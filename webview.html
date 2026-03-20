@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Matrix</title>
+<style>
+/* ------------------------------------------------------------------ */
+/* Variables                                                           */
+/* ------------------------------------------------------------------ */
+:root {
+  --bg:          #0d1117;
+  --bg-surface:  #161b22;
+  --bg-cell:     #1c2129;
+  --bg-hover:    #252c35;
+  --border:      #30363d;
+  --text:        #e6edf3;
+  --text-dim:    #8b949e;
+  --accent:      #58a6ff;
+  --green:       #3fb950;
+  --red:         #f85149;
+  --amber:       #d29922;
+  --font:        ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
+                 "Liberation Mono", Menlo, Consolas, monospace;
+  --radius:      6px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reset                                                               */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%; width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 11px/1.4 var(--font);
+  overflow-x: hidden;
+  -webkit-user-select: none; user-select: none;
+}
+button {
+  font: inherit; cursor: pointer;
+  background: none; border: none; color: var(--text);
+}
+input, select {
+  font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px 8px;
+  outline: none; width: 100%;
+}
+input:focus, select:focus { border-color: var(--accent); }
+
+/* ------------------------------------------------------------------ */
+/* Header                                                              */
+/* ------------------------------------------------------------------ */
+header {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+#conn-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--red); flex-shrink: 0;
+  transition: background .3s;
+}
+#conn-dot.ok { background: var(--green); }
+header h1 {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: .06em; flex: 1;
+}
+.hdr-btn {
+  font-size: 10px; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-dim);
+  transition: color .15s, border-color .15s;
+}
+.hdr-btn:hover { color: var(--text); border-color: var(--text-dim); }
+
+/* ------------------------------------------------------------------ */
+/* Main scroll area                                                    */
+/* ------------------------------------------------------------------ */
+main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
+
+/* ------------------------------------------------------------------ */
+/* Empty state                                                         */
+/* ------------------------------------------------------------------ */
+.empty {
+  text-align: center; color: var(--text-dim);
+  padding: 32px 12px; font-size: 11px; line-height: 1.6;
+}
+.empty-icon { font-size: 28px; margin-bottom: 8px; opacity: .5; }
+
+/* ------------------------------------------------------------------ */
+/* Group card                                                          */
+/* ------------------------------------------------------------------ */
+.group {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+}
+.group-hdr {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.group-name {
+  font-weight: 600; font-size: 11px; flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.group-count {
+  font-size: 10px; color: var(--text-dim);
+  background: var(--bg); padding: 1px 5px;
+  border-radius: 8px;
+}
+.group-btn {
+  font-size: 12px; color: var(--text-dim);
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; transition: background .15s, color .15s;
+}
+.group-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+/* ------------------------------------------------------------------ */
+/* Section labels (shown when group has both agents & terminals)       */
+/* ------------------------------------------------------------------ */
+.section-label {
+  font-size: 9px; font-weight: 600; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .08em;
+  padding: 6px 8px 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Agent grid                                                          */
+/* ------------------------------------------------------------------ */
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 6px;
+  padding: 4px 8px 8px;
+}
+.btn-row {
+  display: flex; gap: 4px;
+  padding: 0 8px 8px;
+}
+.btn-row.empty { padding-top: 8px; }
+.add-cell-btn {
+  flex: 1; padding: 4px;
+  font-size: 10px; color: var(--text-dim);
+  border: 1px dashed var(--border); border-radius: var(--radius);
+  transition: color .15s, border-color .15s;
+}
+.add-cell-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ------------------------------------------------------------------ */
+/* Cell (shared)                                                       */
+/* ------------------------------------------------------------------ */
+.cell {
+  position: relative;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 10px 4px 6px;
+  background: var(--bg-cell);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background .15s, border-color .15s, box-shadow .15s;
+  min-height: 64px;
+}
+.cell:hover { background: var(--bg-hover); }
+.cell.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(88,166,255,.2);
+}
+.cell.stopped { opacity: .55; }
+.cell-name {
+  font-size: 9px; text-align: center;
+  max-width: 100%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* status dot */
+.cell-status {
+  position: absolute; top: 4px; right: 4px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text-dim);
+}
+.cell-status.running { background: var(--green); animation: pulse 1.8s ease-in-out infinite; }
+.cell-status.idle    { background: var(--text-dim); }
+.cell-status.error   { background: var(--red); }
+.cell-status.stopped { background: var(--amber); }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .4; }
+}
+
+/* close & relaunch buttons */
+.cell-close {
+  position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px;
+  font-size: 10px; line-height: 16px; text-align: center;
+  border-radius: 3px; color: var(--text-dim);
+  opacity: 0; transition: opacity .15s;
+}
+.cell:hover .cell-close { opacity: 1; }
+.cell-close:hover { background: var(--red); color: #fff; }
+.cell-relaunch {
+  width: 100%; font-size: 9px; padding: 1px 0;
+  color: var(--text-dim); margin-top: 2px;
+  opacity: 0; transition: opacity .15s;
+}
+.cell:hover .cell-relaunch { opacity: 1; }
+.cell-relaunch:hover { color: var(--accent); }
+
+/* ------------------------------------------------------------------ */
+/* Agent cell icon (geometric)                                         */
+/* ------------------------------------------------------------------ */
+.cell-icon { font-size: 18px; line-height: 1; margin-bottom: 2px; }
+
+/* ------------------------------------------------------------------ */
+/* Terminal cell process badge                                         */
+/* ------------------------------------------------------------------ */
+.cell-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 28px; height: 20px; padding: 0 5px;
+  border-radius: 4px; margin-bottom: 3px;
+  font-size: 9px; font-weight: 700; letter-spacing: .03em;
+  color: #fff;
+  background: var(--text-dim);
+}
+.cell-badge.dark-text { color: #0d1117; }
+
+/* ------------------------------------------------------------------ */
+/* Broadcast bar                                                       */
+/* ------------------------------------------------------------------ */
+#broadcast {
+  display: none;
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  padding: 6px 8px;
+  gap: 6px; align-items: center; z-index: 20;
+}
+#broadcast.visible { display: flex; }
+#broadcast-target {
+  font-size: 10px; color: var(--accent);
+  white-space: nowrap; flex-shrink: 0;
+}
+#broadcast input {
+  flex: 1; font-size: 11px; padding: 4px 6px;
+}
+#broadcast button {
+  flex-shrink: 0; font-size: 12px;
+  color: var(--text-dim); padding: 2px 6px;
+  border-radius: 4px;
+}
+#broadcast button:hover { color: var(--text); background: var(--bg-hover); }
+
+/* ------------------------------------------------------------------ */
+/* Modal                                                               */
+/* ------------------------------------------------------------------ */
+.overlay {
+  display: none; position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,.55);
+  align-items: center; justify-content: center;
+  padding: 16px;
+}
+.overlay.visible { display: flex; }
+.modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px; width: 100%; max-width: 280px;
+}
+.modal h2 { font-size: 13px; margin-bottom: 12px; }
+.modal label {
+  display: block; font-size: 10px; color: var(--text-dim);
+  margin-bottom: 3px; margin-top: 10px;
+}
+.modal label:first-of-type { margin-top: 0; }
+.modal-actions {
+  display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end;
+}
+.modal-actions button {
+  padding: 5px 14px; border-radius: var(--radius);
+  font-size: 11px; font-weight: 600;
+}
+.btn-cancel { color: var(--text-dim); }
+.btn-cancel:hover { color: var(--text); }
+.btn-primary {
+  background: var(--accent); color: #fff;
+  border-radius: var(--radius);
+}
+.btn-primary:hover { filter: brightness(1.15); }
+.btn-danger { background: var(--red); }
+.btn-danger:hover { filter: brightness(1.15); }
+.hidden { display: none !important; }
+#modal-confirm { z-index: 200; }
+#confirm-message { font-size: 12px; line-height: 1.5; }
+
+/* ------------------------------------------------------------------ */
+/* Scrollbar                                                           */
+/* ------------------------------------------------------------------ */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div id="conn-dot" title="Disconnected"></div>
+  <h1>AGENT MATRIX</h1>
+  <button class="hdr-btn" onclick="restartDaemon()" title="Restart Agent Matrix">&#x21BB;</button>
+  <button class="hdr-btn" onclick="openAddGroup()">+ Group</button>
+</header>
+
+<!-- Main area (rendered by JS) -->
+<main id="main"></main>
+
+<!-- Broadcast bar -->
+<div id="broadcast">
+  <span id="broadcast-target"></span>
+  <input id="broadcast-input" placeholder="Send to all..." autocomplete="off"
+         onkeydown="if(event.key==='Enter')sendBroadcast();if(event.key==='Escape')closeBroadcast();">
+  <button onclick="sendBroadcast()" title="Send">&#9654;</button>
+  <button onclick="closeBroadcast()" title="Close">&#10005;</button>
+</div>
+
+<!-- Add Group modal -->
+<div class="overlay" id="modal-group">
+  <div class="modal">
+    <h2>New Group</h2>
+    <label>Group name</label>
+    <input id="group-name-input" placeholder="e.g. frontend" autocomplete="off"
+           onkeydown="if(event.key==='Enter')submitGroup();if(event.key==='Escape')closeModals();">
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" onclick="submitGroup()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Agent / Terminal modal (shared) -->
+<div class="overlay" id="modal-add">
+  <div class="modal">
+    <h2 id="modal-add-title">New Agent</h2>
+    <label>Name</label>
+    <input id="add-name-input" placeholder="e.g. Claude 1" autocomplete="off">
+    <label>Group</label>
+    <select id="add-group-select"></select>
+    <div id="add-cmd-row">
+      <label>Boot command</label>
+      <input id="add-cmd-input" autocomplete="off">
+    </div>
+    <label>Profile <span style="color:var(--text-dim)">(optional)</span></label>
+    <input id="add-profile-input" placeholder="Default" autocomplete="off"
+           onkeydown="if(event.key==='Enter')submitAdd();if(event.key==='Escape')closeModals();">
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" onclick="submitAdd()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm dialog (replaces window.confirm for WKWebView) -->
+<div class="overlay" id="modal-confirm">
+  <div class="modal">
+    <p id="confirm-message"></p>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="confirmNo()">Cancel</button>
+      <button class="btn-primary btn-danger" onclick="confirmYes()">Remove</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================================================================== */
+/* Constants                                                           */
+/* ================================================================== */
+const AGENT_ICONS = ['\u2B21','\u25C8','\u25C6','\u25A3','\u2B22','\u25C9','\u25CE','\u25B2','\u2B1F','\u23E3'];
+
+const PROCESS_MAP = {
+  /* Shells */
+  'zsh':     { label: '\u276F_',  color: '#3fb950' },
+  'bash':    { label: '\u276F_',  color: '#3fb950' },
+  'fish':    { label: '\u276F_',  color: '#d2a04e' },
+  'sh':      { label: '\u276F_',  color: '#6e7681' },
+  'login':   { label: '\u276F_',  color: '#3fb950' },
+  /* Editors */
+  'vim':     { label: 'VIM', color: '#019833' },
+  'nvim':    { label: 'VIM', color: '#57a143' },
+  'vi':      { label: 'VI',  color: '#019833' },
+  'nano':    { label: 'NAN', color: '#4a90d9' },
+  'emacs':   { label: 'EMX', color: '#7f5ab6' },
+  'hx':      { label: 'HLX', color: '#583674' },
+  'code':    { label: 'VSC', color: '#007acc' },
+  /* Languages */
+  'python':  { label: 'PY',  color: '#3572a5' },
+  'python3': { label: 'PY',  color: '#3572a5' },
+  'ipython': { label: 'PY',  color: '#3572a5' },
+  'node':    { label: 'JS',  color: '#8cc84b' },
+  'deno':    { label: 'DNO', color: '#01c2ff' },
+  'bun':     { label: 'BUN', color: '#fbf0df', dark: true },
+  'ruby':    { label: 'RB',  color: '#cc342d' },
+  'irb':     { label: 'RB',  color: '#cc342d' },
+  'go':      { label: 'GO',  color: '#00add8' },
+  'cargo':   { label: 'RS',  color: '#dea584', dark: true },
+  'rustc':   { label: 'RS',  color: '#dea584', dark: true },
+  'java':    { label: 'JV',  color: '#b07219' },
+  'swift':   { label: 'SW',  color: '#f05138' },
+  'lua':     { label: 'LUA', color: '#2c2d72' },
+  'perl':    { label: 'PL',  color: '#0298c3' },
+  'php':     { label: 'PHP', color: '#4f5d95' },
+  /* DevOps */
+  'ssh':     { label: 'SSH', color: '#58a6ff' },
+  'mosh':    { label: 'SSH', color: '#58a6ff' },
+  'docker':  { label: 'DKR', color: '#2496ed' },
+  'kubectl': { label: 'K8S', color: '#326ce5' },
+  'git':     { label: 'GIT', color: '#f05032' },
+  'make':    { label: 'MK',  color: '#d29922' },
+  'npm':     { label: 'NPM', color: '#cb3837' },
+  'yarn':    { label: 'YRN', color: '#2c8ebb' },
+  'pip':     { label: 'PIP', color: '#3572a5' },
+  /* AI */
+  'claude':  { label: 'CL',  color: '#d4a574' },
+  'aider':   { label: 'AID', color: '#14b8a6' },
+  /* System */
+  'top':     { label: 'TOP', color: '#6e7681' },
+  'htop':    { label: 'HTP', color: '#6e7681' },
+  'btop':    { label: 'BTP', color: '#6e7681' },
+  'less':    { label: '\u2026',  color: '#6e7681' },
+  'man':     { label: 'MAN', color: '#6e7681' },
+  'curl':    { label: 'CRL', color: '#073551' },
+  'wget':    { label: 'WGT', color: '#073551' },
+};
+
+const WS_URL = `ws://${location.host}/ws`;
+let ws = null;
+let state = { agents: {}, groups: {}, active_session_id: null };
+let broadcastGroup = null;
+let addCellMode = 'agent'; // 'agent' | 'terminal'
+let _confirmResolve = null;
+
+/* ================================================================== */
+/* Helpers                                                             */
+/* ================================================================== */
+function agentIcon(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+  return AGENT_ICONS[Math.abs(h) % AGENT_ICONS.length];
+}
+
+function processInfo(name) {
+  const key = (name || '').toLowerCase().replace(/^-/, '');
+  if (PROCESS_MAP[key]) return PROCESS_MAP[key];
+  const label = key ? key.slice(0, 3).toUpperCase() : '?';
+  return { label, color: '#30363d' };
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* ================================================================== */
+/* WebSocket                                                           */
+/* ================================================================== */
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    document.getElementById('conn-dot').classList.add('ok');
+    document.getElementById('conn-dot').title = 'Connected';
+  };
+  ws.onclose = () => {
+    document.getElementById('conn-dot').classList.remove('ok');
+    document.getElementById('conn-dot').title = 'Disconnected';
+    setTimeout(connect, 2000);
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'state') {
+      state = msg;
+      render();
+    }
+  };
+}
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+/* ================================================================== */
+/* Rendering                                                           */
+/* ================================================================== */
+function render() {
+  const main = document.getElementById('main');
+  const groupNames = Object.keys(state.groups);
+
+  if (groupNames.length === 0) {
+    main.innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">\u2B22</div>
+        No groups yet.<br>Create one to get started.
+      </div>`;
+    return;
+  }
+
+  let html = '';
+  for (const gname of groupNames) {
+    const aids = state.groups[gname] || [];
+    const agents = [];
+    const terminals = [];
+    for (const id of aids) {
+      const c = state.agents[id];
+      if (!c) continue;
+      (c.cell_type === 'terminal' ? terminals : agents).push(c);
+    }
+    const showLabels = agents.length > 0 && terminals.length > 0;
+
+    html += `<div class="group">`;
+    /* header */
+    html += `<div class="group-hdr">`;
+    html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
+    html += `  <span class="group-count">${aids.length}</span>`;
+    html += `  <button class="group-btn" title="Broadcast to ${esc(gname)}" onclick="openBroadcast('${esc(gname)}')">\u2318</button>`;
+    html += `  <button class="group-btn" title="Remove group" onclick="removeGroup('${esc(gname)}')">\u2715</button>`;
+    html += `</div>`;
+
+    /* agents section */
+    if (agents.length > 0) {
+      if (showLabels) html += `<div class="section-label">Agents</div>`;
+      html += `<div class="agent-grid">`;
+      for (const a of agents) html += renderAgentCell(a);
+      html += `</div>`;
+    }
+
+    /* terminals section */
+    if (terminals.length > 0) {
+      if (showLabels) html += `<div class="section-label">Terminals</div>`;
+      html += `<div class="agent-grid">`;
+      for (const t of terminals) html += renderTerminalCell(t);
+      html += `</div>`;
+    }
+
+    /* buttons */
+    const btnEmpty = (agents.length === 0 && terminals.length === 0) ? ' empty' : '';
+    html += `<div class="btn-row${btnEmpty}">`;
+    html += `  <button class="add-cell-btn" onclick="openAddAgent('${esc(gname)}')">+ Agent</button>`;
+    html += `  <button class="add-cell-btn" onclick="openAddTerminal('${esc(gname)}')">+ Terminal</button>`;
+    html += `</div>`;
+    html += `</div>`;
+  }
+
+  main.innerHTML = html;
+}
+
+function renderAgentCell(a) {
+  const active = a.session_id && a.session_id === state.active_session_id;
+  const cls = ['cell'];
+  if (active) cls.push('active');
+  if (a.status === 'stopped') cls.push('stopped');
+
+  let h = `<div class="${cls.join(' ')}" onclick="focusAgent('${a.id}')" title="${esc(a.name)} (${a.status})">`;
+  h += `<div class="cell-status ${a.status}"></div>`;
+  h += `<button class="cell-close" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
+  h += `<div class="cell-icon">${agentIcon(a.name)}</div>`;
+  h += `<div class="cell-name">${esc(a.name)}</div>`;
+  if (a.status === 'stopped') {
+    h += `<button class="cell-relaunch" onclick="event.stopPropagation();relaunchAgent('${a.id}')" title="Relaunch">\u21BB relaunch</button>`;
+  }
+  h += `</div>`;
+  return h;
+}
+
+function renderTerminalCell(t) {
+  const active = t.session_id && t.session_id === state.active_session_id;
+  const cls = ['cell'];
+  if (active) cls.push('active');
+  if (t.status === 'stopped') cls.push('stopped');
+
+  const proc = t.status === 'stopped'
+    ? { label: 'OFF', color: '#6e7681' }
+    : processInfo(t.current_process);
+
+  const darkCls = proc.dark ? ' dark-text' : '';
+  const tip = esc(t.name) + ' (' + t.status + (t.current_process ? ' \u2014 ' + t.current_process : '') + ')';
+
+  let h = `<div class="${cls.join(' ')}" onclick="focusAgent('${t.id}')" title="${tip}">`;
+  h += `<div class="cell-status ${t.status}"></div>`;
+  h += `<button class="cell-close" onclick="event.stopPropagation();removeAgent('${t.id}')" title="Remove">\u2715</button>`;
+  h += `<div class="cell-badge${darkCls}" style="background:${proc.color}">${proc.label}</div>`;
+  h += `<div class="cell-name">${esc(t.name)}</div>`;
+  if (t.status === 'stopped') {
+    h += `<button class="cell-relaunch" onclick="event.stopPropagation();relaunchAgent('${t.id}')" title="Relaunch">\u21BB relaunch</button>`;
+  }
+  h += `</div>`;
+  return h;
+}
+
+/* ================================================================== */
+/* Commands                                                            */
+/* ================================================================== */
+function focusAgent(id) { send({ cmd: 'focus_agent', id }); }
+
+async function removeAgent(id) {
+  const a = state.agents[id];
+  if (a && await showConfirm(`Remove "${a.name}"?`)) {
+    send({ cmd: 'remove_agent', id });
+  }
+}
+
+function relaunchAgent(id) { send({ cmd: 'relaunch_agent', id }); }
+
+async function restartDaemon() {
+  if (await showConfirm('Restart Agent Matrix? Active cells will be marked as stopped.')) {
+    send({ cmd: 'restart' });
+  }
+}
+
+async function removeGroup(group) {
+  const count = (state.groups[group] || []).length;
+  const msg = count > 0
+    ? `Remove group "${group}" and its ${count} cell(s)?`
+    : `Remove empty group "${group}"?`;
+  if (await showConfirm(msg)) send({ cmd: 'remove_group', group });
+}
+
+/* -- Custom confirm (window.confirm is blocked in WKWebView) ---------- */
+function showConfirm(message) {
+  return new Promise((resolve) => {
+    _confirmResolve = resolve;
+    document.getElementById('confirm-message').textContent = message;
+    document.getElementById('modal-confirm').classList.add('visible');
+  });
+}
+function confirmYes() {
+  document.getElementById('modal-confirm').classList.remove('visible');
+  if (_confirmResolve) { _confirmResolve(true); _confirmResolve = null; }
+}
+function confirmNo() {
+  document.getElementById('modal-confirm').classList.remove('visible');
+  if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+}
+
+/* ================================================================== */
+/* Broadcast bar                                                       */
+/* ================================================================== */
+function openBroadcast(group) {
+  broadcastGroup = group;
+  document.getElementById('broadcast-target').textContent = '\u2192 ' + group;
+  document.getElementById('broadcast').classList.add('visible');
+  const inp = document.getElementById('broadcast-input');
+  inp.value = '';
+  inp.focus();
+}
+function closeBroadcast() {
+  broadcastGroup = null;
+  document.getElementById('broadcast').classList.remove('visible');
+}
+function sendBroadcast() {
+  const text = document.getElementById('broadcast-input').value;
+  if (text && broadcastGroup) {
+    send({ cmd: 'broadcast_to_group', group: broadcastGroup, text: text + '\n' });
+    document.getElementById('broadcast-input').value = '';
+  }
+}
+
+/* ================================================================== */
+/* Modals                                                              */
+/* ================================================================== */
+function closeModals() {
+  document.querySelectorAll('.overlay').forEach(o => o.classList.remove('visible'));
+  if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+}
+
+/* -- Add Group -------------------------------------------------------- */
+function openAddGroup() {
+  document.getElementById('modal-group').classList.add('visible');
+  const inp = document.getElementById('group-name-input');
+  inp.value = '';
+  inp.focus();
+}
+function submitGroup() {
+  const name = document.getElementById('group-name-input').value.trim();
+  if (name) { send({ cmd: 'add_group', group: name }); closeModals(); }
+}
+
+/* -- Add Agent / Terminal (shared modal) ------------------------------ */
+function _openAddModal(mode, group) {
+  addCellMode = mode;
+  document.getElementById('modal-add-title').textContent =
+    mode === 'agent' ? 'New Agent' : 'New Terminal';
+
+  const cmdRow = document.getElementById('add-cmd-row');
+  if (mode === 'terminal') cmdRow.classList.add('hidden');
+  else cmdRow.classList.remove('hidden');
+
+  /* populate group dropdown */
+  const sel = document.getElementById('add-group-select');
+  sel.innerHTML = '';
+  for (const g of Object.keys(state.groups)) {
+    const opt = document.createElement('option');
+    opt.value = g; opt.textContent = g;
+    if (g === group) opt.selected = true;
+    sel.appendChild(opt);
+  }
+
+  document.getElementById('add-name-input').value = '';
+  document.getElementById('add-cmd-input').value = '';
+  document.getElementById('add-cmd-input').placeholder = 'claude';
+  document.getElementById('add-profile-input').value = '';
+  document.getElementById('modal-add').classList.add('visible');
+  document.getElementById('add-name-input').focus();
+}
+
+function openAddAgent(group)    { _openAddModal('agent', group); }
+function openAddTerminal(group) { _openAddModal('terminal', group); }
+
+function submitAdd() {
+  const name    = document.getElementById('add-name-input').value.trim();
+  const group   = document.getElementById('add-group-select').value;
+  const command = document.getElementById('add-cmd-input').value.trim();
+  const profile = document.getElementById('add-profile-input').value.trim();
+
+  if (!name || !group) return;
+
+  if (addCellMode === 'agent') {
+    const msg = { cmd: 'add_agent', name, group };
+    if (command) msg.command = command;
+    if (profile) msg.profile = profile;
+    send(msg);
+  } else {
+    const msg = { cmd: 'add_terminal', name, group };
+    if (profile) msg.profile = profile;
+    send(msg);
+  }
+  closeModals();
+}
+
+/* ================================================================== */
+/* Keyboard                                                            */
+/* ================================================================== */
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeModals(); closeBroadcast(); }
+});
+document.querySelectorAll('.overlay').forEach(o => {
+  o.addEventListener('click', (e) => { if (e.target === o) closeModals(); });
+});
+
+/* Allow Enter to submit from the name input in the add modal */
+document.getElementById('add-name-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submitAdd();
+  if (e.key === 'Escape') closeModals();
+});
+
+/* ================================================================== */
+/* Boot                                                                */
+/* ================================================================== */
+connect();
+</script>
+</body>
+</html>
