@@ -148,6 +148,10 @@ async def main(connection: iterm2.Connection):
                 if cell and cell.status == "stopped":
                     await bridge.create_session(cell)
 
+            elif cmd == "move_group":
+                state.move_group(data["group"], data.get("before", ""))
+                await bridge.reorder_tabs()
+
             elif cmd == "move_agent":
                 state.move_agent(data["id"], data["target_group"],
                                  data.get("before", ""))

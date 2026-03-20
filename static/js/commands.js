@@ -55,7 +55,8 @@ function setupDrag() {
     dragInProgress = true;
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', _dragId);
-    requestAnimationFrame(() => el.classList.add('dragging'));
+    const dimEl = _dragType === 'group' ? el.closest('.group') || el : el;
+    requestAnimationFrame(() => dimEl.classList.add('dragging'));
   });
 
   main.addEventListener('dragend', () => {
@@ -68,10 +69,21 @@ function setupDrag() {
 
   main.addEventListener('dragover', (e) => {
     if (!_dragId) return;
+    _clearDropIndicators();
+
+    if (_dragType === 'group') {
+      const groupEl = e.target.closest('.group[data-group-name]');
+      if (groupEl && groupEl.dataset.groupName !== _dragId) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const rect = groupEl.getBoundingClientRect();
+        groupEl.classList.add(e.clientY < rect.top + rect.height / 2 ? 'drop-before' : 'drop-after');
+      }
+      return;
+    }
+
     const item = e.target.closest('[data-drag-id]');
     const container = e.target.closest('[data-drop-type]');
-
-    _clearDropIndicators();
 
     if (item && item.dataset.dragType === _dragType && item.dataset.dragId !== _dragId) {
       e.preventDefault();
@@ -91,6 +103,24 @@ function setupDrag() {
   main.addEventListener('drop', (e) => {
     if (!_dragId) return;
     e.preventDefault();
+
+    if (_dragType === 'group') {
+      const groupEl = e.target.closest('.group[data-group-name]');
+      if (groupEl && groupEl.dataset.groupName !== _dragId) {
+        const rect = groupEl.getBoundingClientRect();
+        let beforeGroup = '';
+        if (e.clientY < rect.top + rect.height / 2) {
+          beforeGroup = groupEl.dataset.groupName;
+        } else {
+          const next = groupEl.nextElementSibling;
+          beforeGroup = next && next.dataset.groupName ? next.dataset.groupName : '';
+        }
+        send({ cmd: 'move_group', group: _dragId, before: beforeGroup });
+      }
+      _clearDropIndicators();
+      return;
+    }
+
     const item = e.target.closest('[data-drag-id]');
     const container = e.target.closest('[data-drop-type]');
     let targetGroup = null;

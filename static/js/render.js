@@ -60,12 +60,12 @@ function render() {
       if (!c) continue;
       (c.cell_type === 'terminal' ? terminals : agents).push(c);
     }
-    html += `<div class="group">`;
-    html += `<div class="group-hdr">`;
+    html += `<div class="group" data-group-name="${esc(gname)}">`;
+    html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group">`;
     html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
     html += `  <span class="group-count">${aids.length}</span>`;
-    html += `  <button class="group-btn" title="Broadcast to ${esc(gname)}" onclick="openBroadcast('${esc(gname)}')">\u2318</button>`;
-    html += `  <button class="group-btn" title="Remove group" onclick="removeGroup('${esc(gname)}')">\u2715</button>`;
+    html += `  <button class="group-btn" draggable="false" title="Broadcast to ${esc(gname)}" onclick="openBroadcast('${esc(gname)}')">\u2318</button>`;
+    html += `  <button class="group-btn" draggable="false" title="Remove group" onclick="removeGroup('${esc(gname)}')">\u2715</button>`;
     html += `</div>`;
 
     html += `<div class="section-label">Agents</div>`;

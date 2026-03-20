@@ -168,6 +168,19 @@ class MatrixState:
         cell.group = target_group
         self.save()
 
+    def move_group(self, name: str, before: str = ""):
+        if name not in self.groups:
+            return
+        items = [(k, v) for k, v in self.groups.items() if k != name]
+        value = self.groups[name]
+        idx = next((i for i, (k, _) in enumerate(items) if k == before), -1)
+        if idx >= 0:
+            items.insert(idx, (name, value))
+        else:
+            items.append((name, value))
+        self.groups = dict(items)
+        self.save()
+
     # -- WebSocket broadcast ------------------------------------------------
 
     async def broadcast(self):

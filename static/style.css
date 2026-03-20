@@ -386,11 +386,13 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
 /* ------------------------------------------------------------------ */
 /* Drag and drop                                                       */
 /* ------------------------------------------------------------------ */
-.cell.dragging, .term-row.dragging { opacity: 0.3; }
+.cell.dragging, .term-row.dragging, .group.dragging { opacity: 0.3; }
 .cell.drop-before { border-left: 2px solid var(--accent) !important; }
 .cell.drop-after { border-right: 2px solid var(--accent) !important; }
 .term-row.drop-before { border-top: 2px solid var(--accent) !important; }
 .term-row.drop-after { border-bottom: 2px solid var(--accent) !important; }
+.group.drop-before { border-top: 2px solid var(--accent) !important; }
+.group.drop-after { border-bottom: 2px solid var(--accent) !important; }
 .agent-grid.drop-target, .term-list.drop-target {
   outline: 2px dashed var(--accent);
   outline-offset: -2px;
