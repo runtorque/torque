@@ -107,6 +107,21 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
   background: var(--bg); padding: 1px 5px;
   border-radius: 8px;
 }
+.group-toggle {
+  font-size: 10px; color: var(--text-dim);
+  width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .2s ease-out;
+}
+.group.collapsed .group-toggle { transform: rotate(-90deg); }
+.group.collapsed .group-hdr { border-bottom: none; }
+.group-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows .2s ease-out;
+}
+.group.collapsed .group-body { grid-template-rows: 0fr; }
+.group-body-inner { overflow: hidden; }
 .group-btn {
   font-size: 12px; color: var(--text-dim);
   width: 22px; height: 22px;

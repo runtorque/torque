@@ -37,6 +37,19 @@ function closeMenus() {
   document.querySelectorAll('.split-menu.open').forEach(m => m.classList.remove('open'));
 }
 
+/* Group collapse/expand */
+const collapsedGroups = new Set();
+
+function toggleGroup(name) {
+  if (collapsedGroups.has(name)) {
+    collapsedGroups.delete(name);
+  } else {
+    collapsedGroups.add(name);
+  }
+  const el = document.querySelector(`.group[data-group-name="${CSS.escape(name)}"]`);
+  if (el) el.classList.toggle('collapsed');
+}
+
 /* FLIP animation — capture old positions, render, animate to new positions */
 let _flipUntil = 0;
 
@@ -97,13 +110,17 @@ function render() {
       if (!c) continue;
       (c.cell_type === 'terminal' ? terminals : agents).push(c);
     }
-    html += `<div class="group" data-group-name="${esc(gname)}">`;
+    const collapsed = collapsedGroups.has(gname);
+    html += `<div class="group${collapsed ? ' collapsed' : ''}" data-group-name="${esc(gname)}">`;
     html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group">`;
+    html += `  <button class="group-toggle" draggable="false" onclick="event.stopPropagation();toggleGroup('${esc(gname)}')">\u25BE</button>`;
     html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
     html += `  <span class="group-count">${aids.length}</span>`;
     html += `  <button class="group-btn" draggable="false" title="Broadcast to ${esc(gname)}" onclick="openBroadcast('${esc(gname)}')">\u2318</button>`;
     html += `  <button class="group-btn" draggable="false" title="Remove group" onclick="removeGroup('${esc(gname)}')">\u2715</button>`;
     html += `</div>`;
+
+    html += `<div class="group-body"><div class="group-body-inner">`;
 
     html += `<div class="section-label">Agents</div>`;
     html += `<div class="agent-grid" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
@@ -121,6 +138,7 @@ function render() {
     html += renderSplitBtn(`quickAddTerminal('${esc(gname)}')`, `openAddTerminal('${esc(gname)}')`);
     html += `</div>`;
 
+    html += `</div></div>`;
     html += `</div>`;
   }
 
