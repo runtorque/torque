@@ -258,6 +258,46 @@ class ITerm2Bridge:
 
         self.state.save()
         self._start_prompt_monitor(cell)
+        await self.reorder_tabs()
+
+    async def reorder_tabs(self):
+        """Keep managed tabs last, ordered by group then position within group."""
+        try:
+            app = await iterm2.async_get_app(self.conn)
+            window = app.current_window
+            if not window:
+                return
+
+            # Build a sort key for managed session_ids: (group_index, position)
+            managed_sids: dict[str, tuple[int, int]] = {}
+            for gi, gname in enumerate(self.state.groups):
+                for pos, aid in enumerate(self.state.groups[gname]):
+                    cell = self.state.agents.get(aid)
+                    if cell and cell.session_id:
+                        managed_sids[cell.session_id] = (gi, pos)
+
+            unmanaged = []
+            managed = []
+            for tab in window.tabs:
+                sid = tab.current_session.session_id if tab.current_session else None
+                if sid in managed_sids:
+                    managed.append((managed_sids[sid], tab))
+                else:
+                    unmanaged.append(tab)
+
+            if not managed:
+                return
+
+            managed.sort(key=lambda pair: pair[0])
+            new_order = unmanaged + [tab for _, tab in managed]
+
+            # Only call API if the order actually changed
+            if [t.tab_id for t in new_order] != [t.tab_id for t in window.tabs]:
+                await window.async_set_tabs(new_order)
+                log.debug("Tabs reordered: %d unmanaged + %d managed",
+                          len(unmanaged), len(managed))
+        except Exception:
+            log.exception("Failed to reorder tabs")
 
     async def close_session(self, session_id: str):
         session = await self._find_session(session_id)
@@ -473,6 +513,7 @@ async def main(connection: iterm2.Connection):
 
             elif cmd == "move_agent":
                 state.move_agent(data["id"], data["target_group"])
+                await bridge.reorder_tabs()
 
             elif cmd == "restart":
                 log.info("Restart requested — re-executing")
