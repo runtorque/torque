@@ -41,16 +41,23 @@ class ITerm2Bridge:
         log.info("Tab created: session_id=%s", session.session_id)
         await tab.async_set_title(f"[{cell.group}] {cell.name}")
 
-        # Tab color
+        # Tab color — set all variants to cover both unified and split modes
         if cell.tab_color:
             try:
                 r = int(cell.tab_color[1:3], 16)
                 g = int(cell.tab_color[3:5], 16)
                 b = int(cell.tab_color[5:7], 16)
+                color = iterm2.Color(r, g, b)
                 change = iterm2.LocalWriteOnlyProfile()
                 change.set_use_tab_color(True)
-                change.set_tab_color(iterm2.Color(r, g, b))
+                change.set_use_tab_color_light(True)
+                change.set_use_tab_color_dark(True)
+                change.set_tab_color(color)
+                change.set_tab_color_light(color)
+                change.set_tab_color_dark(color)
                 await session.async_set_profile_properties(change)
+                log.info("Tab color set for '%s': #%02x%02x%02x",
+                         cell.name, r, g, b)
             except Exception:
                 log.exception("Failed to set tab color for '%s'", cell.name)
 

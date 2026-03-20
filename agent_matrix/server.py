@@ -192,6 +192,8 @@ async def main(connection: iterm2.Connection):
     app_server = web.Application()
     app_server.router.add_get("/", handle_index)
     app_server.router.add_get("/ws", handle_ws)
+    from .config import SCRIPT_DIR
+    app_server.router.add_static("/static", SCRIPT_DIR / "static")
 
     runner = web.AppRunner(app_server)
     await runner.setup()

@@ -133,6 +133,8 @@ class MatrixState:
         self.agents[aid] = cell
         self.groups[group].append(aid)
         self.save()
+        log.info("Cell created: id=%s type=%s tab_color=%r directory=%r",
+                 aid, cell_type, cell.tab_color, cell.directory)
         return cell
 
     def add_agent(self, **kw) -> Optional[AgentCell]:
