@@ -52,6 +52,8 @@ class AgentCell:
     status: str = "stopped"  # idle | running | error | stopped
     current_process: str = ""  # foreground job name (tracked for terminals)
     current_path: str = ""  # working directory (tracked for terminals)
+    current_branch: str = ""  # git branch (empty if not in a repo)
+    git_root: str = ""  # git repo root (empty if not in a repo)
 
 
 class MatrixState:
@@ -92,6 +94,8 @@ class MatrixState:
                 cell.session_id = None
                 cell.current_process = ""
                 cell.current_path = ""
+                cell.current_branch = ""
+                cell.git_root = ""
                 self.agents[aid] = cell
             self.groups = data.get("groups", {})
             for gname in list(self.groups):
@@ -254,6 +258,7 @@ class ITerm2Bridge:
                 cell.current_path = path or ""
             except Exception:
                 log.exception("Failed to read initial path for '%s'", cell.name)
+            await self._resolve_git_info(cell)
             self._start_terminal_monitors(cell)
 
         self.state.save()
@@ -368,40 +373,73 @@ class ITerm2Bridge:
         except Exception:
             log.exception("PromptMonitor failed for '%s' (session %s)", cell.name, cell.session_id)
 
+    async def _resolve_git_info(self, cell: AgentCell):
+        """Run git to detect repo root and branch for the cell's current path."""
+        path = cell.current_path
+        if not path:
+            cell.current_branch = ""
+            cell.git_root = ""
+            return
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", path, "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                lines = stdout.decode().strip().splitlines()
+                cell.git_root = lines[0] if len(lines) > 0 else ""
+                cell.current_branch = lines[1] if len(lines) > 1 else ""
+            else:
+                cell.git_root = ""
+                cell.current_branch = ""
+        except Exception:
+            log.exception("git resolve failed for '%s' at %s", cell.name, path)
+            cell.git_root = ""
+            cell.current_branch = ""
+
     async def _monitor_terminal_vars(self, cell: AgentCell):
         """Watch jobName and path changes for terminal cells."""
 
-        async def _watch(var_name: str, setter):
+        async def _watch_job():
             try:
                 async with iterm2.VariableMonitor(
-                    self.conn,
-                    iterm2.VariableScopes.SESSION,
-                    var_name,
-                    cell.session_id,
+                    self.conn, iterm2.VariableScopes.SESSION,
+                    "jobName", cell.session_id,
                 ) as mon:
                     while True:
                         val = await mon.async_get()
-                        setter(val or "")
+                        cell.current_process = val or ""
+                        log.debug("Job changed for '%s': %s", cell.name, val)
                         self.state.save()
                         await self.state.broadcast()
             except asyncio.CancelledError:
                 raise
             except Exception:
-                log.exception("%s monitor failed for '%s' (session %s)",
-                              var_name, cell.name, cell.session_id)
+                log.exception("jobName monitor failed for '%s' (session %s)",
+                              cell.name, cell.session_id)
 
-        def set_job(v):
-            cell.current_process = v
-            log.debug("Job changed for '%s': %s", cell.name, v)
+        async def _watch_path():
+            try:
+                async with iterm2.VariableMonitor(
+                    self.conn, iterm2.VariableScopes.SESSION,
+                    "path", cell.session_id,
+                ) as mon:
+                    while True:
+                        val = await mon.async_get()
+                        cell.current_path = val or ""
+                        log.debug("Path changed for '%s': %s", cell.name, val)
+                        await self._resolve_git_info(cell)
+                        self.state.save()
+                        await self.state.broadcast()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("path monitor failed for '%s' (session %s)",
+                              cell.name, cell.session_id)
 
-        def set_path(v):
-            cell.current_path = v
-            log.debug("Path changed for '%s': %s", cell.name, v)
-
-        await asyncio.gather(
-            _watch("jobName", set_job),
-            _watch("path", set_path),
-        )
+        await asyncio.gather(_watch_job(), _watch_path())
 
     async def _watch_terminations(self):
         """Global monitor: detect when any tracked session closes."""
@@ -416,6 +454,8 @@ class ITerm2Bridge:
                             cell.session_id = None
                             cell.current_process = ""
                             cell.current_path = ""
+                            cell.current_branch = ""
+                            cell.git_root = ""
                             self.state.save()
                             for tasks in (self._prompt_tasks, self._job_tasks):
                                 task = tasks.pop(cell.id, None)

@@ -692,9 +692,18 @@ function renderTerminalRow(t) {
     : processInfo(t.current_process);
 
   const darkCls = proc.dark ? ' dark-text' : '';
-  const pathDisplay = t.current_path
-    ? t.current_path.replace(/^\/Users\/[^/]+/, '~')
-    : '';
+  let pathDisplay = '';
+  if (t.current_branch && t.git_root) {
+    const repoName = t.git_root.split('/').pop();
+    let rel = t.current_path || '';
+    if (rel.startsWith(t.git_root)) {
+      rel = rel.slice(t.git_root.length);
+      if (rel.startsWith('/')) rel = rel.slice(1);
+    }
+    pathDisplay = t.current_branch + ' | ' + repoName + (rel ? '/' + rel : '');
+  } else if (t.current_path) {
+    pathDisplay = t.current_path.replace(/^\/Users\/[^/]+/, '~');
+  }
 
   let h = `<div class="${cls.join(' ')}" onclick="focusAgent('${t.id}')">`;
   h += `<div class="term-badge${darkCls}" style="background:${proc.color}">${proc.label}</div>`;
