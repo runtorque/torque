@@ -63,6 +63,7 @@ function setupDrag() {
     _dragId = null;
     _dragType = null;
     dragInProgress = false;
+    _flipUntil = Date.now() + 500;
     _clearDropIndicators();
     render();
   });

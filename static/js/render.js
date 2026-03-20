@@ -37,6 +37,40 @@ function closeMenus() {
   document.querySelectorAll('.split-menu.open').forEach(m => m.classList.remove('open'));
 }
 
+/* FLIP animation — capture old positions, render, animate to new positions */
+let _flipUntil = 0;
+
+function _captureRects(main) {
+  const rects = {};
+  main.querySelectorAll('[data-drag-id]').forEach(el => {
+    rects[el.dataset.dragId] = el.getBoundingClientRect();
+  });
+  main.querySelectorAll('[data-group-name]').forEach(el => {
+    rects['g:' + el.dataset.groupName] = el.getBoundingClientRect();
+  });
+  return rects;
+}
+
+function _applyFlip(main, oldRects) {
+  const els = [
+    ...main.querySelectorAll('[data-drag-id]'),
+    ...main.querySelectorAll('[data-group-name]'),
+  ];
+  for (const el of els) {
+    const key = el.dataset.dragId || ('g:' + el.dataset.groupName);
+    const oldRect = oldRects[key];
+    if (!oldRect) continue;
+    const newRect = el.getBoundingClientRect();
+    const dx = oldRect.left - newRect.left;
+    const dy = oldRect.top - newRect.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+    el.animate([
+      { transform: `translate(${dx}px, ${dy}px)` },
+      { transform: 'translate(0, 0)' }
+    ], { duration: 200, easing: 'ease-out' });
+  }
+}
+
 function render() {
   const main = document.getElementById('main');
   const groupNames = Object.keys(state.groups);
@@ -49,6 +83,9 @@ function render() {
       </div>`;
     return;
   }
+
+  const doFlip = Date.now() < _flipUntil;
+  const oldRects = doFlip ? _captureRects(main) : null;
 
   let html = '';
   for (const gname of groupNames) {
@@ -88,6 +125,8 @@ function render() {
   }
 
   main.innerHTML = html;
+
+  if (oldRects) _applyFlip(main, oldRects);
 }
 
 function renderAgentCell(a) {
