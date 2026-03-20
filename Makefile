@@ -13,9 +13,12 @@ ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
 
 ## install: Copy agent_matrix files into the iTerm2 Scripts project
 install:
-	@mkdir -p "$(SCRIPT_DIR)"
+	@mkdir -p "$(SCRIPT_DIR)/agent_matrix"
 	cp agent_matrix.py "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
 	cp webview.html    "$(SCRIPT_DIR)/webview.html"
+	cp agent_matrix/__init__.py agent_matrix/config.py \
+	   agent_matrix/state.py agent_matrix/bridge.py \
+	   agent_matrix/server.py "$(SCRIPT_DIR)/agent_matrix/"
 	@echo ""
 	@echo "Installed to $(SCRIPT_DIR)"
 	@echo ""

@@ -383,6 +383,25 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
 .btn-danger { background: var(--red); }
 .btn-danger:hover { filter: brightness(1.15); }
 .hidden { display: none !important; }
+
+/* Color swatches */
+.color-swatches {
+  display: flex; gap: 5px; flex-wrap: wrap; padding-top: 2px;
+}
+.swatch {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 2px solid transparent;
+  transition: border-color .15s, transform .1s;
+}
+.swatch:hover { transform: scale(1.15); }
+.swatch.selected { border-color: var(--text); }
+.swatch-none {
+  background: var(--bg) !important;
+  border: 1px solid var(--border);
+  font-size: 8px; color: var(--text-dim);
+  display: flex; align-items: center; justify-content: center;
+}
+.swatch-none.selected { border-color: var(--text); }
 #modal-confirm { z-index: 200; }
 #confirm-message { font-size: 12px; line-height: 1.5; }
 
@@ -442,9 +461,14 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
       <label>Boot command</label>
       <input id="add-cmd-input" autocomplete="off">
     </div>
-    <label>Profile <span style="color:var(--text-dim)">(optional)</span></label>
-    <input id="add-profile-input" placeholder="Default" autocomplete="off"
-           onkeydown="if(event.key==='Enter')submitAdd();if(event.key==='Escape')closeModals();">
+    <label>Directory</label>
+    <select id="add-dir-select" onchange="onDirChange()"></select>
+    <input id="add-dir-input" class="hidden" placeholder="/path/to/directory"
+           autocomplete="off" style="margin-top:4px">
+    <label>Profile</label>
+    <select id="add-profile-select"></select>
+    <label>Tab color</label>
+    <div class="color-swatches" id="add-color-swatches"></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" onclick="submitAdd()">Create</button>
@@ -524,12 +548,25 @@ const PROCESS_MAP = {
   'wget':    { label: 'WGT', color: '#073551' },
 };
 
+const TAB_COLORS = [
+  { name: 'Red',    hex: '#f85149' },
+  { name: 'Orange', hex: '#d29922' },
+  { name: 'Yellow', hex: '#e3b341' },
+  { name: 'Green',  hex: '#3fb950' },
+  { name: 'Teal',   hex: '#2ea8a1' },
+  { name: 'Blue',   hex: '#58a6ff' },
+  { name: 'Purple', hex: '#a371f7' },
+  { name: 'Pink',   hex: '#f778ba' },
+];
+
 const WS_URL = `ws://${location.host}/ws`;
 let ws = null;
 let state = { agents: {}, groups: {}, active_session_id: null };
 let broadcastGroup = null;
 let addCellMode = 'agent'; // 'agent' | 'terminal'
 let _confirmResolve = null;
+let _pendingModal = null;
+let _selectedColor = '';
 
 /* ================================================================== */
 /* Helpers                                                             */
@@ -592,6 +629,11 @@ function connect() {
     if (msg.type === 'state') {
       state = msg;
       render();
+    } else if (msg.type === 'config') {
+      if (_pendingModal) {
+        _showAddModal(_pendingModal.mode, _pendingModal.group, msg);
+        _pendingModal = null;
+      }
     }
   };
 }
@@ -829,7 +871,14 @@ function submitGroup() {
 
 /* -- Add Agent / Terminal (shared modal) ------------------------------ */
 function _openAddModal(mode, group) {
+  _pendingModal = { mode, group };
+  send({ cmd: 'get_config', group });
+}
+
+function _showAddModal(mode, group, config) {
   addCellMode = mode;
+  _selectedColor = '';
+
   document.getElementById('modal-add-title').textContent =
     mode === 'agent' ? 'New Agent' : 'New Terminal';
 
@@ -837,22 +886,81 @@ function _openAddModal(mode, group) {
   if (mode === 'terminal') cmdRow.classList.add('hidden');
   else cmdRow.classList.remove('hidden');
 
-  /* populate group dropdown */
-  const sel = document.getElementById('add-group-select');
-  sel.innerHTML = '';
+  /* group dropdown */
+  const gsel = document.getElementById('add-group-select');
+  gsel.innerHTML = '';
   for (const g of Object.keys(state.groups)) {
     const opt = document.createElement('option');
     opt.value = g; opt.textContent = g;
     if (g === group) opt.selected = true;
-    sel.appendChild(opt);
+    gsel.appendChild(opt);
   }
 
+  /* directory dropdown */
+  const dsel = document.getElementById('add-dir-select');
+  dsel.innerHTML = '';
+  const optCur = document.createElement('option');
+  optCur.value = config.current_path || '';
+  optCur.textContent = 'Current session';
+  dsel.appendChild(optCur);
+  for (const c of (config.group_cells || [])) {
+    const opt = document.createElement('option');
+    opt.value = c.current_path;
+    opt.textContent = 'Same as ' + c.name;
+    dsel.appendChild(opt);
+  }
+  const optCustom = document.createElement('option');
+  optCustom.value = '__custom__';
+  optCustom.textContent = 'Custom\u2026';
+  dsel.appendChild(optCustom);
+  document.getElementById('add-dir-input').value = config.current_path || '';
+  document.getElementById('add-dir-input').classList.add('hidden');
+
+  /* profile dropdown */
+  const psel = document.getElementById('add-profile-select');
+  psel.innerHTML = '';
+  for (const name of (config.profiles || ['Default'])) {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    if (name === config.current_profile) opt.selected = true;
+    psel.appendChild(opt);
+  }
+
+  /* color swatches */
+  const sw = document.getElementById('add-color-swatches');
+  let sh = '';
+  for (const c of TAB_COLORS) {
+    sh += `<button class="swatch" data-color="${c.hex}" style="background:${c.hex}"
+            onclick="selectColor('${c.hex}')" title="${c.name}"></button>`;
+  }
+  sh += `<button class="swatch swatch-none" data-color="" onclick="selectColor('')" title="None">\u2715</button>`;
+  sw.innerHTML = sh;
+
+  /* reset fields */
   document.getElementById('add-name-input').value = '';
   document.getElementById('add-cmd-input').value = '';
   document.getElementById('add-cmd-input').placeholder = 'claude';
-  document.getElementById('add-profile-input').value = '';
+
   document.getElementById('modal-add').classList.add('visible');
   document.getElementById('add-name-input').focus();
+}
+
+function onDirChange() {
+  const sel = document.getElementById('add-dir-select');
+  const inp = document.getElementById('add-dir-input');
+  if (sel.value === '__custom__') {
+    inp.classList.remove('hidden');
+    inp.focus();
+  } else {
+    inp.classList.add('hidden');
+  }
+}
+
+function selectColor(hex) {
+  _selectedColor = hex;
+  document.querySelectorAll('#add-color-swatches .swatch').forEach(s => {
+    s.classList.toggle('selected', (s.dataset.color || '') === hex);
+  });
 }
 
 function openAddAgent(group)    { _openAddModal('agent', group); }
@@ -862,20 +970,24 @@ function submitAdd() {
   const name    = document.getElementById('add-name-input').value.trim();
   const group   = document.getElementById('add-group-select').value;
   const command = document.getElementById('add-cmd-input').value.trim();
-  const profile = document.getElementById('add-profile-input').value.trim();
+  const profile = document.getElementById('add-profile-select').value;
+
+  const dirSel  = document.getElementById('add-dir-select');
+  const directory = dirSel.value === '__custom__'
+    ? document.getElementById('add-dir-input').value.trim()
+    : dirSel.value;
 
   if (!name || !group) return;
 
-  if (addCellMode === 'agent') {
-    const msg = { cmd: 'add_agent', name, group };
-    if (command) msg.command = command;
-    if (profile) msg.profile = profile;
-    send(msg);
-  } else {
-    const msg = { cmd: 'add_terminal', name, group };
-    if (profile) msg.profile = profile;
-    send(msg);
-  }
+  const msg = {
+    cmd: addCellMode === 'agent' ? 'add_agent' : 'add_terminal',
+    name, group, profile,
+  };
+  if (addCellMode === 'agent' && command) msg.command = command;
+  if (directory) msg.directory = directory;
+  if (_selectedColor) msg.tab_color = _selectedColor;
+
+  send(msg);
   closeModals();
 }
 
@@ -890,10 +1002,12 @@ document.querySelectorAll('.overlay').forEach(o => {
   o.addEventListener('click', (e) => { if (e.target === o) closeModals(); });
 });
 
-/* Allow Enter to submit from the name input in the add modal */
-document.getElementById('add-name-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') submitAdd();
-  if (e.key === 'Escape') closeModals();
+/* Allow Enter to submit / Escape to close from modal inputs */
+['add-name-input', 'add-cmd-input', 'add-dir-input'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitAdd();
+    if (e.key === 'Escape') closeModals();
+  });
 });
 
 /* ================================================================== */
