@@ -1,3 +1,6 @@
+/* When true, only show agents/terminals belonging to the current window */
+const FILTER_BY_WINDOW = true;
+
 const AGENT_ICONS = ['\u2B21','\u25C8','\u25C6','\u25A3','\u2B22','\u25C9','\u25CE','\u25B2','\u2B1F','\u23E3'];
 
 const PROCESS_MAP = {

@@ -21,9 +21,18 @@ class ITerm2Bridge:
         self._prompt_tasks: dict[str, asyncio.Task] = {}
         self._job_tasks: dict[str, asyncio.Task] = {}
         self._term_task: Optional[asyncio.Task] = None
+        self._focus_task: Optional[asyncio.Task] = None
 
     async def start(self):
         self._term_task = asyncio.create_task(self._watch_terminations())
+        self._focus_task = asyncio.create_task(self._watch_focus())
+        # Seed current window from the focused window at startup
+        try:
+            app = await iterm2.async_get_app(self.conn)
+            if app.current_window:
+                self.state.current_window_id = app.current_window.window_id
+        except Exception:
+            log.debug("Could not seed current_window_id at startup")
 
     async def reconnect_orphans(self):
         """Re-link persisted cells to existing iTerm2 sessions after restart."""
@@ -73,9 +82,10 @@ class ITerm2Bridge:
 
                 matched.add(cell.id)
                 cell.session_id = sid
+                cell.window_id = window.window_id
                 cell.status = "idle"
-                log.info("Reconnected '%s' [%s] → session %s",
-                         cell.name, cell.group, sid)
+                log.info("Reconnected '%s' [%s] → session %s (window %s)",
+                         cell.name, cell.group, sid, window.window_id)
 
                 # Seed ephemeral fields
                 try:
@@ -127,7 +137,9 @@ class ITerm2Bridge:
         tab = await window.async_create_tab(profile=cell.profile)
         session = tab.current_session
         cell.session_id = session.session_id
-        log.info("Tab created: session_id=%s", session.session_id)
+        cell.window_id = window.window_id
+        log.info("Tab created: session_id=%s window=%s",
+                 session.session_id, window.window_id)
         await tab.async_set_title(f"[{cell.group}] {cell.name}")
 
         # Tab color — set all variants to cover both unified and split modes
@@ -184,12 +196,9 @@ class ITerm2Bridge:
         await self.reorder_tabs()
 
     async def reorder_tabs(self):
-        """Keep managed tabs last, ordered by group then position."""
+        """Keep managed tabs last in each window, ordered by group then position."""
         try:
             app = await iterm2.async_get_app(self.conn)
-            window = app.current_window
-            if not window:
-                return
 
             managed_sids: dict[str, tuple[int, int]] = {}
             for gi, gname in enumerate(self.state.groups):
@@ -198,27 +207,33 @@ class ITerm2Bridge:
                     if cell and cell.session_id:
                         managed_sids[cell.session_id] = (gi, pos)
 
-            unmanaged = []
-            managed = []
-            for tab in window.tabs:
-                sid = (tab.current_session.session_id
-                       if tab.current_session else None)
-                if sid in managed_sids:
-                    managed.append((managed_sids[sid], tab))
-                else:
-                    unmanaged.append(tab)
-
-            if not managed:
+            if not managed_sids:
                 return
 
-            managed.sort(key=lambda pair: pair[0])
-            new_order = unmanaged + [tab for _, tab in managed]
+            for window in app.windows:
+                unmanaged = []
+                managed = []
+                for tab in window.tabs:
+                    sid = (tab.current_session.session_id
+                           if tab.current_session else None)
+                    if sid in managed_sids:
+                        managed.append((managed_sids[sid], tab))
+                    else:
+                        unmanaged.append(tab)
 
-            if [t.tab_id for t in new_order] != \
-               [t.tab_id for t in window.tabs]:
-                await window.async_set_tabs(new_order)
-                log.debug("Tabs reordered: %d unmanaged + %d managed",
-                          len(unmanaged), len(managed))
+                if not managed:
+                    continue
+
+                managed.sort(key=lambda pair: pair[0])
+                new_order = unmanaged + [tab for _, tab in managed]
+
+                if [t.tab_id for t in new_order] != \
+                   [t.tab_id for t in window.tabs]:
+                    await window.async_set_tabs(new_order)
+                    log.debug("Tabs reordered in window %s: "
+                              "%d unmanaged + %d managed",
+                              window.window_id,
+                              len(unmanaged), len(managed))
         except Exception:
             log.exception("Failed to reorder tabs")
 
@@ -358,6 +373,30 @@ class ITerm2Bridge:
                               cell.name, cell.session_id)
 
         await asyncio.gather(_watch_job(), _watch_path())
+
+    async def _watch_focus(self):
+        try:
+            async with iterm2.FocusMonitor(self.conn) as mon:
+                while True:
+                    update = await mon.async_get_next_update()
+                    changed = False
+                    if update.window_changed:
+                        wc = update.window_changed
+                        if wc.event == (iterm2.FocusUpdateWindowChanged
+                                        .Reason
+                                        .TERMINAL_WINDOW_BECAME_KEY):
+                            self.state.current_window_id = wc.window_id
+                            changed = True
+                    if update.active_session_changed:
+                        self.state.active_session_id = (
+                            update.active_session_changed.session_id)
+                        changed = True
+                    if changed:
+                        await self.state.broadcast()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("FocusMonitor failed")
 
     async def _watch_terminations(self):
         try:

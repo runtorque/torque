@@ -100,6 +100,8 @@ function render() {
   const doFlip = Date.now() < _flipUntil;
   const oldRects = doFlip ? _captureRects(main) : null;
 
+  const wid = FILTER_BY_WINDOW ? state.current_window_id : null;
+
   let html = '';
   for (const gname of groupNames) {
     const aids = state.groups[gname] || [];
@@ -108,8 +110,10 @@ function render() {
     for (const id of aids) {
       const c = state.agents[id];
       if (!c) continue;
+      if (wid && c.window_id && c.window_id !== wid) continue;
       (c.cell_type === 'terminal' ? terminals : agents).push(c);
     }
+    if (wid && agents.length === 0 && terminals.length === 0) continue;
     const collapsed = collapsedGroups.has(gname);
     html += `<div class="group${collapsed ? ' collapsed' : ''}" data-group-name="${esc(gname)}">`;
     html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group">`;

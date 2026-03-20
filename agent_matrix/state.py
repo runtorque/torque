@@ -21,6 +21,7 @@ class AgentCell:
     command: str = ""
     directory: str = ""  # working dir on create/relaunch
     tab_color: str = ""  # hex color for iTerm2 tab (e.g. "#f85149")
+    window_id: str = ""  # iTerm2 window this session lives in
     status: str = "stopped"  # idle | running | error | stopped
     current_process: str = ""  # foreground job name (tracked for terminals)
     current_path: str = ""  # working directory (tracked for terminals)
@@ -40,6 +41,7 @@ class MatrixState:
         self.agents: dict[str, AgentCell] = {}
         self.groups: dict[str, list[str]] = {}
         self.active_session_id: Optional[str] = None
+        self.current_window_id: Optional[str] = None
         self._ws_clients: set[web.WebSocketResponse] = set()
 
     # -- Serialization ------------------------------------------------------
@@ -49,6 +51,7 @@ class MatrixState:
             "agents": {aid: asdict(a) for aid, a in self.agents.items()},
             "groups": self.groups,
             "active_session_id": self.active_session_id,
+            "current_window_id": self.current_window_id,
         }
 
     def save(self):
