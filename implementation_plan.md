@@ -78,6 +78,7 @@ Both use the exact same pattern this project uses. The architecture is validated
 | `PromptMonitor` | Detect idle/busy state per session |
 | `VariableMonitor` | Watch jobName and path changes in real time |
 | `SessionTerminationMonitor` | Detect when any session closes |
+| `FocusMonitor` | Track current window and active session in real time |
 | `PartialProfile.async_query()` | List all available iTerm2 profiles |
 | `iterm2.run_forever(main)` | Keep daemon alive |
 
@@ -96,6 +97,10 @@ The Python API must be enabled in Preferences → General → Magic → Enable P
 | `AGENT_MATRIX_PORT` | `18932` | TCP port for the HTTP + WebSocket server |
 | `AGENT_MATRIX_DEFAULT_CMD` | `claude` | Default boot command for new agents |
 
+| JS constant | Default | Description |
+|---|---|---|
+| `FILTER_BY_WINDOW` | `true` | Only show agents/terminals belonging to the current iTerm2 window |
+
 ## File Structure
 
 ```
@@ -110,10 +115,10 @@ webview.html                     # Toolbelt UI shell (loads CSS + JS)
 static/
   style.css                      # Dark theme styles
   js/
-    constants.js                 # Icon maps, process badge map, tab color presets
+    constants.js                 # Icon maps, process badge map, tab color presets, feature flags
     ws.js                        # WebSocket client, auto-reconnect, shared state
-    render.js                    # UI rendering (groups, agent cells, terminal rows)
-    commands.js                  # Actions (focus, remove, broadcast, restart)
+    render.js                    # UI rendering (groups, agent cells, terminal rows, FLIP animation, collapse, window filter)
+    commands.js                  # Actions (focus, remove, broadcast, restart, drag-and-drop)
     modals.js                    # Add/confirm dialogs, color picker, directory selector
     main.js                      # Keyboard bindings, boot
 Makefile                         # install, deploy, stop, check, deps targets
@@ -134,9 +139,9 @@ Installed to: `~/Library/Application Support/iTerm2/Scripts/iterm2-agent-orchest
 ### Phase 1: Core Daemon — DONE
 
 1. **State management** — DONE
-   - `AgentCell` dataclass with fields: `id`, `name`, `group`, `cell_type` (agent/terminal), `session_id`, `profile`, `command`, `directory`, `tab_color`, `status`, `current_process`, `current_path`, `current_branch`, `git_root`
-   - `MatrixState` class: agents dict, groups dict (ordered, preserves insertion), active session tracking, WS client set
-   - Persistence to `state.json` on every mutation. On load, agents marked as `stopped` with ephemeral fields cleared.
+   - `AgentCell` dataclass with fields: `id`, `name`, `group`, `cell_type` (agent/terminal), `session_id`, `profile`, `command`, `directory`, `tab_color`, `window_id`, `status`, `current_process`, `current_path`, `current_branch`, `git_root`
+   - `MatrixState` class: agents dict, groups dict (ordered, preserves insertion), active session tracking, current window tracking, WS client set
+   - Persistence to `state.json` on every mutation. On load, agents marked as `stopped` with ephemeral fields cleared. `session_id` and `window_id` are preserved for orphan reconnection.
 
 2. **aiohttp server** — DONE
    - Binds to `127.0.0.1:18932` with `reuse_address=True`
@@ -161,29 +166,31 @@ Installed to: `~/Library/Application Support/iTerm2/Scripts/iterm2-agent-orchest
    | `send_text` | `{id, text}` | Send text to a specific session |
    | `broadcast_to_group` | `{group, text}` | Send text to all sessions in a group |
    | `relaunch_agent` | `{id}` | Create a new tab for a stopped agent, re-run its command |
-   | `move_agent` | `{id, target_group}` | Move agent between groups |
+   | `move_agent` | `{id, target_group, before?}` | Move/reorder agent (insert before ID, or append) |
+   | `move_group` | `{group, before?}` | Reorder group (insert before name, or append) |
    | `get_config` | `{group}` | Return profiles, current session info, group cell paths |
    | `restart` | — | Save state, `os.execv` to re-exec the daemon in-place |
 
    Server → client message types:
    | Type | Description |
    |------|-------------|
-   | `state` | Full state snapshot (agents, groups, active_session_id) |
+   | `state` | Full state snapshot (agents, groups, active_session_id, current_window_id) |
    | `config` | Response to `get_config` (profiles, current_path, current_profile, group_cells) |
    | `error` | Exception message from a failed command |
 
 4. **iTerm2 integration** — DONE
-   - `create_session()` — Create tab, set title, set tab color (all three light/dark variants), cd to directory, send boot command, seed terminal variables, start monitors, reorder tabs
-   - `focus_session()` — Find and activate tab + session
+   - `create_session()` — Create tab, set title, set tab color (all three light/dark variants), cd to directory, send boot command, seed terminal variables, start monitors, store `window_id`, reorder tabs
+   - `focus_session()` — Find and activate tab + session (searches all windows)
    - `close_session()` — Find and force-close
    - `send_text()` — Find session and send text
-   - `reorder_tabs()` — Keep managed tabs last, sorted by group then position. Uses `window.async_set_tabs()`. Only calls API when order actually changed.
+   - `reorder_tabs()` — Keep managed tabs last in each window, sorted by group then position. Iterates all windows with managed tabs independently.
 
 5. **Session status monitoring** — DONE
    - `PromptMonitor` per session: detects shell prompt → marks `idle`
    - `SessionTerminationMonitor` (global): detects closed sessions → marks `stopped`, clears ephemeral fields, cancels monitor tasks
    - `VariableMonitor` for `jobName` (terminals): tracks foreground process in real time
    - `VariableMonitor` for `path` (terminals): tracks working directory in real time, triggers git info resolution on every change
+   - `FocusMonitor` (global): tracks current window (`current_window_id`) and active session (`active_session_id`) in real time, broadcasts on change
 
 6. **Git integration** — DONE
    - On every path change, runs `git -C <path> rev-parse --show-toplevel --abbrev-ref HEAD` asynchronously
@@ -265,18 +272,21 @@ Split across `webview.html` (shell) + `static/style.css` + `static/js/*.js` (6 f
 - Relaunch creates a fresh tab with the original command, directory, and tab color
 - `directory` and `tab_color` are persisted so they survive restarts
 
-### Phase 4: Polish & Edge Cases — PARTIAL
+### Phase 4: Polish & Edge Cases — DONE
 
 | Feature | Status |
 |---------|--------|
-| Tab reordering (managed tabs last, sorted by group) | DONE |
+| Tab reordering (managed tabs last, sorted by group, all windows) | DONE |
 | Tab colors (per session, all light/dark variants) | DONE |
 | In-place daemon restart from UI | DONE |
 | File logging with full error tracebacks | DONE |
 | Code split: Python into 4 modules, JS into 6 files | DONE |
-| Orphan detection (re-link sessions on restart) | NOT STARTED |
-| Drag-and-drop reorder in webview | NOT STARTED |
-| Group collapse/expand | NOT STARTED |
+| Orphan detection (re-link sessions on restart by session_id + tab title) | DONE |
+| Drag-and-drop reorder (agents, terminals, and groups) | DONE |
+| FLIP animation on drag-and-drop (smooth position transitions) | DONE |
+| Group collapse/expand (CSS grid-template-rows animation) | DONE |
+| Window awareness (window_id per cell, FocusMonitor, per-window filtering) | DONE |
+| Active session tracking via FocusMonitor | DONE |
 | Keyboard navigation (arrows, enter, delete) | NOT STARTED |
 
 ### Future Ideas
@@ -284,6 +294,7 @@ Split across `webview.html` (shell) + `static/style.css` + `static/js/*.js` (6 f
 - **Environment variables** — inject key=value pairs before the boot command
 - **Auto-restart** — automatically relaunch agents that exit unexpectedly
 - **Shell selector** — choose bash/zsh/fish for terminal sessions
+- **Keyboard navigation** — arrow keys to move between cells, Enter to focus, Delete to remove
 
 ## Testing Checklist
 
@@ -308,6 +319,22 @@ Split across `webview.html` (shell) + `static/style.css` + `static/js/*.js` (6 f
 - [x] Webview reconnects automatically after daemon restart
 - [x] Multiple webview clients stay in sync
 - [x] Log file captures all commands and errors
+- [x] Daemon restart re-links running sessions (orphan detection)
+- [x] Orphan reconnection matches by session_id (primary) and tab title (secondary)
+- [x] Drag agent cells to reorder within or between groups
+- [x] Drag terminal rows to reorder within or between groups
+- [x] Drag group headers to reorder groups
+- [x] FLIP animation smoothly slides items to new positions after drop
+- [x] Drop indicators (inset box-shadow) appear without layout shift
+- [x] Renders deferred during drag (dragInProgress flag) to prevent DOM destruction
+- [x] Collapse/expand groups via chevron toggle with smooth animation
+- [x] Collapsed state preserved across WS reconnects
+- [x] Window ID stored on each agent at creation and on orphan reconnect
+- [x] FocusMonitor tracks current window and active session in real time
+- [x] Active cell/row highlight updates when switching tabs
+- [x] FILTER_BY_WINDOW hides agents not in current window when enabled
+- [x] Empty groups hidden when window filter is active
+- [x] Tab reordering works across all windows independently
 
 ## Makefile Targets
 
