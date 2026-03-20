@@ -51,6 +51,7 @@ class AgentCell:
     command: str = ""
     status: str = "stopped"  # idle | running | error | stopped
     current_process: str = ""  # foreground job name (tracked for terminals)
+    current_path: str = ""  # working directory (tracked for terminals)
 
 
 class MatrixState:
@@ -90,6 +91,7 @@ class MatrixState:
                 cell.status = "stopped"
                 cell.session_id = None
                 cell.current_process = ""
+                cell.current_path = ""
                 self.agents[aid] = cell
             self.groups = data.get("groups", {})
             for gname in list(self.groups):
@@ -240,14 +242,19 @@ class ITerm2Bridge:
         else:
             cell.status = "idle"
 
-        # For terminals, seed the current_process and start job monitor
+        # For terminals, seed live variables and start monitors
         if cell.cell_type == "terminal":
             try:
-                value = await session.async_get_variable("jobName")
-                cell.current_process = value or ""
+                job = await session.async_get_variable("jobName")
+                cell.current_process = job or ""
             except Exception:
                 log.exception("Failed to read initial jobName for '%s'", cell.name)
-            self._start_job_monitor(cell)
+            try:
+                path = await session.async_get_variable("path")
+                cell.current_path = path or ""
+            except Exception:
+                log.exception("Failed to read initial path for '%s'", cell.name)
+            self._start_terminal_monitors(cell)
 
         self.state.save()
         self._start_prompt_monitor(cell)
@@ -298,11 +305,12 @@ class ITerm2Bridge:
             self._monitor_prompt(cell)
         )
 
-    def _start_job_monitor(self, cell: AgentCell):
-        if cell.id in self._job_tasks:
-            self._job_tasks[cell.id].cancel()
+    def _start_terminal_monitors(self, cell: AgentCell):
+        old = self._job_tasks.pop(cell.id, None)
+        if old:
+            old.cancel()
         self._job_tasks[cell.id] = asyncio.create_task(
-            self._monitor_job_name(cell)
+            self._monitor_terminal_vars(cell)
         )
 
     async def _monitor_prompt(self, cell: AgentCell):
@@ -320,25 +328,40 @@ class ITerm2Bridge:
         except Exception:
             log.exception("PromptMonitor failed for '%s' (session %s)", cell.name, cell.session_id)
 
-    async def _monitor_job_name(self, cell: AgentCell):
-        """Watch foreground job name changes for terminal cells."""
-        try:
-            async with iterm2.VariableMonitor(
-                self.conn,
-                iterm2.VariableScopes.SESSION,
-                "jobName",
-                cell.session_id,
-            ) as mon:
-                while True:
-                    new_value = await mon.async_get()
-                    cell.current_process = new_value or ""
-                    log.debug("Job changed for '%s': %s", cell.name, cell.current_process)
-                    self.state.save()
-                    await self.state.broadcast()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            log.exception("JobNameMonitor failed for '%s' (session %s)", cell.name, cell.session_id)
+    async def _monitor_terminal_vars(self, cell: AgentCell):
+        """Watch jobName and path changes for terminal cells."""
+
+        async def _watch(var_name: str, setter):
+            try:
+                async with iterm2.VariableMonitor(
+                    self.conn,
+                    iterm2.VariableScopes.SESSION,
+                    var_name,
+                    cell.session_id,
+                ) as mon:
+                    while True:
+                        val = await mon.async_get()
+                        setter(val or "")
+                        self.state.save()
+                        await self.state.broadcast()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("%s monitor failed for '%s' (session %s)",
+                              var_name, cell.name, cell.session_id)
+
+        def set_job(v):
+            cell.current_process = v
+            log.debug("Job changed for '%s': %s", cell.name, v)
+
+        def set_path(v):
+            cell.current_path = v
+            log.debug("Path changed for '%s': %s", cell.name, v)
+
+        await asyncio.gather(
+            _watch("jobName", set_job),
+            _watch("path", set_path),
+        )
 
     async def _watch_terminations(self):
         """Global monitor: detect when any tracked session closes."""
@@ -352,6 +375,7 @@ class ITerm2Bridge:
                             cell.status = "stopped"
                             cell.session_id = None
                             cell.current_process = ""
+                            cell.current_path = ""
                             self.state.save()
                             for tasks in (self._prompt_tasks, self._job_tasks):
                                 task = tasks.pop(cell.id, None)
