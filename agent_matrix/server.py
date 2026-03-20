@@ -23,6 +23,7 @@ async def main(connection: iterm2.Connection):
 
     bridge = ITerm2Bridge(connection, state)
     await bridge.start()
+    await bridge.reconnect_orphans()
 
     # -- Command handler ----------------------------------------------------
 

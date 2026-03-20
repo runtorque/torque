@@ -29,7 +29,7 @@ class AgentCell:
 
 
 # Fields that are ephemeral (not meaningful across restarts)
-_EPHEMERAL_FIELDS = ("session_id", "current_process", "current_path",
+_EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "current_branch", "git_root")
 
 

@@ -1,6 +1,7 @@
 """iTerm2 bridge — translates matrix commands into iTerm2 Python API calls."""
 
 import asyncio
+import re
 import shlex
 from typing import Optional
 
@@ -8,6 +9,8 @@ import iterm2
 
 from .config import log
 from .state import AgentCell, MatrixState
+
+_TITLE_RE = re.compile(r"^\[(.+?)\]\s+(.+)$")
 
 
 class ITerm2Bridge:
@@ -21,6 +24,92 @@ class ITerm2Bridge:
 
     async def start(self):
         self._term_task = asyncio.create_task(self._watch_terminations())
+
+    async def reconnect_orphans(self):
+        """Re-link persisted cells to existing iTerm2 sessions after restart."""
+        app = await iterm2.async_get_app(self.conn)
+
+        # Index stopped cells by persisted session_id and by (group, name)
+        by_sid: dict[str, AgentCell] = {}
+        by_title: dict[tuple[str, str], AgentCell] = {}
+        for cell in self.state.agents.values():
+            if cell.status != "stopped":
+                continue
+            if cell.session_id:
+                by_sid[cell.session_id] = cell
+            by_title[(cell.group, cell.name)] = cell
+
+        if not by_sid and not by_title:
+            log.info("Orphan reconnect: no stopped cells to re-link")
+            return
+
+        matched: set[str] = set()  # cell ids that were matched
+
+        for window in app.windows:
+            for tab in window.tabs:
+                session = tab.current_session
+                if not session:
+                    continue
+                sid = session.session_id
+                cell = None
+
+                # Primary: match by persisted session_id
+                if sid in by_sid:
+                    cell = by_sid[sid]
+
+                # Secondary: match by tab title "[group] name"
+                if not cell:
+                    title = getattr(session, "name", None)
+                    if title:
+                        m = _TITLE_RE.match(title)
+                        if m:
+                            key = (m.group(1), m.group(2))
+                            candidate = by_title.get(key)
+                            if candidate and candidate.id not in matched:
+                                cell = candidate
+
+                if not cell or cell.id in matched:
+                    continue
+
+                matched.add(cell.id)
+                cell.session_id = sid
+                cell.status = "idle"
+                log.info("Reconnected '%s' [%s] → session %s",
+                         cell.name, cell.group, sid)
+
+                # Seed ephemeral fields
+                try:
+                    path = await session.async_get_variable("path")
+                    cell.current_path = path or ""
+                except Exception:
+                    log.debug("Could not read path for reconnected '%s'",
+                              cell.name)
+
+                if cell.cell_type == "terminal":
+                    try:
+                        job = await session.async_get_variable("jobName")
+                        cell.current_process = job or ""
+                    except Exception:
+                        log.debug("Could not read jobName for '%s'",
+                                  cell.name)
+                    await self._resolve_git_info(cell)
+                    self._start_terminal_monitors(cell)
+
+                self._start_prompt_monitor(cell)
+
+        # Clear session_id for cells that weren't matched (sessions truly gone)
+        for cell in self.state.agents.values():
+            if cell.status == "stopped" and cell.session_id \
+                    and cell.id not in matched:
+                log.debug("Session %s gone for '%s' — clearing",
+                          cell.session_id, cell.name)
+                cell.session_id = None
+
+        self.state.save()
+        stopped = sum(1 for c in self.state.agents.values()
+                      if c.status == "stopped")
+        log.info("Orphan reconnect: %d re-linked, %d remain stopped",
+                 len(matched), stopped)
 
     # -- Session lifecycle --------------------------------------------------
 
