@@ -109,18 +109,20 @@ async def main(connection: iterm2.Connection):
             elif cmd == "add_terminal":
                 cell = state.add_terminal(
                     name=data["name"],
-                    group=data["group"],
+                    group=data.get("group", ""),
                     profile=data.get("profile", "Default"),
                     directory=data.get("directory", ""),
                     tab_color=data.get("tab_color", ""),
+                    parent_id=data.get("parent_id", ""),
                 )
                 if cell:
                     await bridge.create_session(cell)
 
             elif cmd == "remove_agent":
-                cell = state.remove_agent(data["id"])
-                if cell and cell.session_id:
-                    await bridge.close_session(cell.session_id)
+                removed = state.remove_agent(data["id"])
+                for c in removed:
+                    if c.session_id:
+                        await bridge.close_session(c.session_id)
 
             elif cmd == "focus_agent":
                 cell = state.agents.get(data["id"])
@@ -141,6 +143,13 @@ async def main(connection: iterm2.Connection):
                         await bridge.send_text(
                             cell.session_id, data["text"])
                         cell.status = "running"
+                    # Also send to child terminals
+                    for child_id in state._children.get(aid, []):
+                        child = state.agents.get(child_id)
+                        if child and child.session_id:
+                            await bridge.send_text(
+                                child.session_id, data["text"])
+                            child.status = "running"
                 state.save()
 
             elif cmd == "relaunch_agent":
@@ -155,6 +164,16 @@ async def main(connection: iterm2.Connection):
             elif cmd == "move_agent":
                 state.move_agent(data["id"], data["target_group"],
                                  data.get("before", ""))
+                await bridge.reorder_tabs()
+
+            elif cmd == "reparent_terminal":
+                state.reparent_terminal(data["id"],
+                                        data.get("parent_id", ""))
+                await bridge.reorder_tabs()
+
+            elif cmd == "reorder_child":
+                state.reorder_child(data["id"], data["parent_id"],
+                                    data.get("before", ""))
                 await bridge.reorder_tabs()
 
             elif cmd == "restart":

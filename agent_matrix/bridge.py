@@ -140,7 +140,13 @@ class ITerm2Bridge:
         cell.window_id = window.window_id
         log.info("Tab created: session_id=%s window=%s",
                  session.session_id, window.window_id)
-        await tab.async_set_title(f"[{cell.group}] {cell.name}")
+        if cell.parent_id:
+            parent = self.state.agents.get(cell.parent_id)
+            parent_name = parent.name if parent else "?"
+            await tab.async_set_title(
+                f"[{cell.group}] {parent_name}/{cell.name}")
+        else:
+            await tab.async_set_title(f"[{cell.group}] {cell.name}")
 
         # Tab color — set all variants to cover both unified and split modes
         if cell.tab_color:
@@ -200,12 +206,21 @@ class ITerm2Bridge:
         try:
             app = await iterm2.async_get_app(self.conn)
 
-            managed_sids: dict[str, tuple[int, int]] = {}
+            # Sort key: (group_idx, parent_pos, is_child, child_pos)
+            # This clusters child terminals right after their parent agent.
+            managed_sids: dict[str, tuple] = {}
             for gi, gname in enumerate(self.state.groups):
                 for pos, aid in enumerate(self.state.groups[gname]):
                     cell = self.state.agents.get(aid)
                     if cell and cell.session_id:
-                        managed_sids[cell.session_id] = (gi, pos)
+                        managed_sids[cell.session_id] = (gi, pos, 0, 0)
+                    # Add child terminals after parent
+                    for ci, child_id in enumerate(
+                            self.state._children.get(aid, [])):
+                        child = self.state.agents.get(child_id)
+                        if child and child.session_id:
+                            managed_sids[child.session_id] = (
+                                gi, pos, 1, ci)
 
             if not managed_sids:
                 return

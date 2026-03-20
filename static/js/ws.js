@@ -2,8 +2,9 @@
 
 const WS_URL = `ws://${location.host}/ws`;
 let ws = null;
-let state = { agents: {}, groups: {}, active_session_id: null };
+let state = { agents: {}, groups: {}, children: {}, active_session_id: null };
 let dragInProgress = false;
+let selectedAgentId = null;
 
 function connect() {
   ws = new WebSocket(WS_URL);

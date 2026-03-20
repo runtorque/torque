@@ -102,31 +102,35 @@ function render() {
 
   const wid = FILTER_BY_WINDOW ? state.current_window_id : null;
 
+  // Clear selectedAgentId if it no longer exists
+  if (selectedAgentId && !state.agents[selectedAgentId]) selectedAgentId = null;
+
   let html = '';
   for (const gname of groupNames) {
     const aids = state.groups[gname] || [];
     const agents = [];
-    const terminals = [];
+    const standaloneTerms = [];
     for (const id of aids) {
       const c = state.agents[id];
       if (!c) continue;
       if (wid && c.window_id && c.window_id !== wid) continue;
-      (c.cell_type === 'terminal' ? terminals : agents).push(c);
+      if (c.cell_type === 'terminal') standaloneTerms.push(c);
+      else agents.push(c);
     }
-    if (wid && agents.length === 0 && terminals.length === 0) continue;
+    if (wid && agents.length === 0 && standaloneTerms.length === 0) continue;
     const collapsed = collapsedGroups.has(gname);
     html += `<div class="group${collapsed ? ' collapsed' : ''}" data-group-name="${esc(gname)}">`;
     html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group">`;
     html += `  <button class="group-toggle" draggable="false" onclick="event.stopPropagation();toggleGroup('${esc(gname)}')">\u25BE</button>`;
     html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
-    html += `  <span class="group-count">${aids.length}</span>`;
+    html += `  <span class="group-count">${agents.length}</span>`;
     html += `  <button class="group-btn" draggable="false" title="Broadcast to ${esc(gname)}" onclick="openBroadcast('${esc(gname)}')">\u2318</button>`;
     html += `  <button class="group-btn" draggable="false" title="Remove group" onclick="removeGroup('${esc(gname)}')">\u2715</button>`;
     html += `</div>`;
 
     html += `<div class="group-body"><div class="group-body-inner">`;
 
-    html += `<div class="section-label">Agents</div>`;
+    /* Agent grid */
     html += `<div class="agent-grid" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
     for (const a of agents) html += renderAgentCell(a);
     html += `</div>`;
@@ -134,13 +138,39 @@ function render() {
     html += renderSplitBtn(`quickAddAgent('${esc(gname)}')`, `openAddAgent('${esc(gname)}')`);
     html += `</div>`;
 
-    html += `<div class="section-label">Terminals</div>`;
-    html += `<div class="term-list" data-drop-group="${esc(gname)}" data-drop-type="terminal">`;
-    for (const t of terminals) html += renderTerminalRow(t);
-    html += `</div>`;
-    html += `<div class="section-btns">`;
-    html += renderSplitBtn(`quickAddTerminal('${esc(gname)}')`, `openAddTerminal('${esc(gname)}')`);
-    html += `</div>`;
+    /* Terminal drawer for selected agent (if in this group) */
+    const selAgent = selectedAgentId && state.agents[selectedAgentId];
+    if (selAgent && selAgent.group === gname) {
+      const childIds = state.children[selectedAgentId] || [];
+      const childTerms = childIds
+        .map(id => state.agents[id])
+        .filter(c => c && (!wid || !c.window_id || c.window_id === wid));
+      html += `<div class="terminal-drawer">`;
+      html += `<div class="drawer-hdr">`;
+      html += `  <span class="drawer-label">${esc(selAgent.name)} terminals</span>`;
+      html += `  <span class="drawer-count">${childTerms.length}</span>`;
+      html += `</div>`;
+      html += `<div class="term-list" data-drop-type="terminal" data-drop-group="${esc(gname)}" data-drop-parent="${esc(selectedAgentId)}">`;
+      for (const t of childTerms) html += renderTerminalRow(t);
+      html += `</div>`;
+      html += `<div class="section-btns">`;
+      html += renderSplitBtn(
+        `quickAddTerminal('${esc(gname)}','${esc(selectedAgentId)}')`,
+        `openAddTerminal('${esc(gname)}','${esc(selectedAgentId)}')`);
+      html += `</div>`;
+      html += `</div>`;
+    }
+
+    /* Standalone terminals (no parent) */
+    if (standaloneTerms.length > 0) {
+      html += `<div class="section-label">Terminals</div>`;
+      html += `<div class="term-list" data-drop-group="${esc(gname)}" data-drop-type="terminal">`;
+      for (const t of standaloneTerms) html += renderTerminalRow(t);
+      html += `</div>`;
+      html += `<div class="section-btns">`;
+      html += renderSplitBtn(`quickAddTerminal('${esc(gname)}','')`, `openAddTerminal('${esc(gname)}','')`);
+      html += `</div>`;
+    }
 
     html += `</div></div>`;
     html += `</div>`;
@@ -153,15 +183,21 @@ function render() {
 
 function renderAgentCell(a) {
   const active = a.session_id && a.session_id === state.active_session_id;
+  const selected = a.id === selectedAgentId;
+  const childCount = (state.children[a.id] || []).length;
   const cls = ['cell'];
   if (active) cls.push('active');
+  if (selected) cls.push('selected');
   if (a.status === 'stopped') cls.push('stopped');
 
-  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" onclick="focusAgent('${a.id}')" title="${esc(a.name)} (${a.status})">`;
+  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" title="${esc(a.name)} (${a.status})">`;
   h += `<div class="cell-status ${a.status}"></div>`;
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   h += `<div class="cell-icon">${agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
+  if (childCount > 0) {
+    h += `<div class="cell-term-count">${childCount}</div>`;
+  }
   if (a.status === 'stopped') {
     h += `<button class="cell-relaunch" onclick="event.stopPropagation();relaunchAgent('${a.id}')" title="Relaunch">\u21BB relaunch</button>`;
   }

@@ -2,9 +2,33 @@
 
 function focusAgent(id) { send({ cmd: 'focus_agent', id }); }
 
+function onAgentClick(id) {
+  if (selectedAgentId === id) {
+    // Already selected → focus the agent's iTerm2 session
+    send({ cmd: 'focus_agent', id });
+  } else {
+    // Select this agent → show its terminal drawer
+    selectedAgentId = id;
+    render();
+  }
+}
+
+function onAgentDblClick(id) {
+  selectedAgentId = id;
+  send({ cmd: 'focus_agent', id });
+  render();
+}
+
 async function removeAgent(id) {
   const a = state.agents[id];
-  if (a && await showConfirm(`Remove "${a.name}"?`)) {
+  if (!a) return;
+  const childCount = (state.children[id] || []).length;
+  let msg = `Remove "${a.name}"?`;
+  if (childCount > 0) {
+    msg = `Remove "${a.name}" and its ${childCount} terminal(s)?`;
+  }
+  if (await showConfirm(msg)) {
+    if (selectedAgentId === id) selectedAgentId = null;
     send({ cmd: 'remove_agent', id });
   }
 }
@@ -22,8 +46,10 @@ function _nextName(prefix) {
 function quickAddAgent(group) {
   send({ cmd: 'add_agent', name: _nextName('Agent'), group });
 }
-function quickAddTerminal(group) {
-  send({ cmd: 'add_terminal', name: _nextName('Terminal'), group });
+function quickAddTerminal(group, parentId) {
+  const msg = { cmd: 'add_terminal', name: _nextName('Terminal'), group };
+  if (parentId) msg.parent_id = parentId;
+  send(msg);
 }
 
 async function restartDaemon() {
@@ -65,6 +91,8 @@ function setupDrag() {
     dragInProgress = false;
     _flipUntil = Date.now() + 500;
     _clearDropIndicators();
+    document.querySelectorAll('.dragging')
+      .forEach(el => el.classList.remove('dragging'));
     render();
   });
 
@@ -86,7 +114,12 @@ function setupDrag() {
     const item = e.target.closest('[data-drag-id]');
     const container = e.target.closest('[data-drop-type]');
 
-    if (item && item.dataset.dragType === _dragType && item.dataset.dragId !== _dragId) {
+    // Terminal dragged over an agent cell → re-parent indicator
+    if (_dragType === 'terminal' && item && item.dataset.dragType === 'agent') {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      item.classList.add('drop-target');
+    } else if (item && item.dataset.dragType === _dragType && item.dataset.dragId !== _dragId) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       const rect = item.getBoundingClientRect();
@@ -124,11 +157,18 @@ function setupDrag() {
 
     const item = e.target.closest('[data-drag-id]');
     const container = e.target.closest('[data-drop-type]');
+
+    // Terminal dropped on an agent cell → re-parent
+    if (_dragType === 'terminal' && item && item.dataset.dragType === 'agent') {
+      send({ cmd: 'reparent_terminal', id: _dragId, parent_id: item.dataset.dragId });
+      _clearDropIndicators();
+      return;
+    }
+
     let targetGroup = null;
     let beforeId = '';
 
     if (item && item.dataset.dragType === _dragType && item.dataset.dragId !== _dragId) {
-      targetGroup = item.dataset.dragGroup;
       const rect = item.getBoundingClientRect();
       const isGrid = _dragType === 'agent';
       const pos = isGrid ? e.clientX : e.clientY;
@@ -139,7 +179,25 @@ function setupDrag() {
         const next = _nextDragSibling(item);
         beforeId = next ? next.dataset.dragId : '';
       }
+
+      // Check if both terminals share the same parent → reorder within parent
+      const dragCell = state.agents[_dragId];
+      const dropCell = state.agents[item.dataset.dragId];
+      if (_dragType === 'terminal' && dragCell && dropCell
+          && dragCell.parent_id && dragCell.parent_id === dropCell.parent_id) {
+        send({ cmd: 'reorder_child', id: _dragId, parent_id: dragCell.parent_id, before: beforeId });
+        _clearDropIndicators();
+        return;
+      }
+
+      targetGroup = item.dataset.dragGroup;
     } else if (container && container.dataset.dropType === _dragType) {
+      if (container.dataset.dropParent) {
+        // Dropped in agent's terminal drawer → reparent
+        send({ cmd: 'reparent_terminal', id: _dragId, parent_id: container.dataset.dropParent });
+        _clearDropIndicators();
+        return;
+      }
       targetGroup = container.dataset.dropGroup;
     }
 
@@ -151,8 +209,8 @@ function setupDrag() {
 }
 
 function _clearDropIndicators() {
-  document.querySelectorAll('.dragging, .drop-before, .drop-after, .drop-target')
-    .forEach(el => el.classList.remove('dragging', 'drop-before', 'drop-after', 'drop-target'));
+  document.querySelectorAll('.drop-before, .drop-after, .drop-target')
+    .forEach(el => el.classList.remove('drop-before', 'drop-after', 'drop-target'));
 }
 
 function _nextDragSibling(el) {

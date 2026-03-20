@@ -4,6 +4,7 @@ let addCellMode = 'agent';
 let _confirmResolve = null;
 let _pendingModal = null;
 let _selectedColor = '';
+let _pendingParentId = '';
 
 function closeModals() {
   document.querySelectorAll('.overlay').forEach(o => o.classList.remove('visible'));
@@ -40,16 +41,19 @@ function submitGroup() {
 }
 
 /* -- Add Agent / Terminal (shared modal) ------------------------------ */
-function _openAddModal(mode, group) {
-  _pendingModal = { mode, group };
+function _openAddModal(mode, group, parentId) {
+  _pendingModal = { mode, group, parentId: parentId || '' };
   send({ cmd: 'get_config', group });
 }
 
 function _showAddModal(mode, group, config) {
   addCellMode = mode;
   _selectedColor = '';
+  _pendingParentId = (_pendingModal && _pendingModal.parentId) || '';
 
+  const parent = _pendingParentId ? state.agents[_pendingParentId] : null;
   document.getElementById('modal-add-title').textContent =
+    parent ? `New Terminal for ${parent.name}` :
     mode === 'agent' ? 'New Agent' : 'New Terminal';
 
   const cmdRow = document.getElementById('add-cmd-row');
@@ -133,8 +137,8 @@ function selectColor(hex) {
   });
 }
 
-function openAddAgent(group)    { _openAddModal('agent', group); }
-function openAddTerminal(group) { _openAddModal('terminal', group); }
+function openAddAgent(group)              { _openAddModal('agent', group); }
+function openAddTerminal(group, parentId) { _openAddModal('terminal', group, parentId); }
 
 function submitAdd() {
   const name    = document.getElementById('add-name-input').value.trim();
@@ -154,6 +158,7 @@ function submitAdd() {
     name, group, profile,
   };
   if (addCellMode === 'agent' && command) msg.command = command;
+  if (addCellMode === 'terminal' && _pendingParentId) msg.parent_id = _pendingParentId;
   if (directory) msg.directory = directory;
   if (_selectedColor) msg.tab_color = _selectedColor;
 
