@@ -69,21 +69,17 @@ function render() {
     html += `</div>`;
 
     html += `<div class="section-label">Agents</div>`;
-    if (agents.length > 0) {
-      html += `<div class="agent-grid">`;
-      for (const a of agents) html += renderAgentCell(a);
-      html += `</div>`;
-    }
+    html += `<div class="agent-grid" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
+    for (const a of agents) html += renderAgentCell(a);
+    html += `</div>`;
     html += `<div class="section-btns">`;
     html += renderSplitBtn(`quickAddAgent('${esc(gname)}')`, `openAddAgent('${esc(gname)}')`);
     html += `</div>`;
 
     html += `<div class="section-label">Terminals</div>`;
-    if (terminals.length > 0) {
-      html += `<div class="term-list">`;
-      for (const t of terminals) html += renderTerminalRow(t);
-      html += `</div>`;
-    }
+    html += `<div class="term-list" data-drop-group="${esc(gname)}" data-drop-type="terminal">`;
+    for (const t of terminals) html += renderTerminalRow(t);
+    html += `</div>`;
     html += `<div class="section-btns">`;
     html += renderSplitBtn(`quickAddTerminal('${esc(gname)}')`, `openAddTerminal('${esc(gname)}')`);
     html += `</div>`;
@@ -100,9 +96,9 @@ function renderAgentCell(a) {
   if (active) cls.push('active');
   if (a.status === 'stopped') cls.push('stopped');
 
-  let h = `<div class="${cls.join(' ')}" onclick="focusAgent('${a.id}')" title="${esc(a.name)} (${a.status})">`;
+  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" onclick="focusAgent('${a.id}')" title="${esc(a.name)} (${a.status})">`;
   h += `<div class="cell-status ${a.status}"></div>`;
-  h += `<button class="cell-close" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
+  h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   h += `<div class="cell-icon">${agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
   if (a.status === 'stopped') {
@@ -136,7 +132,7 @@ function renderTerminalRow(t) {
     pathDisplay = t.current_path.replace(/^\/Users\/[^/]+/, '~');
   }
 
-  let h = `<div class="${cls.join(' ')}" onclick="focusAgent('${t.id}')">`;
+  let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${t.id}" data-drag-type="terminal" data-drag-group="${esc(t.group)}" onclick="focusAgent('${t.id}')">`;
   h += `<div class="term-badge${darkCls}" style="background:${proc.color}">${proc.label}</div>`;
   h += `<div class="term-info">`;
   h += `  <div class="term-name">${esc(t.name)}</div>`;

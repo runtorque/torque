@@ -3,6 +3,7 @@
 const WS_URL = `ws://${location.host}/ws`;
 let ws = null;
 let state = { agents: {}, groups: {}, active_session_id: null };
+let dragInProgress = false;
 
 function connect() {
   ws = new WebSocket(WS_URL);
@@ -20,7 +21,7 @@ function connect() {
     const msg = JSON.parse(e.data);
     if (msg.type === 'state') {
       state = msg;
-      render();
+      if (!dragInProgress) render();
     } else if (msg.type === 'config') {
       if (_pendingModal) {
         _showAddModal(_pendingModal.mode, _pendingModal.group, msg);

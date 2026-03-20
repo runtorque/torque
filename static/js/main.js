@@ -16,3 +16,4 @@ document.querySelectorAll('.overlay').forEach(o => {
 });
 
 connect();
+setupDrag();

@@ -152,7 +152,7 @@ class MatrixState:
             self.save()
         return cell
 
-    def move_agent(self, aid: str, target_group: str):
+    def move_agent(self, aid: str, target_group: str, before: str = ""):
         cell = self.agents.get(aid)
         if not cell or target_group not in self.groups:
             return
@@ -160,7 +160,11 @@ class MatrixState:
             self.groups[cell.group] = [
                 x for x in self.groups[cell.group] if x != aid
             ]
-        self.groups[target_group].append(aid)
+        if before and before in self.groups[target_group]:
+            idx = self.groups[target_group].index(before)
+            self.groups[target_group].insert(idx, aid)
+        else:
+            self.groups[target_group].append(aid)
         cell.group = target_group
         self.save()
 
