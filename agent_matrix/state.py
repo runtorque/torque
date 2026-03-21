@@ -185,6 +185,16 @@ class MatrixState:
                  cell.tab_color, cell.directory)
         return cell
 
+    def update_agent(self, aid: str, **fields):
+        """Update mutable fields on an existing cell."""
+        cell = self.agents.get(aid)
+        if not cell:
+            return
+        for key in ("name", "tab_color"):
+            if key in fields:
+                setattr(cell, key, fields[key])
+        self.save()
+
     def add_agent(self, **kw) -> Optional[AgentCell]:
         return self._add_cell(cell_type="agent", **kw)
 

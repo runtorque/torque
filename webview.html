@@ -69,6 +69,25 @@
   </div>
 </div>
 
+<!-- Edit Agent/Terminal modal -->
+<div class="overlay" id="modal-edit">
+  <div class="modal">
+    <h2 id="edit-title">Edit</h2>
+    <label>Name</label>
+    <input id="edit-name-input" autocomplete="off"
+           onkeydown="if(event.key==='Enter')submitEdit();if(event.key==='Escape')closeModals();">
+    <label>Tab color</label>
+    <div class="color-swatches" id="edit-color-swatches"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" onclick="submitEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Context menu (right-click) -->
+<div id="ctx-menu"></div>
+
 <!-- Confirm dialog (replaces window.confirm for WKWebView) -->
 <div class="overlay" id="modal-confirm">
   <div class="modal">

@@ -271,6 +271,52 @@ class ITerm2Bridge:
                         return True
         return False
 
+    async def update_session(self, cell: AgentCell, old_name: str = ""):
+        """Apply name and tab color changes to a live session."""
+        session = await self._find_session(cell.session_id)
+        if not session:
+            return
+        try:
+            # Update tab title
+            app = await iterm2.async_get_app(self.conn)
+            for window in app.windows:
+                for tab in window.tabs:
+                    if tab.current_session and \
+                            tab.current_session.session_id == cell.session_id:
+                        if cell.parent_id:
+                            parent = self.state.agents.get(cell.parent_id)
+                            parent_name = parent.name if parent else "?"
+                            await tab.async_set_title(
+                                f"[{cell.group}] {parent_name}/{cell.name}")
+                        else:
+                            await tab.async_set_title(
+                                f"[{cell.group}] {cell.name}")
+                        break
+        except Exception:
+            log.exception("Failed to update tab title for '%s'", cell.name)
+
+        # Update tab color
+        try:
+            change = iterm2.LocalWriteOnlyProfile()
+            if cell.tab_color:
+                r = int(cell.tab_color[1:3], 16)
+                g = int(cell.tab_color[3:5], 16)
+                b = int(cell.tab_color[5:7], 16)
+                color = iterm2.Color(r, g, b)
+                change.set_use_tab_color(True)
+                change.set_use_tab_color_light(True)
+                change.set_use_tab_color_dark(True)
+                change.set_tab_color(color)
+                change.set_tab_color_light(color)
+                change.set_tab_color_dark(color)
+            else:
+                change.set_use_tab_color(False)
+                change.set_use_tab_color_light(False)
+                change.set_use_tab_color_dark(False)
+            await session.async_set_profile_properties(change)
+        except Exception:
+            log.exception("Failed to update tab color for '%s'", cell.name)
+
     async def send_text(self, session_id: str, text: str):
         session = await self._find_session(session_id)
         if session:

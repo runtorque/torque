@@ -460,6 +460,29 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
 #confirm-message { font-size: 12px; line-height: 1.5; }
 
 /* ------------------------------------------------------------------ */
+/* Context menu                                                        */
+/* ------------------------------------------------------------------ */
+#ctx-menu {
+  display: none; position: fixed;
+  z-index: 150;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0,0,0,.4);
+  padding: 2px;
+  min-width: 120px;
+}
+#ctx-menu.open { display: block; }
+#ctx-menu button {
+  display: block; width: 100%;
+  padding: 5px 10px; font-size: 10px;
+  color: var(--text-dim); text-align: left;
+  border-radius: 3px; white-space: nowrap;
+}
+#ctx-menu button:hover { background: var(--bg-hover); color: var(--text); }
+#ctx-menu button.danger:hover { background: var(--red); color: #fff; }
+
+/* ------------------------------------------------------------------ */
 /* Drag and drop                                                       */
 /* ------------------------------------------------------------------ */
 [draggable="true"] { cursor: grab; }

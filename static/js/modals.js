@@ -137,6 +137,53 @@ function selectColor(hex) {
   });
 }
 
+/* -- Edit Agent / Terminal --------------------------------------------- */
+let _editCellId = null;
+let _editColor = '';
+
+function openEditCell(id) {
+  const cell = state.agents[id];
+  if (!cell) return;
+  _editCellId = id;
+  _editColor = cell.tab_color || '';
+
+  document.getElementById('edit-title').textContent =
+    cell.cell_type === 'terminal' ? 'Edit Terminal' : 'Edit Agent';
+  document.getElementById('edit-name-input').value = cell.name;
+
+  /* color swatches */
+  const sw = document.getElementById('edit-color-swatches');
+  let sh = '';
+  for (const c of TAB_COLORS) {
+    const sel = c.hex === _editColor ? ' selected' : '';
+    sh += `<button class="swatch${sel}" data-color="${c.hex}" style="background:${c.hex}"
+            onclick="selectEditColor('${c.hex}')" title="${c.name}"></button>`;
+  }
+  const noneSel = !_editColor ? ' selected' : '';
+  sh += `<button class="swatch swatch-none${noneSel}" data-color="" onclick="selectEditColor('')" title="None">\u2715</button>`;
+  sw.innerHTML = sh;
+
+  document.getElementById('modal-edit').classList.add('visible');
+  document.getElementById('edit-name-input').focus();
+  document.getElementById('edit-name-input').select();
+}
+
+function selectEditColor(hex) {
+  _editColor = hex;
+  document.querySelectorAll('#edit-color-swatches .swatch').forEach(s => {
+    s.classList.toggle('selected', (s.dataset.color || '') === hex);
+  });
+}
+
+function submitEdit() {
+  if (!_editCellId) return;
+  const name = document.getElementById('edit-name-input').value.trim();
+  if (!name) return;
+  send({ cmd: 'update_agent', id: _editCellId, name, tab_color: _editColor });
+  _editCellId = null;
+  closeModals();
+}
+
 function openAddAgent(group)              { _openAddModal('agent', group); }
 function openAddTerminal(group, parentId) { _openAddModal('terminal', group, parentId); }
 

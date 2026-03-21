@@ -128,6 +128,17 @@ async def main(connection: iterm2.Connection):
                     if c.session_id:
                         await bridge.close_session(c.session_id)
 
+            elif cmd == "update_agent":
+                cell = state.agents.get(data["id"])
+                if cell:
+                    old_name = cell.name
+                    new_name = data.get("name", cell.name)
+                    new_color = data.get("tab_color", cell.tab_color)
+                    state.update_agent(data["id"], name=new_name,
+                                       tab_color=new_color)
+                    if cell.session_id:
+                        await bridge.update_session(cell, old_name)
+
             elif cmd == "focus_agent":
                 cell = state.agents.get(data["id"])
                 if cell and cell.session_id:

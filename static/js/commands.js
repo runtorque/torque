@@ -221,6 +221,49 @@ function _nextDragSibling(el) {
   return next;
 }
 
+/* Context menu (right-click) */
+
+function closeContextMenu() {
+  document.getElementById('ctx-menu').classList.remove('open');
+}
+
+function showContextMenu(x, y, items) {
+  const menu = document.getElementById('ctx-menu');
+  let html = '';
+  for (const item of items) {
+    const cls = item.danger ? ' class="danger"' : '';
+    html += `<button${cls} onclick="closeContextMenu();${esc(item.action)}">${esc(item.label)}</button>`;
+  }
+  menu.innerHTML = html;
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  menu.classList.add('open');
+
+  // Adjust if menu overflows viewport
+  requestAnimationFrame(() => {
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 4) + 'px';
+    if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 4) + 'px';
+  });
+}
+
+function onCellContextMenu(e, id) {
+  e.preventDefault();
+  e.stopPropagation();
+  const cell = state.agents[id];
+  if (!cell) return;
+
+  const items = [
+    { label: 'Edit\u2026', action: `openEditCell('${id}')` },
+    { label: 'Focus', action: `focusAgent('${id}')` },
+  ];
+  if (cell.status === 'stopped') {
+    items.push({ label: 'Relaunch', action: `relaunchAgent('${id}')` });
+  }
+  items.push({ label: 'Remove', action: `removeAgent('${id}')`, danger: true });
+  showContextMenu(e.clientX, e.clientY, items);
+}
+
 /* Broadcast bar */
 let broadcastGroup = null;
 

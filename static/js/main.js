@@ -263,11 +263,12 @@ document.addEventListener('keydown', (e) => {
       closeModals();
       closeBroadcast();
       closeMenus();
+      closeContextMenu();
       break;
   }
 });
 
-document.addEventListener('click', () => closeMenus());
+document.addEventListener('click', () => { closeMenus(); closeContextMenu(); });
 document.querySelectorAll('.overlay').forEach(o => {
   o.addEventListener('click', (e) => { if (e.target === o) closeModals(); });
 });
