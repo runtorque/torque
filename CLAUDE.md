@@ -22,14 +22,15 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → iterm2-a
   - `state.py` — `AgentCell` dataclass (with `parent_id` for terminal→agent hierarchy), `MatrixState` (persistence, `_children` index, cascade delete, WS broadcast)
   - `bridge.py` — `ITerm2Bridge` (create/close/focus sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection)
   - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/static/*` assets), all command dispatch
+  - `keybindings.py` — global iTerm2 key binding lifecycle (RPC registration, install/remove bindings, focus-next/prev/broadcast RPCs)
 - **Webview** (`webview.html` + `static/`):
   - `static/style.css` — all styles (dark theme, narrow toolbelt layout)
   - `static/js/constants.js` — icon maps, process badge map, tab color presets, feature flags (`FILTER_BY_WINDOW`)
-  - `static/js/ws.js` — WebSocket client, shared `state`, auto-reconnect, `selectedAgentId`, `dragInProgress`
-  - `static/js/render.js` — `render()`, agent cells, terminal drawer, FLIP animation, group collapse, window filtering
+  - `static/js/ws.js` — WebSocket client, shared `state`, auto-reconnect, `selectedAgentId`, `focusedItemId`, `dragInProgress`, tab-focus sync, action messages
+  - `static/js/render.js` — `render()`, agent cells, terminal drawer, FLIP animation, group collapse, window filtering, `_navItems`/`_navAgents` lists for keyboard navigation
   - `static/js/commands.js` — agent click/dblclick, focus, remove (cascade-aware), drag-and-drop (agents, terminals, groups, reparent), broadcast
   - `static/js/modals.js` — add group/agent/terminal modals (with `parent_id` support), confirm dialog, color picker
-  - `static/js/main.js` — keyboard bindings, boot, drag setup
+  - `static/js/main.js` — keyboard navigation (arrows, Enter, Delete, N/G/T/B/R shortcuts), boot, drag setup
 
 ## Code conventions
 
@@ -46,6 +47,8 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → iterm2-a
 - **VariableMonitor**: `jobName` and `path` are session-scoped variables. Monitor triggers on change, not on initial value — seed with `async_get_variable()` first.
 - **Port conflicts**: If the daemon crashes on start, an old instance is likely still holding port 18932. Run `make stop` first.
 - **Restart**: `os.execv(sys.executable, [sys.executable] + sys.argv)` replaces the process in-place. Must set `reuse_address=True` on the TCPSite so the new process can bind immediately.
+- **Global key bindings**: `async_set_global_key_bindings` is replace-all — must read→merge→write. Displaced user bindings are saved and restored on shutdown. On crash, stale `agent_matrix_*` bindings are cleaned up on next startup.
+- **RPC invocation**: `INVOKE_SCRIPT_FUNCTION` param format is `"function_name()"`. RPCs are registered via `@iterm2.RPC` decorator + `async_register(connection)`. Arrow key bindings require the `FUNCTION` modifier flag alongside `COMMAND`/`SHIFT`.
 
 ## Testing changes
 

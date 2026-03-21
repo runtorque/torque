@@ -18,7 +18,8 @@ install:
 	cp webview.html    "$(SCRIPT_DIR)/webview.html"
 	cp agent_matrix/__init__.py agent_matrix/config.py \
 	   agent_matrix/state.py agent_matrix/bridge.py \
-	   agent_matrix/server.py "$(SCRIPT_DIR)/agent_matrix/"
+	   agent_matrix/server.py agent_matrix/keybindings.py \
+	   "$(SCRIPT_DIR)/agent_matrix/"
 	@mkdir -p "$(SCRIPT_DIR)/static/js"
 	cp static/style.css "$(SCRIPT_DIR)/static/"
 	cp static/js/*.js   "$(SCRIPT_DIR)/static/js/"

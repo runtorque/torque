@@ -100,6 +100,8 @@ function render() {
         <div class="empty-icon">\u2B22</div>
         No groups yet.<br>Create one to get started.
       </div>`;
+    window._navItems = [];
+    focusedItemId = null;
     return;
   }
 
@@ -110,6 +112,9 @@ function render() {
 
   // Clear selectedAgentId if it no longer exists
   if (selectedAgentId && !state.agents[selectedAgentId]) selectedAgentId = null;
+
+  const navItems = [];
+  const navAgents = [];  // agents only, for left/right navigation
 
   let html = '';
   for (const gname of groupNames) {
@@ -138,7 +143,21 @@ function render() {
 
     /* Agent grid (+ New cell is part of the grid) */
     html += `<div class="agent-grid" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
-    for (const a of agents) html += renderAgentCell(a);
+    for (const a of agents) {
+      if (!collapsed) {
+        navItems.push(a.id);
+        navAgents.push(a.id);
+        // Insert child terminals right after parent for keyboard nav
+        if (a.id === selectedAgentId) {
+          const cIds = state.children[a.id] || [];
+          for (const cid of cIds) {
+            const ct = state.agents[cid];
+            if (ct && (!wid || !ct.window_id || ct.window_id === wid)) navItems.push(cid);
+          }
+        }
+      }
+      html += renderAgentCell(a);
+    }
     html += `<div class="cell cell-add" onclick="quickAddAgent('${esc(gname)}')">`;
     html += `  <div class="cell-add-icon">+</div>`;
     html += `  <div class="cell-name">New</div>`;
@@ -170,7 +189,10 @@ function render() {
     if (standaloneTerms.length > 0) {
       html += `<div class="section-label">Terminals</div>`;
       html += `<div class="term-list" data-drop-group="${esc(gname)}" data-drop-type="terminal">`;
-      for (const t of standaloneTerms) html += renderTerminalRow(t);
+      for (const t of standaloneTerms) {
+        navItems.push(t.id);
+        html += renderTerminalRow(t);
+      }
       html += `</div>`;
       html += renderTermAddBtn(gname, '');
     }
@@ -180,6 +202,11 @@ function render() {
   }
 
   main.innerHTML = html;
+
+  // Update navigable items lists; clear focus if item was removed
+  window._navItems = navItems;
+  window._navAgents = navAgents;
+  if (focusedItemId && !navItems.includes(focusedItemId)) focusedItemId = null;
 
   if (oldRects) _applyFlip(main, oldRects);
 }
@@ -191,6 +218,7 @@ function renderAgentCell(a) {
   const cls = ['cell'];
   if (active) cls.push('active');
   if (selected) cls.push('selected');
+  if (a.id === focusedItemId) cls.push('focused');
   if (a.status === 'stopped') cls.push('stopped');
 
   let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" title="${esc(a.name)} (${a.status})">`;
@@ -223,6 +251,7 @@ function renderTerminalRow(t) {
   const active = t.session_id && t.session_id === state.active_session_id;
   const cls = ['term-row'];
   if (active) cls.push('active');
+  if (t.id === focusedItemId) cls.push('focused');
   if (t.status === 'stopped') cls.push('stopped');
 
   const proc = t.status === 'stopped'

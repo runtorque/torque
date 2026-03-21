@@ -287,14 +287,15 @@ Split across `webview.html` (shell) + `static/style.css` + `static/js/*.js` (6 f
 | Group collapse/expand (CSS grid-template-rows animation) | DONE |
 | Window awareness (window_id per cell, FocusMonitor, per-window filtering) | DONE |
 | Active session tracking via FocusMonitor | DONE |
-| Keyboard navigation (arrows, enter, delete) | NOT STARTED |
+| Keyboard navigation (arrows, enter, delete) | DONE |
+| Global iTerm2 key bindings (Cmd+Shift+Arrow, Cmd+Shift+B) | DONE |
+| Auto-select agent on tab focus (tab-focus sync) | DONE |
 
 ### Future Ideas
 
 - **Environment variables** — inject key=value pairs before the boot command
 - **Auto-restart** — automatically relaunch agents that exit unexpectedly
 - **Shell selector** — choose bash/zsh/fish for terminal sessions
-- **Keyboard navigation** — arrow keys to move between cells, Enter to focus, Delete to remove
 
 ## Testing Checklist
 

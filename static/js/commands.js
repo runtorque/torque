@@ -1,8 +1,9 @@
 /* Commands — actions sent to the daemon */
 
-function focusAgent(id) { send({ cmd: 'focus_agent', id }); }
+function focusAgent(id) { focusedItemId = id; send({ cmd: 'focus_agent', id }); }
 
 function onAgentClick(id) {
+  focusedItemId = id;
   if (selectedAgentId === id) {
     // Already selected → focus the agent's iTerm2 session
     send({ cmd: 'focus_agent', id });
@@ -14,6 +15,7 @@ function onAgentClick(id) {
 }
 
 function onAgentDblClick(id) {
+  focusedItemId = id;
   selectedAgentId = id;
   send({ cmd: 'focus_agent', id });
   render();

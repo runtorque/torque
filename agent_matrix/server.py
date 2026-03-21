@@ -12,6 +12,7 @@ import iterm2
 from .config import WS_PORT, WEBVIEW_FILE, log
 from .state import MatrixState
 from .bridge import ITerm2Bridge
+from . import keybindings
 
 
 async def main(connection: iterm2.Connection):
@@ -24,6 +25,9 @@ async def main(connection: iterm2.Connection):
     bridge = ITerm2Bridge(connection, state)
     await bridge.start()
     await bridge.reconnect_orphans()
+
+    # Register RPCs and install global key bindings
+    displaced_bindings = await keybindings.setup(connection, state, bridge)
 
     # -- Command handler ----------------------------------------------------
 
@@ -177,7 +181,8 @@ async def main(connection: iterm2.Connection):
                 await bridge.reorder_tabs()
 
             elif cmd == "restart":
-                log.info("Restart requested — re-executing")
+                log.info("Restart requested — cleaning up and re-executing")
+                await keybindings.remove(connection, displaced_bindings)
                 state.save()
                 os.execv(sys.executable, [sys.executable] + sys.argv)
 

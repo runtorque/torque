@@ -1,8 +1,242 @@
 /* Keyboard bindings and boot */
 
+/* -- Keyboard navigation helpers ----------------------------------------- */
+
+function _focusedGroup() {
+  if (!focusedItemId) return null;
+  const cell = state.agents[focusedItemId];
+  return cell ? cell.group : null;
+}
+
+function _firstGroup() {
+  const names = Object.keys(state.groups);
+  return names.length > 0 ? names[0] : null;
+}
+
+function moveFocus(delta) {
+  const items = window._navItems || [];
+  if (items.length === 0) return;
+
+  if (focusedItemId == null) {
+    // Start from active cell if possible, otherwise first/last
+    const activeIdx = items.findIndex(id => {
+      const c = state.agents[id];
+      return c && c.session_id === state.active_session_id;
+    });
+    if (activeIdx >= 0) {
+      focusedItemId = items[activeIdx];
+    } else {
+      focusedItemId = delta > 0 ? items[0] : items[items.length - 1];
+    }
+  } else {
+    const idx = items.indexOf(focusedItemId);
+    const next = idx < 0 ? 0 : Math.max(0, Math.min(items.length - 1, idx + delta));
+    focusedItemId = items[next];
+  }
+  render();
+  const el = document.querySelector('.focused');
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
+
+function moveFocusHorizontal(delta) {
+  const agents = window._navAgents || [];
+  if (agents.length === 0) return;
+
+  const cell = focusedItemId ? state.agents[focusedItemId] : null;
+  const onTerminal = cell && cell.cell_type === 'terminal';
+
+  // Find current position in agents list
+  let currentAgentId = focusedItemId;
+  if (onTerminal) {
+    // Terminal focused — find its parent agent
+    currentAgentId = cell.parent_id || null;
+  }
+
+  let idx = currentAgentId ? agents.indexOf(currentAgentId) : -1;
+  const nextIdx = idx < 0 ? 0 : Math.max(0, Math.min(agents.length - 1, idx + delta));
+  const nextAgentId = agents[nextIdx];
+
+  // Open the target agent's drawer
+  selectedAgentId = nextAgentId;
+
+  if (onTerminal) {
+    // Was on a terminal — focus the first child terminal of the new agent
+    // (render first so _navItems is rebuilt with the new drawer)
+    render();
+    const childIds = state.children[nextAgentId] || [];
+    const wid = typeof FILTER_BY_WINDOW !== 'undefined' && FILTER_BY_WINDOW ? state.current_window_id : null;
+    const firstChild = childIds.find(cid => {
+      const ct = state.agents[cid];
+      return ct && (!wid || !ct.window_id || ct.window_id === wid);
+    });
+    focusedItemId = firstChild || nextAgentId;
+    render();
+  } else {
+    focusedItemId = nextAgentId;
+    render();
+  }
+
+  const el = document.querySelector('.focused');
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
+
+function moveFocusDown() {
+  const items = window._navItems || [];
+  if (items.length === 0) return;
+
+  if (focusedItemId == null) {
+    moveFocus(1);
+    return;
+  }
+
+  const cell = state.agents[focusedItemId];
+  // If focused on an agent that isn't selected yet, open its drawer first
+  if (cell && cell.cell_type !== 'terminal' && selectedAgentId !== focusedItemId) {
+    selectedAgentId = focusedItemId;
+    render();
+    const el = document.querySelector('.focused');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+    return;
+  }
+
+  // Otherwise normal down movement
+  moveFocus(1);
+}
+
+function moveFocusUp() {
+  const items = window._navItems || [];
+  if (items.length === 0) return;
+
+  if (focusedItemId == null) {
+    moveFocus(-1);
+    return;
+  }
+
+  moveFocus(-1);
+}
+
+function activateFocused() {
+  if (!focusedItemId) return;
+  const cell = state.agents[focusedItemId];
+  if (!cell) return;
+  if (cell.cell_type !== 'terminal') {
+    onAgentClick(focusedItemId);
+  } else {
+    focusAgent(focusedItemId);
+  }
+}
+
+function removeFocused() {
+  if (!focusedItemId) return;
+  removeAgent(focusedItemId);
+}
+
+
+function openAddAgentForFocused() {
+  const gname = _focusedGroup() || _firstGroup();
+  if (gname) quickAddAgent(gname);
+}
+
+function openAddTerminalForFocused() {
+  if (selectedAgentId) {
+    const cell = state.agents[selectedAgentId];
+    if (cell) quickAddTerminal(cell.group, selectedAgentId);
+  }
+}
+
+function toggleBroadcastForFocused() {
+  if (broadcastGroup) {
+    closeBroadcast();
+  } else {
+    const gname = _focusedGroup() || _firstGroup();
+    if (gname) openBroadcast(gname);
+  }
+}
+
+function relaunchFocused() {
+  if (!focusedItemId) return;
+  const cell = state.agents[focusedItemId];
+  if (cell && cell.status === 'stopped') relaunchAgent(focusedItemId);
+}
+
+/* -- Main keyboard handler ----------------------------------------------- */
+
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { closeModals(); closeBroadcast(); closeMenus(); }
+  // If a modal is open, only handle Escape/Enter
+  if (document.querySelector('.overlay.visible')) {
+    if (e.key === 'Escape') closeModals();
+    return;
+  }
+
+  // If broadcast input is focused, let it handle its own keys
+  if (document.activeElement && document.activeElement.id === 'broadcast-input') {
+    if (e.key === 'Escape') closeBroadcast();
+    return;
+  }
+
+  // Skip shortcuts when any input/select/textarea is focused
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+
+  switch (e.key) {
+    case 'ArrowUp':
+      e.preventDefault();
+      moveFocusUp();
+      break;
+    case 'ArrowDown':
+      e.preventDefault();
+      moveFocusDown();
+      break;
+    case 'ArrowLeft':
+      e.preventDefault();
+      moveFocusHorizontal(-1);
+      break;
+    case 'ArrowRight':
+      e.preventDefault();
+      moveFocusHorizontal(1);
+      break;
+    case 'Enter':
+      e.preventDefault();
+      activateFocused();
+      break;
+    case 'Backspace':
+    case 'Delete':
+      e.preventDefault();
+      removeFocused();
+      break;
+    case 'n':
+    case 'N':
+      e.preventDefault();
+      openAddAgentForFocused();
+      break;
+    case 'g':
+    case 'G':
+      e.preventDefault();
+      openAddGroup();
+      break;
+    case 't':
+    case 'T':
+      e.preventDefault();
+      openAddTerminalForFocused();
+      break;
+    case 'b':
+    case 'B':
+      e.preventDefault();
+      toggleBroadcastForFocused();
+      break;
+    case 'r':
+    case 'R':
+      e.preventDefault();
+      relaunchFocused();
+      break;
+    case 'Escape':
+      closeModals();
+      closeBroadcast();
+      closeMenus();
+      break;
+  }
 });
+
 document.addEventListener('click', () => closeMenus());
 document.querySelectorAll('.overlay').forEach(o => {
   o.addEventListener('click', (e) => { if (e.target === o) closeModals(); });

@@ -217,6 +217,10 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
   border-color: var(--accent);
   background: var(--bg-hover);
 }
+.cell.focused {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
 .cell.stopped { opacity: .55; }
 .cell-name {
   font-size: 9px; text-align: center;
@@ -315,6 +319,10 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
 .term-row.active {
   border-color: var(--accent);
   box-shadow: 0 0 10px rgba(88,166,255,.2);
+}
+.term-row.focused {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 .term-row.stopped { opacity: .55; }
 .term-badge {
