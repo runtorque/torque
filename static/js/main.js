@@ -13,55 +13,69 @@ function _firstGroup() {
   return names.length > 0 ? names[0] : null;
 }
 
-function moveFocus(delta) {
+function _initFocus(delta) {
+  // Start focus from active cell if possible, otherwise first/last in full list
   const items = window._navItems || [];
   if (items.length === 0) return;
-
-  if (focusedItemId == null) {
-    // Start from active cell if possible, otherwise first/last
-    const activeIdx = items.findIndex(id => {
-      const c = state.agents[id];
-      return c && c.session_id === state.active_session_id;
-    });
-    if (activeIdx >= 0) {
-      focusedItemId = items[activeIdx];
-    } else {
-      focusedItemId = delta > 0 ? items[0] : items[items.length - 1];
-    }
+  const activeIdx = items.findIndex(id => {
+    const c = state.agents[id];
+    return c && c.session_id === state.active_session_id;
+  });
+  if (activeIdx >= 0) {
+    focusedItemId = items[activeIdx];
   } else {
-    const idx = items.indexOf(focusedItemId);
-    const next = idx < 0 ? 0 : Math.max(0, Math.min(items.length - 1, idx + delta));
-    focusedItemId = items[next];
+    focusedItemId = delta > 0 ? items[0] : items[items.length - 1];
   }
   render();
   const el = document.querySelector('.focused');
   if (el) el.scrollIntoView({ block: 'nearest' });
 }
 
+function _moveInList(list, delta) {
+  if (list.length === 0) return;
+  const idx = list.indexOf(focusedItemId);
+  const next = idx < 0 ? 0 : Math.max(0, Math.min(list.length - 1, idx + delta));
+  focusedItemId = list[next];
+  render();
+  const el = document.querySelector('.focused');
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
+
+function _currentGroupItems() {
+  const gname = _focusedGroup();
+  if (!gname) return null;
+  const byGroup = window._navByGroup || {};
+  return byGroup[gname] || null;
+}
+
 function moveFocusHorizontal(delta) {
-  const agents = window._navAgents || [];
-  if (agents.length === 0) return;
+  if (focusedItemId == null) { _initFocus(delta); return; }
 
-  const cell = focusedItemId ? state.agents[focusedItemId] : null;
+  const cell = state.agents[focusedItemId];
   const onTerminal = cell && cell.cell_type === 'terminal';
+  const gname = cell ? cell.group : null;
 
-  // Find current position in agents list
+  // Get agents in the current group only
+  const groupItems = gname ? ((window._navByGroup || {})[gname] || []) : [];
+  const groupAgents = groupItems.filter(id => {
+    const c = state.agents[id];
+    return c && c.cell_type !== 'terminal';
+  });
+  if (groupAgents.length === 0) return;
+
+  // Find current agent position
   let currentAgentId = focusedItemId;
-  if (onTerminal) {
-    // Terminal focused — find its parent agent
-    currentAgentId = cell.parent_id || null;
-  }
+  if (onTerminal) currentAgentId = cell.parent_id || null;
 
-  let idx = currentAgentId ? agents.indexOf(currentAgentId) : -1;
-  const nextIdx = idx < 0 ? 0 : Math.max(0, Math.min(agents.length - 1, idx + delta));
-  const nextAgentId = agents[nextIdx];
+  let idx = currentAgentId ? groupAgents.indexOf(currentAgentId) : -1;
+  const nextIdx = idx < 0 ? 0 : Math.max(0, Math.min(groupAgents.length - 1, idx + delta));
+  const nextAgentId = groupAgents[nextIdx];
 
   // Open the target agent's drawer
   selectedAgentId = nextAgentId;
 
   if (onTerminal) {
     // Was on a terminal — focus the first child terminal of the new agent
-    // (render first so _navItems is rebuilt with the new drawer)
     render();
     const childIds = state.children[nextAgentId] || [];
     const wid = typeof FILTER_BY_WINDOW !== 'undefined' && FILTER_BY_WINDOW ? state.current_window_id : null;
@@ -81,13 +95,7 @@ function moveFocusHorizontal(delta) {
 }
 
 function moveFocusDown() {
-  const items = window._navItems || [];
-  if (items.length === 0) return;
-
-  if (focusedItemId == null) {
-    moveFocus(1);
-    return;
-  }
+  if (focusedItemId == null) { _initFocus(1); return; }
 
   const cell = state.agents[focusedItemId];
   // If focused on an agent that isn't selected yet, open its drawer first
@@ -99,20 +107,38 @@ function moveFocusDown() {
     return;
   }
 
-  // Otherwise normal down movement
-  moveFocus(1);
+  // Move down within current group only
+  const groupItems = _currentGroupItems();
+  if (groupItems) _moveInList(groupItems, 1);
 }
 
 function moveFocusUp() {
-  const items = window._navItems || [];
-  if (items.length === 0) return;
+  if (focusedItemId == null) { _initFocus(-1); return; }
 
-  if (focusedItemId == null) {
-    moveFocus(-1);
-    return;
+  // Move up within current group only
+  const groupItems = _currentGroupItems();
+  if (groupItems) _moveInList(groupItems, -1);
+}
+
+function switchGroup(delta) {
+  const groups = window._navGroupOrder || [];
+  if (groups.length === 0) return;
+
+  const currentGroup = _focusedGroup();
+  let idx = currentGroup ? groups.indexOf(currentGroup) : -1;
+  const nextIdx = idx < 0 ? 0 : Math.max(0, Math.min(groups.length - 1, idx + delta));
+  const targetGroup = groups[nextIdx];
+
+  const groupItems = (window._navByGroup || {})[targetGroup] || [];
+  if (groupItems.length > 0) {
+    focusedItemId = delta > 0 ? groupItems[0] : groupItems[groupItems.length - 1];
+  } else {
+    // Empty group — clear focus but we could leave it
+    focusedItemId = null;
   }
-
-  moveFocus(-1);
+  render();
+  const el = document.querySelector('.focused');
+  if (el) el.scrollIntoView({ block: 'nearest' });
 }
 
 function activateFocused() {
@@ -228,6 +254,10 @@ document.addEventListener('keydown', (e) => {
     case 'R':
       e.preventDefault();
       relaunchFocused();
+      break;
+    case 'Tab':
+      e.preventDefault();
+      switchGroup(e.shiftKey ? -1 : 1);
       break;
     case 'Escape':
       closeModals();

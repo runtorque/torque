@@ -115,6 +115,8 @@ function render() {
 
   const navItems = [];
   const navAgents = [];  // agents only, for left/right navigation
+  const navByGroup = {};  // group name → [item IDs] for up/down within group
+  const navGroupOrder = [];  // visible group names in order
 
   let html = '';
   for (const gname of groupNames) {
@@ -128,7 +130,11 @@ function render() {
       if (c.cell_type === 'terminal') standaloneTerms.push(c);
       else agents.push(c);
     }
-    if (wid && agents.length === 0 && standaloneTerms.length === 0) continue;
+    // Hide group only if it has cells but none in this window;
+    // always show truly empty groups so the user can populate them.
+    if (wid && agents.length === 0 && standaloneTerms.length === 0 && aids.length > 0) continue;
+    navGroupOrder.push(gname);
+    const groupNav = [];
     const collapsed = collapsedGroups.has(gname);
     html += `<div class="group${collapsed ? ' collapsed' : ''}" data-group-name="${esc(gname)}">`;
     html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group">`;
@@ -147,12 +153,16 @@ function render() {
       if (!collapsed) {
         navItems.push(a.id);
         navAgents.push(a.id);
+        groupNav.push(a.id);
         // Insert child terminals right after parent for keyboard nav
         if (a.id === selectedAgentId) {
           const cIds = state.children[a.id] || [];
           for (const cid of cIds) {
             const ct = state.agents[cid];
-            if (ct && (!wid || !ct.window_id || ct.window_id === wid)) navItems.push(cid);
+            if (ct && (!wid || !ct.window_id || ct.window_id === wid)) {
+              navItems.push(cid);
+              groupNav.push(cid);
+            }
           }
         }
       }
@@ -191,6 +201,7 @@ function render() {
       html += `<div class="term-list" data-drop-group="${esc(gname)}" data-drop-type="terminal">`;
       for (const t of standaloneTerms) {
         navItems.push(t.id);
+        groupNav.push(t.id);
         html += renderTerminalRow(t);
       }
       html += `</div>`;
@@ -199,6 +210,7 @@ function render() {
 
     html += `</div></div>`;
     html += `</div>`;
+    navByGroup[gname] = groupNav;
   }
 
   main.innerHTML = html;
@@ -206,6 +218,8 @@ function render() {
   // Update navigable items lists; clear focus if item was removed
   window._navItems = navItems;
   window._navAgents = navAgents;
+  window._navByGroup = navByGroup;
+  window._navGroupOrder = navGroupOrder;
   if (focusedItemId && !navItems.includes(focusedItemId)) focusedItemId = null;
 
   if (oldRects) _applyFlip(main, oldRects);

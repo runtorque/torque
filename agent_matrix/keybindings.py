@@ -1,9 +1,10 @@
 """Global iTerm2 key bindings for Agent Matrix.
 
-Installs Cmd+Shift+Arrow and Cmd+Shift+B as global shortcuts that invoke
-registered RPC functions.  Bindings are added on startup and removed on
-shutdown/restart.  Any pre-existing bindings with the same key combos are
-saved and restored when our bindings are removed.
+Installs Cmd+Option+Arrow (all four directions) and Cmd+Shift+B as global
+shortcuts that invoke registered RPC functions.  Up/Down cycle through all
+managed cells; Left/Right cycle through agents only.  Bindings are added on
+startup and removed on shutdown/restart.  Any pre-existing bindings with the
+same key combos are saved and restored when our bindings are removed.
 """
 
 import json
@@ -19,20 +20,34 @@ _RPC_PREFIX = "agent_matrix_"
 
 # Binding specs: (character, modifiers, keycode, rpc_invocation)
 _BINDING_SPECS = [
-    # Cmd+Shift+Down → focus next agent
+    # Cmd+Option+Down → focus next cell
     (0xF701,
      [iterm2.keyboard.Modifier.COMMAND,
-      iterm2.keyboard.Modifier.SHIFT,
+      iterm2.keyboard.Modifier.OPTION,
       iterm2.keyboard.Modifier.FUNCTION],
      iterm2.keyboard.Keycode.DOWN_ARROW,
      "agent_matrix_focus_next()"),
-    # Cmd+Shift+Up → focus prev agent
+    # Cmd+Option+Up → focus prev cell
     (0xF700,
      [iterm2.keyboard.Modifier.COMMAND,
-      iterm2.keyboard.Modifier.SHIFT,
+      iterm2.keyboard.Modifier.OPTION,
       iterm2.keyboard.Modifier.FUNCTION],
      iterm2.keyboard.Keycode.UP_ARROW,
      "agent_matrix_focus_prev()"),
+    # Cmd+Option+Right → next agent
+    (0xF703,
+     [iterm2.keyboard.Modifier.COMMAND,
+      iterm2.keyboard.Modifier.OPTION,
+      iterm2.keyboard.Modifier.FUNCTION],
+     iterm2.keyboard.Keycode.RIGHT_ARROW,
+     "agent_matrix_next_agent()"),
+    # Cmd+Option+Left → prev agent
+    (0xF702,
+     [iterm2.keyboard.Modifier.COMMAND,
+      iterm2.keyboard.Modifier.OPTION,
+      iterm2.keyboard.Modifier.FUNCTION],
+     iterm2.keyboard.Keycode.LEFT_ARROW,
+     "agent_matrix_prev_agent()"),
     # Cmd+Shift+B → toggle broadcast
     (ord('B'),
      [iterm2.keyboard.Modifier.COMMAND,
@@ -70,20 +85,52 @@ def _is_ours(binding):
             and binding.param.startswith(_RPC_PREFIX))
 
 
-def get_ordered_cells(state):
+def get_ordered_cells(state, window_id=None):
     """Return all cells with a live session, in group/position order."""
     ordered = []
     for gname in state.groups:
         for aid in state.groups[gname]:
             cell = state.agents.get(aid)
             if cell and cell.session_id:
-                ordered.append(cell)
-            # Include child terminals after their parent
+                if not window_id or cell.window_id == window_id:
+                    ordered.append(cell)
             for child_id in state._children.get(aid, []):
                 child = state.agents.get(child_id)
                 if child and child.session_id:
-                    ordered.append(child)
+                    if not window_id or child.window_id == window_id:
+                        ordered.append(child)
     return ordered
+
+
+def get_ordered_agents(state, window_id=None):
+    """Return only agent cells (not terminals) with a live session."""
+    ordered = []
+    for gname in state.groups:
+        for aid in state.groups[gname]:
+            cell = state.agents.get(aid)
+            if cell and cell.cell_type == 'agent' and cell.session_id:
+                if not window_id or cell.window_id == window_id:
+                    ordered.append(cell)
+    return ordered
+
+
+def _find_current_agent(state):
+    """Find the agent associated with the active session.
+
+    If the active session is a terminal, returns its parent agent.
+    Returns (agent_cell, is_on_terminal).
+    """
+    for cell in state.agents.values():
+        if cell.session_id != state.active_session_id:
+            continue
+        if cell.cell_type == 'agent':
+            return cell, False
+        elif cell.parent_id:
+            parent = state.agents.get(cell.parent_id)
+            if parent:
+                return parent, True
+        return None, True
+    return None, False
 
 
 async def install(connection):
@@ -153,7 +200,8 @@ async def setup(connection, state, bridge):
 
     @iterm2.RPC
     async def agent_matrix_focus_next():
-        ordered = get_ordered_cells(state)
+        wid = state.current_window_id
+        ordered = get_ordered_cells(state, wid)
         if not ordered:
             return
         current_idx = -1
@@ -166,7 +214,8 @@ async def setup(connection, state, bridge):
 
     @iterm2.RPC
     async def agent_matrix_focus_prev():
-        ordered = get_ordered_cells(state)
+        wid = state.current_window_id
+        ordered = get_ordered_cells(state, wid)
         if not ordered:
             return
         current_idx = 0
@@ -174,6 +223,39 @@ async def setup(connection, state, bridge):
             if cell.session_id == state.active_session_id:
                 current_idx = i
                 break
+        prev_idx = (current_idx - 1) % len(ordered)
+        await bridge.focus_session(ordered[prev_idx].session_id)
+
+    @iterm2.RPC
+    async def agent_matrix_next_agent():
+        wid = state.current_window_id
+        ordered = get_ordered_agents(state, wid)
+        if not ordered:
+            return
+        # Find current agent (or parent agent if on a terminal)
+        current_agent, _ = _find_current_agent(state)
+        current_idx = -1
+        if current_agent:
+            for i, cell in enumerate(ordered):
+                if cell.id == current_agent.id:
+                    current_idx = i
+                    break
+        next_idx = (current_idx + 1) % len(ordered)
+        await bridge.focus_session(ordered[next_idx].session_id)
+
+    @iterm2.RPC
+    async def agent_matrix_prev_agent():
+        wid = state.current_window_id
+        ordered = get_ordered_agents(state, wid)
+        if not ordered:
+            return
+        current_agent, _ = _find_current_agent(state)
+        current_idx = 0
+        if current_agent:
+            for i, cell in enumerate(ordered):
+                if cell.id == current_agent.id:
+                    current_idx = i
+                    break
         prev_idx = (current_idx - 1) % len(ordered)
         await bridge.focus_session(ordered[prev_idx].session_id)
 
@@ -204,6 +286,8 @@ async def setup(connection, state, bridge):
     # Register all RPCs
     await agent_matrix_focus_next.async_register(connection, timeout=10)
     await agent_matrix_focus_prev.async_register(connection, timeout=10)
+    await agent_matrix_next_agent.async_register(connection, timeout=10)
+    await agent_matrix_prev_agent.async_register(connection, timeout=10)
     await agent_matrix_toggle_broadcast.async_register(connection, timeout=10)
     log.info("Agent Matrix RPCs registered")
 
