@@ -19,17 +19,17 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → iterm2-a
 - **Entry point**: `agent_matrix.py` — thin wrapper that anchors paths and calls `iterm2.run_forever(main)`
 - **Python package** (`agent_matrix/`):
   - `config.py` — env vars, paths, logging setup
-  - `state.py` — `AgentCell` dataclass, `MatrixState` (persistence to `state.json`, mutations, WS broadcast)
-  - `bridge.py` — `ITerm2Bridge` (create/close/focus sessions, tab color, tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor)
+  - `state.py` — `AgentCell` dataclass (with `parent_id` for terminal→agent hierarchy), `MatrixState` (persistence, `_children` index, cascade delete, WS broadcast)
+  - `bridge.py` — `ITerm2Bridge` (create/close/focus sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection)
   - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/static/*` assets), all command dispatch
 - **Webview** (`webview.html` + `static/`):
   - `static/style.css` — all styles (dark theme, narrow toolbelt layout)
-  - `static/js/constants.js` — icon maps, process badge map, tab color presets
-  - `static/js/ws.js` — WebSocket client, shared `state`, auto-reconnect
-  - `static/js/render.js` — `render()`, agent cells, terminal rows, split buttons
-  - `static/js/commands.js` — focus, remove, relaunch, quick-add, broadcast
-  - `static/js/modals.js` — add group/agent/terminal modals, confirm dialog, color picker
-  - `static/js/main.js` — keyboard bindings, boot
+  - `static/js/constants.js` — icon maps, process badge map, tab color presets, feature flags (`FILTER_BY_WINDOW`)
+  - `static/js/ws.js` — WebSocket client, shared `state`, auto-reconnect, `selectedAgentId`, `dragInProgress`
+  - `static/js/render.js` — `render()`, agent cells, terminal drawer, FLIP animation, group collapse, window filtering
+  - `static/js/commands.js` — agent click/dblclick, focus, remove (cascade-aware), drag-and-drop (agents, terminals, groups, reparent), broadcast
+  - `static/js/modals.js` — add group/agent/terminal modals (with `parent_id` support), confirm dialog, color picker
+  - `static/js/main.js` — keyboard bindings, boot, drag setup
 
 ## Code conventions
 
@@ -56,7 +56,7 @@ There are no automated tests. To test changes:
    ```
    ~/Library/Application\ Support/iTerm2/Scripts/iterm2-agent-orchestrator/iterm2-agent-orchestrator/agent_matrix.log
    ```
-4. Test in the Toolbelt panel: create groups, add agents/terminals, close, relaunch, broadcast
+4. Test in the Toolbelt panel: create groups, add agents, click agent to select → add child terminals, drag terminals between drawer and standalone, remove agent (cascade), relaunch, broadcast
 
 ## Install location
 

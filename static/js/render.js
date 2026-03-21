@@ -31,7 +31,13 @@ function toggleMenu(chevron) {
   const menu = chevron.nextElementSibling;
   const wasOpen = menu.classList.contains('open');
   closeMenus();
-  if (!wasOpen) menu.classList.add('open');
+  if (!wasOpen) {
+    const rect = chevron.parentElement.getBoundingClientRect();
+    menu.style.left = rect.left + 'px';
+    menu.style.top = (rect.bottom + 2) + 'px';
+    menu.style.minWidth = rect.width + 'px';
+    menu.classList.add('open');
+  }
 }
 function closeMenus() {
   document.querySelectorAll('.split-menu.open').forEach(m => m.classList.remove('open'));
@@ -130,12 +136,15 @@ function render() {
 
     html += `<div class="group-body"><div class="group-body-inner">`;
 
-    /* Agent grid */
+    /* Agent grid (+ New cell is part of the grid) */
     html += `<div class="agent-grid" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
     for (const a of agents) html += renderAgentCell(a);
+    html += `<div class="cell cell-add" onclick="quickAddAgent('${esc(gname)}')">`;
+    html += `  <div class="cell-add-icon">+</div>`;
+    html += `  <div class="cell-name">New</div>`;
+    html += `  <button class="cell-add-drop" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>`;
+    html += `  <div class="split-menu"><button onclick="closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button></div>`;
     html += `</div>`;
-    html += `<div class="section-btns">`;
-    html += renderSplitBtn(`quickAddAgent('${esc(gname)}')`, `openAddAgent('${esc(gname)}')`);
     html += `</div>`;
 
     /* Terminal drawer for selected agent (if in this group) */
@@ -153,11 +162,7 @@ function render() {
       html += `<div class="term-list" data-drop-type="terminal" data-drop-group="${esc(gname)}" data-drop-parent="${esc(selectedAgentId)}">`;
       for (const t of childTerms) html += renderTerminalRow(t);
       html += `</div>`;
-      html += `<div class="section-btns">`;
-      html += renderSplitBtn(
-        `quickAddTerminal('${esc(gname)}','${esc(selectedAgentId)}')`,
-        `openAddTerminal('${esc(gname)}','${esc(selectedAgentId)}')`);
-      html += `</div>`;
+      html += renderTermAddBtn(gname, selectedAgentId);
       html += `</div>`;
     }
 
@@ -167,9 +172,7 @@ function render() {
       html += `<div class="term-list" data-drop-group="${esc(gname)}" data-drop-type="terminal">`;
       for (const t of standaloneTerms) html += renderTerminalRow(t);
       html += `</div>`;
-      html += `<div class="section-btns">`;
-      html += renderSplitBtn(`quickAddTerminal('${esc(gname)}','')`, `openAddTerminal('${esc(gname)}','')`);
-      html += `</div>`;
+      html += renderTermAddBtn(gname, '');
     }
 
     html += `</div></div>`;
@@ -201,6 +204,17 @@ function renderAgentCell(a) {
   if (a.status === 'stopped') {
     h += `<button class="cell-relaunch" onclick="event.stopPropagation();relaunchAgent('${a.id}')" title="Relaunch">\u21BB relaunch</button>`;
   }
+  h += `</div>`;
+  return h;
+}
+
+function renderTermAddBtn(gname, parentId) {
+  const pid = parentId ? esc(parentId) : '';
+  let h = `<div class="term-row term-add" onclick="quickAddTerminal('${esc(gname)}','${pid}')">`;
+  h += `<div class="term-badge" style="background:var(--border)">+</div>`;
+  h += `<div class="term-info"><div class="term-name" style="color:var(--text-dim)">New terminal</div></div>`;
+  h += `<button class="term-action" onclick="event.stopPropagation();toggleMenu(this)" title="Custom">\u25BE</button>`;
+  h += `<div class="split-menu"><button onclick="closeMenus();openAddTerminal('${esc(gname)}','${pid}')">Custom\u2026</button></div>`;
   h += `</div>`;
   return h;
 }

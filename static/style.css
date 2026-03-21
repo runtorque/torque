@@ -146,7 +146,7 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
   gap: 6px;
-  padding: 4px 8px 2px;
+  padding: 6px 8px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -176,9 +176,8 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
 }
 .split-drop:hover { background: var(--bg-hover); color: var(--text); }
 .split-menu {
-  display: none; position: absolute;
-  top: 100%; left: 0; margin-top: 2px;
-  min-width: 100%; z-index: 50;
+  display: none; position: fixed;
+  z-index: 50;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -254,6 +253,21 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
 .cell:hover .cell-relaunch { opacity: 1; }
 .cell-relaunch:hover { color: var(--accent); }
 .cell-icon { font-size: 18px; line-height: 1; margin-bottom: 2px; }
+.cell.cell-add {
+  border: 1px dashed var(--border);
+  background: transparent;
+  opacity: .6;
+}
+.cell.cell-add:hover { opacity: 1; background: var(--bg-cell); }
+.cell-add-icon { font-size: 18px; line-height: 1; margin-bottom: 2px; color: var(--text-dim); }
+.cell-add-drop {
+  position: absolute; top: 2px; right: 2px;
+  font-size: 10px; color: var(--text-dim);
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px;
+}
+.cell-add-drop:hover { background: var(--bg-hover); color: var(--text); }
 .cell-term-count {
   position: absolute; bottom: 2px; right: 3px;
   font-size: 8px; color: var(--text-dim);
@@ -344,6 +358,13 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
 }
 .term-action:hover { background: var(--bg); color: var(--text); }
 .term-action.danger:hover { background: var(--red); color: #fff; }
+.term-row.term-add {
+  border: 1px dashed var(--border);
+  background: transparent;
+  opacity: .6; margin: 4px 8px 6px;
+}
+.term-row.term-add:hover { opacity: 1; background: var(--bg-cell); }
+.term-row.term-add .term-action { opacity: 1; font-size: 12px; }
 
 /* ------------------------------------------------------------------ */
 /* Broadcast bar                                                       */
