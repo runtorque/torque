@@ -273,7 +273,8 @@ document.querySelectorAll('.overlay').forEach(o => {
   o.addEventListener('click', (e) => { if (e.target === o) closeModals(); });
 });
 
-['add-name-input', 'add-cmd-input', 'add-dir-input'].forEach(id => {
+['add-name-input', 'add-cmd-input', 'add-dir-input',
+ 'add-args-input', 'add-init-input'].forEach(id => {
   document.getElementById(id).addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitAdd();
     if (e.key === 'Escape') closeModals();

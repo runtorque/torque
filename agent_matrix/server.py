@@ -134,8 +134,8 @@ async def main(connection: iterm2.Connection):
                 directory = data.get("directory") or gs.agent_directory or gs.default_directory or ""
                 _ac = gs.agent_tab_color
                 tab_color = data.get("tab_color") or (_ac if _ac != "none" else "") or gs.tab_color or ""
-                shell = gs.agent_shell or gs.shell or ""
-                env = {**gs.env_vars, **gs.agent_env_vars} or None
+                shell = data.get("shell") or gs.agent_shell or gs.shell or ""
+                env = {**gs.env_vars, **gs.agent_env_vars, **(data.get("env_vars") or {})} or None
 
                 cell = state.add_agent(
                     name=data["name"], group=group,
@@ -195,11 +195,13 @@ async def main(connection: iterm2.Connection):
                 directory = data.get("directory") or gs.terminal_directory or gs.default_directory or ""
                 _tc = gs.terminal_tab_color
                 tab_color = data.get("tab_color") or (_tc if _tc != "none" else "") or gs.tab_color or ""
-                shell = gs.terminal_shell or gs.shell or ""
-                env = {**gs.env_vars, **gs.terminal_env_vars} or None
-                command = gs.terminal_boot_command or ""
-                if gs.terminal_command_args and command:
-                    command = (command + " " + gs.terminal_command_args).strip()
+                shell = data.get("shell") or gs.terminal_shell or gs.shell or ""
+                env = {**gs.env_vars, **gs.terminal_env_vars, **(data.get("env_vars") or {})} or None
+                command = data.get("command") or gs.terminal_boot_command or ""
+                cmd_args = data.get("command_args") or gs.terminal_command_args or ""
+                if cmd_args and command:
+                    command = (command + " " + cmd_args).strip()
+                init_script = data.get("init_script") or gs.terminal_init_script or ""
 
                 cell = state.add_terminal(
                     name=data["name"], group=group,
@@ -210,7 +212,7 @@ async def main(connection: iterm2.Connection):
                 if cell:
                     await bridge.create_session(
                         cell, env_vars=env,
-                        init_script=gs.terminal_init_script,
+                        init_script=init_script,
                         shell=shell)
 
             elif cmd == "remove_agent":

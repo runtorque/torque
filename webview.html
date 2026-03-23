@@ -44,24 +44,43 @@
 
 <!-- Add Agent / Terminal modal (shared) -->
 <div class="overlay" id="modal-add">
-  <div class="modal">
+  <div class="modal modal-tall">
     <h2 id="modal-add-title">New Agent</h2>
-    <label>Name</label>
-    <input id="add-name-input" placeholder="e.g. Claude 1" autocomplete="off">
-    <label>Group</label>
-    <select id="add-group-select"></select>
-    <div id="add-cmd-row">
-      <label>Boot command</label>
-      <input id="add-cmd-input" autocomplete="off">
+    <div class="gs-pane active" style="display:block">
+      <label>Name</label>
+      <input id="add-name-input" placeholder="e.g. Claude 1" autocomplete="off">
+      <label>Group</label>
+      <select id="add-group-select"></select>
+      <div id="add-cmd-row" class="hidden">
+        <label>Boot command</label>
+        <input id="add-cmd-input" placeholder="e.g. npm run dev" autocomplete="off">
+      </div>
+      <div id="add-args-row" class="hidden">
+        <label>Arguments</label>
+        <input id="add-args-input" placeholder="e.g. --watch" autocomplete="off">
+      </div>
+      <div id="add-init-row" class="hidden">
+        <label>Init script</label>
+        <input id="add-init-input" placeholder="/path/to/script.sh" autocomplete="off">
+      </div>
+      <label>Directory</label>
+      <select id="add-dir-select" onchange="onDirChange()"></select>
+      <input id="add-dir-input" class="hidden" placeholder="Same as group"
+             autocomplete="off" style="margin-top:4px">
+      <label>Profile</label>
+      <select id="add-profile-select"></select>
+      <label>Shell</label>
+      <select id="add-shell-select">
+        <option value="">Same as group</option>
+        <option value="zsh">zsh</option>
+        <option value="bash">bash</option>
+        <option value="fish">fish</option>
+      </select>
+      <label>Tab color</label>
+      <div class="color-swatches" id="add-color-swatches"></div>
+      <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
+      <textarea id="add-env-vars" rows="2" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
     </div>
-    <label>Directory</label>
-    <select id="add-dir-select" onchange="onDirChange()"></select>
-    <input id="add-dir-input" class="hidden" placeholder="/path/to/directory"
-           autocomplete="off" style="margin-top:4px">
-    <label>Profile</label>
-    <select id="add-profile-select"></select>
-    <label>Tab color</label>
-    <div class="color-swatches" id="add-color-swatches"></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" onclick="submitAdd()">Create</button>

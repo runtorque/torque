@@ -79,9 +79,19 @@ function _showAddModal(mode, group, config) {
     parent ? `New Terminal for ${parent.name}` :
     mode === 'agent' ? 'New Agent' : 'New Terminal';
 
+  const isTerminal = mode === 'terminal';
   const cmdRow = document.getElementById('add-cmd-row');
-  if (mode === 'terminal') cmdRow.classList.add('hidden');
-  else cmdRow.classList.remove('hidden');
+  const argsRow = document.getElementById('add-args-row');
+  const initRow = document.getElementById('add-init-row');
+  if (isTerminal) {
+    cmdRow.classList.remove('hidden');
+    argsRow.classList.remove('hidden');
+    initRow.classList.remove('hidden');
+  } else {
+    cmdRow.classList.add('hidden');
+    argsRow.classList.add('hidden');
+    initRow.classList.add('hidden');
+  }
 
   /* group dropdown */
   const gsel = document.getElementById('add-group-select');
@@ -137,9 +147,15 @@ function _showAddModal(mode, group, config) {
   const gs = config.group_settings || {};
   const isAgent = mode === 'agent';
   const prefix = isAgent ? '' : gs.terminal_name_prefix;
-  document.getElementById('add-name-input').value = prefix ? _nextName(prefix) : '';
-  document.getElementById('add-cmd-input').value = '';
-  document.getElementById('add-cmd-input').placeholder = 'claude';
+  const nameInput = document.getElementById('add-name-input');
+  nameInput.value = prefix ? _nextName(prefix) : '';
+  nameInput.placeholder = isTerminal ? 'e.g. Shell' : 'e.g. Claude 1';
+
+  if (isTerminal) {
+    document.getElementById('add-cmd-input').value = gs.terminal_boot_command || '';
+    document.getElementById('add-args-input').value = gs.terminal_command_args || '';
+    document.getElementById('add-init-input').value = gs.terminal_init_script || '';
+  }
 
   const dir = (isAgent ? gs.agent_directory : gs.terminal_directory) || gs.default_directory;
   if (dir) {
@@ -157,8 +173,14 @@ function _showAddModal(mode, group, config) {
     }
   }
 
+  const shell = (isAgent ? gs.agent_shell : gs.terminal_shell) || gs.shell;
+  document.getElementById('add-shell-select').value = shell || '';
+
   const color = (isAgent ? gs.agent_tab_color : gs.terminal_tab_color) || gs.tab_color;
-  if (color) selectColor(color);
+  if (color && color !== 'none') selectColor(color);
+
+  const envObj = isAgent ? gs.agent_env_vars : gs.terminal_env_vars;
+  document.getElementById('add-env-vars').value = _envToText(envObj);
 
   document.getElementById('modal-add').classList.add('visible');
   document.getElementById('add-name-input').focus();
@@ -412,14 +434,25 @@ function submitAdd() {
 
   if (!name || !group) return;
 
+  const shell = document.getElementById('add-shell-select').value;
+  const envVars = _textToEnv('add-env-vars');
+
   const msg = {
     cmd: addCellMode === 'agent' ? 'add_agent' : 'add_terminal',
     name, group, profile,
   };
-  if (addCellMode === 'agent' && command) msg.command = command;
   if (addCellMode === 'terminal' && _pendingParentId) msg.parent_id = _pendingParentId;
   if (directory) msg.directory = directory;
   if (_selectedColor) msg.tab_color = _selectedColor;
+  if (shell) msg.shell = shell;
+  if (Object.keys(envVars).length > 0) msg.env_vars = envVars;
+  if (addCellMode === 'terminal') {
+    if (command) msg.command = command;
+    const args = document.getElementById('add-args-input').value.trim();
+    const init = document.getElementById('add-init-input').value.trim();
+    if (args) msg.command_args = args;
+    if (init) msg.init_script = init;
+  }
 
   send(msg);
   closeModals();
