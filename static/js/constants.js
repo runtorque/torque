@@ -52,6 +52,23 @@ const PROCESS_MAP = {
   'wget':    { label: 'WGT', color: '#073551' },
 };
 
+/* Agent type display labels */
+const AGENT_TYPE_LABELS = {
+  'claude-code': { label: 'Claude', short: 'CC' },
+  'codex':       { label: 'Codex',  short: 'CX' },
+  'gemini-cli':  { label: 'Gemini', short: 'GM' },
+  'generic':     { label: '',       short: '' },
+};
+
+/* Activity → status dot CSS class */
+const ACTIVITY_CLASSES = {
+  'thinking':  'activity-thinking',
+  'tool_call': 'activity-tool',
+  'writing':   'activity-tool',
+  'waiting':   'activity-waiting',
+  'subagent':  'activity-thinking',
+};
+
 const TAB_COLORS = [
   { name: 'Red',    hex: '#f85149' },
   { name: 'Orange', hex: '#d29922' },

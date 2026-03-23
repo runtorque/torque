@@ -143,6 +143,20 @@
         <input id="gs-filter-window" type="checkbox"> Pin to active window
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Only show this group in windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.">?</span>
       </label>
+      <div class="gs-section-label" style="margin-top:12px;font-size:9px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;">Notifications</div>
+      <label class="gs-checkbox">
+        <input id="gs-notifications" type="checkbox"> Enable macOS notifications
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Send macOS notifications when agents in this group finish, encounter errors, or need attention. Notifications are batched over 5 seconds.">?</span>
+      </label>
+      <label class="gs-checkbox">
+        <input id="gs-notify-finish" type="checkbox" checked> Notify on finish
+      </label>
+      <label class="gs-checkbox">
+        <input id="gs-notify-error" type="checkbox" checked> Notify on error
+      </label>
+      <label class="gs-checkbox">
+        <input id="gs-notify-attention" type="checkbox" checked> Notify when needs attention
+      </label>
     </div>
 
     <!-- Agents tab -->

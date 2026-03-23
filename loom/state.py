@@ -30,11 +30,24 @@ class AgentCell:
     git_root: str = ""  # git repo root (empty if not in a repo)
     worktree_path: str = ""  # git worktree path (if created via group setting)
     worktree_branch: str = ""  # git worktree branch name
+    # Agent awareness (Phase 1)
+    agent_type: str = ""  # "claude-code", "codex", "gemini-cli", ""
+    agent_session_id: str = ""  # agent's own session ID (e.g. Claude Code session)
+    activity: str = ""  # "", "thinking", "tool_call", "writing", "waiting"
+    activity_detail: str = ""  # e.g. "Editing server.py", "Running tests"
+    last_event_at: float = 0.0  # timestamp of last event received
+    session_tokens_in: int = 0  # cumulative input tokens this session
+    session_tokens_out: int = 0  # cumulative output tokens this session
+    error_message: str = ""  # last error, cleared on next successful event
+    needs_attention: bool = False  # agent waiting for input or stuck
 
 
 # Fields that are ephemeral (not meaningful across restarts)
 _EPHEMERAL_FIELDS = ("current_process", "current_path",
-                     "current_branch", "git_root")
+                     "current_branch", "git_root",
+                     "activity", "activity_detail", "last_event_at",
+                     "session_tokens_in", "session_tokens_out",
+                     "error_message", "needs_attention")
 
 
 @dataclass
@@ -69,6 +82,11 @@ class GroupSettings:
     terminal_tab_color: str = ""
     terminal_env_vars: dict[str, str] = field(default_factory=dict)
     terminal_always_custom_dialog: bool = False
+    # Agent awareness
+    notifications: bool = False
+    notify_on_finish: bool = True
+    notify_on_error: bool = True
+    notify_on_attention: bool = True
 
 
 class MatrixState:
@@ -408,6 +426,10 @@ class MatrixState:
             items.append((name, value))
         self.groups = dict(items)
         self.save()
+
+    def cells_with_awareness(self) -> list[AgentCell]:
+        """Return cells that have agent awareness active (agent_type set)."""
+        return [c for c in self.agents.values() if c.agent_type]
 
     # -- WebSocket broadcast ------------------------------------------------
 

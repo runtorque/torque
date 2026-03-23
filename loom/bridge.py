@@ -10,6 +10,7 @@ import iterm2
 
 from .config import log
 from .state import AgentCell, MatrixState
+from .adapters import detect_agent_type, detect_by_command, get_adapter
 
 _TITLE_RE = re.compile(r"^\[(.+?)\]\s+(.+)$")
 
@@ -84,9 +85,12 @@ class ITerm2Bridge:
                 matched.add(cell.id)
                 cell.session_id = sid
                 cell.window_id = window.window_id
-                cell.status = "idle"
-                log.info("Reconnected '%s' [%s] → session %s (window %s)",
-                         cell.name, cell.group, sid, window.window_id)
+                # Agents with a boot command are likely still running
+                cell.status = "running" if cell.command else "idle"
+                log.info("Reconnected '%s' [%s] → session %s (window %s, "
+                         "status=%s)",
+                         cell.name, cell.group, sid, window.window_id,
+                         cell.status)
 
                 # Seed ephemeral fields
                 try:
@@ -105,6 +109,16 @@ class ITerm2Bridge:
                                   cell.name)
                     await self._resolve_git_info(cell)
                     self._start_terminal_monitors(cell)
+
+                # Re-install hooks for awareness agents (in case files
+                # were lost or working dir changed)
+                if cell.agent_type and cell.directory:
+                    adapter = get_adapter(cell.agent_type)
+                    hook_dir = os.path.expanduser(cell.directory)
+                    if hasattr(adapter, "install_hooks"):
+                        if adapter.install_hooks(hook_dir):
+                            log.info("Re-installed hooks for '%s' in %s",
+                                     cell.name, hook_dir)
 
                 self._start_prompt_monitor(cell)
 
@@ -183,6 +197,19 @@ class ITerm2Bridge:
             d = os.path.expanduser(cell.directory)
             await session.async_send_text(f"cd {shlex.quote(d)}\n")
 
+        # Auto-detect agent type from boot command
+        if cell.cell_type == "agent" and not cell.agent_type and cell.command:
+            adapter = detect_by_command(cell.command)
+            if adapter:
+                cell.agent_type = adapter.name
+                log.info("Auto-detected agent type '%s' for '%s' "
+                         "(command: %s)", adapter.name, cell.name,
+                         cell.command)
+
+        # Inject LOOM_CELL_ID for all cells (used by hook correlation)
+        env_vars = dict(env_vars) if env_vars else {}
+        env_vars["LOOM_CELL_ID"] = cell.id
+
         # Environment variables
         if env_vars:
             exports = " ".join(
@@ -190,14 +217,31 @@ class ITerm2Bridge:
                 for k, v in env_vars.items())
             await session.async_send_text(f"export {exports}\n")
 
+        # Install agent hooks (if adapter supports it)
+        if cell.agent_type:
+            adapter = get_adapter(cell.agent_type)
+            hook_dir = os.path.expanduser(cell.directory) if cell.directory else ""
+            if hook_dir and hasattr(adapter, "install_hooks"):
+                if adapter.install_hooks(hook_dir):
+                    log.info("Installed hooks for '%s' (type=%s) in %s",
+                             cell.name, cell.agent_type, hook_dir)
+                else:
+                    log.warning("Failed to install hooks for '%s' in %s",
+                                cell.name, hook_dir)
+
         # Init script
         if init_script:
             await session.async_send_text(
                 f"source {shlex.quote(os.path.expanduser(init_script))}\n")
 
-        # Boot command
-        if cell.command:
-            await session.async_send_text(cell.command + "\n")
+        # Boot command (with session resume for supported agents)
+        boot_cmd = cell.command
+        if boot_cmd and cell.agent_session_id and cell.agent_type == "claude-code":
+            boot_cmd = f"{boot_cmd} --resume {shlex.quote(cell.agent_session_id)}"
+            log.info("Resuming Claude Code session %s for '%s'",
+                     cell.agent_session_id, cell.name)
+        if boot_cmd:
+            await session.async_send_text(boot_cmd + "\n")
             cell.status = "running"
         else:
             cell.status = "idle"
@@ -505,6 +549,14 @@ class ITerm2Bridge:
                         cell.current_process = val or ""
                         log.debug("Job changed for '%s': %s",
                                   cell.name, val)
+                        # Auto-detect agent type on first meaningful process
+                        if val and not cell.agent_type:
+                            adapter = detect_agent_type(val)
+                            if adapter.name != "generic":
+                                cell.agent_type = adapter.name
+                                log.info("Auto-detected agent type '%s' "
+                                         "for '%s' (process: %s)",
+                                         adapter.name, cell.name, val)
                         self.state.save()
                         await self.state.broadcast()
             except asyncio.CancelledError:
@@ -574,6 +626,11 @@ class ITerm2Bridge:
                             cell.current_path = ""
                             cell.current_branch = ""
                             cell.git_root = ""
+                            # Clear awareness fields
+                            cell.activity = ""
+                            cell.activity_detail = ""
+                            cell.error_message = ""
+                            cell.needs_attention = False
                             self.state.save()
                             for tasks in (self._prompt_tasks,
                                           self._job_tasks):

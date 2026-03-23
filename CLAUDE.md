@@ -21,15 +21,23 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
   - `config.py` — env vars, paths, logging setup
   - `state.py` — `AgentCell` dataclass (with `parent_id` for terminal→agent hierarchy), `GroupSettings` dataclass, `MatrixState` (persistence, `_children` index, cascade delete, WS broadcast)
   - `bridge.py` — `ITerm2Bridge` (create/close/focus/update sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection, git worktree lifecycle)
-  - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/static/*` assets), all command dispatch
+  - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/events` hook receiver, `/static/*` assets), all command dispatch
+  - `events.py` — `EventBus` (throttled broadcast), `EventLog` (per-cell ring buffer), `health_check` (30s periodic scan)
+  - `notifications.py` — `NotificationManager` (macOS notifications via osascript, 5s batching window)
   - `keybindings.py` — global iTerm2 key binding lifecycle (RPC registration, install/remove bindings, Cmd+Option+Arrow for cell/agent nav, Cmd+Shift+B for broadcast)
+  - `adapters/` — provider-agnostic agent awareness:
+    - `base.py` — `AgentEvent` dataclass, `AgentAdapter` base class
+    - `claude_code.py` — full integration: HTTP hooks, event parsing, activity inference, hook install/uninstall, session resume
+    - `codex.py` — template (process matching only)
+    - `gemini_cli.py` — template (process matching only)
+    - `generic.py` — fallback (process monitoring only)
 - **Webview** (`webview.html` + `static/`):
   - `static/style.css` — all styles (dark theme, narrow toolbelt layout)
-  - `static/js/constants.js` — icon maps, process badge map, tab color presets, feature flags (`FILTER_BY_WINDOW`)
+  - `static/js/constants.js` — icon maps, process badge map, tab color presets, feature flags (`FILTER_BY_WINDOW`), agent type labels, activity CSS class map
   - `static/js/ws.js` — WebSocket client, shared `state`, auto-reconnect, `selectedAgentId`, `focusedItemId`, `dragInProgress`, tab-focus sync, action messages
-  - `static/js/render.js` — `render()`, agent cells, terminal drawer, FLIP animation, group collapse, per-group window filtering, `_navItems`/`_navAgents` lists for keyboard navigation
+  - `static/js/render.js` — `render()`, agent cells (with activity indicators, attention badges, agent type labels), terminal drawer, FLIP animation, group collapse, per-group window filtering, `_navItems`/`_navAgents` lists for keyboard navigation
   - `static/js/commands.js` — agent click/dblclick, focus, remove (cascade-aware), drag-and-drop (agents, terminals, groups, reparent), broadcast, right-click context menu
-  - `static/js/modals.js` — add group/agent/terminal modals (with `parent_id` support), edit agent/terminal modal, group settings modal (tabbed: Group/Agents/Terminals), confirm dialog, color picker, hint tooltip popovers
+  - `static/js/modals.js` — add group/agent/terminal modals (with `parent_id` support), edit agent/terminal modal, group settings modal (tabbed: Group/Agents/Terminals, with notification settings), confirm dialog, color picker, hint tooltip popovers
   - `static/js/main.js` — keyboard navigation (arrows within group, Tab/Shift+Tab between groups, Enter, Delete, N/G/T/B/R shortcuts), boot, drag setup
 
 ## Code conventions

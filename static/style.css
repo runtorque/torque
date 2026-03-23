@@ -107,6 +107,14 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
   background: var(--bg); padding: 1px 5px;
   border-radius: 8px;
 }
+.group-running {
+  font-size: 9px; color: var(--green);
+  white-space: nowrap;
+}
+.group-attention {
+  font-size: 9px; color: var(--amber); font-weight: 700;
+  white-space: nowrap;
+}
 .group-toggle {
   font-size: 10px; color: var(--text-dim);
   width: 16px; height: 16px;
@@ -232,13 +240,21 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--text-dim);
 }
-.cell-status.running { background: var(--green); animation: pulse 1.8s ease-in-out infinite; }
-.cell-status.idle    { background: var(--text-dim); }
-.cell-status.error   { background: var(--red); }
-.cell-status.stopped { background: var(--amber); }
+.cell-status.running          { background: var(--green); animation: pulse 1.8s ease-in-out infinite; }
+.cell-status.idle             { background: var(--text-dim); }
+.cell-status.error            { background: var(--red); }
+.cell-status.stopped          { background: var(--amber); }
+/* Activity-aware status indicators */
+.cell-status.activity-thinking { background: var(--accent); animation: pulse 1.8s ease-in-out infinite; }
+.cell-status.activity-tool     { background: var(--green); animation: pulse-fast 1s ease-in-out infinite; }
+.cell-status.activity-waiting  { background: var(--amber); animation: pulse 1.8s ease-in-out infinite; }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: .4; }
+}
+@keyframes pulse-fast {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .3; }
 }
 .cell-close {
   position: absolute; top: 2px; left: 2px;
@@ -272,6 +288,31 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
   border-radius: 3px;
 }
 .cell-add-drop:hover { background: var(--bg-hover); color: var(--text); }
+/* Activity detail line under agent name */
+.cell-activity {
+  font-size: 8px; color: var(--text-dim);
+  text-align: center; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; line-height: 1.3;
+  margin-top: 1px;
+}
+/* Attention badge — orange ! in top-left */
+.cell-attention {
+  position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--amber); color: #0d1117;
+  font-size: 9px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2;
+}
+.cell.attention { border-color: var(--amber); }
+/* Agent type label — bottom-left */
+.cell-type {
+  position: absolute; bottom: 2px; left: 3px;
+  font-size: 7px; color: var(--text-dim);
+  letter-spacing: .03em; font-weight: 600;
+  opacity: .7;
+}
 .cell-term-count {
   position: absolute; bottom: 2px; right: 3px;
   font-size: 8px; color: var(--text-dim);

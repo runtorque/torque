@@ -13,6 +13,9 @@ from .config import WS_PORT, WEBVIEW_FILE, log
 from dataclasses import asdict
 from .state import MatrixState
 from .bridge import ITerm2Bridge
+from .events import EventLog, EventBus, health_check
+from .adapters import get_adapter
+from .notifications import NotificationManager
 from . import keybindings
 
 
@@ -22,6 +25,14 @@ async def main(connection: iterm2.Connection):
     state.load()
     log.info("State loaded: %d agents, %d groups",
              len(state.agents), len(state.groups))
+
+    event_log = EventLog()
+    notifier = NotificationManager(state)
+    notifier.start()
+    event_bus = EventBus(state, event_log, notifier)
+    event_bus.start()
+    asyncio.create_task(health_check(state, event_log, event_bus, notifier))
+    log.info("Event bus, health monitor, and notifications started")
 
     bridge = ITerm2Bridge(connection, state)
     await bridge.start()
@@ -121,6 +132,12 @@ async def main(connection: iterm2.Connection):
                 for c in removed:
                     if c.session_id:
                         await bridge.close_session(c.session_id)
+                    if c.agent_type and c.directory:
+                        adapter = get_adapter(c.agent_type)
+                        if hasattr(adapter, "uninstall_hooks"):
+                            adapter.uninstall_hooks(
+                                os.path.expanduser(c.directory))
+                    event_bus.cleanup_cell(c.id)
                     if c.worktree_path:
                         await bridge.remove_worktree(c)
 
@@ -220,6 +237,14 @@ async def main(connection: iterm2.Connection):
                 for c in removed:
                     if c.session_id:
                         await bridge.close_session(c.session_id)
+                    # Clean up hooks
+                    if c.agent_type and c.directory:
+                        adapter = get_adapter(c.agent_type)
+                        if hasattr(adapter, "uninstall_hooks"):
+                            adapter.uninstall_hooks(
+                                os.path.expanduser(c.directory))
+                    # Clean up event bus state
+                    event_bus.cleanup_cell(c.id)
                     if c.worktree_path:
                         await bridge.remove_worktree(c)
 
@@ -310,6 +335,43 @@ async def main(connection: iterm2.Connection):
 
         await state.broadcast()
 
+    # -- Events endpoint (agent hooks) ----------------------------------------
+
+    async def handle_events(request):
+        """Receive events from agent hooks (Claude Code HTTP hooks, etc.)."""
+        try:
+            raw = await request.json()
+        except Exception:
+            return web.json_response({}, status=400)
+
+        # Correlate: X-Loom-Cell-Id header (primary) → cwd match (fallback)
+        cell_id = request.headers.get("X-Loom-Cell-Id", "")
+        cell = state.agents.get(cell_id) if cell_id else None
+
+        if not cell:
+            # Fallback: match by cwd
+            cwd = raw.get("cwd", "")
+            if cwd:
+                for c in state.agents.values():
+                    if c.session_id and c.directory and \
+                            os.path.realpath(c.directory) == os.path.realpath(cwd):
+                        cell = c
+                        break
+
+        if not cell:
+            log.debug("Event from unknown cell (id=%s, cwd=%s), discarding",
+                      cell_id, raw.get("cwd", ""))
+            return web.json_response({})
+
+        # Parse through the adapter
+        adapter = get_adapter(cell.agent_type)
+        event = adapter.parse_event(raw, cell)
+        if event:
+            await event_bus.emit(event)
+
+        # Always return 200 with empty JSON — never block the agent
+        return web.json_response({})
+
     # -- HTTP / WS routes ---------------------------------------------------
 
     async def handle_index(_request):
@@ -339,6 +401,7 @@ async def main(connection: iterm2.Connection):
     app_server = web.Application()
     app_server.router.add_get("/", handle_index)
     app_server.router.add_get("/ws", handle_ws)
+    app_server.router.add_post("/events", handle_events)
     from .config import SCRIPT_DIR
     app_server.router.add_static("/static", SCRIPT_DIR / "static")
 

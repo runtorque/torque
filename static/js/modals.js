@@ -326,6 +326,10 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-auto-terminals').value = s.auto_terminals || 0;
   document.getElementById('gs-collapsed').checked = s.collapsed_default || false;
   document.getElementById('gs-filter-window').checked = s.filter_by_window || false;
+  document.getElementById('gs-notifications').checked = s.notifications || false;
+  document.getElementById('gs-notify-finish').checked = s.notify_on_finish !== false;
+  document.getElementById('gs-notify-error').checked = s.notify_on_error !== false;
+  document.getElementById('gs-notify-attention').checked = s.notify_on_attention !== false;
   document.getElementById('gs-env-vars').value = _envToText(s.env_vars);
   _populateProfileSelect(document.getElementById('gs-profile'), data.profiles, s.profile, 'System default');
   _gsColor = s.tab_color || '';
@@ -392,6 +396,10 @@ function submitGroupSettings() {
     max_agents: parseInt(document.getElementById('gs-max-agents').value) || 0,
     collapsed_default: document.getElementById('gs-collapsed').checked,
     filter_by_window: document.getElementById('gs-filter-window').checked,
+    notifications: document.getElementById('gs-notifications').checked,
+    notify_on_finish: document.getElementById('gs-notify-finish').checked,
+    notify_on_error: document.getElementById('gs-notify-error').checked,
+    notify_on_attention: document.getElementById('gs-notify-attention').checked,
     /* Agents */
     agent_directory: document.getElementById('gs-agent-directory').value.trim(),
     agent_profile: document.getElementById('gs-agent-profile').value,

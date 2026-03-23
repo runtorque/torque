@@ -21,6 +21,7 @@ ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
 install:
 	@# -- Ensure project directory exists --
 	@mkdir -p "$(SCRIPT_DIR)/loom"
+	@mkdir -p "$(SCRIPT_DIR)/loom/adapters"
 	@mkdir -p "$(SCRIPT_DIR)/static/js"
 	@# -- Bootstrap iterm2env if missing --
 	@if [ ! -d "$(ITERM2_PROJECT)/iterm2env" ]; then \
@@ -60,7 +61,12 @@ install:
 	cp loom/__init__.py loom/config.py \
 	   loom/state.py loom/bridge.py \
 	   loom/server.py loom/keybindings.py \
+	   loom/events.py loom/notifications.py \
 	   "$(SCRIPT_DIR)/loom/"
+	cp loom/adapters/__init__.py loom/adapters/base.py \
+	   loom/adapters/claude_code.py loom/adapters/codex.py \
+	   loom/adapters/gemini_cli.py loom/adapters/generic.py \
+	   "$(SCRIPT_DIR)/loom/adapters/"
 	cp static/style.css "$(SCRIPT_DIR)/static/"
 	cp static/js/*.js   "$(SCRIPT_DIR)/static/js/"
 	@# -- Install dependencies --
