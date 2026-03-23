@@ -10,7 +10,7 @@ Groups can be configured to only appear in windows where they have active sessio
 
 ## Agents
 
-An agent is an AI coding session. When you create an agent, Agent Matrix opens a new iTerm2 tab and runs a boot command (defaults to `claude`). Agents appear as cells in the group grid.
+An agent is an AI coding session. When you create an agent, Loom opens a new iTerm2 tab and runs a boot command (defaults to `claude`). Agents appear as cells in the group grid.
 
 Each agent can have its own:
 

@@ -1,12 +1,12 @@
-# Agent Matrix
+# Loom
 
-Agent Matrix is an iTerm2 Toolbelt plugin that lets you manage AI agents and terminal sessions in a visual grid, directly inside your terminal.
+Loom is an iTerm2 Toolbelt plugin that lets you manage AI agents and terminal sessions in a visual grid, directly inside your terminal.
 
-## Why Agent Matrix?
+## Why Loom?
 
 If you spend most of your day in the terminal, you know how productive that environment can be. But as AI coding agents become part of the workflow, managing them gets messy fast. Each agent needs its own tab. Each agent might need companion terminals for running tests, watching logs, or checking git status. Multiply that by a few tasks running in parallel and you're drowning in tabs with no easy way to tell them apart.
 
-Agent Matrix solves this by giving you a structured way to organize agents and terminals:
+Loom solves this by giving you a structured way to organize agents and terminals:
 
 - **Groups** collect related work. A group might represent a feature branch, a project, or a bug investigation.
 - **Agents** are AI coding sessions (Claude Code, or any CLI tool). Each agent gets its own iTerm2 tab with a boot command, working directory, and environment.
@@ -16,11 +16,11 @@ When you're done with a task, remove the agent and its terminals are cleaned up 
 
 ## How it works
 
-Agent Matrix runs as a Python daemon inside iTerm2's scripting infrastructure. It serves a small webview UI in the Toolbelt sidebar panel, communicating over a local WebSocket. The webview shows your groups, agents, and terminals in a compact grid. Clicking an agent focuses its iTerm2 tab. Creating an agent opens a new tab with your configured settings. Everything stays in sync.
+Loom runs as a Python daemon inside iTerm2's scripting infrastructure. It serves a small webview UI in the Toolbelt sidebar panel, communicating over a local WebSocket. The webview shows your groups, agents, and terminals in a compact grid. Clicking an agent focuses its iTerm2 tab. Creating an agent opens a new tab with your configured settings. Everything stays in sync.
 
 ## Quick start
 
-See [Getting Started](getting-started.md) to install and run Agent Matrix.
+See [Getting Started](getting-started.md) to install and run Loom.
 
 ## Features
 

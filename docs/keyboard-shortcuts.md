@@ -1,10 +1,10 @@
 # Keyboard Shortcuts
 
-Agent Matrix provides two layers of keyboard shortcuts: **Toolbelt shortcuts** that work when the Toolbelt panel is focused, and **global shortcuts** that work from any iTerm2 tab.
+Loom provides two layers of keyboard shortcuts: **Toolbelt shortcuts** that work when the Toolbelt panel is focused, and **global shortcuts** that work from any iTerm2 tab.
 
 ## Toolbelt shortcuts
 
-These work when the Agent Matrix panel in the Toolbelt has focus. Click anywhere in the panel to focus it.
+These work when the Loom panel in the Toolbelt has focus. Click anywhere in the panel to focus it.
 
 ### Navigation
 
@@ -32,7 +32,7 @@ These work when the Agent Matrix panel in the Toolbelt has focus. Click anywhere
 
 ## Global shortcuts
 
-These work from any iTerm2 tab, even when the Toolbelt is not focused. They are registered as global key bindings when Agent Matrix starts and removed on shutdown.
+These work from any iTerm2 tab, even when the Toolbelt is not focused. They are registered as global key bindings when Loom starts and removed on shutdown.
 
 | Shortcut | Action |
 |----------|--------|
@@ -46,4 +46,4 @@ These work from any iTerm2 tab, even when the Toolbelt is not focused. They are 
     The global arrow shortcuts cycle through all managed sessions in the current window, ordered by group position. This means you can navigate between agents and their terminals without touching the Toolbelt panel.
 
 !!! note
-    Agent Matrix saves any existing key bindings that conflict with its shortcuts and restores them when the plugin is stopped or restarted. If Agent Matrix crashes, stale bindings are cleaned up on next startup.
+    Loom saves any existing key bindings that conflict with its shortcuts and restores them when the plugin is stopped or restarted. If Loom crashes, stale bindings are cleaned up on next startup.

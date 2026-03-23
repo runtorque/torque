@@ -1,4 +1,4 @@
-"""Global iTerm2 key bindings for Agent Matrix.
+"""Global iTerm2 key bindings for Loom.
 
 Installs Cmd+Option+Arrow (all four directions) and Cmd+Shift+B as global
 shortcuts that invoke registered RPC functions.  Up/Down cycle through all
@@ -16,7 +16,7 @@ import iterm2.keyboard
 from .config import log
 
 # Prefix used to identify our RPC functions in binding params
-_RPC_PREFIX = "agent_matrix_"
+_RPC_PREFIX = "loom_"
 
 # Binding specs: (character, modifiers, keycode, rpc_invocation)
 _BINDING_SPECS = [
@@ -26,34 +26,34 @@ _BINDING_SPECS = [
       iterm2.keyboard.Modifier.OPTION,
       iterm2.keyboard.Modifier.FUNCTION],
      iterm2.keyboard.Keycode.DOWN_ARROW,
-     "agent_matrix_focus_next()"),
+     "loom_focus_next()"),
     # Cmd+Option+Up → focus prev cell
     (0xF700,
      [iterm2.keyboard.Modifier.COMMAND,
       iterm2.keyboard.Modifier.OPTION,
       iterm2.keyboard.Modifier.FUNCTION],
      iterm2.keyboard.Keycode.UP_ARROW,
-     "agent_matrix_focus_prev()"),
+     "loom_focus_prev()"),
     # Cmd+Option+Right → next agent
     (0xF703,
      [iterm2.keyboard.Modifier.COMMAND,
       iterm2.keyboard.Modifier.OPTION,
       iterm2.keyboard.Modifier.FUNCTION],
      iterm2.keyboard.Keycode.RIGHT_ARROW,
-     "agent_matrix_next_agent()"),
+     "loom_next_agent()"),
     # Cmd+Option+Left → prev agent
     (0xF702,
      [iterm2.keyboard.Modifier.COMMAND,
       iterm2.keyboard.Modifier.OPTION,
       iterm2.keyboard.Modifier.FUNCTION],
      iterm2.keyboard.Keycode.LEFT_ARROW,
-     "agent_matrix_prev_agent()"),
+     "loom_prev_agent()"),
     # Cmd+Shift+B → toggle broadcast
     (ord('B'),
      [iterm2.keyboard.Modifier.COMMAND,
       iterm2.keyboard.Modifier.SHIFT],
      iterm2.keyboard.Keycode.ANSI_B,
-     "agent_matrix_toggle_broadcast()"),
+     "loom_toggle_broadcast()"),
 ]
 
 
@@ -79,7 +79,7 @@ def _our_keys():
 
 
 def _is_ours(binding):
-    """Check if a binding was installed by Agent Matrix."""
+    """Check if a binding was installed by Loom."""
     return (binding.action == iterm2.binding.BindingAction.INVOKE_SCRIPT_FUNCTION
             and isinstance(binding.param, str)
             and binding.param.startswith(_RPC_PREFIX))
@@ -152,7 +152,7 @@ async def install(connection):
     displaced = [b for b in existing
                  if b.key in our_key_set and not _is_ours(b)]
 
-    # Remove stale Agent Matrix bindings AND displaced originals
+    # Remove stale Loom bindings AND displaced originals
     kept = [b for b in existing
             if b.key not in our_key_set and not _is_ours(b)]
 
@@ -199,7 +199,7 @@ async def setup(connection, state, bridge):
     """
 
     @iterm2.RPC
-    async def agent_matrix_focus_next():
+    async def loom_focus_next():
         wid = state.current_window_id
         ordered = get_ordered_cells(state, wid)
         if not ordered:
@@ -213,7 +213,7 @@ async def setup(connection, state, bridge):
         await bridge.focus_session(ordered[next_idx].session_id)
 
     @iterm2.RPC
-    async def agent_matrix_focus_prev():
+    async def loom_focus_prev():
         wid = state.current_window_id
         ordered = get_ordered_cells(state, wid)
         if not ordered:
@@ -227,7 +227,7 @@ async def setup(connection, state, bridge):
         await bridge.focus_session(ordered[prev_idx].session_id)
 
     @iterm2.RPC
-    async def agent_matrix_next_agent():
+    async def loom_next_agent():
         wid = state.current_window_id
         ordered = get_ordered_agents(state, wid)
         if not ordered:
@@ -244,7 +244,7 @@ async def setup(connection, state, bridge):
         await bridge.focus_session(ordered[next_idx].session_id)
 
     @iterm2.RPC
-    async def agent_matrix_prev_agent():
+    async def loom_prev_agent():
         wid = state.current_window_id
         ordered = get_ordered_agents(state, wid)
         if not ordered:
@@ -260,7 +260,7 @@ async def setup(connection, state, bridge):
         await bridge.focus_session(ordered[prev_idx].session_id)
 
     @iterm2.RPC
-    async def agent_matrix_toggle_broadcast():
+    async def loom_toggle_broadcast():
         # Find the group of the currently active session
         group = None
         for cell in state.agents.values():
@@ -284,12 +284,12 @@ async def setup(connection, state, bridge):
         state._ws_clients -= dead
 
     # Register all RPCs
-    await agent_matrix_focus_next.async_register(connection, timeout=10)
-    await agent_matrix_focus_prev.async_register(connection, timeout=10)
-    await agent_matrix_next_agent.async_register(connection, timeout=10)
-    await agent_matrix_prev_agent.async_register(connection, timeout=10)
-    await agent_matrix_toggle_broadcast.async_register(connection, timeout=10)
-    log.info("Agent Matrix RPCs registered")
+    await loom_focus_next.async_register(connection, timeout=10)
+    await loom_focus_prev.async_register(connection, timeout=10)
+    await loom_next_agent.async_register(connection, timeout=10)
+    await loom_prev_agent.async_register(connection, timeout=10)
+    await loom_toggle_broadcast.async_register(connection, timeout=10)
+    log.info("Loom RPCs registered")
 
     # Install global key bindings
     displaced = await install(connection)

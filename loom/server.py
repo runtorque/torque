@@ -17,7 +17,7 @@ from . import keybindings
 
 
 async def main(connection: iterm2.Connection):
-    log.info("Agent Matrix starting (port=%d)", WS_PORT)
+    log.info("Loom starting (port=%d)", WS_PORT)
     state = MatrixState()
     state.load()
     log.info("State loaded: %d agents, %d groups",
@@ -357,11 +357,11 @@ async def main(connection: iterm2.Connection):
 
     await iterm2.tool.async_register_web_view_tool(
         connection,
-        display_name="Agent Matrix",
-        identifier="com.agentmatrix.toolbelt",
+        display_name="Loom",
+        identifier="com.loom.toolbelt",
         reveal_if_already_registered=True,
         url=f"http://127.0.0.1:{WS_PORT}/",
     )
-    log.info("Toolbelt webview registered — Agent Matrix ready")
+    log.info("Toolbelt webview registered — Loom ready")
 
     await asyncio.Future()

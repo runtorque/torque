@@ -371,7 +371,7 @@ class ITerm2Bridge:
 
             slug = re.sub(r"[^a-z0-9-]", "-",
                           cell.name.lower().strip())[:30]
-            branch = f"agent-matrix/{cell.id}-{slug}"
+            branch = f"loom/{cell.id}-{slug}"
             wt_path = f"{repo_root}/.worktrees/{cell.id}"
 
             proc = await asyncio.create_subprocess_exec(

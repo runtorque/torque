@@ -60,7 +60,7 @@ function quickAddTerminal(group, parentId) {
 }
 
 async function restartDaemon() {
-  if (await showConfirm('Restart Agent Matrix? Active cells will be marked as stopped.')) {
+  if (await showConfirm('Restart Loom? Active cells will be marked as stopped.')) {
     send({ cmd: 'restart' });
   }
 }

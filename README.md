@@ -1,8 +1,8 @@
-# Agent Matrix
+# Loom
 
 An iTerm2 Toolbelt plugin for managing AI agent and terminal sessions in a visual grid.
 
-If you work primarily in the terminal, you know how productive that environment can be. But running multiple AI agents alongside companion terminals quickly turns into tab chaos. Agent Matrix gives you a structured way to organize it all: **groups** for context, **agents** for AI sessions, and **child terminals** for supporting tasks — all managed from iTerm2's Toolbelt sidebar. Spin up an agent with its own isolated environment, attach terminals for tests or logs, do your work, and tear it all down when you're done.
+If you work primarily in the terminal, you know how productive that environment can be. But running multiple AI agents alongside companion terminals quickly turns into tab chaos. Loom gives you a structured way to organize it all: **groups** for context, **agents** for AI sessions, and **child terminals** for supporting tasks — all managed from iTerm2's Toolbelt sidebar. Spin up an agent with its own isolated environment, attach terminals for tests or logs, do your work, and tear it all down when you're done.
 
 For full documentation, see the [docs site](docs/).
 
@@ -26,7 +26,7 @@ Two components communicate over a local WebSocket:
 ```
 ┌──────────────┐         ┌────────────────────────┐
 │   Webview     │  WS     │  Python Daemon          │
-│  (HTML/JS)    │◄───────►│  agent_matrix/          │
+│  (HTML/JS)    │◄───────►│  loom/          │
 │  in Toolbelt  │ :18932  │                         │
 └──────────────┘         │  MatrixState ──► JSON   │
                           │       │                  │
@@ -64,9 +64,9 @@ make autolaunch
 
 Then:
 
-1. **Scripts menu → iterm2-agent-orchestrator** to start
+1. **Scripts menu → loom** to start
 2. **View → Show Toolbelt** (Cmd+Shift+B)
-3. **Toolbelt gear menu → check "Agent Matrix"**
+3. **Toolbelt gear menu → check "Loom"**
 
 ## Usage
 
@@ -99,8 +99,8 @@ Click **↻** in the header to restart the daemon in-place. State is preserved; 
 
 | Environment variable | Default | Description |
 |---|---|---|
-| `AGENT_MATRIX_PORT` | `18932` | HTTP + WebSocket server port |
-| `AGENT_MATRIX_DEFAULT_CMD` | `claude` | Default boot command for new agents |
+| `LOOM_PORT` | `18932` | HTTP + WebSocket server port |
+| `LOOM_DEFAULT_CMD` | `claude` | Default boot command for new agents |
 
 ## Make targets
 
@@ -118,8 +118,8 @@ Click **↻** in the header to restart the daemon in-place. State is preserved; 
 ## File structure
 
 ```
-agent_matrix.py              # Entry point (anchors paths, boots daemon)
-agent_matrix/
+loom.py              # Entry point (anchors paths, boots daemon)
+loom/
   config.py                  # Env vars, paths, logging setup
   state.py                   # AgentCell, GroupSettings, MatrixState persistence
   bridge.py                  # iTerm2 bridge (sessions, monitors, worktrees)
@@ -141,7 +141,7 @@ Makefile                     # Install, deploy, stop, check targets
 
 Auto-generated at runtime (in the install directory, not in the repo):
 - `state.json` — persisted groups and agents
-- `agent_matrix.log` — debug log
+- `loom.log` — debug log
 
 ## Troubleshooting
 
@@ -150,7 +150,7 @@ An old daemon instance may be running. Run `make deploy` to kill it and install 
 
 **Log location:**
 ```
-~/Library/Application\ Support/iTerm2/Scripts/iterm2-agent-orchestrator/iterm2-agent-orchestrator/agent_matrix.log
+~/Library/Application\ Support/iTerm2/Scripts/loom/loom/loom.log
 ```
 
 **Tab colors not visible:**

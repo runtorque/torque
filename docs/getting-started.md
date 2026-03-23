@@ -29,15 +29,15 @@ make install
 ## Running
 
 1. Open iTerm2
-2. Go to **Scripts** menu and click **iterm2-agent-orchestrator**
+2. Go to **Scripts** menu and click **loom**
 3. Open the Toolbelt: **View > Show Toolbelt** (++cmd+shift+b++)
-4. In the Toolbelt gear menu, check **Agent Matrix**
+4. In the Toolbelt gear menu, check **Loom**
 
-The Agent Matrix panel appears in the Toolbelt sidebar.
+The Loom panel appears in the Toolbelt sidebar.
 
 ## Auto-launch
 
-To start Agent Matrix automatically when iTerm2 opens:
+To start Loom automatically when iTerm2 opens:
 
 ```bash
 make autolaunch
@@ -85,10 +85,10 @@ Then restart from the **Scripts** menu.
 
 **Port conflict on startup**: Another instance may be running. Run `make stop` first.
 
-**Plugin doesn't appear in Toolbelt**: Make sure you ran the script from the Scripts menu and checked "Agent Matrix" in the Toolbelt gear menu.
+**Plugin doesn't appear in Toolbelt**: Make sure you ran the script from the Scripts menu and checked "Loom" in the Toolbelt gear menu.
 
 **Check logs**: Errors are logged to:
 
 ```
-~/Library/Application Support/iTerm2/Scripts/iterm2-agent-orchestrator/iterm2-agent-orchestrator/agent_matrix.log
+~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log
 ```

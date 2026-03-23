@@ -1,7 +1,7 @@
-ITERM2_PROJECT := $(HOME)/Library/Application Support/iTerm2/Scripts/iterm2-agent-orchestrator
-SCRIPT_DIR     := $(ITERM2_PROJECT)/iterm2-agent-orchestrator
+ITERM2_PROJECT := $(HOME)/Library/Application Support/iTerm2/Scripts/loom
+SCRIPT_DIR     := $(ITERM2_PROJECT)/loom
 AUTOLAUNCH_DIR := $(HOME)/Library/Application Support/iTerm2/Scripts/AutoLaunch
-MAIN_SCRIPT    := iterm2-agent-orchestrator.py
+MAIN_SCRIPT    := loom.py
 
 # Prefer the project-local Python (matches setup.cfg python_requires),
 # fall back to the global iTerm2 Python.
@@ -11,15 +11,15 @@ ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
 
 .PHONY: install uninstall run deps check stop deploy
 
-## install: Copy agent_matrix files into the iTerm2 Scripts project
+## install: Copy loom files into the iTerm2 Scripts project
 install:
-	@mkdir -p "$(SCRIPT_DIR)/agent_matrix"
-	cp agent_matrix.py "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
+	@mkdir -p "$(SCRIPT_DIR)/loom"
+	cp loom.py "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
 	cp webview.html    "$(SCRIPT_DIR)/webview.html"
-	cp agent_matrix/__init__.py agent_matrix/config.py \
-	   agent_matrix/state.py agent_matrix/bridge.py \
-	   agent_matrix/server.py agent_matrix/keybindings.py \
-	   "$(SCRIPT_DIR)/agent_matrix/"
+	cp loom/__init__.py loom/config.py \
+	   loom/state.py loom/bridge.py \
+	   loom/server.py loom/keybindings.py \
+	   "$(SCRIPT_DIR)/loom/"
 	@mkdir -p "$(SCRIPT_DIR)/static/js"
 	cp static/style.css "$(SCRIPT_DIR)/static/"
 	cp static/js/*.js   "$(SCRIPT_DIR)/static/js/"
@@ -27,9 +27,9 @@ install:
 	@echo "Installed to $(SCRIPT_DIR)"
 	@echo ""
 	@echo "Next steps:"
-	@echo "  1. Run: Scripts menu → iterm2-agent-orchestrator"
+	@echo "  1. Run: Scripts menu → loom"
 	@echo "  2. Show Toolbelt: View → Show Toolbelt (⌘⇧B)"
-	@echo "  3. Check 'Agent Matrix' in the Toolbelt gear menu"
+	@echo "  3. Check 'Loom' in the Toolbelt gear menu"
 
 ## autolaunch: Symlink for auto-start on iTerm2 launch
 autolaunch: install
@@ -60,7 +60,7 @@ run:
 	fi
 	"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
 
-## stop: Kill any running agent_matrix instance (by port)
+## stop: Kill any running loom instance (by port)
 stop:
 	@pid=$$(lsof -ti :18932 2>/dev/null); \
 	if [ -n "$$pid" ]; then \
@@ -73,7 +73,7 @@ stop:
 ## deploy: Stop old instance, install new files, prompt to restart
 deploy: stop install
 	@echo ""
-	@echo "Now restart via: Scripts menu → iterm2-agent-orchestrator"
+	@echo "Now restart via: Scripts menu → loom"
 
 ## check: Verify prerequisites
 check:
