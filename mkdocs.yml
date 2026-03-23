@@ -1,0 +1,30 @@
+site_name: Agent Matrix
+site_description: iTerm2 agent and terminal orchestration
+repo_url: https://github.com/aleksanderarruda/iterm2-agent-orchestration
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: blue
+    accent: blue
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.keys
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Concepts: concepts.md
+  - Group Settings: group-settings.md
+  - Keyboard Shortcuts: keyboard-shortcuts.md
