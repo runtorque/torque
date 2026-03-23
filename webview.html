@@ -143,20 +143,6 @@
         <input id="gs-filter-window" type="checkbox"> Pin to active window
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Only show this group in windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.">?</span>
       </label>
-      <div class="gs-section-label" style="margin-top:12px;font-size:9px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;">Notifications</div>
-      <label class="gs-checkbox">
-        <input id="gs-notifications" type="checkbox"> Enable macOS notifications
-        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Send macOS notifications when agents in this group finish, encounter errors, or need attention. Notifications are batched over 5 seconds.">?</span>
-      </label>
-      <label class="gs-checkbox">
-        <input id="gs-notify-finish" type="checkbox" checked> Notify on finish
-      </label>
-      <label class="gs-checkbox">
-        <input id="gs-notify-error" type="checkbox" checked> Notify on error
-      </label>
-      <label class="gs-checkbox">
-        <input id="gs-notify-attention" type="checkbox" checked> Notify when needs attention
-      </label>
     </div>
 
     <!-- Agents tab -->
@@ -174,6 +160,8 @@
       </select>
       <label>Tab color</label>
       <div class="color-swatches" id="gs-agent-color-swatches"></div>
+      <label>Boot command <span class="label-hint">override default</span></label>
+      <input id="gs-agent-boot-cmd" placeholder="claude" autocomplete="off">
       <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
       <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
       <label class="gs-checkbox">
@@ -181,8 +169,28 @@
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Create a new git worktree and branch for each agent, so they can work on the same repo in parallel without conflicts.">?</span>
       </label>
       <label class="gs-checkbox">
+        <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When relaunching an agent, resume the previous conversation instead of starting fresh. Currently supported for Claude Code.">?</span>
+      </label>
+      <label>Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
+      <input id="gs-agent-idle-timeout" type="number" min="0" max="60" value="5">
+      <label class="gs-checkbox">
         <input id="gs-agent-always-custom" type="checkbox"> Always open custom dialog
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating an agent with default settings.">?</span>
+      </label>
+      <div class="gs-section-label" style="margin-top:12px;font-size:9px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;">Notifications</div>
+      <label class="gs-checkbox">
+        <input id="gs-notifications" type="checkbox"> Enable macOS notifications
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Send macOS notifications when agents in this group finish, encounter errors, or need attention. Notifications are batched over 5 seconds.">?</span>
+      </label>
+      <label class="gs-checkbox">
+        <input id="gs-notify-finish" type="checkbox" checked> Notify on finish
+      </label>
+      <label class="gs-checkbox">
+        <input id="gs-notify-error" type="checkbox" checked> Notify on error
+      </label>
+      <label class="gs-checkbox">
+        <input id="gs-notify-attention" type="checkbox" checked> Notify when needs attention
       </label>
     </div>
 

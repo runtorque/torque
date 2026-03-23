@@ -326,10 +326,6 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-auto-terminals').value = s.auto_terminals || 0;
   document.getElementById('gs-collapsed').checked = s.collapsed_default || false;
   document.getElementById('gs-filter-window').checked = s.filter_by_window || false;
-  document.getElementById('gs-notifications').checked = s.notifications || false;
-  document.getElementById('gs-notify-finish').checked = s.notify_on_finish !== false;
-  document.getElementById('gs-notify-error').checked = s.notify_on_error !== false;
-  document.getElementById('gs-notify-attention').checked = s.notify_on_attention !== false;
   document.getElementById('gs-env-vars').value = _envToText(s.env_vars);
   _populateProfileSelect(document.getElementById('gs-profile'), data.profiles, s.profile, 'System default');
   _gsColor = s.tab_color || '';
@@ -338,8 +334,15 @@ function _showGroupSettings(group, data) {
   /* -- Agents tab -- */
   document.getElementById('gs-agent-directory').value = s.agent_directory || '';
   document.getElementById('gs-agent-shell').value = s.agent_shell || '';
+  document.getElementById('gs-agent-boot-cmd').value = s.agent_boot_command || '';
   document.getElementById('gs-worktree').checked = s.git_worktree || false;
+  document.getElementById('gs-session-resume').checked = s.agent_session_resume !== false;
+  document.getElementById('gs-agent-idle-timeout').value = s.agent_idle_timeout != null ? s.agent_idle_timeout : 5;
   document.getElementById('gs-agent-always-custom').checked = s.agent_always_custom_dialog || false;
+  document.getElementById('gs-notifications').checked = s.notifications || false;
+  document.getElementById('gs-notify-finish').checked = s.notify_on_finish !== false;
+  document.getElementById('gs-notify-error').checked = s.notify_on_error !== false;
+  document.getElementById('gs-notify-attention').checked = s.notify_on_attention !== false;
   document.getElementById('gs-agent-env-vars').value = _envToText(s.agent_env_vars);
   _populateProfileSelect(document.getElementById('gs-agent-profile'), data.profiles, s.agent_profile, 'Same as group');
   _gsAgentColor = s.agent_tab_color || '';
@@ -396,18 +399,21 @@ function submitGroupSettings() {
     max_agents: parseInt(document.getElementById('gs-max-agents').value) || 0,
     collapsed_default: document.getElementById('gs-collapsed').checked,
     filter_by_window: document.getElementById('gs-filter-window').checked,
-    notifications: document.getElementById('gs-notifications').checked,
-    notify_on_finish: document.getElementById('gs-notify-finish').checked,
-    notify_on_error: document.getElementById('gs-notify-error').checked,
-    notify_on_attention: document.getElementById('gs-notify-attention').checked,
     /* Agents */
     agent_directory: document.getElementById('gs-agent-directory').value.trim(),
     agent_profile: document.getElementById('gs-agent-profile').value,
     agent_shell: document.getElementById('gs-agent-shell').value,
     agent_tab_color: _gsAgentColor,
+    agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
     agent_env_vars: _textToEnv('gs-agent-env-vars'),
     git_worktree: document.getElementById('gs-worktree').checked,
+    agent_session_resume: document.getElementById('gs-session-resume').checked,
+    agent_idle_timeout: parseInt(document.getElementById('gs-agent-idle-timeout').value) || 0,
     agent_always_custom_dialog: document.getElementById('gs-agent-always-custom').checked,
+    notifications: document.getElementById('gs-notifications').checked,
+    notify_on_finish: document.getElementById('gs-notify-finish').checked,
+    notify_on_error: document.getElementById('gs-notify-error').checked,
+    notify_on_attention: document.getElementById('gs-notify-attention').checked,
     /* Terminals */
     terminal_name_prefix: document.getElementById('gs-terminal-prefix').value.trim(),
     terminal_boot_command: document.getElementById('gs-terminal-boot-cmd').value.trim(),

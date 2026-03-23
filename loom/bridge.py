@@ -237,9 +237,11 @@ class ITerm2Bridge:
         # Boot command (with session resume for supported agents)
         boot_cmd = cell.command
         if boot_cmd and cell.agent_session_id and cell.agent_type == "claude-code":
-            boot_cmd = f"{boot_cmd} --resume {shlex.quote(cell.agent_session_id)}"
-            log.info("Resuming Claude Code session %s for '%s'",
-                     cell.agent_session_id, cell.name)
+            gs = self.state.get_group_settings(cell.group)
+            if gs.agent_session_resume:
+                boot_cmd = f"{boot_cmd} --resume {shlex.quote(cell.agent_session_id)}"
+                log.info("Resuming Claude Code session %s for '%s'",
+                         cell.agent_session_id, cell.name)
         if boot_cmd:
             await session.async_send_text(boot_cmd + "\n")
             cell.status = "running"

@@ -69,8 +69,16 @@ class GroupSettings:
     agent_shell: str = ""
     agent_tab_color: str = ""
     agent_env_vars: dict[str, str] = field(default_factory=dict)
+    agent_boot_command: str = ""  # override default boot command (e.g. "codex")
     git_worktree: bool = False
+    agent_session_resume: bool = True  # resume session on relaunch
+    agent_idle_timeout: int = 5  # minutes before flagging agent as stuck (0=disable)
     agent_always_custom_dialog: bool = False
+    # Agent notifications
+    notifications: bool = False
+    notify_on_finish: bool = True
+    notify_on_error: bool = True
+    notify_on_attention: bool = True
     # Terminal overrides
     terminal_name_prefix: str = ""
     terminal_boot_command: str = ""
@@ -82,11 +90,6 @@ class GroupSettings:
     terminal_tab_color: str = ""
     terminal_env_vars: dict[str, str] = field(default_factory=dict)
     terminal_always_custom_dialog: bool = False
-    # Agent awareness
-    notifications: bool = False
-    notify_on_finish: bool = True
-    notify_on_error: bool = True
-    notify_on_attention: bool = True
 
 
 class MatrixState:

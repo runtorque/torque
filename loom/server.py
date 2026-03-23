@@ -154,10 +154,11 @@ async def main(connection: iterm2.Connection):
                 shell = data.get("shell") or gs.agent_shell or gs.shell or ""
                 env = {**gs.env_vars, **gs.agent_env_vars, **(data.get("env_vars") or {})} or None
 
+                command = data.get("command", "") or gs.agent_boot_command
                 cell = state.add_agent(
                     name=data["name"], group=group,
                     profile=profile,
-                    command=data.get("command", ""),
+                    command=command,
                     directory=directory, tab_color=tab_color,
                 )
                 if cell:
