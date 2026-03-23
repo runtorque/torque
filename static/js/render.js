@@ -166,19 +166,9 @@ function render() {
     const collapsed = collapsedGroups.has(gname);
 
     html += `<div class="group${collapsed ? ' collapsed' : ''}" data-group-name="${esc(gname)}">`;
-    /* Group header with running/attention counts */
-    const runningCount = agents.filter(a => a.status === 'running').length;
-    const attentionCount = agents.filter(a => a.needs_attention).length;
-
     html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group" oncontextmenu="onGroupContextMenu(event,'${esc(gname)}')">`;
     html += `  <button class="group-toggle" draggable="false" onclick="event.stopPropagation();toggleGroup('${esc(gname)}')">\u25BE</button>`;
     html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
-    if (attentionCount > 0) {
-      html += `<span class="group-attention" title="${attentionCount} need${attentionCount > 1 ? '' : 's'} attention">${attentionCount} !</span>`;
-    }
-    if (runningCount > 0) {
-      html += `<span class="group-running">${runningCount} running</span>`;
-    }
     html += `  <span class="group-count">${agents.length}</span>`;
     html += `  <button class="group-btn" draggable="false" title="Group settings" onclick="event.stopPropagation();openGroupSettings('${esc(gname)}')">\u2699</button>`;
     html += `  <button class="group-btn" draggable="false" title="Broadcast to ${esc(gname)}" onclick="openBroadcast('${esc(gname)}')">\u2318</button>`;
@@ -274,6 +264,8 @@ function render() {
 }
 
 function agentStatusClass(a) {
+  /* Attention overrides everything */
+  if (a.needs_attention) return 'attention';
   /* If agent has awareness data, use activity-based class */
   if (a.agent_type && a.activity) {
     return ACTIVITY_CLASSES[a.activity] || a.status;
@@ -290,17 +282,14 @@ function renderAgentCell(a) {
   if (selected) cls.push('selected');
   if (a.id === focusedItemId) cls.push('focused');
   if (a.status === 'stopped') cls.push('stopped');
-  if (a.needs_attention) cls.push('attention');
 
   const statusCls = agentStatusClass(a);
   const titleParts = [a.name, `(${a.status})`];
-  if (a.activity_detail) titleParts.push(`\u2014 ${a.activity_detail}`);
+  if (a.needs_attention && a.error_message) titleParts.push(`\u2014 ${a.error_message}`);
+  else if (a.activity_detail) titleParts.push(`\u2014 ${a.activity_detail}`);
 
   let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" oncontextmenu="onCellContextMenu(event,'${a.id}')" title="${esc(titleParts.join(' '))}">`;
-  h += `<div class="cell-status ${statusCls}"></div>`;
-  if (a.needs_attention) {
-    h += `<div class="cell-attention" title="${esc(a.error_message || 'Needs attention')}">!</div>`;
-  }
+  h += `<div class="cell-status ${statusCls}"${statusCls === 'attention' ? ' title="' + esc(a.error_message || 'Needs attention') + '"' : ''}>${statusCls === 'attention' ? '!' : ''}</div>`;
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   h += `<div class="cell-icon">${agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
