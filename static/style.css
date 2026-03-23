@@ -232,27 +232,23 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--text-dim);
 }
-.cell-status.running          { background: var(--green); animation: pulse 1.8s ease-in-out infinite; }
-.cell-status.idle             { background: var(--text-dim); }
-.cell-status.error            { background: var(--red); }
-.cell-status.stopped          { background: var(--amber); }
-/* Activity-aware status indicators */
-.cell-status.activity-thinking { background: var(--accent); animation: pulse 1.8s ease-in-out infinite; }
-.cell-status.activity-tool     { background: var(--green); animation: pulse-fast 1s ease-in-out infinite; }
-.cell-status.activity-waiting  { background: var(--amber); animation: pulse 1.8s ease-in-out infinite; }
+/* Three-state status: idle (gray), working (green), disconnected (red) */
+.cell-status.idle          { background: var(--text-dim); }
+.cell-status.working       { background: var(--green); animation: pulse 1.8s ease-in-out infinite; }
+.cell-status.disconnected  { background: var(--red); }
 .cell-status.attention {
   background: var(--amber); color: #0d1117;
   width: 12px; height: 12px; top: 2px; right: 2px;
   font-size: 8px; font-weight: 800; line-height: 12px; text-align: center;
   animation: pulse 1.8s ease-in-out infinite;
 }
+/* Legacy status classes (used by terminal rows) */
+.cell-status.running       { background: var(--green); animation: pulse 1.8s ease-in-out infinite; }
+.cell-status.error         { background: var(--red); }
+.cell-status.stopped       { background: var(--amber); }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: .4; }
-}
-@keyframes pulse-fast {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .3; }
 }
 .cell-close {
   position: absolute; top: 2px; left: 2px;

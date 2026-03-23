@@ -266,11 +266,13 @@ function render() {
 function agentStatusClass(a) {
   /* Attention overrides everything */
   if (a.needs_attention) return 'attention';
-  /* If agent has awareness data, use activity-based class */
-  if (a.agent_type && a.activity) {
-    return ACTIVITY_CLASSES[a.activity] || a.status;
-  }
-  return a.status;
+  /* Disconnected (tab closed) */
+  if (a.status === 'stopped') return 'disconnected';
+  /* Working (any activity means the agent is doing something) */
+  if (a.agent_type && a.activity) return 'working';
+  if (a.status === 'running') return 'working';
+  /* Idle (session alive but not actively working) */
+  return 'idle';
 }
 
 function renderAgentCell(a) {

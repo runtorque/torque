@@ -60,14 +60,6 @@ const AGENT_TYPE_LABELS = {
   'generic':     { label: '',       short: '' },
 };
 
-/* Activity → status dot CSS class */
-const ACTIVITY_CLASSES = {
-  'thinking':  'activity-thinking',
-  'tool_call': 'activity-tool',
-  'writing':   'activity-tool',
-  'waiting':   'activity-waiting',
-  'subagent':  'activity-thinking',
-};
 
 const TAB_COLORS = [
   { name: 'Red',    hex: '#f85149' },
