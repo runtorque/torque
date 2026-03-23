@@ -38,6 +38,9 @@ def _is_loom_hook_entry(entry: dict) -> bool:
     for hook in entry.get("hooks", []):
         if hook.get("url") == LOOM_HOOK_URL:
             return True
+        # Command hooks that curl to Loom
+        if hook.get("type") == "command" and LOOM_HOOK_URL in hook.get("command", ""):
+            return True
     return False
 
 
@@ -59,12 +62,14 @@ class ClaudeCodeAdapter(AgentAdapter):
     def get_hook_config(self, cell) -> dict | None:
         """Return the Claude Code hooks config to write for this cell.
 
-        The hooks POST to Loom's /events endpoint with X-Loom-Cell-Id header.
+        Most hooks use type: "http" (POST directly to Loom). SessionStart
+        requires type: "command" (Claude Code limitation — HTTP hooks are
+        not supported for SessionStart/WorktreeCreate/WorktreeRemove).
         """
         url = "http://localhost:18932/events"
         timeout = 3
 
-        def _hook(matcher=None):
+        def _http_hook(matcher=None):
             h = {"type": "http", "url": url, "timeout": timeout,
                  "headers": {"X-Loom-Cell-Id": "$LOOM_CELL_ID"},
                  "allowedEnvVars": ["LOOM_CELL_ID"]}
@@ -73,17 +78,32 @@ class ClaudeCodeAdapter(AgentAdapter):
                 entry["matcher"] = matcher
             return [entry]
 
+        def _cmd_hook(matcher=None):
+            """Command hook that curls to Loom (for events that don't support HTTP hooks)."""
+            h = {"type": "command", "timeout": timeout,
+                 "command": (
+                     'curl -s -X POST ' + url
+                     + ' -H "Content-Type: application/json"'
+                     + ' -H "X-Loom-Cell-Id: $LOOM_CELL_ID"'
+                     + ' -d "$(cat)" > /dev/null 2>&1'
+                 )}
+            entry = {"hooks": [h]}
+            if matcher:
+                entry["matcher"] = matcher
+            return [entry]
+
         return {
             "hooks": {
-                "SessionStart": _hook(),
-                "PreToolUse": _hook(".*"),
-                "PostToolUse": _hook(".*"),
-                "PostToolUseFailure": _hook(".*"),
-                "Notification": _hook(".*"),
-                "Stop": _hook(),
-                "SubagentStart": _hook(".*"),
-                "SubagentStop": _hook(".*"),
-                "StopFailure": _hook(".*"),
+                # SessionStart only supports command hooks (Claude Code limitation)
+                "SessionStart": _cmd_hook(),
+                "PreToolUse": _http_hook(".*"),
+                "PostToolUse": _http_hook(".*"),
+                "PostToolUseFailure": _http_hook(".*"),
+                "Notification": _http_hook(".*"),
+                "Stop": _http_hook(),
+                "SubagentStart": _http_hook(".*"),
+                "SubagentStop": _http_hook(".*"),
+                "StopFailure": _http_hook(".*"),
             }
         }
 
