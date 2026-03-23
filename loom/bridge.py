@@ -244,7 +244,9 @@ class ITerm2Bridge:
                          cell.agent_session_id, cell.name)
         if boot_cmd:
             await session.async_send_text(boot_cmd + "\n")
-            cell.status = "running"
+            # Awareness agents start as idle — hooks will set activity
+            # when the agent actually starts working
+            cell.status = "running" if not cell.agent_type else "idle"
         else:
             cell.status = "idle"
 
