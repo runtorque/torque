@@ -89,10 +89,13 @@ class AgentEvent:
 | `error_message` | str | No | Last error message |
 | `needs_attention` | bool | No | Agent stuck, errored, or needs permission |
 
-**GroupSettings extensions** (notification settings):
+**GroupSettings extensions** (in Agents tab):
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
+| `agent_boot_command` | str | "" | Override default boot command (e.g. "codex") |
+| `agent_session_resume` | bool | True | Resume session on relaunch (`claude --resume`) |
+| `agent_idle_timeout` | int | 5 | Minutes before flagging as stuck (0 = disable) |
 | `notifications` | bool | False | Master toggle for macOS notifications |
 | `notify_on_finish` | bool | True | Notify when agent finishes |
 | `notify_on_error` | bool | True | Notify on errors |
@@ -108,16 +111,16 @@ Registry in `loom/adapters/__init__.py` with `detect_agent_type()` (by process n
 
 | Adapter | File | Status | Integration |
 |---|---|---|---|
-| Claude Code | `claude_code.py` | Full | HTTP hooks, event parsing, activity inference, session resume |
+| Claude Code | `claude_code.py` | Full | HTTP hooks (command hook for SessionStart), event parsing, activity inference, session resume |
 | Codex | `codex.py` | Template | Process matching only |
 | Gemini CLI | `gemini_cli.py` | Template | Process matching only |
 | Generic | `generic.py` | Full | Fallback, process monitoring only |
 
 ### Claude Code Adapter
 
-**Hook installation**: Loom writes hooks to `.claude/settings.local.json` in the agent's working directory using a merge strategy. Loom hooks are identified by their URL (`http://localhost:18932/events`) and can be cleanly added/removed without affecting user hooks. Hooks include `allowedEnvVars: ["LOOM_CELL_ID"]` for header interpolation.
+**Hook installation**: Loom writes hooks to `.claude/settings.local.json` in the agent's working directory using a merge strategy. Loom hooks are identified by their URL (`http://localhost:18932/events`) and can be cleanly added/removed without affecting user hooks. HTTP hooks include `allowedEnvVars: ["LOOM_CELL_ID"]` for header interpolation.
 
-**Hooks subscribed**: `SessionStart`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `Stop`, `SubagentStart`, `SubagentStop`, `StopFailure`.
+**Hooks subscribed**: `SessionStart` (command hook — HTTP not supported), `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `Stop`, `SubagentStart`, `SubagentStop`, `StopFailure` (all HTTP hooks).
 
 **Event mapping**:
 
@@ -142,7 +145,7 @@ Registry in `loom/adapters/__init__.py` with `detect_agent_type()` (by process n
 - `Agent` → "Subagent: {description}"
 - `WebFetch` / `WebSearch` → "Fetching web page" / "Searching web"
 
-**Session resume**: When `SessionStart` fires, the adapter captures Claude Code's `session_id` and stores it in `cell.agent_session_id`. On relaunch, Loom runs `claude --resume <session_id>` instead of plain `claude`, continuing the conversation where it left off.
+**Session resume**: When `SessionStart` fires, the adapter captures Claude Code's `session_id` and stores it in `cell.agent_session_id` (persisted to `state.json` immediately). On relaunch, Loom runs `claude --resume <session_id>` instead of plain `claude`, continuing the conversation where it left off. Controlled by the `agent_session_resume` group setting (default: on). A `/clear` in Claude Code generates a new session ID, so resume after clear starts from a blank conversation.
 
 ### Event Bus and Throttling
 
@@ -190,14 +193,15 @@ On daemon restart, `reconnect_orphans`:
 ### UI Changes
 
 **Agent cell** (`render.js`):
-- Activity-aware status dot: blue pulse (thinking), green fast-pulse (tool call), amber pulse (waiting)
+- Three-state status dot: gray (idle), green pulsing (working), red (disconnected)
+- Attention state: status dot becomes larger amber `!` when `needs_attention` is true
 - Activity detail line below name: "Editing server.py", "Running: npm test"
-- Attention badge: orange `!` circle when `needs_attention` is true
 - Agent type label: "CC", "CX", "GM" in bottom-left corner
+- For awareness agents, `activity` field is the source of truth for working vs idle (not `status`, since PromptMonitor doesn't fire for TUI apps)
 
-**Group header**: Running count ("3 running") and attention count ("1 !") next to group name.
+**Group header**: Agent count badge only (no running/attention counts — the cells themselves communicate status).
 
-**Group settings modal** (`webview.html`, `modals.js`): Notifications section with 4 checkboxes.
+**Group settings modal** (`webview.html`, `modals.js`): Agents tab includes boot command, session resume toggle, idle timeout, and notification settings (4 checkboxes).
 
 Agents without awareness (`agent_type` empty) render exactly as before — fully backward compatible.
 
@@ -226,11 +230,11 @@ Modified files:
 loom/state.py            # AgentCell +8 fields, GroupSettings +4 fields, _EPHEMERAL_FIELDS, cells_with_awareness()
 loom/server.py           # POST /events route, event bus + notifier wiring, hook cleanup on remove
 loom/bridge.py           # Auto-detection, LOOM_CELL_ID injection, hook install, session resume, reconnect fixes
-static/js/constants.js   # AGENT_TYPE_LABELS, ACTIVITY_CLASSES
-static/js/render.js      # agentStatusClass(), activity detail, attention badge, type label, group counts
-static/js/modals.js      # Notification settings in group settings modal
-static/style.css         # Activity dot animations, attention badge, type label, group header counts
-webview.html             # Notification checkboxes in group settings pane
+static/js/constants.js   # AGENT_TYPE_LABELS
+static/js/render.js      # agentStatusClass() (gray/green/red), activity detail, type label
+static/js/modals.js      # Agent settings (boot cmd, resume, idle timeout, notifications) in group settings modal
+static/style.css         # Three-state status dot, attention indicator, type label
+webview.html             # Agent settings and notification checkboxes in Agents tab of group settings
 Makefile                 # Copy adapters/, events.py, notifications.py
 ```
 
@@ -254,15 +258,20 @@ Resolved during implementation:
 
 7. **Notification delivery** — Uses `osascript` (macOS `display notification`) rather than iTerm2's Python API, which doesn't expose a notification method.
 
-8. **Session resume** — Claude Code's `session_id` is captured from `SessionStart` hooks and persisted. Relaunch uses `claude --resume <id>`. Will be made a per-group setting later.
+8. **Session resume** — Claude Code's `session_id` is captured from `SessionStart` hooks (command type, not HTTP) and persisted to `state.json`. Relaunch uses `claude --resume <id>`. Controlled by `agent_session_resume` group setting (default: on).
 
 9. **Idle vs. waiting** — `idle_prompt` (agent finished, waiting for next task) maps to `session_end`, not `waiting`. Only `permission_prompt` (agent blocked, needs approval) sets `needs_attention`.
+
+10. **SessionStart hook type** — Claude Code only supports `type: "command"` for `SessionStart` events. HTTP hooks are silently ignored. Uses `curl` to POST to Loom instead.
+
+11. **Status dot simplification** — Three states: gray (idle), green (working), red (disconnected). For awareness agents, `activity` field is the source of truth — `status` field stays "running" while a TUI app is active (PromptMonitor limitation). Awareness agents start as idle on boot; hooks flip to working.
+
+12. **Agent settings in Agents tab** — Boot command, session resume, idle timeout, and notifications are all in the Agents tab of group settings (not the Group tab).
 
 ---
 
 ## Future Work
 
-- **Session resume as a setting** — Add a `GroupSettings` toggle for whether to resume or start fresh on relaunch.
 - **Session recording** — Persist the EventLog to disk for replay and auditing (Phase 1 item, deferred).
 - **Gemini CLI adapter** — Fill in hook config generation and event parsing.
 - **Codex adapter** — Investigate `CODEX_HOME` per-agent scoping, implement hook config.
