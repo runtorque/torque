@@ -268,10 +268,15 @@ function agentStatusClass(a) {
   if (a.needs_attention) return 'attention';
   /* Disconnected (tab closed) */
   if (a.status === 'stopped') return 'disconnected';
-  /* Working (any activity means the agent is doing something) */
-  if (a.agent_type && a.activity) return 'working';
+  /* For awareness agents, activity is the source of truth */
+  if (a.agent_type) {
+    if (a.activity) return 'working';
+    /* No activity — idle if we've heard from the agent before;
+       otherwise it just started and hasn't sent its first event yet */
+    if (a.last_event_at > 0) return 'idle';
+  }
+  /* Non-awareness agents / agents that haven't sent events yet */
   if (a.status === 'running') return 'working';
-  /* Idle (session alive but not actively working) */
   return 'idle';
 }
 

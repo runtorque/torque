@@ -63,6 +63,9 @@ class EventBus:
 
         self._apply(event, cell)
         self._log.append(event)
+        log.info("Event: cell='%s' type=%s activity='%s' detail='%s'",
+                 cell.name, event.event_type, cell.activity,
+                 cell.activity_detail[:50] if cell.activity_detail else "")
         if self._notifier:
             self._notifier.on_event(event)
         self._schedule_broadcast()
