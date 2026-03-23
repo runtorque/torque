@@ -10,6 +10,7 @@ from aiohttp import web
 import iterm2
 
 from .config import WS_PORT, WEBVIEW_FILE, log
+from dataclasses import asdict
 from .state import MatrixState
 from .bridge import ITerm2Bridge
 from . import keybindings
@@ -73,12 +74,34 @@ async def main(connection: iterm2.Connection):
                         "current_path": c.current_path,
                     })
 
+            gs = state.get_group_settings(group)
             await ws.send_str(json.dumps({
                 "type": "config",
                 "profiles": profile_names,
                 "current_path": current_path,
                 "current_profile": current_profile,
                 "group_cells": group_cells,
+                "group_settings": asdict(gs),
+            }))
+            return
+
+        # get_group_settings: respond directly, no state mutation
+        if cmd == "get_group_settings":
+            group = data.get("group", "")
+            gs = state.get_group_settings(group)
+            try:
+                all_profiles = await iterm2.PartialProfile.async_query(
+                    connection)
+                pnames = sorted(
+                    set(p.name for p in all_profiles if p.name))
+            except Exception:
+                log.exception("Failed to query profiles")
+                pnames = ["Default"]
+            await ws.send_str(json.dumps({
+                "type": "group_settings",
+                "group": group,
+                "settings": asdict(gs),
+                "profiles": pnames,
             }))
             return
 
@@ -89,44 +112,114 @@ async def main(connection: iterm2.Connection):
             elif cmd == "add_group":
                 state.add_group(data["group"])
 
+            elif cmd == "update_group_settings":
+                settings = data.get("settings", {})
+                state.update_group_settings(data["group"], **settings)
+
             elif cmd == "remove_group":
                 removed = state.remove_group(data["group"])
                 for c in removed:
                     if c.session_id:
                         await bridge.close_session(c.session_id)
+                    if c.worktree_path:
+                        await bridge.remove_worktree(c)
 
             elif cmd == "rename_group":
                 state.rename_group(data["group"], data["new_name"])
 
             elif cmd == "add_agent":
+                group = data["group"]
+                gs = state.get_group_settings(group)
+                profile = data.get("profile") or gs.agent_profile or gs.profile or "Default"
+                directory = data.get("directory") or gs.agent_directory or gs.default_directory or ""
+                _ac = gs.agent_tab_color
+                tab_color = data.get("tab_color") or (_ac if _ac != "none" else "") or gs.tab_color or ""
+                shell = gs.agent_shell or gs.shell or ""
+                env = {**gs.env_vars, **gs.agent_env_vars} or None
+
                 cell = state.add_agent(
-                    name=data["name"],
-                    group=data["group"],
-                    profile=data.get("profile", "Default"),
+                    name=data["name"], group=group,
+                    profile=profile,
                     command=data.get("command", ""),
-                    directory=data.get("directory", ""),
-                    tab_color=data.get("tab_color", ""),
+                    directory=directory, tab_color=tab_color,
                 )
                 if cell:
-                    await bridge.create_session(cell)
+                    # Git worktree
+                    if gs.git_worktree and cell.directory:
+                        wt_path = await bridge.create_worktree(
+                            cell, cell.directory)
+                        if wt_path:
+                            cell.directory = wt_path
+                            state.save()
+
+                    await bridge.create_session(
+                        cell, env_vars=env, shell=shell)
+
+                    # Auto-create child terminals
+                    t_profile = gs.terminal_profile or gs.profile or "Default"
+                    t_dir = gs.terminal_directory or gs.default_directory or ""
+                    _ttc = gs.terminal_tab_color
+                    t_color = (_ttc if _ttc != "none" else "") or gs.tab_color or ""
+                    t_shell = gs.terminal_shell or gs.shell or ""
+                    t_env = {**gs.env_vars, **gs.terminal_env_vars} or None
+                    t_cmd = gs.terminal_boot_command or ""
+                    if gs.terminal_command_args and t_cmd:
+                        t_cmd = (t_cmd + " " + gs.terminal_command_args).strip()
+                    for i in range(gs.auto_terminals):
+                        t_name = state.next_cell_name(group, "terminal")
+                        t = state.add_terminal(
+                            name=t_name, group=group,
+                            profile=t_profile,
+                            command=t_cmd,
+                            directory=t_dir or cell.directory,
+                            tab_color=t_color,
+                            parent_id=cell.id,
+                        )
+                        if t:
+                            await bridge.create_session(
+                                t, env_vars=t_env,
+                                init_script=gs.terminal_init_script,
+                                shell=t_shell)
 
             elif cmd == "add_terminal":
+                group = data.get("group", "")
+                parent_id = data.get("parent_id", "")
+                # Resolve group from parent if needed
+                resolve_group = group
+                if parent_id:
+                    p = state.agents.get(parent_id)
+                    if p:
+                        resolve_group = p.group
+                gs = state.get_group_settings(resolve_group or group)
+                profile = data.get("profile") or gs.terminal_profile or gs.profile or "Default"
+                directory = data.get("directory") or gs.terminal_directory or gs.default_directory or ""
+                _tc = gs.terminal_tab_color
+                tab_color = data.get("tab_color") or (_tc if _tc != "none" else "") or gs.tab_color or ""
+                shell = gs.terminal_shell or gs.shell or ""
+                env = {**gs.env_vars, **gs.terminal_env_vars} or None
+                command = gs.terminal_boot_command or ""
+                if gs.terminal_command_args and command:
+                    command = (command + " " + gs.terminal_command_args).strip()
+
                 cell = state.add_terminal(
-                    name=data["name"],
-                    group=data.get("group", ""),
-                    profile=data.get("profile", "Default"),
-                    directory=data.get("directory", ""),
-                    tab_color=data.get("tab_color", ""),
-                    parent_id=data.get("parent_id", ""),
+                    name=data["name"], group=group,
+                    profile=profile, command=command,
+                    directory=directory, tab_color=tab_color,
+                    parent_id=parent_id,
                 )
                 if cell:
-                    await bridge.create_session(cell)
+                    await bridge.create_session(
+                        cell, env_vars=env,
+                        init_script=gs.terminal_init_script,
+                        shell=shell)
 
             elif cmd == "remove_agent":
                 removed = state.remove_agent(data["id"])
                 for c in removed:
                     if c.session_id:
                         await bridge.close_session(c.session_id)
+                    if c.worktree_path:
+                        await bridge.remove_worktree(c)
 
             elif cmd == "update_agent":
                 cell = state.agents.get(data["id"])
@@ -170,7 +263,18 @@ async def main(connection: iterm2.Connection):
             elif cmd == "relaunch_agent":
                 cell = state.agents.get(data["id"])
                 if cell and cell.status == "stopped":
-                    await bridge.create_session(cell)
+                    gs = state.get_group_settings(cell.group)
+                    if cell.cell_type == "terminal":
+                        env = {**gs.env_vars, **gs.terminal_env_vars} or None
+                        shell = gs.terminal_shell or gs.shell or ""
+                        init = gs.terminal_init_script
+                    else:
+                        env = {**gs.env_vars, **gs.agent_env_vars} or None
+                        shell = gs.agent_shell or gs.shell or ""
+                        init = ""
+                    await bridge.create_session(
+                        cell, env_vars=env,
+                        init_script=init, shell=shell)
 
             elif cmd == "move_group":
                 state.move_group(data["group"], data.get("before", ""))

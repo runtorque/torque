@@ -440,10 +440,10 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
 
 /* Color swatches */
 .color-swatches {
-  display: flex; gap: 5px; flex-wrap: wrap; padding-top: 2px;
+  display: flex; gap: 3px; padding: 2px;
 }
 .swatch {
-  width: 20px; height: 20px; border-radius: 50%;
+  width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
   border: 2px solid transparent;
   transition: border-color .15s, transform .1s;
 }
@@ -456,8 +456,92 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
   display: flex; align-items: center; justify-content: center;
 }
 .swatch-none.selected { border-color: var(--text); }
+.swatch-inherit {
+  background: var(--bg) !important;
+  border: 1px solid var(--border);
+  font-size: 10px; color: var(--text-dim);
+  display: flex; align-items: center; justify-content: center;
+}
+.swatch-inherit.selected { border-color: var(--text); }
+
+/* Group settings modal — tabbed layout */
+.modal-tall { max-height: 85vh; display: flex; flex-direction: column; }
+
+/* Tab bar */
+.gs-tabs {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.gs-tab {
+  flex: 1;
+  padding: 5px 0;
+  font-size: 10px; font-weight: 600;
+  color: var(--text-dim);
+  text-align: center;
+  border-right: 1px solid var(--border);
+  transition: color .15s, background .15s;
+}
+.gs-tab:last-child { border-right: none; }
+.gs-tab:hover { color: var(--text); background: var(--bg-hover); }
+.gs-tab.active {
+  color: var(--text);
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Tab panes */
+.gs-pane {
+  display: none;
+  overflow-y: auto;
+  flex: 1;
+  max-height: calc(85vh - 140px);
+  padding-right: 4px;
+}
+.gs-pane.active { display: block; }
+
+.gs-checkbox {
+  display: flex !important; align-items: center; gap: 6px;
+  margin-top: 8px !important; cursor: pointer;
+}
+.gs-checkbox input[type="checkbox"] { width: auto; margin: 0; }
+.hint-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%;
+  font-size: 9px; font-weight: 700;
+  color: var(--text-dim); border: 1px solid var(--border);
+  cursor: pointer; flex-shrink: 0; margin-left: auto;
+}
+.hint-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.hint-pop {
+  position: fixed; z-index: 300;
+  max-width: 220px;
+  font-size: 10px; font-weight: 400; line-height: 1.4;
+  color: var(--text); background: var(--bg-surface);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0,0,0,.5);
+  padding: 8px 10px;
+  pointer-events: none;
+}
+.label-hint {
+  font-weight: 400; color: var(--text-dim); font-size: 9px;
+}
+textarea {
+  font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px 8px;
+  outline: none; width: 100%; resize: vertical;
+  min-height: 48px;
+}
+textarea:focus { border-color: var(--accent); }
+
 #modal-confirm { z-index: 200; }
 #confirm-message { font-size: 12px; line-height: 1.5; }
+
+/* Max agents cap — disabled add cell */
+.cell.cell-add.disabled { opacity: .3; cursor: not-allowed; pointer-events: none; }
 
 /* ------------------------------------------------------------------ */
 /* Context menu                                                        */

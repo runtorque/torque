@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 from aiohttp import web
@@ -28,11 +28,47 @@ class AgentCell:
     current_path: str = ""  # working directory (tracked for terminals)
     current_branch: str = ""  # git branch (empty if not in a repo)
     git_root: str = ""  # git repo root (empty if not in a repo)
+    worktree_path: str = ""  # git worktree path (if created via group setting)
+    worktree_branch: str = ""  # git worktree branch name
 
 
 # Fields that are ephemeral (not meaningful across restarts)
 _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "current_branch", "git_root")
+
+
+@dataclass
+class GroupSettings:
+    """Default settings applied when creating agents/terminals in a group."""
+    # Group-level defaults
+    default_directory: str = ""
+    profile: str = ""
+    shell: str = ""
+    tab_color: str = ""
+    env_vars: dict[str, str] = field(default_factory=dict)
+    auto_terminals: int = 0
+    max_agents: int = 0
+    collapsed_default: bool = False
+    filter_by_window: bool = False
+    # Agent overrides
+    agent_directory: str = ""
+    agent_profile: str = ""
+    agent_shell: str = ""
+    agent_tab_color: str = ""
+    agent_env_vars: dict[str, str] = field(default_factory=dict)
+    git_worktree: bool = False
+    agent_always_custom_dialog: bool = False
+    # Terminal overrides
+    terminal_name_prefix: str = ""
+    terminal_boot_command: str = ""
+    terminal_command_args: str = ""
+    terminal_init_script: str = ""
+    terminal_directory: str = ""
+    terminal_profile: str = ""
+    terminal_shell: str = ""
+    terminal_tab_color: str = ""
+    terminal_env_vars: dict[str, str] = field(default_factory=dict)
+    terminal_always_custom_dialog: bool = False
 
 
 class MatrixState:
@@ -41,6 +77,7 @@ class MatrixState:
     def __init__(self):
         self.agents: dict[str, AgentCell] = {}
         self.groups: dict[str, list[str]] = {}
+        self.group_settings: dict[str, GroupSettings] = {}
         self.active_session_id: Optional[str] = None
         self.current_window_id: Optional[str] = None
         self._children: dict[str, list[str]] = {}  # agent_id → [child terminal ids]
@@ -52,6 +89,9 @@ class MatrixState:
         return {
             "agents": {aid: asdict(a) for aid, a in self.agents.items()},
             "groups": self.groups,
+            "group_settings": {
+                n: asdict(gs) for n, gs in self.group_settings.items()
+            },
             "children": self._children,
             "active_session_id": self.active_session_id,
             "current_window_id": self.current_window_id,
@@ -62,6 +102,9 @@ class MatrixState:
         payload = {
             "agents": {aid: asdict(a) for aid, a in self.agents.items()},
             "groups": self.groups,
+            "group_settings": {
+                n: asdict(gs) for n, gs in self.group_settings.items()
+            },
         }
         STATE_FILE.write_text(json.dumps(payload, indent=2))
 
@@ -84,6 +127,12 @@ class MatrixState:
                 self.groups[gname] = [
                     aid for aid in self.groups[gname] if aid in self.agents
                 ]
+            # Restore group settings (backward-compat: missing key → empty)
+            gs_fields = set(GroupSettings.__dataclass_fields__)
+            for gname, raw in data.get("group_settings", {}).items():
+                if gname in self.groups:
+                    filtered = {k: v for k, v in raw.items() if k in gs_fields}
+                    self.group_settings[gname] = GroupSettings(**filtered)
             # Promote orphaned children whose parent was deleted
             for aid, cell in self.agents.items():
                 if cell.parent_id and cell.parent_id not in self.agents:
@@ -107,6 +156,39 @@ class MatrixState:
             if cell.parent_id and cell.parent_id in self._children:
                 self._children[cell.parent_id].append(aid)
 
+    # -- Group settings -----------------------------------------------------
+
+    def get_group_settings(self, name: str) -> GroupSettings:
+        """Return group settings, creating defaults if group has none."""
+        return self.group_settings.get(name, GroupSettings())
+
+    def update_group_settings(self, name: str, **fields):
+        """Update group settings. Creates GroupSettings entry if needed."""
+        if name not in self.groups:
+            return
+        gs = self.group_settings.get(name)
+        if gs is None:
+            gs = GroupSettings()
+            self.group_settings[name] = gs
+        valid = set(GroupSettings.__dataclass_fields__)
+        for key, value in fields.items():
+            if key in valid:
+                setattr(gs, key, value)
+        self.save()
+
+    def next_cell_name(self, group: str, cell_type: str) -> str:
+        """Generate the next auto-name based on group prefix settings."""
+        gs = self.get_group_settings(group)
+        prefix = gs.terminal_name_prefix if cell_type == "terminal" else ""
+        if not prefix:
+            prefix = "Agent" if cell_type == "agent" else "Terminal"
+        existing = {a.name for a in self.agents.values()
+                    if a.group == group}
+        i = 1
+        while f"{prefix} {i}" in existing:
+            i += 1
+        return f"{prefix} {i}"
+
     # -- Mutations ----------------------------------------------------------
 
     def add_group(self, name: str):
@@ -127,12 +209,15 @@ class MatrixState:
                         if child:
                             removed.append(child)
             del self.groups[name]
+            self.group_settings.pop(name, None)
             self.save()
         return removed
 
     def rename_group(self, old: str, new: str):
         if old in self.groups and new and new not in self.groups:
             self.groups[new] = self.groups.pop(old)
+            if old in self.group_settings:
+                self.group_settings[new] = self.group_settings.pop(old)
             for aid in self.groups[new]:
                 if aid in self.agents:
                     self.agents[aid].group = new
@@ -160,6 +245,17 @@ class MatrixState:
             group = parent.group
         elif group not in self.groups:
             return None
+        # Max agents cap
+        if cell_type == "agent" and not parent_id:
+            gs = self.get_group_settings(group)
+            if gs.max_agents > 0:
+                current = sum(1 for aid in self.groups.get(group, [])
+                              if self.agents.get(aid)
+                              and self.agents[aid].cell_type == "agent")
+                if current >= gs.max_agents:
+                    log.warning("Group '%s' at max_agents cap (%d)",
+                                group, gs.max_agents)
+                    return None
         aid = uuid.uuid4().hex[:8]
         cell = AgentCell(
             id=aid,
@@ -199,7 +295,8 @@ class MatrixState:
         return self._add_cell(cell_type="agent", **kw)
 
     def add_terminal(self, **kw) -> Optional[AgentCell]:
-        return self._add_cell(cell_type="terminal", command="", **kw)
+        kw.setdefault("command", "")
+        return self._add_cell(cell_type="terminal", **kw)
 
     def remove_agent(self, aid: str) -> list[AgentCell]:
         removed: list[AgentCell] = []

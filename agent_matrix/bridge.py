@@ -1,6 +1,7 @@
 """iTerm2 bridge — translates matrix commands into iTerm2 Python API calls."""
 
 import asyncio
+import os
 import re
 import shlex
 from typing import Optional
@@ -123,13 +124,17 @@ class ITerm2Bridge:
 
     # -- Session lifecycle --------------------------------------------------
 
-    async def create_session(self, cell: AgentCell):
+    async def create_session(self, cell: AgentCell, *,
+                             env_vars: dict[str, str] | None = None,
+                             init_script: str = "",
+                             shell: str = ""):
         log.info("Creating session for %s '%s' [%s]",
                  cell.cell_type, cell.name, cell.group)
         app = await iterm2.async_get_app(self.conn)
         window = app.current_window
         if not window:
-            log.error("No current window — cannot create tab for '%s'", cell.name)
+            log.error("No current window — cannot create tab for '%s'",
+                      cell.name)
             cell.status = "error"
             self.state.save()
             return
@@ -168,10 +173,27 @@ class ITerm2Bridge:
             except Exception:
                 log.exception("Failed to set tab color for '%s'", cell.name)
 
-        # Directory
+        # Shell override
+        if shell:
+            await session.async_send_text(f"exec {shell}\n")
+            await asyncio.sleep(0.3)
+
+        # Directory (expanduser so ~ works even when quoted)
         if cell.directory:
+            d = os.path.expanduser(cell.directory)
+            await session.async_send_text(f"cd {shlex.quote(d)}\n")
+
+        # Environment variables
+        if env_vars:
+            exports = " ".join(
+                f"{k}={shlex.quote(os.path.expanduser(v))}"
+                for k, v in env_vars.items())
+            await session.async_send_text(f"export {exports}\n")
+
+        # Init script
+        if init_script:
             await session.async_send_text(
-                f"cd {shlex.quote(cell.directory)}\n")
+                f"source {shlex.quote(os.path.expanduser(init_script))}\n")
 
         # Boot command
         if cell.command:
@@ -321,6 +343,84 @@ class ITerm2Bridge:
         session = await self._find_session(session_id)
         if session:
             await session.async_send_text(text)
+
+    # -- Git worktree -------------------------------------------------------
+
+    async def create_worktree(self, cell: AgentCell,
+                              base_dir: str) -> str | None:
+        """Create a git worktree for the cell. Returns the worktree path."""
+        base_dir = os.path.expanduser(base_dir)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", base_dir, "rev-parse", "--is-inside-work-tree",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+            if proc.returncode != 0:
+                log.warning("Not a git repo: %s", base_dir)
+                return None
+
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", base_dir, "rev-parse", "--show-toplevel",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            repo_root = stdout.decode().strip()
+
+            slug = re.sub(r"[^a-z0-9-]", "-",
+                          cell.name.lower().strip())[:30]
+            branch = f"agent-matrix/{cell.id}-{slug}"
+            wt_path = f"{repo_root}/.worktrees/{cell.id}"
+
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root, "worktree", "add",
+                "-b", branch, wt_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                log.error("git worktree add failed: %s",
+                          stderr.decode().strip())
+                return None
+
+            cell.worktree_path = wt_path
+            cell.worktree_branch = branch
+            log.info("Created worktree for '%s': %s (branch %s)",
+                     cell.name, wt_path, branch)
+            return wt_path
+        except Exception:
+            log.exception("Failed to create worktree for '%s'", cell.name)
+            return None
+
+    async def remove_worktree(self, cell: AgentCell):
+        """Remove the git worktree associated with a cell."""
+        if not cell.worktree_path:
+            return
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "worktree", "remove", "--force", cell.worktree_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                log.warning("git worktree remove failed for '%s': %s",
+                            cell.name, stderr.decode().strip())
+            else:
+                log.info("Removed worktree for '%s': %s",
+                         cell.name, cell.worktree_path)
+            if cell.worktree_branch:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "branch", "-d", cell.worktree_branch,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.communicate()
+        except Exception:
+            log.exception("Failed to remove worktree for '%s'", cell.name)
 
     # -- Helpers ------------------------------------------------------------
 

@@ -34,6 +34,8 @@ function connect() {
         _showAddModal(_pendingModal.mode, _pendingModal.group, msg);
         _pendingModal = null;
       }
+    } else if (msg.type === 'group_settings') {
+      _showGroupSettings(msg.group, msg);
     } else if (msg.type === 'action') {
       handleAction(msg);
     }

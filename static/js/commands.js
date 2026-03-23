@@ -46,10 +46,15 @@ function _nextName(prefix) {
   return prefix + ' ' + i;
 }
 function quickAddAgent(group) {
+  const gs = (state.group_settings || {})[group] || {};
+  if (gs.agent_always_custom_dialog) { openAddAgent(group); return; }
   send({ cmd: 'add_agent', name: _nextName('Agent'), group });
 }
 function quickAddTerminal(group, parentId) {
-  const msg = { cmd: 'add_terminal', name: _nextName('Terminal'), group };
+  const gs = (state.group_settings || {})[group] || {};
+  if (gs.terminal_always_custom_dialog) { openAddTerminal(group, parentId); return; }
+  const prefix = gs.terminal_name_prefix || 'Terminal';
+  const msg = { cmd: 'add_terminal', name: _nextName(prefix), group };
   if (parentId) msg.parent_id = parentId;
   send(msg);
 }
@@ -261,6 +266,18 @@ function onCellContextMenu(e, id) {
     items.push({ label: 'Relaunch', action: `relaunchAgent('${id}')` });
   }
   items.push({ label: 'Remove', action: `removeAgent('${id}')`, danger: true });
+  showContextMenu(e.clientX, e.clientY, items);
+}
+
+/* Group context menu (right-click on group header) */
+function onGroupContextMenu(e, group) {
+  e.preventDefault();
+  e.stopPropagation();
+  const items = [
+    { label: 'Settings\u2026', action: `openGroupSettings('${esc(group)}')` },
+    { label: 'Broadcast\u2026', action: `openBroadcast('${esc(group)}')` },
+    { label: 'Remove', action: `removeGroup('${esc(group)}')`, danger: true },
+  ];
   showContextMenu(e.clientX, e.clientY, items);
 }
 

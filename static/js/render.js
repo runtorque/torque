@@ -45,6 +45,7 @@ function closeMenus() {
 
 /* Group collapse/expand */
 const collapsedGroups = new Set();
+const _collapsedInitialized = new Set();
 
 function toggleGroup(name) {
   if (collapsedGroups.has(name)) {
@@ -108,8 +109,6 @@ function render() {
   const doFlip = Date.now() < _flipUntil;
   const oldRects = doFlip ? _captureRects(main) : null;
 
-  const wid = FILTER_BY_WINDOW ? state.current_window_id : null;
-
   // Clear selectedAgentId if it no longer exists
   if (selectedAgentId && !state.agents[selectedAgentId]) selectedAgentId = null;
 
@@ -121,6 +120,28 @@ function render() {
   let html = '';
   for (const gname of groupNames) {
     const aids = state.groups[gname] || [];
+
+    // Per-group window filtering based on filter_by_window setting
+    const gsFilter = (state.group_settings || {})[gname] || {};
+    let wid = null;
+    if (gsFilter.filter_by_window && state.current_window_id) {
+      // Check if any cell in this group has an active session
+      const hasActive = aids.some(id => {
+        const c = state.agents[id];
+        if (c && c.session_id) return true;
+        // Also check child terminals
+        const kids = state.children[id] || [];
+        return kids.some(kid => {
+          const ct = state.agents[kid];
+          return ct && ct.session_id;
+        });
+      });
+      // Only filter if there are active sessions; otherwise show everywhere
+      if (hasActive) wid = state.current_window_id;
+    } else if (FILTER_BY_WINDOW) {
+      wid = state.current_window_id;
+    }
+
     const agents = [];
     const standaloneTerms = [];
     for (const id of aids) {
@@ -135,12 +156,21 @@ function render() {
     if (wid && agents.length === 0 && standaloneTerms.length === 0 && aids.length > 0) continue;
     navGroupOrder.push(gname);
     const groupNav = [];
+
+    /* collapsed-default on first render of this group */
+    const gsLocal = (state.group_settings || {})[gname] || {};
+    if (!_collapsedInitialized.has(gname)) {
+      _collapsedInitialized.add(gname);
+      if (gsLocal.collapsed_default) collapsedGroups.add(gname);
+    }
     const collapsed = collapsedGroups.has(gname);
+
     html += `<div class="group${collapsed ? ' collapsed' : ''}" data-group-name="${esc(gname)}">`;
-    html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group">`;
+    html += `<div class="group-hdr" draggable="true" data-drag-id="${esc(gname)}" data-drag-type="group" oncontextmenu="onGroupContextMenu(event,'${esc(gname)}')">`;
     html += `  <button class="group-toggle" draggable="false" onclick="event.stopPropagation();toggleGroup('${esc(gname)}')">\u25BE</button>`;
     html += `  <span class="group-name" title="${esc(gname)}">${esc(gname)}</span>`;
     html += `  <span class="group-count">${agents.length}</span>`;
+    html += `  <button class="group-btn" draggable="false" title="Group settings" onclick="event.stopPropagation();openGroupSettings('${esc(gname)}')">\u2699</button>`;
     html += `  <button class="group-btn" draggable="false" title="Broadcast to ${esc(gname)}" onclick="openBroadcast('${esc(gname)}')">\u2318</button>`;
     html += `  <button class="group-btn" draggable="false" title="Remove group" onclick="removeGroup('${esc(gname)}')">\u2715</button>`;
     html += `</div>`;
@@ -168,12 +198,20 @@ function render() {
       }
       html += renderAgentCell(a);
     }
-    html += `<div class="cell cell-add" onclick="quickAddAgent('${esc(gname)}')">`;
-    html += `  <div class="cell-add-icon">+</div>`;
-    html += `  <div class="cell-name">New</div>`;
-    html += `  <button class="cell-add-drop" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>`;
-    html += `  <div class="split-menu"><button onclick="closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button></div>`;
-    html += `</div>`;
+    const atCap = gsLocal.max_agents > 0 && agents.length >= gsLocal.max_agents;
+    if (atCap) {
+      html += `<div class="cell cell-add disabled">`;
+      html += `  <div class="cell-add-icon">\u2013</div>`;
+      html += `  <div class="cell-name">Full</div>`;
+      html += `</div>`;
+    } else {
+      html += `<div class="cell cell-add" onclick="quickAddAgent('${esc(gname)}')">`;
+      html += `  <div class="cell-add-icon">+</div>`;
+      html += `  <div class="cell-name">New</div>`;
+      html += `  <button class="cell-add-drop" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>`;
+      html += `  <div class="split-menu"><button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button></div>`;
+      html += `</div>`;
+    }
     html += `</div>`;
 
     /* Terminal drawer for selected agent (if in this group) */
@@ -256,7 +294,7 @@ function renderTermAddBtn(gname, parentId) {
   h += `<div class="term-badge" style="background:var(--border)">+</div>`;
   h += `<div class="term-info"><div class="term-name" style="color:var(--text-dim)">New terminal</div></div>`;
   h += `<button class="term-action" onclick="event.stopPropagation();toggleMenu(this)" title="Custom">\u25BE</button>`;
-  h += `<div class="split-menu"><button onclick="closeMenus();openAddTerminal('${esc(gname)}','${pid}')">Custom\u2026</button></div>`;
+  h += `<div class="split-menu"><button onclick="event.stopPropagation();closeMenus();openAddTerminal('${esc(gname)}','${pid}')">Custom\u2026</button></div>`;
   h += `</div>`;
   return h;
 }

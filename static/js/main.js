@@ -280,5 +280,14 @@ document.querySelectorAll('.overlay').forEach(o => {
   });
 });
 
+/* Group settings modal: Escape to close (no Enter-to-submit since many fields) */
+['gs-directory', 'gs-agent-directory', 'gs-terminal-prefix',
+ 'gs-terminal-boot-cmd', 'gs-terminal-cmd-args',
+ 'gs-terminal-init-script', 'gs-terminal-directory'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeModals();
+  });
+});
+
 connect();
 setupDrag();

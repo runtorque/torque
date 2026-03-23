@@ -85,6 +85,112 @@
   </div>
 </div>
 
+<!-- Group Settings modal -->
+<div class="overlay" id="modal-group-settings">
+  <div class="modal modal-tall">
+    <h2 id="gs-title">Group Settings</h2>
+    <div class="gs-tabs">
+      <button class="gs-tab active" data-tab="group" onclick="switchGsTab('group')">Group</button>
+      <button class="gs-tab" data-tab="agents" onclick="switchGsTab('agents')">Agents</button>
+      <button class="gs-tab" data-tab="terminals" onclick="switchGsTab('terminals')">Terminals</button>
+    </div>
+
+    <!-- Group tab -->
+    <div class="gs-pane active" data-pane="group">
+      <label>Directory</label>
+      <input id="gs-directory" placeholder="/path/to/project" autocomplete="off">
+      <label>Profile</label>
+      <select id="gs-profile"></select>
+      <label>Shell</label>
+      <select id="gs-shell">
+        <option value="">Default</option>
+        <option value="zsh">zsh</option>
+        <option value="bash">bash</option>
+        <option value="fish">fish</option>
+      </select>
+      <label>Tab color</label>
+      <div class="color-swatches" id="gs-color-swatches"></div>
+      <label>Environment <span class="label-hint">KEY=VALUE per line</span></label>
+      <textarea id="gs-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+      <label>Auto-create terminals</label>
+      <input id="gs-auto-terminals" type="number" min="0" max="10" value="0">
+      <label>Max agents <span class="label-hint">0 = unlimited</span></label>
+      <input id="gs-max-agents" type="number" min="0" max="100" value="0">
+      <label class="gs-checkbox">
+        <input id="gs-collapsed" type="checkbox"> Start collapsed on load
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Collapse this group automatically when the page loads. You can still expand it manually at any time.">?</span>
+      </label>
+      <label class="gs-checkbox">
+        <input id="gs-filter-window" type="checkbox"> Pin to active window
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Only show this group in windows where it has active sessions. If all sessions are closed, the group appears in every window so you can relaunch.">?</span>
+      </label>
+    </div>
+
+    <!-- Agents tab -->
+    <div class="gs-pane" data-pane="agents">
+      <label>Directory</label>
+      <input id="gs-agent-directory" placeholder="Same as group" autocomplete="off">
+      <label>Profile</label>
+      <select id="gs-agent-profile"></select>
+      <label>Shell</label>
+      <select id="gs-agent-shell">
+        <option value="">Same as group</option>
+        <option value="zsh">zsh</option>
+        <option value="bash">bash</option>
+        <option value="fish">fish</option>
+      </select>
+      <label>Tab color</label>
+      <div class="color-swatches" id="gs-agent-color-swatches"></div>
+      <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
+      <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+      <label class="gs-checkbox">
+        <input id="gs-worktree" type="checkbox"> Git worktree per agent
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Create a new git worktree and branch for each agent, so they can work on the same repo in parallel without conflicts.">?</span>
+      </label>
+      <label class="gs-checkbox">
+        <input id="gs-agent-always-custom" type="checkbox"> Always open custom dialog
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating an agent with default settings.">?</span>
+      </label>
+    </div>
+
+    <!-- Terminals tab -->
+    <div class="gs-pane" data-pane="terminals">
+      <label>Name prefix</label>
+      <input id="gs-terminal-prefix" placeholder="e.g. Shell" autocomplete="off">
+      <label>Boot command</label>
+      <input id="gs-terminal-boot-cmd" placeholder="e.g. npm run dev" autocomplete="off">
+      <label>Arguments</label>
+      <input id="gs-terminal-cmd-args" placeholder="e.g. --watch" autocomplete="off">
+      <label>Init script</label>
+      <input id="gs-terminal-init-script" placeholder="/path/to/script.sh" autocomplete="off">
+      <label>Directory</label>
+      <input id="gs-terminal-directory" placeholder="Same as group" autocomplete="off">
+      <label>Profile</label>
+      <select id="gs-terminal-profile"></select>
+      <label>Shell</label>
+      <select id="gs-terminal-shell">
+        <option value="">Same as group</option>
+        <option value="zsh">zsh</option>
+        <option value="bash">bash</option>
+        <option value="fish">fish</option>
+      </select>
+      <label>Tab color</label>
+      <div class="color-swatches" id="gs-terminal-color-swatches"></div>
+      <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
+      <textarea id="gs-terminal-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+      <label class="gs-checkbox">
+        <input id="gs-terminal-always-custom" type="checkbox"> Always open custom dialog
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating a terminal with default settings.">?</span>
+      </label>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" onclick="submitGroupSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Context menu (right-click) -->
 <div id="ctx-menu"></div>
 
