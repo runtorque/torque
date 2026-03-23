@@ -84,8 +84,9 @@ class EventBus:
             cell.needs_attention = False
             # Persist the agent's own session ID for resume support
             agent_sid = d.get("session_id", "")
-            if agent_sid:
+            if agent_sid and agent_sid != cell.agent_session_id:
                 cell.agent_session_id = agent_sid
+                self._state.save()
 
         elif et == "session_end":
             cell.activity = ""
