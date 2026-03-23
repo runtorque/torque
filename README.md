@@ -1,38 +1,23 @@
 # Agent Matrix
 
-An iTerm2 Toolbelt plugin that displays terminal tabs in a matrix/grid layout, grouped by project or purpose. Built for managing multiple AI agent sessions (Claude Code, Aider, etc.) and plain terminals simultaneously — all from iTerm2's right-side panel.
+An iTerm2 Toolbelt plugin for managing AI agent and terminal sessions in a visual grid.
 
-```
-┌────────────────────────────────────┬─────────────────────┐
-│                                    │ ● AGENT MATRIX      │
-│                                    │                     │
-│   Active terminal session          │ AGENTS              │
-│   (whichever agent you clicked)    │ ┌───┬───┬───┐       │
-│                                    │ │ A1│ A2│ A3│       │
-│                                    │ └───┴───┴───┘       │
-│                                    │ [+ New ▾]           │
-│                                    │                     │
-│                                    │ TERMINALS           │
-│                                    │ [❯_] dev-server     │
-│                                    │      main | myapp   │
-│                                    │ [SSH] prod-box      │
-│                                    │      ~/logs         │
-│                                    │ [+ New ▾]           │
-├────────────────────────────────────┴─────────────────────┤
-│ Status bar                                               │
-└──────────────────────────────────────────────────────────┘
-```
+If you work primarily in the terminal, you know how productive that environment can be. But running multiple AI agents alongside companion terminals quickly turns into tab chaos. Agent Matrix gives you a structured way to organize it all: **groups** for context, **agents** for AI sessions, and **child terminals** for supporting tasks — all managed from iTerm2's Toolbelt sidebar. Spin up an agent with its own isolated environment, attach terminals for tests or logs, do your work, and tear it all down when you're done.
+
+For full documentation, see the [docs site](docs/).
 
 ## Features
 
-- **Agent grid** — compact cells with geometric icons, status dots (idle/running/stopped), one-click focus
-- **Terminal rows** — process badge (auto-detected: `zsh`, `vim`, `python`, `ssh`, `docker`, etc.), working directory, and git branch/repo name — all updated in real time
-- **Groups** — organize sessions by project or purpose; broadcast commands to an entire group at once
-- **Quick add** — one click to create with defaults, or use the dropdown for full customization (directory, iTerm2 profile, tab color)
-- **Tab management** — managed tabs are automatically reordered to the end of the tab bar, sorted by group
-- **Tab colors** — set iTerm2 native tab colors per session
-- **Persistence** — groups and agents survive daemon restarts; relaunch stopped agents with their original settings
-- **In-place restart** — restart the daemon from the UI without losing state
+- **Agent grid** — compact cells with status dots, one-click focus, drag-and-drop reordering
+- **Terminal rows** — live process badge, working directory, and git branch tracking
+- **Groups** — organize sessions by project; configurable defaults for directory, profile, shell, environment, and more
+- **Group settings** — per-agent and per-terminal overrides, git worktree isolation, auto-create companion terminals, max agent caps
+- **Quick add** — one click to create with defaults, or use the custom dialog for full control
+- **Broadcast** — send a command to all sessions in a group at once
+- **Global shortcuts** — navigate between agents from any tab with Cmd+Option+Arrow keys
+- **Tab colors** — color-coded iTerm2 tabs for visual organization
+- **Window filtering** — pin groups to windows where they have active sessions
+- **Persistence** — groups, agents, and settings survive daemon restarts; relaunch stopped sessions with their original configuration
 
 ## Architecture
 
@@ -133,12 +118,13 @@ Click **↻** in the header to restart the daemon in-place. State is preserved; 
 ## File structure
 
 ```
-agent_matrix.py              # Entry point (thin — anchors paths, boots daemon)
+agent_matrix.py              # Entry point (anchors paths, boots daemon)
 agent_matrix/
   config.py                  # Env vars, paths, logging setup
-  state.py                   # AgentCell dataclass, MatrixState persistence
-  bridge.py                  # iTerm2 bridge (sessions, monitors, tab reorder)
+  state.py                   # AgentCell, GroupSettings, MatrixState persistence
+  bridge.py                  # iTerm2 bridge (sessions, monitors, worktrees)
   server.py                  # aiohttp server, WebSocket command handler
+  keybindings.py             # Global iTerm2 key binding lifecycle
 webview.html                 # Toolbelt UI shell (loads CSS + JS)
 static/
   style.css                  # Dark theme styles
@@ -146,9 +132,10 @@ static/
     constants.js             # Icon maps, process badges, color presets
     ws.js                    # WebSocket client, auto-reconnect
     render.js                # UI rendering (groups, agent cells, terminal rows)
-    commands.js              # Actions (focus, remove, broadcast, restart)
-    modals.js                # Add/confirm dialogs, color picker
+    commands.js              # Actions (focus, remove, drag-drop, broadcast)
+    modals.js                # Add/edit/settings dialogs, color picker, tooltips
     main.js                  # Keyboard bindings, boot
+docs/                        # mkdocs documentation
 Makefile                     # Install, deploy, stop, check targets
 ```
 
