@@ -214,9 +214,12 @@ function render() {
     }
     html += `</div>`;
 
-    /* Terminal drawer for selected agent (if in this group) */
+    /* Details + terminal drawer for selected agent (if in this group) */
     const selAgent = selectedAgentId && state.agents[selectedAgentId];
     if (selAgent && selAgent.group === gname) {
+      /* Agent details section */
+      html += renderAgentDetails(selAgent);
+
       const childIds = state.children[selectedAgentId] || [];
       const childTerms = childIds
         .map(id => state.agents[id])
@@ -300,24 +303,6 @@ function renderAgentCell(a) {
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   h += `<div class="cell-icon">${agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
-  /* Activity detail line */
-  if (a.agent_type && a.activity_detail && a.status !== 'stopped') {
-    h += `<div class="cell-activity">${esc(a.activity_detail)}</div>`;
-  }
-  /* Worktree branch badge */
-  if (a.worktree_branch) {
-    const branchShort = a.worktree_branch.replace(/^loom\//, '');
-    const diffInfo = a.worktree_diff || {};
-    let diffText = '';
-    if (diffInfo.insertions || diffInfo.deletions) {
-      diffText = ` +${diffInfo.insertions || 0} -${diffInfo.deletions || 0}`;
-    }
-    const dimmed = a.status === 'stopped' ? ' dimmed' : '';
-    h += `<div class="cell-branch${dimmed}" title="${esc(a.worktree_branch)}${diffText}">`;
-    h += `\u2387 ${esc(branchShort.length > 14 ? branchShort.slice(0, 12) + '\u2026' : branchShort)}`;
-    if (diffText) h += `<span class="cell-diff">${esc(diffText)}</span>`;
-    h += `</div>`;
-  }
   /* Agent type badge */
   if (a.agent_type) {
     const typeInfo = AGENT_TYPE_LABELS[a.agent_type] || { short: a.agent_type.slice(0, 2).toUpperCase() };
@@ -333,6 +318,66 @@ function renderAgentCell(a) {
   }
   h += `</div>`;
   return h;
+}
+
+function renderAgentDetails(a) {
+  const statusCls = agentStatusClass(a);
+  const typeInfo = a.agent_type ? (AGENT_TYPE_LABELS[a.agent_type] || { label: a.agent_type }) : null;
+
+  let h = `<div class="agent-details">`;
+  h += `<div class="detail-hdr">`;
+  h += `  <span class="detail-name">${esc(a.name)}</span>`;
+  if (typeInfo && typeInfo.label) {
+    h += `  <span class="detail-type">${esc(typeInfo.label)}</span>`;
+  }
+  h += `  <span class="detail-status ${statusCls}">`;
+  if (statusCls === 'attention') h += esc(a.error_message || 'Needs attention');
+  else if (statusCls === 'working') h += 'Working';
+  else if (statusCls === 'idle') h += 'Idle';
+  else if (statusCls === 'disconnected') h += 'Stopped';
+  h += `</span>`;
+  h += `</div>`;
+
+  /* Activity */
+  if (a.agent_type && a.activity_detail && a.status !== 'stopped') {
+    h += `<div class="detail-row"><span class="detail-label">Activity</span><span class="detail-val">${esc(a.activity_detail)}</span></div>`;
+  }
+
+  /* Worktree */
+  if (a.worktree_branch) {
+    const branch = a.worktree_branch.replace(/^loom\//, '');
+    h += `<div class="detail-row"><span class="detail-label">Branch</span><span class="detail-val detail-branch">\u2387 ${esc(branch)}</span></div>`;
+    const diff = a.worktree_diff || {};
+    if (diff.files) {
+      h += `<div class="detail-row"><span class="detail-label">Changes</span><span class="detail-val">${diff.files} file${diff.files !== 1 ? 's' : ''} <span class="detail-ins">+${diff.insertions || 0}</span> <span class="detail-del">-${diff.deletions || 0}</span></span></div>`;
+    }
+    if (a.worktree_checkpoints > 0) {
+      h += `<div class="detail-row"><span class="detail-label">Checkpoints</span><span class="detail-val">${a.worktree_checkpoints}</span></div>`;
+    }
+  }
+
+  /* Directory */
+  if (a.directory) {
+    const dir = a.directory.replace(/^\/Users\/[^/]+/, '~');
+    h += `<div class="detail-row"><span class="detail-label">Directory</span><span class="detail-val detail-dir" title="${esc(a.directory)}">${esc(dir)}</span></div>`;
+  }
+
+  /* Last event */
+  if (a.last_event_at > 0) {
+    const ago = _relativeTime(a.last_event_at);
+    h += `<div class="detail-row"><span class="detail-label">Last event</span><span class="detail-val">${esc(ago)}</span></div>`;
+  }
+
+  h += `</div>`;
+  return h;
+}
+
+function _relativeTime(ts) {
+  const diff = (Date.now() / 1000) - ts;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
 }
 
 function renderTermAddBtn(gname, parentId) {
