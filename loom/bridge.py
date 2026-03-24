@@ -24,6 +24,7 @@ class ITerm2Bridge:
         self._job_tasks: dict[str, asyncio.Task] = {}
         self._term_task: Optional[asyncio.Task] = None
         self._focus_task: Optional[asyncio.Task] = None
+        self.on_session_terminated = None  # async callback(cell)
 
     async def start(self):
         self._term_task = asyncio.create_task(self._watch_terminations())
@@ -129,6 +130,16 @@ class ITerm2Bridge:
                 log.debug("Session %s gone for '%s' — clearing",
                           cell.session_id, cell.name)
                 cell.session_id = None
+
+        # Validate worktree paths still exist on disk
+        for cell in self.state.agents.values():
+            if cell.worktree_path and not os.path.isdir(cell.worktree_path):
+                log.warning("Worktree path gone for '%s': %s — clearing",
+                            cell.name, cell.worktree_path)
+                cell.worktree_path = ""
+                cell.worktree_branch = ""
+                cell.worktree_repo_root = ""
+                cell.worktree_base_branch = ""
 
         self.state.save()
         stopped = sum(1 for c in self.state.agents.values()
@@ -392,84 +403,6 @@ class ITerm2Bridge:
         if session:
             await session.async_send_text(text)
 
-    # -- Git worktree -------------------------------------------------------
-
-    async def create_worktree(self, cell: AgentCell,
-                              base_dir: str) -> str | None:
-        """Create a git worktree for the cell. Returns the worktree path."""
-        base_dir = os.path.expanduser(base_dir)
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", base_dir, "rev-parse", "--is-inside-work-tree",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await proc.communicate()
-            if proc.returncode != 0:
-                log.warning("Not a git repo: %s", base_dir)
-                return None
-
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", base_dir, "rev-parse", "--show-toplevel",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            stdout, _ = await proc.communicate()
-            repo_root = stdout.decode().strip()
-
-            slug = re.sub(r"[^a-z0-9-]", "-",
-                          cell.name.lower().strip())[:30]
-            branch = f"loom/{cell.id}-{slug}"
-            wt_path = f"{repo_root}/.worktrees/{cell.id}"
-
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", repo_root, "worktree", "add",
-                "-b", branch, wt_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                log.error("git worktree add failed: %s",
-                          stderr.decode().strip())
-                return None
-
-            cell.worktree_path = wt_path
-            cell.worktree_branch = branch
-            log.info("Created worktree for '%s': %s (branch %s)",
-                     cell.name, wt_path, branch)
-            return wt_path
-        except Exception:
-            log.exception("Failed to create worktree for '%s'", cell.name)
-            return None
-
-    async def remove_worktree(self, cell: AgentCell):
-        """Remove the git worktree associated with a cell."""
-        if not cell.worktree_path:
-            return
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", "worktree", "remove", "--force", cell.worktree_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                log.warning("git worktree remove failed for '%s': %s",
-                            cell.name, stderr.decode().strip())
-            else:
-                log.info("Removed worktree for '%s': %s",
-                         cell.name, cell.worktree_path)
-            if cell.worktree_branch:
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "branch", "-d", cell.worktree_branch,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                await proc.communicate()
-        except Exception:
-            log.exception("Failed to remove worktree for '%s'", cell.name)
-
     # -- Helpers ------------------------------------------------------------
 
     async def _find_session(self, session_id: str):
@@ -641,6 +574,13 @@ class ITerm2Bridge:
                                 task = tasks.pop(cell.id, None)
                                 if task:
                                     task.cancel()
+                            # Notify server for post-termination work
+                            if self.on_session_terminated:
+                                try:
+                                    await self.on_session_terminated(cell)
+                                except Exception:
+                                    log.exception("on_session_terminated "
+                                                  "callback failed")
                             await self.state.broadcast()
                             break
         except asyncio.CancelledError:

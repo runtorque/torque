@@ -62,6 +62,7 @@ install:
 	   loom/state.py loom/bridge.py \
 	   loom/server.py loom/keybindings.py \
 	   loom/events.py loom/notifications.py \
+	   loom/worktree.py \
 	   "$(SCRIPT_DIR)/loom/"
 	cp loom/adapters/__init__.py loom/adapters/base.py \
 	   loom/adapters/claude_code.py loom/adapters/codex.py \

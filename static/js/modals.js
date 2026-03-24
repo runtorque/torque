@@ -336,6 +336,10 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-agent-shell').value = s.agent_shell || '';
   document.getElementById('gs-agent-boot-cmd').value = s.agent_boot_command || '';
   document.getElementById('gs-worktree').checked = s.git_worktree || false;
+  document.getElementById('gs-wt-base-dir').value = s.worktree_base_dir || '.loom/worktrees';
+  document.getElementById('gs-wt-base-branch').value = s.worktree_base_branch || '';
+  document.getElementById('gs-wt-auto-checkpoint').checked = s.worktree_auto_checkpoint || false;
+  _toggleWorktreeFields();
   document.getElementById('gs-session-resume').checked = s.agent_session_resume !== false;
   document.getElementById('gs-agent-idle-timeout').value = s.agent_idle_timeout != null ? s.agent_idle_timeout : 5;
   document.getElementById('gs-agent-always-custom').checked = s.agent_always_custom_dialog || false;
@@ -407,6 +411,9 @@ function submitGroupSettings() {
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
     agent_env_vars: _textToEnv('gs-agent-env-vars'),
     git_worktree: document.getElementById('gs-worktree').checked,
+    worktree_base_dir: document.getElementById('gs-wt-base-dir').value.trim() || '.loom/worktrees',
+    worktree_base_branch: document.getElementById('gs-wt-base-branch').value.trim(),
+    worktree_auto_checkpoint: document.getElementById('gs-wt-auto-checkpoint').checked,
     agent_session_resume: document.getElementById('gs-session-resume').checked,
     agent_idle_timeout: parseInt(document.getElementById('gs-agent-idle-timeout').value) || 0,
     agent_always_custom_dialog: document.getElementById('gs-agent-always-custom').checked,
@@ -430,6 +437,11 @@ function submitGroupSettings() {
   send({ cmd: 'update_group_settings', group: _settingsGroup, settings });
   _settingsGroup = null;
   closeModals();
+}
+
+function _toggleWorktreeFields() {
+  const on = document.getElementById('gs-worktree').checked;
+  document.getElementById('gs-wt-fields').style.display = on ? 'block' : 'none';
 }
 
 function openAddAgent(group)              { _openAddModal('agent', group); }

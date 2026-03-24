@@ -48,6 +48,7 @@ class EventBus:
         self._notifier = notifier
         self._timers: dict[str, asyncio.TimerHandle] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
+        self.on_session_end = None  # async callback(cell) — agent finished turn
 
     def start(self):
         """Capture the running event loop. Call once during server startup."""
@@ -68,6 +69,13 @@ class EventBus:
                  cell.activity_detail[:50] if cell.activity_detail else "")
         if self._notifier:
             self._notifier.on_event(event)
+        # Notify on agent turn completion (for auto-checkpoint, etc.)
+        if event.event_type == "session_end" and self.on_session_end:
+            try:
+                await self.on_session_end(cell)
+            except Exception:
+                log.exception("on_session_end callback failed for '%s'",
+                              cell.name)
         self._schedule_broadcast()
 
     def _apply(self, event: AgentEvent, cell):

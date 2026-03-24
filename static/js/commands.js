@@ -252,6 +252,20 @@ function showContextMenu(x, y, items) {
   });
 }
 
+function worktreeCreate(id) { send({ cmd: 'worktree_create', id }); }
+function worktreeCheckpoint(id) { send({ cmd: 'worktree_checkpoint', id }); }
+async function worktreeRemove(id) {
+  const cell = state.agents[id];
+  if (!cell) return;
+  const dirty = cell.worktree_dirty;
+  const msg = dirty
+    ? `Remove worktree for "${cell.name}"? It has uncommitted changes.`
+    : `Remove worktree for "${cell.name}"?`;
+  if (await showConfirm(msg)) {
+    send({ cmd: 'worktree_remove', id });
+  }
+}
+
 function onCellContextMenu(e, id) {
   e.preventDefault();
   e.stopPropagation();
@@ -264,6 +278,18 @@ function onCellContextMenu(e, id) {
   ];
   if (cell.status === 'stopped') {
     items.push({ label: 'Relaunch', action: `relaunchAgent('${id}')` });
+  }
+  /* Worktree actions */
+  if (cell.cell_type === 'agent') {
+    if (cell.worktree_path) {
+      items.push({ label: 'Checkpoint', action: `worktreeCheckpoint('${id}')` });
+      items.push({ label: 'Remove Worktree', action: `worktreeRemove('${id}')`, danger: true });
+    } else {
+      const gs = (state.group_settings || {})[cell.group] || {};
+      if (gs.git_worktree) {
+        items.push({ label: 'Create Worktree', action: `worktreeCreate('${id}')` });
+      }
+    }
   }
   items.push({ label: 'Remove', action: `removeAgent('${id}')`, danger: true });
   showContextMenu(e.clientX, e.clientY, items);

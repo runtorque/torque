@@ -16,7 +16,30 @@ from .bridge import ITerm2Bridge
 from .events import EventLog, EventBus, health_check
 from .adapters import get_adapter
 from .notifications import NotificationManager
+from .worktree import WorktreeManager
 from . import keybindings
+
+
+async def _worktree_diff_updater(state: MatrixState,
+                                 worktree_mgr: WorktreeManager):
+    """Periodically update diff stats for cells with active worktrees."""
+    while True:
+        await asyncio.sleep(60)
+        changed = False
+        for cell in state.agents.values():
+            if not cell.worktree_path:
+                continue
+            diff = await worktree_mgr.diff_summary(cell)
+            dirty = await worktree_mgr.has_uncommitted_changes(cell)
+            checkpoints = await worktree_mgr.count_commits(cell)
+            if diff != cell.worktree_diff or dirty != cell.worktree_dirty \
+                    or checkpoints != cell.worktree_checkpoints:
+                cell.worktree_diff = diff
+                cell.worktree_dirty = dirty
+                cell.worktree_checkpoints = checkpoints
+                changed = True
+        if changed:
+            await state.broadcast()
 
 
 async def main(connection: iterm2.Connection):
@@ -35,8 +58,24 @@ async def main(connection: iterm2.Connection):
     log.info("Event bus, health monitor, and notifications started")
 
     bridge = ITerm2Bridge(connection, state)
+    worktree_mgr = WorktreeManager()
+
+    async def _auto_checkpoint(cell):
+        """Auto-checkpoint if the cell has a worktree and the setting is on."""
+        if cell.worktree_path and cell.cell_type == "agent":
+            gs = state.get_group_settings(cell.group)
+            if gs.worktree_auto_checkpoint:
+                sha = await worktree_mgr.checkpoint(cell)
+                if sha:
+                    state.save()
+
+    # Auto-checkpoint when agent finishes its turn (hook-based session_end)
+    event_bus.on_session_end = _auto_checkpoint
+    # Also checkpoint when the terminal session is actually closed (tab closed)
+    bridge.on_session_terminated = _auto_checkpoint
     await bridge.start()
     await bridge.reconnect_orphans()
+    asyncio.create_task(_worktree_diff_updater(state, worktree_mgr))
 
     # Register RPCs and install global key bindings
     displaced_bindings = await keybindings.setup(connection, state, bridge)
@@ -139,7 +178,7 @@ async def main(connection: iterm2.Connection):
                                 os.path.expanduser(c.directory))
                     event_bus.cleanup_cell(c.id)
                     if c.worktree_path:
-                        await bridge.remove_worktree(c)
+                        await worktree_mgr.remove(c)
 
             elif cmd == "rename_group":
                 state.rename_group(data["group"], data["new_name"])
@@ -162,13 +201,19 @@ async def main(connection: iterm2.Connection):
                     directory=directory, tab_color=tab_color,
                 )
                 if cell:
-                    # Git worktree
+                    # Git worktree — create before session so cwd is correct
                     if gs.git_worktree and cell.directory:
-                        wt_path = await bridge.create_worktree(
-                            cell, cell.directory)
-                        if wt_path:
-                            cell.directory = wt_path
-                            state.save()
+                        repo_root = await worktree_mgr.get_repo_root(
+                            cell.directory)
+                        if repo_root:
+                            wt_path = await worktree_mgr.create(
+                                cell, repo_root,
+                                base_dir=gs.worktree_base_dir
+                                    or ".loom/worktrees",
+                                base_branch=gs.worktree_base_branch or "")
+                            if wt_path:
+                                cell.directory = wt_path
+                                state.save()
 
                     await bridge.create_session(
                         cell, env_vars=env, shell=shell)
@@ -247,7 +292,7 @@ async def main(connection: iterm2.Connection):
                     # Clean up event bus state
                     event_bus.cleanup_cell(c.id)
                     if c.worktree_path:
-                        await bridge.remove_worktree(c)
+                        await worktree_mgr.remove(c)
 
             elif cmd == "update_agent":
                 cell = state.agents.get(data["id"])
@@ -300,6 +345,37 @@ async def main(connection: iterm2.Connection):
                         env = {**gs.env_vars, **gs.agent_env_vars} or None
                         shell = gs.agent_shell or gs.shell or ""
                         init = ""
+                        # Worktree handling on relaunch
+                        if cell.worktree_path:
+                            if await worktree_mgr.validate(cell):
+                                # Reuse existing worktree
+                                cell.directory = cell.worktree_path
+                                log.info("Reusing worktree for '%s': %s",
+                                         cell.name, cell.worktree_path)
+                            else:
+                                # Worktree gone — clear and recreate if enabled
+                                log.warning("Worktree invalid for '%s', "
+                                            "clearing", cell.name)
+                                cell.worktree_path = ""
+                                cell.worktree_branch = ""
+                                cell.worktree_repo_root = ""
+                                cell.worktree_base_branch = ""
+                                state.save()
+                        # Create new worktree if enabled and none exists
+                        if not cell.worktree_path and gs.git_worktree \
+                                and cell.directory:
+                            repo_root = await worktree_mgr.get_repo_root(
+                                cell.directory)
+                            if repo_root:
+                                wt_path = await worktree_mgr.create(
+                                    cell, repo_root,
+                                    base_dir=gs.worktree_base_dir
+                                        or ".loom/worktrees",
+                                    base_branch=gs.worktree_base_branch
+                                        or "")
+                                if wt_path:
+                                    cell.directory = wt_path
+                                    state.save()
                     await bridge.create_session(
                         cell, env_vars=env,
                         init_script=init, shell=shell)
@@ -322,6 +398,32 @@ async def main(connection: iterm2.Connection):
                 state.reorder_child(data["id"], data["parent_id"],
                                     data.get("before", ""))
                 await bridge.reorder_tabs()
+
+            elif cmd == "worktree_create":
+                cell = state.agents.get(data["id"])
+                if cell and not cell.worktree_path and cell.directory:
+                    gs = state.get_group_settings(cell.group)
+                    repo_root = await worktree_mgr.get_repo_root(
+                        cell.directory)
+                    if repo_root:
+                        await worktree_mgr.create(
+                            cell, repo_root,
+                            base_dir=gs.worktree_base_dir
+                                or ".loom/worktrees",
+                            base_branch=gs.worktree_base_branch or "")
+                        state.save()
+
+            elif cmd == "worktree_remove":
+                cell = state.agents.get(data["id"])
+                if cell and cell.worktree_path:
+                    await worktree_mgr.remove(cell)
+                    state.save()
+
+            elif cmd == "worktree_checkpoint":
+                cell = state.agents.get(data["id"])
+                if cell and cell.worktree_path:
+                    await worktree_mgr.checkpoint(cell)
+                    state.save()
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")

@@ -47,25 +47,22 @@ Capture agent transcripts as structured logs. Every command, tool call, and outp
 
 Agents should work in isolation by default. This phase makes worktrees a first-class concept.
 
-### Managed Worktrees
+> **Status**: Core implemented. See [implementation plan](plans/git-worktree-lifecycle.md) for details.
 
-When Loom spawns an agent, it creates a git worktree on a dedicated branch. The agent works in its own copy of the repo. When it's done, the user reviews the diff and either merges or discards.
+### Managed Worktrees ✅
 
-- Branch naming convention: `loom/<agent-name>/<task-slug>`
-- Worktree directory: configurable, defaults to `.loom-worktrees/`
-- Cleanup on agent removal: prompt to delete worktree or keep for manual review
+Loom creates a git worktree on a dedicated branch when spawning an agent. Worktrees live in `.loom/worktrees/` (configurable), branches named `loom/{agent-name}-{short-id}`. `.loom/` is auto-added to `.gitignore`. Worktrees survive agent stops and are reused on relaunch. Validated on daemon restart. UI shows branch badge with diff stats on agent cells. Manual create/remove via context menu.
 
-### Checkpoints & Rollback
+### Checkpoints ✅
 
-Loom auto-commits snapshots at configurable intervals while an agent works. If an agent goes off the rails, roll back to any checkpoint without losing the worktree. Think of it as undo for agent work.
+Auto-checkpoint on agent stop (opt-in per group). Manual checkpoint via context menu. Commits all changes with `loom: checkpoint N — {name}`. Checkpoint count tracked and displayed via periodic diff updater (60s).
 
-### Auto-PR Lifecycle
+### Remaining Work
 
-Agent finishes → Loom creates a PR with a structured description → CI runs → user reviews from the toolbelt → approve → Loom merges and cleans up the worktree. The full lifecycle managed from a single panel.
-
-### Multi-Repo Support
-
-Some tasks span repositories. An agent gets worktrees in multiple repos, and Loom tracks the set as a single unit of work. Cleanup and PR creation happen across all repos in the set.
+- **Auto-PR lifecycle** — abstract PR provider interface + GitHub implementation. "Create PR" context menu, auto-PR on stop, PR URL tracking.
+- **Rollback** — list checkpoints and reset to a given SHA.
+- **Diff viewer modal** — read-only diff view in the toolbelt.
+- **Multi-repo support** — groundwork laid with `worktree_repo_root` field, full implementation deferred.
 
 ---
 

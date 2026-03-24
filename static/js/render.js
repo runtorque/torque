@@ -304,6 +304,20 @@ function renderAgentCell(a) {
   if (a.agent_type && a.activity_detail && a.status !== 'stopped') {
     h += `<div class="cell-activity">${esc(a.activity_detail)}</div>`;
   }
+  /* Worktree branch badge */
+  if (a.worktree_branch) {
+    const branchShort = a.worktree_branch.replace(/^loom\//, '');
+    const diffInfo = a.worktree_diff || {};
+    let diffText = '';
+    if (diffInfo.insertions || diffInfo.deletions) {
+      diffText = ` +${diffInfo.insertions || 0} -${diffInfo.deletions || 0}`;
+    }
+    const dimmed = a.status === 'stopped' ? ' dimmed' : '';
+    h += `<div class="cell-branch${dimmed}" title="${esc(a.worktree_branch)}${diffText}">`;
+    h += `\u2387 ${esc(branchShort.length > 14 ? branchShort.slice(0, 12) + '\u2026' : branchShort)}`;
+    if (diffText) h += `<span class="cell-diff">${esc(diffText)}</span>`;
+    h += `</div>`;
+  }
   /* Agent type badge */
   if (a.agent_type) {
     const typeInfo = AGENT_TYPE_LABELS[a.agent_type] || { short: a.agent_type.slice(0, 2).toUpperCase() };

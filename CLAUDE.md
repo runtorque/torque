@@ -20,9 +20,10 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
 - **Python package** (`loom/`):
   - `config.py` — env vars, paths, logging setup
   - `state.py` — `AgentCell` dataclass (with `parent_id` for terminal→agent hierarchy), `GroupSettings` dataclass, `MatrixState` (persistence, `_children` index, cascade delete, WS broadcast)
-  - `bridge.py` — `ITerm2Bridge` (create/close/focus/update sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection, git worktree lifecycle)
-  - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/events` hook receiver, `/static/*` assets), all command dispatch
-  - `events.py` — `EventBus` (throttled broadcast), `EventLog` (per-cell ring buffer), `health_check` (30s periodic scan)
+  - `bridge.py` — `ITerm2Bridge` (create/close/focus/update sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection, `on_session_terminated` callback)
+  - `worktree.py` — `WorktreeManager` (create/remove/validate worktrees, checkpoint/count_commits, diff_summary, .gitignore management). Worktrees live in `.loom/worktrees/` in the repo root, branches named `loom/{agent-name}-{short-id}`
+  - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/events` hook receiver, `/static/*` assets), all command dispatch, periodic worktree diff updater
+  - `events.py` — `EventBus` (throttled broadcast, `on_session_end` callback for auto-checkpoint), `EventLog` (per-cell ring buffer), `health_check` (30s periodic scan)
   - `notifications.py` — `NotificationManager` (macOS notifications via osascript, 5s batching window)
   - `keybindings.py` — global iTerm2 key binding lifecycle (RPC registration, install/remove bindings, Cmd+Option+Arrow for cell/agent nav, Cmd+Shift+B for broadcast)
   - `adapters/` — provider-agnostic agent awareness:
@@ -35,9 +36,9 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
   - `static/style.css` — all styles (dark theme, narrow toolbelt layout)
   - `static/js/constants.js` — icon maps, process badge map, tab color presets, feature flags (`FILTER_BY_WINDOW`), agent type labels
   - `static/js/ws.js` — WebSocket client, shared `state`, auto-reconnect, `selectedAgentId`, `focusedItemId`, `dragInProgress`, tab-focus sync, action messages
-  - `static/js/render.js` — `render()`, agent cells (three-state status dot: gray/green/red, activity detail, type label), terminal drawer, FLIP animation, group collapse, per-group window filtering, `_navItems`/`_navAgents` lists for keyboard navigation
-  - `static/js/commands.js` — agent click/dblclick, focus, remove (cascade-aware), drag-and-drop (agents, terminals, groups, reparent), broadcast, right-click context menu
-  - `static/js/modals.js` — add group/agent/terminal modals (with `parent_id` support), edit agent/terminal modal, group settings modal (tabbed: Group/Agents/Terminals; Agents tab has boot command, session resume, idle timeout, notifications), confirm dialog, color picker, hint tooltip popovers
+  - `static/js/render.js` — `render()`, agent cells (three-state status dot: gray/green/red, activity detail, type label, worktree branch badge with diff stats), terminal drawer, FLIP animation, group collapse, per-group window filtering, `_navItems`/`_navAgents` lists for keyboard navigation
+  - `static/js/commands.js` — agent click/dblclick, focus, remove (cascade-aware), drag-and-drop (agents, terminals, groups, reparent), broadcast, right-click context menu (with worktree ops: Create/Checkpoint/Remove Worktree)
+  - `static/js/modals.js` — add group/agent/terminal modals (with `parent_id` support), edit agent/terminal modal, group settings modal (tabbed: Group/Agents/Terminals; Agents tab has boot command, worktree config, session resume, idle timeout, notifications), confirm dialog, color picker, hint tooltip popovers
   - `static/js/main.js` — keyboard navigation (arrows within group, Tab/Shift+Tab between groups, Enter, Delete, N/G/T/B/R shortcuts), boot, drag setup
 
 ## Code conventions
