@@ -522,19 +522,19 @@ async def main(connection: iterm2.Connection):
                         base = cell.worktree_base_branch or "main"
                         branch = cell.worktree_branch
                         repo = cell.worktree_repo_root or ""
-                        prompt = gs.worktree_merge_prompt.strip()
-                        if not prompt:
-                            prompt = (
-                                "Merge the current branch `{branch}` into "
-                                "`{base_branch}`. The main repo is at "
-                                "`{repo_root}`. If there are merge "
-                                "conflicts, resolve them. Do not delete "
-                                "the worktree branch after merging."
-                            )
-                        prompt = (prompt
-                                  .replace("{branch}", branch)
-                                  .replace("{base_branch}", base)
-                                  .replace("{repo_root}", repo))
+                        squash = gs.worktree_merge_squash
+                        method = ("Squash merge" if squash
+                                  else "Merge")
+                        prompt = (
+                            f"{method} the current branch "
+                            f"`{branch}` into `{base}`. The "
+                            f"main repo is at `{repo}`. If there "
+                            f"are merge conflicts, resolve them. "
+                            f"Do not delete the worktree branch "
+                            f"after merging.")
+                        extra = gs.worktree_merge_instructions.strip()
+                        if extra:
+                            prompt += " " + extra
                         await bridge.send_text(
                             cell.session_id, prompt + "\r")
                         _pending_merges.add(cell.id)

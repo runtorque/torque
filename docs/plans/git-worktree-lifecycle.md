@@ -169,7 +169,7 @@ If no summary is available, falls back to just the subject line: `loom: checkpoi
 Delegates the merge to the running Claude Code session. Flow:
 
 1. User clicks "Merge to Main" → confirm dialog: "Claude will perform the merge and resolve any conflicts. You'll be notified if it fails."
-2. Loom builds a merge prompt (customizable via `worktree_merge_prompt` group setting) with `{branch}`, `{base_branch}`, `{repo_root}` placeholders. Default prompt asks Claude to merge, resolve conflicts, and keep the worktree branch.
+2. Loom builds a fixed merge prompt with the branch names, repo root, and merge method (squash or regular). Any additional instructions from `worktree_merge_instructions` group setting are appended. The core prompt can't be broken by user input.
 3. Prompt is sent to the session via `bridge.send_text()` with `\r` to submit.
 4. Cell ID is added to `_pending_merges` set.
 5. When `session_end` fires for a pending-merge cell, `worktree_mgr.is_merged(cell)` runs `git merge-base --is-ancestor` to verify.
@@ -213,7 +213,8 @@ Broadcasts to the UI only if something changed.
   - Worktree directory (default: `.loom/worktrees`)
   - Base branch (placeholder: "main", empty = current HEAD)
   - Auto-checkpoint on stop toggle
-  - Merge prompt textarea (customizable, uses `{branch}`, `{base_branch}`, `{repo_root}` placeholders)
+  - Squash commits on merge checkbox (default: on)
+  - Additional merge instructions textarea (appended to the fixed merge prompt)
 
 **Toast notifications (`commands.js`, `style.css`):**
 - Slide-up toast at the bottom of the toolbelt for transient messages

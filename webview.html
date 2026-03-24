@@ -177,10 +177,14 @@
           <input id="gs-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically commit all changes when an agent stops. Creates a checkpoint commit on the worktree branch.">?</span>
         </label>
-        <label>Merge prompt <span class="label-hint">sent to agent on Merge to Main</span>
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Prompt sent to the Claude Code session when you click Merge to Main. Use {branch}, {base_branch}, and {repo_root} as placeholders. Leave empty for the default prompt.">?</span>
+        <label class="gs-checkbox">
+          <input id="gs-wt-merge-squash" type="checkbox" checked> Squash commits on merge
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Squash all worktree commits into a single commit when merging to main. Keeps the main branch history clean.">?</span>
         </label>
-        <textarea id="gs-wt-merge-prompt" rows="3" placeholder="Merge {branch} into {base_branch}..."></textarea>
+        <label>Additional merge instructions
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Extra instructions appended to the merge prompt sent to Claude. Use this to customize merge behavior, e.g. 'Use a conventional commit message' or 'Run tests after merging'.">?</span>
+        </label>
+        <textarea id="gs-wt-merge-instructions" rows="2" placeholder="e.g. Use a conventional commit message"></textarea>
       </div>
       <label class="gs-checkbox">
         <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch
