@@ -256,6 +256,10 @@ class WorktreeManager:
         if not cell.worktree_path:
             return None
         try:
+            # Seed checkpoint counter from git history if not yet set
+            if cell.worktree_checkpoints == 0:
+                cell.worktree_checkpoints = await self.count_commits(cell)
+
             # Stage everything
             proc = await asyncio.create_subprocess_exec(
                 "git", "-C", cell.worktree_path, "add", "-A",
@@ -400,6 +404,30 @@ class WorktreeManager:
             return True
         except Exception:
             log.exception("Rollback failed for '%s'", cell.name)
+            return False
+
+    async def is_merged(self, cell) -> bool:
+        """Check if the worktree branch has been merged into the base branch."""
+        if not cell.worktree_path or not cell.worktree_base_branch:
+            return False
+        repo_root = cell.worktree_repo_root
+        if not repo_root:
+            repo_root = await self.get_repo_root(cell.worktree_path)
+        if not repo_root:
+            return False
+        try:
+            # Check if worktree branch is an ancestor of the base branch
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root,
+                "merge-base", "--is-ancestor",
+                cell.worktree_branch, cell.worktree_base_branch,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+            return proc.returncode == 0
+        except Exception:
+            log.debug("is_merged check failed for '%s'", cell.name)
             return False
 
     async def count_commits(self, cell) -> int:

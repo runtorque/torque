@@ -21,7 +21,7 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
   - `config.py` — env vars, paths, logging setup
   - `state.py` — `AgentCell` dataclass (with `parent_id` for terminal→agent hierarchy), `GroupSettings` dataclass, `MatrixState` (persistence, `_children` index, cascade delete, WS broadcast)
   - `bridge.py` — `ITerm2Bridge` (create/close/focus/update sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection, `on_session_terminated` callback)
-  - `worktree.py` — `WorktreeManager` (create/remove/validate worktrees, checkpoint/count_commits, diff_summary, .gitignore management). Worktrees live in `.loom/worktrees/` in the repo root, branches named `loom/{agent-name}-{short-id}`
+  - `worktree.py` — `WorktreeManager` (create/remove/validate worktrees, checkpoint/count_commits/list_checkpoints/rollback, diff_summary, is_merged, .gitignore management). Worktrees live in `.loom/worktrees/` in the repo root, branches named `loom/{agent-name}-{short-id}`
   - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/events` hook receiver, `/static/*` assets), all command dispatch, periodic worktree diff updater
   - `events.py` — `EventBus` (throttled broadcast, `on_session_end` callback for auto-checkpoint), `EventLog` (per-cell ring buffer), `health_check` (30s periodic scan)
   - `notifications.py` — `NotificationManager` (macOS notifications via osascript, 5s batching window)

@@ -177,6 +177,10 @@
           <input id="gs-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically commit all changes when an agent stops. Creates a checkpoint commit on the worktree branch.">?</span>
         </label>
+        <label>Merge prompt <span class="label-hint">sent to agent on Merge to Main</span>
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Prompt sent to the Claude Code session when you click Merge to Main. Use {branch}, {base_branch}, and {repo_root} as placeholders. Leave empty for the default prompt.">?</span>
+        </label>
+        <textarea id="gs-wt-merge-prompt" rows="3" placeholder="Merge {branch} into {base_branch}..."></textarea>
       </div>
       <label class="gs-checkbox">
         <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch

@@ -164,6 +164,20 @@ validates JWT expiry timestamps.
 
 If no summary is available, falls back to just the subject line: `loom: checkpoint 3 — Agent 1`.
 
+### Merge to Main
+
+Delegates the merge to the running Claude Code session. Flow:
+
+1. User clicks "Merge to Main" → confirm dialog: "Claude will perform the merge and resolve any conflicts. You'll be notified if it fails."
+2. Loom builds a merge prompt (customizable via `worktree_merge_prompt` group setting) with `{branch}`, `{base_branch}`, `{repo_root}` placeholders. Default prompt asks Claude to merge, resolve conflicts, and keep the worktree branch.
+3. Prompt is sent to the session via `bridge.send_text()` with `\r` to submit.
+4. Cell ID is added to `_pending_merges` set.
+5. When `session_end` fires for a pending-merge cell, `worktree_mgr.is_merged(cell)` runs `git merge-base --is-ancestor` to verify.
+6. **Success:** green toast notification: `"Agent 1" merged to main`. Auto-checkpoint is skipped for the merge turn.
+7. **Failure:** cell gets `needs_attention = true` with `error_message = "Merge to main failed — merge manually"`. The amber attention badge draws the user's eye.
+
+If the session isn't running, the user gets an error message telling them to relaunch or merge manually.
+
 ### Periodic Diff Updater
 
 `_worktree_diff_updater()` runs every 60 seconds. For each cell with a worktree:
@@ -183,9 +197,9 @@ Broadcasts to the UI only if something changed.
   - Checkpoint
   - History... (opens commit history modal)
   - Create PR (disabled — not yet implemented)
-  - Merge to Main (disabled — not yet implemented)
+  - Merge to Main — confirm dialog, sends prompt to Claude Code session, verifies merge via `git merge-base --is-ancestor` when agent finishes
   - Remove Worktree (with dirty confirm dialog)
-- Agent without worktree (group has worktrees enabled): "Create Worktree"
+- Agent without worktree (group has worktrees enabled): "Create Worktree" (prompts relaunch if agent is running)
 
 **History modal (`modals.js`):**
 - Timeline view with vertical git-log-style line
@@ -199,6 +213,12 @@ Broadcasts to the UI only if something changed.
   - Worktree directory (default: `.loom/worktrees`)
   - Base branch (placeholder: "main", empty = current HEAD)
   - Auto-checkpoint on stop toggle
+  - Merge prompt textarea (customizable, uses `{branch}`, `{base_branch}`, `{repo_root}` placeholders)
+
+**Toast notifications (`commands.js`, `style.css`):**
+- Slide-up toast at the bottom of the toolbelt for transient messages
+- Success (green border) and error (red border) variants
+- Auto-dismisses after 4 seconds
 
 **CSS (`style.css`):**
 - `.cell-branch` — accent-colored branch name, centered under agent name
@@ -214,6 +234,7 @@ Broadcasts to the UI only if something changed.
 | `worktree_checkpoint` | Manually create a checkpoint commit |
 | `worktree_history` | Return list of commits (responds directly to requesting WS client) |
 | `worktree_rollback` | Reset worktree branch to a given commit SHA |
+| `worktree_merge` | Send merge prompt to Claude Code session, track pending merge for verification |
 
 ---
 
@@ -230,7 +251,7 @@ Modified files:
 
 ```
 loom/state.py              # AgentCell +6 fields, GroupSettings +3 fields, ephemeral field list
-loom/server.py             # WorktreeManager wiring, lifecycle fixes, 5 commands, diff updater, auto-checkpoint, checkpoint messages
+loom/server.py             # WorktreeManager wiring, lifecycle fixes, 6 commands, diff updater, auto-checkpoint, checkpoint messages, merge verification, toast broadcast
 loom/bridge.py             # Removed worktree methods, added on_session_terminated callback, worktree validation on reconnect
 loom/events.py             # Added on_session_end callback, last_summary capture
 loom/adapters/claude_code.py  # Stop hook: capture last_assistant_message as summary
@@ -266,7 +287,6 @@ Makefile                   # Copy worktree.py, fix stop target (LISTEN-only)
 ## Future Work
 
 - **Auto-PR creation** — Abstract PR provider interface + GitHub (`gh` CLI) implementation. "Create PR" context menu item, `worktree_auto_pr` group setting, `worktree_pr_url` field on AgentCell. Provider interface should support GitHub, GitLab, Bitbucket without hardcoding.
-- **Merge to Main** — Merge worktree branch into the local main branch from the toolbelt.
 - **Diff viewer modal** — Read-only diff view in the toolbelt. Server sends `git diff` content; modal renders with line-level red/green coloring.
 - **Dirty worktree warning on agent removal** — The `removeAgent` function should check `worktree_dirty` and warn, not just the explicit "Remove Worktree" context menu.
 - **Multi-repo worktree sets** — Groundwork laid with `worktree_repo_root` field. Full multi-repo support deferred.

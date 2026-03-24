@@ -57,10 +57,13 @@ Loom creates a git worktree on a dedicated branch when spawning an agent. Worktr
 
 Auto-checkpoint on agent stop (opt-in per group). Manual checkpoint via context menu. Checkpoint commit messages include Claude Code's last assistant message as the body. History modal shows all commits with +/- stats, expandable commit bodies, and per-commit rollback.
 
+### Merge to Main ✅
+
+"Merge to Main" in the worktree submenu sends a customizable prompt to the Claude Code session. Claude performs the merge and resolves conflicts. Loom verifies via `git merge-base --is-ancestor` when the agent finishes — green toast on success, amber attention badge on failure. Merge prompt is configurable per group.
+
 ### Remaining Work
 
 - **Auto-PR lifecycle** — abstract PR provider interface + GitHub implementation. "Create PR" context menu, auto-PR on stop, PR URL tracking.
-- **Merge to Main** — merge worktree branch into local main from the toolbelt.
 - **Diff viewer modal** — read-only diff view in the toolbelt.
 - **Multi-repo support** — groundwork laid with `worktree_repo_root` field, full implementation deferred.
 

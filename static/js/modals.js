@@ -339,6 +339,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-wt-base-dir').value = s.worktree_base_dir || '.loom/worktrees';
   document.getElementById('gs-wt-base-branch').value = s.worktree_base_branch || '';
   document.getElementById('gs-wt-auto-checkpoint').checked = s.worktree_auto_checkpoint || false;
+  document.getElementById('gs-wt-merge-prompt').value = s.worktree_merge_prompt || '';
   _toggleWorktreeFields();
   document.getElementById('gs-session-resume').checked = s.agent_session_resume !== false;
   document.getElementById('gs-agent-idle-timeout').value = s.agent_idle_timeout != null ? s.agent_idle_timeout : 5;
@@ -414,6 +415,7 @@ function submitGroupSettings() {
     worktree_base_dir: document.getElementById('gs-wt-base-dir').value.trim() || '.loom/worktrees',
     worktree_base_branch: document.getElementById('gs-wt-base-branch').value.trim(),
     worktree_auto_checkpoint: document.getElementById('gs-wt-auto-checkpoint').checked,
+    worktree_merge_prompt: document.getElementById('gs-wt-merge-prompt').value.trim(),
     agent_session_resume: document.getElementById('gs-session-resume').checked,
     agent_idle_timeout: parseInt(document.getElementById('gs-agent-idle-timeout').value) || 0,
     agent_always_custom_dialog: document.getElementById('gs-agent-always-custom').checked,

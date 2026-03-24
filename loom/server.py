@@ -60,6 +60,8 @@ async def main(connection: iterm2.Connection):
     bridge = ITerm2Bridge(connection, state)
     worktree_mgr = WorktreeManager()
 
+    _pending_merges: set[str] = set()  # cell IDs awaiting merge verification
+
     def _checkpoint_message(cell) -> str:
         """Build a checkpoint commit message from the agent's last summary."""
         summary = cell.last_summary.strip()
@@ -69,8 +71,30 @@ async def main(connection: iterm2.Connection):
             return f"{subject}\n\n{summary}"
         return subject
 
-    async def _auto_checkpoint(cell):
-        """Auto-checkpoint if the cell has a worktree and the setting is on."""
+    async def _on_agent_session_end(cell):
+        """Handle agent turn completion: merge verification + auto-checkpoint."""
+        # Check pending merge result
+        if cell.id in _pending_merges:
+            _pending_merges.discard(cell.id)
+            merged = await worktree_mgr.is_merged(cell)
+            if merged:
+                log.info("Merge verified for '%s': branch %s merged into %s",
+                         cell.name, cell.worktree_branch,
+                         cell.worktree_base_branch)
+                await _broadcast_toast(
+                    f'"{cell.name}" merged to {cell.worktree_base_branch}',
+                    "success")
+            else:
+                log.warning("Merge failed for '%s': branch %s not in %s",
+                            cell.name, cell.worktree_branch,
+                            cell.worktree_base_branch)
+                cell.needs_attention = True
+                cell.error_message = (
+                    "Merge to main failed — merge manually")
+                state.save()
+            return  # skip auto-checkpoint on merge turn
+
+        # Auto-checkpoint
         if cell.worktree_path and cell.cell_type == "agent":
             gs = state.get_group_settings(cell.group)
             if gs.worktree_auto_checkpoint:
@@ -79,10 +103,22 @@ async def main(connection: iterm2.Connection):
                 if sha:
                     state.save()
 
-    # Auto-checkpoint when agent finishes its turn (hook-based session_end)
-    event_bus.on_session_end = _auto_checkpoint
+    async def _broadcast_toast(message, level="info"):
+        """Send a toast notification to all WS clients."""
+        msg = json.dumps({"type": "toast", "message": message,
+                          "level": level})
+        dead = set()
+        for ws_client in state._ws_clients:
+            try:
+                await ws_client.send_str(msg)
+            except Exception:
+                dead.add(ws_client)
+        state._ws_clients -= dead
+
+    # Handle agent turn completion (hook-based session_end)
+    event_bus.on_session_end = _on_agent_session_end
     # Also checkpoint when the terminal session is actually closed (tab closed)
-    bridge.on_session_terminated = _auto_checkpoint
+    bridge.on_session_terminated = _on_agent_session_end
     await bridge.start()
     await bridge.reconnect_orphans()
     asyncio.create_task(_worktree_diff_updater(state, worktree_mgr))
@@ -416,12 +452,27 @@ async def main(connection: iterm2.Connection):
                     repo_root = await worktree_mgr.get_repo_root(
                         cell.directory)
                     if repo_root:
-                        await worktree_mgr.create(
+                        wt_path = await worktree_mgr.create(
                             cell, repo_root,
                             base_dir=gs.worktree_base_dir
                                 or ".loom/worktrees",
                             base_branch=gs.worktree_base_branch or "")
-                        state.save()
+                        if wt_path:
+                            cell.directory = wt_path
+                            state.save()
+                            # Relaunch if requested by the UI
+                            if data.get("relaunch"):
+                                if cell.session_id:
+                                    await bridge.close_session(
+                                        cell.session_id)
+                                cell.status = "stopped"
+                                cell.session_id = None
+                                env = {**gs.env_vars,
+                                       **gs.agent_env_vars} or None
+                                shell = (gs.agent_shell
+                                         or gs.shell or "")
+                                await bridge.create_session(
+                                    cell, env_vars=env, shell=shell)
 
             elif cmd == "worktree_remove":
                 cell = state.agents.get(data["id"])
@@ -456,6 +507,39 @@ async def main(connection: iterm2.Connection):
                 if cell and cell.worktree_path and sha:
                     await worktree_mgr.rollback(cell, sha)
                     state.save()
+
+            elif cmd == "worktree_merge":
+                cell = state.agents.get(data.get("id", ""))
+                if cell and cell.worktree_path and cell.worktree_branch:
+                    if not cell.session_id:
+                        await ws.send_str(json.dumps({
+                            "type": "error",
+                            "message": "Session not running. Relaunch "
+                                       "the agent first, or merge manually.",
+                        }))
+                    else:
+                        gs = state.get_group_settings(cell.group)
+                        base = cell.worktree_base_branch or "main"
+                        branch = cell.worktree_branch
+                        repo = cell.worktree_repo_root or ""
+                        prompt = gs.worktree_merge_prompt.strip()
+                        if not prompt:
+                            prompt = (
+                                "Merge the current branch `{branch}` into "
+                                "`{base_branch}`. The main repo is at "
+                                "`{repo_root}`. If there are merge "
+                                "conflicts, resolve them. Do not delete "
+                                "the worktree branch after merging."
+                            )
+                        prompt = (prompt
+                                  .replace("{branch}", branch)
+                                  .replace("{base_branch}", base)
+                                  .replace("{repo_root}", repo))
+                        await bridge.send_text(
+                            cell.session_id, prompt + "\r")
+                        _pending_merges.add(cell.id)
+                        cell.status = "running"
+                        state.save()
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")

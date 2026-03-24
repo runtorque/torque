@@ -36,6 +36,8 @@ function connect() {
       }
     } else if (msg.type === 'group_settings') {
       _showGroupSettings(msg.group, msg);
+    } else if (msg.type === 'toast') {
+      _showToast(msg.message, msg.level);
     } else if (msg.type === 'worktree_history') {
       _showWorktreeHistory(msg);
     } else if (msg.type === 'action') {

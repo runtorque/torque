@@ -1,5 +1,18 @@
 /* Commands — actions sent to the daemon */
 
+function _showToast(message, level) {
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + (level || 'info');
+  el.textContent = message;
+  document.body.appendChild(el);
+  // Trigger reflow then animate in
+  requestAnimationFrame(() => el.classList.add('visible'));
+  setTimeout(() => {
+    el.classList.remove('visible');
+    setTimeout(() => el.remove(), 300);
+  }, 4000);
+}
+
 function focusAgent(id) { focusedItemId = id; send({ cmd: 'focus_agent', id }); }
 
 function onAgentClick(id) {
@@ -265,17 +278,37 @@ function _showWorktreeSubmenu(id) {
   html += `<button onclick="closeContextMenu();worktreeCheckpoint('${id}')">Checkpoint</button>`;
   html += `<button onclick="closeContextMenu();worktreeHistory('${id}')">History\u2026</button>`;
   html += `<button onclick="closeContextMenu();worktreeCreatePR('${id}')" disabled>Create PR</button>`;
-  html += `<button onclick="closeContextMenu();worktreeMerge('${id}')" disabled>Merge to Main</button>`;
+  html += `<button onclick="closeContextMenu();worktreeMerge('${id}')">Merge to Main</button>`;
   html += `<div class="ctx-sep"></div>`;
   html += `<button class="danger" onclick="closeContextMenu();worktreeRemove('${id}')">Remove Worktree</button>`;
   menu.innerHTML = html;
 }
 
-function worktreeCreate(id) { send({ cmd: 'worktree_create', id }); }
+async function worktreeCreate(id) {
+  const cell = state.agents[id];
+  if (!cell) return;
+  if (cell.session_id) {
+    // Agent is running — must relaunch to use the worktree
+    if (await showConfirm('Creating a worktree requires relaunching the agent. Continue?')) {
+      send({ cmd: 'worktree_create', id, relaunch: true });
+    }
+  } else {
+    send({ cmd: 'worktree_create', id });
+  }
+}
 function worktreeCheckpoint(id) { send({ cmd: 'worktree_checkpoint', id }); }
 function worktreeHistory(id) { send({ cmd: 'worktree_history', id }); }
 function worktreeCreatePR(_id) { /* TODO: implement */ }
-function worktreeMerge(_id) { /* TODO: implement */ }
+async function worktreeMerge(id) {
+  const cell = state.agents[id];
+  if (!cell) return;
+  const base = cell.worktree_base_branch || 'main';
+  if (await showConfirm(
+    `Merge "${cell.name}" into ${base}? Claude will perform the merge and resolve any conflicts. You\u2019ll be notified if it fails.`
+  )) {
+    send({ cmd: 'worktree_merge', id });
+  }
+}
 async function worktreeRemove(id) {
   const cell = state.agents[id];
   if (!cell) return;

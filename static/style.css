@@ -713,6 +713,30 @@ textarea:focus { border-color: var(--accent); }
 }
 
 /* ------------------------------------------------------------------ */
+/* Toast notifications                                                 */
+/* ------------------------------------------------------------------ */
+.toast {
+  position: fixed; bottom: 12px; left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  opacity: 0;
+  font-size: 10px; font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  box-shadow: 0 4px 12px rgba(0,0,0,.4);
+  z-index: 250;
+  pointer-events: none;
+  transition: opacity .3s, transform .3s;
+  max-width: 80%;
+  text-align: center;
+}
+.toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast-success { border-color: var(--green); color: var(--green); }
+.toast-error { border-color: var(--red); color: var(--red); }
+
+/* ------------------------------------------------------------------ */
 /* Scrollbar                                                           */
 /* ------------------------------------------------------------------ */
 ::-webkit-scrollbar { width: 6px; }
