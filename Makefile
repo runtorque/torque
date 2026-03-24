@@ -115,7 +115,7 @@ run:
 
 ## stop: Kill any running loom instance (by port)
 stop:
-	@pid=$$(lsof -ti :18932 2>/dev/null); \
+	@pid=$$(lsof -ti TCP:18932 -sTCP:LISTEN 2>/dev/null); \
 	if [ -n "$$pid" ]; then \
 		kill $$pid 2>/dev/null; \
 		echo "Killed PID $$pid (port 18932)"; \

@@ -210,7 +210,10 @@ class ClaudeCodeAdapter(AgentAdapter):
             return AgentEvent(
                 cell_id=cell.id, timestamp=now,
                 event_type="session_end",
-                data={"reason": "completed"},
+                data={
+                    "reason": "completed",
+                    "summary": raw.get("last_assistant_message", ""),
+                },
             )
 
         if hook_event == "PreToolUse":

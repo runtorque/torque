@@ -53,14 +53,14 @@ Agents should work in isolation by default. This phase makes worktrees a first-c
 
 Loom creates a git worktree on a dedicated branch when spawning an agent. Worktrees live in `.loom/worktrees/` (configurable), branches named `loom/{agent-name}-{short-id}`. `.loom/` is auto-added to `.gitignore`. Worktrees survive agent stops and are reused on relaunch. Validated on daemon restart. UI shows branch badge with diff stats on agent cells. Manual create/remove via context menu.
 
-### Checkpoints ✅
+### Checkpoints & Rollback ✅
 
-Auto-checkpoint on agent stop (opt-in per group). Manual checkpoint via context menu. Commits all changes with `loom: checkpoint N — {name}`. Checkpoint count tracked and displayed via periodic diff updater (60s).
+Auto-checkpoint on agent stop (opt-in per group). Manual checkpoint via context menu. Checkpoint commit messages include Claude Code's last assistant message as the body. History modal shows all commits with +/- stats, expandable commit bodies, and per-commit rollback.
 
 ### Remaining Work
 
 - **Auto-PR lifecycle** — abstract PR provider interface + GitHub implementation. "Create PR" context menu, auto-PR on stop, PR URL tracking.
-- **Rollback** — list checkpoints and reset to a given SHA.
+- **Merge to Main** — merge worktree branch into local main from the toolbelt.
 - **Diff viewer modal** — read-only diff view in the toolbelt.
 - **Multi-repo support** — groundwork laid with `worktree_repo_root` field, full implementation deferred.
 

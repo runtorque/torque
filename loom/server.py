@@ -60,12 +60,22 @@ async def main(connection: iterm2.Connection):
     bridge = ITerm2Bridge(connection, state)
     worktree_mgr = WorktreeManager()
 
+    def _checkpoint_message(cell) -> str:
+        """Build a checkpoint commit message from the agent's last summary."""
+        summary = cell.last_summary.strip()
+        n = cell.worktree_checkpoints + 1
+        subject = f"loom: checkpoint {n} — {cell.name}"
+        if summary:
+            return f"{subject}\n\n{summary}"
+        return subject
+
     async def _auto_checkpoint(cell):
         """Auto-checkpoint if the cell has a worktree and the setting is on."""
         if cell.worktree_path and cell.cell_type == "agent":
             gs = state.get_group_settings(cell.group)
             if gs.worktree_auto_checkpoint:
-                sha = await worktree_mgr.checkpoint(cell)
+                msg = _checkpoint_message(cell)
+                sha = await worktree_mgr.checkpoint(cell, message=msg)
                 if sha:
                     state.save()
 
@@ -422,7 +432,29 @@ async def main(connection: iterm2.Connection):
             elif cmd == "worktree_checkpoint":
                 cell = state.agents.get(data["id"])
                 if cell and cell.worktree_path:
-                    await worktree_mgr.checkpoint(cell)
+                    msg = _checkpoint_message(cell)
+                    await worktree_mgr.checkpoint(cell, message=msg)
+                    state.save()
+
+            elif cmd == "worktree_history":
+                cell = state.agents.get(data.get("id", ""))
+                commits = []
+                if cell and cell.worktree_path:
+                    commits = await worktree_mgr.list_checkpoints(cell)
+                await ws.send_str(json.dumps({
+                    "type": "worktree_history",
+                    "id": data.get("id", ""),
+                    "branch": cell.worktree_branch if cell else "",
+                    "base_branch": cell.worktree_base_branch if cell else "",
+                    "commits": commits,
+                }))
+                return  # direct response, no broadcast
+
+            elif cmd == "worktree_rollback":
+                cell = state.agents.get(data.get("id", ""))
+                sha = data.get("sha", "")
+                if cell and cell.worktree_path and sha:
+                    await worktree_mgr.rollback(cell, sha)
                     state.save()
 
             elif cmd == "restart":

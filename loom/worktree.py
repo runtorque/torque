@@ -309,6 +309,99 @@ class WorktreeManager:
             log.exception("Checkpoint failed for '%s'", cell.name)
             return None
 
+    async def list_checkpoints(self, cell) -> list[dict]:
+        """List commits on the worktree branch since the fork point.
+
+        Returns:
+            List of {sha, short_sha, message, date, insertions, deletions}
+            dicts, newest first.
+        """
+        if not cell.worktree_path or not cell.worktree_base_branch:
+            return []
+        try:
+            # Use unique delimiters to separate header fields from body
+            hdr_delim = "---LOOM_COMMIT---"
+            body_delim = "---LOOM_BODY---"
+            body_end = "---LOOM_BODY_END---"
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", cell.worktree_path,
+                "log",
+                f"--format={hdr_delim}%n%H%n%h%n%s%n%aI%n{body_delim}%n%b{body_end}",
+                "--numstat",
+                f"{cell.worktree_base_branch}..HEAD",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return []
+
+            commits = []
+            # Split by header delimiter — first chunk is empty
+            chunks = stdout.decode().split(hdr_delim)[1:]
+            for chunk in chunks:
+                # Extract body between body delimiters
+                body = ""
+                if body_delim in chunk and body_end in chunk:
+                    body_start = chunk.index(body_delim) + len(body_delim)
+                    b_end = chunk.index(body_end)
+                    body = chunk[body_start:b_end].strip()
+                    # Remove body section from chunk for numstat parsing
+                    chunk = (chunk[:chunk.index(body_delim)]
+                             + chunk[b_end + len(body_end):])
+
+                lines = chunk.strip().splitlines()
+                if len(lines) < 4:
+                    continue
+                ins = 0
+                dels = 0
+                for stat_line in lines[4:]:
+                    parts = stat_line.split("\t")
+                    if len(parts) >= 2:
+                        try:
+                            ins += int(parts[0]) if parts[0] != "-" else 0
+                            dels += int(parts[1]) if parts[1] != "-" else 0
+                        except ValueError:
+                            continue
+                commits.append({
+                    "sha": lines[0],
+                    "short_sha": lines[1],
+                    "message": lines[2],
+                    "body": body,
+                    "date": lines[3],
+                    "insertions": ins,
+                    "deletions": dels,
+                })
+            return commits
+        except Exception:
+            log.debug("list_checkpoints failed for '%s'", cell.name)
+            return []
+
+    async def rollback(self, cell, commit_sha: str) -> bool:
+        """Reset the worktree branch to the given commit.
+
+        Returns True on success.
+        """
+        if not cell.worktree_path:
+            return False
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", cell.worktree_path,
+                "reset", "--hard", commit_sha,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                log.warning("Rollback failed for '%s': %s",
+                            cell.name, stderr.decode().strip())
+                return False
+            log.info("Rolled back '%s' to %s", cell.name, commit_sha[:8])
+            return True
+        except Exception:
+            log.exception("Rollback failed for '%s'", cell.name)
+            return False
+
     async def count_commits(self, cell) -> int:
         """Count commits on the worktree branch since the fork point."""
         if not cell.worktree_path or not cell.worktree_base_branch:

@@ -101,6 +101,9 @@ class EventBus:
             cell.activity_detail = ""
             cell.error_message = ""
             cell.needs_attention = False
+            summary = d.get("summary", "")
+            if summary:
+                cell.last_summary = summary
 
         elif et == "activity_change":
             cell.activity = d.get("activity", "")

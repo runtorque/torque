@@ -236,8 +236,12 @@ function showContextMenu(x, y, items) {
   const menu = document.getElementById('ctx-menu');
   let html = '';
   for (const item of items) {
-    const cls = item.danger ? ' class="danger"' : '';
-    html += `<button${cls} onclick="closeContextMenu();${esc(item.action)}">${esc(item.label)}</button>`;
+    if (item.submenu) {
+      html += `<button onclick="event.stopPropagation();${esc(item.submenu)}">${esc(item.label)} \u25B8</button>`;
+    } else {
+      const cls = item.danger ? ' class="danger"' : '';
+      html += `<button${cls} onclick="closeContextMenu();${esc(item.action)}">${esc(item.label)}</button>`;
+    }
   }
   menu.innerHTML = html;
   menu.style.left = x + 'px';
@@ -252,8 +256,26 @@ function showContextMenu(x, y, items) {
   });
 }
 
+function _showWorktreeSubmenu(id) {
+  const menu = document.getElementById('ctx-menu');
+  const cell = state.agents[id];
+  if (!cell) return;
+  let html = `<button class="ctx-label" disabled>Worktree</button>`;
+  html += `<div class="ctx-sep"></div>`;
+  html += `<button onclick="closeContextMenu();worktreeCheckpoint('${id}')">Checkpoint</button>`;
+  html += `<button onclick="closeContextMenu();worktreeHistory('${id}')">History\u2026</button>`;
+  html += `<button onclick="closeContextMenu();worktreeCreatePR('${id}')" disabled>Create PR</button>`;
+  html += `<button onclick="closeContextMenu();worktreeMerge('${id}')" disabled>Merge to Main</button>`;
+  html += `<div class="ctx-sep"></div>`;
+  html += `<button class="danger" onclick="closeContextMenu();worktreeRemove('${id}')">Remove Worktree</button>`;
+  menu.innerHTML = html;
+}
+
 function worktreeCreate(id) { send({ cmd: 'worktree_create', id }); }
 function worktreeCheckpoint(id) { send({ cmd: 'worktree_checkpoint', id }); }
+function worktreeHistory(id) { send({ cmd: 'worktree_history', id }); }
+function worktreeCreatePR(_id) { /* TODO: implement */ }
+function worktreeMerge(_id) { /* TODO: implement */ }
 async function worktreeRemove(id) {
   const cell = state.agents[id];
   if (!cell) return;
@@ -279,11 +301,10 @@ function onCellContextMenu(e, id) {
   if (cell.status === 'stopped') {
     items.push({ label: 'Relaunch', action: `relaunchAgent('${id}')` });
   }
-  /* Worktree actions */
+  /* Worktree submenu */
   if (cell.cell_type === 'agent') {
     if (cell.worktree_path) {
-      items.push({ label: 'Checkpoint', action: `worktreeCheckpoint('${id}')` });
-      items.push({ label: 'Remove Worktree', action: `worktreeRemove('${id}')`, danger: true });
+      items.push({ label: 'Worktree', submenu: `_showWorktreeSubmenu('${id}')` });
     } else {
       const gs = (state.group_settings || {})[cell.group] || {};
       if (gs.git_worktree) {

@@ -582,6 +582,74 @@ textarea:focus { border-color: var(--accent); }
 .cell.cell-add.disabled { opacity: .3; cursor: not-allowed; pointer-events: none; }
 
 /* ------------------------------------------------------------------ */
+/* Worktree History modal                                              */
+/* ------------------------------------------------------------------ */
+.hist-branch-label {
+  font-size: 10px; color: var(--accent);
+  margin-bottom: 8px;
+}
+.hist-list {
+  overflow-y: auto; flex: 1;
+  max-height: calc(85vh - 140px);
+  padding-right: 4px;
+}
+.hist-empty {
+  color: var(--text-dim); font-size: 11px;
+  text-align: center; padding: 24px 8px;
+}
+.hist-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 6px 4px;
+  border-left: 2px solid var(--border);
+  margin-left: 5px;
+  position: relative;
+}
+.hist-row:last-child { border-left-color: transparent; }
+.hist-dot {
+  position: absolute; left: -6px; top: 9px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--border); flex-shrink: 0;
+}
+.hist-current .hist-dot { background: var(--green); }
+.hist-info {
+  flex: 1; min-width: 0; padding-left: 8px;
+}
+.hist-msg {
+  font-size: 10px; font-weight: 500;
+  word-break: break-word;
+}
+.hist-meta {
+  font-size: 9px; color: var(--text-dim);
+  margin-top: 1px;
+}
+.hist-clickable { cursor: pointer; }
+.hist-clickable:hover { background: var(--bg-hover); border-radius: var(--radius); }
+.hist-body {
+  display: none;
+  font-size: 9px; color: var(--text-dim);
+  margin-top: 4px; padding: 4px 0;
+  white-space: pre-wrap; word-break: break-word;
+  line-height: 1.5;
+  border-top: 1px solid var(--border);
+}
+.hist-expanded .hist-body { display: block; }
+.hist-rollback {
+  flex-shrink: 0; font-size: 12px;
+  color: var(--text-dim);
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px;
+  transition: background .15s, color .15s;
+}
+.hist-rollback:hover { background: var(--bg-hover); color: var(--amber); }
+.hist-tag {
+  flex-shrink: 0; font-size: 8px; font-weight: 700;
+  color: var(--green); background: rgba(63,185,80,.12);
+  padding: 1px 5px; border-radius: 3px;
+  line-height: 1.6; letter-spacing: .03em;
+}
+
+/* ------------------------------------------------------------------ */
 /* Context menu                                                        */
 /* ------------------------------------------------------------------ */
 #ctx-menu {
@@ -603,6 +671,20 @@ textarea:focus { border-color: var(--accent); }
 }
 #ctx-menu button:hover { background: var(--bg-hover); color: var(--text); }
 #ctx-menu button.danger:hover { background: var(--red); color: #fff; }
+#ctx-menu button:disabled {
+  opacity: .35; cursor: not-allowed;
+}
+#ctx-menu button:disabled:hover { background: none; color: var(--text-dim); }
+.ctx-label {
+  font-size: 9px !important; font-weight: 600 !important;
+  color: var(--text) !important; text-transform: uppercase;
+  letter-spacing: .05em; cursor: default !important;
+  opacity: .7;
+}
+.ctx-sep {
+  height: 1px; background: var(--border);
+  margin: 2px 4px;
+}
 
 /* ------------------------------------------------------------------ */
 /* Drag and drop                                                       */

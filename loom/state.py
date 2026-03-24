@@ -42,6 +42,7 @@ class AgentCell:
     session_tokens_out: int = 0  # cumulative output tokens this session
     error_message: str = ""  # last error, cleared on next successful event
     needs_attention: bool = False  # agent waiting for input or stuck
+    last_summary: str = ""  # last assistant message on Stop (for checkpoint msgs)
     # Worktree status (Phase 2, ephemeral)
     worktree_dirty: bool = False  # has uncommitted changes
     worktree_diff: dict = field(default_factory=dict)  # {files, insertions, deletions}
@@ -53,7 +54,7 @@ _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "current_branch", "git_root",
                      "activity", "activity_detail", "last_event_at",
                      "session_tokens_in", "session_tokens_out",
-                     "error_message", "needs_attention",
+                     "error_message", "needs_attention", "last_summary",
                      "worktree_dirty", "worktree_diff",
                      "worktree_checkpoints")
 

@@ -106,6 +106,7 @@ All git operations use `asyncio.create_subprocess_exec` and specify `-C {repo_ro
 | `worktree_dirty` | bool | No | *New.* Has uncommitted changes (updated by periodic diff task) |
 | `worktree_diff` | dict | No | *New.* `{files: int, insertions: int, deletions: int}` |
 | `worktree_checkpoints` | int | No | *New.* Number of checkpoint commits on this branch |
+| `last_summary` | str | No | *New.* Last assistant message from Claude Code's Stop hook — used for checkpoint commit messages |
 
 **GroupSettings extensions:**
 
@@ -151,6 +152,18 @@ Both call the same `_auto_checkpoint(cell)` function in `server.py`, which check
 
 **Important:** Auto-checkpoint fires on `session_end` (hook event), not on session termination (tab close). Claude Code agents return to the shell prompt when they finish — the tab stays open. The `SessionTerminationMonitor` only fires on tab close, which is too late for the normal workflow.
 
+**Checkpoint commit messages:** When Claude Code's `Stop` hook fires, the `last_assistant_message` field is captured and stored as `cell.last_summary`. Checkpoint commits use this as the commit body:
+
+```
+loom: checkpoint 3 — Agent 1
+
+I've updated server.py to fix the auth validation bug and added
+unit tests in test_auth.py. The login endpoint now properly
+validates JWT expiry timestamps.
+```
+
+If no summary is available, falls back to just the subject line: `loom: checkpoint 3 — Agent 1`.
+
 ### Periodic Diff Updater
 
 `_worktree_diff_updater()` runs every 60 seconds. For each cell with a worktree:
@@ -166,8 +179,20 @@ Broadcasts to the UI only if something changed.
 - Branch badge: `⎇ {branch-name}` with truncation at 14 chars. Shows diff stats (`+N -N`) when there are changes. Dimmed when agent is stopped.
 
 **Context menu (`commands.js`):**
-- Agent with worktree: "Checkpoint", "Remove Worktree" (with dirty confirm dialog)
+- Agent with worktree: "Worktree ▸" submenu containing:
+  - Checkpoint
+  - History... (opens commit history modal)
+  - Create PR (disabled — not yet implemented)
+  - Merge to Main (disabled — not yet implemented)
+  - Remove Worktree (with dirty confirm dialog)
 - Agent without worktree (group has worktrees enabled): "Create Worktree"
+
+**History modal (`modals.js`):**
+- Timeline view with vertical git-log-style line
+- Each commit shows: subject, short SHA, relative date, +/- stats
+- HEAD commit tagged with green "HEAD" badge; other commits have a rollback button
+- Clicking a commit with a body toggles the full commit message (pre-wrapped text)
+- Rollback shows a confirm dialog, then sends `worktree_rollback`
 
 **Group settings modal (`modals.js`, Agents tab):**
 - Under "Git worktree per agent" checkbox, a collapsible section with:
@@ -187,6 +212,8 @@ Broadcasts to the UI only if something changed.
 | `worktree_create` | Manually create a worktree for an agent that doesn't have one |
 | `worktree_remove` | Remove an agent's worktree |
 | `worktree_checkpoint` | Manually create a checkpoint commit |
+| `worktree_history` | Return list of commits (responds directly to requesting WS client) |
+| `worktree_rollback` | Reset worktree branch to a given commit SHA |
 
 ---
 
@@ -202,16 +229,18 @@ loom/
 Modified files:
 
 ```
-loom/state.py              # AgentCell +5 fields, GroupSettings +3 fields, ephemeral field list
-loom/server.py             # WorktreeManager wiring, lifecycle fixes, 3 new commands, diff updater, auto-checkpoint callback
+loom/state.py              # AgentCell +6 fields, GroupSettings +3 fields, ephemeral field list
+loom/server.py             # WorktreeManager wiring, lifecycle fixes, 5 commands, diff updater, auto-checkpoint, checkpoint messages
 loom/bridge.py             # Removed worktree methods, added on_session_terminated callback, worktree validation on reconnect
-loom/events.py             # Added on_session_end callback for auto-checkpoint
+loom/events.py             # Added on_session_end callback, last_summary capture
+loom/adapters/claude_code.py  # Stop hook: capture last_assistant_message as summary
 static/js/render.js        # Branch badge, diff stats in agent cells
-static/js/commands.js      # Context menu items (Create Worktree, Checkpoint, Remove Worktree)
-static/js/modals.js        # Worktree section in group settings Agents tab, toggle helper
-static/style.css           # .cell-branch, .cell-diff styles
-webview.html               # Worktree config inputs in Agents tab
-Makefile                   # Copy worktree.py
+static/js/ws.js            # worktree_history message handler
+static/js/commands.js      # Worktree submenu (Checkpoint, History, Create PR, Merge, Remove), worktree actions
+static/js/modals.js        # Worktree section in group settings, history modal with rollback + expandable body
+static/style.css           # .cell-branch, .cell-diff, context menu, history modal styles
+webview.html               # Worktree config inputs, history modal HTML
+Makefile                   # Copy worktree.py, fix stop target (LISTEN-only)
 ```
 
 ---
@@ -237,8 +266,8 @@ Makefile                   # Copy worktree.py
 ## Future Work
 
 - **Auto-PR creation** — Abstract PR provider interface + GitHub (`gh` CLI) implementation. "Create PR" context menu item, `worktree_auto_pr` group setting, `worktree_pr_url` field on AgentCell. Provider interface should support GitHub, GitLab, Bitbucket without hardcoding.
+- **Merge to Main** — Merge worktree branch into the local main branch from the toolbelt.
 - **Diff viewer modal** — Read-only diff view in the toolbelt. Server sends `git diff` content; modal renders with line-level red/green coloring.
-- **Rollback** — `list_checkpoints()` and `rollback(cell, sha)` methods in WorktreeManager. UI for listing checkpoints and resetting to one.
 - **Dirty worktree warning on agent removal** — The `removeAgent` function should check `worktree_dirty` and warn, not just the explicit "Remove Worktree" context menu.
 - **Multi-repo worktree sets** — Groundwork laid with `worktree_repo_root` field. Full multi-repo support deferred.
 - **Claude Code WorktreeCreate/WorktreeRemove hooks** — Listen for Claude Code's own worktree events to stay in sync. Orthogonal to Loom-managed worktrees.
