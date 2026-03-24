@@ -332,7 +332,6 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
 .detail-label {
   font-size: 9px; color: var(--text-dim);
   flex-shrink: 0; width: 62px;
-  text-align: right;
 }
 .detail-val {
   font-size: 10px; flex: 1; min-width: 0;
