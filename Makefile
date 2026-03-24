@@ -126,7 +126,10 @@ stop:
 ## deploy: Stop old instance, install new files, prompt to restart
 deploy: stop install
 	@echo ""
-	@echo "Now restart via: Scripts menu → loom"
+	@echo "Now restart via: make run (or Scripts menu → loom)"
+
+## restart: Deploy and launch in one step
+restart: deploy run
 
 ## check: Verify prerequisites
 check:

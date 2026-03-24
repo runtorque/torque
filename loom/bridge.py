@@ -86,8 +86,12 @@ class ITerm2Bridge:
                 matched.add(cell.id)
                 cell.session_id = sid
                 cell.window_id = window.window_id
-                # Agents with a boot command are likely still running
-                cell.status = "running" if cell.command else "idle"
+                # Awareness agents start as idle — hooks will update
+                # Non-awareness agents with a boot command assume running
+                if cell.agent_type:
+                    cell.status = "idle"
+                else:
+                    cell.status = "running" if cell.command else "idle"
                 log.info("Reconnected '%s' [%s] → session %s (window %s, "
                          "status=%s)",
                          cell.name, cell.group, sid, window.window_id,
