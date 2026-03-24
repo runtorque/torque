@@ -1,1 +1,6 @@
+__pycache__/
+*.pyc
 .loom/
+*.log
+.DS_Store
+state.json
