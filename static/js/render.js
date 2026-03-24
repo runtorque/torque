@@ -343,10 +343,10 @@ function renderAgentDetails(a) {
     h += `<div class="detail-row"><span class="detail-label">Activity</span><span class="detail-val">${esc(a.activity_detail)}</span></div>`;
   }
 
-  /* Worktree */
+  /* Branch — worktree branch takes priority, then regular git branch */
   if (a.worktree_branch) {
     const branch = a.worktree_branch.replace(/^loom\//, '');
-    h += `<div class="detail-row"><span class="detail-label">Branch</span><span class="detail-val detail-branch">\u2387 ${esc(branch)}</span></div>`;
+    h += `<div class="detail-row"><span class="detail-label">Branch</span><span class="detail-val detail-branch">\u2387 ${esc(branch)} <span class="detail-wt-tag">worktree</span></span></div>`;
     const diff = a.worktree_diff || {};
     if (diff.files) {
       h += `<div class="detail-row"><span class="detail-label">Changes</span><span class="detail-val">${diff.files} file${diff.files !== 1 ? 's' : ''} <span class="detail-ins">+${diff.insertions || 0}</span> <span class="detail-del">-${diff.deletions || 0}</span></span></div>`;
@@ -354,6 +354,8 @@ function renderAgentDetails(a) {
     if (a.worktree_checkpoints > 0) {
       h += `<div class="detail-row"><span class="detail-label">Checkpoints</span><span class="detail-val">${a.worktree_checkpoints}</span></div>`;
     }
+  } else if (a.current_branch) {
+    h += `<div class="detail-row"><span class="detail-label">Branch</span><span class="detail-val detail-branch">\u2387 ${esc(a.current_branch)}</span></div>`;
   }
 
   /* Directory */

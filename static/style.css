@@ -232,8 +232,8 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--text-dim);
 }
-/* Three-state status: idle (gray), working (green), disconnected (red) */
-.cell-status.idle          { background: var(--text-dim); }
+/* Three-state status: idle (gray blink), working (green pulse), disconnected (red) */
+.cell-status.idle          { background: var(--text-dim); animation: blink 3s ease-in-out infinite; }
 .cell-status.working       { background: var(--green); animation: pulse 1.8s ease-in-out infinite; }
 .cell-status.disconnected  { background: var(--red); }
 .cell-status.attention {
@@ -249,6 +249,10 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: .4; }
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .25; }
 }
 .cell-close {
   position: absolute; top: 2px; left: 2px;
@@ -339,6 +343,12 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
   white-space: nowrap;
 }
 .detail-branch { color: var(--accent); }
+.detail-wt-tag {
+  font-size: 8px; font-weight: 700;
+  color: var(--accent); background: rgba(88,166,255,.12);
+  padding: 1px 4px; border-radius: 3px;
+  letter-spacing: .03em; vertical-align: middle;
+}
 .detail-dir { color: var(--text-dim); }
 .detail-ins { color: var(--green); }
 .detail-del { color: var(--red); }
@@ -565,6 +575,28 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
   padding-right: 4px;
 }
 .gs-pane.active { display: block; }
+
+/* Sub-tabs (underline style, nested inside a pane) */
+.gs-subtabs {
+  display: flex; gap: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+  padding-bottom: 0;
+}
+.gs-subtab {
+  font-size: 9px; font-weight: 600;
+  color: var(--text-dim);
+  padding: 2px 0 5px;
+  border-bottom: 2px solid transparent;
+  transition: color .15s, border-color .15s;
+}
+.gs-subtab:hover { color: var(--text); }
+.gs-subtab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.gs-subpane { display: none; }
+.gs-subpane.active { display: block; }
 
 .gs-checkbox {
   display: flex !important; align-items: center; gap: 6px;

@@ -262,6 +262,21 @@ function switchGsTab(name) {
     t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.gs-pane').forEach(p =>
     p.classList.toggle('active', p.dataset.pane === name));
+  // Reset sub-tabs to first when switching main tabs
+  const pane = document.querySelector(`.gs-pane[data-pane="${name}"]`);
+  if (pane) {
+    const firstSub = pane.querySelector('.gs-subtab');
+    if (firstSub) switchGsSubTab(name, firstSub);
+  }
+}
+
+function switchGsSubTab(pane, btn) {
+  const container = btn.closest('.gs-pane');
+  container.querySelectorAll('.gs-subtab').forEach(t =>
+    t.classList.toggle('active', t === btn));
+  const target = btn.dataset.subtab;
+  container.querySelectorAll('.gs-subpane').forEach(p =>
+    p.classList.toggle('active', p.dataset.subpane === target));
 }
 
 function openGroupSettings(group) {

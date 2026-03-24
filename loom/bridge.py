@@ -112,8 +112,10 @@ class ITerm2Bridge:
                     except Exception:
                         log.debug("Could not read jobName for '%s'",
                                   cell.name)
-                    await self._resolve_git_info(cell)
                     self._start_terminal_monitors(cell)
+
+                # Resolve git info for all cell types
+                await self._resolve_git_info(cell)
 
                 # Re-install hooks for awareness agents (in case files
                 # were lost or working dir changed)
@@ -279,8 +281,14 @@ class ITerm2Bridge:
             except Exception:
                 log.exception("Failed to read initial path for '%s'",
                               cell.name)
-            await self._resolve_git_info(cell)
             self._start_terminal_monitors(cell)
+        else:
+            # For agents, seed current_path from directory for git resolution
+            if cell.directory and not cell.current_path:
+                cell.current_path = os.path.expanduser(cell.directory)
+
+        # Resolve git info for all cell types
+        await self._resolve_git_info(cell)
 
         self.state.save()
         self._start_prompt_monitor(cell)

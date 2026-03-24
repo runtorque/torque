@@ -147,69 +147,85 @@
 
     <!-- Agents tab -->
     <div class="gs-pane" data-pane="agents">
-      <label>Directory</label>
-      <input id="gs-agent-directory" placeholder="Same as group" autocomplete="off">
-      <label>Profile</label>
-      <select id="gs-agent-profile"></select>
-      <label>Shell</label>
-      <select id="gs-agent-shell">
-        <option value="">Same as group</option>
-        <option value="zsh">zsh</option>
-        <option value="bash">bash</option>
-        <option value="fish">fish</option>
-      </select>
-      <label>Tab color</label>
-      <div class="color-swatches" id="gs-agent-color-swatches"></div>
-      <label>Boot command <span class="label-hint">override default</span></label>
-      <input id="gs-agent-boot-cmd" placeholder="claude" autocomplete="off">
-      <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
-      <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
-      <label class="gs-checkbox">
-        <input id="gs-worktree" type="checkbox" onchange="_toggleWorktreeFields()"> Git worktree per agent
-        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Create a new git worktree and branch for each agent, so they can work on the same repo in parallel without conflicts.">?</span>
-      </label>
-      <div id="gs-wt-fields" style="display:none;padding-left:20px">
-        <label>Worktree directory <span class="label-hint">relative to repo root</span></label>
-        <input id="gs-wt-base-dir" placeholder=".loom/worktrees" autocomplete="off">
-        <label>Base branch <span class="label-hint">empty = current HEAD</span></label>
-        <input id="gs-wt-base-branch" placeholder="main" autocomplete="off">
-        <label class="gs-checkbox">
-          <input id="gs-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically commit all changes when an agent stops. Creates a checkpoint commit on the worktree branch.">?</span>
-        </label>
-        <label class="gs-checkbox">
-          <input id="gs-wt-merge-squash" type="checkbox" checked> Squash commits on merge
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Squash all worktree commits into a single commit when merging to main. Keeps the main branch history clean.">?</span>
-        </label>
-        <label>Additional merge instructions
-          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Extra instructions appended to the merge prompt sent to Claude. Use this to customize merge behavior, e.g. 'Use a conventional commit message' or 'Run tests after merging'.">?</span>
-        </label>
-        <textarea id="gs-wt-merge-instructions" rows="2" placeholder="e.g. Use a conventional commit message"></textarea>
+      <div class="gs-subtabs">
+        <button class="gs-subtab active" data-subtab="agent-general" onclick="switchGsSubTab('agents',this)">General</button>
+        <button class="gs-subtab" data-subtab="agent-worktree" onclick="switchGsSubTab('agents',this)">Worktree</button>
+        <button class="gs-subtab" data-subtab="agent-notifications" onclick="switchGsSubTab('agents',this)">Notifications</button>
       </div>
-      <label class="gs-checkbox">
-        <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch
-        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When relaunching an agent, resume the previous conversation instead of starting fresh. Currently supported for Claude Code.">?</span>
-      </label>
-      <label>Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
-      <input id="gs-agent-idle-timeout" type="number" min="0" max="60" value="5">
-      <label class="gs-checkbox">
-        <input id="gs-agent-always-custom" type="checkbox"> Always open custom dialog
-        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating an agent with default settings.">?</span>
-      </label>
-      <div class="gs-section-label" style="margin-top:12px;font-size:9px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;">Notifications</div>
-      <label class="gs-checkbox">
-        <input id="gs-notifications" type="checkbox"> Enable macOS notifications
-        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Send macOS notifications when agents in this group finish, encounter errors, or need attention. Notifications are batched over 5 seconds.">?</span>
-      </label>
-      <label class="gs-checkbox">
-        <input id="gs-notify-finish" type="checkbox" checked> Notify on finish
-      </label>
-      <label class="gs-checkbox">
-        <input id="gs-notify-error" type="checkbox" checked> Notify on error
-      </label>
-      <label class="gs-checkbox">
-        <input id="gs-notify-attention" type="checkbox" checked> Notify when needs attention
-      </label>
+
+      <!-- General sub-tab -->
+      <div class="gs-subpane active" data-subpane="agent-general">
+        <label>Directory</label>
+        <input id="gs-agent-directory" placeholder="Same as group" autocomplete="off">
+        <label>Profile</label>
+        <select id="gs-agent-profile"></select>
+        <label>Shell</label>
+        <select id="gs-agent-shell">
+          <option value="">Same as group</option>
+          <option value="zsh">zsh</option>
+          <option value="bash">bash</option>
+          <option value="fish">fish</option>
+        </select>
+        <label>Tab color</label>
+        <div class="color-swatches" id="gs-agent-color-swatches"></div>
+        <label>Boot command <span class="label-hint">override default</span></label>
+        <input id="gs-agent-boot-cmd" placeholder="claude" autocomplete="off">
+        <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
+        <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+        <label class="gs-checkbox">
+          <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When relaunching an agent, resume the previous conversation instead of starting fresh. Currently supported for Claude Code.">?</span>
+        </label>
+        <label>Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
+        <input id="gs-agent-idle-timeout" type="number" min="0" max="60" value="5">
+        <label class="gs-checkbox">
+          <input id="gs-agent-always-custom" type="checkbox"> Always open custom dialog
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating an agent with default settings.">?</span>
+        </label>
+      </div>
+
+      <!-- Worktree sub-tab -->
+      <div class="gs-subpane" data-subpane="agent-worktree">
+        <label class="gs-checkbox">
+          <input id="gs-worktree" type="checkbox" onchange="_toggleWorktreeFields()"> Git worktree per agent
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Create a new git worktree and branch for each agent, so they can work on the same repo in parallel without conflicts.">?</span>
+        </label>
+        <div id="gs-wt-fields" style="display:none;padding-left:20px">
+          <label>Worktree directory <span class="label-hint">relative to repo root</span></label>
+          <input id="gs-wt-base-dir" placeholder=".loom/worktrees" autocomplete="off">
+          <label>Base branch <span class="label-hint">empty = current HEAD</span></label>
+          <input id="gs-wt-base-branch" placeholder="main" autocomplete="off">
+          <label class="gs-checkbox">
+            <input id="gs-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically commit all changes when an agent stops. Creates a checkpoint commit on the worktree branch.">?</span>
+          </label>
+          <label class="gs-checkbox">
+            <input id="gs-wt-merge-squash" type="checkbox" checked> Squash commits on merge
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Squash all worktree commits into a single commit when merging to main. Keeps the main branch history clean.">?</span>
+          </label>
+          <label>Additional merge instructions
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Extra instructions appended to the merge prompt sent to Claude. Use this to customize merge behavior, e.g. 'Use a conventional commit message' or 'Run tests after merging'.">?</span>
+          </label>
+          <textarea id="gs-wt-merge-instructions" rows="2" placeholder="e.g. Use a conventional commit message"></textarea>
+        </div>
+      </div>
+
+      <!-- Notifications sub-tab -->
+      <div class="gs-subpane" data-subpane="agent-notifications">
+        <label class="gs-checkbox">
+          <input id="gs-notifications" type="checkbox"> Enable macOS notifications
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Send macOS notifications when agents in this group finish, encounter errors, or need attention. Notifications are batched over 5 seconds.">?</span>
+        </label>
+        <label class="gs-checkbox">
+          <input id="gs-notify-finish" type="checkbox" checked> Notify on finish
+        </label>
+        <label class="gs-checkbox">
+          <input id="gs-notify-error" type="checkbox" checked> Notify on error
+        </label>
+        <label class="gs-checkbox">
+          <input id="gs-notify-attention" type="checkbox" checked> Notify when needs attention
+        </label>
+      </div>
     </div>
 
     <!-- Terminals tab -->
