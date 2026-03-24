@@ -467,6 +467,9 @@ async def main(connection: iterm2.Connection):
                                         cell.session_id)
                                 cell.status = "stopped"
                                 cell.session_id = None
+                                # Clear session ID — the old session
+                                # may not exist (no prompts sent yet)
+                                cell.agent_session_id = ""
                                 env = {**gs.env_vars,
                                        **gs.agent_env_vars} or None
                                 shell = (gs.agent_shell
@@ -477,8 +480,25 @@ async def main(connection: iterm2.Connection):
             elif cmd == "worktree_remove":
                 cell = state.agents.get(data["id"])
                 if cell and cell.worktree_path:
+                    # Restore directory to original repo root
+                    repo_root = cell.worktree_repo_root
                     await worktree_mgr.remove(cell)
+                    if repo_root:
+                        cell.directory = repo_root
                     state.save()
+                    # Relaunch if requested by the UI
+                    if data.get("relaunch") and cell.cell_type == "agent":
+                        if cell.session_id:
+                            await bridge.close_session(cell.session_id)
+                        cell.status = "stopped"
+                        cell.session_id = None
+                        cell.agent_session_id = ""
+                        gs = state.get_group_settings(cell.group)
+                        env = {**gs.env_vars,
+                               **gs.agent_env_vars} or None
+                        shell = gs.agent_shell or gs.shell or ""
+                        await bridge.create_session(
+                            cell, env_vars=env, shell=shell)
 
             elif cmd == "worktree_checkpoint":
                 cell = state.agents.get(data["id"])

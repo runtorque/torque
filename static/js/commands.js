@@ -289,7 +289,7 @@ async function worktreeCreate(id) {
   if (!cell) return;
   if (cell.session_id) {
     // Agent is running — must relaunch to use the worktree
-    if (await showConfirm('Creating a worktree requires relaunching the agent. Continue?')) {
+    if (await showConfirm('Creating a worktree will restart the agent in a fresh session. The current conversation will be lost. Continue?')) {
       send({ cmd: 'worktree_create', id, relaunch: true });
     }
   } else {
@@ -313,11 +313,15 @@ async function worktreeRemove(id) {
   const cell = state.agents[id];
   if (!cell) return;
   const dirty = cell.worktree_dirty;
-  const msg = dirty
-    ? `Remove worktree for "${cell.name}"? It has uncommitted changes.`
-    : `Remove worktree for "${cell.name}"?`;
+  const hasCommits = (cell.worktree_checkpoints || 0) > 0;
+  const warnings = [];
+  if (hasCommits) warnings.push('has unmerged commits');
+  if (dirty) warnings.push('has uncommitted changes');
+  if (cell.session_id) warnings.push('agent will restart in a fresh session');
+  let msg = `Remove worktree for "${cell.name}"?`;
+  if (warnings.length) msg += ' ' + warnings.join(', ').replace(/^./, c => c.toUpperCase()) + '. All changes will be lost.';
   if (await showConfirm(msg)) {
-    send({ cmd: 'worktree_remove', id });
+    send({ cmd: 'worktree_remove', id, relaunch: !!cell.session_id });
   }
 }
 
