@@ -105,13 +105,15 @@ deps:
 	"$(ITERM2_PYTHON)" -m pip install aiohttp
 	@echo "Done. Using: $(ITERM2_PYTHON)"
 
-## run: Launch the script directly (iTerm2 must be running with Python API enabled)
+## run: Launch the script in the background (iTerm2 must be running with Python API enabled)
 run:
 	@if [ -z "$(ITERM2_PYTHON)" ]; then \
 		echo "Error: iTerm2 Python not found. Run make install first."; \
 		exit 1; \
 	fi
-	"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
+	@nohup "$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
+		>> "$(SCRIPT_DIR)/loom/loom.log" 2>&1 &
+	@echo "Loom started (PID $$!). Logs: $(SCRIPT_DIR)/loom/loom.log"
 
 ## stop: Kill any running loom instance (by port)
 stop:
