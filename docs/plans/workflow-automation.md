@@ -1,7 +1,7 @@
 # Implementation Plan: Workflow Automation (Phase 4a)
 
 **Roadmap phase**: 4 — Workflow Automation
-**Status**: Core implemented (templates + dispatch)
+**Status**: Implemented (Jinja2 templates, dispatch, UI picker)
 **Goal**: Make Loom a task runner, not just a session manager. A `loom dispatch` command combines agent creation, worktree setup, and prompt delivery into a single operation. Templates make these tasks repeatable.
 
 ---

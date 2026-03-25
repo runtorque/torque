@@ -119,9 +119,23 @@ With awareness, worktrees, and programmatic access in place, Loom can start runn
 
 ### Agent Templates ✅
 
-YAML templates in `.loom/templates/` define reusable agent configurations: boot command, tab color, environment variables, worktree settings, child terminals, and a prompt with `${TASK}` variable substitution. Templates layer on top of group settings — empty fields fall through to group defaults.
+YAML templates in `.loom/templates/` are rendered through Jinja2 as a whole — variables work anywhere in the file (names, directories, colors, prompts, env vars). Variables are auto-discovered from the Jinja2 AST with no declaration needed. Default values are extracted from `| default()` filters:
 
-Managed via the CLI: `loom template list`, `loom template show <name>`, `loom template create <name>`. Three starter templates ship with the project (`templates/` directory): `default`, `bugfix`, and `review`.
+```yaml
+name: {{ PROJECT | default('myapp') }}-agent
+
+agent:
+  name_prefix: fix
+  directory: "~/projects/{{ PROJECT | default('myapp') }}"
+  tab_color: "#f85149"
+
+prompt: |
+  Fix this bug in {{ PROJECT | default('myapp') }}:
+  {{ TASK }}
+  Run `{{ TEST_COMMAND | default('npm test') }}` to verify.
+```
+
+The toolbelt has a "From Template" option in the New Agent dropdown — a two-step modal that lists available templates and shows a form for their variables. Templates are also available via the CLI: `loom template list`, `loom template show <name>`, `loom template create <name>`. Three starters ship with the project: `default`, `bugfix`, and `review`.
 
 ### `loom dispatch` ✅
 
@@ -129,9 +143,10 @@ One command to create an agent from a template and send it a task:
 
 ```bash
 loom dispatch "Fix the login bug" --template bugfix --wait
+loom dispatch "Fix it" -t bugfix -v TEST_COMMAND=pytest --wait
 ```
 
-Creates the agent, waits for it to boot, renders the prompt with `${TASK}` substitution, sends it, and optionally blocks until the agent finishes (`--wait`). Group and directory are auto-detected from session context. Agent name is derived from the template prefix and a task slug.
+Creates the agent, renders the entire template through Jinja2 with the provided variables, sends the prompt, and optionally blocks until the agent finishes (`--wait`). Group and directory are auto-detected from session context. Agent name is derived from the template prefix and a task slug. Variables are passed via `-v KEY=VALUE`.
 
 ### Pipeline Composition
 
@@ -160,8 +175,6 @@ Since `loom dispatch` is scriptable, simple triggers work today via cron or CI c
 
 ### Remaining Work
 
-- **Template parameters** — custom variables beyond `${TASK}` (e.g., `--param issue=123`)
-- **Toolbelt template picker** — dropdown in the "Add Agent" modal that applies a template's settings
 - **Pipeline engine** — declarative YAML pipelines with DAG execution
 - **Event-driven triggers** — built-in webhook/cron/CI trigger system
 - **Retry & fallback policies** — configurable per template or pipeline step

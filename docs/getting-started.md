@@ -62,16 +62,17 @@ Create an agent from a template and send it a task in one command:
 
 ```bash
 loom dispatch "Fix the login bug" --template bugfix --wait
+loom dispatch "Fix it" -t bugfix -v TEST_COMMAND=pytest --wait
 ```
 
-Templates are YAML files in `.loom/templates/`. Copy the starters into your repo:
+Templates are Jinja2+YAML files in `.loom/templates/`. Variables work anywhere in the file and are auto-discovered — no declaration needed. Defaults come from `| default()` filters. Copy the starters into your repo:
 
 ```bash
 mkdir -p .loom/templates
 cp templates/*.yaml .loom/templates/
 ```
 
-Manage templates with `loom template list`, `loom template show <name>`, and `loom template create <name>`.
+Manage templates with `loom template list`, `loom template show <name>`, and `loom template create <name>`. The toolbelt also has a "From Template" option in the New Agent dropdown.
 
 Run `loom --help` or `loom <command> --help` for the full reference.
 
