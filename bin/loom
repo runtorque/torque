@@ -357,6 +357,284 @@ def format_agent_detail(cell, children_map, agents):
 
 
 # ---------------------------------------------------------------------------
+# Minimal YAML parser (stdlib only, covers the template subset)
+# ---------------------------------------------------------------------------
+
+def _yaml_parse_value(raw):
+    """Parse a scalar YAML value."""
+    if raw == "" or raw == "~" or raw == "null":
+        return None
+    if raw == "true" or raw == "True":
+        return True
+    if raw == "false" or raw == "False":
+        return False
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    # Strip surrounding quotes
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
+        return raw[1:-1]
+    return raw
+
+
+def parse_yaml(text):
+    """Parse a simple YAML document into a Python dict.
+
+    Supports: nested dicts (indentation), lists of dicts (- key: val),
+    scalars (strings, bools, ints), block scalars (|), quoted strings,
+    and comments (#). Does NOT support anchors, tags, flow style, or
+    multi-document streams.
+    """
+    lines = text.split("\n")
+    return _yaml_parse_block(lines, 0, 0)[0]
+
+
+def _yaml_parse_block(lines, idx, base_indent):
+    """Parse a YAML block starting at line idx with given base indent.
+    Returns (result_dict_or_list, next_line_idx).
+    """
+    result = {}
+    while idx < len(lines):
+        line = lines[idx]
+        stripped = line.lstrip()
+
+        # Skip blanks and comments
+        if not stripped or stripped.startswith("#"):
+            idx += 1
+            continue
+
+        indent = len(line) - len(stripped)
+        if indent < base_indent:
+            break  # dedented — return to parent
+
+        # List item
+        if stripped.startswith("- "):
+            # We're in a list — switch to list parsing
+            lst, idx = _yaml_parse_list(lines, idx, indent)
+            return lst, idx
+
+        # Key: value pair
+        colon_pos = stripped.find(":")
+        if colon_pos == -1:
+            idx += 1
+            continue
+
+        key = stripped[:colon_pos].strip()
+        rest = stripped[colon_pos + 1:].strip()
+
+        # Strip inline comments (but not inside quoted strings)
+        if rest and rest[0] not in ('"', "'", "|", ">"):
+            comment_pos = rest.find(" #")
+            if comment_pos >= 0:
+                rest = rest[:comment_pos].strip()
+
+        if rest == "|":
+            # Block scalar — collect indented lines
+            val, idx = _yaml_parse_block_scalar(lines, idx + 1, indent)
+            result[key] = val
+        elif rest == "":
+            # Nested mapping or list
+            idx += 1
+            child, idx = _yaml_parse_block(lines, idx, indent + 1)
+            result[key] = child
+        else:
+            result[key] = _yaml_parse_value(rest)
+            idx += 1
+
+    return result, idx
+
+
+def _yaml_parse_list(lines, idx, base_indent):
+    """Parse a YAML list starting at line idx."""
+    result = []
+    while idx < len(lines):
+        line = lines[idx]
+        stripped = line.lstrip()
+
+        if not stripped or stripped.startswith("#"):
+            idx += 1
+            continue
+
+        indent = len(line) - len(stripped)
+        if indent < base_indent:
+            break
+        if indent > base_indent:
+            idx += 1
+            continue
+
+        if not stripped.startswith("- "):
+            break
+
+        item_str = stripped[2:]  # after "- "
+
+        # Check if it's "- key: val" (dict item)
+        colon_pos = item_str.find(":")
+        if colon_pos > 0:
+            # Dict item — parse this and any continuation lines
+            item = {}
+            key = item_str[:colon_pos].strip()
+            rest = item_str[colon_pos + 1:].strip()
+            if rest:
+                item[key] = _yaml_parse_value(rest)
+            else:
+                item[key] = None
+            idx += 1
+
+            # Collect additional keys at deeper indent
+            while idx < len(lines):
+                cline = lines[idx]
+                cstripped = cline.lstrip()
+                if not cstripped or cstripped.startswith("#"):
+                    idx += 1
+                    continue
+                cindent = len(cline) - len(cstripped)
+                if cindent <= base_indent:
+                    break
+                cp = cstripped.find(":")
+                if cp > 0:
+                    ck = cstripped[:cp].strip()
+                    cv = cstripped[cp + 1:].strip()
+                    item[ck] = _yaml_parse_value(cv) if cv else None
+                idx += 1
+
+            result.append(item)
+        else:
+            # Simple scalar list item
+            result.append(_yaml_parse_value(item_str))
+            idx += 1
+
+    return result, idx
+
+
+def _yaml_parse_block_scalar(lines, idx, parent_indent):
+    """Parse a YAML block scalar (lines after |)."""
+    collected = []
+    block_indent = None
+    while idx < len(lines):
+        line = lines[idx]
+        if line.strip() == "":
+            collected.append("")
+            idx += 1
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= parent_indent:
+            break
+        if block_indent is None:
+            block_indent = indent
+        collected.append(line[block_indent:] if indent >= block_indent
+                         else line.lstrip())
+        idx += 1
+    # Strip trailing blank lines
+    while collected and collected[-1] == "":
+        collected.pop()
+    return "\n".join(collected), idx
+
+
+# ---------------------------------------------------------------------------
+# Template utilities
+# ---------------------------------------------------------------------------
+
+def find_templates_dir():
+    """Walk up from cwd to find .loom/templates/. Returns path or None."""
+    d = os.getcwd()
+    while True:
+        candidate = os.path.join(d, ".loom", "templates")
+        if os.path.isdir(candidate):
+            return candidate
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+
+
+def load_template(name, templates_dir=None):
+    """Load a template by name. Returns parsed dict or dies."""
+    if not templates_dir:
+        templates_dir = find_templates_dir()
+    if not templates_dir:
+        die("No .loom/templates/ directory found.\n"
+            "  Create it in your repo root, or copy starter templates:\n"
+            "    mkdir -p .loom/templates && cp templates/*.yaml .loom/templates/")
+
+    # Try with and without .yaml extension
+    for suffix in ("", ".yaml", ".yml"):
+        path = os.path.join(templates_dir, name + suffix)
+        if os.path.isfile(path):
+            with open(path) as f:
+                return parse_yaml(f.read())
+
+    available = list_templates(templates_dir)
+    if available:
+        names = ", ".join(t["name"] for t in available)
+        die(f"Template \"{name}\" not found in {templates_dir}\n"
+            f"  Available: {names}")
+    else:
+        die(f"Template \"{name}\" not found in {templates_dir}\n"
+            "  Directory is empty")
+
+
+def list_templates(templates_dir=None):
+    """List all templates. Returns list of {name, description}."""
+    if not templates_dir:
+        templates_dir = find_templates_dir()
+    if not templates_dir:
+        return []
+
+    result = []
+    for fname in sorted(os.listdir(templates_dir)):
+        if not fname.endswith((".yaml", ".yml")):
+            continue
+        name = fname.rsplit(".", 1)[0]
+        path = os.path.join(templates_dir, fname)
+        try:
+            with open(path) as f:
+                tpl = parse_yaml(f.read())
+            desc = tpl.get("description", "")
+        except Exception:
+            desc = "(parse error)"
+        result.append({"name": name, "description": desc})
+    return result
+
+
+def render_prompt(template, task, agent_name="", agent_id="",
+                  branch="", directory=""):
+    """Render a template's prompt with variable substitution."""
+    prompt = template.get("prompt", "${TASK}")
+    prompt = prompt.replace("${TASK}", task)
+    prompt = prompt.replace("${AGENT_NAME}", agent_name)
+    prompt = prompt.replace("${AGENT_ID}", agent_id)
+    prompt = prompt.replace("${BRANCH}", branch)
+    prompt = prompt.replace("${DIRECTORY}", directory)
+    return prompt
+
+
+def wait_for_boot(cell_id, port, timeout=15):
+    """Poll until agent has a session and is running."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        time.sleep(0.5)
+        state_data = get_state(port)
+        cell = state_data.get("agents", {}).get(cell_id)
+        if cell and cell.get("session_id") and cell.get("status") != "stopped":
+            return cell
+    return None
+
+
+def task_slug(description, max_len=20):
+    """Generate a short slug from a task description."""
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "-", description.lower()).strip("-")
+    if len(slug) > max_len:
+        slug = slug[:max_len].rsplit("-", 1)[0]
+    return slug
+
+
+# ---------------------------------------------------------------------------
 # Subcommand handlers
 # ---------------------------------------------------------------------------
 
@@ -769,6 +1047,183 @@ def cmd_worktree_rollback(args):
     print(f"Rolled back \"{cell['name']}\" to {args.sha[:8]}")
 
 
+# -- Dispatch ---------------------------------------------------------------
+
+def cmd_dispatch(args):
+    state_data = get_state(args.port)
+
+    # Resolve group
+    group = args.group
+    if not group:
+        _cell, _parent, group = detect_context(state_data)
+        if not group:
+            die("--group (-g) is required\n"
+                "  (auto-detect failed — not in a Loom-managed session)")
+
+    # Load template
+    tpl = {}
+    tpl_agent = {}
+    if args.template:
+        tpl = load_template(args.template)
+        tpl_agent = tpl.get("agent", {})
+
+    # Resolve agent name
+    if args.name:
+        agent_name = args.name
+    elif tpl_agent.get("name_prefix"):
+        slug = task_slug(args.description)
+        agent_name = f"{tpl_agent['name_prefix']}-{slug}"
+    else:
+        slug = task_slug(args.description)
+        agent_name = slug or "agent"
+
+    # Build add_agent payload
+    kwargs = {"name": agent_name, "group": group}
+    if args.command or tpl_agent.get("command"):
+        kwargs["command"] = args.command or tpl_agent.get("command")
+    if args.directory or tpl_agent.get("directory"):
+        kwargs["directory"] = args.directory or tpl_agent.get("directory")
+    if tpl_agent.get("profile"):
+        kwargs["profile"] = tpl_agent["profile"]
+    if tpl_agent.get("shell"):
+        kwargs["shell"] = tpl_agent["shell"]
+    if tpl_agent.get("tab_color"):
+        kwargs["tab_color"] = tpl_agent["tab_color"]
+    if tpl_agent.get("env_vars"):
+        kwargs["env_vars"] = tpl_agent["env_vars"]
+
+    # Create agent
+    resp = api_call("add_agent", port=args.port, **kwargs)
+    data = check_ok(resp)
+
+    # Find the new agent in the returned state
+    agents = data.get("agents", {})
+    match = [c for c in agents.values()
+             if c["name"] == agent_name and c["group"] == group]
+    if not match:
+        die("Agent creation succeeded but could not find it in state")
+    cell = match[-1]
+    cell_id = cell["id"]
+    print(f"Agent \"{agent_name}\" created (id: {cell_id})")
+
+    if args.no_prompt:
+        return
+
+    # Wait for agent to boot
+    booted = wait_for_boot(cell_id, args.port)
+    if not booted:
+        die("Agent failed to boot within 15 seconds")
+
+    # Small delay for the boot command to initialize
+    time.sleep(1.5)
+
+    # Render and send prompt
+    prompt = render_prompt(
+        tpl, args.description,
+        agent_name=agent_name, agent_id=cell_id,
+        branch=booted.get("worktree_branch", ""),
+        directory=booted.get("directory", ""),
+    )
+    if not prompt.endswith("\r") and not prompt.endswith("\n"):
+        prompt += "\r"
+    resp = api_call("send_text", port=args.port, id=cell_id, text=prompt)
+    check_ok(resp)
+    print(f"Prompt sent to \"{agent_name}\"")
+
+    if args.wait:
+        rc = wait_for_idle(cell_id, agent_name, args.port)
+        sys.exit(rc)
+
+
+# -- Template ---------------------------------------------------------------
+
+def cmd_template_list(args):
+    templates = list_templates()
+    if not templates:
+        tdir = find_templates_dir()
+        if tdir:
+            print(f"No templates found in {tdir}")
+        else:
+            print("No .loom/templates/ directory found")
+            print("  Create it in your repo root and add .yaml files")
+        return
+
+    if args.json:
+        print(json.dumps(templates, indent=2))
+        return
+
+    print(f"{_bold('Templates')}  {_dim(find_templates_dir())}\n")
+    for t in templates:
+        print(f"  {t['name']:<20} {_dim(t['description'])}")
+
+
+def cmd_template_show(args):
+    tpl = load_template(args.name)
+    if args.json:
+        print(json.dumps(tpl, indent=2))
+    else:
+        # Pretty-print as indented key-value pairs
+        _print_dict(tpl)
+
+
+def _print_dict(d, indent=0):
+    """Pretty-print a dict with indentation."""
+    prefix = "  " * indent
+    for k, v in d.items():
+        if isinstance(v, dict):
+            print(f"{prefix}{_bold(k)}:")
+            _print_dict(v, indent + 1)
+        elif isinstance(v, list):
+            print(f"{prefix}{_bold(k)}:")
+            for item in v:
+                if isinstance(item, dict):
+                    first = True
+                    for ik, iv in item.items():
+                        marker = "- " if first else "  "
+                        print(f"{prefix}  {marker}{ik}: {iv}")
+                        first = False
+                else:
+                    print(f"{prefix}  - {item}")
+        elif isinstance(v, str) and "\n" in v:
+            print(f"{prefix}{_bold(k)}: |")
+            for line in v.split("\n"):
+                print(f"{prefix}  {line}")
+        else:
+            print(f"{prefix}{_bold(k)}: {v}")
+
+
+def cmd_template_create(args):
+    tdir = find_templates_dir()
+    if not tdir:
+        # Create .loom/templates/ in the repo root (or cwd)
+        root = os.getcwd()
+        tdir = os.path.join(root, ".loom", "templates")
+        os.makedirs(tdir, exist_ok=True)
+        print(f"Created {tdir}")
+
+    path = os.path.join(tdir, f"{args.name}.yaml")
+    if os.path.exists(path):
+        die(f"Template \"{args.name}\" already exists at {path}")
+
+    starter = f"""name: {args.name}
+description: ""
+
+agent:
+  name_prefix: {args.name}
+  # command: claude
+  # tab_color: "#f85149"
+
+# worktree: true
+
+prompt: |
+  ${{TASK}}
+"""
+    with open(path, "w") as f:
+        f.write(starter)
+    print(f"Created {path}")
+    print(f"  Edit it, then run: loom dispatch \"your task\" --template {args.name}")
+
+
 # -- Logs -------------------------------------------------------------------
 
 def cmd_logs(args):
@@ -950,6 +1405,40 @@ def build_parser():
     p.add_argument("identifier", help="Agent ID or name")
     p.add_argument("sha", help="Commit SHA to rollback to")
     p.set_defaults(func=cmd_worktree_rollback)
+
+    # -- dispatch -----------------------------------------------------------
+    p = sub.add_parser("dispatch", aliases=["d"],
+                       help="Create agent from template and send prompt")
+    p.add_argument("description", help="Task description (sent as prompt)")
+    p.add_argument("-t", "--template", help="Template name")
+    p.add_argument("-g", "--group",
+                   help="Target group (auto-detected if in a Loom session)")
+    p.add_argument("-n", "--name", help="Agent name override")
+    p.add_argument("-c", "--command", help="Boot command override")
+    p.add_argument("-d", "--directory", help="Working directory override")
+    p.add_argument("-w", "--wait", action="store_true",
+                   help="Wait for the agent to finish")
+    p.add_argument("--no-prompt", action="store_true",
+                   help="Create agent but don't send a prompt")
+    p.set_defaults(func=cmd_dispatch)
+
+    # -- template -----------------------------------------------------------
+    tmpl = sub.add_parser("template", aliases=["tpl"],
+                          help="Template management")
+    tmpl.set_defaults(func=None, _sub_parser=tmpl)
+    tmpl_sub = tmpl.add_subparsers(dest="template_cmd")
+
+    p = tmpl_sub.add_parser("list", aliases=["ls"],
+                            help="List available templates")
+    p.set_defaults(func=cmd_template_list)
+
+    p = tmpl_sub.add_parser("show", help="Show template contents")
+    p.add_argument("name", help="Template name")
+    p.set_defaults(func=cmd_template_show)
+
+    p = tmpl_sub.add_parser("create", help="Create a starter template")
+    p.add_argument("name", help="Template name")
+    p.set_defaults(func=cmd_template_create)
 
     # -- logs ---------------------------------------------------------------
     p = sub.add_parser("logs", help="Tail daemon log")

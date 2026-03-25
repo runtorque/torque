@@ -1,0 +1,13 @@
+name: review
+description: Review code changes
+
+agent:
+  name_prefix: review
+  tab_color: "#a371f7"
+
+prompt: |
+  You are reviewing code. Here is the task:
+
+  ${TASK}
+
+  Be thorough. Check for bugs, security issues, and style problems.

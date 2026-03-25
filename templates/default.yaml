@@ -1,0 +1,8 @@
+name: default
+description: General-purpose agent
+
+agent:
+  name_prefix: agent
+
+prompt: |
+  ${TASK}

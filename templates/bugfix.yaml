@@ -1,0 +1,18 @@
+name: bugfix
+description: Fix a bug in an isolated worktree
+
+agent:
+  name_prefix: fix
+  tab_color: "#f85149"
+
+worktree: true
+
+prompt: |
+  You are fixing a bug. Here is the task:
+
+  ${TASK}
+
+  After fixing, run the test suite to verify your fix works.
+
+terminals:
+  - name: tests

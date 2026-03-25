@@ -1,0 +1,256 @@
+# Implementation Plan: Workflow Automation (Phase 4a)
+
+**Roadmap phase**: 4 — Workflow Automation
+**Status**: Planned
+**Goal**: Make Loom a task runner, not just a session manager. A `loom dispatch` command combines agent creation, worktree setup, and prompt delivery into a single operation. Templates make these tasks repeatable.
+
+---
+
+## The Problem
+
+Creating an agent for a task today requires multiple steps: create the agent, wait for it to boot, then send it a prompt. If the group has worktrees enabled, you also need to wait for the worktree to be created. And if you want specific settings (different command, env vars, a particular directory), you either configure the group settings or pass flags every time.
+
+For recurring workflows — bug fixes, code reviews, dependency updates — you end up repeating the same setup. There's no way to say "spin up my standard bug-fix agent and tell it to fix this issue."
+
+## Design Principles
+
+1. **Templates are data, not code** — A template is a JSON file with pre-filled agent settings. No scripting language, no conditionals, no Turing-completeness. Complex workflows are shell scripts that call `loom dispatch`.
+2. **`loom dispatch` is the entry point** — One command that creates an agent from a template and sends it a prompt. It composes existing primitives (`add_agent` + `send_text` + `wait_for_idle`).
+3. **Templates layer on top of GroupSettings** — Templates don't replace group settings. They provide per-task overrides. The resolution cascade is: template field → group setting → system default.
+4. **No new server commands for v1** — Templates are resolved client-side in the CLI. The server receives the same `add_agent` and `send_text` payloads it already handles. This keeps the server simple and templates a CLI-only concept initially.
+
+---
+
+## Architecture
+
+```
+loom dispatch "Fix the login bug" --template bugfix -g Backend
+  │
+  │  1. Load template from .loom/templates/bugfix.yaml
+  │  2. Merge template fields with CLI flags
+  │
+  ├──► POST /api/cmd  {"cmd": "add_agent", ...}
+  │    Server creates agent + worktree + auto-terminals
+  │    Returns state with new agent ID
+  │
+  ├──► Poll until agent has a session_id and status != "stopped"
+  │    (agent is booted and ready to receive input)
+  │
+  ├──► POST /api/cmd  {"cmd": "send_text", id, text: rendered_prompt}
+  │    Sends the task prompt to the agent
+  │
+  └──► (if --wait) Poll until turn completes, print summary
+```
+
+Templates stay in the CLI layer. The server is unaware of them — it just receives the resolved fields. This means templates work immediately without a server deploy.
+
+---
+
+## Template Format
+
+Templates live in `.loom/templates/` relative to the git repo root (same convention as `.loom/worktrees/`). Each template is a YAML file.
+
+```yaml
+name: bugfix
+description: Fix a bug with a worktree and test runner
+
+agent:
+  name_prefix: fix
+  command: claude
+  tab_color: "#f85149"
+
+worktree: true
+
+prompt: |
+  You are fixing a bug. Here is the task:
+
+  ${TASK}
+
+  After fixing, run the test suite to verify.
+
+terminals:
+  - name: tests
+```
+
+### Field reference
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Template identifier (matches filename without `.yaml`) |
+| `description` | string | Human-readable description for `loom template list` |
+| `agent.name_prefix` | string | Agent name prefix. Full name: `{prefix}-{short_id}` or `{prefix}-{task_slug}` |
+| `agent.command` | string | Boot command override. Empty = use group default |
+| `agent.directory` | string | Working directory override. Empty = use group default |
+| `agent.profile` | string | iTerm2 profile override |
+| `agent.shell` | string | Shell override |
+| `agent.tab_color` | string | Hex color override |
+| `agent.env_vars` | dict | Additional env vars (merged on top of group defaults) |
+| `worktree` | bool | Create a git worktree for this agent (overrides group setting) |
+| `prompt` | string | Prompt template. `${TASK}` is replaced with the task description |
+| `terminals` | list | Child terminals to create alongside the agent |
+| `terminals[].name` | string | Terminal name |
+| `terminals[].command` | string | Boot command for the terminal |
+| `terminals[].directory` | string | Working directory (empty = same as agent) |
+| `terminals[].init_script` | string | Init script path |
+
+### Template resolution
+
+Fields cascade: **CLI flag → template field → group setting → system default**.
+
+An empty string in a template field means "fall through to group settings." This lets templates be sparse — a review template might only set `prompt` and `tab_color`, inheriting everything else from the group.
+
+### Prompt interpolation
+
+The `prompt` field supports variable substitution:
+
+| Variable | Source |
+|---|---|
+| `${TASK}` | The task description from `loom dispatch "<description>"` |
+| `${AGENT_NAME}` | The generated agent name |
+| `${AGENT_ID}` | The agent's 8-char ID |
+| `${BRANCH}` | The worktree branch name (empty if no worktree) |
+| `${DIRECTORY}` | The agent's working directory |
+
+Only `${TASK}` is essential. The others are conveniences for prompts that reference agent metadata.
+
+---
+
+## CLI Commands
+
+### `loom dispatch`
+
+The primary entry point for template-based agent creation.
+
+```
+loom dispatch <description> [flags]
+
+Arguments:
+  description              Task description (sent as the prompt)
+
+Flags:
+  -t, --template NAME      Template name (looks in .loom/templates/)
+  -g, --group GROUP        Target group (auto-detected if omitted)
+  -n, --name NAME          Agent name override
+  -d, --directory DIR      Working directory override
+  -w, --wait               Wait for the agent to finish
+  --no-prompt              Create agent but don't send a prompt
+```
+
+**Examples:**
+
+```bash
+# Simple: create agent, send prompt, wait for result
+loom dispatch "Fix the login bug in auth.py" --wait
+
+# With template: use the bugfix template
+loom dispatch "Fix the login bug" --template bugfix --wait
+
+# Override name and directory
+loom dispatch "Review PR #42" -t review -n pr-42-review -d ~/projects/app
+
+# Fire and forget (no --wait)
+loom dispatch "Update all dependencies to latest"
+```
+
+**Behavior without `--template`:** Creates a plain agent with group defaults and sends the description as the prompt. Equivalent to `loom agent add` + `loom send`, but in one step.
+
+### `loom template`
+
+Template management commands.
+
+```
+loom template list                    # list available templates
+loom template show <name>             # show template contents
+loom template create <name>           # create a template interactively
+```
+
+`loom template list` scans `.loom/templates/` and shows name + description for each. `loom template show` pretty-prints the JSON. `loom template create` writes a starter template file.
+
+---
+
+## Implementation Steps
+
+### Step 1: Template loader
+
+**File**: `bin/loom` (new functions)
+
+- `find_templates_dir()` — walk up from cwd to find `.loom/templates/`, return path or None
+- `load_template(name)` — read and parse `.loom/templates/{name}.yaml`, return dict
+- `list_templates()` — scan dir, return list of `{name, description}`
+- `render_prompt(template, task, agent_name, agent_id, branch, directory)` — substitute `${TASK}` etc.
+
+### Step 2: `loom dispatch` command
+
+**File**: `bin/loom` (new subcommand)
+
+Sequence:
+1. Load template (if `--template` given)
+2. Resolve agent name: `--name` flag → `{template.name_prefix}-{task_slug}` → auto-generated
+3. Resolve group: `--group` flag → context detection → die
+4. Build `add_agent` payload, merging template fields with CLI flags
+5. Call `add_agent` API
+6. Poll state until the new agent has `session_id` and `status != "stopped"` (agent booted)
+7. Render prompt with variable substitution
+8. Call `send_text` API
+9. If `--wait`: call `wait_for_idle`
+
+### Step 3: `loom template` commands
+
+**File**: `bin/loom` (new subcommands)
+
+- `loom template list` — scan `.loom/templates/`, print table
+- `loom template show <name>` — pretty-print YAML
+- `loom template create <name>` — write a starter template to `.loom/templates/{name}.yaml`
+
+### Step 4: Built-in starter templates
+
+**Files**: `templates/` directory in the repo (shipped as examples, not auto-installed)
+
+Three starter templates in YAML format: `default.yaml`, `bugfix.yaml`, `review.yaml`.
+
+Users copy these into their project's `.loom/templates/` and customize.
+
+### Step 5: Agent boot readiness
+
+After `add_agent`, the CLI needs to wait for the agent to be ready before sending the prompt. The agent isn't ready until the iTerm2 session exists and the boot command has been sent.
+
+**Approach**: Poll state every 500ms until the agent's `session_id` is non-empty and `status` is not `"stopped"`. Cap at 15 seconds. This is fast — session creation takes < 1 second typically.
+
+```python
+def wait_for_boot(cell_id, port, timeout=15):
+    """Poll until agent has a session and is running."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        time.sleep(0.5)
+        state = get_state(port)
+        cell = state.get("agents", {}).get(cell_id)
+        if cell and cell.get("session_id") and cell.get("status") != "stopped":
+            return cell
+    return None
+```
+
+A short additional delay (~1s) after boot detection ensures the shell and boot command have had time to initialize before we send the prompt. This matters for Claude Code, which needs a moment to start up.
+
+---
+
+## What We're NOT Building (Yet)
+
+- **Server-side template support** — Templates are CLI-only for now. The toolbelt's "Add Agent" modal already has group settings as its template mechanism. Merging these later is possible but premature.
+- **Template inheritance** — Templates are flat. No `extends: base-template` chains.
+- **Conditional logic in prompts** — `${TASK}` substitution only. No `{{#if worktree}}` blocks. Use separate templates for different scenarios.
+- **Pipeline composition** — Multi-step agent chains are shell scripts, not a Loom concept. `loom dispatch --wait && loom dispatch --wait` is a pipeline.
+- **Template parameters** — No `loom dispatch --param issue=123` for custom variables. The task description covers most cases. Parameters are a Phase 4b addition if needed.
+- **Retry / fallback** — Deferred. Retry is `loom dispatch --wait || loom dispatch --wait` in a shell script for now.
+- **Toolbelt template picker** — A dropdown in the "Add Agent" modal that applies a template's settings. Nice to have, but the modal already has all the fields. Defer.
+
+---
+
+## File Changes Summary
+
+| File | Change |
+|---|---|
+| `bin/loom` | Add `task` and `template` subcommands, template loader, `wait_for_boot`, prompt rendering |
+| `templates/default.yaml` | New — starter template |
+| `templates/bugfix.yaml` | New — bug fix template |
+| `templates/review.yaml` | New — code review template |
+| `docs/roadmap.md` | Update Phase 4 status |
