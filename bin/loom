@@ -1295,6 +1295,106 @@ def cmd_logs(args):
 
 
 # ---------------------------------------------------------------------------
+# Board commands
+# ---------------------------------------------------------------------------
+
+def cmd_board_list(args):
+    st = get_state(args.port)
+    lanes = st.get("board_lanes", [])
+    tasks = st.get("board_tasks", {})
+    lane_filter = args.lane if hasattr(args, "lane") and args.lane else None
+
+    if args.json:
+        import json as _j
+        print(_j.dumps({"lanes": lanes, "tasks": tasks}, indent=2))
+        return
+
+    for lane in lanes:
+        if lane_filter and lane.lower() != lane_filter.lower():
+            continue
+        lane_tasks = sorted(
+            [t for t in tasks.values() if t["lane"] == lane],
+            key=lambda t: t.get("position", 0),
+        )
+        print(f"\n  {_bold(lane)} ({len(lane_tasks)})")
+        if not lane_tasks:
+            print(f"    {_dim('(empty)')}")
+        for t in lane_tasks:
+            agent_str = ""
+            if t.get("agent_id"):
+                a = st.get("agents", {}).get(t["agent_id"])
+                if a:
+                    agent_str = f" {_cyan('→ ' + a['name'])}"
+            tid = _dim(t["id"][:6])
+            print(f"    {tid}  {t['title']}{agent_str}")
+    print()
+
+
+def cmd_board_add(args):
+    resp = api_call("board_add_task", port=args.port,
+                    title=args.title, lane=args.lane or "")
+    data = check_ok(resp)
+    if args.json:
+        import json as _j
+        print(_j.dumps(data, indent=2))
+    else:
+        print(f"Task added to {args.lane or 'first lane'}")
+
+
+def cmd_board_move(args):
+    st = get_state(args.port)
+    tasks = st.get("board_tasks", {})
+
+    # Resolve task by ID prefix or title match
+    match = None
+    identifier = args.identifier
+    for tid, t in tasks.items():
+        if tid.startswith(identifier) or t["title"].lower() == identifier.lower():
+            match = t
+            break
+    if not match:
+        die(f"Task not found: {identifier}")
+
+    resp = api_call("board_move_task", port=args.port,
+                    id=match["id"], lane=args.lane)
+    check_ok(resp)
+    print(f"Moved \"{match['title']}\" to {args.lane}")
+
+
+def cmd_board_remove(args):
+    st = get_state(args.port)
+    tasks = st.get("board_tasks", {})
+
+    match = None
+    identifier = args.identifier
+    for tid, t in tasks.items():
+        if tid.startswith(identifier) or t["title"].lower() == identifier.lower():
+            match = t
+            break
+    if not match:
+        die(f"Task not found: {identifier}")
+
+    resp = api_call("board_remove_task", port=args.port, id=match["id"])
+    check_ok(resp)
+    print(f"Removed \"{match['title']}\"")
+
+
+def cmd_board_lanes(args):
+    st = get_state(args.port)
+    lanes = st.get("board_lanes", [])
+    tasks = st.get("board_tasks", {})
+
+    if args.json:
+        import json as _j
+        print(_j.dumps(lanes, indent=2))
+        return
+
+    for lane in lanes:
+        cnt = sum(1 for t in tasks.values() if t["lane"] == lane)
+        print(f"  {lane} ({cnt})")
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -1500,6 +1600,36 @@ def build_parser():
     p = tmpl_sub.add_parser("create", help="Create a starter template")
     p.add_argument("name", help="Template name")
     p.set_defaults(func=cmd_template_create)
+
+    # -- board --------------------------------------------------------------
+    brd = sub.add_parser("board", aliases=["bd"],
+                         help="Task board management")
+    brd.set_defaults(func=cmd_board_list, _sub_parser=brd)
+    brd_sub = brd.add_subparsers(dest="board_cmd")
+
+    p = brd_sub.add_parser("list", aliases=["ls"],
+                            help="List tasks by lane")
+    p.add_argument("-l", "--lane", help="Filter by lane name")
+    p.set_defaults(func=cmd_board_list)
+
+    p = brd_sub.add_parser("add", help="Add a task")
+    p.add_argument("title", help="Task title")
+    p.add_argument("-l", "--lane", help="Target lane (default: first lane)")
+    p.set_defaults(func=cmd_board_add)
+
+    p = brd_sub.add_parser("move", help="Move a task to a lane")
+    p.add_argument("identifier", help="Task ID prefix or title")
+    p.add_argument("-l", "--lane", required=True,
+                   help="Target lane")
+    p.set_defaults(func=cmd_board_move)
+
+    p = brd_sub.add_parser("remove", aliases=["rm"],
+                            help="Remove a task")
+    p.add_argument("identifier", help="Task ID prefix or title")
+    p.set_defaults(func=cmd_board_remove)
+
+    p = brd_sub.add_parser("lanes", help="List lanes")
+    p.set_defaults(func=cmd_board_lanes)
 
     # -- logs ---------------------------------------------------------------
     p = sub.add_parser("logs", help="Tail daemon log")

@@ -704,6 +704,60 @@ async def main(connection: iterm2.Connection):
                         cell.status = "running"
                         state.save()
 
+            # -- Board commands (Phase 5) --
+            elif cmd == "board_add_task":
+                task = state.board_add_task(
+                    title=data.get("title", ""),
+                    lane=data.get("lane", ""),
+                    description=data.get("description", ""),
+                    agent_id=data.get("agent_id", ""),
+                    labels=data.get("labels", []),
+                )
+                if not task:
+                    result = {"type": "error",
+                              "message": "Invalid lane or empty title"}
+
+            elif cmd == "board_update_task":
+                tid = data.get("id", "")
+                fields = {k: v for k, v in data.items()
+                          if k not in ("cmd", "id")}
+                state.board_update_task(tid, **fields)
+
+            elif cmd == "board_remove_task":
+                state.board_remove_task(data.get("id", ""))
+
+            elif cmd == "board_move_task":
+                state.board_move_task(
+                    data.get("id", ""),
+                    data.get("lane", ""),
+                    data.get("position"))
+
+            elif cmd == "board_reorder_task":
+                state.board_reorder_task(
+                    data.get("id", ""),
+                    data.get("position", 0))
+
+            elif cmd == "board_add_lane":
+                name = data.get("name", "").strip()
+                if not name:
+                    result = {"type": "error",
+                              "message": "Lane name cannot be empty"}
+                else:
+                    state.board_add_lane(name, data.get("position"))
+
+            elif cmd == "board_rename_lane":
+                state.board_rename_lane(
+                    data.get("old_name", ""),
+                    data.get("new_name", "").strip())
+
+            elif cmd == "board_remove_lane":
+                state.board_remove_lane(
+                    data.get("name", ""),
+                    data.get("move_tasks_to", ""))
+
+            elif cmd == "board_reorder_lanes":
+                state.board_reorder_lanes(data.get("lanes", []))
+
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")
                 await keybindings.remove(connection, displaced_bindings)

@@ -185,14 +185,22 @@ Since `loom dispatch` is scriptable, simple triggers work today via cron or CI c
 
 Agents need to know what to work on. This phase connects Loom to where work is tracked.
 
-### Built-in Task Board
+> **Status**: Task board implemented. See [implementation plan](plans/task-board.md) for details.
 
-A lightweight Kanban view inside the toolbelt. Tasks move across columns: **Backlog → Assigned → In Progress → Review → Done**. Each card maps to an agent + worktree.
+### Built-in Task Board ✅
 
-- Create tasks manually or from the CLI
-- Assign to an agent template
-- Track progress via hooks
-- View diffs and approve from the card
+A Kanban board in a collapsible bottom panel with a taskbar dock. Default lanes: **Backlog → To Do → In Progress → Done** (customizable). Shows one lane at a time with scrollable lane tabs. Tasks are cards with optional agent linking — the dot reflects the linked agent's status.
+
+- Create, edit, move, and delete tasks from the toolbelt or CLI
+- Drag cards to reorder within a lane or drop on lane tabs to move between lanes
+- Link/unlink agents to tasks (card shows agent name, clicking focuses agent)
+- Add, rename, and delete lanes (tasks auto-migrate on lane deletion)
+- `K` keyboard shortcut toggles the board panel
+- CLI: `loom board list`, `loom board add`, `loom board move`, `loom board rm`, `loom board lanes`
+
+### Taskbar ✅
+
+A dock at the bottom of the toolbelt for "panel apps". The board is the first app. Future apps (logs viewer, cost dashboard, diff viewer) plug into the same dock. Clicking an app toggles its panel open/closed.
 
 ### Provider Integrations
 
@@ -203,11 +211,17 @@ Sync the task board with external systems. Each provider is a plugin:
 - **GitHub Issues** — same, with tighter PR linkage
 - **Notion** — for teams using Notion as a task tracker
 
-The plugin interface is generic: fetch tasks, update status, post comments. New providers are a single adapter file.
+The plugin interface is generic: fetch tasks, update status, post comments. New providers are a single adapter file. The data model includes provider-ready fields (`provider`, `external_id`, `external_url`) for zero-migration sync.
 
 ### Auto-Assignment
 
 Loom watches the task board (or external provider) and automatically assigns incoming tasks to agents based on templates, priority, and available capacity. The user approves the assignment or lets it run.
+
+### Remaining Work
+
+- **Provider integrations** — Jira, Linear, GitHub Issues adapters
+- **Auto-assignment** — template-based task dispatch from board
+- **Rich task content** — descriptions, labels display, due dates
 
 ---
 

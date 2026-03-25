@@ -1,4 +1,69 @@
-/* Keyboard bindings and boot */
+/* Keyboard bindings, panel management, and boot */
+
+/* -- Panel management (taskbar app toggle) -------------------------------- */
+
+var _activePanelApp = '';   // '' = collapsed, 'board' = board open
+var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
+
+function togglePanel(appName) {
+  var panel = document.getElementById('bottom-panel');
+  var buttons = document.querySelectorAll('.taskbar-app');
+
+  if (_activePanelApp === appName) {
+    // Collapse
+    _activePanelApp = '';
+    panel.classList.add('collapsed');
+    buttons.forEach(function(b) { b.classList.remove('active'); });
+  } else {
+    // Expand / switch
+    _activePanelApp = appName;
+    panel.classList.remove('collapsed');
+    if (_panelHeight > 0) {
+      panel.style.setProperty('--panel-height', _panelHeight + 'px');
+    }
+    buttons.forEach(function(b) {
+      b.classList.toggle('active', b.dataset.app === appName);
+    });
+    // Render the active app
+    if (appName === 'board') renderBoard();
+  }
+}
+
+/* -- Panel resize handle -------------------------------------------------- */
+
+(function() {
+  var handle = document.getElementById('panel-resize-handle');
+  if (!handle) return;
+
+  var dragging = false;
+  var startY = 0;
+  var startH = 0;
+
+  handle.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    var panel = document.getElementById('bottom-panel');
+    if (panel.classList.contains('collapsed')) return;
+    dragging = true;
+    startY = e.clientY;
+    startH = panel.offsetHeight;
+    document.body.style.cursor = 'ns-resize';
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    var panel = document.getElementById('bottom-panel');
+    var delta = startY - e.clientY;
+    var newH = Math.max(80, Math.min(window.innerHeight - 80, startH + delta));
+    _panelHeight = newH;
+    panel.style.setProperty('--panel-height', newH + 'px');
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = '';
+  });
+})();
 
 /* -- Keyboard navigation helpers ----------------------------------------- */
 
@@ -204,6 +269,11 @@ document.addEventListener('keydown', (e) => {
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
 
+  // Board keyboard shortcuts (when board is open, arrows/enter/delete go to board)
+  if (_activePanelApp === 'board') {
+    if (boardKeydown(e)) { e.preventDefault(); return; }
+  }
+
   switch (e.key) {
     case 'ArrowUp':
       e.preventDefault();
@@ -255,6 +325,11 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       relaunchFocused();
       break;
+    case 'k':
+    case 'K':
+      e.preventDefault();
+      togglePanel('board');
+      break;
     case 'Tab':
       e.preventDefault();
       switchGroup(e.shiftKey ? -1 : 1);
@@ -264,6 +339,7 @@ document.addEventListener('keydown', (e) => {
       closeBroadcast();
       closeMenus();
       closeContextMenu();
+      if (_activePanelApp) togglePanel(_activePanelApp);
       break;
   }
 });

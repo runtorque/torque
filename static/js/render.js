@@ -264,6 +264,12 @@ function render() {
   if (focusedItemId && !navItems.includes(focusedItemId)) focusedItemId = null;
 
   if (oldRects) _applyFlip(main, oldRects);
+
+  // Render board panel if open
+  var bottomPanel = document.getElementById('bottom-panel');
+  if (bottomPanel && !bottomPanel.classList.contains('collapsed')) {
+    renderBoard();
+  }
 }
 
 function agentStatusClass(a) {

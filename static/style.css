@@ -30,6 +30,9 @@ html, body {
   overflow-x: hidden;
   -webkit-user-select: none; user-select: none;
 }
+body {
+  display: flex; flex-direction: column;
+}
 button {
   font: inherit; cursor: pointer;
   background: none; border: none; color: var(--text);
@@ -73,7 +76,7 @@ header h1 {
 /* ------------------------------------------------------------------ */
 /* Main scroll area                                                    */
 /* ------------------------------------------------------------------ */
-main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
+main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
 
 /* ------------------------------------------------------------------ */
 /* Empty state                                                         */
@@ -453,7 +456,7 @@ main { padding: 8px; overflow-y: auto; height: calc(100vh - 38px); }
 /* ------------------------------------------------------------------ */
 #broadcast {
   display: none;
-  position: fixed; bottom: 0; left: 0; right: 0;
+  position: fixed; bottom: 26px; left: 0; right: 0;
   background: var(--bg-surface);
   border-top: 1px solid var(--border);
   padding: 6px 8px;
@@ -804,7 +807,7 @@ textarea:focus { border-color: var(--accent); }
 /* Toast notifications                                                 */
 /* ------------------------------------------------------------------ */
 .toast {
-  position: fixed; bottom: 12px; left: 50%;
+  position: fixed; bottom: 38px; left: 50%;
   transform: translateX(-50%) translateY(20px);
   opacity: 0;
   font-size: 10px; font-weight: 600;
@@ -823,6 +826,231 @@ textarea:focus { border-color: var(--accent); }
 .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast-success { border-color: var(--green); color: var(--green); }
 .toast-error { border-color: var(--red); color: var(--red); }
+
+/* ------------------------------------------------------------------ */
+/* Taskbar                                                             */
+/* ------------------------------------------------------------------ */
+#taskbar {
+  display: flex; align-items: center;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  padding: 0 4px;
+  flex-shrink: 0;
+  height: 26px;
+}
+.taskbar-app {
+  font-size: 10px; color: var(--text-dim);
+  padding: 3px 8px; border-radius: 4px;
+  transition: color .15s, background .15s;
+}
+.taskbar-app:hover { color: var(--text); background: var(--bg-hover); }
+.taskbar-app.active { color: var(--accent); background: rgba(88,166,255,.1); }
+
+/* ------------------------------------------------------------------ */
+/* Bottom panel (collapsible, hosts panel apps)                        */
+/* ------------------------------------------------------------------ */
+#bottom-panel {
+  flex-shrink: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+  height: var(--panel-height, 55vh);
+}
+#bottom-panel.collapsed {
+  height: 0;
+  border-top: none;
+}
+
+/* Resize handle */
+.panel-resize-handle {
+  height: 5px; cursor: ns-resize;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.panel-resize-handle::after {
+  content: '';
+  width: 32px; height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background .15s;
+}
+.panel-resize-handle:hover::after { background: var(--text-dim); }
+
+/* ------------------------------------------------------------------ */
+/* Board panel                                                         */
+/* ------------------------------------------------------------------ */
+#panel-board {
+  display: flex; flex-direction: column;
+  height: calc(100% - 5px); /* minus resize handle */
+}
+
+/* Lane tabs */
+.board-lane-bar {
+  display: flex; align-items: center;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  padding: 0 2px;
+  gap: 0;
+  height: 28px;
+}
+.board-lane-scroll-btn {
+  font-size: 10px; color: var(--text-dim);
+  width: 14px; height: 24px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px;
+  transition: opacity .1s;
+}
+.board-lane-scroll-btn:hover { color: var(--text); background: var(--bg-hover); }
+.board-lane-scroll-btn.hidden { opacity: 0; pointer-events: none; }
+.board-lane-tabs {
+  position: relative;
+  display: flex; gap: 0;
+  overflow-x: auto;
+  flex: 1; min-width: 0;
+  scrollbar-width: none;           /* Firefox */
+  -ms-overflow-style: none;        /* IE/Edge */
+}
+.board-lane-tabs::-webkit-scrollbar { display: none; }
+.board-lane-tab {
+  font-size: 10px; font-weight: 500;
+  color: var(--text-dim);
+  padding: 4px 10px;
+  white-space: nowrap; flex-shrink: 0;
+  border-bottom: 2px solid transparent;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.board-lane-tab:hover { color: var(--text); background: var(--bg-hover); }
+.board-lane-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.board-lane-tab .lane-count {
+  font-size: 9px; color: var(--text-dim);
+  margin-left: 4px;
+}
+.board-lane-actions {
+  display: flex; align-items: center; gap: 0; flex-shrink: 0;
+  margin-left: auto;
+}
+.board-lane-action-btn {
+  font-size: 11px; color: var(--text-dim);
+  width: 24px; height: 24px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px;
+}
+.board-lane-action-btn:hover { color: var(--text); background: var(--bg-hover); }
+
+/* Card list */
+.board-cards {
+  flex: 1; overflow-y: auto;
+  padding: 6px 8px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.board-card {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-cell);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  min-height: 32px;
+}
+.board-card:hover { background: var(--bg-hover); }
+.board-card.focused {
+  border-color: var(--accent);
+  outline: none;
+}
+.board-card-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  flex-shrink: 0; background: var(--text-dim);
+}
+.board-card-dot.working { background: var(--green); }
+.board-card-dot.idle { background: var(--accent); }
+.board-card-dot.attention { background: var(--amber); }
+.board-card-dot.disconnected { background: var(--red); }
+.board-card-info {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.board-card-title {
+  font-size: 10px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.board-card-agent {
+  font-size: 9px; color: var(--accent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer;
+}
+.board-card-agent:hover { text-decoration: underline; }
+.board-card-menu-btn {
+  font-size: 12px; color: var(--text-dim);
+  width: 20px; height: 20px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px;
+  opacity: 0; transition: opacity .15s;
+}
+.board-card:hover .board-card-menu-btn { opacity: 1; }
+.board-card-menu-btn:hover { background: var(--bg); color: var(--text); }
+
+/* Add task inline */
+.board-add-task {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  cursor: pointer; opacity: .6;
+  transition: opacity .15s;
+  min-height: 28px;
+}
+.board-add-task:hover { opacity: 1; }
+.board-add-task span { font-size: 10px; color: var(--text-dim); }
+.board-add-input {
+  width: 100%; font-size: 10px;
+  padding: 5px 8px;
+  background: var(--bg-cell);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+.board-add-input:focus { outline: none; }
+
+/* Empty lane */
+.board-empty {
+  text-align: center; color: var(--text-dim);
+  font-size: 10px; padding: 16px 8px;
+}
+
+/* Lane settings popover */
+.board-lane-popover {
+  position: fixed; z-index: 160;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0,0,0,.4);
+  padding: 2px; min-width: 120px;
+}
+.board-lane-popover button {
+  display: block; width: 100%;
+  padding: 5px 10px; font-size: 10px;
+  color: var(--text-dim); text-align: left;
+  border-radius: 3px; white-space: nowrap;
+}
+.board-lane-popover button:hover { background: var(--bg-hover); color: var(--text); }
+.board-lane-popover button.danger:hover { background: var(--red); color: #fff; }
+.board-lane-popover input {
+  margin: 4px; width: calc(100% - 8px);
+  font-size: 10px; padding: 4px 6px;
+}
+
+/* Dragging cards */
+.board-card.dragging { opacity: .3; pointer-events: none; }
+.board-lane-tab.drop-target {
+  color: var(--accent); background: rgba(88,166,255,.15);
+  border-bottom-color: var(--accent);
+}
+.board-card.drop-before { box-shadow: inset 0 3px 0 0 var(--accent); }
+.board-card.drop-after { box-shadow: inset 0 -3px 0 0 var(--accent); }
 
 /* ------------------------------------------------------------------ */
 /* Scrollbar                                                           */

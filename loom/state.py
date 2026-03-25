@@ -9,6 +9,25 @@ from aiohttp import web
 
 from .config import DEFAULT_COMMAND, STATE_FILE, log
 
+_DEFAULT_LANES = ["Backlog", "To Do", "In Progress", "Done"]
+
+
+@dataclass
+class BoardTask:
+    id: str
+    title: str
+    description: str = ""
+    lane: str = "Backlog"
+    position: int = 0
+    agent_id: str = ""          # linked agent cell (optional)
+    labels: list[str] = field(default_factory=list)
+    created_at: str = ""        # ISO 8601
+    updated_at: str = ""        # ISO 8601
+    # Provider fields (unused in v1, ready for sync)
+    provider: str = ""          # "jira", "linear", "github"
+    external_id: str = ""       # e.g. "PROJ-123"
+    external_url: str = ""      # link back to provider
+
 
 @dataclass
 class AgentCell:
@@ -117,6 +136,9 @@ class MatrixState:
         self.current_window_id: Optional[str] = None
         self._children: dict[str, list[str]] = {}  # agent_id → [child terminal ids]
         self._ws_clients: set[web.WebSocketResponse] = set()
+        # Board (Phase 5)
+        self.board_lanes: list[str] = list(_DEFAULT_LANES)
+        self.board_tasks: dict[str, BoardTask] = {}
 
     # -- Serialization ------------------------------------------------------
 
@@ -130,6 +152,10 @@ class MatrixState:
             "children": self._children,
             "active_session_id": self.active_session_id,
             "current_window_id": self.current_window_id,
+            "board_lanes": self.board_lanes,
+            "board_tasks": {
+                tid: asdict(t) for tid, t in self.board_tasks.items()
+            },
         }
 
     def save(self):
@@ -139,6 +165,10 @@ class MatrixState:
             "groups": self.groups,
             "group_settings": {
                 n: asdict(gs) for n, gs in self.group_settings.items()
+            },
+            "board_lanes": self.board_lanes,
+            "board_tasks": {
+                tid: asdict(t) for tid, t in self.board_tasks.items()
             },
         }
         STATE_FILE.write_text(json.dumps(payload, indent=2))
@@ -178,6 +208,12 @@ class MatrixState:
                     if cell.group in self.groups:
                         self.groups[cell.group].append(aid)
             self._rebuild_children()
+            # Board state
+            self.board_lanes = data.get("board_lanes", list(_DEFAULT_LANES))
+            bt_fields = set(BoardTask.__dataclass_fields__)
+            for tid, raw in data.get("board_tasks", {}).items():
+                filtered = {k: v for k, v in raw.items() if k in bt_fields}
+                self.board_tasks[tid] = BoardTask(**filtered)
         except (json.JSONDecodeError, TypeError, KeyError):
             log.exception("Failed to load state from %s", STATE_FILE)
 
@@ -354,6 +390,10 @@ class MatrixState:
             child = self.agents.pop(child_id, None)
             if child:
                 removed.append(child)
+        # Unlink from board tasks
+        for t in self.board_tasks.values():
+            if t.agent_id == aid:
+                t.agent_id = ""
         self.save()
         return removed
 
@@ -447,6 +487,155 @@ class MatrixState:
     def cells_with_awareness(self) -> list[AgentCell]:
         """Return cells that have agent awareness active (agent_type set)."""
         return [c for c in self.agents.values() if c.agent_type]
+
+    # -- Board (Phase 5) ---------------------------------------------------
+
+    def _board_reindex(self, lane: str):
+        """Reindex positions for all tasks in a lane."""
+        tasks = sorted(
+            [t for t in self.board_tasks.values() if t.lane == lane],
+            key=lambda t: t.position,
+        )
+        for i, t in enumerate(tasks):
+            t.position = i
+
+    def board_add_task(self, title: str, lane: str = "",
+                       **kwargs) -> Optional[BoardTask]:
+        if not title:
+            return None
+        if not lane:
+            lane = self.board_lanes[0] if self.board_lanes else "Backlog"
+        if lane not in self.board_lanes:
+            return None
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        tid = uuid.uuid4().hex[:8]
+        # Position = end of lane
+        max_pos = max(
+            (t.position for t in self.board_tasks.values() if t.lane == lane),
+            default=-1,
+        )
+        task = BoardTask(
+            id=tid,
+            title=title,
+            lane=lane,
+            position=max_pos + 1,
+            created_at=now,
+            updated_at=now,
+            **{k: v for k, v in kwargs.items()
+               if k in BoardTask.__dataclass_fields__ and k not in
+               ("id", "title", "lane", "position", "created_at", "updated_at")},
+        )
+        self.board_tasks[tid] = task
+        self.save()
+        return task
+
+    def board_update_task(self, tid: str, **fields):
+        task = self.board_tasks.get(tid)
+        if not task:
+            return
+        valid = set(BoardTask.__dataclass_fields__) - {"id", "created_at"}
+        old_lane = task.lane
+        for key, value in fields.items():
+            if key in valid:
+                setattr(task, key, value)
+        from datetime import datetime, timezone
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+        # Reindex if lane changed
+        if "lane" in fields and fields["lane"] != old_lane:
+            self._board_reindex(old_lane)
+            self._board_reindex(task.lane)
+        self.save()
+
+    def board_remove_task(self, tid: str):
+        task = self.board_tasks.pop(tid, None)
+        if task:
+            self._board_reindex(task.lane)
+            self.save()
+
+    def board_move_task(self, tid: str, lane: str,
+                        position: Optional[int] = None):
+        task = self.board_tasks.get(tid)
+        if not task or lane not in self.board_lanes:
+            return
+        old_lane = task.lane
+        task.lane = lane
+        if position is not None:
+            task.position = position
+        else:
+            max_pos = max(
+                (t.position for t in self.board_tasks.values()
+                 if t.lane == lane and t.id != tid),
+                default=-1,
+            )
+            task.position = max_pos + 1
+        from datetime import datetime, timezone
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+        self._board_reindex(old_lane)
+        self._board_reindex(lane)
+        self.save()
+
+    def board_reorder_task(self, tid: str, position: int):
+        task = self.board_tasks.get(tid)
+        if not task:
+            return
+        lane_tasks = sorted(
+            [t for t in self.board_tasks.values()
+             if t.lane == task.lane and t.id != tid],
+            key=lambda t: t.position,
+        )
+        lane_tasks.insert(min(position, len(lane_tasks)), task)
+        for i, t in enumerate(lane_tasks):
+            t.position = i
+        self.save()
+
+    def board_add_lane(self, name: str, position: Optional[int] = None):
+        if not name or name in self.board_lanes:
+            return
+        if position is not None:
+            self.board_lanes.insert(min(position, len(self.board_lanes)), name)
+        else:
+            self.board_lanes.append(name)
+        self.save()
+
+    def board_rename_lane(self, old_name: str, new_name: str):
+        if (old_name not in self.board_lanes or not new_name
+                or new_name in self.board_lanes):
+            return
+        idx = self.board_lanes.index(old_name)
+        self.board_lanes[idx] = new_name
+        for t in self.board_tasks.values():
+            if t.lane == old_name:
+                t.lane = new_name
+        self.save()
+
+    def board_remove_lane(self, name: str, move_tasks_to: str = ""):
+        if name not in self.board_lanes or len(self.board_lanes) <= 1:
+            return
+        self.board_lanes.remove(name)
+        target = move_tasks_to if move_tasks_to in self.board_lanes \
+            else self.board_lanes[0]
+        for t in self.board_tasks.values():
+            if t.lane == name:
+                t.lane = target
+        self._board_reindex(target)
+        self.save()
+
+    def board_reorder_lanes(self, lanes: list[str]):
+        if set(lanes) != set(self.board_lanes):
+            return
+        self.board_lanes = lanes
+        self.save()
+
+    def board_unlink_agent(self, agent_id: str):
+        """Unlink an agent from all tasks (called when agent is removed)."""
+        changed = False
+        for t in self.board_tasks.values():
+            if t.agent_id == agent_id:
+                t.agent_id = ""
+                changed = True
+        if changed:
+            self.save()
 
     # -- WebSocket broadcast ------------------------------------------------
 

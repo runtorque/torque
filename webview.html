@@ -300,6 +300,17 @@
   </div>
 </div>
 
+<!-- Bottom Panel (collapsible, hosts panel apps) -->
+<div id="bottom-panel" class="collapsed">
+  <div class="panel-resize-handle" id="panel-resize-handle"></div>
+  <div id="panel-board"></div>
+</div>
+
+<!-- Taskbar (dock for panel apps) -->
+<div id="taskbar">
+  <button class="taskbar-app" data-app="board" onclick="togglePanel('board')">&#9776; Board</button>
+</div>
+
 <!-- Context menu (right-click) -->
 <div id="ctx-menu"></div>
 
@@ -314,12 +325,13 @@
   </div>
 </div>
 
-<!-- JS (order matters: constants → ws → render → commands → modals → main) -->
+<!-- JS (order matters: constants → ws → render → commands → modals → board → main) -->
 <script src="/static/js/constants.js"></script>
 <script src="/static/js/ws.js"></script>
 <script src="/static/js/render.js"></script>
 <script src="/static/js/commands.js"></script>
 <script src="/static/js/modals.js"></script>
+<script src="/static/js/board.js"></script>
 <script src="/static/js/main.js"></script>
 </body>
 </html>
