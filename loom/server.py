@@ -237,11 +237,12 @@ async def main(connection: iterm2.Connection):
         # get_template: respond directly
         if cmd == "get_template":
             base_dir = await _resolve_base_dir(data.get("group", ""))
-            tpl = template_mgr.load_template(data["name"], base_dir)
-            if not tpl:
+            raw = template_mgr._load_raw(data["name"], base_dir)
+            if not raw:
                 return {"type": "error",
                         "message": f"Template \"{data['name']}\" not found"}
-            tvars = template_mgr.get_template_vars(tpl)
+            tpl = template_mgr.load_template(data["name"], base_dir) or {}
+            tvars = template_mgr.get_template_vars(raw)
             return {"type": "template_detail", "name": data["name"],
                     "template": tpl, "vars": tvars}
 
@@ -341,12 +342,13 @@ async def main(connection: iterm2.Connection):
                 tpl_name = data["template"]
                 variables = data.get("vars", {})
                 base_dir = await _resolve_base_dir(group)
-                tpl = template_mgr.load_template(tpl_name, base_dir)
-                if not tpl:
+                raw = template_mgr._load_raw(tpl_name, base_dir)
+                if not raw:
                     result = {"type": "error",
                               "message": f"Template \"{tpl_name}\" not found"}
                 else:
-                    rendered = template_mgr.render_template(tpl, variables)
+                    rendered = template_mgr.render_template(
+                        raw, variables)
                     gs = state.get_group_settings(group)
 
                     # Use rendered values, falling through to group settings

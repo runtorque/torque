@@ -1175,21 +1175,39 @@ def cmd_template_show(args):
 
     _print_dict(tpl)
 
-    # Highlight variables
-    raw_vars = tpl.get("vars", {})
-    if isinstance(raw_vars, dict) and raw_vars:
+    # Auto-discover variables via regex (CLI has no Jinja2)
+    import re
+    tdir = find_templates_dir()
+    raw = ""
+    if tdir:
+        for suffix in ("", ".yaml", ".yml"):
+            path = os.path.join(tdir, args.name + suffix)
+            if os.path.isfile(path):
+                with open(path) as f:
+                    raw = f.read()
+                break
+    # Find {{ VAR }} and {{ VAR | default('val') }}
+    var_pattern = re.compile(
+        r'\{\{\s*(\w+)\s*(?:\|\s*default\s*\(\s*[\'"]([^"\']*)[\'"]'
+        r'\s*\))?\s*\}\}')
+    seen = {}
+    for m in var_pattern.finditer(raw):
+        vname, default = m.group(1), m.group(2)
+        if vname not in seen:
+            seen[vname] = default or ""
+
+    if seen:
+        ordered = sorted(k for k in seen if k != "TASK")
+        if "TASK" in seen:
+            ordered = ["TASK"] + ordered
         print(f"\n{_bold('Variables:')}")
-        for vname, meta in raw_vars.items():
-            if isinstance(meta, dict):
-                desc = meta.get("description", "")
-                default = meta.get("default", "")
-                req = meta.get("required", False)
-            else:
-                desc, default, req = "", str(meta) if meta else "", False
-            tag = _red(" (required)") if req else ""
-            print(f"  {_bold(vname)}{tag}: {desc}")
+        for vname in ordered:
+            default = seen[vname]
+            tag = _red(" (required)") if vname == "TASK" else ""
+            line = f"  {_bold(vname)}{tag}"
             if default:
-                print(f"    default: {_dim(str(default))}")
+                line += f"  {_dim(f'default: {default}')}"
+            print(line)
 
 
 def _print_dict(d, indent=0):

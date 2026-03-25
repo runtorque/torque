@@ -1,4 +1,9 @@
-"""Template loading, variable extraction, and Jinja2 rendering."""
+"""Template loading, variable extraction, and Jinja2 rendering.
+
+Templates are YAML files rendered through Jinja2 as a whole. Variables
+are auto-discovered from the Jinja2 AST — no explicit declaration
+needed. Default values are extracted from ``| default()`` filters.
+"""
 
 import os
 import re
@@ -7,7 +12,8 @@ from .config import log
 
 try:
     from jinja2.sandbox import SandboxedEnvironment
-    from jinja2 import StrictUndefined
+    from jinja2 import Undefined, StrictUndefined, nodes
+    from jinja2 import meta as jinja2_meta
     _HAS_JINJA2 = True
 except ImportError:
     _HAS_JINJA2 = False
@@ -150,30 +156,13 @@ def _yaml_parse_block_scalar(lines, idx, parent_indent):
 
 
 # ---------------------------------------------------------------------------
-# Syntax migration
+# TemplateManager
 # ---------------------------------------------------------------------------
 
 def _migrate_syntax(text):
     """Convert legacy ${VAR} to Jinja2 {{ VAR }} syntax."""
-    if not isinstance(text, str):
-        return text
     return re.sub(r'\$\{(\w+)\}', r'{{ \1 }}', text)
 
-
-def _migrate_template(tpl):
-    """Recursively migrate all string fields in a template dict."""
-    if isinstance(tpl, str):
-        return _migrate_syntax(tpl)
-    if isinstance(tpl, dict):
-        return {k: _migrate_template(v) for k, v in tpl.items()}
-    if isinstance(tpl, list):
-        return [_migrate_template(item) for item in tpl]
-    return tpl
-
-
-# ---------------------------------------------------------------------------
-# TemplateManager
-# ---------------------------------------------------------------------------
 
 class TemplateManager:
 
@@ -183,8 +172,14 @@ class TemplateManager:
                 undefined=StrictUndefined,
                 keep_trailing_newline=True,
             )
+            # Lenient env for metadata parsing (unresolved vars → empty)
+            self._lenient_env = SandboxedEnvironment(
+                undefined=Undefined,
+                keep_trailing_newline=True,
+            )
         else:
             self._env = None
+            self._lenient_env = None
 
     @staticmethod
     def find_templates_dir(base_dir: str = "") -> str | None:
@@ -192,7 +187,7 @@ class TemplateManager:
         d = os.path.expanduser(base_dir) if base_dir else os.getcwd()
         if not os.path.isdir(d):
             d = os.getcwd()
-        for _ in range(20):  # safety limit
+        for _ in range(20):
             candidate = os.path.join(d, ".loom", "templates")
             if os.path.isdir(candidate):
                 return candidate
@@ -202,8 +197,20 @@ class TemplateManager:
             d = parent
         return None
 
+    def _load_raw(self, name: str, base_dir: str = "") -> str | None:
+        """Load a template file as raw text."""
+        tdir = self.find_templates_dir(base_dir)
+        if not tdir:
+            return None
+        for suffix in ("", ".yaml", ".yml"):
+            path = os.path.join(tdir, name + suffix)
+            if os.path.isfile(path):
+                with open(path) as f:
+                    return f.read()
+        return None
+
     def list_templates(self, base_dir: str = "") -> list[dict]:
-        """List all templates with name, description, and vars metadata."""
+        """List all templates with name, description, and vars."""
         tdir = self.find_templates_dir(base_dir)
         if not tdir:
             return []
@@ -215,120 +222,206 @@ class TemplateManager:
             path = os.path.join(tdir, fname)
             try:
                 with open(path) as f:
-                    tpl = parse_yaml(f.read())
-                desc = tpl.get("description", "")
-                tvars = self.get_template_vars(tpl)
+                    raw = f.read()
+                raw = _migrate_syntax(raw)
+                # Parse metadata leniently (unresolved vars → empty)
+                meta = self._parse_lenient(raw)
+                desc = meta.get("description", "") if meta else ""
+                tvars = self.get_template_vars(raw)
             except Exception:
                 desc = "(parse error)"
                 tvars = []
-            result.append({"name": name, "description": desc, "vars": tvars})
+            result.append({"name": name, "description": desc,
+                           "vars": tvars})
         return result
 
     def load_template(self, name: str, base_dir: str = "") -> dict | None:
-        """Load a template by name. Returns parsed dict or None."""
-        tdir = self.find_templates_dir(base_dir)
-        if not tdir:
+        """Load template metadata (parsed leniently). Returns dict or None."""
+        raw = self._load_raw(name, base_dir)
+        if raw is None:
             return None
-        for suffix in ("", ".yaml", ".yml"):
-            path = os.path.join(tdir, name + suffix)
-            if os.path.isfile(path):
-                with open(path) as f:
-                    return parse_yaml(f.read())
-        return None
+        raw = _migrate_syntax(raw)
+        return self._parse_lenient(raw) or {}
 
-    @staticmethod
-    def get_template_vars(tpl: dict) -> list[dict]:
-        """Extract variable metadata from a template's vars section.
+    def get_template_vars(self, raw_or_tpl) -> list[dict]:
+        """Auto-discover variables from the raw template text.
 
-        Always includes TASK as the first variable if not explicitly
-        declared. Returns list of {name, description, default, required}.
+        Parses the entire file as a Jinja2 template to find referenced
+        variables. Extracts default values from ``| default()`` filters.
+        TASK is always listed first and marked as required.
+
+        Accepts either raw text (str) or a parsed dict (for backward
+        compat — will just return TASK in that case).
         """
-        raw_vars = tpl.get("vars", {})
-        if not isinstance(raw_vars, dict):
-            raw_vars = {}
+        if isinstance(raw_or_tpl, dict):
+            # Legacy call with parsed dict — collect strings and scan
+            raw = self._dict_to_scannable(raw_or_tpl)
+        else:
+            raw = _migrate_syntax(raw_or_tpl)
 
+        # Discover variables and defaults from Jinja2 AST
+        discovered = set()
+        defaults = {}
+
+        if self._env and _HAS_JINJA2:
+            try:
+                ast = self._env.parse(raw)
+                discovered = jinja2_meta.find_undeclared_variables(ast)
+                defaults = self._extract_defaults(ast)
+            except Exception as exc:
+                log.debug("Jinja2 AST parse failed: %s", exc)
+        else:
+            discovered = set(re.findall(r'\{\{\s*(\w+)\s*', raw))
+
+        # Build result: TASK first, then others alphabetically
         result = []
-        has_task = False
-        for vname, meta in raw_vars.items():
-            if vname == "TASK":
-                has_task = True
-            if isinstance(meta, dict):
-                result.append({
-                    "name": vname,
-                    "description": meta.get("description", ""),
-                    "default": meta.get("default", ""),
-                    "required": meta.get("required", False),
-                })
-            else:
-                # Simple value — treat as default
-                result.append({
-                    "name": vname,
-                    "description": "",
-                    "default": str(meta) if meta is not None else "",
-                    "required": False,
-                })
+        ordered = sorted(discovered - {"TASK"})
+        if "TASK" in discovered:
+            ordered = ["TASK"] + ordered
 
-        if not has_task:
-            result.insert(0, {
-                "name": "TASK",
-                "description": "Task description",
-                "default": "",
-                "required": True,
+        for vname in ordered:
+            result.append({
+                "name": vname,
+                "default": defaults.get(vname, ""),
+                "required": vname == "TASK",
             })
 
         return result
 
-    def render_template(self, tpl: dict, variables: dict) -> dict:
-        """Render all Jinja2 fields in a template with given variables.
+    def render_template(self, tpl_or_name, variables: dict,
+                        base_dir: str = "") -> dict:
+        """Render the entire template file through Jinja2, then parse YAML.
 
         Returns a flat dict with resolved agent settings:
-        {name, command, directory, profile, shell, tab_color, env_vars, prompt}
+        {name, command, directory, profile, shell, tab_color, env_vars,
+         prompt, worktree, terminals}
         """
-        tpl = _migrate_template(tpl)
-        agent = tpl.get("agent", {})
+        if isinstance(tpl_or_name, str) and "\n" not in tpl_or_name:
+            # It's a template name, load raw
+            raw = self._load_raw(tpl_or_name, base_dir)
+            if not raw:
+                return {}
+        elif isinstance(tpl_or_name, str):
+            raw = tpl_or_name
+        else:
+            # Legacy dict — render field by field
+            return self._render_dict_fields(tpl_or_name, variables)
 
-        result = {
+        raw = _migrate_syntax(raw)
+
+        # Render entire file through Jinja2
+        if self._env and _HAS_JINJA2:
+            try:
+                tmpl = self._env.from_string(raw)
+                rendered_text = tmpl.render(**variables)
+            except Exception as exc:
+                log.warning("Jinja2 render failed: %s", exc)
+                rendered_text = self._fallback_render(raw, variables)
+        else:
+            rendered_text = self._fallback_render(raw, variables)
+
+        # Parse the rendered YAML
+        try:
+            tpl = parse_yaml(rendered_text)
+        except Exception as exc:
+            log.warning("YAML parse failed after render: %s", exc)
+            return {}
+
+        agent = tpl.get("agent", {}) if isinstance(tpl, dict) else {}
+
+        return {
+            "name": agent.get("name_prefix", tpl.get("name", "agent")),
+            "command": agent.get("command", ""),
+            "directory": agent.get("directory", ""),
+            "profile": agent.get("profile", ""),
+            "shell": agent.get("shell", ""),
+            "tab_color": agent.get("tab_color", ""),
+            "env_vars": agent.get("env_vars", {}),
+            "prompt": tpl.get("prompt", ""),
+            "worktree": tpl.get("worktree", None),
+            "terminals": tpl.get("terminals", []),
+        }
+
+    # -- Internal helpers ---------------------------------------------------
+
+    def _parse_lenient(self, raw: str) -> dict | None:
+        """Render with lenient undefined (unresolved vars → empty), parse."""
+        if self._lenient_env and _HAS_JINJA2:
+            try:
+                rendered = self._lenient_env.from_string(raw).render()
+                return parse_yaml(rendered)
+            except Exception:
+                pass
+        # Fallback: try parsing raw text directly
+        try:
+            return parse_yaml(raw)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _extract_defaults(ast) -> dict[str, str]:
+        """Walk Jinja2 AST to find ``| default(val)`` filter values."""
+        if not _HAS_JINJA2:
+            return {}
+        defaults = {}
+        for node in ast.find_all(nodes.Filter):
+            if node.name in ("default", "d") and node.args:
+                if isinstance(node.node, nodes.Name):
+                    arg = node.args[0]
+                    if isinstance(arg, nodes.Const) and arg.value is not None:
+                        defaults[node.node.name] = str(arg.value)
+        return defaults
+
+    @staticmethod
+    def _dict_to_scannable(tpl: dict) -> str:
+        """Convert a parsed template dict back to scannable text."""
+        parts = []
+        def _walk(obj):
+            if isinstance(obj, str):
+                parts.append(obj)
+            elif isinstance(obj, dict):
+                for v in obj.values():
+                    _walk(v)
+            elif isinstance(obj, list):
+                for item in obj:
+                    _walk(item)
+        _walk(tpl)
+        return "\n".join(parts)
+
+    def _render_dict_fields(self, tpl: dict, variables: dict) -> dict:
+        """Legacy: render individual fields of a parsed template dict."""
+        agent = tpl.get("agent", {})
+        return {
             "name": self._render_str(
                 agent.get("name_prefix", tpl.get("name", "agent")),
                 variables),
-            "command": self._render_str(
-                agent.get("command", ""), variables),
+            "command": self._render_str(agent.get("command", ""), variables),
             "directory": self._render_str(
                 agent.get("directory", ""), variables),
             "profile": agent.get("profile", ""),
             "shell": agent.get("shell", ""),
             "tab_color": agent.get("tab_color", ""),
-            "env_vars": {},
+            "env_vars": {k: self._render_str(str(v or ""), variables)
+                         for k, v in (agent.get("env_vars") or {}).items()},
             "prompt": self._render_str(
                 tpl.get("prompt", "{{ TASK }}"), variables),
             "worktree": tpl.get("worktree", None),
             "terminals": tpl.get("terminals", []),
         }
 
-        # Render env_vars values
-        for k, v in (agent.get("env_vars") or {}).items():
-            result["env_vars"][k] = self._render_str(
-                str(v) if v is not None else "", variables)
-
-        return result
-
     def _render_str(self, text: str, variables: dict) -> str:
-        """Render a single string through Jinja2 or fallback."""
         if not isinstance(text, str) or not text:
             return text or ""
+        text = _migrate_syntax(text)
         if self._env:
             try:
-                tmpl = self._env.from_string(text)
-                return tmpl.render(**variables)
-            except Exception as exc:
-                log.warning("Jinja2 render failed for %r: %s",
-                            text[:50], exc)
+                return self._env.from_string(text).render(**variables)
+            except Exception:
                 return self._fallback_render(text, variables)
         return self._fallback_render(text, variables)
 
     @staticmethod
     def _fallback_render(text: str, variables: dict) -> str:
-        """Simple {{ VAR }} substitution without Jinja2."""
         for key, value in variables.items():
             text = text.replace('{{ ' + key + ' }}', str(value))
             text = text.replace('{{' + key + '}}', str(value))
