@@ -115,22 +115,35 @@ Expose Loom as an MCP (Model Context Protocol) server. Any MCP-aware agent or to
 
 With awareness, worktrees, and programmatic access in place, Loom can start running work autonomously.
 
-### Agent Templates & Playbooks
+> **Status**: Templates and dispatch implemented. See [implementation plan](plans/workflow-automation.md) for details.
 
-Predefined agent configurations: "Bug Fix Agent" gets a worktree + issue context + test runner. "Review Agent" gets the diff + repo conventions + a checklist. Templates are shareable YAML/JSON files.
+### Agent Templates ✅
 
-- System prompt, model, tools, and environment per template
-- Parameters: fill in the blanks when instantiating ("which issue?", "which branch?")
-- Community-contributed template library
+YAML templates in `.loom/templates/` define reusable agent configurations: boot command, tab color, environment variables, worktree settings, child terminals, and a prompt with `${TASK}` variable substitution. Templates layer on top of group settings — empty fields fall through to group defaults.
+
+Managed via the CLI: `loom template list`, `loom template show <name>`, `loom template create <name>`. Three starter templates ship with the project (`templates/` directory): `default`, `bugfix`, and `review`.
+
+### `loom dispatch` ✅
+
+One command to create an agent from a template and send it a task:
+
+```bash
+loom dispatch "Fix the login bug" --template bugfix --wait
+```
+
+Creates the agent, waits for it to boot, renders the prompt with `${TASK}` substitution, sends it, and optionally blocks until the agent finishes (`--wait`). Group and directory are auto-detected from session context. Agent name is derived from the template prefix and a task slug.
 
 ### Pipeline Composition
 
-Chain agents into multi-step workflows: Agent 1 implements → Agent 2 writes tests → Agent 3 reviews → auto-create PR if all pass.
+Chain agents into multi-step workflows: Agent 1 implements → Agent 2 writes tests → Agent 3 reviews → auto-create PR if all pass. For now, multi-step workflows are shell scripts composing `loom dispatch --wait`:
 
-- Define pipelines declaratively (YAML/JSON)
-- DAG execution: parallel and sequential steps with dependencies
-- Conditional branches: "if tests fail, go back to implementation"
-- Visual pipeline view in the toolbelt
+```bash
+loom dispatch "implement login" -t impl --wait
+loom dispatch "write tests for login" -t test --wait
+loom dispatch "review login changes" -t review --wait
+```
+
+Declarative pipeline definitions (YAML DAGs with parallel/sequential steps and conditional branches) are deferred until usage patterns emerge.
 
 ### Event-Driven Triggers
 
@@ -143,9 +156,15 @@ Start agents or pipelines based on events rather than manual invocation:
 - File changed on a branch → re-run validation
 - Webhook received → configurable handler
 
-### Retry & Fallback Policies
+Since `loom dispatch` is scriptable, simple triggers work today via cron or CI calling the CLI. A built-in trigger system is deferred.
 
-If an agent fails, Loom can retry with a different prompt strategy, a different model, or escalate to a human. Configurable per template or per pipeline step.
+### Remaining Work
+
+- **Template parameters** — custom variables beyond `${TASK}` (e.g., `--param issue=123`)
+- **Toolbelt template picker** — dropdown in the "Add Agent" modal that applies a template's settings
+- **Pipeline engine** — declarative YAML pipelines with DAG execution
+- **Event-driven triggers** — built-in webhook/cron/CI trigger system
+- **Retry & fallback policies** — configurable per template or pipeline step
 
 ---
 

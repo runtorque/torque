@@ -56,6 +56,23 @@ loom send "fix it" --wait # send and wait for the agent to finish
 loom logs -f             # tail the daemon log
 ```
 
+### Dispatch
+
+Create an agent from a template and send it a task in one command:
+
+```bash
+loom dispatch "Fix the login bug" --template bugfix --wait
+```
+
+Templates are YAML files in `.loom/templates/`. Copy the starters into your repo:
+
+```bash
+mkdir -p .loom/templates
+cp templates/*.yaml .loom/templates/
+```
+
+Manage templates with `loom template list`, `loom template show <name>`, and `loom template create <name>`.
+
 Run `loom --help` or `loom <command> --help` for the full reference.
 
 ## Auto-launch
