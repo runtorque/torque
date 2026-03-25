@@ -576,3 +576,117 @@ async function _doRollback(sha) {
     closeModals();
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Template modal                                                       */
+/* ------------------------------------------------------------------ */
+
+let _tplGroup = '';
+let _tplName = '';
+let _tplData = null;
+
+function openAddFromTemplate(group) {
+  _tplGroup = group;
+  _tplName = '';
+  _tplData = null;
+  send({ cmd: 'list_templates', group });
+}
+
+function _showTemplateList(msg) {
+  const templates = msg.templates || [];
+  const listEl = document.getElementById('tpl-list');
+  const emptyEl = document.getElementById('tpl-empty');
+  const listPane = document.getElementById('tpl-list-pane');
+  const varsPane = document.getElementById('tpl-vars-pane');
+
+  listPane.classList.remove('hidden');
+  varsPane.classList.add('hidden');
+  document.getElementById('tpl-back-btn').classList.add('hidden');
+  document.getElementById('tpl-submit-btn').classList.add('hidden');
+  document.getElementById('tpl-title').textContent = 'From Template';
+
+  if (templates.length === 0) {
+    listEl.innerHTML = '';
+    emptyEl.classList.remove('hidden');
+  } else {
+    emptyEl.classList.add('hidden');
+    let html = '';
+    for (const t of templates) {
+      const varCount = (t.vars || []).filter(v => v.name !== 'TASK').length;
+      html += `<button class="tpl-item" onclick="_selectTemplate('${esc(t.name)}')">`;
+      html += `<span class="tpl-item-name">${esc(t.name)}</span>`;
+      if (t.description) html += `<span class="tpl-item-desc">${esc(t.description)}</span>`;
+      if (varCount) html += `<span class="tpl-item-vars">${varCount} var${varCount > 1 ? 's' : ''}</span>`;
+      html += `</button>`;
+    }
+    listEl.innerHTML = html;
+  }
+  document.getElementById('modal-template').classList.add('visible');
+}
+
+function _selectTemplate(name) {
+  _tplName = name;
+  send({ cmd: 'get_template', name, group: _tplGroup });
+}
+
+function _showTemplateVarForm(msg) {
+  _tplData = msg;
+  const vars = msg.vars || [];
+
+  document.getElementById('tpl-list-pane').classList.add('hidden');
+  document.getElementById('tpl-vars-pane').classList.remove('hidden');
+  document.getElementById('tpl-back-btn').classList.remove('hidden');
+  document.getElementById('tpl-submit-btn').classList.remove('hidden');
+  document.getElementById('tpl-title').textContent = msg.name;
+
+  const descEl = document.getElementById('tpl-description');
+  descEl.textContent = (msg.template || {}).description || '';
+
+  const fieldsEl = document.getElementById('tpl-var-fields');
+  let html = '';
+
+  for (const v of vars) {
+    const req = v.required ? ' <span class="tpl-req">*</span>' : '';
+    const label = v.description || v.name;
+    html += `<label>${esc(label)}${req}</label>`;
+    if (v.name === 'TASK') {
+      html += `<textarea id="tpl-var-${esc(v.name)}" rows="3" placeholder="${esc(label)}">${esc(v.default || '')}</textarea>`;
+    } else {
+      html += `<input id="tpl-var-${esc(v.name)}" value="${esc(v.default || '')}" placeholder="${esc(label)}" autocomplete="off">`;
+    }
+  }
+  fieldsEl.innerHTML = html;
+
+  const first = fieldsEl.querySelector('textarea, input');
+  if (first) setTimeout(() => first.focus(), 50);
+}
+
+function _tplBack() {
+  send({ cmd: 'list_templates', group: _tplGroup });
+}
+
+function _tplSubmit() {
+  if (!_tplData) return;
+  const vars = {};
+  for (const v of (_tplData.vars || [])) {
+    const el = document.getElementById('tpl-var-' + v.name);
+    if (el) vars[v.name] = el.value;
+  }
+
+  // Validate required fields
+  for (const v of (_tplData.vars || [])) {
+    if (v.required && !vars[v.name]) {
+      const el = document.getElementById('tpl-var-' + v.name);
+      if (el) { el.focus(); el.classList.add('input-error'); }
+      return;
+    }
+  }
+
+  send({
+    cmd: 'add_agent_from_template',
+    template: _tplName,
+    group: _tplGroup,
+    vars,
+  });
+  closeModals();
+}

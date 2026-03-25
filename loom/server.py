@@ -17,6 +17,7 @@ from .events import EventLog, EventBus, health_check
 from .adapters import get_adapter
 from .notifications import NotificationManager
 from .worktree import WorktreeManager
+from .templates import TemplateManager
 from . import keybindings
 
 
@@ -59,6 +60,7 @@ async def main(connection: iterm2.Connection):
 
     bridge = ITerm2Bridge(connection, state)
     worktree_mgr = WorktreeManager()
+    template_mgr = TemplateManager()
 
     _pending_merges: set[str] = set()  # cell IDs awaiting merge verification
 
@@ -125,6 +127,25 @@ async def main(connection: iterm2.Connection):
 
     # Register RPCs and install global key bindings
     displaced_bindings = await keybindings.setup(connection, state, bridge)
+
+    async def _resolve_base_dir(group: str = "") -> str:
+        """Resolve a base directory for template discovery."""
+        if group:
+            gs = state.get_group_settings(group)
+            d = gs.agent_directory or gs.default_directory
+            if d:
+                return os.path.expanduser(d)
+        try:
+            app = await iterm2.async_get_app(connection)
+            win = app.current_terminal_window
+            if win and win.current_tab and win.current_tab.current_session:
+                p = await win.current_tab.current_session.async_get_variable(
+                    "path")
+                if p:
+                    return p
+        except Exception:
+            pass
+        return ""
 
     # -- Command handler ----------------------------------------------------
 
@@ -205,6 +226,24 @@ async def main(connection: iterm2.Connection):
                 "settings": asdict(gs),
                 "profiles": pnames,
             }
+
+        # list_templates: respond directly
+        if cmd == "list_templates":
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            templates = template_mgr.list_templates(base_dir)
+            return {"type": "templates", "group": data.get("group", ""),
+                    "templates": templates}
+
+        # get_template: respond directly
+        if cmd == "get_template":
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            tpl = template_mgr.load_template(data["name"], base_dir)
+            if not tpl:
+                return {"type": "error",
+                        "message": f"Template \"{data['name']}\" not found"}
+            tvars = template_mgr.get_template_vars(tpl)
+            return {"type": "template_detail", "name": data["name"],
+                    "template": tpl, "vars": tvars}
 
         # -- Mutation commands: broadcast state at the end --
         result = None
@@ -296,6 +335,101 @@ async def main(connection: iterm2.Connection):
                                 t, env_vars=t_env,
                                 init_script=gs.terminal_init_script,
                                 shell=t_shell)
+
+            elif cmd == "add_agent_from_template":
+                group = data["group"]
+                tpl_name = data["template"]
+                variables = data.get("vars", {})
+                base_dir = await _resolve_base_dir(group)
+                tpl = template_mgr.load_template(tpl_name, base_dir)
+                if not tpl:
+                    result = {"type": "error",
+                              "message": f"Template \"{tpl_name}\" not found"}
+                else:
+                    rendered = template_mgr.render_template(tpl, variables)
+                    gs = state.get_group_settings(group)
+
+                    # Use rendered values, falling through to group settings
+                    name = data.get("name") or rendered["name"]
+                    profile = rendered.get("profile") or gs.agent_profile \
+                        or gs.profile or "Default"
+                    directory = rendered.get("directory") \
+                        or gs.agent_directory or gs.default_directory or ""
+                    command = rendered.get("command") or gs.agent_boot_command
+                    _ac = gs.agent_tab_color
+                    tab_color = rendered.get("tab_color") \
+                        or (_ac if _ac != "none" else "") or gs.tab_color or ""
+                    shell = rendered.get("shell") or gs.agent_shell \
+                        or gs.shell or ""
+                    env = {**gs.env_vars, **gs.agent_env_vars,
+                           **(rendered.get("env_vars") or {})} or None
+
+                    # Worktree: template can override group setting
+                    want_worktree = rendered.get("worktree")
+                    if want_worktree is None:
+                        want_worktree = gs.git_worktree
+
+                    cell = state.add_agent(
+                        name=name, group=group, profile=profile,
+                        command=command, directory=directory,
+                        tab_color=tab_color)
+                    if cell:
+                        if want_worktree and cell.directory:
+                            repo_root = await worktree_mgr.get_repo_root(
+                                cell.directory)
+                            if repo_root:
+                                wt_path = await worktree_mgr.create(
+                                    cell, repo_root,
+                                    base_dir=gs.worktree_base_dir
+                                        or ".loom/worktrees",
+                                    base_branch=gs.worktree_base_branch
+                                        or "")
+                                if wt_path:
+                                    cell.directory = wt_path
+                                    state.save()
+
+                        await bridge.create_session(
+                            cell, env_vars=env, shell=shell)
+
+                        # Create template-defined child terminals
+                        for tterm in (rendered.get("terminals") or []):
+                            t_name = tterm.get("name") \
+                                or state.next_cell_name(group, "terminal")
+                            t = state.add_terminal(
+                                name=t_name, group=group,
+                                profile=gs.terminal_profile
+                                    or gs.profile or "Default",
+                                command=tterm.get("command") or "",
+                                directory=tterm.get("directory")
+                                    or cell.directory,
+                                tab_color=gs.terminal_tab_color
+                                    or gs.tab_color or "",
+                                parent_id=cell.id)
+                            if t:
+                                t_shell = gs.terminal_shell \
+                                    or gs.shell or ""
+                                t_env = {**gs.env_vars,
+                                         **gs.terminal_env_vars} or None
+                                await bridge.create_session(
+                                    t, env_vars=t_env,
+                                    init_script=tterm.get("init_script")
+                                        or gs.terminal_init_script,
+                                    shell=t_shell)
+
+                        # Send rendered prompt after a short boot delay
+                        prompt = rendered.get("prompt", "")
+                        if prompt and cell.session_id:
+                            async def _send_after_boot(c, p):
+                                await asyncio.sleep(2)
+                                if c.session_id:
+                                    await bridge.send_text(
+                                        c.session_id,
+                                        p if p.endswith("\r") else p + "\r")
+                                    c.status = "running"
+                                    state.save()
+                                    await state.broadcast()
+                            asyncio.create_task(
+                                _send_after_boot(cell, prompt))
 
             elif cmd == "add_terminal":
                 group = data.get("group", "")

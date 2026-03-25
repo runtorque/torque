@@ -209,7 +209,7 @@ function render() {
       html += `  <div class="cell-add-icon">+</div>`;
       html += `  <div class="cell-name">New</div>`;
       html += `  <button class="cell-add-drop" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>`;
-      html += `  <div class="split-menu"><button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button></div>`;
+      html += `  <div class="split-menu"><button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button><button onclick="event.stopPropagation();closeMenus();openAddFromTemplate('${esc(gname)}')">From Template\u2026</button></div>`;
       html += `</div>`;
     }
     html += `</div>`;

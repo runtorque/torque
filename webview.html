@@ -278,6 +278,28 @@
   </div>
 </div>
 
+<!-- Template modal -->
+<div class="overlay" id="modal-template">
+  <div class="modal modal-tall">
+    <h2 id="tpl-title">From Template</h2>
+    <div id="tpl-list-pane">
+      <div id="tpl-list" class="tpl-list"></div>
+      <div class="tpl-empty hidden" id="tpl-empty">
+        No templates found.<br>Add <code>.yaml</code> files to <code>.loom/templates/</code> in your project.
+      </div>
+    </div>
+    <div id="tpl-vars-pane" class="hidden">
+      <div id="tpl-description" class="tpl-description"></div>
+      <div id="tpl-var-fields" class="modal-fields"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-cancel hidden" id="tpl-back-btn" onclick="_tplBack()">Back</button>
+      <button class="btn-primary hidden" id="tpl-submit-btn" onclick="_tplSubmit()">Create</button>
+    </div>
+  </div>
+</div>
+
 <!-- Context menu (right-click) -->
 <div id="ctx-menu"></div>
 

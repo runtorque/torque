@@ -1,6 +1,14 @@
 name: bugfix
 description: Fix a bug in an isolated worktree
 
+vars:
+  TASK:
+    description: What bug needs to be fixed?
+    required: true
+  TEST_COMMAND:
+    description: Command to run tests
+    default: npm test
+
 agent:
   name_prefix: fix
   tab_color: "#f85149"
@@ -10,9 +18,9 @@ worktree: true
 prompt: |
   You are fixing a bug. Here is the task:
 
-  ${TASK}
+  {{ TASK }}
 
-  After fixing, run the test suite to verify your fix works.
+  After fixing, run `{{ TEST_COMMAND }}` to verify your fix works.
 
 terminals:
   - name: tests

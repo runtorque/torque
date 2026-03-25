@@ -1060,40 +1060,57 @@ def cmd_dispatch(args):
             die("--group (-g) is required\n"
                 "  (auto-detect failed — not in a Loom-managed session)")
 
-    # Load template
-    tpl = {}
-    tpl_agent = {}
+    # Build variables dict
+    variables = {"TASK": args.description}
+    if args.var:
+        for kv in args.var:
+            if "=" not in kv:
+                die(f"Invalid variable format: {kv} (expected KEY=VALUE)")
+            k, v = kv.split("=", 1)
+            variables[k] = v
+
     if args.template:
+        # Server-side rendering via add_agent_from_template
+        # Resolve agent name client-side for display
         tpl = load_template(args.template)
-        tpl_agent = tpl.get("agent", {})
+        tpl_agent = tpl.get("agent", {}) if tpl else {}
+        if args.name:
+            agent_name = args.name
+        elif tpl_agent.get("name_prefix"):
+            slug = task_slug(args.description)
+            agent_name = f"{tpl_agent['name_prefix']}-{slug}"
+        else:
+            slug = task_slug(args.description)
+            agent_name = slug or "agent"
 
-    # Resolve agent name
-    if args.name:
-        agent_name = args.name
-    elif tpl_agent.get("name_prefix"):
-        slug = task_slug(args.description)
-        agent_name = f"{tpl_agent['name_prefix']}-{slug}"
+        kwargs = {
+            "group": group,
+            "template": args.template,
+            "vars": variables,
+            "name": agent_name,
+        }
+        if args.command:
+            kwargs["command"] = args.command
+        if args.directory:
+            kwargs["directory"] = args.directory
+
+        if args.no_prompt:
+            # Remove TASK so no prompt is sent
+            variables.pop("TASK", None)
+            kwargs["vars"] = variables
+
+        resp = api_call("add_agent_from_template", port=args.port, **kwargs)
     else:
+        # No template — plain add_agent + send_text
         slug = task_slug(args.description)
-        agent_name = slug or "agent"
+        agent_name = args.name or slug or "agent"
+        kwargs = {"name": agent_name, "group": group}
+        if args.command:
+            kwargs["command"] = args.command
+        if args.directory:
+            kwargs["directory"] = args.directory
+        resp = api_call("add_agent", port=args.port, **kwargs)
 
-    # Build add_agent payload
-    kwargs = {"name": agent_name, "group": group}
-    if args.command or tpl_agent.get("command"):
-        kwargs["command"] = args.command or tpl_agent.get("command")
-    if args.directory or tpl_agent.get("directory"):
-        kwargs["directory"] = args.directory or tpl_agent.get("directory")
-    if tpl_agent.get("profile"):
-        kwargs["profile"] = tpl_agent["profile"]
-    if tpl_agent.get("shell"):
-        kwargs["shell"] = tpl_agent["shell"]
-    if tpl_agent.get("tab_color"):
-        kwargs["tab_color"] = tpl_agent["tab_color"]
-    if tpl_agent.get("env_vars"):
-        kwargs["env_vars"] = tpl_agent["env_vars"]
-
-    # Create agent
-    resp = api_call("add_agent", port=args.port, **kwargs)
     data = check_ok(resp)
 
     # Find the new agent in the returned state
@@ -1106,31 +1123,24 @@ def cmd_dispatch(args):
     cell_id = cell["id"]
     print(f"Agent \"{agent_name}\" created (id: {cell_id})")
 
-    if args.no_prompt:
-        return
-
-    # Wait for agent to boot
-    booted = wait_for_boot(cell_id, args.port)
-    if not booted:
-        die("Agent failed to boot within 15 seconds")
-
-    # Small delay for the boot command to initialize
-    time.sleep(1.5)
-
-    # Render and send prompt
-    prompt = render_prompt(
-        tpl, args.description,
-        agent_name=agent_name, agent_id=cell_id,
-        branch=booted.get("worktree_branch", ""),
-        directory=booted.get("directory", ""),
-    )
-    if not prompt.endswith("\r") and not prompt.endswith("\n"):
-        prompt += "\r"
-    resp = api_call("send_text", port=args.port, id=cell_id, text=prompt)
-    check_ok(resp)
-    print(f"Prompt sent to \"{agent_name}\"")
+    # For non-template dispatch, send prompt manually
+    if not args.template and not args.no_prompt:
+        booted = wait_for_boot(cell_id, args.port)
+        if not booted:
+            die("Agent failed to boot within 15 seconds")
+        time.sleep(1.5)
+        prompt = args.description
+        if not prompt.endswith("\r") and not prompt.endswith("\n"):
+            prompt += "\r"
+        resp = api_call("send_text", port=args.port, id=cell_id, text=prompt)
+        check_ok(resp)
+        print(f"Prompt sent to \"{agent_name}\"")
 
     if args.wait:
+        # For template dispatch, prompt is sent server-side after boot delay
+        # Give it a moment to start
+        if args.template:
+            time.sleep(3)
         rc = wait_for_idle(cell_id, agent_name, args.port)
         sys.exit(rc)
 
@@ -1161,9 +1171,25 @@ def cmd_template_show(args):
     tpl = load_template(args.name)
     if args.json:
         print(json.dumps(tpl, indent=2))
-    else:
-        # Pretty-print as indented key-value pairs
-        _print_dict(tpl)
+        return
+
+    _print_dict(tpl)
+
+    # Highlight variables
+    raw_vars = tpl.get("vars", {})
+    if isinstance(raw_vars, dict) and raw_vars:
+        print(f"\n{_bold('Variables:')}")
+        for vname, meta in raw_vars.items():
+            if isinstance(meta, dict):
+                desc = meta.get("description", "")
+                default = meta.get("default", "")
+                req = meta.get("required", False)
+            else:
+                desc, default, req = "", str(meta) if meta else "", False
+            tag = _red(" (required)") if req else ""
+            print(f"  {_bold(vname)}{tag}: {desc}")
+            if default:
+                print(f"    default: {_dim(str(default))}")
 
 
 def _print_dict(d, indent=0):
@@ -1416,6 +1442,8 @@ def build_parser():
     p.add_argument("-n", "--name", help="Agent name override")
     p.add_argument("-c", "--command", help="Boot command override")
     p.add_argument("-d", "--directory", help="Working directory override")
+    p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
+                   help="Template variables (e.g., -v TEST_COMMAND='pytest')")
     p.add_argument("-w", "--wait", action="store_true",
                    help="Wait for the agent to finish")
     p.add_argument("--no-prompt", action="store_true",

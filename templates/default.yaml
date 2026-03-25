@@ -1,8 +1,13 @@
 name: default
 description: General-purpose agent
 
+vars:
+  TASK:
+    description: What should the agent do?
+    required: true
+
 agent:
   name_prefix: agent
 
 prompt: |
-  ${TASK}
+  {{ TASK }}

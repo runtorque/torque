@@ -40,6 +40,10 @@ function connect() {
       _showToast(msg.message, msg.level);
     } else if (msg.type === 'worktree_history') {
       _showWorktreeHistory(msg);
+    } else if (msg.type === 'templates') {
+      _showTemplateList(msg);
+    } else if (msg.type === 'template_detail') {
+      _showTemplateVarForm(msg);
     } else if (msg.type === 'action') {
       handleAction(msg);
     }

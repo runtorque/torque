@@ -708,6 +708,36 @@ textarea:focus { border-color: var(--accent); }
 }
 
 /* ------------------------------------------------------------------ */
+/* Template modal                                                       */
+/* ------------------------------------------------------------------ */
+.tpl-list { display: flex; flex-direction: column; gap: 4px; }
+.tpl-item {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-cell); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px;
+  cursor: pointer; text-align: left; width: 100%;
+  font: inherit; color: var(--fg);
+  transition: background .15s, border-color .15s;
+}
+.tpl-item:hover { background: var(--bg-hover); border-color: var(--fg-dim); }
+.tpl-item-name { font-weight: 600; white-space: nowrap; }
+.tpl-item-desc {
+  flex: 1; color: var(--fg-dim); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tpl-item-vars {
+  flex-shrink: 0; font-size: 9px; color: var(--fg-dim);
+  background: var(--bg-hover); padding: 2px 6px; border-radius: 3px;
+}
+.tpl-description {
+  color: var(--fg-dim); font-size: 11px; margin-bottom: 10px;
+}
+.tpl-empty { color: var(--fg-dim); font-size: 11px; padding: 12px 0; }
+.tpl-empty code { color: var(--fg); font-size: 10px; }
+.tpl-req { color: var(--red); }
+.input-error { border-color: var(--red) !important; }
+
+/* ------------------------------------------------------------------ */
 /* Context menu                                                        */
 /* ------------------------------------------------------------------ */
 #ctx-menu {

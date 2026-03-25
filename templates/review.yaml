@@ -1,6 +1,11 @@
 name: review
 description: Review code changes
 
+vars:
+  TASK:
+    description: What should be reviewed?
+    required: true
+
 agent:
   name_prefix: review
   tab_color: "#a371f7"
@@ -8,6 +13,6 @@ agent:
 prompt: |
   You are reviewing code. Here is the task:
 
-  ${TASK}
+  {{ TASK }}
 
   Be thorough. Check for bugs, security issues, and style problems.
