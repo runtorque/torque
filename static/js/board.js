@@ -130,7 +130,8 @@ function renderBoard() {
       + ' ondragover="boardCardDragOver(event)"'
       + ' ondragleave="boardCardDragLeave(event)"'
       + ' ondrop="boardCardDrop(event)"'
-      + ' onclick="boardFocusTask(\'' + t.id + '\')">';
+      + ' onclick="boardFocusTask(\'' + t.id + '\')"'
+      + ' oncontextmenu="boardCardMenu(event,\'' + t.id + '\')">';
     html += '<div class="board-card-dot ' + dotClass + '"></div>';
     html += '<div class="board-card-info">';
     html += '<div class="board-card-title">' + esc(t.title) + '</div>';
@@ -418,7 +419,8 @@ function boardRemoveLane(lane) {
   var msg = 'Delete lane "' + lane + '"?';
   if (cnt > 0) msg += '\n' + cnt + ' task(s) will move to "' + target + '".';
 
-  showConfirm(msg, function() {
+  showConfirm(msg).then(function(yes) {
+    if (!yes) return;
     send({ cmd: 'board_remove_lane', name: lane, move_tasks_to: target });
     if (_boardSelectedLane === lane) _boardSelectedLane = target;
   });
@@ -427,6 +429,7 @@ function boardRemoveLane(lane) {
 /* ---- Card context menu ---------------------------------------------- */
 
 function boardCardMenu(evt, taskId) {
+  evt.preventDefault();
   var tasks = _boardTasks();
   var task = tasks[taskId];
   if (!task) return;
