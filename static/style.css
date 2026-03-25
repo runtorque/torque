@@ -854,7 +854,7 @@ textarea:focus { border-color: var(--accent); }
   overflow: hidden;
   border-top: 1px solid var(--border);
   background: var(--bg-surface);
-  height: var(--panel-height, 55vh);
+  height: var(--panel-height, 20vh);
 }
 #bottom-panel.collapsed {
   height: 0;

@@ -139,6 +139,8 @@ class MatrixState:
         # Board (Phase 5)
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
+        self.board_panel_open: bool = False
+        self.board_panel_height: int = 0  # 0 = use CSS default
 
     # -- Serialization ------------------------------------------------------
 
@@ -156,6 +158,8 @@ class MatrixState:
             "board_tasks": {
                 tid: asdict(t) for tid, t in self.board_tasks.items()
             },
+            "board_panel_open": self.board_panel_open,
+            "board_panel_height": self.board_panel_height,
         }
 
     def save(self):
@@ -170,6 +174,8 @@ class MatrixState:
             "board_tasks": {
                 tid: asdict(t) for tid, t in self.board_tasks.items()
             },
+            "board_panel_open": self.board_panel_open,
+            "board_panel_height": self.board_panel_height,
         }
         STATE_FILE.write_text(json.dumps(payload, indent=2))
 
@@ -214,6 +220,8 @@ class MatrixState:
             for tid, raw in data.get("board_tasks", {}).items():
                 filtered = {k: v for k, v in raw.items() if k in bt_fields}
                 self.board_tasks[tid] = BoardTask(**filtered)
+            self.board_panel_open = data.get("board_panel_open", False)
+            self.board_panel_height = data.get("board_panel_height", 0)
         except (json.JSONDecodeError, TypeError, KeyError):
             log.exception("Failed to load state from %s", STATE_FILE)
 

@@ -231,8 +231,9 @@ Horizontal scrollable tab bar. Structure:
 - `.board-lane-tabs` has `position: relative` so child `offsetLeft` is relative to the scroll container
 - Selected lane tab has `.active` style
 - Clicking an already-selected tab is a no-op (no re-render)
+- Right-click on a lane tab shows Rename/Delete context menu
 - `+` opens an inline input to name a new lane
-- `⚙` opens a small dropdown/popover for the selected lane: Rename, Delete
+- `⚙` opens a popover for the selected lane (Rename, Delete, future settings)
 
 Clicking a lane tab switches the view to that lane. This is client-side only (no server roundtrip needed — the tasks are already in state).
 
@@ -257,8 +258,9 @@ Each card in the lane list shows:
 ### Panel Collapse/Expand
 
 - Default: collapsed (only taskbar visible)
-- Expanded height: 55vh default, user-resizable via drag handle
-- Height stored as CSS custom property (`--panel-height`), persists for the session
+- Expanded height: 20vh default, user-resizable via drag handle
+- Open/closed state and height persist across daemon restarts via `board_panel_open` and `board_panel_height` fields in `MatrixState`
+- On first WS connect, the panel is restored to its previous state
 
 ---
 

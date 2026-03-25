@@ -194,7 +194,8 @@ A Kanban board in a collapsible bottom panel with a taskbar dock. Default lanes:
 - Create, edit, move, and delete tasks from the toolbelt or CLI
 - Drag cards to reorder within a lane or drop on lane tabs to move between lanes
 - Link/unlink agents to tasks (card shows agent name, clicking focuses agent)
-- Add, rename, and delete lanes (tasks auto-migrate on lane deletion)
+- Add, rename, and delete lanes via right-click context menu or settings (tasks auto-migrate on lane deletion)
+- Resizable panel with drag handle; open/closed state and height persist across restarts
 - `K` keyboard shortcut toggles the board panel
 - CLI: `loom board list`, `loom board add`, `loom board move`, `loom board rm`, `loom board lanes`
 

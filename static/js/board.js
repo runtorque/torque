@@ -9,7 +9,6 @@ var _boardAddingTask = false;
 var _boardAddingLane = false;
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
 var _boardPopover = null;      // {type, lane, rect} for lane settings popover
-var _boardRenamingLane = null;  // lane name being renamed
 var _boardDragId = '';          // card being dragged
 
 /* ---- Helpers -------------------------------------------------------- */
@@ -81,9 +80,11 @@ function renderBoard() {
     var l = lanes[i];
     var cnt = _boardLaneCount(l);
     var cls = l === _boardSelectedLane ? ' active' : '';
+    var escLane = esc(l).replace(/'/g, "\\'");
     html += '<button class="board-lane-tab' + cls + '"'
       + ' data-lane="' + esc(l) + '"'
-      + ' onclick="boardSelectLane(\'' + esc(l).replace(/'/g, "\\'") + '\')"'
+      + ' onclick="boardSelectLane(\'' + escLane + '\')"'
+      + ' oncontextmenu="boardLaneContextMenu(event,\'' + escLane + '\')"'
       + ' ondragover="boardLaneTabDragOver(event)"'
       + ' ondragleave="boardLaneTabDragLeave(event)"'
       + ' ondrop="boardLaneTabDrop(event)">'
@@ -319,6 +320,24 @@ function boardAddLaneKeydown(e) {
   }
 }
 
+/* ---- Lane context menu (right-click) -------------------------------- */
+
+function boardLaneContextMenu(evt, lane) {
+  evt.preventDefault();
+  var menu = document.getElementById('ctx-menu');
+  var lanes = _boardLanes();
+  var escLane = esc(lane).replace(/'/g, "\\'");
+
+  var html = '<button onclick="event.stopPropagation();boardStartRenameLane(\'' + escLane + '\')">Rename</button>';
+  if (lanes.length > 1) {
+    html += '<button class="danger" onclick="boardRemoveLane(\'' + escLane + '\')">Delete lane</button>';
+  }
+  menu.innerHTML = html;
+  menu.style.top = evt.clientY + 'px';
+  menu.style.left = Math.min(evt.clientX, window.innerWidth - 140) + 'px';
+  menu.classList.add('open');
+}
+
 /* ---- Lane settings popover ------------------------------------------ */
 
 function boardOpenLaneSettings(evt) {
@@ -343,60 +362,58 @@ function _renderBoardPopover() {
   var lane = _boardPopover.lane;
   var lanes = _boardLanes();
 
-  if (_boardRenamingLane === lane) {
-    pop.innerHTML = '<input id="board-rename-input" value="' + esc(lane) + '"'
-      + ' onkeydown="boardRenameLaneKeydown(event)"'
-      + ' style="margin:4px;width:calc(100% - 8px)">';
-  } else {
-    var html = '<button onclick="boardStartRenameLane()">Rename</button>';
-    if (lanes.length > 1) {
-      html += '<button class="danger" onclick="boardRemoveLane()">Delete lane</button>';
-    }
-    pop.innerHTML = html;
+  var escLane = esc(lane).replace(/'/g, "\\'");
+  var html = '<button onclick="event.stopPropagation();boardStartRenameLane(\'' + escLane + '\')">Rename</button>';
+  if (lanes.length > 1) {
+    html += '<button class="danger" onclick="boardRemoveLane(\'' + escLane + '\')">Delete lane</button>';
   }
+  pop.innerHTML = html;
 
   // Position below the settings button
   var r = _boardPopover.rect;
   pop.style.top = (r.bottom + 2) + 'px';
   pop.style.right = (window.innerWidth - r.right) + 'px';
   document.body.appendChild(pop);
-
-  if (_boardRenamingLane === lane) {
-    var inp = document.getElementById('board-rename-input');
-    if (inp) { inp.focus(); inp.select(); }
-  }
 }
 
 function _boardClosePopover() {
   _boardPopover = null;
-  _boardRenamingLane = null;
   var old = document.getElementById('board-lane-popover');
   if (old) old.remove();
 }
 
-function boardStartRenameLane() {
-  _boardRenamingLane = _boardPopover.lane;
-  _renderBoardPopover();
+function boardStartRenameLane(lane) {
+  _boardClosePopover();
+
+  // Replace ctx-menu content with rename input
+  var menu = document.getElementById('ctx-menu');
+  menu.innerHTML = '<input id="board-rename-input" value="' + esc(lane) + '"'
+    + ' style="margin:4px;width:calc(100% - 8px);font-size:10px;padding:4px 6px"'
+    + ' onkeydown="boardRenameLaneKeydown(event,\'' + esc(lane).replace(/'/g, "\\'") + '\')"'
+    + ' onclick="event.stopPropagation()">';
+  menu.classList.add('open');
+  var inp = document.getElementById('board-rename-input');
+  if (inp) { inp.focus(); inp.select(); }
 }
 
-function boardRenameLaneKeydown(e) {
-  if (e.key === 'Escape') { _boardClosePopover(); return; }
+function boardRenameLaneKeydown(e, oldName) {
+  if (e.key === 'Escape') { _closeCtxMenu(); return; }
   if (e.key === 'Enter') {
     var val = e.target.value.trim();
-    if (val && val !== _boardRenamingLane) {
-      send({ cmd: 'board_rename_lane', old_name: _boardRenamingLane, new_name: val });
-      _boardSelectedLane = val;
+    if (val && val !== oldName) {
+      send({ cmd: 'board_rename_lane', old_name: oldName, new_name: val });
+      if (_boardSelectedLane === oldName) _boardSelectedLane = val;
     }
-    _boardClosePopover();
+    _closeCtxMenu();
   }
 }
 
-function boardRemoveLane() {
-  var lane = _boardPopover.lane;
-  var lanes = _boardLanes();
-  var cnt = _boardLaneCount(lane);
+function boardRemoveLane(lane) {
+  _closeCtxMenu();
   _boardClosePopover();
 
+  var lanes = _boardLanes();
+  var cnt = _boardLaneCount(lane);
   var target = lanes[0] === lane ? lanes[1] : lanes[0];
   var msg = 'Delete lane "' + lane + '"?';
   if (cnt > 0) msg += '\n' + cnt + ' task(s) will move to "' + target + '".';
@@ -418,7 +435,7 @@ function boardCardMenu(evt, taskId) {
   var lanes = _boardLanes();
 
   var html = '';
-  html += '<button onclick="boardEditTask(\'' + taskId + '\')">Edit</button>';
+  html += '<button onclick="event.stopPropagation();boardEditTask(\'' + taskId + '\')">Edit</button>';
 
   // Move to lane submenu
   for (var i = 0; i < lanes.length; i++) {
@@ -434,7 +451,7 @@ function boardCardMenu(evt, taskId) {
   if (task.agent_id) {
     html += '<button onclick="boardUnlinkAgent(\'' + taskId + '\')">Unlink agent</button>';
   } else {
-    html += '<button onclick="boardLinkAgent(\'' + taskId + '\')">Link agent...</button>';
+    html += '<button onclick="event.stopPropagation();boardLinkAgent(\'' + taskId + '\')">Link agent...</button>';
   }
 
   html += '<div class="ctx-sep"></div>';
@@ -463,16 +480,16 @@ function boardFocusAgent(agentId) {
 }
 
 function boardEditTask(taskId) {
-  _closeCtxMenu();
   var tasks = _boardTasks();
   var task = tasks[taskId];
   if (!task) return;
 
-  // Reuse confirm modal pattern — show a simple inline edit
+  // Replace ctx-menu content with an inline edit input
   var menu = document.getElementById('ctx-menu');
   menu.innerHTML = '<input id="board-edit-task-input" value="' + esc(task.title)
     + '" style="margin:4px;width:calc(100% - 8px);font-size:10px;padding:4px 6px"'
-    + ' onkeydown="boardEditTaskKeydown(event,\'' + taskId + '\')">';
+    + ' onkeydown="boardEditTaskKeydown(event,\'' + taskId + '\')"'
+    + ' onclick="event.stopPropagation()">';
   menu.classList.add('open');
   var inp = document.getElementById('board-edit-task-input');
   if (inp) { inp.focus(); inp.select(); }

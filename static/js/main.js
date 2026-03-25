@@ -4,6 +4,7 @@
 
 var _activePanelApp = '';   // '' = collapsed, 'board' = board open
 var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
+var _panelStateRestored = false;  // true after first state message restores panel
 
 function togglePanel(appName) {
   var panel = document.getElementById('bottom-panel');
@@ -26,6 +27,32 @@ function togglePanel(appName) {
     });
     // Render the active app
     if (appName === 'board') renderBoard();
+  }
+  // Persist panel state to server
+  send({ cmd: 'board_set_panel', open: _activePanelApp === 'board' });
+}
+
+function _restorePanelState() {
+  if (_panelStateRestored) return;
+  _panelStateRestored = true;
+
+  var open = state.board_panel_open;
+  var height = state.board_panel_height;
+  if (height > 0) _panelHeight = height;
+
+  if (open) {
+    _activePanelApp = 'board';
+    var panel = document.getElementById('bottom-panel');
+    if (panel) {
+      panel.classList.remove('collapsed');
+      if (_panelHeight > 0) {
+        panel.style.setProperty('--panel-height', _panelHeight + 'px');
+      }
+    }
+    document.querySelectorAll('.taskbar-app').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.app === 'board');
+    });
+    renderBoard();
   }
 }
 
@@ -62,6 +89,10 @@ function togglePanel(appName) {
     if (!dragging) return;
     dragging = false;
     document.body.style.cursor = '';
+    // Persist height to server
+    if (_panelHeight > 0) {
+      send({ cmd: 'board_set_panel', height: _panelHeight });
+    }
   });
 })();
 

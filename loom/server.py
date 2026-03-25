@@ -758,6 +758,13 @@ async def main(connection: iterm2.Connection):
             elif cmd == "board_reorder_lanes":
                 state.board_reorder_lanes(data.get("lanes", []))
 
+            elif cmd == "board_set_panel":
+                if "open" in data:
+                    state.board_panel_open = bool(data["open"])
+                if "height" in data:
+                    state.board_panel_height = int(data["height"])
+                state.save()
+
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")
                 await keybindings.remove(connection, displaced_bindings)

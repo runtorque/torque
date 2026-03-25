@@ -29,6 +29,8 @@ function connect() {
         _syncSelectionToActiveSession();
       }
       if (!dragInProgress) render();
+      // Restore board panel state on first load
+      if (typeof _restorePanelState === 'function') _restorePanelState();
     } else if (msg.type === 'config') {
       if (_pendingModal) {
         _showAddModal(_pendingModal.mode, _pendingModal.group, msg);
