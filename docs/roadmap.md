@@ -135,7 +135,7 @@ prompt: |
   Run `{{ TEST_COMMAND | default('npm test') }}` to verify.
 ```
 
-The toolbelt has a "From Template" option in the New Agent dropdown — a two-step modal that lists available templates and shows a form for their variables. Templates are also available via the CLI: `loom template list`, `loom template show <name>`, `loom template create <name>`. Three starters ship with the project: `default`, `bugfix`, and `review`.
+Loom searches two locations for templates: project-local `.loom/templates/` (takes precedence) and global `~/.loom/templates/`. The toolbelt has a "From Template" option in the New Agent dropdown — a two-step modal that lists available templates and shows a form for their variables. Templates are also available via the CLI: `loom template list`, `loom template show <name>`, `loom template create <name>`. Three starters ship with the project: `default`, `bugfix`, and `review`.
 
 ### `loom dispatch` ✅
 

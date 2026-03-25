@@ -181,59 +181,81 @@ class TemplateManager:
             self._env = None
             self._lenient_env = None
 
+    GLOBAL_TEMPLATES_DIR = os.path.expanduser("~/.loom/templates")
+
     @staticmethod
-    def find_templates_dir(base_dir: str = "") -> str | None:
-        """Walk up from base_dir (or cwd) to find .loom/templates/."""
+    def find_templates_dirs(base_dir: str = "") -> list[str]:
+        """Return template directories in priority order.
+
+        Searches up from base_dir (or cwd) for a project-local
+        .loom/templates/, then falls back to ~/.loom/templates/.
+        Project templates take precedence over global ones.
+        """
+        dirs = []
+        # Project-local: walk up from base_dir
         d = os.path.expanduser(base_dir) if base_dir else os.getcwd()
         if not os.path.isdir(d):
             d = os.getcwd()
         for _ in range(20):
             candidate = os.path.join(d, ".loom", "templates")
             if os.path.isdir(candidate):
-                return candidate
+                dirs.append(candidate)
+                break
             parent = os.path.dirname(d)
             if parent == d:
-                return None
+                break
             d = parent
-        return None
+        # Global: ~/.loom/templates/
+        g = TemplateManager.GLOBAL_TEMPLATES_DIR
+        if os.path.isdir(g) and g not in dirs:
+            dirs.append(g)
+        return dirs
+
+    @staticmethod
+    def find_templates_dir(base_dir: str = "") -> str | None:
+        """Return the highest-priority templates directory, or None."""
+        dirs = TemplateManager.find_templates_dirs(base_dir)
+        return dirs[0] if dirs else None
 
     def _load_raw(self, name: str, base_dir: str = "") -> str | None:
-        """Load a template file as raw text."""
-        tdir = self.find_templates_dir(base_dir)
-        if not tdir:
-            return None
-        for suffix in ("", ".yaml", ".yml"):
-            path = os.path.join(tdir, name + suffix)
-            if os.path.isfile(path):
-                with open(path) as f:
-                    return f.read()
+        """Load a template file as raw text. Searches all template dirs."""
+        for tdir in self.find_templates_dirs(base_dir):
+            for suffix in ("", ".yaml", ".yml"):
+                path = os.path.join(tdir, name + suffix)
+                if os.path.isfile(path):
+                    with open(path) as f:
+                        return f.read()
         return None
 
     def list_templates(self, base_dir: str = "") -> list[dict]:
-        """List all templates with name, description, and vars."""
-        tdir = self.find_templates_dir(base_dir)
-        if not tdir:
-            return []
-        result = []
-        for fname in sorted(os.listdir(tdir)):
-            if not fname.endswith((".yaml", ".yml")):
-                continue
-            name = fname.rsplit(".", 1)[0]
-            path = os.path.join(tdir, fname)
-            try:
-                with open(path) as f:
-                    raw = f.read()
-                raw = _migrate_syntax(raw)
-                # Parse metadata leniently (unresolved vars → empty)
-                meta = self._parse_lenient(raw)
-                desc = meta.get("description", "") if meta else ""
-                tvars = self.get_template_vars(raw)
-            except Exception:
-                desc = "(parse error)"
-                tvars = []
-            result.append({"name": name, "description": desc,
-                           "vars": tvars})
-        return result
+        """List all templates with name, description, and vars.
+
+        Merges project-local and global templates. Project templates
+        take precedence when names collide.
+        """
+        seen = {}  # name → entry dict
+        for tdir in self.find_templates_dirs(base_dir):
+            for fname in sorted(os.listdir(tdir)):
+                if not fname.endswith((".yaml", ".yml")):
+                    continue
+                name = fname.rsplit(".", 1)[0]
+                if name in seen:
+                    continue  # project-local wins
+                path = os.path.join(tdir, fname)
+                is_global = (tdir == self.GLOBAL_TEMPLATES_DIR)
+                try:
+                    with open(path) as f:
+                        raw = f.read()
+                    raw = _migrate_syntax(raw)
+                    meta = self._parse_lenient(raw)
+                    desc = meta.get("description", "") if meta else ""
+                    tvars = self.get_template_vars(raw)
+                except Exception:
+                    desc = "(parse error)"
+                    tvars = []
+                seen[name] = {"name": name, "description": desc,
+                              "vars": tvars, "global": is_global}
+        return sorted(seen.values(), key=lambda t: t["name"])
 
     def load_template(self, name: str, base_dir: str = "") -> dict | None:
         """Load template metadata (parsed leniently). Returns dict or None."""

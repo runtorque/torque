@@ -539,66 +539,78 @@ def _yaml_parse_block_scalar(lines, idx, parent_indent):
 # Template utilities
 # ---------------------------------------------------------------------------
 
-def find_templates_dir():
-    """Walk up from cwd to find .loom/templates/. Returns path or None."""
+GLOBAL_TEMPLATES_DIR = os.path.expanduser("~/.loom/templates")
+
+
+def find_templates_dirs():
+    """Return template directories in priority order.
+
+    Project-local (.loom/templates/ walking up from cwd) first,
+    then global (~/.loom/templates/). Project templates win on collision.
+    """
+    dirs = []
     d = os.getcwd()
     while True:
         candidate = os.path.join(d, ".loom", "templates")
         if os.path.isdir(candidate):
-            return candidate
+            dirs.append(candidate)
+            break
         parent = os.path.dirname(d)
         if parent == d:
-            return None
+            break
         d = parent
+    if os.path.isdir(GLOBAL_TEMPLATES_DIR) \
+            and GLOBAL_TEMPLATES_DIR not in dirs:
+        dirs.append(GLOBAL_TEMPLATES_DIR)
+    return dirs
 
 
-def load_template(name, templates_dir=None):
+def find_templates_dir():
+    """Return highest-priority templates directory, or None."""
+    dirs = find_templates_dirs()
+    return dirs[0] if dirs else None
+
+
+def load_template(name):
     """Load a template by name. Returns parsed dict or dies."""
-    if not templates_dir:
-        templates_dir = find_templates_dir()
-    if not templates_dir:
-        die("No .loom/templates/ directory found.\n"
-            "  Create it in your repo root, or copy starter templates:\n"
-            "    mkdir -p .loom/templates && cp templates/*.yaml .loom/templates/")
+    for tdir in find_templates_dirs():
+        for suffix in ("", ".yaml", ".yml"):
+            path = os.path.join(tdir, name + suffix)
+            if os.path.isfile(path):
+                with open(path) as f:
+                    return parse_yaml(f.read())
 
-    # Try with and without .yaml extension
-    for suffix in ("", ".yaml", ".yml"):
-        path = os.path.join(templates_dir, name + suffix)
-        if os.path.isfile(path):
-            with open(path) as f:
-                return parse_yaml(f.read())
-
-    available = list_templates(templates_dir)
+    available = list_templates()
     if available:
         names = ", ".join(t["name"] for t in available)
-        die(f"Template \"{name}\" not found in {templates_dir}\n"
+        die(f"Template \"{name}\" not found\n"
             f"  Available: {names}")
     else:
-        die(f"Template \"{name}\" not found in {templates_dir}\n"
-            "  Directory is empty")
+        die(f"Template \"{name}\" not found\n"
+            "  No templates in .loom/templates/ or ~/.loom/templates/")
 
 
-def list_templates(templates_dir=None):
-    """List all templates. Returns list of {name, description}."""
-    if not templates_dir:
-        templates_dir = find_templates_dir()
-    if not templates_dir:
-        return []
-
-    result = []
-    for fname in sorted(os.listdir(templates_dir)):
-        if not fname.endswith((".yaml", ".yml")):
-            continue
-        name = fname.rsplit(".", 1)[0]
-        path = os.path.join(templates_dir, fname)
-        try:
-            with open(path) as f:
-                tpl = parse_yaml(f.read())
-            desc = tpl.get("description", "")
-        except Exception:
-            desc = "(parse error)"
-        result.append({"name": name, "description": desc})
-    return result
+def list_templates():
+    """List all templates. Returns list of {name, description, global}."""
+    seen = {}
+    for tdir in find_templates_dirs():
+        is_global = (tdir == GLOBAL_TEMPLATES_DIR)
+        for fname in sorted(os.listdir(tdir)):
+            if not fname.endswith((".yaml", ".yml")):
+                continue
+            name = fname.rsplit(".", 1)[0]
+            if name in seen:
+                continue  # project-local wins
+            path = os.path.join(tdir, fname)
+            try:
+                with open(path) as f:
+                    tpl = parse_yaml(f.read())
+                desc = tpl.get("description", "")
+            except Exception:
+                desc = "(parse error)"
+            seen[name] = {"name": name, "description": desc,
+                          "global": is_global}
+    return sorted(seen.values(), key=lambda t: t["name"])
 
 
 def render_prompt(template, task, agent_name="", agent_id="",
@@ -1150,21 +1162,24 @@ def cmd_dispatch(args):
 def cmd_template_list(args):
     templates = list_templates()
     if not templates:
-        tdir = find_templates_dir()
-        if tdir:
-            print(f"No templates found in {tdir}")
+        dirs = find_templates_dirs()
+        if dirs:
+            print(f"No templates found in {dirs[0]}")
         else:
-            print("No .loom/templates/ directory found")
-            print("  Create it in your repo root and add .yaml files")
+            print("No template directories found")
+            print("  Project: .loom/templates/  (in repo root)")
+            print("  Global:  ~/.loom/templates/")
         return
 
     if args.json:
         print(json.dumps(templates, indent=2))
         return
 
-    print(f"{_bold('Templates')}  {_dim(find_templates_dir())}\n")
+    dirs = find_templates_dirs()
+    print(f"{_bold('Templates')}  {_dim(', '.join(dirs))}\n")
     for t in templates:
-        print(f"  {t['name']:<20} {_dim(t['description'])}")
+        tag = _dim(" (global)") if t.get("global") else ""
+        print(f"  {t['name']:<20} {_dim(t['description'])}{tag}")
 
 
 def cmd_template_show(args):

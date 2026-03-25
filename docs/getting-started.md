@@ -65,11 +65,23 @@ loom dispatch "Fix the login bug" --template bugfix --wait
 loom dispatch "Fix it" -t bugfix -v TEST_COMMAND=pytest --wait
 ```
 
-Templates are Jinja2+YAML files in `.loom/templates/`. Variables work anywhere in the file and are auto-discovered — no declaration needed. Defaults come from `| default()` filters. Copy the starters into your repo:
+Templates are Jinja2+YAML files. Loom looks in two locations (project-local takes precedence):
+
+- **Project**: `.loom/templates/` in your repo root
+- **Global**: `~/.loom/templates/` for templates shared across projects
+
+Variables work anywhere in the file and are auto-discovered — no declaration needed. Defaults come from `| default()` filters. Copy the starters into your repo:
 
 ```bash
 mkdir -p .loom/templates
 cp templates/*.yaml .loom/templates/
+```
+
+Or install them globally:
+
+```bash
+mkdir -p ~/.loom/templates
+cp templates/*.yaml ~/.loom/templates/
 ```
 
 Manage templates with `loom template list`, `loom template show <name>`, and `loom template create <name>`. The toolbelt also has a "From Template" option in the New Agent dropdown.
