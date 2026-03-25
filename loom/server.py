@@ -128,7 +128,14 @@ async def main(connection: iterm2.Connection):
 
     # -- Command handler ----------------------------------------------------
 
-    async def handle_command(data: dict, ws: web.WebSocketResponse):
+    async def handle_command(data: dict) -> dict | None:
+        """Handle a command, return a direct-response dict or None.
+
+        Direct-response commands (get_config, get_group_settings,
+        worktree_history) return immediately without broadcasting.
+        Mutation commands broadcast state to all WS clients and
+        optionally return a result dict.
+        """
         cmd = data.get("cmd")
         log.info("CMD %s %s", cmd,
                  {k: v for k, v in data.items() if k != "cmd"})
@@ -171,15 +178,14 @@ async def main(connection: iterm2.Connection):
                     })
 
             gs = state.get_group_settings(group)
-            await ws.send_str(json.dumps({
+            return {
                 "type": "config",
                 "profiles": profile_names,
                 "current_path": current_path,
                 "current_profile": current_profile,
                 "group_cells": group_cells,
                 "group_settings": asdict(gs),
-            }))
-            return
+            }
 
         # get_group_settings: respond directly, no state mutation
         if cmd == "get_group_settings":
@@ -193,14 +199,15 @@ async def main(connection: iterm2.Connection):
             except Exception:
                 log.exception("Failed to query profiles")
                 pnames = ["Default"]
-            await ws.send_str(json.dumps({
+            return {
                 "type": "group_settings",
                 "group": group,
                 "settings": asdict(gs),
                 "profiles": pnames,
-            }))
-            return
+            }
 
+        # -- Mutation commands: broadcast state at the end --
+        result = None
         try:
             if cmd == "refresh":
                 pass
@@ -512,14 +519,14 @@ async def main(connection: iterm2.Connection):
                 commits = []
                 if cell and cell.worktree_path:
                     commits = await worktree_mgr.list_checkpoints(cell)
-                await ws.send_str(json.dumps({
+                return {
                     "type": "worktree_history",
                     "id": data.get("id", ""),
                     "branch": cell.worktree_branch if cell else "",
-                    "base_branch": cell.worktree_base_branch if cell else "",
+                    "base_branch": cell.worktree_base_branch
+                    if cell else "",
                     "commits": commits,
-                }))
-                return  # direct response, no broadcast
+                }
 
             elif cmd == "worktree_rollback":
                 cell = state.agents.get(data.get("id", ""))
@@ -532,11 +539,11 @@ async def main(connection: iterm2.Connection):
                 cell = state.agents.get(data.get("id", ""))
                 if cell and cell.worktree_path and cell.worktree_branch:
                     if not cell.session_id:
-                        await ws.send_str(json.dumps({
+                        result = {
                             "type": "error",
                             "message": "Session not running. Relaunch "
                                        "the agent first, or merge manually.",
-                        }))
+                        }
                     else:
                         gs = state.get_group_settings(cell.group)
                         base = cell.worktree_base_branch or "main"
@@ -569,10 +576,10 @@ async def main(connection: iterm2.Connection):
 
         except Exception as exc:
             log.exception("Command '%s' failed", cmd)
-            await ws.send_str(
-                json.dumps({"type": "error", "message": str(exc)}))
+            result = {"type": "error", "message": str(exc)}
 
         await state.broadcast()
+        return result
 
     # -- Events endpoint (agent hooks) ----------------------------------------
 
@@ -626,7 +633,10 @@ async def main(connection: iterm2.Connection):
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     try:
-                        await handle_command(json.loads(msg.data), ws)
+                        result = await handle_command(
+                            json.loads(msg.data))
+                        if result:
+                            await ws.send_str(json.dumps(result))
                     except json.JSONDecodeError:
                         log.warning("Received malformed JSON from webview")
                 elif msg.type == aiohttp.WSMsgType.ERROR:
@@ -635,12 +645,48 @@ async def main(connection: iterm2.Connection):
             state._ws_clients.discard(ws)
         return ws
 
+    # -- REST API endpoint --------------------------------------------------
+
+    async def handle_api_cmd(request):
+        """REST endpoint for CLI and scripting access.
+
+        Accepts the same {"cmd": ..., ...} payloads as the WS handler.
+        Returns {"ok": true, "data": ...} on success or
+        {"ok": false, "error": "..."} on failure.
+        """
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"ok": False, "error": "invalid JSON"}, status=400)
+
+        cmd = data.get("cmd")
+        if not cmd:
+            return web.json_response(
+                {"ok": False, "error": "missing 'cmd'"}, status=400)
+
+        try:
+            result = await handle_command(data)
+        except Exception as exc:
+            log.exception("API command '%s' failed", cmd)
+            return web.json_response(
+                {"ok": False, "error": str(exc)}, status=500)
+
+        if result and result.get("type") == "error":
+            return web.json_response(
+                {"ok": False, "error": result.get("message", "")})
+
+        payload = result if result else {"type": "state",
+                                         **state.to_dict()}
+        return web.json_response({"ok": True, "data": payload})
+
     # -- Start server -------------------------------------------------------
 
     app_server = web.Application()
     app_server.router.add_get("/", handle_index)
     app_server.router.add_get("/ws", handle_ws)
     app_server.router.add_post("/events", handle_events)
+    app_server.router.add_post("/api/cmd", handle_api_cmd)
     from .config import SCRIPT_DIR
     app_server.router.add_static("/static", SCRIPT_DIR / "static")
 

@@ -257,7 +257,10 @@ class ClaudeCodeAdapter(AgentAdapter):
                 return AgentEvent(
                     cell_id=cell.id, timestamp=now,
                     event_type="session_end",
-                    data={"reason": "idle"},
+                    data={
+                        "reason": "idle",
+                        "summary": raw.get("last_assistant_message", ""),
+                    },
                 )
             return None
 

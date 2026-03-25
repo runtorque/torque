@@ -35,6 +35,29 @@ make install
 
 The Loom panel appears in the Toolbelt sidebar.
 
+## CLI
+
+Install the `loom` command-line tool:
+
+```bash
+make cli
+```
+
+This symlinks `bin/loom` to `~/.local/bin/loom`. Make sure `~/.local/bin` is in your `PATH`.
+
+The CLI lets you control Loom from any terminal:
+
+```bash
+loom status              # show agents in the current window
+loom status --all        # show all agents across all windows
+loom agent add my-agent  # create an agent (group auto-detected)
+loom send "fix the bug"  # send text to the parent agent
+loom send "fix it" --wait # send and wait for the agent to finish
+loom logs -f             # tail the daemon log
+```
+
+Run `loom --help` or `loom <command> --help` for the full reference.
+
 ## Auto-launch
 
 To start Loom automatically when iTerm2 opens:

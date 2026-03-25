@@ -1,0 +1,981 @@
+#!/usr/bin/env python3
+"""Loom CLI — control the Loom daemon from the terminal.
+
+Talks to the Loom daemon over HTTP (POST /api/cmd).
+Requires only Python 3 stdlib (urllib, json, argparse).
+"""
+
+import argparse
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+
+DEFAULT_PORT = 18932
+LOOM_LOG = os.path.expanduser(
+    "~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log")
+
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
+
+def api_url(port):
+    return f"http://127.0.0.1:{port}/api/cmd"
+
+
+def api_call(cmd, port=DEFAULT_PORT, **kwargs):
+    """Send a command to the Loom daemon, return parsed response."""
+    payload = {"cmd": cmd, **kwargs}
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        api_url(port),
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        try:
+            return json.loads(body)
+        except Exception:
+            die(f"HTTP {exc.code}: {body}")
+    except urllib.error.URLError as exc:
+        die(f"Cannot connect to Loom daemon on localhost:{port}\n"
+            f"  Is it running? Start with: make run (or Scripts menu → loom)\n"
+            f"  ({exc.reason})")
+
+
+def die(msg):
+    print(f"Error: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def check_ok(resp):
+    """Check API response, die on error, return data."""
+    if not resp:
+        die("Empty response from daemon")
+    if not resp.get("ok"):
+        die(resp.get("error", "Unknown error"))
+    return resp.get("data", {})
+
+
+# ---------------------------------------------------------------------------
+# Name / ID resolution
+# ---------------------------------------------------------------------------
+
+def get_state(port):
+    """Fetch current state from daemon."""
+    resp = api_call("refresh", port=port)
+    return check_ok(resp)
+
+
+def resolve_cell(state_data, identifier):
+    """Resolve a name or ID to a cell dict. Dies on ambiguity."""
+    agents = state_data.get("agents", {})
+
+    # Exact ID match
+    if identifier in agents:
+        return agents[identifier]
+
+    # Name match (case-insensitive)
+    matches = [c for c in agents.values()
+               if c["name"].lower() == identifier.lower()]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        print(f"Ambiguous name \"{identifier}\" matches {len(matches)} cells:",
+              file=sys.stderr)
+        for m in matches:
+            print(f"  {m['id']}  {m['name']}  ({m.get('group', '')})",
+                  file=sys.stderr)
+        die("Use the ID instead")
+
+    # Partial ID match (prefix)
+    matches = [c for c in agents.values()
+               if c["id"].startswith(identifier.lower())]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        print(f"Ambiguous prefix \"{identifier}\" matches {len(matches)} cells:",
+              file=sys.stderr)
+        for m in matches:
+            print(f"  {m['id']}  {m['name']}", file=sys.stderr)
+        die("Use the full ID")
+
+    die(f"No agent or terminal matching \"{identifier}\"")
+
+
+def resolve_group(state_data, identifier):
+    """Resolve a group name (case-insensitive). Dies if not found."""
+    groups = state_data.get("groups", {})
+
+    if identifier in groups:
+        return identifier
+
+    for name in groups:
+        if name.lower() == identifier.lower():
+            return name
+
+    die(f"No group matching \"{identifier}\"")
+
+
+def detect_context(state_data):
+    """Auto-detect group and parent from the current iTerm2 session.
+
+    Reads ITERM_SESSION_ID (format: w0t0p0:GUID), matches the GUID
+    against cells in state. Returns (cell, parent_agent, group) or
+    (None, None, None) if not in a Loom-managed session.
+    """
+    iterm_var = os.environ.get("ITERM_SESSION_ID", "")
+    if ":" not in iterm_var:
+        return None, None, None
+
+    guid = iterm_var.split(":", 1)[1]
+    agents = state_data.get("agents", {})
+
+    cell = None
+    for c in agents.values():
+        if c.get("session_id") == guid:
+            cell = c
+            break
+
+    if not cell:
+        return None, None, None
+
+    group = cell.get("group", "")
+
+    # If we're in a child terminal, the parent agent is parent_id.
+    # If we're in an agent session, the agent itself is the parent.
+    parent = None
+    if cell.get("parent_id"):
+        parent = agents.get(cell["parent_id"])
+    elif cell.get("cell_type") == "agent":
+        parent = cell
+
+    return cell, parent, group
+
+
+# ---------------------------------------------------------------------------
+# Output formatting
+# ---------------------------------------------------------------------------
+
+# ANSI helpers — disabled when output is not a TTY
+_COLOR = sys.stdout.isatty()
+
+
+def _c(code, text):
+    return f"\033[{code}m{text}\033[0m" if _COLOR else text
+
+
+def _bold(t):    return _c("1", t)
+def _dim(t):     return _c("2", t)
+def _green(t):   return _c("32", t)
+def _yellow(t):  return _c("33", t)
+def _red(t):     return _c("31", t)
+def _cyan(t):    return _c("36", t)
+
+
+_STATUS_DOT = {
+    "running":  lambda: _green("●"),
+    "idle":     lambda: _dim("●"),
+    "stopped":  lambda: _red("■"),
+    "error":    lambda: _red("!"),
+}
+
+
+def _status_str(status):
+    dot_fn = _STATUS_DOT.get(status, lambda: _dim("●"))
+    return f"{dot_fn()} {status}"
+
+
+def format_status_table(state_data, group_filter=None, window_id=None):
+    """Format state as a compact, human-readable table."""
+    groups = state_data.get("groups", {})
+    agents = state_data.get("agents", {})
+    children = state_data.get("children", {})
+    lines = []
+
+    for group_name, cell_ids in groups.items():
+        if group_filter and group_name.lower() != group_filter.lower():
+            continue
+
+        top_cells = [agents[cid] for cid in cell_ids
+                     if cid in agents and not agents[cid].get("parent_id")]
+
+        # Window filter: keep agents that have any cell in this window
+        if window_id:
+            def _in_window(cell):
+                if cell.get("window_id") == window_id:
+                    return True
+                for ch_id in children.get(cell["id"], []):
+                    ch = agents.get(ch_id)
+                    if ch and ch.get("window_id") == window_id:
+                        return True
+                return False
+            top_cells = [c for c in top_cells if _in_window(c)]
+        child_cells_in_group = [agents[cid] for cid in cell_ids
+                                if cid in agents and agents[cid].get("parent_id")]
+
+        count = len(top_cells)
+        if window_id and count == 0:
+            continue  # skip empty groups when window-filtering
+        label = "agent" if count == 1 else "agents"
+        lines.append(f"\n{_bold(group_name)}  {_dim(f'{count} {label}')}")
+
+        for cell in top_cells:
+            _append_cell_line(lines, cell, children, agents)
+
+        # Orphan terminals (parent in different group — edge case)
+        all_children = {cid for cids in children.values() for cid in cids}
+        for cell in child_cells_in_group:
+            if cell["id"] not in all_children:
+                _append_cell_line(lines, cell, children, agents)
+
+    if not lines:
+        if group_filter:
+            lines.append(f"No group matching \"{group_filter}\"")
+        else:
+            lines.append("No groups configured")
+
+    return "\n".join(lines)
+
+
+def _append_cell_line(lines, cell, children, agents, is_child=False):
+    cid = cell["id"]
+    name = cell.get("name", "")
+    status = cell.get("status", "")
+    activity = cell.get("activity_detail", "") or cell.get("activity", "")
+    branch = cell.get("worktree_branch", "")
+
+    # Build prefix with consistent visible width so status column aligns.
+    # Agent:  "  {id}  {name}"       e.g. "  c5ccb221  Agent 1"
+    # Child:  "            ↳ {name}" e.g. "            ↳ Terminal 1"
+    PREFIX_W = 32
+    if is_child:
+        visible = f"            ↳ {name}"
+        colored = f"  {' ' * 8}  {_dim('↳')} {name}"
+    else:
+        visible = f"  {cid}  {name}"
+        colored = f"  {_dim(cid)}  {name}"
+
+    pad = " " * max(1, PREFIX_W - len(visible))
+
+    parts = [colored + pad, _status_str(status)]
+    if activity:
+        parts.append(_yellow(activity[:30]))
+    if branch:
+        parts.append(_cyan(branch))
+
+    lines.append("  ".join(parts))
+
+    if not is_child:
+        for child_id in children.get(cid, []):
+            child = agents.get(child_id)
+            if child:
+                _append_cell_line(lines, child, children, agents,
+                                  is_child=True)
+
+
+def format_agent_detail(cell, children_map, agents):
+    """Format single agent detail view."""
+    lines = []
+    ctype = cell.get("cell_type", "agent").title()
+    lines.append(f"{ctype}: {cell['name']} ({cell['id']})")
+    lines.append(f"  Group:      {cell.get('group', '')}")
+    lines.append(f"  Status:     {cell.get('status', '')}")
+
+    activity = cell.get("activity_detail", "") or cell.get("activity", "")
+    if activity:
+        lines.append(f"  Activity:   {activity}")
+
+    proc = cell.get("current_process", "")
+    if proc:
+        lines.append(f"  Process:    {proc}")
+
+    agent_type = cell.get("agent_type", "")
+    if agent_type:
+        lines.append(f"  Agent type: {agent_type}")
+
+    directory = cell.get("directory", "")
+    if directory:
+        lines.append(f"  Directory:  {directory}")
+
+    branch = cell.get("current_branch", "")
+    if branch:
+        lines.append(f"  Branch:     {branch}")
+
+    wt_branch = cell.get("worktree_branch", "")
+    if wt_branch:
+        lines.append(f"  Worktree:   {cell.get('worktree_path', '')}")
+        lines.append(f"  WT branch:  {wt_branch}")
+        base = cell.get("worktree_base_branch", "")
+        if base:
+            lines.append(f"  Base:       {base}")
+        diff = cell.get("worktree_diff", {})
+        if diff:
+            f = diff.get("files", 0)
+            ins = diff.get("insertions", 0)
+            dels = diff.get("deletions", 0)
+            lines.append(f"  Diff:       +{ins} -{dels} ({f} files)")
+        cp = cell.get("worktree_checkpoints", 0)
+        if cp:
+            lines.append(f"  Checkpoints: {cp}")
+
+    tok_in = cell.get("session_tokens_in", 0)
+    tok_out = cell.get("session_tokens_out", 0)
+    if tok_in or tok_out:
+        lines.append(f"  Tokens:     {tok_in:,} in / {tok_out:,} out")
+
+    err = cell.get("error_message", "")
+    if err:
+        lines.append(f"  Error:      {err}")
+
+    summary = cell.get("last_summary", "")
+    if summary:
+        # Truncate long summaries
+        if len(summary) > 120:
+            summary = summary[:117] + "..."
+        lines.append(f"  Summary:    {summary}")
+
+    # Children
+    child_ids = children_map.get(cell["id"], [])
+    if child_ids:
+        lines.append(f"  Children:")
+        for cid in child_ids:
+            child = agents.get(cid)
+            if child:
+                lines.append(f"    {child['id']}  {child['name']:<16} "
+                             f"{child.get('status', '')}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Subcommand handlers
+# ---------------------------------------------------------------------------
+
+def cmd_status(args):
+    state_data = get_state(args.port)
+
+    if args.identifier:
+        cell = resolve_cell(state_data, args.identifier)
+        agents = state_data.get("agents", {})
+        children = state_data.get("children", {})
+        if args.json:
+            print(json.dumps(cell, indent=2))
+        else:
+            print(format_agent_detail(cell, children, agents))
+    else:
+        # Default: filter to current window unless --all
+        window_id = None
+        if not args.all and not args.group:
+            ctx_cell, _, _ = detect_context(state_data)
+            if ctx_cell:
+                window_id = ctx_cell.get("window_id", "")
+        if args.json:
+            print(json.dumps(state_data, indent=2))
+        else:
+            print(format_status_table(state_data, args.group,
+                                      window_id))
+
+
+# -- Group commands ---------------------------------------------------------
+
+def cmd_group_add(args):
+    resp = api_call("add_group", port=args.port, group=args.name)
+    check_ok(resp)
+    print(f"Group \"{args.name}\" created")
+
+
+def cmd_group_remove(args):
+    state_data = get_state(args.port)
+    name = resolve_group(state_data, args.name)
+    resp = api_call("remove_group", port=args.port, group=name)
+    check_ok(resp)
+    print(f"Group \"{name}\" removed")
+
+
+def cmd_group_rename(args):
+    state_data = get_state(args.port)
+    name = resolve_group(state_data, args.old)
+    resp = api_call("rename_group", port=args.port,
+                    group=name, new_name=args.new)
+    check_ok(resp)
+    print(f"Group \"{name}\" renamed to \"{args.new}\"")
+
+
+def cmd_group_settings(args):
+    state_data = get_state(args.port)
+    name = resolve_group(state_data, args.name)
+    resp = api_call("get_group_settings", port=args.port, group=name)
+    data = check_ok(resp)
+
+    if args.set:
+        updates = {}
+        for kv in args.set:
+            if "=" not in kv:
+                die(f"Invalid setting format: {kv} (expected key=value)")
+            k, v = kv.split("=", 1)
+            # Try to parse as JSON for booleans/numbers
+            try:
+                v = json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                pass
+            updates[k] = v
+        resp = api_call("update_group_settings", port=args.port,
+                        group=name, settings=updates)
+        check_ok(resp)
+        print(f"Group \"{name}\" settings updated")
+    else:
+        settings = data.get("settings", {})
+        if args.json:
+            print(json.dumps(settings, indent=2))
+        else:
+            print(f"Settings for \"{name}\":")
+            for k, v in sorted(settings.items()):
+                if v or v == 0 or v is False:
+                    print(f"  {k}: {v}")
+
+
+# -- Agent commands ---------------------------------------------------------
+
+def cmd_agent_add(args):
+    group = args.group
+    if not group:
+        state_data = get_state(args.port)
+        _cell, _parent, group = detect_context(state_data)
+        if not group:
+            die("--group (-g) is required\n"
+                "  (auto-detect failed — not in a Loom-managed session)")
+    kwargs = {
+        "name": args.name,
+        "group": group,
+    }
+    if args.command:
+        kwargs["command"] = args.command
+    if args.directory:
+        kwargs["directory"] = args.directory
+    if args.profile:
+        kwargs["profile"] = args.profile
+    if args.color:
+        kwargs["tab_color"] = args.color
+
+    resp = api_call("add_agent", port=args.port, **kwargs)
+    data = check_ok(resp)
+
+    # The response is a state snapshot — find the new agent by name
+    agents = data.get("agents", {})
+    match = [c for c in agents.values()
+             if c["name"] == args.name and c["group"] == group]
+    if match:
+        cell = match[-1]  # newest
+        print(f"Agent \"{args.name}\" created (id: {cell['id']})")
+    else:
+        print(f"Agent \"{args.name}\" created")
+
+
+def cmd_agent_remove(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    resp = api_call("remove_agent", port=args.port, id=cell["id"])
+    check_ok(resp)
+    print(f"Removed \"{cell['name']}\" ({cell['id']})")
+
+
+def cmd_agent_focus(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    resp = api_call("focus_agent", port=args.port, id=cell["id"])
+    check_ok(resp)
+    print(f"Focused \"{cell['name']}\"")
+
+
+def cmd_agent_relaunch(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    resp = api_call("relaunch_agent", port=args.port, id=cell["id"])
+    check_ok(resp)
+    print(f"Relaunched \"{cell['name']}\"")
+
+
+def cmd_agent_move(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    group = resolve_group(state_data, args.group)
+    resp = api_call("move_agent", port=args.port,
+                    id=cell["id"], target_group=group)
+    check_ok(resp)
+    print(f"Moved \"{cell['name']}\" to \"{group}\"")
+
+
+def cmd_agent_edit(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    kwargs = {"id": cell["id"]}
+    if args.name:
+        kwargs["name"] = args.name
+    if args.color:
+        kwargs["tab_color"] = args.color
+    resp = api_call("update_agent", port=args.port, **kwargs)
+    check_ok(resp)
+    print(f"Updated \"{cell['name']}\"")
+
+
+# -- Terminal commands ------------------------------------------------------
+
+def cmd_terminal_add(args):
+    kwargs = {
+        "name": args.name,
+        "parent_id": "",
+    }
+    if args.parent:
+        state_data = get_state(args.port)
+        parent = resolve_cell(state_data, args.parent)
+        kwargs["parent_id"] = parent["id"]
+        kwargs["group"] = parent.get("group", "")
+    elif args.group:
+        kwargs["group"] = args.group
+    else:
+        # Auto-detect from current iTerm2 session
+        state_data = get_state(args.port)
+        _cell, parent, group = detect_context(state_data)
+        if parent:
+            kwargs["parent_id"] = parent["id"]
+            kwargs["group"] = parent.get("group", "")
+        elif group:
+            kwargs["group"] = group
+        else:
+            die("Either --parent (-p) or --group (-g) is required\n"
+                "  (auto-detect failed — not in a Loom-managed session)")
+
+    if args.command:
+        kwargs["command"] = args.command
+    if args.directory:
+        kwargs["directory"] = args.directory
+    if args.profile:
+        kwargs["profile"] = args.profile
+    if args.color:
+        kwargs["tab_color"] = args.color
+
+    resp = api_call("add_terminal", port=args.port, **kwargs)
+    data = check_ok(resp)
+
+    agents = data.get("agents", {})
+    match = [c for c in agents.values()
+             if c["name"] == args.name and c.get("cell_type") == "terminal"]
+    if match:
+        cell = match[-1]
+        print(f"Terminal \"{args.name}\" created (id: {cell['id']})")
+    else:
+        print(f"Terminal \"{args.name}\" created")
+
+
+def cmd_terminal_remove(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    resp = api_call("remove_agent", port=args.port, id=cell["id"])
+    check_ok(resp)
+    print(f"Removed \"{cell['name']}\" ({cell['id']})")
+
+
+def cmd_terminal_reparent(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    parent_id = ""
+    if not args.detach:
+        if not args.parent:
+            die("Either --parent (-p) or --detach is required")
+        parent = resolve_cell(state_data, args.parent)
+        parent_id = parent["id"]
+    resp = api_call("reparent_terminal", port=args.port,
+                    id=cell["id"], parent_id=parent_id)
+    check_ok(resp)
+    if parent_id:
+        print(f"Reparented \"{cell['name']}\" under \"{args.parent}\"")
+    else:
+        print(f"Detached \"{cell['name']}\"")
+
+
+# -- Send / Broadcast -------------------------------------------------------
+
+def wait_for_idle(cell_id, cell_name, port, interval=2):
+    """Poll until the agent finishes its turn.
+
+    Detects turn completion by watching for activity to clear after
+    being non-empty (the session_end event clears activity fields).
+    Also exits on hard status changes (stopped, error).
+    """
+    t0 = time.time()
+    is_tty = sys.stderr.isatty()
+    saw_activity = False
+
+    try:
+        while True:
+            time.sleep(interval)
+            state_data = get_state(port)
+            cell = state_data.get("agents", {}).get(cell_id)
+            if not cell:
+                if is_tty:
+                    print(file=sys.stderr)
+                print(f"{cell_name} no longer exists", file=sys.stderr)
+                return 1
+
+            status = cell.get("status", "")
+            activity = (cell.get("activity_detail", "")
+                        or cell.get("activity", ""))
+            elapsed = int(time.time() - t0)
+
+            if is_tty:
+                line = (f"  {_status_str(status)}"
+                        f"  {_yellow(activity[:40]) if activity else ''}"
+                        f"  {_dim(f'{elapsed}s')}")
+                print(f"\r\033[K{line}", end="", file=sys.stderr,
+                      flush=True)
+
+            # Track whether the agent ever started working
+            if activity:
+                saw_activity = True
+
+            # Hard exit: process died or errored
+            if status in ("stopped", "error"):
+                if is_tty:
+                    print(file=sys.stderr)
+                return 1
+
+            # Turn complete: activity cleared after we saw it working
+            if saw_activity and not activity:
+                if is_tty:
+                    print(file=sys.stderr)
+                summary = cell.get("last_summary", "")
+                if summary:
+                    print(f"\n{summary}")
+                return 0
+    except KeyboardInterrupt:
+        if is_tty:
+            print(file=sys.stderr)
+        print("Interrupted", file=sys.stderr)
+        return 130
+
+
+def cmd_send(args):
+    state_data = get_state(args.port)
+    if args.identifier:
+        cell = resolve_cell(state_data, args.identifier)
+    else:
+        _cell, parent, _group = detect_context(state_data)
+        if not parent:
+            die("No target specified and auto-detect failed\n"
+                "  (not in a Loom-managed session)")
+        cell = parent
+    text = args.text
+    if not text.endswith("\r") and not text.endswith("\n"):
+        text += "\r"
+    resp = api_call("send_text", port=args.port,
+                    id=cell["id"], text=text)
+    check_ok(resp)
+    print(f"Sent to \"{cell['name']}\"")
+
+    if args.wait:
+        rc = wait_for_idle(cell["id"], cell["name"], args.port)
+        sys.exit(rc)
+
+
+def cmd_broadcast(args):
+    state_data = get_state(args.port)
+    group = resolve_group(state_data, args.group)
+    text = args.text
+    if not text.endswith("\r") and not text.endswith("\n"):
+        text += "\r"
+    resp = api_call("broadcast_to_group", port=args.port,
+                    group=group, text=text)
+    check_ok(resp)
+    print(f"Broadcast to \"{group}\"")
+
+
+# -- Worktree commands ------------------------------------------------------
+
+def cmd_worktree_create(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    kwargs = {"id": cell["id"]}
+    if args.relaunch:
+        kwargs["relaunch"] = True
+    resp = api_call("worktree_create", port=args.port, **kwargs)
+    check_ok(resp)
+    print(f"Worktree created for \"{cell['name']}\"")
+
+
+def cmd_worktree_remove(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    kwargs = {"id": cell["id"]}
+    if args.relaunch:
+        kwargs["relaunch"] = True
+    resp = api_call("worktree_remove", port=args.port, **kwargs)
+    check_ok(resp)
+    print(f"Worktree removed for \"{cell['name']}\"")
+
+
+def cmd_worktree_checkpoint(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    resp = api_call("worktree_checkpoint", port=args.port, id=cell["id"])
+    check_ok(resp)
+    print(f"Checkpoint created for \"{cell['name']}\"")
+
+
+def cmd_worktree_history(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    resp = api_call("worktree_history", port=args.port, id=cell["id"])
+    data = check_ok(resp)
+
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return
+
+    branch = data.get("branch", "")
+    base = data.get("base_branch", "")
+    commits = data.get("commits", [])
+
+    print(f"Worktree history for \"{cell['name']}\"")
+    if branch:
+        print(f"  Branch: {branch} (base: {base})")
+    if not commits:
+        print("  No checkpoints")
+        return
+
+    print(f"\n  {'SHA':<10} {'Date':<20} {'Subject'}")
+    print(f"  {'─' * 10} {'─' * 20} {'─' * 40}")
+    for c in commits:
+        sha = c.get("sha", "")[:8]
+        ts = c.get("timestamp", "")
+        subj = c.get("subject", "")
+        print(f"  {sha:<10} {ts:<20} {subj}")
+
+
+def cmd_worktree_rollback(args):
+    state_data = get_state(args.port)
+    cell = resolve_cell(state_data, args.identifier)
+    resp = api_call("worktree_rollback", port=args.port,
+                    id=cell["id"], sha=args.sha)
+    check_ok(resp)
+    print(f"Rolled back \"{cell['name']}\" to {args.sha[:8]}")
+
+
+# -- Logs -------------------------------------------------------------------
+
+def cmd_logs(args):
+    if not os.path.isfile(LOOM_LOG):
+        die(f"Log file not found: {LOOM_LOG}")
+    if args.follow:
+        os.execvp("tail", ["tail", "-f", LOOM_LOG])
+    else:
+        os.execvp("tail", ["tail", "-50", LOOM_LOG])
+
+
+# ---------------------------------------------------------------------------
+# Argument parser
+# ---------------------------------------------------------------------------
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="loom",
+        description="Control the Loom daemon from the terminal",
+    )
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
+                        help=f"Daemon port (default: {DEFAULT_PORT})")
+    parser.add_argument("--json", action="store_true",
+                        help="Output raw JSON")
+    sub = parser.add_subparsers(dest="command")
+
+    # -- status -------------------------------------------------------------
+    p = sub.add_parser("status", aliases=["st", "ls"],
+                       help="Show groups and agents")
+    p.add_argument("identifier", nargs="?",
+                   help="Agent ID or name for detail view")
+    p.add_argument("-g", "--group", help="Filter by group name")
+    p.add_argument("-a", "--all", action="store_true",
+                   help="Show all windows (default: current window only)")
+    p.set_defaults(func=cmd_status)
+
+    # -- group --------------------------------------------------------------
+    grp = sub.add_parser("group", aliases=["g"],
+                         help="Group management")
+    grp.set_defaults(func=None, _sub_parser=grp)
+    grp_sub = grp.add_subparsers(dest="group_cmd")
+
+    p = grp_sub.add_parser("add", help="Create a group")
+    p.add_argument("name", help="Group name")
+    p.set_defaults(func=cmd_group_add)
+
+    p = grp_sub.add_parser("remove", aliases=["rm"],
+                           help="Remove a group")
+    p.add_argument("name", help="Group name")
+    p.set_defaults(func=cmd_group_remove)
+
+    p = grp_sub.add_parser("rename", aliases=["mv"],
+                           help="Rename a group")
+    p.add_argument("old", help="Current name")
+    p.add_argument("new", help="New name")
+    p.set_defaults(func=cmd_group_rename)
+
+    p = grp_sub.add_parser("settings", help="Show or update group settings")
+    p.add_argument("name", help="Group name")
+    p.add_argument("-s", "--set", nargs="+", metavar="KEY=VALUE",
+                   help="Update settings (e.g., -s git_worktree=true)")
+    p.set_defaults(func=cmd_group_settings)
+
+    # -- agent --------------------------------------------------------------
+    agt = sub.add_parser("agent", aliases=["a"],
+                         help="Agent management")
+    agt.set_defaults(func=None, _sub_parser=agt)
+    agt_sub = agt.add_subparsers(dest="agent_cmd")
+
+    p = agt_sub.add_parser("add", help="Create an agent")
+    p.add_argument("name", help="Agent name")
+    p.add_argument("-g", "--group",
+                   help="Target group (auto-detected if in a Loom session)")
+    p.add_argument("-c", "--command", help="Boot command")
+    p.add_argument("-d", "--directory", help="Working directory")
+    p.add_argument("--profile", help="iTerm2 profile")
+    p.add_argument("--color", help="Tab color (hex, e.g., #f85149)")
+    p.set_defaults(func=cmd_agent_add)
+
+    p = agt_sub.add_parser("remove", aliases=["rm"],
+                           help="Remove an agent")
+    p.add_argument("identifier", help="Agent ID or name")
+    p.set_defaults(func=cmd_agent_remove)
+
+    p = agt_sub.add_parser("focus", help="Focus agent's iTerm2 session")
+    p.add_argument("identifier", help="Agent ID or name")
+    p.set_defaults(func=cmd_agent_focus)
+
+    p = agt_sub.add_parser("relaunch", help="Restart a stopped agent")
+    p.add_argument("identifier", help="Agent ID or name")
+    p.set_defaults(func=cmd_agent_relaunch)
+
+    p = agt_sub.add_parser("move", help="Move agent to different group")
+    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("-g", "--group", required=True, help="Target group")
+    p.set_defaults(func=cmd_agent_move)
+
+    p = agt_sub.add_parser("edit", help="Update agent name or color")
+    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("--name", help="New name")
+    p.add_argument("--color", help="New tab color (hex)")
+    p.set_defaults(func=cmd_agent_edit)
+
+    # -- terminal -----------------------------------------------------------
+    trm = sub.add_parser("terminal", aliases=["t", "term"],
+                         help="Terminal management")
+    trm.set_defaults(func=None, _sub_parser=trm)
+    trm_sub = trm.add_subparsers(dest="terminal_cmd")
+
+    p = trm_sub.add_parser("add", help="Create a terminal")
+    p.add_argument("name", help="Terminal name")
+    p.add_argument("-p", "--parent", help="Parent agent ID or name")
+    p.add_argument("-g", "--group", help="Group (if no parent)")
+    p.add_argument("-c", "--command", help="Boot command")
+    p.add_argument("-d", "--directory", help="Working directory")
+    p.add_argument("--profile", help="iTerm2 profile")
+    p.add_argument("--color", help="Tab color (hex)")
+    p.set_defaults(func=cmd_terminal_add)
+
+    p = trm_sub.add_parser("remove", aliases=["rm"],
+                           help="Remove a terminal")
+    p.add_argument("identifier", help="Terminal ID or name")
+    p.set_defaults(func=cmd_terminal_remove)
+
+    p = trm_sub.add_parser("reparent", help="Reparent a terminal")
+    p.add_argument("identifier", help="Terminal ID or name")
+    p.add_argument("-p", "--parent", help="New parent agent ID or name")
+    p.add_argument("--detach", action="store_true",
+                   help="Detach from parent")
+    p.set_defaults(func=cmd_terminal_reparent)
+
+    # -- send ---------------------------------------------------------------
+    p = sub.add_parser("send", help="Send text to a session")
+    p.add_argument("text", help="Text to send")
+    p.add_argument("-t", "--to",  dest="identifier", default="",
+                   help="Target agent/terminal ID or name "
+                        "(auto-detected if in a Loom session)")
+    p.add_argument("-w", "--wait", action="store_true",
+                   help="Wait until the agent finishes (polls every 2s)")
+    p.set_defaults(func=cmd_send)
+
+    # -- broadcast ----------------------------------------------------------
+    p = sub.add_parser("broadcast", aliases=["bc"],
+                       help="Broadcast text to a group")
+    p.add_argument("group", help="Group name")
+    p.add_argument("text", help="Text to broadcast")
+    p.set_defaults(func=cmd_broadcast)
+
+    # -- worktree -----------------------------------------------------------
+    wt = sub.add_parser("worktree", aliases=["wt"],
+                        help="Git worktree management")
+    wt.set_defaults(func=None, _sub_parser=wt)
+    wt_sub = wt.add_subparsers(dest="worktree_cmd")
+
+    p = wt_sub.add_parser("create", help="Create worktree for agent")
+    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("--relaunch", action="store_true",
+                   help="Relaunch agent in worktree")
+    p.set_defaults(func=cmd_worktree_create)
+
+    p = wt_sub.add_parser("remove", aliases=["rm"],
+                           help="Remove worktree")
+    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("--relaunch", action="store_true",
+                   help="Relaunch agent after removal")
+    p.set_defaults(func=cmd_worktree_remove)
+
+    p = wt_sub.add_parser("checkpoint", aliases=["cp"],
+                           help="Create checkpoint commit")
+    p.add_argument("identifier", help="Agent ID or name")
+    p.set_defaults(func=cmd_worktree_checkpoint)
+
+    p = wt_sub.add_parser("history", aliases=["log"],
+                           help="Show checkpoint history")
+    p.add_argument("identifier", help="Agent ID or name")
+    p.set_defaults(func=cmd_worktree_history)
+
+    p = wt_sub.add_parser("rollback", help="Rollback to checkpoint")
+    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("sha", help="Commit SHA to rollback to")
+    p.set_defaults(func=cmd_worktree_rollback)
+
+    # -- logs ---------------------------------------------------------------
+    p = sub.add_parser("logs", help="Tail daemon log")
+    p.add_argument("-f", "--follow", action="store_true",
+                   help="Follow log output")
+    p.set_defaults(func=cmd_logs)
+
+    return parser
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if not hasattr(args, "func") or args.func is None:
+        # Show help for the subcommand (e.g. "loom agent") or top-level
+        sub_parser = getattr(args, "_sub_parser", None)
+        (sub_parser or parser).print_help()
+        sys.exit(1)
+
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

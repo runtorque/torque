@@ -35,3 +35,4 @@ See [Getting Started](getting-started.md) to install and run Loom.
 - Tab color coding for visual organization
 - Automatic tab reordering to keep managed sessions grouped
 - Per-group window filtering to keep unrelated work out of sight
+- `loom` CLI for scripting and automation (`make cli` to install)

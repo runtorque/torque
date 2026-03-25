@@ -450,19 +450,26 @@ class WorktreeManager:
         return 0
 
     async def _ensure_gitignore(self, repo_root: str):
-        """Add .loom/ to .gitignore if not already present."""
+        """Add Loom-managed paths to .gitignore if not already present."""
         gitignore = os.path.join(repo_root, ".gitignore")
-        marker = ".loom/"
+        entries = [".loom/", ".claude/settings.local.json"]
         try:
             content = ""
             if os.path.exists(gitignore):
                 with open(gitignore) as f:
                     content = f.read()
-            if marker not in content.splitlines():
+            lines = content.splitlines()
+            added = []
+            for entry in entries:
+                if entry not in lines:
+                    added.append(entry)
+            if added:
                 with open(gitignore, "a") as f:
                     if content and not content.endswith("\n"):
                         f.write("\n")
-                    f.write(f"{marker}\n")
-                log.info("Added %s to .gitignore in %s", marker, repo_root)
+                    for entry in added:
+                        f.write(f"{entry}\n")
+                log.info("Added %s to .gitignore in %s",
+                         ", ".join(added), repo_root)
         except Exception:
             log.debug("Could not update .gitignore in %s", repo_root)

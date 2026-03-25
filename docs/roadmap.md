@@ -73,19 +73,29 @@ Auto-checkpoint on agent stop (opt-in per group). Manual checkpoint via context 
 
 Loom shouldn't only be usable from the toolbelt. This phase adds programmatic access.
 
-### `loom` CLI
+> **Status**: CLI implemented. See [implementation plan](plans/cli.md) for details.
 
-A terminal command that talks to the Loom daemon over its local socket. Commands include:
+### `loom` CLI ✅
 
-- `loom agent new <name>` — create an agent
-- `loom agent send <id> <message>` — send input to a running agent
-- `loom terminal new` — create a terminal
-- `loom broadcast <command>` — broadcast to all agents in a group
-- `loom task <description>` — create an agent with a task and worktree in one shot
-- `loom status` — show all agents, their state, and current task
-- `loom diff <id>` — show what an agent has changed
+A single-file Python CLI (`bin/loom`, stdlib only) that talks to the Loom daemon over a REST API (`POST /api/cmd`). The server's `handle_command` function is shared between the WebSocket (toolbelt) and REST (CLI) paths — same code, zero drift.
 
-This makes Loom scriptable — it can be called from shell scripts, CI, other agents, or automation tools.
+Commands cover the full surface: `status`, `group`, `agent`, `terminal`, `send`, `broadcast`, `worktree`, and `logs`. Context-aware — auto-detects the current group, parent agent, and window from `$ITERM_SESSION_ID` when run inside a Loom-managed session.
+
+Key features:
+
+- **`loom status`** — compact table with colored status indicators, filtered to current window by default (`--all` for everything)
+- **`loom send <text> --wait`** — send input to an agent and block until the turn completes, printing live activity and the agent's final response
+- **`loom agent add <name>`** — group auto-detected from session context, `-g` optional
+- **`loom terminal add <name>`** — parent agent and group auto-detected from session context
+- **Name resolution** — all commands accept names or IDs, with case-insensitive matching and prefix support
+- **`--json`** flag on any command for machine-readable output
+- **Short aliases** — `st`, `ls`, `g`, `a`, `t`, `wt`, `bc`, `rm`, `mv`, `cp`
+
+Install with `make cli` (symlinks to `~/.local/bin/loom`).
+
+### REST API ✅
+
+`POST /api/cmd` accepts the same `{"cmd": ..., ...}` JSON payloads as the WebSocket handler. Returns `{"ok": true, "data": ...}` on success or `{"ok": false, "error": "..."}` on failure. Binds to `127.0.0.1` only — no network exposure.
 
 ### Remote Server Mode
 

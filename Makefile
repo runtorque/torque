@@ -15,7 +15,7 @@ GLOBAL_PYTHON  := $(shell ls $(HOME)/.config/iterm2/AppSupport/iterm2env*/versio
                     2>/dev/null | sort -V | tail -1)
 ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
 
-.PHONY: install uninstall run deps check stop deploy autolaunch
+.PHONY: install uninstall run deps check stop deploy autolaunch cli
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
@@ -132,6 +132,19 @@ deploy: stop install
 
 ## restart: Deploy and launch in one step
 restart: deploy run
+
+## cli: Install the loom CLI to ~/.local/bin (add to PATH if needed)
+cli:
+	@chmod +x bin/loom
+	@mkdir -p "$(HOME)/.local/bin"
+	@ln -sf "$(CURDIR)/bin/loom" "$(HOME)/.local/bin/loom"
+	@echo "Installed: loom → $(CURDIR)/bin/loom"
+	@echo "  Symlink: $(HOME)/.local/bin/loom"
+	@case "$$PATH" in *$(HOME)/.local/bin*) ;; *) \
+		echo ""; \
+		echo "  Add to your PATH if not already:"; \
+		echo "    export PATH=\"\$$HOME/.local/bin:\$$PATH\"";; \
+	esac
 
 ## check: Verify prerequisites
 check:
