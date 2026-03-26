@@ -7,7 +7,10 @@ let dragInProgress = false;
 let selectedAgentId = null;
 let focusedItemId = null;
 
+var _firstStateReceived = false;
+
 function connect() {
+  _firstStateReceived = false;
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
     document.getElementById('conn-dot').classList.add('ok');
@@ -24,10 +27,13 @@ function connect() {
     if (msg.type === 'state') {
       const prevActive = state.active_session_id;
       state = msg;
-      // When user switches to a managed tab, select its agent
-      if (state.active_session_id && state.active_session_id !== prevActive) {
+      // Sync selection on first message (restore after restart/reconnect)
+      // and whenever the active session changes
+      if (state.active_session_id &&
+          (!_firstStateReceived || state.active_session_id !== prevActive)) {
         _syncSelectionToActiveSession();
       }
+      _firstStateReceived = true;
       if (!dragInProgress) render();
       // Restore board panel state on first load
       if (typeof _restorePanelState === 'function') _restorePanelState();
