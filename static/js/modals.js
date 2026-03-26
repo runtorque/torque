@@ -26,7 +26,24 @@ let addCellMode = 'agent';
 let _confirmResolve = null;
 let _pendingModal = null;
 let _selectedColor = '';
+let _selectedIcon = '';
 let _pendingParentId = '';
+
+function _renderIconPicker(containerId, selectedIcon, onClickFn) {
+  let html = `<button class="icon-btn${!selectedIcon ? ' selected' : ''}" data-icon="" onclick="${onClickFn}('')" title="Auto">auto</button>`;
+  for (const icon of AGENT_ICONS) {
+    const sel = icon === selectedIcon ? ' selected' : '';
+    html += `<button class="icon-btn${sel}" data-icon="${icon}" onclick="${onClickFn}('${icon}')" title="${icon}">${icon}</button>`;
+  }
+  document.getElementById(containerId).innerHTML = html;
+}
+
+function selectIcon(icon) {
+  _selectedIcon = icon;
+  document.querySelectorAll('#add-icon-picker .icon-btn').forEach(b => {
+    b.classList.toggle('selected', (b.dataset.icon || '') === icon);
+  });
+}
 
 function closeModals() {
   document.querySelectorAll('.overlay').forEach(o => o.classList.remove('visible'));
@@ -72,6 +89,7 @@ function _openAddModal(mode, group, parentId) {
 function _showAddModal(mode, group, config) {
   addCellMode = mode;
   _selectedColor = '';
+  _selectedIcon = '';
   _pendingParentId = (_pendingModal && _pendingModal.parentId) || '';
 
   const parent = _pendingParentId ? state.agents[_pendingParentId] : null;
@@ -83,14 +101,18 @@ function _showAddModal(mode, group, config) {
   const cmdRow = document.getElementById('add-cmd-row');
   const argsRow = document.getElementById('add-args-row');
   const initRow = document.getElementById('add-init-row');
+  const iconRow = document.getElementById('add-icon-row');
   if (isTerminal) {
     cmdRow.classList.remove('hidden');
     argsRow.classList.remove('hidden');
     initRow.classList.remove('hidden');
+    iconRow.classList.add('hidden');
   } else {
     cmdRow.classList.add('hidden');
     argsRow.classList.add('hidden');
     initRow.classList.add('hidden');
+    iconRow.classList.remove('hidden');
+    _renderIconPicker('add-icon-picker', '', 'selectIcon');
   }
 
   /* group dropdown */
@@ -207,16 +229,34 @@ function selectColor(hex) {
 /* -- Edit Agent / Terminal --------------------------------------------- */
 let _editCellId = null;
 let _editColor = '';
+let _editIcon = '';
+
+function selectEditIcon(icon) {
+  _editIcon = icon;
+  document.querySelectorAll('#edit-icon-picker .icon-btn').forEach(b => {
+    b.classList.toggle('selected', (b.dataset.icon || '') === icon);
+  });
+}
 
 function openEditCell(id) {
   const cell = state.agents[id];
   if (!cell) return;
   _editCellId = id;
   _editColor = cell.tab_color || '';
+  _editIcon = cell.icon || '';
 
   document.getElementById('edit-title').textContent =
     cell.cell_type === 'terminal' ? 'Edit Terminal' : 'Edit Agent';
   document.getElementById('edit-name-input').value = cell.name;
+
+  /* icon picker (agents only) */
+  const iconRow = document.getElementById('edit-icon-row');
+  if (cell.cell_type === 'agent') {
+    iconRow.classList.remove('hidden');
+    _renderIconPicker('edit-icon-picker', _editIcon, 'selectEditIcon');
+  } else {
+    iconRow.classList.add('hidden');
+  }
 
   /* color swatches */
   const sw = document.getElementById('edit-color-swatches');
@@ -246,7 +286,7 @@ function submitEdit() {
   if (!_editCellId) return;
   const name = document.getElementById('edit-name-input').value.trim();
   if (!name) return;
-  send({ cmd: 'update_agent', id: _editCellId, name, tab_color: _editColor });
+  send({ cmd: 'update_agent', id: _editCellId, name, tab_color: _editColor, icon: _editIcon });
   _editCellId = null;
   closeModals();
 }
@@ -489,6 +529,7 @@ function submitAdd() {
   if (addCellMode === 'terminal' && _pendingParentId) msg.parent_id = _pendingParentId;
   if (directory) msg.directory = directory;
   if (_selectedColor) msg.tab_color = _selectedColor;
+  if (_selectedIcon) msg.icon = _selectedIcon;
   if (shell) msg.shell = shell;
   if (Object.keys(envVars).length > 0) msg.env_vars = envVars;
   if (addCellMode === 'terminal') {

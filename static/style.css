@@ -541,6 +541,19 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
 }
 .swatch-inherit.selected { border-color: var(--text); }
 
+/* Icon picker */
+.icon-picker { display: flex; gap: 3px; flex-wrap: wrap; padding: 2px; }
+.icon-btn {
+  width: 26px; height: 26px; border-radius: 4px; flex-shrink: 0;
+  border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font-size: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color .15s, transform .1s;
+}
+.icon-btn:hover { transform: scale(1.12); border-color: var(--text-dim); }
+.icon-btn.selected { border-color: var(--accent); background: rgba(88,166,255,.12); }
+.icon-btn[data-icon=""] { font-size: 9px; color: var(--text-dim); }
+
 /* Group settings modal — tabbed layout */
 .modal-tall { max-height: 85vh; display: flex; flex-direction: column; }
 

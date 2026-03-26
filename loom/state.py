@@ -40,6 +40,7 @@ class AgentCell:
     command: str = ""
     directory: str = ""  # working dir on create/relaunch
     tab_color: str = ""  # hex color for iTerm2 tab (e.g. "#f85149")
+    icon: str = ""  # custom icon character (from AGENT_ICONS set)
     window_id: str = ""  # iTerm2 window this session lives in
     parent_id: str = ""  # for child terminals: the owning agent's ID
     status: str = "stopped"  # idle | running | error | stopped
@@ -314,6 +315,7 @@ class MatrixState:
         command: str = "",
         directory: str = "",
         tab_color: str = "",
+        icon: str = "",
         parent_id: str = "",
     ) -> Optional[AgentCell]:
         # Child terminals inherit group from parent
@@ -345,6 +347,7 @@ class MatrixState:
             command=command or (DEFAULT_COMMAND if cell_type == "agent" else ""),
             directory=directory,
             tab_color=tab_color,
+            icon=icon,
             parent_id=parent_id,
         )
         self.agents[aid] = cell
@@ -365,7 +368,7 @@ class MatrixState:
         cell = self.agents.get(aid)
         if not cell:
             return
-        for key in ("name", "tab_color"):
+        for key in ("name", "tab_color", "icon"):
             if key in fields:
                 setattr(cell, key, fields[key])
         self.save()

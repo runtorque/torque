@@ -287,11 +287,13 @@ async def main(connection: iterm2.Connection):
                 env = {**gs.env_vars, **gs.agent_env_vars, **(data.get("env_vars") or {})} or None
 
                 command = data.get("command", "") or gs.agent_boot_command
+                icon = data.get("icon", "")
                 cell = state.add_agent(
                     name=data["name"], group=group,
                     profile=profile,
                     command=command,
                     directory=directory, tab_color=tab_color,
+                    icon=icon,
                 )
                 if cell:
                     # Git worktree — create before session so cwd is correct
@@ -489,8 +491,10 @@ async def main(connection: iterm2.Connection):
                     old_name = cell.name
                     new_name = data.get("name", cell.name)
                     new_color = data.get("tab_color", cell.tab_color)
+                    new_icon = data.get("icon", cell.icon)
                     state.update_agent(data["id"], name=new_name,
-                                       tab_color=new_color)
+                                       tab_color=new_color,
+                                       icon=new_icon)
                     if cell.session_id:
                         await bridge.update_session(cell, old_name)
 

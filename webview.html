@@ -49,6 +49,10 @@
     <div class="gs-pane active" style="display:block">
       <label>Name</label>
       <input id="add-name-input" placeholder="e.g. Claude 1" autocomplete="off">
+      <div id="add-icon-row">
+        <label>Icon</label>
+        <div class="icon-picker" id="add-icon-picker"></div>
+      </div>
       <label>Group</label>
       <select id="add-group-select"></select>
       <div id="add-cmd-row" class="hidden">
@@ -95,6 +99,10 @@
     <label>Name</label>
     <input id="edit-name-input" autocomplete="off"
            onkeydown="if(event.key==='Enter')submitEdit();if(event.key==='Escape')closeModals();">
+    <div id="edit-icon-row">
+      <label>Icon</label>
+      <div class="icon-picker" id="edit-icon-picker"></div>
+    </div>
     <label>Tab color</label>
     <div class="color-swatches" id="edit-color-swatches"></div>
     <div class="modal-actions">

@@ -307,7 +307,7 @@ function renderAgentCell(a) {
   let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" oncontextmenu="onCellContextMenu(event,'${a.id}')" title="${esc(titleParts.join(' '))}">`;
   h += `<div class="cell-status ${statusCls}"${statusCls === 'attention' ? ' title="' + esc(a.error_message || 'Needs attention') + '"' : ''}>${statusCls === 'attention' ? '!' : ''}</div>`;
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
-  h += `<div class="cell-icon">${agentIcon(a.name)}</div>`;
+  h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
   /* Agent type badge */
   if (a.agent_type) {
