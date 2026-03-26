@@ -52,6 +52,8 @@ function connect() {
       _showTemplateList(msg);
     } else if (msg.type === 'template_detail') {
       _showTemplateVarForm(msg);
+    } else if (msg.type === 'template_rendered') {
+      _handleTemplateRendered(msg);
     } else if (msg.type === 'action') {
       handleAction(msg);
     }

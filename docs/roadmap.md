@@ -119,34 +119,46 @@ With awareness, worktrees, and programmatic access in place, Loom can start runn
 
 ### Agent Templates ✅
 
-YAML templates in `.loom/templates/` are rendered through Jinja2 as a whole — variables work anywhere in the file (names, directories, colors, prompts, env vars). Variables are auto-discovered from the Jinja2 AST with no declaration needed. Default values are extracted from `| default()` filters:
+YAML templates in `.loom/templates/` are rendered through Jinja2 as a whole — variables work anywhere in the file (names, directories, colors, task text, env vars). Variables are auto-discovered from the Jinja2 AST with no declaration needed. Default values are extracted from `| default()` filters.
+
+Templates define structured task fields that map to the ticketing system:
 
 ```yaml
-name: {{ PROJECT | default('myapp') }}-agent
-
+name: implement
 agent:
-  name_prefix: fix
-  directory: "~/projects/{{ PROJECT | default('myapp') }}"
-  tab_color: "#f85149"
+  name_prefix: impl
+  tab_color: "#3fb950"
+worktree: true
+labels:
+  - feature
 
-prompt: |
-  Fix this bug in {{ PROJECT | default('myapp') }}:
+task: |
   {{ TASK }}
-  Run `{{ TEST_COMMAND | default('npm test') }}` to verify.
+instructions: |
+  Implement this feature. Write clean, minimal code.
+  Add or update tests to cover the new behavior.
+criteria: |
+  - The feature works as described
+  - Tests pass: `{{ TEST_COMMAND | default('npm test') }}`
 ```
 
-Loom searches two locations for templates: project-local `.loom/templates/` (takes precedence) and global `~/.loom/templates/`. The toolbelt has a "From Template" option in the New Agent dropdown — a two-step modal that lists available templates and shows a form for their variables. Templates are also available via the CLI: `loom template list`, `loom template show <name>`, `loom template create <name>`. Three starters ship with the project: `default`, `bugfix`, and `review`.
+Templates support `task` (main description), `instructions`, `context`, `criteria` (acceptance criteria), `labels` (list), and `group` (override target group). Old templates with `prompt:` still work via backward compat.
 
-### `loom dispatch` ✅
+Loom searches two locations: project-local `.loom/templates/` (takes precedence) and global `~/.loom/templates/`. The toolbelt has "From Template" options in both the agent creation dropdown and the board's "+ Add task" dropdown — the latter renders the template and pre-fills the task modal. CLI: `loom template list`, `loom template show <name>`, `loom template create <name>`. Seven starter templates ship: `implement`, `fix`, `review`, `investigate`, `test`, `refactor`, `migrate`.
 
-One command to create an agent from a template and send it a task:
+### `loom task dispatch` / `loom task create` ✅
+
+Two commands for task lifecycle:
 
 ```bash
-loom dispatch "Fix the login bug" --template bugfix --wait
-loom dispatch "Fix it" -t bugfix -v TEST_COMMAND=pytest --wait
+# Create a ticket in In Progress, launch an agent, link them
+loom task dispatch "Fix the login bug" -t fix --wait
+
+# Create a ticket in Backlog (no agent launched)
+loom task create "Update error handling in auth module" -a frontend
 ```
 
-Creates the agent, renders the entire template through Jinja2 with the provided variables, sends the prompt, and optionally blocks until the agent finishes (`--wait`). Group and directory are auto-detected from session context. Agent name is derived from the template prefix and a task slug. Variables are passed via `-v KEY=VALUE`.
+`task dispatch` creates a board ticket in the "In Progress" lane, creates an agent from the template, links them via `agent_id`, and sends the task. `task create` parks a ticket in "Backlog" for later pickup. Both support `--assign PREFIX` for pool-based agent assignment and `--labels` for orchestration tagging.
 
 ### Pipeline Composition
 
@@ -189,15 +201,25 @@ Agents need to know what to work on. This phase connects Loom to where work is t
 
 ### Built-in Task Board ✅
 
-A Kanban board in a collapsible bottom panel with a taskbar dock. Default lanes: **Backlog → To Do → In Progress → Done** (customizable). Shows one lane at a time with scrollable lane tabs. Tasks are cards with optional agent linking — the dot reflects the linked agent's status.
+A Kanban board in a collapsible bottom panel with a taskbar dock. **Backlog** and **In Progress** are reserved lanes (cannot be renamed or deleted, visually distinct with italic text and lock icon on hover). Additional lanes are customizable. Shows one lane at a time with scrollable lane tabs.
 
-- Create, edit, move, and delete tasks from the toolbelt or CLI
-- Drag cards to reorder within a lane or drop on lane tabs to move between lanes
-- Link/unlink agents to tasks (card shows agent name, clicking focuses agent)
-- Add, rename, and delete lanes via right-click context menu or settings (tasks auto-migrate on lane deletion)
-- Resizable panel with drag handle; open/closed state and height persist across restarts
+Tasks are structured tickets with fields designed for agent orchestration:
+- **Task** (required) — actionable description
+- **Group** (required) — owning group, must exist
+- **Assignee** — agent name prefix for pool assignment (e.g. "frontend" matches `frontend-1`, `frontend-2`)
+- **Instructions**, **Context**, **Criteria** — structured fields that map to template fields
+- **Labels** — for orchestration tagging
+
+Cards show group badge, assignee badge (amber), label badges, and linked agent name. Double-click opens the edit modal.
+
+- Create tasks via modal (New task or From template dropdown), edit, move, delete
+- "+ Add task" is a dropdown: **New task** opens the task modal, **From template** renders a template's fields and pre-fills the modal
+- Drag cards to reorder or drop on lane tabs to move between lanes
+- Link/unlink agents (card dot reflects agent status, clicking focuses agent)
+- Resizable panel; open/closed state and height persist across restarts
 - `K` keyboard shortcut toggles the board panel
 - CLI: `loom board list`, `loom board add`, `loom board move`, `loom board rm`, `loom board lanes`
+- CLI: `loom task create` (Backlog), `loom task dispatch` (In Progress + launch agent)
 
 ### Taskbar ✅
 
@@ -221,8 +243,9 @@ Loom watches the task board (or external provider) and automatically assigns inc
 ### Remaining Work
 
 - **Provider integrations** — Jira, Linear, GitHub Issues adapters
-- **Auto-assignment** — template-based task dispatch from board
-- **Rich task content** — descriptions, labels display, due dates
+- **Auto-assignment** — agents automatically pick up tickets matching their assignee prefix
+- **Launch agent from ticket** — "Launch agent" action on ticket cards in the UI (creates agent from ticket fields, auto-links)
+- **Due dates / priority** — not yet implemented
 
 ---
 

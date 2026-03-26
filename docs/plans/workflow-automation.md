@@ -1,8 +1,8 @@
 # Implementation Plan: Workflow Automation (Phase 4a)
 
 **Roadmap phase**: 4 — Workflow Automation
-**Status**: Implemented (Jinja2 templates, dispatch, UI picker)
-**Goal**: Make Loom a task runner, not just a session manager. A `loom dispatch` command combines agent creation, worktree setup, and prompt delivery into a single operation. Templates make these tasks repeatable.
+**Status**: Implemented (Jinja2 templates, task dispatch/create, template-to-task flow, structured task fields)
+**Goal**: Make Loom a task runner, not just a session manager. `loom task dispatch` combines ticket creation, agent launch, worktree setup, and task delivery into a single operation. `loom task create` parks tickets for later pickup. Templates make these tasks repeatable and integrate with the board's ticketing system.
 
 ---
 
@@ -51,25 +51,30 @@ Templates stay in the CLI layer. The server is unaware of them — it just recei
 Templates live in `.loom/templates/` relative to the git repo root (same convention as `.loom/worktrees/`). Each template is a YAML file.
 
 ```yaml
-name: bugfix
-description: Fix a bug with a worktree and test runner
+name: fix
+description: Diagnose and fix a bug
 
 agent:
   name_prefix: fix
-  command: claude
   tab_color: "#f85149"
 
 worktree: true
+labels:
+  - bugfix
 
-prompt: |
-  You are fixing a bug. Here is the task:
+task: |
+  {{ TASK }}
 
-  ${TASK}
+instructions: |
+  1. Reproduce the bug — confirm you can see the failure before changing anything.
+  2. Identify the root cause.
+  3. Write a test that fails without the fix and passes with it.
+  4. Apply the minimal fix.
 
-  After fixing, run the test suite to verify.
-
-terminals:
-  - name: tests
+criteria: |
+  - The bug no longer reproduces
+  - A regression test exists for this case
+  - Tests pass: `{{ TEST_COMMAND | default('npm test') }}`
 ```
 
 ### Field reference
@@ -78,7 +83,7 @@ terminals:
 |---|---|---|
 | `name` | string | Template identifier (matches filename without `.yaml`) |
 | `description` | string | Human-readable description for `loom template list` |
-| `agent.name_prefix` | string | Agent name prefix. Full name: `{prefix}-{short_id}` or `{prefix}-{task_slug}` |
+| `agent.name_prefix` | string | Agent name prefix. Full name: `{prefix}-{task_slug}` |
 | `agent.command` | string | Boot command override. Empty = use group default |
 | `agent.directory` | string | Working directory override. Empty = use group default |
 | `agent.profile` | string | iTerm2 profile override |
@@ -86,7 +91,12 @@ terminals:
 | `agent.tab_color` | string | Hex color override |
 | `agent.env_vars` | dict | Additional env vars (merged on top of group defaults) |
 | `worktree` | bool | Create a git worktree for this agent (overrides group setting) |
-| `prompt` | string | Prompt template. `${TASK}` is replaced with the task description |
+| `task` | string | Task description template (Jinja2). Replaces old `prompt` field. |
+| `group` | string | Target group override. Empty = use CLI/UI group. |
+| `instructions` | string | Agent instructions template (Jinja2). Optional. |
+| `context` | string | Additional context template (Jinja2). Optional. |
+| `criteria` | string | Acceptance criteria template (Jinja2). Optional. |
+| `labels` | list | Labels for orchestration tagging. Optional. |
 | `terminals` | list | Child terminals to create alongside the agent |
 | `terminals[].name` | string | Terminal name |
 | `terminals[].command` | string | Boot command for the terminal |
@@ -99,60 +109,82 @@ Fields cascade: **CLI flag → template field → group setting → system defau
 
 An empty string in a template field means "fall through to group settings." This lets templates be sparse — a review template might only set `prompt` and `tab_color`, inheriting everything else from the group.
 
-### Prompt interpolation
+### Variable interpolation
 
-The `prompt` field supports variable substitution:
+All text fields (`task`, `instructions`, `context`, `criteria`, agent name, directory, etc.) are rendered through Jinja2 with the provided variables. Variables are auto-discovered from the AST — no explicit declaration needed. Default values are extracted from `| default()` filters.
 
-| Variable | Source |
-|---|---|
-| `${TASK}` | The task description from `loom dispatch "<description>"` |
-| `${AGENT_NAME}` | The generated agent name |
-| `${AGENT_ID}` | The agent's 8-char ID |
-| `${BRANCH}` | The worktree branch name (empty if no worktree) |
-| `${DIRECTORY}` | The agent's working directory |
+The `TASK` variable is always the task description passed to `loom task dispatch`. Custom variables are passed via `-v KEY=VALUE`.
 
-Only `${TASK}` is essential. The others are conveniences for prompts that reference agent metadata.
+Legacy `${VAR}` syntax is automatically migrated to `{{ VAR }}`.
 
 ---
 
 ## CLI Commands
 
-### `loom dispatch`
+### `loom task dispatch`
 
-The primary entry point for template-based agent creation.
+Create a ticket, launch an agent, and send the task. The ticket is placed in the "In Progress" lane and linked to the new agent.
 
 ```
-loom dispatch <description> [flags]
+loom task dispatch <description> [flags]
 
 Arguments:
-  description              Task description (sent as the prompt)
+  description              Task description (sent to agent)
 
 Flags:
   -t, --template NAME      Template name (looks in .loom/templates/)
   -g, --group GROUP        Target group (auto-detected if omitted)
   -n, --name NAME          Agent name override
+  -a, --assign PREFIX      Assign to agent name prefix (e.g. 'frontend')
+  -c, --command CMD        Boot command override
   -d, --directory DIR      Working directory override
+  -v, --var KEY=VALUE      Template variables
+  -l, --labels LABELS      Comma-separated labels
   -w, --wait               Wait for the agent to finish
-  --no-prompt              Create agent but don't send a prompt
+  --no-task                Create agent but don't send the task text
 ```
 
 **Examples:**
 
 ```bash
-# Simple: create agent, send prompt, wait for result
-loom dispatch "Fix the login bug in auth.py" --wait
+# Dispatch with template
+loom task dispatch "Fix the login bug" -t fix --wait
 
-# With template: use the bugfix template
-loom dispatch "Fix the login bug" --template bugfix --wait
+# With custom test command
+loom task dispatch "Fix it" -t fix -v TEST_COMMAND=pytest --wait
 
-# Override name and directory
-loom dispatch "Review PR #42" -t review -n pr-42-review -d ~/projects/app
+# Assign to agent pool
+loom task dispatch "Review PR #42" -t review -a review --labels urgent
 
-# Fire and forget (no --wait)
-loom dispatch "Update all dependencies to latest"
+# Fire and forget
+loom task dispatch "Update all dependencies" -t migrate
 ```
 
-**Behavior without `--template`:** Creates a plain agent with group defaults and sends the description as the prompt. Equivalent to `loom agent add` + `loom send`, but in one step.
+### `loom task create`
+
+Create a ticket in the Backlog lane without launching an agent.
+
+```
+loom task create <description> [flags]
+
+Arguments:
+  description              Task description
+
+Flags:
+  -g, --group GROUP        Target group (auto-detected if omitted)
+  -a, --assign PREFIX      Assign to agent name prefix
+  -l, --labels LABELS      Comma-separated labels
+```
+
+**Examples:**
+
+```bash
+# Add to backlog
+loom task create "Refactor the auth module"
+
+# With assignment and labels
+loom task create "Add rate limiting to API" -a backend -l feature,api
+```
 
 ### `loom template`
 
@@ -235,13 +267,11 @@ A short additional delay (~1s) after boot detection ensures the shell and boot c
 
 ## What We're NOT Building (Yet)
 
-- **Server-side template support** — Templates are CLI-only for now. The toolbelt's "Add Agent" modal already has group settings as its template mechanism. Merging these later is possible but premature.
 - **Template inheritance** — Templates are flat. No `extends: base-template` chains.
-- **Conditional logic in prompts** — `${TASK}` substitution only. No `{{#if worktree}}` blocks. Use separate templates for different scenarios.
-- **Pipeline composition** — Multi-step agent chains are shell scripts, not a Loom concept. `loom dispatch --wait && loom dispatch --wait` is a pipeline.
-- **Template parameters** — No `loom dispatch --param issue=123` for custom variables. The task description covers most cases. Parameters are a Phase 4b addition if needed.
-- **Retry / fallback** — Deferred. Retry is `loom dispatch --wait || loom dispatch --wait` in a shell script for now.
-- **Toolbelt template picker** — A dropdown in the "Add Agent" modal that applies a template's settings. Nice to have, but the modal already has all the fields. Defer.
+- **Conditional logic in templates** — Jinja2 variables and filters only. No `{% if %}` blocks. Use separate templates for different scenarios.
+- **Pipeline composition** — Multi-step agent chains are shell scripts, not a Loom concept. `loom task dispatch --wait && loom task dispatch --wait` is a pipeline.
+- **Retry / fallback** — Deferred. Retry is `loom task dispatch --wait || loom task dispatch --wait` in a shell script for now.
+- **Auto-assignment** — Agents don't yet automatically pick up tickets matching their assignee prefix. Manual assignment or explicit dispatch required.
 
 ---
 
@@ -249,8 +279,10 @@ A short additional delay (~1s) after boot detection ensures the shell and boot c
 
 | File | Change |
 |---|---|
-| `bin/loom` | Add `task` and `template` subcommands, template loader, `wait_for_boot`, prompt rendering |
-| `templates/default.yaml` | New — starter template |
-| `templates/bugfix.yaml` | New — bug fix template |
-| `templates/review.yaml` | New — code review template |
-| `docs/roadmap.md` | Update Phase 4 status |
+| `loom/templates.py` | Template loading, Jinja2 rendering, variable discovery, `render_template` returns structured fields |
+| `loom/server.py` | `add_agent_from_template` handler, `render_template` command for board integration |
+| `bin/loom` | `task dispatch`, `task create`, `template` subcommands, template loader |
+| `static/js/modals.js` | Task create/edit modal, `openTaskFromTemplate` → `render_template` → pre-fill flow |
+| `static/js/board.js` | "+ Add task" dropdown with "New task" and "From template" options |
+| `templates/*.yaml` | Seven starter templates: implement, fix, review, investigate, test, refactor, migrate |
+| `docs/roadmap.md` | Update Phase 4 and Phase 5 status |

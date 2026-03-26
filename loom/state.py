@@ -9,17 +9,22 @@ from aiohttp import web
 
 from .config import DEFAULT_COMMAND, STATE_FILE, log
 
+_RESERVED_LANES = {"Backlog", "In Progress"}
 _DEFAULT_LANES = ["Backlog", "To Do", "In Progress", "Done"]
 
 
 @dataclass
 class BoardTask:
     id: str
-    title: str
-    description: str = ""
+    task: str                   # actionable task description (required)
+    group: str = ""             # owning group (must be an existing group)
+    instructions: str = ""      # clear instructions for the agent (optional)
+    context: str = ""           # additional context the agent might need (optional)
+    criteria: str = ""          # acceptance criteria / verification (optional)
     lane: str = "Backlog"
     position: int = 0
-    agent_id: str = ""          # linked agent cell (optional)
+    assignee: str = ""          # agent name prefix for pool assignment (optional)
+    agent_id: str = ""          # concrete agent working on this (optional)
     labels: list[str] = field(default_factory=list)
     created_at: str = ""        # ISO 8601
     updated_at: str = ""        # ISO 8601
@@ -124,6 +129,8 @@ class GroupSettings:
     terminal_tab_color: str = ""
     terminal_env_vars: dict[str, str] = field(default_factory=dict)
     terminal_always_custom_dialog: bool = False
+    # Board
+    dispatch_lane: str = "In Progress"  # lane for dispatched tasks
 
 
 class MatrixState:
@@ -217,8 +224,20 @@ class MatrixState:
             self._rebuild_children()
             # Board state
             self.board_lanes = data.get("board_lanes", list(_DEFAULT_LANES))
+            # Ensure reserved lanes exist
+            for rl in ("Backlog", "In Progress"):
+                if rl not in self.board_lanes:
+                    self.board_lanes.insert(0, rl)
             bt_fields = set(BoardTask.__dataclass_fields__)
+            first_group = next(iter(self.groups), "")
             for tid, raw in data.get("board_tasks", {}).items():
+                # Migrate renamed fields: title→task, description→instructions
+                if "title" in raw and "task" not in raw:
+                    raw["task"] = raw.pop("title")
+                if "description" in raw and "instructions" not in raw:
+                    raw["instructions"] = raw.pop("description")
+                if not raw.get("group"):
+                    raw["group"] = first_group
                 filtered = {k: v for k, v in raw.items() if k in bt_fields}
                 self.board_tasks[tid] = BoardTask(**filtered)
             self.board_panel_open = data.get("board_panel_open", False)
@@ -510,9 +529,11 @@ class MatrixState:
         for i, t in enumerate(tasks):
             t.position = i
 
-    def board_add_task(self, title: str, lane: str = "",
+    def board_add_task(self, task: str, group: str, lane: str = "",
                        **kwargs) -> Optional[BoardTask]:
-        if not title:
+        if not task:
+            return None
+        if not group or group not in self.groups:
             return None
         if not lane:
             lane = self.board_lanes[0] if self.board_lanes else "Backlog"
@@ -526,20 +547,22 @@ class MatrixState:
             (t.position for t in self.board_tasks.values() if t.lane == lane),
             default=-1,
         )
-        task = BoardTask(
+        bt = BoardTask(
             id=tid,
-            title=title,
+            task=task,
+            group=group,
             lane=lane,
             position=max_pos + 1,
             created_at=now,
             updated_at=now,
             **{k: v for k, v in kwargs.items()
                if k in BoardTask.__dataclass_fields__ and k not in
-               ("id", "title", "lane", "position", "created_at", "updated_at")},
+               ("id", "task", "group", "lane", "position",
+                "created_at", "updated_at")},
         )
-        self.board_tasks[tid] = task
+        self.board_tasks[tid] = bt
         self.save()
-        return task
+        return bt
 
     def board_update_task(self, tid: str, **fields):
         task = self.board_tasks.get(tid)
@@ -610,8 +633,8 @@ class MatrixState:
         self.save()
 
     def board_rename_lane(self, old_name: str, new_name: str):
-        if (old_name not in self.board_lanes or not new_name
-                or new_name in self.board_lanes):
+        if (old_name in _RESERVED_LANES or old_name not in self.board_lanes
+                or not new_name or new_name in self.board_lanes):
             return
         idx = self.board_lanes.index(old_name)
         self.board_lanes[idx] = new_name
@@ -621,7 +644,8 @@ class MatrixState:
         self.save()
 
     def board_remove_lane(self, name: str, move_tasks_to: str = ""):
-        if name not in self.board_lanes or len(self.board_lanes) <= 1:
+        if (name in _RESERVED_LANES or name not in self.board_lanes
+                or len(self.board_lanes) <= 1):
             return
         self.board_lanes.remove(name)
         target = move_tasks_to if move_tasks_to in self.board_lanes \

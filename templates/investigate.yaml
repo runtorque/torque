@@ -1,0 +1,29 @@
+name: investigate
+description: Research a technical question and produce a summary
+
+agent:
+  name_prefix: spike
+  tab_color: "#d2a8ff"
+
+labels:
+  - spike
+
+task: |
+  {{ TASK }}
+
+instructions: |
+  This is a research spike — your output is knowledge, not code.
+  Investigate the question thoroughly:
+  - Read the relevant source code, docs, and git history
+  - Try small experiments if needed, but don't commit anything
+  - Produce a concise written summary of your findings
+
+  Structure your summary as:
+  1. **Answer** — the direct answer in 1-2 sentences
+  2. **Evidence** — what you found that supports the answer
+  3. **Recommendation** — what to do next, if anything
+
+criteria: |
+  - The question is answered directly
+  - Evidence is cited (file paths, commit SHAs, doc links)
+  - No code changes committed

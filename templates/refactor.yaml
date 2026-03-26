@@ -1,0 +1,27 @@
+name: refactor
+description: Refactor code with zero behavior change
+
+agent:
+  name_prefix: refactor
+  tab_color: "#58a6ff"
+
+worktree: true
+
+labels:
+  - refactor
+
+task: |
+  {{ TASK }}
+
+instructions: |
+  This is a pure refactor — behavior MUST NOT change.
+  Before starting, run the test suite and confirm it passes.
+  Make your changes in small, logical steps.
+  After each step, run tests to confirm nothing broke.
+  If you find a bug during refactoring, note it but don't fix it — that's a separate task.
+
+criteria: |
+  - All existing tests still pass: `{{ TEST_COMMAND | default('npm test') }}`
+  - No functional behavior has changed
+  - The code is measurably better (fewer lines, clearer names, simpler flow)
+  - No new dependencies introduced

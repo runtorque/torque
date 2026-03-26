@@ -246,6 +246,24 @@ async def main(connection: iterm2.Connection):
             return {"type": "template_detail", "name": data["name"],
                     "template": tpl, "vars": tvars}
 
+        # render_template: render template fields without creating an agent
+        if cmd == "render_template":
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            raw = template_mgr._load_raw(data["name"], base_dir)
+            if not raw:
+                return {"type": "error",
+                        "message": f"Template \"{data['name']}\" not found"}
+            variables = data.get("vars", {})
+            rendered = template_mgr.render_template(raw, variables)
+            return {"type": "template_rendered",
+                    "name": data["name"],
+                    "task": rendered.get("task", ""),
+                    "group": rendered.get("group", ""),
+                    "instructions": rendered.get("instructions", ""),
+                    "context": rendered.get("context", ""),
+                    "criteria": rendered.get("criteria", ""),
+                    "labels": rendered.get("labels", [])}
+
         # -- Mutation commands: broadcast state at the end --
         result = None
         try:
@@ -351,6 +369,12 @@ async def main(connection: iterm2.Connection):
                 else:
                     rendered = template_mgr.render_template(
                         raw, variables)
+
+                    # Template can override the target group
+                    tpl_group = rendered.get("group", "")
+                    if tpl_group and tpl_group in state.groups:
+                        group = tpl_group
+
                     gs = state.get_group_settings(group)
 
                     # Use rendered values, falling through to group settings
@@ -420,8 +444,22 @@ async def main(connection: iterm2.Connection):
                                         or gs.terminal_init_script,
                                     shell=t_shell)
 
-                        # Send rendered prompt after a short boot delay
-                        prompt = rendered.get("prompt", "")
+                        # Compose prompt from task + structured fields
+                        parts = []
+                        task_text = rendered.get("task", "")
+                        if task_text:
+                            parts.append(task_text)
+                        instr = rendered.get("instructions", "")
+                        if instr:
+                            parts.append(instr)
+                        ctx = rendered.get("context", "")
+                        if ctx:
+                            parts.append(ctx)
+                        crit = rendered.get("criteria", "")
+                        if crit:
+                            parts.append(crit)
+                        prompt = "\n\n".join(parts)
+
                         if prompt and cell.session_id:
                             async def _send_after_boot(c, p):
                                 await asyncio.sleep(2)
@@ -710,16 +748,20 @@ async def main(connection: iterm2.Connection):
 
             # -- Board commands (Phase 5) --
             elif cmd == "board_add_task":
-                task = state.board_add_task(
-                    title=data.get("title", ""),
+                bt = state.board_add_task(
+                    task=data.get("task", ""),
+                    group=data.get("group", ""),
                     lane=data.get("lane", ""),
-                    description=data.get("description", ""),
+                    instructions=data.get("instructions", ""),
+                    context=data.get("context", ""),
+                    criteria=data.get("criteria", ""),
+                    assignee=data.get("assignee", ""),
                     agent_id=data.get("agent_id", ""),
                     labels=data.get("labels", []),
                 )
-                if not task:
+                if not bt:
                     result = {"type": "error",
-                              "message": "Invalid lane or empty title"}
+                              "message": "Invalid lane, group, or empty task"}
 
             elif cmd == "board_update_task":
                 tid = data.get("id", "")

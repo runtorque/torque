@@ -316,7 +316,8 @@ class TemplateManager:
 
         Returns a flat dict with resolved agent settings:
         {name, command, directory, profile, shell, tab_color, env_vars,
-         prompt, worktree, terminals}
+         task, group, instructions, context, criteria, labels,
+         worktree, terminals}
         """
         if isinstance(tpl_or_name, str) and "\n" not in tpl_or_name:
             # It's a template name, load raw
@@ -351,6 +352,9 @@ class TemplateManager:
 
         agent = tpl.get("agent", {}) if isinstance(tpl, dict) else {}
 
+        # Backward compat: old templates use "prompt", new ones use "task"
+        task = tpl.get("task", "") or tpl.get("prompt", "")
+
         return {
             "name": agent.get("name_prefix", tpl.get("name", "agent")),
             "command": agent.get("command", ""),
@@ -359,7 +363,12 @@ class TemplateManager:
             "shell": agent.get("shell", ""),
             "tab_color": agent.get("tab_color", ""),
             "env_vars": agent.get("env_vars", {}),
-            "prompt": tpl.get("prompt", ""),
+            "task": task,
+            "group": tpl.get("group", ""),
+            "instructions": tpl.get("instructions", ""),
+            "context": tpl.get("context", ""),
+            "criteria": tpl.get("criteria", ""),
+            "labels": tpl.get("labels", []),
             "worktree": tpl.get("worktree", None),
             "terminals": tpl.get("terminals", []),
         }
@@ -413,6 +422,8 @@ class TemplateManager:
     def _render_dict_fields(self, tpl: dict, variables: dict) -> dict:
         """Legacy: render individual fields of a parsed template dict."""
         agent = tpl.get("agent", {})
+        # Backward compat: old templates use "prompt", new ones use "task"
+        task_raw = tpl.get("task", "") or tpl.get("prompt", "{{ TASK }}")
         return {
             "name": self._render_str(
                 agent.get("name_prefix", tpl.get("name", "agent")),
@@ -425,8 +436,15 @@ class TemplateManager:
             "tab_color": agent.get("tab_color", ""),
             "env_vars": {k: self._render_str(str(v or ""), variables)
                          for k, v in (agent.get("env_vars") or {}).items()},
-            "prompt": self._render_str(
-                tpl.get("prompt", "{{ TASK }}"), variables),
+            "task": self._render_str(task_raw, variables),
+            "group": self._render_str(tpl.get("group", ""), variables),
+            "instructions": self._render_str(
+                tpl.get("instructions", ""), variables),
+            "context": self._render_str(
+                tpl.get("context", ""), variables),
+            "criteria": self._render_str(
+                tpl.get("criteria", ""), variables),
+            "labels": tpl.get("labels", []),
             "worktree": tpl.get("worktree", None),
             "terminals": tpl.get("terminals", []),
         }

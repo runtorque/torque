@@ -407,7 +407,11 @@ class WorktreeManager:
             return False
 
     async def is_merged(self, cell) -> bool:
-        """Check if the worktree branch has been merged into the base branch."""
+        """Check if the worktree branch has been merged into the base branch.
+
+        Handles both regular merges (ancestry check) and squash merges
+        (patch-based comparison).
+        """
         if not cell.worktree_path or not cell.worktree_base_branch:
             return False
         repo_root = cell.worktree_repo_root
@@ -416,7 +420,7 @@ class WorktreeManager:
         if not repo_root:
             return False
         try:
-            # Check if worktree branch is an ancestor of the base branch
+            # Fast path: check if worktree branch is an ancestor of base
             proc = await asyncio.create_subprocess_exec(
                 "git", "-C", repo_root,
                 "merge-base", "--is-ancestor",
@@ -425,7 +429,61 @@ class WorktreeManager:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             await proc.communicate()
-            return proc.returncode == 0
+            if proc.returncode == 0:
+                return True
+
+            # Slow path: detect squash merges.  A squash merge creates a
+            # new commit on base with the same content but a different SHA,
+            # so the ancestry check above fails.  Instead, find which files
+            # the branch changed since the fork point, then compare those
+            # files between the current base tip and the branch tip.  If
+            # they're identical, the changes have landed (via squash merge,
+            # cherry-pick, etc.).
+
+            # 1. Find the fork point
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root,
+                "merge-base", cell.worktree_base_branch,
+                cell.worktree_branch,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return False
+            merge_base = stdout.decode().strip()
+
+            # 2. List files the branch changed since the fork
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root,
+                "diff", "--name-only",
+                f"{merge_base}..{cell.worktree_branch}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return False
+            changed_files = stdout.decode().strip()
+            if not changed_files:
+                # Branch has no changes — not really "merged"
+                return False
+
+            # 3. Compare those files between base tip and branch tip
+            cmd = [
+                "git", "-C", repo_root, "diff",
+                cell.worktree_base_branch, cell.worktree_branch,
+                "--", *changed_files.splitlines(),
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return False
+            return len(stdout.decode().strip()) == 0
         except Exception:
             log.debug("is_merged check failed for '%s'", cell.name)
             return False

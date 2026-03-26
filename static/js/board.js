@@ -5,11 +5,13 @@
 // Client-side state
 var _boardSelectedLane = '';
 var _boardFocusedTask = '';
-var _boardAddingTask = false;
+// _boardAddingTask removed — task creation uses modal now
 var _boardAddingLane = false;
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
 var _boardPopover = null;      // {type, lane, rect} for lane settings popover
 var _boardDragId = '';          // card being dragged
+
+var _RESERVED_LANES = ['Backlog', 'In Progress'];
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -80,6 +82,7 @@ function renderBoard() {
     var l = lanes[i];
     var cnt = _boardLaneCount(l);
     var cls = l === _boardSelectedLane ? ' active' : '';
+    if (_RESERVED_LANES.indexOf(l) >= 0) cls += ' reserved';
     var escLane = esc(l).replace(/'/g, "\\'");
     html += '<button class="board-lane-tab' + cls + '"'
       + ' data-lane="' + esc(l) + '"'
@@ -88,7 +91,9 @@ function renderBoard() {
       + ' ondragover="boardLaneTabDragOver(event)"'
       + ' ondragleave="boardLaneTabDragLeave(event)"'
       + ' ondrop="boardLaneTabDrop(event)">'
-      + esc(l) + '<span class="lane-count">' + cnt + '</span></button>';
+      + esc(l) + '<span class="lane-count">' + cnt + '</span>'
+      + (_RESERVED_LANES.indexOf(l) >= 0 ? '<span class="lane-lock">&#x1F512;</span>' : '')
+      + '</button>';
   }
   html += '</div>';
   html += '<button class="board-lane-scroll-btn" id="board-scroll-right" onclick="boardScrollLanes(1)" title="Scroll right">&#9654;</button>';
@@ -114,7 +119,7 @@ function renderBoard() {
   var tasks = _boardTasksInLane(_boardSelectedLane);
   html += '<div class="board-cards" id="board-cards">';
 
-  if (tasks.length === 0 && !_boardAddingTask) {
+  if (tasks.length === 0) {
     html += '<div class="board-empty">No tasks in this lane</div>';
   }
 
@@ -131,10 +136,21 @@ function renderBoard() {
       + ' ondragleave="boardCardDragLeave(event)"'
       + ' ondrop="boardCardDrop(event)"'
       + ' onclick="boardFocusTask(\'' + t.id + '\')"'
-      + ' oncontextmenu="boardCardMenu(event,\'' + t.id + '\')">';
+      + ' oncontextmenu="boardCardMenu(event,\'' + t.id + '\')"'
+      + ' ondblclick="openEditTask(\'' + t.id + '\')">';
     html += '<div class="board-card-dot ' + dotClass + '"></div>';
     html += '<div class="board-card-info">';
-    html += '<div class="board-card-title">' + esc(t.title) + '</div>';
+    html += '<div class="board-card-title">' + esc(t.task || '') + '</div>';
+    // Meta line: group badge + assignee + labels
+    var meta = '';
+    if (t.group) meta += '<span class="board-card-group">' + esc(t.group) + '</span>';
+    if (t.assignee) meta += '<span class="board-card-assignee">' + esc(t.assignee) + '</span>';
+    if (t.labels && t.labels.length) {
+      for (var li = 0; li < t.labels.length; li++) {
+        meta += '<span class="board-card-label">' + esc(t.labels[li]) + '</span>';
+      }
+    }
+    if (meta) html += '<div class="board-card-meta">' + meta + '</div>';
     if (t.agent_id) {
       var aName = _boardAgentName(t.agent_id);
       if (aName) {
@@ -147,26 +163,16 @@ function renderBoard() {
     html += '</div>';
   }
 
-  // Add task inline
-  if (_boardAddingTask) {
-    html += '<input class="board-add-input" id="board-add-task-input"'
-      + ' placeholder="Task title..."'
-      + ' onkeydown="boardAddTaskKeydown(event)"'
-      + ' onblur="boardCancelAddTask()">';
-  } else {
-    html += '<div class="board-add-task" onclick="boardStartAddTask()">';
-    html += '<span>+ Add task</span>';
-    html += '</div>';
-  }
+  // Add task dropdown
+  html += '<div class="board-add-task" onclick="boardAddTaskMenu(event)">';
+  html += '<span>+ Add task</span>';
+  html += '<span class="board-add-caret">&#9662;</span>';
+  html += '</div>';
 
   html += '</div>';
   panel.innerHTML = html;
 
   // Auto-focus inputs
-  if (_boardAddingTask) {
-    var inp = document.getElementById('board-add-task-input');
-    if (inp) inp.focus();
-  }
   if (_boardAddingLane) {
     var inp2 = document.getElementById('board-add-lane-input');
     if (inp2) inp2.focus();
@@ -217,7 +223,6 @@ function boardSelectLane(lane) {
   if (tabs) _boardScrollLeft = tabs.scrollLeft;
   _boardSelectedLane = lane;
   _boardFocusedTask = '';
-  _boardAddingTask = false;
   renderBoard();
 }
 
@@ -267,31 +272,25 @@ function boardUpdateScrollArrows() {
   right.classList.toggle('hidden', maxScroll - sl < 1);
 }
 
-/* ---- Add task ------------------------------------------------------- */
+/* ---- Add task dropdown ---------------------------------------------- */
 
-function boardStartAddTask() {
-  _boardAddingTask = true;
-  renderBoard();
+function boardAddTaskMenu(evt) {
+  evt.stopPropagation();
+  var menu = document.getElementById('ctx-menu');
+  var html = '';
+  html += '<button onclick="_closeCtxMenu();openAddTask(_boardSelectedLane)">New task</button>';
+  html += '<button onclick="_closeCtxMenu();boardAddFromTemplate()">From template</button>';
+  menu.innerHTML = html;
+
+  var rect = evt.currentTarget.getBoundingClientRect();
+  menu.style.top = rect.top + 'px';
+  menu.style.left = Math.min(rect.left, window.innerWidth - 140) + 'px';
+  menu.classList.add('open');
 }
 
-function boardCancelAddTask() {
-  setTimeout(function() { _boardAddingTask = false; renderBoard(); }, 150);
-}
-
-function boardAddTaskKeydown(e) {
-  if (e.key === 'Escape') {
-    _boardAddingTask = false;
-    renderBoard();
-    return;
-  }
-  if (e.key === 'Enter') {
-    var val = e.target.value.trim();
-    if (val) {
-      send({ cmd: 'board_add_task', title: val, lane: _boardSelectedLane });
-    }
-    _boardAddingTask = false;
-    // Don't re-render; broadcast will trigger it
-  }
+function boardAddFromTemplate() {
+  var group = _currentGroup();
+  openTaskFromTemplate(group, _boardSelectedLane);
 }
 
 /* ---- Add lane ------------------------------------------------------- */
@@ -325,6 +324,9 @@ function boardAddLaneKeydown(e) {
 
 function boardLaneContextMenu(evt, lane) {
   evt.preventDefault();
+  var reserved = _RESERVED_LANES.indexOf(lane) >= 0;
+  if (reserved) return;  // no context menu for reserved lanes
+
   var menu = document.getElementById('ctx-menu');
   var lanes = _boardLanes();
   var escLane = esc(lane).replace(/'/g, "\\'");
@@ -363,10 +365,16 @@ function _renderBoardPopover() {
   var lane = _boardPopover.lane;
   var lanes = _boardLanes();
 
+  var reserved = _RESERVED_LANES.indexOf(lane) >= 0;
   var escLane = esc(lane).replace(/'/g, "\\'");
-  var html = '<button onclick="event.stopPropagation();boardStartRenameLane(\'' + escLane + '\')">Rename</button>';
-  if (lanes.length > 1) {
-    html += '<button class="danger" onclick="boardRemoveLane(\'' + escLane + '\')">Delete lane</button>';
+  var html = '';
+  if (!reserved) {
+    html += '<button onclick="event.stopPropagation();boardStartRenameLane(\'' + escLane + '\')">Rename</button>';
+    if (lanes.length > 1) {
+      html += '<button class="danger" onclick="boardRemoveLane(\'' + escLane + '\')">Delete lane</button>';
+    }
+  } else {
+    html += '<button disabled>Reserved lane</button>';
   }
   pop.innerHTML = html;
 
@@ -483,30 +491,8 @@ function boardFocusAgent(agentId) {
 }
 
 function boardEditTask(taskId) {
-  var tasks = _boardTasks();
-  var task = tasks[taskId];
-  if (!task) return;
-
-  // Replace ctx-menu content with an inline edit input
-  var menu = document.getElementById('ctx-menu');
-  menu.innerHTML = '<input id="board-edit-task-input" value="' + esc(task.title)
-    + '" style="margin:4px;width:calc(100% - 8px);font-size:10px;padding:4px 6px"'
-    + ' onkeydown="boardEditTaskKeydown(event,\'' + taskId + '\')"'
-    + ' onclick="event.stopPropagation()">';
-  menu.classList.add('open');
-  var inp = document.getElementById('board-edit-task-input');
-  if (inp) { inp.focus(); inp.select(); }
-}
-
-function boardEditTaskKeydown(e, taskId) {
-  if (e.key === 'Escape') { _closeCtxMenu(); return; }
-  if (e.key === 'Enter') {
-    var val = e.target.value.trim();
-    if (val) {
-      send({ cmd: 'board_update_task', id: taskId, title: val });
-    }
-    _closeCtxMenu();
-  }
+  _closeCtxMenu();
+  openEditTask(taskId);
 }
 
 function boardMoveTaskToLane(taskId, lane) {
@@ -690,7 +676,7 @@ function boardKeydown(e) {
   }
 
   if (e.key === 'Enter' && _boardFocusedTask) {
-    boardEditTask(_boardFocusedTask);
+    openEditTask(_boardFocusedTask);
     return true;
   }
 

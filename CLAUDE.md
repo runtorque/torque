@@ -19,10 +19,11 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
 - **Entry point**: `loom.py` — thin wrapper that anchors paths and calls `iterm2.run_forever(main)`
 - **Python package** (`loom/`):
   - `config.py` — env vars, paths, logging setup
-  - `state.py` — `AgentCell` dataclass (with `parent_id` for terminal→agent hierarchy), `GroupSettings` dataclass, `MatrixState` (persistence, `_children` index, cascade delete, WS broadcast)
+  - `state.py` — `AgentCell` dataclass (with `parent_id` for terminal→agent hierarchy), `GroupSettings` dataclass (with `dispatch_lane`), `BoardTask` dataclass (task, group, instructions, context, criteria, assignee, labels, agent_id, lane, position), `MatrixState` (persistence, `_children` index, cascade delete, WS broadcast). Reserved lanes (`Backlog`, `In Progress`) are enforced — cannot be renamed or deleted.
+  - `templates.py` — `TemplateManager` (Jinja2 rendering, variable auto-discovery from AST, lenient/strict parse modes, `render_template` returns flat dict with `task`, `group`, `instructions`, `context`, `criteria`, `labels`, `worktree`, `terminals`). Templates use `task:` (not `prompt:`) for the main text field. Backward compat: old templates with `prompt:` still work.
   - `bridge.py` — `ITerm2Bridge` (create/close/focus/update sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection, `on_session_terminated` callback)
   - `worktree.py` — `WorktreeManager` (create/remove/validate worktrees, checkpoint/count_commits/list_checkpoints/rollback, diff_summary, is_merged, .gitignore management). Worktrees live in `.loom/worktrees/` in the repo root, branches named `loom/{agent-name}-{short-id}`
-  - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/events` hook receiver, `/static/*` assets), all command dispatch, periodic worktree diff updater
+  - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/events` hook receiver, `/static/*` assets), all command dispatch, periodic worktree diff updater, `render_template` command (renders template fields without creating an agent, used by board "From template" flow)
   - `events.py` — `EventBus` (throttled broadcast, `on_session_end` callback for auto-checkpoint), `EventLog` (per-cell ring buffer), `health_check` (30s periodic scan)
   - `notifications.py` — `NotificationManager` (macOS notifications via osascript, 5s batching window)
   - `keybindings.py` — global iTerm2 key binding lifecycle (RPC registration, install/remove bindings, Cmd+Option+Arrow for cell/agent nav, Cmd+Shift+B for broadcast)
@@ -38,13 +39,13 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
   - `static/js/ws.js` — WebSocket client, shared `state`, auto-reconnect, `selectedAgentId`, `focusedItemId`, `dragInProgress`, tab-focus sync, action messages
   - `static/js/render.js` — `render()`, agent cells (three-state status dot: gray/green/red, activity detail, type label, worktree branch badge with diff stats), terminal drawer, FLIP animation, group collapse, per-group window filtering, `_navItems`/`_navAgents` lists for keyboard navigation
   - `static/js/commands.js` — agent click/dblclick, focus, remove (cascade-aware), drag-and-drop (agents, terminals, groups, reparent), broadcast, right-click context menu (with worktree ops: Create/Checkpoint/Remove Worktree)
-  - `static/js/modals.js` — add group/agent/terminal modals (with `parent_id` support), edit agent/terminal modal, group settings modal (tabbed: Group/Agents/Terminals; Agents tab has boot command, worktree config, session resume, idle timeout, notifications), confirm dialog, color picker, hint tooltip popovers
+  - `static/js/modals.js` — add group/agent/terminal modals (with `parent_id` support), edit agent/terminal modal, group settings modal (tabbed: Group/Agents/Terminals; Agents tab has boot command, worktree config, session resume, idle timeout, notifications), confirm dialog, color picker, hint tooltip popovers, task create/edit modal (task, group, assignee, instructions, context, criteria, labels), template-to-task flow (`openTaskFromTemplate` → `render_template` → pre-fills task modal)
   - `static/js/main.js` — keyboard navigation (arrows within group, Tab/Shift+Tab between groups, Enter, Delete, N/G/T/B/R shortcuts), boot, drag setup
 
 ## Code conventions
 
 - Python: no framework beyond aiohttp + iterm2. All state mutations go through `MatrixState` methods which call `self.save()`. Every iTerm2 API error must be caught and logged (never bare `except: pass`).
-- JS: no build step, no framework. Six plain script files loaded in order (constants → ws → render → commands → modals → main). All functions are global. State is re-rendered from scratch on every WS message.
+- JS: no build step, no framework. Seven plain script files loaded in order (constants → ws → render → commands → modals → board → main). All functions are global. State is re-rendered from scratch on every WS message.
 - CSS: single file, CSS custom properties for theming, monospace font throughout.
 - `window.confirm()` and `window.alert()` do not work in iTerm2's WKWebView — use the custom `showConfirm()` modal instead.
 

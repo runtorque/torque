@@ -1,13 +1,32 @@
 name: review
-description: Review code changes
+description: Review a branch or diff for issues
 
 agent:
   name_prefix: review
   tab_color: "#a371f7"
 
-prompt: |
-  You are reviewing code. Here is the task:
+labels:
+  - review
 
-  {{ TASK }}
+task: |
+  Review the changes on branch `{{ BRANCH | default('HEAD') }}`.
 
-  Be thorough. Check for bugs, security issues, and style problems.
+instructions: |
+  Examine every changed file. For each issue found, report:
+  - **File and line**
+  - **Severity** (critical / warning / nit)
+  - **What's wrong** and a suggested fix
+
+  Check for:
+  - Correctness bugs and edge cases
+  - Security issues (injection, auth bypass, secrets in code)
+  - Performance regressions (N+1 queries, unnecessary allocations)
+  - Missing error handling at system boundaries
+  - Dead code or unused imports introduced by the change
+
+  End with a summary: ship / ship with fixes / needs rework.
+
+criteria: |
+  - Every changed file is reviewed
+  - Critical issues are clearly flagged
+  - A clear ship/no-ship verdict is given

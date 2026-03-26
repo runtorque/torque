@@ -640,6 +640,9 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
 .label-hint {
   font-weight: 400; color: var(--text-dim); font-size: 9px;
 }
+.label-req {
+  color: var(--red); font-weight: 700;
+}
 textarea {
   font: inherit; color: var(--text);
   background: var(--bg); border: 1px solid var(--border);
@@ -937,10 +940,19 @@ textarea:focus { border-color: var(--accent); }
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
+.board-lane-tab.reserved {
+  font-style: italic;
+}
 .board-lane-tab .lane-count {
   font-size: 9px; color: var(--text-dim);
   margin-left: 4px;
 }
+.board-lane-tab .lane-lock {
+  font-size: 7px; margin-left: 2px;
+  opacity: 0; transition: opacity .15s;
+  font-style: normal;
+}
+.board-lane-tab.reserved:hover .lane-lock { opacity: 0.5; }
 .board-lane-actions {
   display: flex; align-items: center; gap: 0; flex-shrink: 0;
   margin-left: auto;
@@ -990,6 +1002,24 @@ textarea:focus { border-color: var(--accent); }
   font-size: 10px; font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.board-card-meta {
+  display: flex; flex-wrap: wrap; gap: 3px; margin-top: 1px;
+}
+.board-card-group {
+  font-size: 8px; color: var(--text-dim);
+  background: var(--bg); border-radius: 3px;
+  padding: 0 4px; line-height: 14px;
+}
+.board-card-assignee {
+  font-size: 8px; color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+  border-radius: 3px; padding: 0 4px; line-height: 14px;
+}
+.board-card-label {
+  font-size: 8px; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-radius: 3px; padding: 0 4px; line-height: 14px;
+}
 .board-card-agent {
   font-size: 9px; color: var(--accent);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1018,6 +1048,7 @@ textarea:focus { border-color: var(--accent); }
 }
 .board-add-task:hover { opacity: 1; }
 .board-add-task span { font-size: 10px; color: var(--text-dim); }
+.board-add-caret { font-size: 8px !important; margin-left: auto; }
 .board-add-input {
   width: 100%; font-size: 10px;
   padding: 5px 8px;

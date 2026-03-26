@@ -308,6 +308,44 @@
   </div>
 </div>
 
+<!-- Add/Edit Task modal -->
+<div class="overlay" id="modal-task">
+  <div class="modal modal-tall">
+    <h2 id="task-modal-title">New Task</h2>
+    <label>Task <span class="label-req">*</span>
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="An actionable task description, e.g. 'Create a summary of last week's deploys' instead of 'Weekly deploy report'.">?</span>
+    </label>
+    <input id="task-task-input" autocomplete="off"
+           onkeydown="if(event.key==='Escape')closeModals();">
+    <label>Group <span class="label-req">*</span></label>
+    <select id="task-group-select"></select>
+    <label>Assignee
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Agent name prefix for pool assignment (e.g. 'frontend'). Any agent matching this prefix can pick up the task.">?</span>
+    </label>
+    <input id="task-assignee-input" autocomplete="off">
+    <label>Instructions
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Clear instructions on what the agent should do to complete this task.">?</span>
+    </label>
+    <textarea id="task-instructions-input" rows="3"></textarea>
+    <label>Context
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Any additional context the agent might need — relevant files, background info, constraints.">?</span>
+    </label>
+    <textarea id="task-context-input" rows="2"></textarea>
+    <label>Criteria
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Acceptance criteria for verifying completion. Also used by agents tasked with reviewing work.">?</span>
+    </label>
+    <textarea id="task-criteria-input" rows="2"></textarea>
+    <label>Labels
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Comma-separated labels used for orchestration, e.g. 'urgent, frontend, deploy'.">?</span>
+    </label>
+    <input id="task-labels-input" autocomplete="off">
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" id="task-submit-btn" onclick="submitTask()">Create</button>
+    </div>
+  </div>
+</div>
+
 <!-- Bottom Panel (collapsible, hosts panel apps) -->
 <div id="bottom-panel" class="collapsed">
   <div class="panel-resize-handle" id="panel-resize-handle"></div>

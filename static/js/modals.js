@@ -625,11 +625,23 @@ async function _doRollback(sha) {
 let _tplGroup = '';
 let _tplName = '';
 let _tplData = null;
+let _tplMode = 'agent';  // 'agent' = create agent, 'task' = pre-fill task modal
+let _tplTaskLane = '';    // lane for task mode
 
 function openAddFromTemplate(group) {
   _tplGroup = group;
   _tplName = '';
   _tplData = null;
+  _tplMode = 'agent';
+  send({ cmd: 'list_templates', group });
+}
+
+function openTaskFromTemplate(group, lane) {
+  _tplGroup = group;
+  _tplName = '';
+  _tplData = null;
+  _tplMode = 'task';
+  _tplTaskLane = lane || '';
   send({ cmd: 'list_templates', group });
 }
 
@@ -644,7 +656,7 @@ function _showTemplateList(msg) {
   varsPane.classList.add('hidden');
   document.getElementById('tpl-back-btn').classList.add('hidden');
   document.getElementById('tpl-submit-btn').classList.add('hidden');
-  document.getElementById('tpl-title').textContent = 'From Template';
+  document.getElementById('tpl-title').textContent = _tplMode === 'task' ? 'Task from Template' : 'From Template';
 
   if (templates.length === 0) {
     listEl.innerHTML = '';
@@ -723,11 +735,160 @@ function _tplSubmit() {
     }
   }
 
-  send({
-    cmd: 'add_agent_from_template',
-    template: _tplName,
-    group: _tplGroup,
-    vars,
-  });
+  if (_tplMode === 'task') {
+    // Render template and pre-fill the task modal
+    send({
+      cmd: 'render_template',
+      name: _tplName,
+      group: _tplGroup,
+      vars,
+    });
+    closeModals();
+  } else {
+    // Default: create agent from template
+    send({
+      cmd: 'add_agent_from_template',
+      template: _tplName,
+      group: _tplGroup,
+      vars,
+    });
+    closeModals();
+  }
+}
+
+function _handleTemplateRendered(msg) {
+  // Pre-fill the task modal with rendered template fields
+  _taskEditId = null;
+  document.getElementById('task-modal-title').textContent = 'New Task';
+  document.getElementById('task-submit-btn').textContent = 'Create';
+
+  document.getElementById('task-task-input').value = msg.task || '';
+  document.getElementById('task-assignee-input').value = '';
+  document.getElementById('task-instructions-input').value = msg.instructions || '';
+  document.getElementById('task-context-input').value = msg.context || '';
+  document.getElementById('task-criteria-input').value = msg.criteria || '';
+  document.getElementById('task-labels-input').value = (msg.labels || []).join(', ');
+
+  var group = msg.group || _tplGroup || _currentGroup();
+  _populateTaskGroupSelect(group);
+
+  document.getElementById('modal-task').dataset.lane = _tplTaskLane || '';
+
+  document.getElementById('modal-task').classList.add('visible');
+  document.getElementById('task-task-input').focus();
+}
+
+/* ------------------------------------------------------------------ */
+/* Task modal (create & edit)                                          */
+/* ------------------------------------------------------------------ */
+
+let _taskEditId = null;  // null = create mode, string = edit mode
+
+function _currentGroup() {
+  if (selectedAgentId && state && state.agents && state.agents[selectedAgentId]) {
+    return state.agents[selectedAgentId].group;
+  }
+  if (state && state.groups) {
+    var keys = Object.keys(state.groups);
+    if (keys.length) return keys[0];
+  }
+  return '';
+}
+
+function openAddTask(lane) {
+  _taskEditId = null;
+  document.getElementById('task-modal-title').textContent = 'New Task';
+  document.getElementById('task-submit-btn').textContent = 'Create';
+
+  document.getElementById('task-task-input').value = '';
+  document.getElementById('task-assignee-input').value = '';
+  document.getElementById('task-instructions-input').value = '';
+  document.getElementById('task-context-input').value = '';
+  document.getElementById('task-criteria-input').value = '';
+  document.getElementById('task-labels-input').value = '';
+
+  _populateTaskGroupSelect(_currentGroup());
+
+  document.getElementById('modal-task').classList.add('visible');
+  document.getElementById('task-task-input').focus();
+
+  // Stash lane for submit
+  document.getElementById('modal-task').dataset.lane = lane || '';
+}
+
+function openEditTask(taskId) {
+  var tasks = (state && state.board_tasks) || {};
+  var t = tasks[taskId];
+  if (!t) return;
+
+  _taskEditId = taskId;
+  document.getElementById('task-modal-title').textContent = 'Edit Task';
+  document.getElementById('task-submit-btn').textContent = 'Save';
+
+  document.getElementById('task-task-input').value = t.task || '';
+  document.getElementById('task-assignee-input').value = t.assignee || '';
+  document.getElementById('task-instructions-input').value = t.instructions || '';
+  document.getElementById('task-context-input').value = t.context || '';
+  document.getElementById('task-criteria-input').value = t.criteria || '';
+  document.getElementById('task-labels-input').value = (t.labels || []).join(', ');
+
+  _populateTaskGroupSelect(t.group || _currentGroup());
+
+  document.getElementById('modal-task').classList.add('visible');
+  document.getElementById('task-task-input').focus();
+  document.getElementById('task-task-input').select();
+}
+
+function _populateTaskGroupSelect(defaultGroup) {
+  var sel = document.getElementById('task-group-select');
+  sel.innerHTML = '';
+  if (state && state.groups) {
+    for (var g of Object.keys(state.groups)) {
+      var opt = document.createElement('option');
+      opt.value = g;
+      opt.textContent = g;
+      if (g === defaultGroup) opt.selected = true;
+      sel.appendChild(opt);
+    }
+  }
+}
+
+function submitTask() {
+  var task = document.getElementById('task-task-input').value.trim();
+  var group = document.getElementById('task-group-select').value;
+  if (!task || !group) {
+    if (!task) document.getElementById('task-task-input').focus();
+    else document.getElementById('task-group-select').focus();
+    return;
+  }
+
+  var assignee = document.getElementById('task-assignee-input').value.trim();
+  var instructions = document.getElementById('task-instructions-input').value.trim();
+  var context = document.getElementById('task-context-input').value.trim();
+  var criteria = document.getElementById('task-criteria-input').value.trim();
+  var labelsRaw = document.getElementById('task-labels-input').value.trim();
+  var labels = labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+
+  if (_taskEditId) {
+    // Edit mode
+    var msg = { cmd: 'board_update_task', id: _taskEditId, task: task, group: group, assignee: assignee };
+    if (instructions !== undefined) msg.instructions = instructions;
+    if (context !== undefined) msg.context = context;
+    if (criteria !== undefined) msg.criteria = criteria;
+    msg.labels = labels;
+    send(msg);
+  } else {
+    // Create mode
+    var lane = document.getElementById('modal-task').dataset.lane || '';
+    var msg = { cmd: 'board_add_task', task: task, group: group, lane: lane };
+    if (assignee) msg.assignee = assignee;
+    if (instructions) msg.instructions = instructions;
+    if (context) msg.context = context;
+    if (criteria) msg.criteria = criteria;
+    if (labels.length) msg.labels = labels;
+    send(msg);
+  }
+
+  _taskEditId = null;
   closeModals();
 }

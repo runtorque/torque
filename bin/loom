@@ -615,8 +615,9 @@ def list_templates():
 
 def render_prompt(template, task, agent_name="", agent_id="",
                   branch="", directory=""):
-    """Render a template's prompt with variable substitution."""
-    prompt = template.get("prompt", "${TASK}")
+    """Render a template's task/prompt with variable substitution."""
+    # Backward compat: old templates use "prompt", new ones use "task"
+    prompt = template.get("task", "") or template.get("prompt", "${TASK}")
     prompt = prompt.replace("${TASK}", task)
     prompt = prompt.replace("${AGENT_NAME}", agent_name)
     prompt = prompt.replace("${AGENT_ID}", agent_id)
@@ -1061,7 +1062,34 @@ def cmd_worktree_rollback(args):
 
 # -- Dispatch ---------------------------------------------------------------
 
-def cmd_dispatch(args):
+def cmd_task_create(args):
+    """Create a ticket in the Backlog lane (no agent launched)."""
+    state_data = get_state(args.port)
+
+    group = args.group
+    if not group:
+        _cell, _parent, group = detect_context(state_data)
+        if not group:
+            die("--group (-g) is required\n"
+                "  (auto-detect failed — not in a Loom-managed session)")
+
+    kwargs = {
+        "task": args.description,
+        "group": group,
+        "lane": "Backlog",
+    }
+    if args.assign:
+        kwargs["assignee"] = args.assign
+    if args.labels:
+        kwargs["labels"] = [l.strip() for l in args.labels.split(",") if l.strip()]
+
+    resp = api_call("board_add_task", port=args.port, **kwargs)
+    check_ok(resp)
+    print(f"Task added to Backlog")
+
+
+def cmd_task_dispatch(args):
+    """Create a ticket in In Progress, launch an agent, and link them."""
     state_data = get_state(args.port)
 
     # Resolve group
@@ -1081,9 +1109,21 @@ def cmd_dispatch(args):
             k, v = kv.split("=", 1)
             variables[k] = v
 
+    # -- Create the ticket first (In Progress lane) --
+    ticket_kwargs = {
+        "task": args.description,
+        "group": group,
+        "lane": "In Progress",
+    }
+    if args.assign:
+        ticket_kwargs["assignee"] = args.assign
+    if args.labels:
+        ticket_kwargs["labels"] = [l.strip() for l in args.labels.split(",")
+                                   if l.strip()]
+
+    # -- Launch the agent --
     if args.template:
         # Server-side rendering via add_agent_from_template
-        # Resolve agent name client-side for display
         tpl = load_template(args.template)
         tpl_agent = tpl.get("agent", {}) if tpl else {}
         if args.name:
@@ -1106,8 +1146,7 @@ def cmd_dispatch(args):
         if args.directory:
             kwargs["directory"] = args.directory
 
-        if args.no_prompt:
-            # Remove TASK so no prompt is sent
+        if args.no_task:
             variables.pop("TASK", None)
             kwargs["vars"] = variables
 
@@ -1133,24 +1172,30 @@ def cmd_dispatch(args):
         die("Agent creation succeeded but could not find it in state")
     cell = match[-1]
     cell_id = cell["id"]
-    print(f"Agent \"{agent_name}\" created (id: {cell_id})")
 
-    # For non-template dispatch, send prompt manually
-    if not args.template and not args.no_prompt:
+    # Create ticket and link to the agent
+    ticket_kwargs["agent_id"] = cell_id
+    resp2 = api_call("board_add_task", port=args.port, **ticket_kwargs)
+    check_ok(resp2)
+
+    print(f"Agent \"{agent_name}\" created (id: {cell_id})")
+    print(f"Ticket created in In Progress")
+
+    # For non-template dispatch, send task text manually
+    if not args.template and not args.no_task:
         booted = wait_for_boot(cell_id, args.port)
         if not booted:
             die("Agent failed to boot within 15 seconds")
         time.sleep(1.5)
-        prompt = args.description
-        if not prompt.endswith("\r") and not prompt.endswith("\n"):
-            prompt += "\r"
-        resp = api_call("send_text", port=args.port, id=cell_id, text=prompt)
+        task_text = args.description
+        if not task_text.endswith("\r") and not task_text.endswith("\n"):
+            task_text += "\r"
+        resp = api_call("send_text", port=args.port, id=cell_id, text=task_text)
         check_ok(resp)
-        print(f"Prompt sent to \"{agent_name}\"")
+        print(f"Task sent to \"{agent_name}\"")
 
     if args.wait:
-        # For template dispatch, prompt is sent server-side after boot delay
-        # Give it a moment to start
+        # For template dispatch, task is sent server-side after boot delay
         if args.template:
             time.sleep(3)
         rc = wait_for_idle(cell_id, agent_name, args.port)
@@ -1272,10 +1317,23 @@ agent:
   # command: claude
   # tab_color: "#f85149"
 
+# group: ""
 # worktree: true
 
-prompt: |
+task: |
   ${{TASK}}
+
+# instructions: |
+#   Steps the agent should follow.
+
+# context: |
+#   Additional context the agent might need.
+
+# criteria: |
+#   Acceptance criteria for verifying completion.
+
+# labels:
+#   - example
 """
     with open(path, "w") as f:
         f.write(starter)
@@ -1326,13 +1384,20 @@ def cmd_board_list(args):
                 if a:
                     agent_str = f" {_cyan('→ ' + a['name'])}"
             tid = _dim(t["id"][:6])
-            print(f"    {tid}  {t['title']}{agent_str}")
+            print(f"    {tid}  {t.get('task', t.get('title', ''))}{agent_str}")
     print()
 
 
 def cmd_board_add(args):
+    state_data = get_state(args.port)
+    group = args.group
+    if not group:
+        _cell, _parent, group = detect_context(state_data)
+        if not group:
+            groups = state_data.get("groups", {})
+            group = next(iter(groups), "")
     resp = api_call("board_add_task", port=args.port,
-                    title=args.title, lane=args.lane or "")
+                    task=args.task, group=group, lane=args.lane or "")
     data = check_ok(resp)
     if args.json:
         import json as _j
@@ -1349,7 +1414,8 @@ def cmd_board_move(args):
     match = None
     identifier = args.identifier
     for tid, t in tasks.items():
-        if tid.startswith(identifier) or t["title"].lower() == identifier.lower():
+        task_text = t.get("task", t.get("title", ""))
+        if tid.startswith(identifier) or task_text.lower() == identifier.lower():
             match = t
             break
     if not match:
@@ -1358,7 +1424,7 @@ def cmd_board_move(args):
     resp = api_call("board_move_task", port=args.port,
                     id=match["id"], lane=args.lane)
     check_ok(resp)
-    print(f"Moved \"{match['title']}\" to {args.lane}")
+    print(f"Moved \"{match.get('task', match.get('title', ''))}\" to {args.lane}")
 
 
 def cmd_board_remove(args):
@@ -1368,7 +1434,8 @@ def cmd_board_remove(args):
     match = None
     identifier = args.identifier
     for tid, t in tasks.items():
-        if tid.startswith(identifier) or t["title"].lower() == identifier.lower():
+        task_text = t.get("task", t.get("title", ""))
+        if tid.startswith(identifier) or task_text.lower() == identifier.lower():
             match = t
             break
     if not match:
@@ -1376,7 +1443,8 @@ def cmd_board_remove(args):
 
     resp = api_call("board_remove_task", port=args.port, id=match["id"])
     check_ok(resp)
-    print(f"Removed \"{match['title']}\"")
+    print(f"Removed \"{match.get('task', match.get('title', ''))}\"")
+
 
 
 def cmd_board_lanes(args):
@@ -1565,23 +1633,40 @@ def build_parser():
     p.add_argument("sha", help="Commit SHA to rollback to")
     p.set_defaults(func=cmd_worktree_rollback)
 
-    # -- dispatch -----------------------------------------------------------
-    p = sub.add_parser("dispatch", aliases=["d"],
-                       help="Create agent from template and send prompt")
-    p.add_argument("description", help="Task description (sent as prompt)")
+    # -- task ---------------------------------------------------------------
+    tsk = sub.add_parser("task", help="Task/ticket management")
+    tsk.set_defaults(func=None, _sub_parser=tsk)
+    tsk_sub = tsk.add_subparsers(dest="task_cmd")
+
+    p = tsk_sub.add_parser("create", aliases=["c"],
+                           help="Create a ticket in the Backlog")
+    p.add_argument("description", help="Task description")
+    p.add_argument("-g", "--group",
+                   help="Target group (auto-detected if in a Loom session)")
+    p.add_argument("-a", "--assign", metavar="PREFIX",
+                   help="Assign to agent name prefix (e.g. 'frontend')")
+    p.add_argument("-l", "--labels", help="Comma-separated labels")
+    p.set_defaults(func=cmd_task_create)
+
+    p = tsk_sub.add_parser("dispatch", aliases=["d"],
+                           help="Create ticket, launch agent, and send task")
+    p.add_argument("description", help="Task description (sent to agent)")
     p.add_argument("-t", "--template", help="Template name")
     p.add_argument("-g", "--group",
                    help="Target group (auto-detected if in a Loom session)")
     p.add_argument("-n", "--name", help="Agent name override")
+    p.add_argument("-a", "--assign", metavar="PREFIX",
+                   help="Assign to agent name prefix (e.g. 'frontend')")
     p.add_argument("-c", "--command", help="Boot command override")
     p.add_argument("-d", "--directory", help="Working directory override")
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
                    help="Template variables (e.g., -v TEST_COMMAND='pytest')")
+    p.add_argument("-l", "--labels", help="Comma-separated labels")
     p.add_argument("-w", "--wait", action="store_true",
                    help="Wait for the agent to finish")
-    p.add_argument("--no-prompt", action="store_true",
-                   help="Create agent but don't send a prompt")
-    p.set_defaults(func=cmd_dispatch)
+    p.add_argument("--no-task", action="store_true",
+                   help="Create agent but don't send the task text")
+    p.set_defaults(func=cmd_task_dispatch)
 
     # -- template -----------------------------------------------------------
     tmpl = sub.add_parser("template", aliases=["tpl"],
@@ -1613,7 +1698,9 @@ def build_parser():
     p.set_defaults(func=cmd_board_list)
 
     p = brd_sub.add_parser("add", help="Add a task")
-    p.add_argument("title", help="Task title")
+    p.add_argument("task", help="Task description")
+    p.add_argument("-g", "--group",
+                   help="Target group (auto-detected if in a Loom session)")
     p.add_argument("-l", "--lane", help="Target lane (default: first lane)")
     p.set_defaults(func=cmd_board_add)
 

@@ -1,0 +1,32 @@
+name: test
+description: Write tests for existing code
+
+agent:
+  name_prefix: test
+  tab_color: "#f0883e"
+
+worktree: true
+
+labels:
+  - testing
+
+task: |
+  Write tests for {{ TARGET | default('the module described below') }}.
+
+instructions: |
+  Read the code under test and understand its behavior before writing anything.
+  Write tests that:
+  - Cover the happy path and meaningful edge cases
+  - Test public API / behavior, not implementation details
+  - Are fast, isolated, and deterministic
+  - Use descriptive names that read as documentation
+  Follow the existing test conventions in the project (framework, file location, naming).
+
+context: |
+  {{ CONTEXT | default('') }}
+
+criteria: |
+  - All new tests pass: `{{ TEST_COMMAND | default('npm test') }}`
+  - Edge cases are covered (empty input, nulls, boundary values, error paths)
+  - No mocks where real implementations are practical
+  - Tests would catch a regression if the code changed

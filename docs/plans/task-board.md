@@ -1,7 +1,7 @@
 # Implementation Plan: Task Board (Phase 5a)
 
 **Roadmap phase**: 5 — Task & Ticketing Integration
-**Status**: Planned
+**Status**: Implemented
 **Goal**: Add a built-in Kanban board to Loom's toolbelt so users can track tasks alongside their agents. The board lives in a collapsible bottom panel with a taskbar — an extensible dock for "panel apps" where the Kanban board is the first one.
 
 ---
@@ -97,20 +97,26 @@ Providers are NOT part of this implementation. The data model is designed so tha
 @dataclass
 class BoardTask:
     id: str                          # 8-char hex
-    title: str
-    description: str = ""
+    task: str                        # actionable task description (required)
+    group: str = ""                  # owning group (must exist)
+    instructions: str = ""           # agent instructions (optional)
+    context: str = ""                # additional context (optional)
+    criteria: str = ""               # acceptance criteria (optional)
     lane: str = "Backlog"            # must match a lane name
     position: int = 0                # sort order within lane
-    agent_id: str | None = None      # linked agent cell (optional)
+    assignee: str = ""               # agent name prefix for pool assignment
+    agent_id: str = ""               # concrete agent working on this
     labels: list[str] = field(default_factory=list)
     created_at: str = ""             # ISO 8601
     updated_at: str = ""             # ISO 8601
 
     # Provider fields (unused in v1, ready for sync)
-    provider: str | None = None      # "jira", "linear", "github"
-    external_id: str | None = None   # e.g. "PROJ-123"
-    external_url: str | None = None  # link back to provider
+    provider: str = ""               # "jira", "linear", "github"
+    external_id: str = ""            # e.g. "PROJ-123"
+    external_url: str = ""           # link back to provider
 ```
+
+**Reserved lanes**: `Backlog` and `In Progress` cannot be renamed or deleted. They are enforced on load and in the rename/remove methods. The UI shows them with italic text and a lock icon on hover.
 
 ### BoardState (embedded in MatrixState)
 
@@ -136,10 +142,15 @@ Board state is persisted alongside existing state in the same JSON file:
   "board_tasks": {
     "a1b2c3d4": {
       "id": "a1b2c3d4",
-      "title": "Fix login redirect",
+      "task": "Fix login redirect",
+      "group": "Backend",
+      "instructions": "Check auth.py for the redirect logic.",
+      "criteria": "Login redirects to /dashboard after success.",
       "lane": "In Progress",
       "position": 0,
-      "agent_id": "e5f6g7h8"
+      "assignee": "fix",
+      "agent_id": "e5f6g7h8",
+      "labels": ["bugfix", "urgent"]
     }
   }
 }
@@ -155,8 +166,8 @@ All commands are prefixed with `board_` and follow existing patterns.
 
 | Command | Payload | Behavior |
 |---|---|---|
-| `board_add_task` | `{title, lane?, description?, agent_id?}` | Create task in lane (default: first lane). Position = end. |
-| `board_update_task` | `{id, title?, description?, lane?, position?, agent_id?, labels?}` | Update task fields. If `lane` changes, reposition in new lane. |
+| `board_add_task` | `{task, group, lane?, instructions?, context?, criteria?, assignee?, agent_id?, labels?}` | Create task in lane (default: Backlog). Position = end. Group required + must exist. |
+| `board_update_task` | `{id, task?, group?, instructions?, context?, criteria?, assignee?, lane?, position?, agent_id?, labels?}` | Update task fields. If `lane` changes, reposition in new lane. |
 | `board_remove_task` | `{id}` | Delete task. |
 | `board_move_task` | `{id, lane, position?}` | Move task to lane at position (default: end). Reindex positions in both source and target lanes. |
 | `board_add_lane` | `{name, position?}` | Add lane at position (default: end). |
@@ -415,11 +426,11 @@ New file — the board "panel app":
 ## What We're NOT Building (Yet)
 
 - **External provider sync** — The provider interface is designed but no adapters ship. Manual board only in v1.
-- **Task descriptions / rich content** — Cards have a title and optional one-line description. No markdown, no attachments, no comments.
+- **Rich content rendering** — Task fields (instructions, context, criteria) are stored but only shown in the edit modal. No markdown rendering, attachments, or comments on cards.
 - **Subtasks / checklists** — Flat task list only. Hierarchy is a future addition.
 - **Filters / search** — With a narrow toolbelt and one-lane-at-a-time view, filtering is premature.
 - **Due dates / priority** — Not in v1. Labels cover basic categorization.
-- **Auto-assignment** — Future feature (roadmap Phase 5). For now, linking is manual.
+- **Auto-assignment** — `assignee` prefix is stored but agents don't yet auto-pick up matching tickets.
 - **Persistence across projects** — Board state is per-project (stored in the same state file). No global board.
 - **Multiple boards** — One board per project. Multiple boards (e.g., per-group) are deferred.
 
