@@ -29,13 +29,16 @@ class ITerm2Bridge:
     async def start(self):
         self._term_task = asyncio.create_task(self._watch_terminations())
         self._focus_task = asyncio.create_task(self._watch_focus())
-        # Seed current window from the focused window at startup
+        # Seed current window and active session from the focused state at startup
         try:
             app = await iterm2.async_get_app(self.conn)
             if app.current_window:
                 self.state.current_window_id = app.current_window.window_id
+                tab = app.current_window.current_tab
+                if tab and tab.current_session:
+                    self.state.active_session_id = tab.current_session.session_id
         except Exception:
-            log.debug("Could not seed current_window_id at startup")
+            log.debug("Could not seed current_window/session at startup")
 
     async def reconnect_orphans(self):
         """Re-link persisted cells to existing iTerm2 sessions after restart."""
