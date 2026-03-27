@@ -928,6 +928,8 @@ function _showGlobalSettingsModal(data) {
   document.getElementById('gls-default-cmd').value = s.default_command || '';
   document.getElementById('gls-filter-window').checked =
     s.filter_by_window !== undefined ? s.filter_by_window : true;
+  document.getElementById('gls-focus-new-tabs').checked =
+    s.focus_new_tabs !== undefined ? s.focus_new_tabs : true;
 
   // General > Board
   document.getElementById('gls-default-lanes').value =
@@ -1078,6 +1080,7 @@ function submitGlobalSettings() {
   var settings = {
     default_command: document.getElementById('gls-default-cmd').value.trim(),
     filter_by_window: document.getElementById('gls-filter-window').checked,
+    focus_new_tabs: document.getElementById('gls-focus-new-tabs').checked,
     default_lanes: lanes,
     keybindings: _glsKeybindings,
   };

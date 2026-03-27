@@ -176,6 +176,9 @@ class ITerm2Bridge:
             self.state._db_save_agent(cell)
             return
 
+        # Remember the active tab so we can restore focus if needed
+        prev_tab = window.current_tab
+
         tab = await window.async_create_tab(profile=cell.profile)
         session = tab.current_session
         cell.session_id = session.session_id
@@ -300,6 +303,13 @@ class ITerm2Bridge:
         self.state._db_save_agent(cell)
         self._start_prompt_monitor(cell)
         await self.reorder_tabs()
+
+        # Restore focus to the previously active tab if configured
+        if not self.state.global_settings.focus_new_tabs and prev_tab:
+            try:
+                await prev_tab.async_select()
+            except Exception:
+                log.debug("Could not restore focus to previous tab")
 
     async def reorder_tabs(self):
         """Keep managed tabs last in each window, ordered by group then position."""
