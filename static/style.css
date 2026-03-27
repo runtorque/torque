@@ -1161,6 +1161,45 @@ textarea:focus { border-color: var(--accent); }
   resize: none; overflow: hidden;
   min-height: 24px;
   font-family: var(--mono, monospace);
+  line-height: 1.4;
+}
+
+/* Jinja2 highlight overlay */
+.tpled-hl-wrap {
+  position: relative;
+}
+.tpled-hl-wrap textarea {
+  color: transparent;
+  caret-color: var(--text);
+  background: transparent;
+  position: relative;
+  z-index: 1;
+}
+.tpled-hl-backdrop {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding: 4px 6px;
+  font: 10px var(--mono, monospace);
+  line-height: 1.4;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--bg);
+  white-space: pre-wrap; word-wrap: break-word;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.tpled-hl-expr {
+  color: var(--accent);
+}
+.tpled-hl-filter {
+  color: var(--amber);
+}
+.tpled-hl-string {
+  color: var(--green);
+}
+.tpled-hl-paren {
+  color: var(--text-dim);
 }
 
 /* Collapsible sections */

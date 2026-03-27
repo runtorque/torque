@@ -145,15 +145,15 @@ function renderTemplatesEditor() {
   html += '<label class="gs-checkbox"><input id="tpled-worktree" type="checkbox"' + (d.worktree ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Git worktree per agent</label>';
   html += '</details>';
 
-  // Task fields
+  // Task fields (with Jinja2 highlighting)
   html += '<label>Task</label>';
-  html += '<textarea id="tpled-task" rows="1" onchange="tplEditorMarkDirty()" oninput="_tplAutoResize(this)">' + esc(d.task || d.prompt || '') + '</textarea>';
+  html += _tplHighlightWrap('tpled-task', d.task || d.prompt || '');
   html += '<label>Instructions</label>';
-  html += '<textarea id="tpled-instructions" rows="1" onchange="tplEditorMarkDirty()" oninput="_tplAutoResize(this)">' + esc(d.instructions || '') + '</textarea>';
+  html += _tplHighlightWrap('tpled-instructions', d.instructions || '');
   html += '<label>Context</label>';
-  html += '<textarea id="tpled-context" rows="1" onchange="tplEditorMarkDirty()" oninput="_tplAutoResize(this)">' + esc(d.context || '') + '</textarea>';
+  html += _tplHighlightWrap('tpled-context', d.context || '');
   html += '<label>Criteria</label>';
-  html += '<textarea id="tpled-criteria" rows="1" onchange="tplEditorMarkDirty()" oninput="_tplAutoResize(this)">' + esc(d.criteria || '') + '</textarea>';
+  html += _tplHighlightWrap('tpled-criteria', d.criteria || '');
   html += '<label>Labels</label>';
   html += '<input id="tpled-labels" value="' + esc((d.labels || []).join(', ')) + '" placeholder="comma-separated" autocomplete="off" onchange="tplEditorMarkDirty()">';
 
@@ -188,6 +188,58 @@ function renderTemplatesEditor() {
 function _tplAutoResize(el) {
   el.style.height = 'auto';
   el.style.height = el.scrollHeight + 'px';
+  // Sync highlight backdrop
+  var wrap = el.closest('.tpled-hl-wrap');
+  if (wrap) {
+    var bd = wrap.querySelector('.tpled-hl-backdrop');
+    if (bd) {
+      bd.innerHTML = _tplHighlightText(el.value);
+      bd.style.height = el.style.height;
+    }
+  }
+}
+
+function _tplHighlightWrap(id, value) {
+  var h = '<div class="tpled-hl-wrap">';
+  h += '<div class="tpled-hl-backdrop" id="' + id + '-hl">' + _tplHighlightText(value) + '</div>';
+  h += '<textarea id="' + id + '" rows="1"'
+    + ' onchange="tplEditorMarkDirty()"'
+    + ' oninput="_tplAutoResize(this)"'
+    + ' onscroll="_tplSyncScroll(this)">'
+    + esc(value) + '</textarea>';
+  h += '</div>';
+  return h;
+}
+
+function _tplHighlightText(text) {
+  // Escape HTML first, then wrap Jinja2 expressions in spans
+  var s = esc(text);
+  // {{ expr | filter('default') }}
+  s = s.replace(/(\{\{)(.*?)(\}\})/g, function(_, open, body, close) {
+    var inner = body;
+    // Strings inside the expression (single or double quotes)
+    inner = inner.replace(/(&#39;[^]*?&#39;|&quot;[^]*?&quot;)/g,
+      '<span class="tpled-hl-string">$1</span>');
+    // Parentheses
+    inner = inner.replace(/([()])/g, '<span class="tpled-hl-paren">$1</span>');
+    // Filter pipes
+    inner = inner.replace(/(\|\s*\w+)/g, '<span class="tpled-hl-filter">$1</span>');
+    return '<span class="tpled-hl-expr">' + open + inner + close + '</span>';
+  });
+  // Trailing newline so backdrop height matches textarea
+  if (!s.endsWith('\n')) s += '\n';
+  return s;
+}
+
+function _tplSyncScroll(el) {
+  var wrap = el.closest('.tpled-hl-wrap');
+  if (wrap) {
+    var bd = wrap.querySelector('.tpled-hl-backdrop');
+    if (bd) {
+      bd.scrollTop = el.scrollTop;
+      bd.scrollLeft = el.scrollLeft;
+    }
+  }
 }
 
 function _tplEditorFindVars() {
