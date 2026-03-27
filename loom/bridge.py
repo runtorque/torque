@@ -25,6 +25,7 @@ class ITerm2Bridge:
         self._term_task: Optional[asyncio.Task] = None
         self._focus_task: Optional[asyncio.Task] = None
         self.on_session_terminated = None  # async callback(cell)
+        self.on_terminal_disconnected = None  # async callback(cell) — auto-remove
 
     async def start(self):
         self._term_task = asyncio.create_task(self._watch_terminations())
@@ -619,6 +620,19 @@ class ITerm2Bridge:
                                 except Exception:
                                     log.exception("on_session_terminated "
                                                   "callback failed")
+                            # Auto-remove terminal if close_on_disconnect
+                            if (cell.cell_type == "terminal"
+                                    and self.on_terminal_disconnected):
+                                gs = self.state.get_group_settings(
+                                    cell.group)
+                                if gs.terminal_close_on_disconnect:
+                                    try:
+                                        await self.on_terminal_disconnected(
+                                            cell)
+                                    except Exception:
+                                        log.exception(
+                                            "on_terminal_disconnected "
+                                            "callback failed")
                             await self.state.broadcast()
                             break
         except asyncio.CancelledError:

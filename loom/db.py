@@ -41,6 +41,7 @@ _GS_BOOL_FIELDS = {
     "dispatch_auto_terminals",
     "notifications", "notify_on_finish", "notify_on_error",
     "notify_on_attention", "terminal_always_custom_dialog",
+    "terminal_close_on_disconnect",
 }
 
 
@@ -130,6 +131,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     terminal_tab_color          TEXT NOT NULL DEFAULT '',
     terminal_env_vars           TEXT NOT NULL DEFAULT '{}',
     terminal_always_custom_dialog INTEGER NOT NULL DEFAULT 0,
+    terminal_close_on_disconnect INTEGER NOT NULL DEFAULT 0,
     dispatch_lane               TEXT NOT NULL DEFAULT 'In Progress',
     dispatch_auto_terminals     INTEGER NOT NULL DEFAULT 0
 );
@@ -201,6 +203,16 @@ class LoomDB:
             self._conn.execute(
                 "ALTER TABLE group_settings ADD COLUMN "
                 "dispatch_auto_terminals INTEGER NOT NULL DEFAULT 0")
+            self._conn.commit()
+        # Migrate: add terminal_close_on_disconnect column
+        try:
+            self._conn.execute(
+                "SELECT terminal_close_on_disconnect FROM group_settings "
+                "LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE group_settings ADD COLUMN "
+                "terminal_close_on_disconnect INTEGER NOT NULL DEFAULT 0")
             self._conn.commit()
         # Set schema version if not present
         row = self._conn.execute(

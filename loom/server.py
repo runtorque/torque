@@ -182,6 +182,15 @@ async def main(connection: iterm2.Connection):
     event_bus.on_session_end = _on_agent_session_end
     # Also checkpoint when the terminal session is actually closed (tab closed)
     bridge.on_session_terminated = _on_agent_session_end
+
+    async def _on_terminal_disconnected(cell):
+        """Auto-remove a terminal when its tab is closed (close_on_disconnect)."""
+        log.info("Auto-removing terminal '%s' (close_on_disconnect)", cell.name)
+        removed = state.remove_agent(cell.id)
+        for c in removed:
+            event_bus.cleanup_cell(c.id)
+
+    bridge.on_terminal_disconnected = _on_terminal_disconnected
     await bridge.start()
     await bridge.reconnect_orphans()
     asyncio.create_task(_worktree_diff_updater(state, worktree_mgr))

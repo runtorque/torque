@@ -419,6 +419,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-terminal-directory').value = s.terminal_directory || '';
   document.getElementById('gs-terminal-shell').value = s.terminal_shell || '';
   document.getElementById('gs-terminal-always-custom').checked = s.terminal_always_custom_dialog || false;
+  document.getElementById('gs-terminal-close-on-disconnect').checked = s.terminal_close_on_disconnect || false;
   document.getElementById('gs-terminal-env-vars').value = _envToText(s.terminal_env_vars);
   _populateProfileSelect(document.getElementById('gs-terminal-profile'), data.profiles, s.terminal_profile, 'Same as group');
   _gsTerminalColor = s.terminal_tab_color || '';
@@ -494,6 +495,7 @@ function submitGroupSettings() {
     terminal_tab_color: _gsTerminalColor,
     terminal_env_vars: _textToEnv('gs-terminal-env-vars'),
     terminal_always_custom_dialog: document.getElementById('gs-terminal-always-custom').checked,
+    terminal_close_on_disconnect: document.getElementById('gs-terminal-close-on-disconnect').checked,
   };
 
   send({ cmd: 'update_group_settings', group: _settingsGroup, settings });
