@@ -328,21 +328,27 @@ async def main(connection: iterm2.Connection):
             if not name:
                 return {"type": "error", "message": "Template name required"}
             tpl_data = data.get("template", {})
+            scope = data.get("scope", "project")  # "project" or "user"
             base_dir = await _resolve_base_dir(data.get("group", ""))
-            tdir = template_mgr.find_templates_dir(base_dir)
-            if not tdir:
-                # Create .loom/templates/ in the resolved dir or cwd
-                d = base_dir or os.getcwd()
-                tdir = os.path.join(d, ".loom", "templates")
+
+            if scope == "user":
+                tdir = template_mgr.GLOBAL_TEMPLATES_DIR
                 os.makedirs(tdir, exist_ok=True)
-            # Rename: if old_name differs, delete old file
+            else:
+                tdir = template_mgr.find_templates_dir(base_dir)
+                if not tdir:
+                    d = base_dir or os.getcwd()
+                    tdir = os.path.join(d, ".loom", "templates")
+                    os.makedirs(tdir, exist_ok=True)
+            # Rename or scope change: delete old file from any location
             old_name = data.get("old_name", "")
-            if old_name and old_name != name:
-                for suffix in (".yaml", ".yml"):
-                    old_path = os.path.join(tdir, old_name + suffix)
-                    if os.path.isfile(old_path):
-                        os.remove(old_path)
-                        break
+            if old_name:
+                for old_dir in template_mgr.find_templates_dirs(base_dir):
+                    for suffix in (".yaml", ".yml"):
+                        old_path = os.path.join(old_dir, old_name + suffix)
+                        if os.path.isfile(old_path):
+                            os.remove(old_path)
+                            break
             path = os.path.join(tdir, name + ".yaml")
             yaml_text = _template_to_yaml(name, tpl_data)
             with open(path, "w") as f:

@@ -1128,6 +1128,8 @@ textarea:focus { border-color: var(--accent); }
   background: var(--bg); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius);
 }
+.tpled-select option { padding: 1px 4px; }
+.tpled-select optgroup { padding: 2px 0; }
 .tpled-new-btn {
   font-size: 14px; color: var(--text-dim);
   padding: 2px 8px; flex-shrink: 0;

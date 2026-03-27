@@ -7,6 +7,7 @@ var _tplEditorSelected = '';   // selected template name
 var _tplEditorData = null;     // loaded template data (parsed dict)
 var _tplEditorDirty = false;
 var _tplEditorNew = false;     // true when creating a new template
+var _tplEditorScope = 'project'; // 'project' or 'user'
 
 /* ---- Load & render ------------------------------------------------- */
 
@@ -49,6 +50,13 @@ function tplEditorSelectTemplate(name) {
   _tplEditorNew = false;
   _tplEditorData = null;
   _tplEditorDirty = false;
+  // Determine scope from list metadata
+  for (var i = 0; i < _tplEditorList.length; i++) {
+    if (_tplEditorList[i].name === name) {
+      _tplEditorScope = _tplEditorList[i].global ? 'user' : 'project';
+      break;
+    }
+  }
   renderTemplatesPanel();
   var group = _currentGroup();
   send({ cmd: 'get_template', name: name, group: group, raw: true });
@@ -67,15 +75,30 @@ function renderTemplatesPanel() {
   html += '<span class="tpled-header-title">Templates</span>';
   html += '<select class="tpled-select" id="tpled-select" onchange="tplEditorOnSelect(this.value)">';
   html += '<option value="">Select\u2026</option>';
+  var projectTpls = [];
+  var userTpls = [];
   for (var i = 0; i < _tplEditorList.length; i++) {
-    var t = _tplEditorList[i];
-    var sel = t.name === _tplEditorSelected ? ' selected' : '';
-    var suffix = t.global ? ' (global)' : '';
-    html += '<option value="' + esc(t.name) + '"' + sel + '>'
-      + esc(t.name) + suffix + '</option>';
+    (_tplEditorList[i].global ? userTpls : projectTpls).push(_tplEditorList[i]);
+  }
+  if (projectTpls.length) {
+    html += '<optgroup label="Project">';
+    for (var i = 0; i < projectTpls.length; i++) {
+      var sel = projectTpls[i].name === _tplEditorSelected ? ' selected' : '';
+      html += '<option value="' + esc(projectTpls[i].name) + '"' + sel + '>' + esc(projectTpls[i].name) + '</option>';
+    }
+    html += '</optgroup>';
+  }
+  if (userTpls.length) {
+    html += '<optgroup label="User">';
+    for (var i = 0; i < userTpls.length; i++) {
+      var sel = userTpls[i].name === _tplEditorSelected ? ' selected' : '';
+      html += '<option value="' + esc(userTpls[i].name) + '"' + sel + '>' + esc(userTpls[i].name) + '</option>';
+    }
+    html += '</optgroup>';
   }
   html += '</select>';
   html += '<button class="tpled-new-btn" onclick="tplEditorNew()" title="New template">+</button>';
+  html += '<button class="tpled-new-btn" onclick="tplEditorLoad()" title="Refresh">&#x21BB;</button>';
   html += '</div>';
 
   // Editor area
@@ -118,9 +141,14 @@ function renderTemplatesEditor() {
 
   var html = '<div class="tpled-form">';
 
-  // Name + description
+  // Name + scope + description
   html += '<label>Name <span class="label-req">*</span></label>';
   html += '<input id="tpled-name" value="' + esc(d.name || _tplEditorSelected || '') + '" autocomplete="off" onchange="tplEditorMarkDirty()">';
+  html += '<label>Scope</label>';
+  html += '<select id="tpled-scope" onchange="tplEditorMarkDirty()">';
+  html += '<option value="project"' + (_tplEditorScope === 'project' ? ' selected' : '') + '>Project (.loom/templates/)</option>';
+  html += '<option value="user"' + (_tplEditorScope === 'user' ? ' selected' : '') + '>User (~/.loom/templates/)</option>';
+  html += '</select>';
   html += '<label>Description</label>';
   html += '<input id="tpled-desc" value="' + esc(d.description || '') + '" autocomplete="off" onchange="tplEditorMarkDirty()">';
 
@@ -280,6 +308,7 @@ function tplEditorNew() {
   _tplEditorSelected = '';
   _tplEditorNew = true;
   _tplEditorDirty = true;
+  _tplEditorScope = 'project';
   _tplEditorData = { name: '', description: '', agent: { name_prefix: '' } };
   renderTemplatesPanel();
   var inp = document.getElementById('tpled-name');
@@ -316,18 +345,23 @@ function tplEditorSave() {
     labels: labels,
   };
 
+  var scope = document.getElementById('tpled-scope').value || 'project';
+
   var msg = {
     cmd: 'save_template',
     name: name,
     template: tplData,
     group: _currentGroup(),
+    scope: scope,
   };
-  // If renaming, include old name
-  if (_tplEditorSelected && _tplEditorSelected !== name && !_tplEditorNew) {
+  // If renaming or changing scope, include old name so the old file is removed
+  var scopeChanged = !_tplEditorNew && scope !== _tplEditorScope;
+  if (_tplEditorSelected && (_tplEditorSelected !== name || scopeChanged) && !_tplEditorNew) {
     msg.old_name = _tplEditorSelected;
   }
 
   _tplEditorSelected = name;
+  _tplEditorScope = scope;
   _tplEditorDirty = false;
   _tplEditorNew = false;
   send(msg);
