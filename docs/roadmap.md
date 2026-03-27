@@ -144,7 +144,11 @@ criteria: |
 
 Templates support `task` (main description), `instructions`, `context`, `criteria` (acceptance criteria), `labels` (list), and `group` (override target group). Old templates with `prompt:` still work via backward compat.
 
-Loom searches two locations: project-local `.loom/templates/` (takes precedence) and global `~/.loom/templates/`. The toolbelt has "From Template" options in both the agent creation dropdown and the board's "+ Add task" dropdown — the latter renders the template and pre-fills the task modal. CLI: `loom template list`, `loom template show <name>`, `loom template create <name>`. Seven starter templates ship: `implement`, `fix`, `review`, `investigate`, `test`, `refactor`, `migrate`.
+Loom searches two locations: project-local `.loom/templates/` (takes precedence) and user-global `~/.loom/templates/`. When both contain a template with the same name, the project one wins for dispatch; the user one is marked as "overridden" in the editor. The toolbelt has "From Template" options in both the agent creation dropdown and the board's "+ Add task" dropdown — the latter renders the template and pre-fills the task modal.
+
+A **Templates panel** in the taskbar provides a full editor for creating and managing templates without leaving iTerm2. It shows project and user templates in separate dropdown groups with directory paths, and includes a structured form with Jinja2 syntax highlighting (expressions, filters, strings, parentheses), auto-expanding textareas, scope picker (project vs user), and auto-discovered variable display.
+
+CLI: `loom template list`, `loom template show <name>`, `loom template create <name>`. Seven starter templates ship: `implement`, `fix`, `review`, `investigate`, `test`, `refactor`, `migrate`.
 
 ### `loom task dispatch` / `loom task create` ✅
 
@@ -223,7 +227,7 @@ Cards show group badge, assignee badge (amber), label badges, and linked agent n
 
 ### Taskbar ✅
 
-A dock at the bottom of the toolbelt for "panel apps". The board is the first app. Future apps (logs viewer, cost dashboard, diff viewer) plug into the same dock. Clicking an app toggles its panel open/closed.
+A dock at the bottom of the toolbelt for "panel apps". Currently hosts two apps: **Board** (Kanban task board) and **Templates** (template editor with Jinja2 highlighting). Future apps (logs viewer, cost dashboard, diff viewer) plug into the same dock. Clicking an app toggles its panel open/closed. Only one panel app is visible at a time.
 
 ### Provider Integrations
 

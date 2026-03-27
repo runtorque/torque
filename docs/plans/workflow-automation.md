@@ -279,10 +279,11 @@ A short additional delay (~1s) after boot detection ensures the shell and boot c
 
 | File | Change |
 |---|---|
-| `loom/templates.py` | Template loading, Jinja2 rendering, variable discovery, `render_template` returns structured fields |
-| `loom/server.py` | `add_agent_from_template` handler, `render_template` command for board integration |
+| `loom/templates.py` | Template loading, Jinja2 rendering, variable discovery, `render_template` returns structured fields, `load_template_raw` for editor, scope-aware `list_templates` with overridden detection |
+| `loom/server.py` | `add_agent_from_template` handler, `render_template` command for board integration, `save_template` / `delete_template` CRUD commands (scope-aware) |
 | `bin/loom` | `task dispatch`, `task create`, `template` subcommands, template loader |
 | `static/js/modals.js` | Task create/edit modal, `openTaskFromTemplate` → `render_template` → pre-fill flow |
 | `static/js/board.js` | "+ Add task" dropdown with "New task" and "From template" options |
+| `static/js/templates.js` | **New** — Templates panel app (dropdown with Project/User optgroups, structured form editor, Jinja2 syntax highlighting, save/duplicate/delete, scope picker) |
 | `templates/*.yaml` | Seven starter templates: implement, fix, review, investigate, test, refactor, migrate |
 | `docs/roadmap.md` | Update Phase 4 and Phase 5 status |
