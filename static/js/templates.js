@@ -1,0 +1,324 @@
+/* ------------------------------------------------------------------ */
+/* Templates panel app — template editor in the taskbar panel          */
+/* ------------------------------------------------------------------ */
+
+var _tplEditorList = [];       // cached template list
+var _tplEditorSelected = '';   // selected template name
+var _tplEditorData = null;     // loaded template data (parsed dict)
+var _tplEditorDirty = false;
+var _tplEditorNew = false;     // true when creating a new template
+
+/* ---- Load & render ------------------------------------------------- */
+
+function tplEditorLoad() {
+  var group = _currentGroup();
+  send({ cmd: 'list_templates', group: group });
+}
+
+function tplEditorReceiveList(msg) {
+  _tplEditorList = msg.templates || [];
+
+  // If we just saved or the selected template still exists, keep selection
+  if (msg.saved) _tplEditorSelected = msg.saved;
+  if (msg.deleted && _tplEditorSelected === msg.deleted) {
+    _tplEditorSelected = '';
+    _tplEditorData = null;
+  }
+
+  renderTemplatesPanel();
+
+  // Load selected template detail (only if user already picked one)
+  if (_tplEditorSelected && !_tplEditorNew) {
+    tplEditorSelectTemplate(_tplEditorSelected);
+  }
+}
+
+function tplEditorReceiveDetail(msg) {
+  if (msg.name !== _tplEditorSelected) return;
+  _tplEditorData = msg.template || {};
+  _tplEditorDirty = false;
+  _tplEditorNew = false;
+  renderTemplatesEditor();
+}
+
+function tplEditorSelectTemplate(name) {
+  if (_tplEditorDirty) {
+    // Discard changes silently — form is small, low stakes
+  }
+  _tplEditorSelected = name;
+  _tplEditorNew = false;
+  _tplEditorData = null;
+  _tplEditorDirty = false;
+  renderTemplatesPanel();
+  var group = _currentGroup();
+  send({ cmd: 'get_template', name: name, group: group, raw: true });
+}
+
+/* ---- Render -------------------------------------------------------- */
+
+function renderTemplatesPanel() {
+  var panel = document.getElementById('panel-templates');
+  if (!panel) return;
+
+  var html = '';
+
+  // Header bar
+  html += '<div class="tpled-header">';
+  html += '<span class="tpled-header-title">Templates</span>';
+  html += '<select class="tpled-select" id="tpled-select" onchange="tplEditorOnSelect(this.value)">';
+  html += '<option value="">Select\u2026</option>';
+  for (var i = 0; i < _tplEditorList.length; i++) {
+    var t = _tplEditorList[i];
+    var sel = t.name === _tplEditorSelected ? ' selected' : '';
+    var suffix = t.global ? ' (global)' : '';
+    html += '<option value="' + esc(t.name) + '"' + sel + '>'
+      + esc(t.name) + suffix + '</option>';
+  }
+  html += '</select>';
+  html += '<button class="tpled-new-btn" onclick="tplEditorNew()" title="New template">+</button>';
+  html += '</div>';
+
+  // Editor area
+  html += '<div class="tpled-editor" id="tpled-editor"></div>';
+
+  panel.innerHTML = html;
+  renderTemplatesEditor();
+}
+
+function tplEditorOnSelect(name) {
+  if (!name) {
+    _tplEditorSelected = '';
+    _tplEditorData = null;
+    _tplEditorDirty = false;
+    _tplEditorNew = false;
+    renderTemplatesEditor();
+    return;
+  }
+  tplEditorSelectTemplate(name);
+}
+
+function renderTemplatesEditor() {
+  var el = document.getElementById('tpled-editor');
+  if (!el) return;
+
+  if (!_tplEditorData && !_tplEditorNew) {
+    if (_tplEditorList.length === 0) {
+      el.innerHTML = '<div class="tpled-empty">No templates found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.loom/templates/</code>.</div>';
+    } else {
+      el.innerHTML = '<div class="tpled-empty">'
+        + '<b>' + _tplEditorList.length + '</b> template' + (_tplEditorList.length !== 1 ? 's' : '') + ' available.<br>'
+        + 'Pick one from the dropdown above to view or edit.'
+        + '</div>';
+    }
+    return;
+  }
+
+  var d = _tplEditorData || {};
+  var agent = d.agent || {};
+
+  var html = '<div class="tpled-form">';
+
+  // Name + description
+  html += '<label>Name <span class="label-req">*</span></label>';
+  html += '<input id="tpled-name" value="' + esc(d.name || _tplEditorSelected || '') + '" autocomplete="off" onchange="tplEditorMarkDirty()">';
+  html += '<label>Description</label>';
+  html += '<input id="tpled-desc" value="' + esc(d.description || '') + '" autocomplete="off" onchange="tplEditorMarkDirty()">';
+
+  // Agent block (collapsible)
+  html += '<details class="tpled-section"' + (agent.name_prefix || agent.tab_color || agent.command ? ' open' : '') + '>';
+  html += '<summary>Agent</summary>';
+  html += '<label>Name prefix</label>';
+  html += '<input id="tpled-agent-prefix" value="' + esc(agent.name_prefix || '') + '" placeholder="e.g. fix" autocomplete="off" onchange="tplEditorMarkDirty()">';
+  html += '<label>Tab color</label>';
+  html += '<input id="tpled-agent-color" value="' + esc(agent.tab_color || '') + '" placeholder="#hex" autocomplete="off" onchange="tplEditorMarkDirty()">';
+  html += '<label>Boot command</label>';
+  html += '<input id="tpled-agent-cmd" value="' + esc(agent.command || '') + '" placeholder="e.g. claude" autocomplete="off" onchange="tplEditorMarkDirty()">';
+  html += '<label>Directory</label>';
+  html += '<input id="tpled-agent-dir" value="' + esc(agent.directory || '') + '" autocomplete="off" onchange="tplEditorMarkDirty()">';
+  html += '</details>';
+
+  // Settings
+  html += '<details class="tpled-section"' + (d.group || d.worktree ? ' open' : '') + '>';
+  html += '<summary>Settings</summary>';
+  html += '<label>Group</label>';
+  html += '<input id="tpled-group" value="' + esc(d.group || '') + '" placeholder="Override target group" autocomplete="off" onchange="tplEditorMarkDirty()">';
+  html += '<label class="gs-checkbox"><input id="tpled-worktree" type="checkbox"' + (d.worktree ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Git worktree per agent</label>';
+  html += '</details>';
+
+  // Task fields
+  html += '<label>Task</label>';
+  html += '<textarea id="tpled-task" rows="1" onchange="tplEditorMarkDirty()" oninput="_tplAutoResize(this)">' + esc(d.task || d.prompt || '') + '</textarea>';
+  html += '<label>Instructions</label>';
+  html += '<textarea id="tpled-instructions" rows="1" onchange="tplEditorMarkDirty()" oninput="_tplAutoResize(this)">' + esc(d.instructions || '') + '</textarea>';
+  html += '<label>Context</label>';
+  html += '<textarea id="tpled-context" rows="1" onchange="tplEditorMarkDirty()" oninput="_tplAutoResize(this)">' + esc(d.context || '') + '</textarea>';
+  html += '<label>Criteria</label>';
+  html += '<textarea id="tpled-criteria" rows="1" onchange="tplEditorMarkDirty()" oninput="_tplAutoResize(this)">' + esc(d.criteria || '') + '</textarea>';
+  html += '<label>Labels</label>';
+  html += '<input id="tpled-labels" value="' + esc((d.labels || []).join(', ')) + '" placeholder="comma-separated" autocomplete="off" onchange="tplEditorMarkDirty()">';
+
+  // Variables (read-only, discovered)
+  var vars = _tplEditorFindVars();
+  if (vars.length > 0) {
+    html += '<div class="tpled-vars-section">';
+    html += '<label>Variables <span class="label-hint">auto-discovered</span></label>';
+    html += '<div class="tpled-vars">';
+    for (var vi = 0; vi < vars.length; vi++) {
+      html += '<span class="tpled-var">' + esc(vars[vi]) + '</span>';
+    }
+    html += '</div></div>';
+  }
+
+  // Actions
+  html += '<div class="tpled-actions">';
+  html += '<button class="btn-primary" onclick="tplEditorSave()">Save</button>';
+  html += '<button class="btn-cancel" onclick="tplEditorDuplicate()">Duplicate</button>';
+  if (!_tplEditorNew) {
+    html += '<button class="btn-cancel btn-danger" onclick="tplEditorDelete()">Delete</button>';
+  }
+  html += '</div>';
+
+  html += '</div>';
+  el.innerHTML = html;
+
+  // Auto-resize all textareas to fit content
+  el.querySelectorAll('textarea').forEach(_tplAutoResize);
+}
+
+function _tplAutoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+function _tplEditorFindVars() {
+  // Quick scan for {{ VAR }} and {{ VAR | default(...) }} in all text fields
+  var texts = [];
+  var el;
+  var ids = ['tpled-task', 'tpled-instructions', 'tpled-context', 'tpled-criteria'];
+  for (var i = 0; i < ids.length; i++) {
+    el = document.getElementById(ids[i]);
+    if (el) texts.push(el.value);
+  }
+  // Also scan current data before form exists
+  if (texts.join('').length === 0 && _tplEditorData) {
+    var d = _tplEditorData;
+    texts = [d.task || d.prompt || '', d.instructions || '', d.context || '', d.criteria || ''];
+  }
+  var seen = {};
+  var result = [];
+  var re = /\{\{\s*(\w+)\s*/g;
+  var combined = texts.join('\n');
+  var m;
+  while ((m = re.exec(combined)) !== null) {
+    if (!seen[m[1]]) {
+      seen[m[1]] = true;
+      result.push(m[1]);
+    }
+  }
+  return result;
+}
+
+/* ---- Actions ------------------------------------------------------- */
+
+function tplEditorMarkDirty() {
+  _tplEditorDirty = true;
+}
+
+function tplEditorNew() {
+  _tplEditorSelected = '';
+  _tplEditorNew = true;
+  _tplEditorDirty = true;
+  _tplEditorData = { name: '', description: '', agent: { name_prefix: '' } };
+  renderTemplatesPanel();
+  var inp = document.getElementById('tpled-name');
+  if (inp) inp.focus();
+}
+
+function tplEditorSave() {
+  var name = (document.getElementById('tpled-name').value || '').trim();
+  if (!name) {
+    document.getElementById('tpled-name').focus();
+    return;
+  }
+
+  // Sanitize name for filename
+  name = name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+
+  var labelsRaw = (document.getElementById('tpled-labels').value || '').trim();
+  var labels = labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+
+  var tplData = {
+    description: (document.getElementById('tpled-desc').value || '').trim(),
+    agent: {
+      name_prefix: (document.getElementById('tpled-agent-prefix').value || '').trim(),
+      tab_color: (document.getElementById('tpled-agent-color').value || '').trim(),
+      command: (document.getElementById('tpled-agent-cmd').value || '').trim(),
+      directory: (document.getElementById('tpled-agent-dir').value || '').trim(),
+    },
+    group: (document.getElementById('tpled-group').value || '').trim(),
+    worktree: document.getElementById('tpled-worktree').checked,
+    task: document.getElementById('tpled-task').value || '',
+    instructions: document.getElementById('tpled-instructions').value || '',
+    context: document.getElementById('tpled-context').value || '',
+    criteria: document.getElementById('tpled-criteria').value || '',
+    labels: labels,
+  };
+
+  var msg = {
+    cmd: 'save_template',
+    name: name,
+    template: tplData,
+    group: _currentGroup(),
+  };
+  // If renaming, include old name
+  if (_tplEditorSelected && _tplEditorSelected !== name && !_tplEditorNew) {
+    msg.old_name = _tplEditorSelected;
+  }
+
+  _tplEditorSelected = name;
+  _tplEditorDirty = false;
+  _tplEditorNew = false;
+  send(msg);
+}
+
+function tplEditorDelete() {
+  showConfirm('Delete template "' + _tplEditorSelected + '"?').then(function(yes) {
+    if (!yes) return;
+    send({ cmd: 'delete_template', name: _tplEditorSelected, group: _currentGroup() });
+  });
+}
+
+function tplEditorDuplicate() {
+  // Read current form values and start a "new" with them pre-filled
+  var name = (document.getElementById('tpled-name').value || '').trim();
+  _tplEditorNew = true;
+  _tplEditorDirty = true;
+  _tplEditorSelected = '';
+  // Keep the form data but clear name
+  _tplEditorData = _tplEditorReadForm();
+  _tplEditorData.name = name ? name + '-copy' : '';
+  renderTemplatesPanel();
+  var inp = document.getElementById('tpled-name');
+  if (inp) { inp.focus(); inp.select(); }
+}
+
+function _tplEditorReadForm() {
+  var labelsRaw = (document.getElementById('tpled-labels').value || '').trim();
+  return {
+    name: (document.getElementById('tpled-name').value || '').trim(),
+    description: (document.getElementById('tpled-desc').value || '').trim(),
+    agent: {
+      name_prefix: (document.getElementById('tpled-agent-prefix').value || '').trim(),
+      tab_color: (document.getElementById('tpled-agent-color').value || '').trim(),
+      command: (document.getElementById('tpled-agent-cmd').value || '').trim(),
+      directory: (document.getElementById('tpled-agent-dir').value || '').trim(),
+    },
+    group: (document.getElementById('tpled-group').value || '').trim(),
+    worktree: document.getElementById('tpled-worktree').checked,
+    task: document.getElementById('tpled-task').value || '',
+    instructions: document.getElementById('tpled-instructions').value || '',
+    context: document.getElementById('tpled-context').value || '',
+    criteria: document.getElementById('tpled-criteria').value || '',
+    labels: labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [],
+  };
+}

@@ -1097,6 +1097,112 @@ textarea:focus { border-color: var(--accent); }
 .board-card.drop-after { box-shadow: inset 0 -3px 0 0 var(--accent); }
 
 /* ------------------------------------------------------------------ */
+/* Panel visibility                                                    */
+/* ------------------------------------------------------------------ */
+.panel-hidden { display: none !important; }
+
+/* ------------------------------------------------------------------ */
+/* Templates panel                                                     */
+/* ------------------------------------------------------------------ */
+#panel-templates {
+  display: flex; flex-direction: column;
+  height: calc(100% - 5px);
+}
+
+/* Header bar */
+.tpled-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tpled-header-title {
+  font-size: 10px; font-weight: 700;
+  color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 0.5px; flex-shrink: 0;
+}
+.tpled-select {
+  flex: 1; min-width: 0;
+  font-size: 10px; padding: 3px 4px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.tpled-new-btn {
+  font-size: 14px; color: var(--text-dim);
+  padding: 2px 8px; flex-shrink: 0;
+}
+.tpled-new-btn:hover { color: var(--accent); }
+
+/* Editor */
+.tpled-editor {
+  flex: 1; overflow-y: auto;
+  padding: 8px;
+}
+.tpled-empty {
+  color: var(--text-dim); font-size: 10px;
+  text-align: center; padding: 24px 8px;
+  line-height: 1.6;
+}
+.tpled-form label {
+  display: block; font-size: 9px; font-weight: 600;
+  color: var(--text-dim); margin: 6px 0 2px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.tpled-form label:first-child { margin-top: 0; }
+.tpled-form input,
+.tpled-form textarea {
+  width: 100%; box-sizing: border-box;
+  font-size: 10px; padding: 4px 6px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.tpled-form textarea {
+  resize: none; overflow: hidden;
+  min-height: 24px;
+  font-family: var(--mono, monospace);
+}
+
+/* Collapsible sections */
+.tpled-section {
+  margin: 6px 0; border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0 6px;
+}
+.tpled-section summary {
+  font-size: 9px; font-weight: 600;
+  color: var(--text-dim); cursor: pointer;
+  padding: 4px 0; text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.tpled-section summary:hover { color: var(--text); }
+.tpled-section[open] { padding-bottom: 6px; }
+
+/* Variables */
+.tpled-vars-section { margin-top: 8px; }
+.tpled-vars {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;
+}
+.tpled-var {
+  font-size: 9px; font-family: var(--mono, monospace);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 3px; padding: 1px 6px;
+}
+
+/* Actions */
+.tpled-actions {
+  display: flex; gap: 6px; margin-top: 10px;
+  padding-top: 8px; border-top: 1px solid var(--border);
+}
+.tpled-actions button {
+  padding: 5px 14px; border-radius: var(--radius);
+  font-size: 11px; font-weight: 600;
+}
+.tpled-actions .btn-danger {
+  margin-left: auto;
+}
+
+/* ------------------------------------------------------------------ */
 /* Scrollbar                                                           */
 /* ------------------------------------------------------------------ */
 ::-webkit-scrollbar { width: 6px; }

@@ -265,6 +265,20 @@ class TemplateManager:
         raw = _migrate_syntax(raw)
         return self._parse_lenient(raw) or {}
 
+    def load_template_raw(self, name: str, base_dir: str = "") -> dict | None:
+        """Load template as raw YAML (no Jinja2 rendering).
+
+        Preserves ``{{ VAR }}`` placeholders in field values.
+        Used by the template editor.
+        """
+        raw = self._load_raw(name, base_dir)
+        if raw is None:
+            return None
+        try:
+            return parse_yaml(raw)
+        except Exception:
+            return None
+
     def get_template_vars(self, raw_or_tpl) -> list[dict]:
         """Auto-discover variables from the raw template text.
 

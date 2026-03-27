@@ -43,6 +43,58 @@ async def _worktree_diff_updater(state: MatrixState,
             await state.broadcast()
 
 
+def _template_to_yaml(name: str, data: dict) -> str:
+    """Convert a template data dict to YAML text."""
+    lines = [f"name: {name}"]
+    if data.get("description"):
+        lines.append(f"description: {data['description']}")
+    lines.append("")
+
+    # Agent block
+    agent = data.get("agent", {})
+    if any(agent.get(k) for k in ("name_prefix", "command", "tab_color",
+                                    "directory", "profile", "shell")):
+        lines.append("agent:")
+        for k in ("name_prefix", "command", "directory", "profile",
+                   "shell", "tab_color"):
+            if agent.get(k):
+                lines.append(f"  {k}: \"{agent[k]}\"" if k == "tab_color"
+                             else f"  {k}: {agent[k]}")
+
+    if data.get("group"):
+        lines.append(f"\ngroup: {data['group']}")
+    if data.get("worktree"):
+        lines.append("\nworktree: true")
+
+    # Text block fields
+    for field in ("task", "instructions", "context", "criteria"):
+        val = data.get(field, "")
+        if val:
+            lines.append(f"\n{field}: |")
+            for l in val.rstrip("\n").split("\n"):
+                lines.append(f"  {l}")
+
+    # Labels
+    labels = data.get("labels", [])
+    if labels:
+        lines.append("\nlabels:")
+        for lb in labels:
+            lines.append(f"  - {lb}")
+
+    # Terminals
+    terminals = data.get("terminals", [])
+    if terminals:
+        lines.append("\nterminals:")
+        for t in terminals:
+            tname = t.get("name", "shell")
+            lines.append(f"  - name: {tname}")
+            if t.get("command"):
+                lines.append(f"    command: {t['command']}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 async def main(connection: iterm2.Connection):
     log.info("Loom starting (port=%d)", WS_PORT)
     state = MatrixState()
@@ -241,7 +293,13 @@ async def main(connection: iterm2.Connection):
             if not raw:
                 return {"type": "error",
                         "message": f"Template \"{data['name']}\" not found"}
-            tpl = template_mgr.load_template(data["name"], base_dir) or {}
+            # Editor mode: parse raw YAML without Jinja2 rendering
+            if data.get("raw"):
+                tpl = template_mgr.load_template_raw(
+                    data["name"], base_dir) or {}
+            else:
+                tpl = template_mgr.load_template(
+                    data["name"], base_dir) or {}
             tvars = template_mgr.get_template_vars(raw)
             return {"type": "template_detail", "name": data["name"],
                     "template": tpl, "vars": tvars}
@@ -263,6 +321,63 @@ async def main(connection: iterm2.Connection):
                     "context": rendered.get("context", ""),
                     "criteria": rendered.get("criteria", ""),
                     "labels": rendered.get("labels", [])}
+
+        # save_template: write template YAML to disk
+        if cmd == "save_template":
+            name = data.get("name", "").strip()
+            if not name:
+                return {"type": "error", "message": "Template name required"}
+            tpl_data = data.get("template", {})
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            tdir = template_mgr.find_templates_dir(base_dir)
+            if not tdir:
+                # Create .loom/templates/ in the resolved dir or cwd
+                d = base_dir or os.getcwd()
+                tdir = os.path.join(d, ".loom", "templates")
+                os.makedirs(tdir, exist_ok=True)
+            # Rename: if old_name differs, delete old file
+            old_name = data.get("old_name", "")
+            if old_name and old_name != name:
+                for suffix in (".yaml", ".yml"):
+                    old_path = os.path.join(tdir, old_name + suffix)
+                    if os.path.isfile(old_path):
+                        os.remove(old_path)
+                        break
+            path = os.path.join(tdir, name + ".yaml")
+            yaml_text = _template_to_yaml(name, tpl_data)
+            with open(path, "w") as f:
+                f.write(yaml_text)
+            # Return updated list
+            templates = template_mgr.list_templates(base_dir)
+            return {"type": "templates",
+                    "group": data.get("group", ""),
+                    "templates": templates,
+                    "saved": name}
+
+        # delete_template: remove template file from disk
+        if cmd == "delete_template":
+            name = data.get("name", "").strip()
+            if not name:
+                return {"type": "error", "message": "Template name required"}
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            deleted = False
+            for tdir in template_mgr.find_templates_dirs(base_dir):
+                for suffix in (".yaml", ".yml"):
+                    path = os.path.join(tdir, name + suffix)
+                    if os.path.isfile(path):
+                        os.remove(path)
+                        deleted = True
+                        break
+                if deleted:
+                    break
+            if not deleted:
+                return {"type": "error",
+                        "message": f"Template \"{name}\" not found"}
+            templates = template_mgr.list_templates(base_dir)
+            return {"type": "templates",
+                    "group": data.get("group", ""),
+                    "templates": templates,
+                    "deleted": name}
 
         # -- Mutation commands: broadcast state at the end --
         result = None

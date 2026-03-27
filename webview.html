@@ -350,11 +350,13 @@
 <div id="bottom-panel" class="collapsed">
   <div class="panel-resize-handle" id="panel-resize-handle"></div>
   <div id="panel-board"></div>
+  <div id="panel-templates" class="panel-hidden"></div>
 </div>
 
 <!-- Taskbar (dock for panel apps) -->
 <div id="taskbar">
   <button class="taskbar-app" data-app="board" onclick="togglePanel('board')">&#9776; Board</button>
+  <button class="taskbar-app" data-app="templates" onclick="togglePanel('templates')">&#9998; Templates</button>
 </div>
 
 <!-- Context menu (right-click) -->
@@ -378,6 +380,7 @@
 <script src="/static/js/commands.js"></script>
 <script src="/static/js/modals.js"></script>
 <script src="/static/js/board.js"></script>
+<script src="/static/js/templates.js"></script>
 <script src="/static/js/main.js"></script>
 </body>
 </html>

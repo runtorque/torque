@@ -49,9 +49,17 @@ function connect() {
     } else if (msg.type === 'worktree_history') {
       _showWorktreeHistory(msg);
     } else if (msg.type === 'templates') {
-      _showTemplateList(msg);
+      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates') {
+        tplEditorReceiveList(msg);
+      } else {
+        _showTemplateList(msg);
+      }
     } else if (msg.type === 'template_detail') {
-      _showTemplateVarForm(msg);
+      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates') {
+        tplEditorReceiveDetail(msg);
+      } else {
+        _showTemplateVarForm(msg);
+      }
     } else if (msg.type === 'template_rendered') {
       _handleTemplateRendered(msg);
     } else if (msg.type === 'action') {

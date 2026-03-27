@@ -25,8 +25,14 @@ function togglePanel(appName) {
     buttons.forEach(function(b) {
       b.classList.toggle('active', b.dataset.app === appName);
     });
+    // Show/hide panel content
+    var panelBoard = document.getElementById('panel-board');
+    var panelTpl = document.getElementById('panel-templates');
+    if (panelBoard) panelBoard.classList.toggle('panel-hidden', appName !== 'board');
+    if (panelTpl) panelTpl.classList.toggle('panel-hidden', appName !== 'templates');
     // Render the active app
     if (appName === 'board') renderBoard();
+    if (appName === 'templates') tplEditorLoad();
   }
   // Persist panel state to server
   send({ cmd: 'board_set_panel', open: _activePanelApp === 'board' });
@@ -49,6 +55,10 @@ function _restorePanelState() {
         panel.style.setProperty('--panel-height', _panelHeight + 'px');
       }
     }
+    var panelBoard = document.getElementById('panel-board');
+    var panelTpl = document.getElementById('panel-templates');
+    if (panelBoard) panelBoard.classList.remove('panel-hidden');
+    if (panelTpl) panelTpl.classList.add('panel-hidden');
     document.querySelectorAll('.taskbar-app').forEach(function(b) {
       b.classList.toggle('active', b.dataset.app === 'board');
     });

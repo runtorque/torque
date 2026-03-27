@@ -45,7 +45,7 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
 ## Code conventions
 
 - Python: no framework beyond aiohttp + iterm2. All state mutations go through `MatrixState` methods which call `self.save()`. Every iTerm2 API error must be caught and logged (never bare `except: pass`).
-- JS: no build step, no framework. Seven plain script files loaded in order (constants → ws → render → commands → modals → board → main). All functions are global. State is re-rendered from scratch on every WS message.
+- JS: no build step, no framework. Eight plain script files loaded in order (constants → ws → render → commands → modals → board → templates → main). All functions are global. State is re-rendered from scratch on every WS message.
 - CSS: single file, CSS custom properties for theming, monospace font throughout.
 - `window.confirm()` and `window.alert()` do not work in iTerm2's WKWebView — use the custom `showConfirm()` modal instead.
 
