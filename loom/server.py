@@ -119,7 +119,7 @@ async def main(connection: iterm2.Connection):
     worktree_mgr = WorktreeManager()
     template_mgr = TemplateManager()
 
-    _pending_merges: set[str] = set()  # cell IDs awaiting merge verification
+    _pending_merges: dict[str, str] = {}  # cell ID → pre-merge base SHA
 
     def _checkpoint_message(cell) -> str:
         """Build a checkpoint commit message from the agent's last summary."""
@@ -134,8 +134,11 @@ async def main(connection: iterm2.Connection):
         """Handle agent turn completion: merge verification + auto-checkpoint."""
         # Check pending merge result
         if cell.id in _pending_merges:
-            _pending_merges.discard(cell.id)
+            pre_sha = _pending_merges.pop(cell.id)
             merged = await worktree_mgr.is_merged(cell)
+            if not merged and pre_sha:
+                merged = await worktree_mgr.check_base_advanced(
+                    cell, pre_sha)
             if merged:
                 log.info("Merge verified for '%s': branch %s merged into %s",
                          cell.name, cell.worktree_branch,
@@ -921,9 +924,25 @@ async def main(connection: iterm2.Connection):
                         extra = gs.worktree_merge_instructions.strip()
                         if extra:
                             prompt += " " + extra
+                        # Record base SHA before merge for fallback
+                        # verification (squash merges with diverged
+                        # base can't be detected from git state alone)
+                        pre_sha = ""
+                        try:
+                            p = await asyncio.create_subprocess_exec(
+                                "git", "-C", repo or ".",
+                                "rev-parse", base,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.DEVNULL,
+                            )
+                            out, _ = await p.communicate()
+                            if p.returncode == 0:
+                                pre_sha = out.decode().strip()
+                        except Exception:
+                            pass
                         await bridge.send_text(
                             cell.session_id, prompt + "\r")
-                        _pending_merges.add(cell.id)
+                        _pending_merges[cell.id] = pre_sha
                         cell.status = "running"
                         state._emit_agent(cell)
                         # Ephemeral status — no DB write needed
