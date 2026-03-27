@@ -38,6 +38,7 @@ _GS_BOOL_FIELDS = {
     "collapsed_default", "filter_by_window", "git_worktree",
     "worktree_auto_checkpoint", "worktree_merge_squash",
     "agent_session_resume", "agent_always_custom_dialog",
+    "dispatch_auto_terminals",
     "notifications", "notify_on_finish", "notify_on_error",
     "notify_on_attention", "terminal_always_custom_dialog",
 }
@@ -129,7 +130,8 @@ CREATE TABLE IF NOT EXISTS group_settings (
     terminal_tab_color          TEXT NOT NULL DEFAULT '',
     terminal_env_vars           TEXT NOT NULL DEFAULT '{}',
     terminal_always_custom_dialog INTEGER NOT NULL DEFAULT 0,
-    dispatch_lane               TEXT NOT NULL DEFAULT 'In Progress'
+    dispatch_lane               TEXT NOT NULL DEFAULT 'In Progress',
+    dispatch_auto_terminals     INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS board_tasks (
@@ -191,6 +193,15 @@ class LoomDB:
                     f"ALTER TABLE {table} ADD COLUMN slug "
                     f"TEXT NOT NULL DEFAULT ''")
                 self._conn.commit()
+        # Migrate: add dispatch_auto_terminals column
+        try:
+            self._conn.execute(
+                "SELECT dispatch_auto_terminals FROM group_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE group_settings ADD COLUMN "
+                "dispatch_auto_terminals INTEGER NOT NULL DEFAULT 0")
+            self._conn.commit()
         # Set schema version if not present
         row = self._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"

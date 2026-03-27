@@ -401,6 +401,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-session-resume').checked = s.agent_session_resume !== false;
   document.getElementById('gs-agent-idle-timeout').value = s.agent_idle_timeout != null ? s.agent_idle_timeout : 5;
   document.getElementById('gs-agent-always-custom').checked = s.agent_always_custom_dialog || false;
+  document.getElementById('gs-dispatch-auto-terminals').checked = s.dispatch_auto_terminals || false;
   document.getElementById('gs-notifications').checked = s.notifications || false;
   document.getElementById('gs-notify-finish').checked = s.notify_on_finish !== false;
   document.getElementById('gs-notify-error').checked = s.notify_on_error !== false;
@@ -477,6 +478,7 @@ function submitGroupSettings() {
     agent_session_resume: document.getElementById('gs-session-resume').checked,
     agent_idle_timeout: parseInt(document.getElementById('gs-agent-idle-timeout').value) || 0,
     agent_always_custom_dialog: document.getElementById('gs-agent-always-custom').checked,
+    dispatch_auto_terminals: document.getElementById('gs-dispatch-auto-terminals').checked,
     notifications: document.getElementById('gs-notifications').checked,
     notify_on_finish: document.getElementById('gs-notify-finish').checked,
     notify_on_error: document.getElementById('gs-notify-error').checked,

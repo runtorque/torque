@@ -152,8 +152,9 @@ class GroupSettings:
     terminal_tab_color: str = ""
     terminal_env_vars: dict[str, str] = field(default_factory=dict)
     terminal_always_custom_dialog: bool = False
-    # Board
+    # Board / Dispatch
     dispatch_lane: str = "In Progress"  # lane for dispatched tasks
+    dispatch_auto_terminals: bool = False  # create child terminals on dispatch
 
 
 @dataclass

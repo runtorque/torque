@@ -1057,39 +1057,43 @@ async def main(connection: iterm2.Connection):
                                 await bridge.create_session(
                                     cell, env_vars=env, shell=shell)
 
-                                # Auto-create child terminals
-                                t_profile = gs.terminal_profile \
-                                    or gs.profile or "Default"
-                                t_dir = gs.terminal_directory \
-                                    or gs.default_directory or ""
-                                _ttc = gs.terminal_tab_color
-                                t_color = (_ttc if _ttc != "none" else "") \
-                                    or gs.tab_color or ""
-                                t_shell = gs.terminal_shell \
-                                    or gs.shell or ""
-                                t_env = {**gs.env_vars,
-                                         **gs.terminal_env_vars} or None
-                                t_cmd = gs.terminal_boot_command or ""
-                                if gs.terminal_command_args and t_cmd:
-                                    t_cmd = (t_cmd + " "
-                                             + gs.terminal_command_args
-                                             ).strip()
-                                for i in range(gs.auto_terminals):
-                                    t_name = state.next_cell_name(
-                                        group, "terminal")
-                                    t = state.add_terminal(
-                                        name=t_name, group=group,
-                                        profile=t_profile,
-                                        command=t_cmd,
-                                        directory=t_dir or cell.directory,
-                                        tab_color=t_color,
-                                        parent_id=cell.id)
-                                    if t:
-                                        await bridge.create_session(
-                                            t, env_vars=t_env,
-                                            init_script=
-                                                gs.terminal_init_script,
-                                            shell=t_shell)
+                                # Auto-create child terminals (off by default for dispatch)
+                                if gs.dispatch_auto_terminals:
+                                    t_profile = gs.terminal_profile \
+                                        or gs.profile or "Default"
+                                    t_dir = gs.terminal_directory \
+                                        or gs.default_directory or ""
+                                    _ttc = gs.terminal_tab_color
+                                    t_color = (_ttc if _ttc != "none" \
+                                        else "") or gs.tab_color or ""
+                                    t_shell = gs.terminal_shell \
+                                        or gs.shell or ""
+                                    t_env = {**gs.env_vars,
+                                             **gs.terminal_env_vars} \
+                                        or None
+                                    t_cmd = \
+                                        gs.terminal_boot_command or ""
+                                    if gs.terminal_command_args and t_cmd:
+                                        t_cmd = (t_cmd + " "
+                                                 + gs.terminal_command_args
+                                                 ).strip()
+                                    for i in range(gs.auto_terminals):
+                                        t_name = state.next_cell_name(
+                                            group, "terminal")
+                                        t = state.add_terminal(
+                                            name=t_name, group=group,
+                                            profile=t_profile,
+                                            command=t_cmd,
+                                            directory=t_dir
+                                                or cell.directory,
+                                            tab_color=t_color,
+                                            parent_id=cell.id)
+                                        if t:
+                                            await bridge.create_session(
+                                                t, env_vars=t_env,
+                                                init_script=
+                                                    gs.terminal_init_script,
+                                                shell=t_shell)
 
                         if cell:
                             # Link task to agent and move to In Progress
