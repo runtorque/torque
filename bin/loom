@@ -31,6 +31,140 @@ def _yaml():
     return _yaml_mod
 LOOM_LOG = os.path.expanduser(
     "~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log")
+LOOM_DB = os.path.expanduser(
+    "~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.db")
+
+
+# ---------------------------------------------------------------------------
+# SQLite direct reads (no daemon needed)
+# ---------------------------------------------------------------------------
+
+import sqlite3
+
+def _db_available():
+    """Check if the SQLite database file exists."""
+    return os.path.isfile(LOOM_DB)
+
+
+def _db_read(query_fn):
+    """Open the DB read-only, run query_fn(conn), return result."""
+    conn = sqlite3.connect(f"file:{LOOM_DB}?mode=ro", uri=True)
+    try:
+        return query_fn(conn)
+    finally:
+        conn.close()
+
+
+def db_read_board_tasks():
+    """Read board tasks directly from SQLite."""
+    def _query(conn):
+        c = conn.cursor()
+        rows = c.execute("SELECT * FROM board_tasks").fetchall()
+        if not rows:
+            return {}
+        cols = [d[0] for d in c.description]
+        tasks = {}
+        for row in rows:
+            d = dict(zip(cols, row))
+            d["group"] = d.pop("group_name", "")
+            try:
+                d["labels"] = json.loads(d.get("labels", "[]"))
+            except (json.JSONDecodeError, TypeError):
+                d["labels"] = []
+            tasks[d["id"]] = d
+        return tasks
+    return _db_read(_query)
+
+
+def db_read_board_lanes():
+    """Read board lanes directly from SQLite."""
+    def _query(conn):
+        return [row[0] for row in conn.execute(
+            "SELECT name FROM board_lanes ORDER BY position")]
+    return _db_read(_query)
+
+
+def db_read_agents():
+    """Read agents directly from SQLite (persisted fields only)."""
+    def _query(conn):
+        c = conn.cursor()
+        rows = c.execute("SELECT * FROM agents").fetchall()
+        if not rows:
+            return {}
+        cols = [d[0] for d in c.description]
+        agents = {}
+        for row in rows:
+            d = dict(zip(cols, row))
+            d["group"] = d.pop("group_name", "")
+            agents[d["id"]] = d
+        return agents
+    return _db_read(_query)
+
+
+def db_read_state():
+    """Read full state from SQLite (for read-only commands).
+    Returns a dict matching the shape of get_state() output,
+    minus ephemeral fields."""
+    def _query(conn):
+        c = conn.cursor()
+
+        # Agents
+        agents = {}
+        rows = c.execute("SELECT * FROM agents").fetchall()
+        if rows:
+            cols = [d[0] for d in c.description]
+            for row in rows:
+                d = dict(zip(cols, row))
+                d["group"] = d.pop("group_name", "")
+                agents[d["id"]] = d
+
+        # Groups
+        groups = {}
+        for row in c.execute("SELECT name FROM groups ORDER BY position"):
+            groups[row[0]] = []
+        for row in c.execute(
+                "SELECT group_name, agent_id FROM group_members "
+                "ORDER BY group_name, position"):
+            gname, aid = row
+            if gname in groups:
+                groups[gname].append(aid)
+
+        # Board lanes
+        lanes = [row[0] for row in c.execute(
+            "SELECT name FROM board_lanes ORDER BY position")]
+
+        # Board tasks
+        tasks = {}
+        rows = c.execute("SELECT * FROM board_tasks").fetchall()
+        if rows:
+            cols = [d[0] for d in c.description]
+            for row in rows:
+                d = dict(zip(cols, row))
+                d["group"] = d.pop("group_name", "")
+                try:
+                    d["labels"] = json.loads(d.get("labels", "[]"))
+                except (json.JSONDecodeError, TypeError):
+                    d["labels"] = []
+                tasks[d["id"]] = d
+
+        return {
+            "agents": agents,
+            "groups": groups,
+            "board_lanes": lanes,
+            "board_tasks": tasks,
+        }
+    return _db_read(_query)
+
+
+def get_state_local(port):
+    """Try SQLite first, fall back to HTTP daemon.
+    Use for read-only commands that don't need ephemeral fields."""
+    if _db_available():
+        try:
+            return db_read_state()
+        except Exception:
+            pass
+    return get_state(port)
 
 
 # ---------------------------------------------------------------------------
@@ -1254,7 +1388,7 @@ def cmd_task_dispatch(args):
 
 def cmd_task_show(args):
     """Display full details of a task."""
-    st = get_state(args.port)
+    st = get_state_local(args.port)
     t = resolve_task(st, args.identifier)
 
     if args.json:
@@ -1305,7 +1439,7 @@ def cmd_task_show(args):
 
 def cmd_task_list(args):
     """List tasks with optional filters."""
-    st = get_state(args.port)
+    st = get_state_local(args.port)
     lanes = st.get("board_lanes", [])
     tasks = st.get("board_tasks", {})
 
@@ -1457,7 +1591,7 @@ def _open_in_editor(initial_text, suffix=".yml"):
 
 def cmd_task_edit(args):
     """Edit task fields — opens $EDITOR with YAML, or use flags."""
-    st = get_state(args.port)
+    st = get_state_local(args.port)
     t = resolve_task(st, args.identifier)
 
     # Check if any inline flags were provided
@@ -1508,7 +1642,7 @@ def cmd_task_edit(args):
 
 def cmd_task_move(args):
     """Move a task to a different lane."""
-    st = get_state(args.port)
+    st = get_state_local(args.port)
     t = resolve_task(st, args.identifier)
 
     resp = api_call("board_move_task", port=args.port,
@@ -1519,7 +1653,7 @@ def cmd_task_move(args):
 
 def cmd_task_assign(args):
     """Assign or unassign a task to an agent."""
-    st = get_state(args.port)
+    st = get_state_local(args.port)
     t = resolve_task(st, args.identifier)
 
     if args.clear:
@@ -1696,7 +1830,7 @@ def cmd_logs(args):
 # ---------------------------------------------------------------------------
 
 def cmd_board_list(args):
-    st = get_state(args.port)
+    st = get_state_local(args.port)
     lanes = st.get("board_lanes", [])
     tasks = st.get("board_tasks", {})
     lane_filter = args.lane if hasattr(args, "lane") and args.lane else None
@@ -1728,7 +1862,7 @@ def cmd_board_list(args):
 
 
 def cmd_board_add(args):
-    state_data = get_state(args.port)
+    state_data = get_state_local(args.port)
     group = args.group
     if not group:
         _cell, _parent, group = detect_context(state_data)
@@ -1746,7 +1880,7 @@ def cmd_board_add(args):
 
 
 def cmd_board_move(args):
-    st = get_state(args.port)
+    st = get_state_local(args.port)
     match = resolve_task(st, args.identifier)
 
     resp = api_call("board_move_task", port=args.port,
@@ -1756,7 +1890,7 @@ def cmd_board_move(args):
 
 
 def cmd_board_remove(args):
-    st = get_state(args.port)
+    st = get_state_local(args.port)
     match = resolve_task(st, args.identifier)
 
     resp = api_call("board_remove_task", port=args.port, id=match["id"])
@@ -1766,7 +1900,7 @@ def cmd_board_remove(args):
 
 
 def cmd_board_lanes(args):
-    st = get_state(args.port)
+    st = get_state_local(args.port)
     lanes = st.get("board_lanes", [])
     tasks = st.get("board_tasks", {})
 
