@@ -984,6 +984,152 @@ async def main(connection: iterm2.Connection):
                     data.get("id", ""),
                     data.get("position", 0))
 
+            elif cmd == "dispatch_task":
+                tid = data.get("id", "")
+                task = state.board_tasks.get(tid)
+                if not task:
+                    result = {"type": "error",
+                              "message": "Task not found"}
+                else:
+                    group = task.group
+                    if not group or group not in state.groups:
+                        # Fall back to first group
+                        group = next(iter(state.groups), "")
+                    if not group:
+                        result = {"type": "error",
+                                  "message": "No group available"}
+                    else:
+                        cell = None
+                        agent_id = data.get("agent_id", "")
+                        if agent_id:
+                            # Dispatch to existing agent
+                            cell = state.agents.get(agent_id)
+                            if not cell:
+                                result = {"type": "error",
+                                          "message": "Agent not found"}
+                        elif data.get("create_agent"):
+                            # Create a new agent
+                            from loom.state import _slugify
+                            slug = _slugify(task.task)
+                            agent_name = slug or "agent"
+                            gs = state.get_group_settings(group)
+                            profile = gs.agent_profile \
+                                or gs.profile or "Default"
+                            directory = gs.agent_directory \
+                                or gs.default_directory or ""
+                            _ac = gs.agent_tab_color
+                            tab_color = (_ac if _ac != "none" else "") \
+                                or gs.tab_color or ""
+                            shell = gs.agent_shell or gs.shell or ""
+                            env = {**gs.env_vars, **gs.agent_env_vars} \
+                                or None
+                            command = gs.agent_boot_command
+
+                            cell = state.add_agent(
+                                name=agent_name, group=group,
+                                profile=profile, command=command,
+                                directory=directory,
+                                tab_color=tab_color)
+                            if cell:
+                                # Worktree
+                                if gs.git_worktree and cell.directory:
+                                    repo_root = \
+                                        await worktree_mgr.get_repo_root(
+                                            cell.directory)
+                                    if repo_root:
+                                        wt_path = \
+                                            await worktree_mgr.create(
+                                                cell, repo_root,
+                                                base_dir=gs.worktree_base_dir
+                                                    or ".loom/worktrees",
+                                                base_branch=
+                                                    gs.worktree_base_branch
+                                                    or "")
+                                        if wt_path:
+                                            cell.directory = wt_path
+                                            state._emit_agent(cell)
+                                            state._db_save_agent(cell)
+
+                                await bridge.create_session(
+                                    cell, env_vars=env, shell=shell)
+
+                                # Auto-create child terminals
+                                t_profile = gs.terminal_profile \
+                                    or gs.profile or "Default"
+                                t_dir = gs.terminal_directory \
+                                    or gs.default_directory or ""
+                                _ttc = gs.terminal_tab_color
+                                t_color = (_ttc if _ttc != "none" else "") \
+                                    or gs.tab_color or ""
+                                t_shell = gs.terminal_shell \
+                                    or gs.shell or ""
+                                t_env = {**gs.env_vars,
+                                         **gs.terminal_env_vars} or None
+                                t_cmd = gs.terminal_boot_command or ""
+                                if gs.terminal_command_args and t_cmd:
+                                    t_cmd = (t_cmd + " "
+                                             + gs.terminal_command_args
+                                             ).strip()
+                                for i in range(gs.auto_terminals):
+                                    t_name = state.next_cell_name(
+                                        group, "terminal")
+                                    t = state.add_terminal(
+                                        name=t_name, group=group,
+                                        profile=t_profile,
+                                        command=t_cmd,
+                                        directory=t_dir or cell.directory,
+                                        tab_color=t_color,
+                                        parent_id=cell.id)
+                                    if t:
+                                        await bridge.create_session(
+                                            t, env_vars=t_env,
+                                            init_script=
+                                                gs.terminal_init_script,
+                                            shell=t_shell)
+
+                        if cell:
+                            # Link task to agent and move to In Progress
+                            state.board_update_task(
+                                tid, agent_id=cell.id,
+                                lane="In Progress")
+
+                            # Compose prompt from task fields
+                            parts = []
+                            if task.task:
+                                parts.append(task.task)
+                            if task.instructions:
+                                parts.append(task.instructions)
+                            if task.context:
+                                parts.append(task.context)
+                            if task.criteria:
+                                parts.append(task.criteria)
+                            prompt = "\n\n".join(parts)
+
+                            if prompt:
+                                if agent_id and cell.session_id:
+                                    # Existing agent — send immediately
+                                    await bridge.send_text(
+                                        cell.session_id,
+                                        prompt if prompt.endswith("\r")
+                                        else prompt + "\r")
+                                    cell.status = "running"
+                                    state._emit_agent(cell)
+                                elif data.get("create_agent") \
+                                        and cell.session_id:
+                                    # New agent — wait for boot
+                                    async def _dispatch_send(c, p):
+                                        await asyncio.sleep(2)
+                                        if c.session_id:
+                                            await bridge.send_text(
+                                                c.session_id,
+                                                p if p.endswith("\r")
+                                                else p + "\r")
+                                            c.status = "running"
+                                            state._emit_agent(c)
+                                            await state.broadcast()
+                                    asyncio.create_task(
+                                        _dispatch_send(cell, prompt))
+
             elif cmd == "board_add_lane":
                 name = data.get("name", "").strip()
                 if not name:

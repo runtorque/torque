@@ -458,6 +458,9 @@ function boardCardMenu(evt, taskId) {
 
   html += '<div class="ctx-sep"></div>';
 
+  // Dispatch
+  html += '<button onclick="event.stopPropagation();boardDispatchTask(\'' + taskId + '\')">Dispatch...</button>';
+
   // Link/Unlink agent
   if (task.agent_id) {
     html += '<button onclick="boardUnlinkAgent(\'' + taskId + '\')">Unlink agent</button>';
@@ -540,6 +543,46 @@ function boardLinkAgent(taskId) {
 function boardDoLinkAgent(taskId, agentId) {
   _closeCtxMenu();
   send({ cmd: 'board_update_task', id: taskId, agent_id: agentId });
+}
+
+/* ---- Dispatch task to agent ----------------------------------------- */
+
+function boardDispatchTask(taskId) {
+  _closeCtxMenu();
+  var tasks = _boardTasks();
+  var task = tasks[taskId];
+  if (!task) return;
+
+  var menu = document.getElementById('ctx-menu');
+  var html = '<button class="ctx-label" disabled>Dispatch to</button>';
+
+  // Option to create a new agent
+  html += '<button onclick="boardDispatchToNew(\'' + taskId + '\')">New agent</button>';
+
+  // List existing agents in the same group
+  if (state && state.agents && task.group) {
+    var agents = state.agents;
+    for (var id in agents) {
+      var a = agents[id];
+      if (a.cell_type === 'agent' && a.group === task.group) {
+        html += '<button onclick="boardDispatchToExisting(\'' + taskId + '\',\'' + id + '\')">'
+          + esc(a.name) + '</button>';
+      }
+    }
+  }
+
+  menu.innerHTML = html;
+  menu.classList.add('open');
+}
+
+function boardDispatchToNew(taskId) {
+  _closeCtxMenu();
+  send({ cmd: 'dispatch_task', id: taskId, create_agent: true });
+}
+
+function boardDispatchToExisting(taskId, agentId) {
+  _closeCtxMenu();
+  send({ cmd: 'dispatch_task', id: taskId, agent_id: agentId });
 }
 
 function _closeCtxMenu() {
