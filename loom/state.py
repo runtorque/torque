@@ -7,7 +7,7 @@ from typing import Optional
 
 from aiohttp import web
 
-from .config import DEFAULT_COMMAND, DB_FILE, STATE_FILE, log
+from .config import DEFAULT_COMMAND, log
 from .db import LoomDB
 
 _RESERVED_LANES = {"Backlog", "In Progress"}
@@ -258,31 +258,6 @@ class MatrixState:
                 self.db.save_ui_state(key, value)
             except Exception:
                 log.exception("Failed to save UI state %s", key)
-
-    def save(self):
-        """Full save — used by external callers (bridge, events, server)
-        that mutate cell fields directly. Persists only the agent they
-        changed (caller should pass the cell), but this fallback saves
-        everything for backward compatibility."""
-        if not self.db:
-            return
-        payload = {
-            "agents": {aid: asdict(a) for aid, a in self.agents.items()},
-            "groups": self.groups,
-            "group_settings": {
-                n: asdict(gs) for n, gs in self.group_settings.items()
-            },
-            "board_lanes": self.board_lanes,
-            "board_tasks": {
-                tid: asdict(t) for tid, t in self.board_tasks.items()
-            },
-            "board_panel_open": self.board_panel_open,
-            "board_panel_height": self.board_panel_height,
-        }
-        try:
-            self.db.save_all(payload)
-        except Exception:
-            log.exception("Failed to save state to SQLite")
 
     def load(self):
         from .config import DB_FILE, STATE_FILE

@@ -316,7 +316,7 @@ class LoomDB:
     # -- Bulk save (transitional) -------------------------------------------
 
     def save_all(self, state_dict: dict):
-        """Write entire state to DB (transitional — used by save() shim)."""
+        """Bulk-write entire state to DB (used by migrate_from_json)."""
         c = self._conn.cursor()
         try:
             # Agents

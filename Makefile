@@ -93,7 +93,7 @@ autolaunch: install
 
 ## uninstall: Remove installed files and autolaunch symlink
 uninstall:
-	rm -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(SCRIPT_DIR)/webview.html" "$(SCRIPT_DIR)/state.json"
+	rm -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(SCRIPT_DIR)/webview.html" "$(SCRIPT_DIR)/state.json" "$(SCRIPT_DIR)/loom.db"
 	rm -f "$(AUTOLAUNCH_DIR)/$(MAIN_SCRIPT)"
 	@echo "Uninstalled."
 
