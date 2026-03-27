@@ -24,7 +24,7 @@ SCHEMA_VERSION = "1"
 # Ephemeral fields are NOT stored (they reset on restart anyway).
 
 _AGENT_PERSISTED_COLS = [
-    "id", "name", "group_name", "cell_type", "session_id", "profile",
+    "id", "name", "slug", "group_name", "cell_type", "session_id", "profile",
     "command", "directory", "tab_color", "icon", "window_id", "parent_id",
     "status", "worktree_path", "worktree_branch", "worktree_repo_root",
     "worktree_base_branch", "agent_type", "agent_session_id",
@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS agents (
     id                    TEXT PRIMARY KEY,
     name                  TEXT NOT NULL,
+    slug                  TEXT NOT NULL DEFAULT '',
     group_name            TEXT NOT NULL,
     cell_type             TEXT NOT NULL DEFAULT 'agent',
     session_id            TEXT,
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE TABLE IF NOT EXISTS groups (
     name     TEXT PRIMARY KEY,
+    slug     TEXT NOT NULL DEFAULT '',
     position INTEGER NOT NULL DEFAULT 0
 );
 
@@ -133,6 +135,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
 CREATE TABLE IF NOT EXISTS board_tasks (
     id           TEXT PRIMARY KEY,
     task         TEXT NOT NULL,
+    slug         TEXT NOT NULL DEFAULT '',
     group_name   TEXT NOT NULL DEFAULT '',
     instructions TEXT NOT NULL DEFAULT '',
     context      TEXT NOT NULL DEFAULT '',
@@ -174,6 +177,15 @@ class LoomDB:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_SCHEMA_SQL)
+        # Migrate: add slug columns to existing tables
+        for table in ("agents", "groups", "board_tasks"):
+            try:
+                self._conn.execute(f"SELECT slug FROM {table} LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN slug "
+                    f"TEXT NOT NULL DEFAULT ''")
+                self._conn.commit()
         # Set schema version if not present
         row = self._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
@@ -195,17 +207,18 @@ class LoomDB:
         """Upsert a single agent/terminal cell (persisted fields only)."""
         self._conn.execute("""
             INSERT OR REPLACE INTO agents
-                (id, name, group_name, cell_type, session_id, profile,
+                (id, name, slug, group_name, cell_type, session_id, profile,
                  command, directory, tab_color, icon, window_id, parent_id,
                  status, worktree_path, worktree_branch, worktree_repo_root,
                  worktree_base_branch, agent_type, agent_session_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
-            cell.id, cell.name, cell.group, cell.cell_type, cell.session_id,
-            cell.profile, cell.command, cell.directory, cell.tab_color,
-            cell.icon, cell.window_id, cell.parent_id, cell.status,
-            cell.worktree_path, cell.worktree_branch, cell.worktree_repo_root,
-            cell.worktree_base_branch, cell.agent_type, cell.agent_session_id,
+            cell.id, cell.name, cell.slug, cell.group, cell.cell_type,
+            cell.session_id, cell.profile, cell.command, cell.directory,
+            cell.tab_color, cell.icon, cell.window_id, cell.parent_id,
+            cell.status, cell.worktree_path, cell.worktree_branch,
+            cell.worktree_repo_root, cell.worktree_base_branch,
+            cell.agent_type, cell.agent_session_id,
         ))
         self._conn.commit()
 
@@ -229,13 +242,14 @@ class LoomDB:
             "DELETE FROM group_settings WHERE group_name=?", (name,))
         self._conn.commit()
 
-    def save_groups(self, groups: dict):
-        """Bulk-save all groups with positions."""
+    def save_groups(self, groups: dict, slugs: dict = None):
+        """Bulk-save all groups with positions and slugs."""
+        slugs = slugs or {}
         self._conn.execute("DELETE FROM groups")
         for pos, name in enumerate(groups):
             self._conn.execute(
-                "INSERT INTO groups (name, position) VALUES (?,?)",
-                (name, pos))
+                "INSERT INTO groups (name, slug, position) VALUES (?,?,?)",
+                (name, slugs.get(name, ""), pos))
         self._conn.commit()
 
     def save_group_members(self, group_name: str, agent_ids: list):
@@ -281,15 +295,16 @@ class LoomDB:
         group_name = d.pop("group", "")
         self._conn.execute("""
             INSERT OR REPLACE INTO board_tasks
-                (id, task, group_name, instructions, context, criteria, lane,
-                 position, assignee, agent_id, labels, created_at, updated_at,
-                 provider, external_id, external_url)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                (id, task, slug, group_name, instructions, context, criteria,
+                 lane, position, assignee, agent_id, labels, created_at,
+                 updated_at, provider, external_id, external_url)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
-            d["id"], d["task"], group_name, d["instructions"], d["context"],
-            d["criteria"], d["lane"], d["position"], d["assignee"],
-            d["agent_id"], labels, d["created_at"], d["updated_at"],
-            d["provider"], d["external_id"], d["external_url"],
+            d["id"], d["task"], d["slug"], group_name, d["instructions"],
+            d["context"], d["criteria"], d["lane"], d["position"],
+            d["assignee"], d["agent_id"], labels, d["created_at"],
+            d["updated_at"], d["provider"], d["external_id"],
+            d["external_url"],
         ))
         self._conn.commit()
 
@@ -324,15 +339,16 @@ class LoomDB:
             for aid, a in state_dict.get("agents", {}).items():
                 c.execute("""
                     INSERT INTO agents
-                        (id, name, group_name, cell_type, session_id, profile,
-                         command, directory, tab_color, icon, window_id,
-                         parent_id, status, worktree_path, worktree_branch,
-                         worktree_repo_root, worktree_base_branch,
-                         agent_type, agent_session_id)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        (id, name, slug, group_name, cell_type, session_id,
+                         profile, command, directory, tab_color, icon,
+                         window_id, parent_id, status, worktree_path,
+                         worktree_branch, worktree_repo_root,
+                         worktree_base_branch, agent_type, agent_session_id)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     a.get("id", aid),
                     a.get("name", ""),
+                    a.get("slug", ""),
                     a.get("group", ""),
                     a.get("cell_type", "agent"),
                     a.get("session_id"),
@@ -355,11 +371,12 @@ class LoomDB:
             # Groups + members
             c.execute("DELETE FROM groups")
             c.execute("DELETE FROM group_members")
+            group_slugs = state_dict.get("group_slugs", {})
             for pos, (gname, members) in enumerate(
                     state_dict.get("groups", {}).items()):
                 c.execute(
-                    "INSERT INTO groups (name, position) VALUES (?,?)",
-                    (gname, pos))
+                    "INSERT INTO groups (name, slug, position) VALUES (?,?,?)",
+                    (gname, group_slugs.get(gname, ""), pos))
                 for mpos, aid in enumerate(members):
                     c.execute(
                         "INSERT INTO group_members "
@@ -400,17 +417,17 @@ class LoomDB:
                 group_name = d.pop("group", "")
                 c.execute("""
                     INSERT INTO board_tasks
-                        (id, task, group_name, instructions, context, criteria,
-                         lane, position, assignee, agent_id, labels,
+                        (id, task, slug, group_name, instructions, context,
+                         criteria, lane, position, assignee, agent_id, labels,
                          created_at, updated_at, provider, external_id,
                          external_url)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
-                    d.get("id", tid), d.get("task", ""), group_name,
-                    d.get("instructions", ""), d.get("context", ""),
-                    d.get("criteria", ""), d.get("lane", "Backlog"),
-                    d.get("position", 0), d.get("assignee", ""),
-                    d.get("agent_id", ""), labels,
+                    d.get("id", tid), d.get("task", ""), d.get("slug", ""),
+                    group_name, d.get("instructions", ""),
+                    d.get("context", ""), d.get("criteria", ""),
+                    d.get("lane", "Backlog"), d.get("position", 0),
+                    d.get("assignee", ""), d.get("agent_id", ""), labels,
                     d.get("created_at", ""), d.get("updated_at", ""),
                     d.get("provider", ""), d.get("external_id", ""),
                     d.get("external_url", ""),
@@ -449,9 +466,12 @@ class LoomDB:
 
         # Groups (ordered)
         groups = {}
+        group_slugs = {}
         for row in c.execute(
-                "SELECT name FROM groups ORDER BY position"):
+                "SELECT name, slug FROM groups ORDER BY position"):
             groups[row[0]] = []
+            if row[1]:
+                group_slugs[row[0]] = row[1]
 
         # Group members
         for row in c.execute(
@@ -510,6 +530,7 @@ class LoomDB:
         return {
             "agents": agents,
             "groups": groups,
+            "group_slugs": group_slugs,
             "group_settings": group_settings,
             "board_lanes": board_lanes,
             "board_tasks": board_tasks,

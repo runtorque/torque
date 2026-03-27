@@ -1,6 +1,7 @@
 """AgentCell dataclass and MatrixState persistence layer."""
 
 import json
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Optional
@@ -18,6 +19,7 @@ _DEFAULT_LANES = ["Backlog", "To Do", "In Progress", "Done"]
 class BoardTask:
     id: str
     task: str                   # actionable task description (required)
+    slug: str = ""              # auto-generated from task text
     group: str = ""             # owning group (must be an existing group)
     instructions: str = ""      # clear instructions for the agent (optional)
     context: str = ""           # additional context the agent might need (optional)
@@ -40,6 +42,7 @@ class AgentCell:
     id: str
     name: str
     group: str
+    slug: str = ""              # auto-generated from name
     cell_type: str = "agent"  # "agent" | "terminal"
     session_id: Optional[str] = None
     profile: str = "Default"
@@ -83,6 +86,25 @@ _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "error_message", "needs_attention", "last_summary",
                      "worktree_dirty", "worktree_diff",
                      "worktree_checkpoints")
+
+
+def _slugify(name: str, max_len: int = 40) -> str:
+    """Convert a name to a URL-friendly slug."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    slug = re.sub(r"-+", "-", slug)
+    if len(slug) > max_len:
+        slug = slug[:max_len].rsplit("-", 1)[0]
+    return slug or "unnamed"
+
+
+def _unique_slug(base: str, existing: set) -> str:
+    """Ensure slug is unique by appending a numeric suffix."""
+    if base not in existing:
+        return base
+    i = 2
+    while f"{base}-{i}" in existing:
+        i += 1
+    return f"{base}-{i}"
 
 
 @dataclass
@@ -141,6 +163,7 @@ class MatrixState:
         self.db: Optional[LoomDB] = db
         self.agents: dict[str, AgentCell] = {}
         self.groups: dict[str, list[str]] = {}
+        self.group_slugs: dict[str, str] = {}  # group_name → slug
         self.group_settings: dict[str, GroupSettings] = {}
         self.active_session_id: Optional[str] = None
         self.current_window_id: Optional[str] = None
@@ -168,6 +191,7 @@ class MatrixState:
     def _emit_group(self, name: str):
         """Emit a group_update delta with the current member list."""
         self._emit("group_update", name=name,
+                   slug=self.group_slugs.get(name, ""),
                    agents=list(self.groups.get(name, [])))
 
     # -- Serialization ------------------------------------------------------
@@ -176,6 +200,7 @@ class MatrixState:
         return {
             "agents": {aid: asdict(a) for aid, a in self.agents.items()},
             "groups": self.groups,
+            "group_slugs": dict(self.group_slugs),
             "group_settings": {
                 n: asdict(gs) for n, gs in self.group_settings.items()
             },
@@ -211,7 +236,7 @@ class MatrixState:
         """Persist all groups and their memberships."""
         if self.db:
             try:
-                self.db.save_groups(self.groups)
+                self.db.save_groups(self.groups, self.group_slugs)
                 for gname, members in self.groups.items():
                     self.db.save_group_members(gname, members)
             except Exception:
@@ -322,6 +347,41 @@ class MatrixState:
                 self.board_tasks[tid] = BoardTask(**filtered)
             self.board_panel_open = data.get("board_panel_open", False)
             self.board_panel_height = data.get("board_panel_height", 0)
+            # Slug migration: generate slugs for resources that lack them.
+            # Groups first (terminal slugs may reference group slugs),
+            # then agents (terminal slugs reference parent agent slugs),
+            # then terminals.
+            slug_dirty = False
+            self.group_slugs = data.get("group_slugs", {})
+            for gname in self.groups:
+                if gname not in self.group_slugs:
+                    self.group_slugs[gname] = self._unique_group_slug(gname)
+                    slug_dirty = True
+            # Agents (non-terminal) first
+            for aid, cell in self.agents.items():
+                if cell.cell_type != "terminal" and not cell.slug:
+                    cell.slug = self._unique_agent_slug(cell.name,
+                                                       exclude_id=aid)
+                    self._db_save_agent(cell)
+                    slug_dirty = True
+            # Terminals: generate or migrate to parent:name format
+            for aid, cell in self.agents.items():
+                if cell.cell_type == "terminal" and (
+                        not cell.slug or ":" not in cell.slug):
+                    cell.slug = self._unique_terminal_slug(
+                        cell.name, parent_id=cell.parent_id,
+                        group=cell.group, exclude_id=aid)
+                    self._db_save_agent(cell)
+                    slug_dirty = True
+            for tid, task in self.board_tasks.items():
+                if not task.slug:
+                    task.slug = self._unique_task_slug(task.task,
+                                                      exclude_id=tid)
+                    self._db_save_task(task)
+                    slug_dirty = True
+            if slug_dirty:
+                self._db_save_groups()
+                log.info("Generated slugs for existing resources")
         except (TypeError, KeyError):
             log.exception("Failed to load state from SQLite")
 
@@ -369,11 +429,50 @@ class MatrixState:
             i += 1
         return f"{prefix} {i}"
 
+    # -- Slug helpers -------------------------------------------------------
+
+    def _unique_agent_slug(self, name: str, exclude_id: str = "") -> str:
+        """Generate a unique slug for an agent."""
+        base = _slugify(name)
+        existing = {c.slug for c in self.agents.values()
+                    if c.id != exclude_id and c.slug}
+        return _unique_slug(base, existing)
+
+    def _unique_terminal_slug(self, name: str, parent_id: str = "",
+                              group: str = "",
+                              exclude_id: str = "") -> str:
+        """Generate a unique slug for a terminal: ``parent:name``."""
+        if parent_id:
+            parent = self.agents.get(parent_id)
+            prefix = parent.slug if parent else ""
+        else:
+            prefix = self.group_slugs.get(group, _slugify(group))
+        base = _slugify(name)
+        full = f"{prefix}:{base}" if prefix else base
+        existing = {c.slug for c in self.agents.values()
+                    if c.id != exclude_id and c.slug}
+        return _unique_slug(full, existing)
+
+    def _unique_group_slug(self, name: str, exclude_name: str = "") -> str:
+        """Generate a unique slug for a group."""
+        base = _slugify(name)
+        existing = {s for n, s in self.group_slugs.items()
+                    if n != exclude_name and s}
+        return _unique_slug(base, existing)
+
+    def _unique_task_slug(self, task_text: str, exclude_id: str = "") -> str:
+        """Generate a unique slug for a board task."""
+        base = _slugify(task_text)
+        existing = {t.slug for t in self.board_tasks.values()
+                    if t.id != exclude_id and t.slug}
+        return _unique_slug(base, existing)
+
     # -- Mutations ----------------------------------------------------------
 
     def add_group(self, name: str):
         if name and name not in self.groups:
             self.groups[name] = []
+            self.group_slugs[name] = self._unique_group_slug(name)
             self._emit_group(name)
             self._emit("groups_reorder", groups=list(self.groups.keys()))
             self._db_save_groups()
@@ -393,6 +492,7 @@ class MatrixState:
                             removed.append(child)
                             self._emit("agent_remove", id=child_id)
             del self.groups[name]
+            self.group_slugs.pop(name, None)
             self.group_settings.pop(name, None)
             self._emit("group_remove", name=name)
             self._emit("groups_reorder", groups=list(self.groups.keys()))
@@ -405,6 +505,8 @@ class MatrixState:
     def rename_group(self, old: str, new: str):
         if old in self.groups and new and new not in self.groups:
             self.groups[new] = self.groups.pop(old)
+            self.group_slugs.pop(old, None)
+            self.group_slugs[new] = self._unique_group_slug(new)
             if old in self.group_settings:
                 self.group_settings[new] = self.group_settings.pop(old)
             for aid in self.groups[new]:
@@ -415,7 +517,8 @@ class MatrixState:
                         if child_id in self.agents:
                             self.agents[child_id].group = new
                             self._emit_agent(self.agents[child_id])
-            self._emit("group_rename", old_name=old, new_name=new)
+            self._emit("group_rename", old_name=old, new_name=new,
+                       slug=self.group_slugs.get(new, ""))
             # Persist: rename group, update agent group fields
             self._db_save_groups()
             if new in self.group_settings:
@@ -459,10 +562,16 @@ class MatrixState:
                                 group, gs.max_agents)
                     return None
         aid = uuid.uuid4().hex[:8]
+        if cell_type == "terminal":
+            slug = self._unique_terminal_slug(name, parent_id=parent_id,
+                                              group=group)
+        else:
+            slug = self._unique_agent_slug(name)
         cell = AgentCell(
             id=aid,
             name=name,
             group=group,
+            slug=slug,
             cell_type=cell_type,
             profile=profile,
             command=command or (DEFAULT_COMMAND if cell_type == "agent" else ""),
@@ -498,6 +607,23 @@ class MatrixState:
         for key in ("name", "tab_color", "icon"):
             if key in fields:
                 setattr(cell, key, fields[key])
+        if "name" in fields:
+            if cell.cell_type == "terminal":
+                cell.slug = self._unique_terminal_slug(
+                    cell.name, parent_id=cell.parent_id,
+                    group=cell.group, exclude_id=aid)
+            else:
+                cell.slug = self._unique_agent_slug(cell.name,
+                                                    exclude_id=aid)
+                # Cascade: update children's slug prefixes
+                for child_id in self._children.get(aid, []):
+                    child = self.agents.get(child_id)
+                    if child:
+                        child.slug = self._unique_terminal_slug(
+                            child.name, parent_id=aid,
+                            group=child.group, exclude_id=child_id)
+                        self._emit_agent(child)
+                        self._db_save_agent(child)
         self._emit_agent(cell)
         self._db_save_agent(cell)
 
@@ -630,6 +756,10 @@ class MatrixState:
             cell.parent_id = ""
             if cell.group in self.groups:
                 self.groups[cell.group].append(aid)
+        # Regenerate slug with new parent prefix
+        cell.slug = self._unique_terminal_slug(
+            cell.name, parent_id=cell.parent_id,
+            group=cell.group, exclude_id=aid)
         self._emit_agent(cell)
         if old_parent_id and old_parent_id in self.agents:
             self._emit_agent(self.agents[old_parent_id])
@@ -683,6 +813,7 @@ class MatrixState:
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         tid = uuid.uuid4().hex[:8]
+        task_slug = self._unique_task_slug(task)
         # Position = end of lane
         max_pos = max(
             (t.position for t in self.board_tasks.values() if t.lane == lane),
@@ -691,6 +822,7 @@ class MatrixState:
         bt = BoardTask(
             id=tid,
             task=task,
+            slug=task_slug,
             group=group,
             lane=lane,
             position=max_pos + 1,
@@ -710,11 +842,13 @@ class MatrixState:
         task = self.board_tasks.get(tid)
         if not task:
             return
-        valid = set(BoardTask.__dataclass_fields__) - {"id", "created_at"}
+        valid = set(BoardTask.__dataclass_fields__) - {"id", "slug", "created_at"}
         old_lane = task.lane
         for key, value in fields.items():
             if key in valid:
                 setattr(task, key, value)
+        if "task" in fields:
+            task.slug = self._unique_task_slug(task.task, exclude_id=tid)
         from datetime import datetime, timezone
         task.updated_at = datetime.now(timezone.utc).isoformat()
         # Reindex if lane changed

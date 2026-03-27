@@ -120,8 +120,15 @@ def db_read_state():
 
         # Groups
         groups = {}
-        for row in c.execute("SELECT name FROM groups ORDER BY position"):
-            groups[row[0]] = []
+        group_slugs = {}
+        rows = c.execute("SELECT * FROM groups ORDER BY position").fetchall()
+        if rows:
+            cols = [d[0] for d in c.description]
+            for row in rows:
+                d = dict(zip(cols, row))
+                groups[d["name"]] = []
+                if d.get("slug"):
+                    group_slugs[d["name"]] = d["slug"]
         for row in c.execute(
                 "SELECT group_name, agent_id FROM group_members "
                 "ORDER BY group_name, position"):
@@ -150,6 +157,7 @@ def db_read_state():
         return {
             "agents": agents,
             "groups": groups,
+            "group_slugs": group_slugs,
             "board_lanes": lanes,
             "board_tasks": tasks,
         }
@@ -225,12 +233,25 @@ def get_state(port):
 
 
 def resolve_cell(state_data, identifier):
-    """Resolve a name or ID to a cell dict. Dies on ambiguity."""
+    """Resolve a name, slug, or ID to a cell dict. Dies on ambiguity."""
     agents = state_data.get("agents", {})
 
     # Exact ID match
     if identifier in agents:
         return agents[identifier]
+
+    # Slug match (slugs are lowercase by construction)
+    slug_matches = [c for c in agents.values()
+                    if c.get("slug") and c["slug"] == identifier.lower()]
+    if len(slug_matches) == 1:
+        return slug_matches[0]
+    if len(slug_matches) > 1:
+        print(f"Ambiguous slug \"{identifier}\" matches {len(slug_matches)} cells:",
+              file=sys.stderr)
+        for m in slug_matches:
+            print(f"  {m['id']}  {m['name']}  ({m.get('group', '')})",
+                  file=sys.stderr)
+        die("Use the ID instead")
 
     # Name match (case-insensitive)
     matches = [c for c in agents.values()
@@ -243,7 +264,7 @@ def resolve_cell(state_data, identifier):
         for m in matches:
             print(f"  {m['id']}  {m['name']}  ({m.get('group', '')})",
                   file=sys.stderr)
-        die("Use the ID instead")
+        die("Use the ID or slug instead")
 
     # Partial ID match (prefix)
     matches = [c for c in agents.values()
@@ -261,30 +282,52 @@ def resolve_cell(state_data, identifier):
 
 
 def resolve_group(state_data, identifier):
-    """Resolve a group name (case-insensitive). Dies if not found."""
+    """Resolve a group name, slug, or case-insensitive name. Dies if not found."""
     groups = state_data.get("groups", {})
+    group_slugs = state_data.get("group_slugs", {})
 
+    # Exact name match
     if identifier in groups:
         return identifier
 
+    # Slug match (slugs are lowercase by construction)
+    ident_lower = identifier.lower()
+    for name, slug in group_slugs.items():
+        if slug == ident_lower:
+            return name
+
+    # Case-insensitive name match
     for name in groups:
-        if name.lower() == identifier.lower():
+        if name.lower() == ident_lower:
             return name
 
     die(f"No group matching \"{identifier}\"")
 
 
 def resolve_task(state_data, identifier):
-    """Resolve a task by ID prefix or title match. Dies on ambiguity."""
+    """Resolve a task by slug, ID prefix, or title match. Dies on ambiguity."""
     tasks = state_data.get("board_tasks", {})
 
     # Exact ID match
     if identifier in tasks:
         return tasks[identifier]
 
+    # Slug match (slugs are lowercase by construction)
+    ident_lower = identifier.lower()
+    slug_matches = [t for t in tasks.values()
+                    if t.get("slug") and t["slug"] == ident_lower]
+    if len(slug_matches) == 1:
+        return slug_matches[0]
+    if len(slug_matches) > 1:
+        print(f"Ambiguous slug \"{identifier}\" matches {len(slug_matches)} tasks:",
+              file=sys.stderr)
+        for t in slug_matches:
+            print(f"  {t['id']}  {t.get('task', '')[:50]}", file=sys.stderr)
+        die("Use the ID instead")
+
     # ID prefix match
     prefix_matches = [t for tid, t in tasks.items()
-                      if tid.startswith(identifier.lower())]
+                      if tid.startswith(ident_lower)]
     if len(prefix_matches) == 1:
         return prefix_matches[0]
     if len(prefix_matches) > 1:
@@ -296,7 +339,7 @@ def resolve_task(state_data, identifier):
 
     # Title match (case-insensitive)
     title_matches = [t for t in tasks.values()
-                     if t.get("task", "").lower() == identifier.lower()]
+                     if t.get("task", "").lower() == ident_lower]
     if len(title_matches) == 1:
         return title_matches[0]
     if len(title_matches) > 1:
@@ -385,6 +428,14 @@ def format_status_table(state_data, group_filter=None, window_id=None):
     children = state_data.get("children", {})
     lines = []
 
+    # Compute column width from the longest slug across all visible cells
+    max_slug = 0
+    for c in agents.values():
+        slug = c.get("slug", "") or c["id"]
+        max_slug = max(max_slug, len(slug))
+    # prefix = "  {slug}" (top-level) or "    ↳ {slug}" (child, 6-char indent)
+    prefix_w = max(20, max_slug + 8)
+
     for group_name, cell_ids in groups.items():
         if group_filter and group_name.lower() != group_filter.lower():
             continue
@@ -413,13 +464,15 @@ def format_status_table(state_data, group_filter=None, window_id=None):
         lines.append(f"\n{_bold(group_name)}  {_dim(f'{count} {label}')}")
 
         for cell in top_cells:
-            _append_cell_line(lines, cell, children, agents)
+            _append_cell_line(lines, cell, children, agents,
+                              prefix_w=prefix_w)
 
         # Orphan terminals (parent in different group — edge case)
         all_children = {cid for cids in children.values() for cid in cids}
         for cell in child_cells_in_group:
             if cell["id"] not in all_children:
-                _append_cell_line(lines, cell, children, agents)
+                _append_cell_line(lines, cell, children, agents,
+                                  prefix_w=prefix_w)
 
     if not lines:
         if group_filter:
@@ -430,25 +483,25 @@ def format_status_table(state_data, group_filter=None, window_id=None):
     return "\n".join(lines)
 
 
-def _append_cell_line(lines, cell, children, agents, is_child=False):
+def _append_cell_line(lines, cell, children, agents, is_child=False,
+                      prefix_w=20):
     cid = cell["id"]
-    name = cell.get("name", "")
+    slug = cell.get("slug", "") or cid
     status = cell.get("status", "")
     activity = cell.get("activity_detail", "") or cell.get("activity", "")
     branch = cell.get("worktree_branch", "")
 
     # Build prefix with consistent visible width so status column aligns.
-    # Agent:  "  {id}  {name}"       e.g. "  c5ccb221  Agent 1"
-    # Child:  "            ↳ {name}" e.g. "            ↳ Terminal 1"
-    PREFIX_W = 32
+    # Agent:  "  {slug}"       e.g. "  agent-1"
+    # Child:  "    ↳ {slug}"   e.g. "    ↳ terminal-1"
     if is_child:
-        visible = f"            ↳ {name}"
-        colored = f"  {' ' * 8}  {_dim('↳')} {name}"
+        visible = f"    ↳ {slug}"
+        colored = f"    {_dim('↳')} {slug}"
     else:
-        visible = f"  {cid}  {name}"
-        colored = f"  {_dim(cid)}  {name}"
+        visible = f"  {slug}"
+        colored = f"  {_dim(slug)}"
 
-    pad = " " * max(1, PREFIX_W - len(visible))
+    pad = " " * max(1, prefix_w - len(visible))
 
     parts = [colored + pad, _status_str(status)]
     if activity:
@@ -463,14 +516,15 @@ def _append_cell_line(lines, cell, children, agents, is_child=False):
             child = agents.get(child_id)
             if child:
                 _append_cell_line(lines, child, children, agents,
-                                  is_child=True)
+                                  is_child=True, prefix_w=prefix_w)
 
 
 def format_agent_detail(cell, children_map, agents):
     """Format single agent detail view."""
     lines = []
     ctype = cell.get("cell_type", "agent").title()
-    lines.append(f"{ctype}: {cell['name']} ({cell['id']})")
+    slug = cell.get("slug", "") or cell["id"]
+    lines.append(f"{ctype}: {cell['name']} ({slug})")
     lines.append(f"  Group:      {cell.get('group', '')}")
     lines.append(f"  Status:     {cell.get('status', '')}")
 
@@ -534,7 +588,8 @@ def format_agent_detail(cell, children_map, agents):
         for cid in child_ids:
             child = agents.get(cid)
             if child:
-                lines.append(f"    {child['id']}  {child['name']:<16} "
+                child_slug = child.get("slug", "") or child["id"]
+                lines.append(f"    {child_slug}  {child['name']:<16} "
                              f"{child.get('status', '')}")
 
     return "\n".join(lines)
@@ -864,8 +919,10 @@ def cmd_status(args):
 
 def cmd_group_add(args):
     resp = api_call("add_group", port=args.port, group=args.name)
-    check_ok(resp)
-    print(f"Group \"{args.name}\" created")
+    data = check_ok(resp)
+    group_slugs = data.get("group_slugs", {})
+    slug = group_slugs.get(args.name, "")
+    print(f"Group \"{args.name}\" created (slug: {slug})")
 
 
 def cmd_group_remove(args):
@@ -950,7 +1007,8 @@ def cmd_agent_add(args):
              if c["name"] == args.name and c["group"] == group]
     if match:
         cell = match[-1]  # newest
-        print(f"Agent \"{args.name}\" created (id: {cell['id']})")
+        slug = cell.get("slug", "")
+        print(f"Agent \"{args.name}\" created (id: {cell['id']}, slug: {slug})")
     else:
         print(f"Agent \"{args.name}\" created")
 
@@ -960,7 +1018,7 @@ def cmd_agent_remove(args):
     cell = resolve_cell(state_data, args.identifier)
     resp = api_call("remove_agent", port=args.port, id=cell["id"])
     check_ok(resp)
-    print(f"Removed \"{cell['name']}\" ({cell['id']})")
+    print(f"Removed \"{cell['name']}\" ({cell.get('slug', '') or cell['id']})")
 
 
 def cmd_agent_focus(args):
@@ -1046,7 +1104,8 @@ def cmd_terminal_add(args):
              if c["name"] == args.name and c.get("cell_type") == "terminal"]
     if match:
         cell = match[-1]
-        print(f"Terminal \"{args.name}\" created (id: {cell['id']})")
+        slug = cell.get("slug", "")
+        print(f"Terminal \"{args.name}\" created (id: {cell['id']}, slug: {slug})")
     else:
         print(f"Terminal \"{args.name}\" created")
 
@@ -1056,7 +1115,7 @@ def cmd_terminal_remove(args):
     cell = resolve_cell(state_data, args.identifier)
     resp = api_call("remove_agent", port=args.port, id=cell["id"])
     check_ok(resp)
-    print(f"Removed \"{cell['name']}\" ({cell['id']})")
+    print(f"Removed \"{cell['name']}\" ({cell.get('slug', '') or cell['id']})")
 
 
 def cmd_terminal_reparent(args):
@@ -1398,7 +1457,7 @@ def cmd_task_show(args):
 
     print()
     print(f"  {_bold(t.get('task', ''))}")
-    print(f"  {_dim(t['id'])}")
+    print(f"  {_dim(t.get('slug', '') or t['id'])}")
     print()
     print(f"  {'Lane:':<14} {t.get('lane', '')}")
     print(f"  {'Group:':<14} {t.get('group', '')}")
@@ -1407,7 +1466,11 @@ def cmd_task_show(args):
         print(f"  {'Assignee:':<14} {t['assignee']}")
     if t.get("agent_id"):
         agent = st.get("agents", {}).get(t["agent_id"])
-        agent_str = f"{agent['name']} ({t['agent_id'][:6]})" if agent else t["agent_id"][:6]
+        if agent:
+            agent_slug = agent.get("slug", "") or t["agent_id"][:6]
+            agent_str = f"{agent['name']} ({agent_slug})"
+        else:
+            agent_str = t["agent_id"][:6]
         print(f"  {'Agent:':<14} {agent_str}")
     if t.get("labels"):
         print(f"  {'Labels:':<14} {', '.join(t['labels'])}")
@@ -1471,8 +1534,8 @@ def cmd_task_list(args):
         found_any = True
         print(f"\n  {_bold(lane)} ({len(lane_tasks)})")
         for t in lane_tasks:
-            tid = _dim(t["id"][:6])
-            parts = [f"    {tid}  {t.get('task', '')}"]
+            tslug = _dim(t.get("slug", "") or t["id"][:6])
+            parts = [f"    {tslug}  {t.get('task', '')}"]
             if t.get("agent_id"):
                 a = st.get("agents", {}).get(t["agent_id"])
                 if a:
@@ -1637,7 +1700,7 @@ def cmd_task_edit(args):
 
     resp = api_call("board_update_task", port=args.port, id=t["id"], **fields)
     check_ok(resp)
-    print(f"Updated task {t['id'][:6]}")
+    print(f"Updated task {t.get('slug', '') or t['id'][:6]}")
 
 
 def cmd_task_move(args):
@@ -1660,7 +1723,7 @@ def cmd_task_assign(args):
         resp = api_call("board_update_task", port=args.port,
                         id=t["id"], agent_id="", assignee="")
         check_ok(resp)
-        print(f"Unassigned task {t['id'][:6]}")
+        print(f"Unassigned task {t.get('slug', '') or t['id'][:6]}")
         return
 
     agent_ref = args.agent
@@ -1672,7 +1735,7 @@ def cmd_task_assign(args):
     resp = api_call("board_update_task", port=args.port,
                     id=t["id"], agent_id=cell["id"])
     check_ok(resp)
-    print(f"Assigned task {t['id'][:6]} to \"{cell['name']}\"")
+    print(f"Assigned task {t.get('slug', '') or t['id'][:6]} to \"{cell['name']}\"")
 
 
 # -- Template ---------------------------------------------------------------
@@ -1856,8 +1919,8 @@ def cmd_board_list(args):
                 a = st.get("agents", {}).get(t["agent_id"])
                 if a:
                     agent_str = f" {_cyan('→ ' + a['name'])}"
-            tid = _dim(t["id"][:6])
-            print(f"    {tid}  {t.get('task', t.get('title', ''))}{agent_str}")
+            tslug = _dim(t.get("slug", "") or t["id"][:6])
+            print(f"    {tslug}  {t.get('task', t.get('title', ''))}{agent_str}")
     print()
 
 
@@ -1933,7 +1996,7 @@ def build_parser():
     p = sub.add_parser("status", aliases=["st", "ls"],
                        help="Show groups and agents")
     p.add_argument("identifier", nargs="?",
-                   help="Agent ID or name for detail view")
+                   help="Agent ID, slug, or name for detail view")
     p.add_argument("-g", "--group", help="Filter by group name")
     p.add_argument("-a", "--all", action="store_true",
                    help="Show all windows (default: current window only)")
@@ -1984,24 +2047,24 @@ def build_parser():
 
     p = agt_sub.add_parser("remove", aliases=["rm"],
                            help="Remove an agent")
-    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
     p.set_defaults(func=cmd_agent_remove)
 
     p = agt_sub.add_parser("focus", help="Focus agent's iTerm2 session")
-    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
     p.set_defaults(func=cmd_agent_focus)
 
     p = agt_sub.add_parser("relaunch", help="Restart a stopped agent")
-    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
     p.set_defaults(func=cmd_agent_relaunch)
 
     p = agt_sub.add_parser("move", help="Move agent to different group")
-    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
     p.add_argument("-g", "--group", required=True, help="Target group")
     p.set_defaults(func=cmd_agent_move)
 
     p = agt_sub.add_parser("edit", help="Update agent name or color")
-    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
     p.add_argument("--name", help="New name")
     p.add_argument("--color", help="New tab color (hex)")
     p.set_defaults(func=cmd_agent_edit)
@@ -2014,7 +2077,7 @@ def build_parser():
 
     p = trm_sub.add_parser("add", help="Create a terminal")
     p.add_argument("name", help="Terminal name")
-    p.add_argument("-p", "--parent", help="Parent agent ID or name")
+    p.add_argument("-p", "--parent", help="Parent agent ID, slug, or name")
     p.add_argument("-g", "--group", help="Group (if no parent)")
     p.add_argument("-c", "--command", help="Boot command")
     p.add_argument("-d", "--directory", help="Working directory")
@@ -2024,12 +2087,12 @@ def build_parser():
 
     p = trm_sub.add_parser("remove", aliases=["rm"],
                            help="Remove a terminal")
-    p.add_argument("identifier", help="Terminal ID or name")
+    p.add_argument("identifier", help="Terminal ID, slug, or name")
     p.set_defaults(func=cmd_terminal_remove)
 
     p = trm_sub.add_parser("reparent", help="Reparent a terminal")
-    p.add_argument("identifier", help="Terminal ID or name")
-    p.add_argument("-p", "--parent", help="New parent agent ID or name")
+    p.add_argument("identifier", help="Terminal ID, slug, or name")
+    p.add_argument("-p", "--parent", help="New parent agent ID, slug, or name")
     p.add_argument("--detach", action="store_true",
                    help="Detach from parent")
     p.set_defaults(func=cmd_terminal_reparent)
@@ -2038,7 +2101,7 @@ def build_parser():
     p = sub.add_parser("send", help="Send text to a session")
     p.add_argument("text", help="Text to send")
     p.add_argument("-t", "--to",  dest="identifier", default="",
-                   help="Target agent/terminal ID or name "
+                   help="Target agent/terminal ID, slug, or name "
                         "(auto-detected if in a Loom session)")
     p.add_argument("-w", "--wait", action="store_true",
                    help="Wait until the agent finishes (polls every 2s)")
@@ -2058,30 +2121,30 @@ def build_parser():
     wt_sub = wt.add_subparsers(dest="worktree_cmd")
 
     p = wt_sub.add_parser("create", help="Create worktree for agent")
-    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
     p.add_argument("--relaunch", action="store_true",
                    help="Relaunch agent in worktree")
     p.set_defaults(func=cmd_worktree_create)
 
     p = wt_sub.add_parser("remove", aliases=["rm"],
                            help="Remove worktree")
-    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
     p.add_argument("--relaunch", action="store_true",
                    help="Relaunch agent after removal")
     p.set_defaults(func=cmd_worktree_remove)
 
     p = wt_sub.add_parser("checkpoint", aliases=["cp"],
                            help="Create checkpoint commit")
-    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
     p.set_defaults(func=cmd_worktree_checkpoint)
 
     p = wt_sub.add_parser("history", aliases=["log"],
                            help="Show checkpoint history")
-    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
     p.set_defaults(func=cmd_worktree_history)
 
     p = wt_sub.add_parser("rollback", help="Rollback to checkpoint")
-    p.add_argument("identifier", help="Agent ID or name")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
     p.add_argument("sha", help="Commit SHA to rollback to")
     p.set_defaults(func=cmd_worktree_rollback)
 
@@ -2121,7 +2184,7 @@ def build_parser():
     p.set_defaults(func=cmd_task_dispatch)
 
     p = tsk_sub.add_parser("show", help="Show full task details")
-    p.add_argument("identifier", help="Task ID prefix or title")
+    p.add_argument("identifier", help="Task ID, slug, or title")
     p.set_defaults(func=cmd_task_show)
 
     p = tsk_sub.add_parser("list", aliases=["ls"],
@@ -2134,7 +2197,7 @@ def build_parser():
 
     p = tsk_sub.add_parser("edit", aliases=["e"],
                            help="Edit task fields")
-    p.add_argument("identifier", help="Task ID prefix or title")
+    p.add_argument("identifier", help="Task ID, slug, or title")
     p.add_argument("-t", "--task", help="New task description")
     p.add_argument("-i", "--instructions", help="Instructions text")
     p.add_argument("-x", "--context", help="Context text")
@@ -2146,13 +2209,13 @@ def build_parser():
 
     p = tsk_sub.add_parser("move", aliases=["mv"],
                            help="Move task to a different lane")
-    p.add_argument("identifier", help="Task ID prefix or title")
+    p.add_argument("identifier", help="Task ID, slug, or title")
     p.add_argument("-l", "--lane", required=True, help="Target lane")
     p.set_defaults(func=cmd_task_move)
 
     p = tsk_sub.add_parser("assign", help="Assign task to an agent")
-    p.add_argument("identifier", help="Task ID prefix or title")
-    p.add_argument("agent", nargs="?", help="Agent name or ID")
+    p.add_argument("identifier", help="Task ID, slug, or title")
+    p.add_argument("agent", nargs="?", help="Agent name, slug, or ID")
     p.add_argument("--clear", action="store_true",
                    help="Unassign the task")
     p.set_defaults(func=cmd_task_assign)
@@ -2194,14 +2257,14 @@ def build_parser():
     p.set_defaults(func=cmd_board_add)
 
     p = brd_sub.add_parser("move", help="Move a task to a lane")
-    p.add_argument("identifier", help="Task ID prefix or title")
+    p.add_argument("identifier", help="Task ID, slug, or title")
     p.add_argument("-l", "--lane", required=True,
                    help="Target lane")
     p.set_defaults(func=cmd_board_move)
 
     p = brd_sub.add_parser("remove", aliases=["rm"],
                             help="Remove a task")
-    p.add_argument("identifier", help="Task ID prefix or title")
+    p.add_argument("identifier", help="Task ID, slug, or title")
     p.set_defaults(func=cmd_board_remove)
 
     p = brd_sub.add_parser("lanes", help="List lanes")
