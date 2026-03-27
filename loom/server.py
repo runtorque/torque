@@ -332,7 +332,7 @@ async def main(connection: iterm2.Connection):
             base_dir = await _resolve_base_dir(data.get("group", ""))
 
             if scope == "user":
-                tdir = template_mgr.GLOBAL_TEMPLATES_DIR
+                tdir = os.path.expanduser("~/.loom/templates")
                 os.makedirs(tdir, exist_ok=True)
             else:
                 tdir = template_mgr.find_templates_dir(base_dir)

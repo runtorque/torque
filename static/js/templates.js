@@ -81,7 +81,8 @@ function renderTemplatesPanel() {
     (_tplEditorList[i].global ? userTpls : projectTpls).push(_tplEditorList[i]);
   }
   if (projectTpls.length) {
-    html += '<optgroup label="Project">';
+    var projectDir = _tplShortenPath(projectTpls[0].dir || '');
+    html += '<optgroup label="Project \u2014 ' + esc(projectDir) + '">';
     for (var i = 0; i < projectTpls.length; i++) {
       var sel = projectTpls[i].name === _tplEditorSelected ? ' selected' : '';
       html += '<option value="' + esc(projectTpls[i].name) + '"' + sel + '>' + esc(projectTpls[i].name) + '</option>';
@@ -89,7 +90,8 @@ function renderTemplatesPanel() {
     html += '</optgroup>';
   }
   if (userTpls.length) {
-    html += '<optgroup label="User">';
+    var userDir = _tplShortenPath(userTpls[0].dir || '');
+    html += '<optgroup label="User \u2014 ' + esc(userDir) + '">';
     for (var i = 0; i < userTpls.length; i++) {
       var sel = userTpls[i].name === _tplEditorSelected ? ' selected' : '';
       html += '<option value="' + esc(userTpls[i].name) + '"' + sel + '>' + esc(userTpls[i].name) + '</option>';
@@ -237,6 +239,18 @@ function _tplHighlightWrap(id, value) {
     + esc(value) + '</textarea>';
   h += '</div>';
   return h;
+}
+
+function _tplShortenPath(p) {
+  // Strip .loom/templates suffix to show the project/user root
+  p = p.replace(/\/?\.loom\/templates\/?$/, '');
+  // Replace home dir with ~
+  if (typeof navigator !== 'undefined') {
+    // Detect home from common prefixes
+    var m = p.match(/^(\/Users\/[^/]+|\/home\/[^/]+)/);
+    if (m) p = '~' + p.slice(m[1].length);
+  }
+  return p || '~';
 }
 
 function _tplHighlightText(text) {

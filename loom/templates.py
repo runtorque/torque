@@ -205,8 +205,8 @@ class TemplateManager:
             if parent == d:
                 break
             d = parent
-        # Global: ~/.loom/templates/
-        g = TemplateManager.GLOBAL_TEMPLATES_DIR
+        # Global: ~/.loom/templates/ (expand at call time for safety)
+        g = os.path.expanduser("~/.loom/templates")
         if os.path.isdir(g) and g not in dirs:
             dirs.append(g)
         return dirs
@@ -242,7 +242,7 @@ class TemplateManager:
                 if name in seen:
                     continue  # project-local wins
                 path = os.path.join(tdir, fname)
-                is_global = (tdir == self.GLOBAL_TEMPLATES_DIR)
+                is_global = (tdir == os.path.expanduser("~/.loom/templates"))
                 try:
                     with open(path) as f:
                         raw = f.read()
@@ -254,7 +254,8 @@ class TemplateManager:
                     desc = "(parse error)"
                     tvars = []
                 seen[name] = {"name": name, "description": desc,
-                              "vars": tvars, "global": is_global}
+                              "vars": tvars, "global": is_global,
+                              "dir": tdir}
         return sorted(seen.values(), key=lambda t: t["name"])
 
     def load_template(self, name: str, base_dir: str = "") -> dict | None:
