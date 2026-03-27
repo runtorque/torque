@@ -458,8 +458,10 @@ function boardCardMenu(evt, taskId) {
 
   html += '<div class="ctx-sep"></div>';
 
-  // Dispatch
-  html += '<button onclick="event.stopPropagation();boardDispatchTask(\'' + taskId + '\')">Dispatch...</button>';
+  // Dispatch (only from Backlog)
+  if (task.lane === 'Backlog') {
+    html += '<button onclick="event.stopPropagation();boardDispatchTask(\'' + taskId + '\')">Dispatch...</button>';
+  }
 
   // Link/Unlink agent
   if (task.agent_id) {
