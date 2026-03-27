@@ -97,7 +97,7 @@ function renderTemplatesPanel() {
     for (var i = 0; i < userTpls.length; i++) {
       var key = 'user:' + userTpls[i].name;
       var sel = key === _tplEditorSelected ? ' selected' : '';
-      var shadow = userTpls[i].shadowed ? ' (shadowed)' : '';
+      var shadow = userTpls[i].shadowed ? ' (overridden)' : '';
       html += '<option value="' + esc(key) + '"' + sel + '>' + esc(userTpls[i].name) + shadow + '</option>';
     }
     html += '</optgroup>';
