@@ -2,18 +2,33 @@
 """Loom CLI — control the Loom daemon from the terminal.
 
 Talks to the Loom daemon over HTTP (POST /api/cmd).
-Requires only Python 3 stdlib (urllib, json, argparse).
 """
 
 import argparse
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
 
 DEFAULT_PORT = 18932
+
+_yaml_mod = None
+
+def _yaml():
+    """Lazy-load PyYAML, with a helpful install hint on failure."""
+    global _yaml_mod
+    if _yaml_mod is None:
+        try:
+            import yaml
+            _yaml_mod = yaml
+        except ImportError:
+            die("PyYAML is required for this command.\n"
+                "  Install with: pip3 install pyyaml")
+    return _yaml_mod
 LOOM_LOG = os.path.expanduser(
     "~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log")
 
@@ -123,6 +138,41 @@ def resolve_group(state_data, identifier):
             return name
 
     die(f"No group matching \"{identifier}\"")
+
+
+def resolve_task(state_data, identifier):
+    """Resolve a task by ID prefix or title match. Dies on ambiguity."""
+    tasks = state_data.get("board_tasks", {})
+
+    # Exact ID match
+    if identifier in tasks:
+        return tasks[identifier]
+
+    # ID prefix match
+    prefix_matches = [t for tid, t in tasks.items()
+                      if tid.startswith(identifier.lower())]
+    if len(prefix_matches) == 1:
+        return prefix_matches[0]
+    if len(prefix_matches) > 1:
+        print(f"Ambiguous prefix \"{identifier}\" matches {len(prefix_matches)} tasks:",
+              file=sys.stderr)
+        for t in prefix_matches:
+            print(f"  {t['id']}  {t.get('task', '')[:50]}", file=sys.stderr)
+        die("Use a longer prefix")
+
+    # Title match (case-insensitive)
+    title_matches = [t for t in tasks.values()
+                     if t.get("task", "").lower() == identifier.lower()]
+    if len(title_matches) == 1:
+        return title_matches[0]
+    if len(title_matches) > 1:
+        print(f"Ambiguous title \"{identifier}\" matches {len(title_matches)} tasks:",
+              file=sys.stderr)
+        for t in title_matches:
+            print(f"  {t['id']}  {t.get('task', '')[:50]}", file=sys.stderr)
+        die("Use the ID instead")
+
+    die(f"Task not found: {identifier}")
 
 
 def detect_context(state_data):
@@ -1202,6 +1252,295 @@ def cmd_task_dispatch(args):
         sys.exit(rc)
 
 
+def cmd_task_show(args):
+    """Display full details of a task."""
+    st = get_state(args.port)
+    t = resolve_task(st, args.identifier)
+
+    if args.json:
+        import json as _j
+        print(_j.dumps(t, indent=2))
+        return
+
+    print()
+    print(f"  {_bold(t.get('task', ''))}")
+    print(f"  {_dim(t['id'])}")
+    print()
+    print(f"  {'Lane:':<14} {t.get('lane', '')}")
+    print(f"  {'Group:':<14} {t.get('group', '')}")
+
+    if t.get("assignee"):
+        print(f"  {'Assignee:':<14} {t['assignee']}")
+    if t.get("agent_id"):
+        agent = st.get("agents", {}).get(t["agent_id"])
+        agent_str = f"{agent['name']} ({t['agent_id'][:6]})" if agent else t["agent_id"][:6]
+        print(f"  {'Agent:':<14} {agent_str}")
+    if t.get("labels"):
+        print(f"  {'Labels:':<14} {', '.join(t['labels'])}")
+
+    for field, label in [("instructions", "Instructions"),
+                         ("context", "Context"),
+                         ("criteria", "Criteria")]:
+        val = t.get(field, "")
+        if val:
+            print()
+            print(f"  {_bold(label + ':')}")
+            for line in val.splitlines():
+                print(f"    {line}")
+
+    if t.get("external_id") or t.get("external_url"):
+        print()
+        if t.get("external_id"):
+            print(f"  {'External ID:':<14} {t['external_id']}")
+        if t.get("external_url"):
+            print(f"  {'URL:':<14} {t['external_url']}")
+
+    print()
+    if t.get("created_at"):
+        print(f"  {_dim('Created: ' + t['created_at'])}")
+    if t.get("updated_at"):
+        print(f"  {_dim('Updated: ' + t['updated_at'])}")
+    print()
+
+
+def cmd_task_list(args):
+    """List tasks with optional filters."""
+    st = get_state(args.port)
+    lanes = st.get("board_lanes", [])
+    tasks = st.get("board_tasks", {})
+
+    if args.json:
+        import json as _j
+        # Apply filters before JSON output
+        filtered = _filter_tasks(tasks, args)
+        print(_j.dumps({"lanes": lanes, "tasks": filtered}, indent=2))
+        return
+
+    lane_filter = args.lane if hasattr(args, "lane") and args.lane else None
+    found_any = False
+
+    for lane in lanes:
+        if lane_filter and lane.lower() != lane_filter.lower():
+            continue
+        lane_tasks = sorted(
+            [t for t in _filter_tasks(tasks, args).values()
+             if t["lane"] == lane],
+            key=lambda t: t.get("position", 0),
+        )
+        if not lane_tasks and lane_filter:
+            print(f"\n  {_bold(lane)} (0)")
+            print(f"    {_dim('(empty)')}")
+            found_any = True
+            continue
+        if not lane_tasks:
+            continue
+        found_any = True
+        print(f"\n  {_bold(lane)} ({len(lane_tasks)})")
+        for t in lane_tasks:
+            tid = _dim(t["id"][:6])
+            parts = [f"    {tid}  {t.get('task', '')}"]
+            if t.get("agent_id"):
+                a = st.get("agents", {}).get(t["agent_id"])
+                if a:
+                    parts.append(_cyan("→ " + a["name"]))
+            elif t.get("assignee"):
+                parts.append(_dim("@ " + t["assignee"]))
+            if t.get("labels"):
+                parts.append(_dim("[" + ", ".join(t["labels"]) + "]"))
+            print("  ".join(parts))
+
+    if not found_any:
+        print("\n  No tasks match the given filters.")
+    print()
+
+
+def _filter_tasks(tasks, args):
+    """Apply CLI filters to a tasks dict, return filtered dict."""
+    result = {}
+    for tid, t in tasks.items():
+        if hasattr(args, "lane") and args.lane:
+            if t.get("lane", "").lower() != args.lane.lower():
+                continue
+        if hasattr(args, "group") and args.group:
+            if t.get("group", "").lower() != args.group.lower():
+                continue
+        if hasattr(args, "assignee") and args.assignee:
+            if t.get("assignee", "").lower() != args.assignee.lower():
+                continue
+        if hasattr(args, "label") and args.label:
+            task_labels = [l.lower() for l in t.get("labels", [])]
+            if args.label.lower() not in task_labels:
+                continue
+        result[tid] = t
+    return result
+
+
+_TASK_EDIT_FIELDS = [
+    "task", "lane", "group", "assignee", "labels",
+    "instructions", "context", "criteria",
+]
+
+_TASK_EDIT_COMMENT = """\
+# Edit task {id}
+# Save and close the editor to apply changes.
+# To abort, clear the 'task' field or leave the file unchanged.
+# Lines starting with '#' are comments (only at the top level).
+"""
+
+
+def _task_to_yaml(t):
+    """Serialize editable task fields to a YAML string with header comment."""
+    yaml = _yaml()
+    doc = {}
+    for key in _TASK_EDIT_FIELDS:
+        val = t.get(key, "")
+        if key == "labels":
+            doc[key] = val if isinstance(val, list) else []
+        else:
+            doc[key] = val or ""
+    comment = _TASK_EDIT_COMMENT.format(id=t["id"])
+    body = yaml.dump(doc, default_flow_style=False, sort_keys=False,
+                     allow_unicode=True)
+    return comment + "\n" + body
+
+
+def _yaml_to_fields(text, original):
+    """Parse edited YAML, return dict of changed fields (or None to abort)."""
+    yaml = _yaml()
+    # Strip comment lines before parsing
+    lines = [l for l in text.splitlines() if not l.startswith("#")]
+    cleaned = "\n".join(lines)
+    try:
+        doc = yaml.safe_load(cleaned)
+    except yaml.YAMLError as exc:
+        die(f"Invalid YAML:\n  {exc}")
+    if not doc or not isinstance(doc, dict):
+        return None
+    if not doc.get("task", "").strip():
+        return None  # abort
+
+    fields = {}
+    for key in _TASK_EDIT_FIELDS:
+        if key not in doc:
+            continue
+        new_val = doc[key]
+        old_val = original.get(key, "" if key != "labels" else [])
+        if key == "labels":
+            new_val = new_val if isinstance(new_val, list) else []
+            if new_val != old_val:
+                fields[key] = new_val
+        else:
+            new_val = str(new_val) if new_val is not None else ""
+            old_val = str(old_val) if old_val else ""
+            if new_val != old_val:
+                fields[key] = new_val
+    return fields
+
+
+def _open_in_editor(initial_text, suffix=".yml"):
+    """Write text to a temp file, open $EDITOR, return edited text."""
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "vi"
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=suffix, prefix="loom-task-", delete=False
+    ) as f:
+        f.write(initial_text)
+        tmp_path = f.name
+    try:
+        rc = subprocess.call([editor, tmp_path])
+        if rc != 0:
+            die(f"Editor exited with code {rc}")
+        with open(tmp_path) as f:
+            return f.read()
+    finally:
+        os.unlink(tmp_path)
+
+
+def cmd_task_edit(args):
+    """Edit task fields — opens $EDITOR with YAML, or use flags."""
+    st = get_state(args.port)
+    t = resolve_task(st, args.identifier)
+
+    # Check if any inline flags were provided
+    has_flags = any(
+        getattr(args, attr, None) is not None
+        for attr in ("task", "instructions", "context", "criteria",
+                     "assign", "labels", "group")
+    )
+
+    if has_flags:
+        # Inline flag mode (non-interactive)
+        fields = {}
+        if args.task is not None:
+            fields["task"] = args.task
+        if args.instructions is not None:
+            fields["instructions"] = args.instructions
+        if args.context is not None:
+            fields["context"] = args.context
+        if args.criteria is not None:
+            fields["criteria"] = args.criteria
+        if args.assign is not None:
+            fields["assignee"] = args.assign
+        if args.labels is not None:
+            fields["labels"] = [l.strip() for l in args.labels.split(",")
+                                if l.strip()]
+        if args.group is not None:
+            fields["group"] = args.group
+    else:
+        # Interactive editor mode
+        original_text = _task_to_yaml(t)
+        edited_text = _open_in_editor(original_text)
+        if edited_text == original_text:
+            print("No changes.")
+            return
+        fields = _yaml_to_fields(edited_text, t)
+        if fields is None:
+            print("Aborted.")
+            return
+
+    if not fields:
+        print("No changes.")
+        return
+
+    resp = api_call("board_update_task", port=args.port, id=t["id"], **fields)
+    check_ok(resp)
+    print(f"Updated task {t['id'][:6]}")
+
+
+def cmd_task_move(args):
+    """Move a task to a different lane."""
+    st = get_state(args.port)
+    t = resolve_task(st, args.identifier)
+
+    resp = api_call("board_move_task", port=args.port,
+                    id=t["id"], lane=args.lane)
+    check_ok(resp)
+    print(f"Moved \"{t.get('task', '')}\" to {args.lane}")
+
+
+def cmd_task_assign(args):
+    """Assign or unassign a task to an agent."""
+    st = get_state(args.port)
+    t = resolve_task(st, args.identifier)
+
+    if args.clear:
+        resp = api_call("board_update_task", port=args.port,
+                        id=t["id"], agent_id="", assignee="")
+        check_ok(resp)
+        print(f"Unassigned task {t['id'][:6]}")
+        return
+
+    agent_ref = args.agent
+    if not agent_ref:
+        die("Provide an agent name/ID, or use --clear to unassign")
+
+    # Resolve agent
+    cell = resolve_cell(st, agent_ref)
+    resp = api_call("board_update_task", port=args.port,
+                    id=t["id"], agent_id=cell["id"])
+    check_ok(resp)
+    print(f"Assigned task {t['id'][:6]} to \"{cell['name']}\"")
+
+
 # -- Template ---------------------------------------------------------------
 
 def cmd_template_list(args):
@@ -1408,42 +1747,21 @@ def cmd_board_add(args):
 
 def cmd_board_move(args):
     st = get_state(args.port)
-    tasks = st.get("board_tasks", {})
-
-    # Resolve task by ID prefix or title match
-    match = None
-    identifier = args.identifier
-    for tid, t in tasks.items():
-        task_text = t.get("task", t.get("title", ""))
-        if tid.startswith(identifier) or task_text.lower() == identifier.lower():
-            match = t
-            break
-    if not match:
-        die(f"Task not found: {identifier}")
+    match = resolve_task(st, args.identifier)
 
     resp = api_call("board_move_task", port=args.port,
                     id=match["id"], lane=args.lane)
     check_ok(resp)
-    print(f"Moved \"{match.get('task', match.get('title', ''))}\" to {args.lane}")
+    print(f"Moved \"{match.get('task', '')}\" to {args.lane}")
 
 
 def cmd_board_remove(args):
     st = get_state(args.port)
-    tasks = st.get("board_tasks", {})
-
-    match = None
-    identifier = args.identifier
-    for tid, t in tasks.items():
-        task_text = t.get("task", t.get("title", ""))
-        if tid.startswith(identifier) or task_text.lower() == identifier.lower():
-            match = t
-            break
-    if not match:
-        die(f"Task not found: {identifier}")
+    match = resolve_task(st, args.identifier)
 
     resp = api_call("board_remove_task", port=args.port, id=match["id"])
     check_ok(resp)
-    print(f"Removed \"{match.get('task', match.get('title', ''))}\"")
+    print(f"Removed \"{match.get('task', '')}\"")
 
 
 
@@ -1667,6 +1985,43 @@ def build_parser():
     p.add_argument("--no-task", action="store_true",
                    help="Create agent but don't send the task text")
     p.set_defaults(func=cmd_task_dispatch)
+
+    p = tsk_sub.add_parser("show", help="Show full task details")
+    p.add_argument("identifier", help="Task ID prefix or title")
+    p.set_defaults(func=cmd_task_show)
+
+    p = tsk_sub.add_parser("list", aliases=["ls"],
+                           help="List tasks (with optional filters)")
+    p.add_argument("-l", "--lane", help="Filter by lane name")
+    p.add_argument("-g", "--group", help="Filter by group name")
+    p.add_argument("-a", "--assignee", help="Filter by assignee")
+    p.add_argument("--label", help="Filter by label")
+    p.set_defaults(func=cmd_task_list)
+
+    p = tsk_sub.add_parser("edit", aliases=["e"],
+                           help="Edit task fields")
+    p.add_argument("identifier", help="Task ID prefix or title")
+    p.add_argument("-t", "--task", help="New task description")
+    p.add_argument("-i", "--instructions", help="Instructions text")
+    p.add_argument("-x", "--context", help="Context text")
+    p.add_argument("-k", "--criteria", help="Acceptance criteria")
+    p.add_argument("-a", "--assign", help="Assignee prefix")
+    p.add_argument("-l", "--labels", help="Comma-separated labels")
+    p.add_argument("-g", "--group", help="Move to different group")
+    p.set_defaults(func=cmd_task_edit)
+
+    p = tsk_sub.add_parser("move", aliases=["mv"],
+                           help="Move task to a different lane")
+    p.add_argument("identifier", help="Task ID prefix or title")
+    p.add_argument("-l", "--lane", required=True, help="Target lane")
+    p.set_defaults(func=cmd_task_move)
+
+    p = tsk_sub.add_parser("assign", help="Assign task to an agent")
+    p.add_argument("identifier", help="Task ID prefix or title")
+    p.add_argument("agent", nargs="?", help="Agent name or ID")
+    p.add_argument("--clear", action="store_true",
+                   help="Unassign the task")
+    p.set_defaults(func=cmd_task_assign)
 
     # -- template -----------------------------------------------------------
     tmpl = sub.add_parser("template", aliases=["tpl"],
