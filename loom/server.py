@@ -289,14 +289,29 @@ async def main(connection: iterm2.Connection):
         # get_template: respond directly
         if cmd == "get_template":
             base_dir = await _resolve_base_dir(data.get("group", ""))
-            raw = template_mgr._load_raw(data["name"], base_dir)
+            scope = data.get("scope", "")
+            # Scope-aware loading: search only the target directory
+            raw = None
+            if scope == "user":
+                gdir = os.path.expanduser("~/.loom/templates")
+                for suffix in ("", ".yaml", ".yml"):
+                    p = os.path.join(gdir, data["name"] + suffix)
+                    if os.path.isfile(p):
+                        with open(p) as f:
+                            raw = f.read()
+                        break
+            if raw is None:
+                raw = template_mgr._load_raw(data["name"], base_dir)
             if not raw:
                 return {"type": "error",
                         "message": f"Template \"{data['name']}\" not found"}
             # Editor mode: parse raw YAML without Jinja2 rendering
             if data.get("raw"):
-                tpl = template_mgr.load_template_raw(
-                    data["name"], base_dir) or {}
+                from .templates import parse_yaml
+                try:
+                    tpl = parse_yaml(raw) or {}
+                except Exception:
+                    tpl = {}
             else:
                 tpl = template_mgr.load_template(
                     data["name"], base_dir) or {}

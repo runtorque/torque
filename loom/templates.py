@@ -228,21 +228,23 @@ class TemplateManager:
         return None
 
     def list_templates(self, base_dir: str = "") -> list[dict]:
-        """List all templates with name, description, and vars.
+        """List all templates with name, description, vars, and scope.
 
-        Merges project-local and global templates. Project templates
-        take precedence when names collide.
+        Returns all templates from all directories. When names collide
+        across scopes, both are included — project templates are marked
+        as the active one (used for dispatch), user templates with the
+        same name are marked as ``shadowed``.
         """
-        seen = {}  # name → entry dict
+        results = []
+        seen_names = set()  # track project-local names for shadowing
         for tdir in self.find_templates_dirs(base_dir):
             for fname in sorted(os.listdir(tdir)):
                 if not fname.endswith((".yaml", ".yml")):
                     continue
                 name = fname.rsplit(".", 1)[0]
-                if name in seen:
-                    continue  # project-local wins
                 path = os.path.join(tdir, fname)
                 is_global = (tdir == os.path.expanduser("~/.loom/templates"))
+                shadowed = is_global and name in seen_names
                 try:
                     with open(path) as f:
                         raw = f.read()
@@ -253,10 +255,12 @@ class TemplateManager:
                 except Exception:
                     desc = "(parse error)"
                     tvars = []
-                seen[name] = {"name": name, "description": desc,
-                              "vars": tvars, "global": is_global,
-                              "dir": tdir}
-        return sorted(seen.values(), key=lambda t: t["name"])
+                results.append({"name": name, "description": desc,
+                                "vars": tvars, "global": is_global,
+                                "dir": tdir, "shadowed": shadowed})
+                if not is_global:
+                    seen_names.add(name)
+        return sorted(results, key=lambda t: (t["global"], t["name"]))
 
     def load_template(self, name: str, base_dir: str = "") -> dict | None:
         """Load template metadata (parsed leniently). Returns dict or None."""

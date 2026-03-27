@@ -16,51 +16,52 @@ function tplEditorLoad() {
   send({ cmd: 'list_templates', group: group });
 }
 
+function _tplKey(t) {
+  return (t.global ? 'user:' : 'project:') + t.name;
+}
+
+function _tplSelectedName() {
+  // Extract name from "scope:name" key
+  var idx = _tplEditorSelected.indexOf(':');
+  return idx >= 0 ? _tplEditorSelected.slice(idx + 1) : _tplEditorSelected;
+}
+
 function tplEditorReceiveList(msg) {
   _tplEditorList = msg.templates || [];
 
-  // If we just saved or the selected template still exists, keep selection
-  if (msg.saved) _tplEditorSelected = msg.saved;
-  if (msg.deleted && _tplEditorSelected === msg.deleted) {
-    _tplEditorSelected = '';
-    _tplEditorData = null;
+  // If we just saved, select it with the right scope key
+  if (msg.saved) {
+    var match = _tplEditorList.find(function(t) { return t.name === msg.saved; });
+    if (match) _tplEditorSelected = _tplKey(match);
+  }
+  if (msg.deleted) {
+    var delName = _tplSelectedName();
+    if (delName === msg.deleted) {
+      _tplEditorSelected = '';
+      _tplEditorData = null;
+    }
   }
 
   renderTemplatesPanel();
 
   // Load selected template detail (only if user already picked one)
   if (_tplEditorSelected && !_tplEditorNew) {
-    tplEditorSelectTemplate(_tplEditorSelected);
+    var name = _tplSelectedName();
+    var group = _currentGroup();
+    send({ cmd: 'get_template', name: name, group: group, raw: true, scope: _tplEditorScope });
   }
 }
 
 function tplEditorReceiveDetail(msg) {
-  if (msg.name !== _tplEditorSelected) return;
+  if (msg.name !== _tplSelectedName()) return;
   _tplEditorData = msg.template || {};
   _tplEditorDirty = false;
   _tplEditorNew = false;
   renderTemplatesEditor();
 }
 
-function tplEditorSelectTemplate(name) {
-  if (_tplEditorDirty) {
-    // Discard changes silently — form is small, low stakes
-  }
-  _tplEditorSelected = name;
-  _tplEditorNew = false;
-  _tplEditorData = null;
-  _tplEditorDirty = false;
-  // Determine scope from list metadata
-  for (var i = 0; i < _tplEditorList.length; i++) {
-    if (_tplEditorList[i].name === name) {
-      _tplEditorScope = _tplEditorList[i].global ? 'user' : 'project';
-      break;
-    }
-  }
-  renderTemplatesPanel();
-  var group = _currentGroup();
-  send({ cmd: 'get_template', name: name, group: group, raw: true });
-}
+// Selection is handled by tplEditorOnSelect (from dropdown) and
+// tplEditorReceiveList (after save/delete)
 
 /* ---- Render -------------------------------------------------------- */
 
@@ -84,8 +85,9 @@ function renderTemplatesPanel() {
     var projectDir = _tplShortenPath(projectTpls[0].dir || '');
     html += '<optgroup label="Project \u2014 ' + esc(projectDir) + '">';
     for (var i = 0; i < projectTpls.length; i++) {
-      var sel = projectTpls[i].name === _tplEditorSelected ? ' selected' : '';
-      html += '<option value="' + esc(projectTpls[i].name) + '"' + sel + '>' + esc(projectTpls[i].name) + '</option>';
+      var key = 'project:' + projectTpls[i].name;
+      var sel = key === _tplEditorSelected ? ' selected' : '';
+      html += '<option value="' + esc(key) + '"' + sel + '>' + esc(projectTpls[i].name) + '</option>';
     }
     html += '</optgroup>';
   }
@@ -93,8 +95,10 @@ function renderTemplatesPanel() {
     var userDir = _tplShortenPath(userTpls[0].dir || '');
     html += '<optgroup label="User \u2014 ' + esc(userDir) + '">';
     for (var i = 0; i < userTpls.length; i++) {
-      var sel = userTpls[i].name === _tplEditorSelected ? ' selected' : '';
-      html += '<option value="' + esc(userTpls[i].name) + '"' + sel + '>' + esc(userTpls[i].name) + '</option>';
+      var key = 'user:' + userTpls[i].name;
+      var sel = key === _tplEditorSelected ? ' selected' : '';
+      var shadow = userTpls[i].shadowed ? ' (shadowed)' : '';
+      html += '<option value="' + esc(key) + '"' + sel + '>' + esc(userTpls[i].name) + shadow + '</option>';
     }
     html += '</optgroup>';
   }
@@ -110,8 +114,8 @@ function renderTemplatesPanel() {
   renderTemplatesEditor();
 }
 
-function tplEditorOnSelect(name) {
-  if (!name) {
+function tplEditorOnSelect(key) {
+  if (!key) {
     _tplEditorSelected = '';
     _tplEditorData = null;
     _tplEditorDirty = false;
@@ -119,7 +123,17 @@ function tplEditorOnSelect(name) {
     renderTemplatesEditor();
     return;
   }
-  tplEditorSelectTemplate(name);
+  _tplEditorSelected = key;
+  var parts = key.split(':');
+  var scope = parts[0];
+  var name = parts.slice(1).join(':');
+  _tplEditorScope = scope === 'user' ? 'user' : 'project';
+  _tplEditorNew = false;
+  _tplEditorData = null;
+  _tplEditorDirty = false;
+  renderTemplatesPanel();
+  var group = _currentGroup();
+  send({ cmd: 'get_template', name: name, group: group, raw: true, scope: _tplEditorScope });
 }
 
 function renderTemplatesEditor() {
@@ -369,12 +383,13 @@ function tplEditorSave() {
     scope: scope,
   };
   // If renaming or changing scope, include old name so the old file is removed
+  var oldName = _tplSelectedName();
   var scopeChanged = !_tplEditorNew && scope !== _tplEditorScope;
-  if (_tplEditorSelected && (_tplEditorSelected !== name || scopeChanged) && !_tplEditorNew) {
-    msg.old_name = _tplEditorSelected;
+  if (oldName && (oldName !== name || scopeChanged) && !_tplEditorNew) {
+    msg.old_name = oldName;
   }
 
-  _tplEditorSelected = name;
+  _tplEditorSelected = scope + ':' + name;
   _tplEditorScope = scope;
   _tplEditorDirty = false;
   _tplEditorNew = false;
@@ -382,9 +397,10 @@ function tplEditorSave() {
 }
 
 function tplEditorDelete() {
-  showConfirm('Delete template "' + _tplEditorSelected + '"?').then(function(yes) {
+  var name = _tplSelectedName();
+  showConfirm('Delete template "' + name + '"?').then(function(yes) {
     if (!yes) return;
-    send({ cmd: 'delete_template', name: _tplEditorSelected, group: _currentGroup() });
+    send({ cmd: 'delete_template', name: name, group: _currentGroup() });
   });
 }
 
