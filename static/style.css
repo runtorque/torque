@@ -1000,7 +1000,7 @@ textarea:focus { border-color: var(--accent); }
 }
 .board-card-title {
   font-size: 10px; font-weight: 500;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: normal; word-break: break-word;
 }
 .board-card-meta {
   display: flex; flex-wrap: wrap; gap: 3px; margin-top: 1px;
