@@ -19,7 +19,7 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
 - **Entry point**: `loom.py` — thin wrapper that anchors paths and calls `iterm2.run_forever(main)`
 - **Python package** (`loom/`):
   - `config.py` — env vars, paths (`STATE_FILE`, `DB_FILE`, `WEBVIEW_FILE`, `LOG_FILE`), logging setup
-  - `db.py` — `LoomDB` (SQLite persistence layer, WAL mode, schema with 7 tables: `agents`, `groups`, `group_members`, `group_settings`, `board_tasks`, `board_lanes`, `ui_state`). Targeted write methods (`save_agent`, `save_board_task`, etc.), `save_all` (transitional bulk write), `load_all`, `migrate_from_json` (one-time state.json→SQLite migration)
+  - `db.py` — `LoomDB` (SQLite persistence layer, WAL mode, schema with 7 tables: `agents`, `groups`, `group_members`, `group_settings`, `board_tasks`, `board_lanes`, `ui_state`). Targeted write methods (`save_agent`, `save_board_task`, etc.), `load_all`, `migrate_from_json` (one-time state.json→SQLite migration), `save_all` (bulk write, used only by migration)
   - `state.py` — `AgentCell` dataclass (with `parent_id` for terminal→agent hierarchy), `GroupSettings` dataclass (with `dispatch_lane`), `BoardTask` dataclass (task, group, instructions, context, criteria, assignee, labels, agent_id, lane, position), `MatrixState` (SQLite persistence via `LoomDB`, `_children` index, cascade delete, delta WS broadcast). Reserved lanes (`Backlog`, `In Progress`) are enforced — cannot be renamed or deleted. Delta accumulator (`_emit`, `_delta_ops`, `_seq`) tracks changes per mutation; `broadcast()` sends only deltas, `snapshot_msg()` sends full state on connect/resync.
   - `templates.py` — `TemplateManager` (Jinja2 rendering, variable auto-discovery from AST, lenient/strict parse modes, `render_template` returns flat dict with `task`, `group`, `instructions`, `context`, `criteria`, `labels`, `worktree`, `terminals`). Templates use `task:` (not `prompt:`) for the main text field. Backward compat: old templates with `prompt:` still work.
   - `bridge.py` — `ITerm2Bridge` (create/close/focus/update sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection, `on_session_terminated` callback)
@@ -43,10 +43,23 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
   - `static/js/modals.js` — add group/agent/terminal modals (with `parent_id` support), edit agent/terminal modal, group settings modal (tabbed: Group/Agents/Terminals; Agents tab has boot command, worktree config, session resume, idle timeout, notifications), confirm dialog, color picker, hint tooltip popovers, task create/edit modal (task, group, assignee, instructions, context, criteria, labels), template-to-task flow (`openTaskFromTemplate` → `render_template` → pre-fills task modal)
   - `static/js/templates.js` — templates panel app (dropdown selector with Project/User optgroups, structured editor form with Jinja2 syntax highlighting, save/duplicate/delete, scope picker, auto-discovered variables display)
   - `static/js/main.js` — keyboard navigation (arrows within group, Tab/Shift+Tab between groups, Enter, Delete, N/G/T/B/R shortcuts), panel toggle (board + templates), boot, drag setup
+- **CLI** (`bin/loom`):
+  - Standalone Python script (stdlib + PyYAML). Talks to daemon via HTTP `POST /api/cmd` for writes, reads SQLite directly for read-only commands (task/board list, show, lanes).
+  - `get_state_local(port)` — tries SQLite first (`~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.db`), falls back to HTTP daemon. Used by all task/board commands.
+  - Task commands: `create`, `dispatch`, `show`, `list`, `edit` (opens `$EDITOR` with YAML or inline flags), `move`, `assign`
+  - Board commands: `list`, `add`, `move`, `remove`, `lanes`
+  - `resolve_task(state_data, identifier)` — shared helper for ID prefix or title match with ambiguity handling
+
+## Persistence
+
+- **SQLite** (`loom.db`) is the persistence layer, using WAL mode for concurrent daemon writes + CLI reads.
+- **Ephemeral fields** (activity, activity_detail, last_event_at, session_tokens_in/out, error_message, needs_attention, last_summary, current_process, current_path, current_branch, git_root, worktree_dirty, worktree_diff, worktree_checkpoints) live in-memory only — not persisted to SQLite, cleared on restart.
+- **Delta broadcasts**: Every mutation calls `_emit()` to queue a delta op. `broadcast()` sends `{"type": "delta", "seq": N, "ops": [...]}` to WS clients. Full state (`snapshot_msg()`) is sent only on initial WS connect or `resync` command. 11 delta op types: `agent_upsert`, `agent_remove`, `group_update`, `group_remove`, `group_rename`, `groups_reorder`, `group_settings_update`, `task_upsert`, `task_remove`, `lanes_update`, `ui_update`, `focus_update`.
+- **Migration**: On first startup, if `loom.db` is empty but `state.json` exists, data is imported automatically and `state.json` is renamed to `state.json.bak`.
 
 ## Code conventions
 
-- Python: no framework beyond aiohttp + iterm2. All state mutations go through `MatrixState` methods which call `self._emit()` (to queue a delta) then `self.save()` (to persist to SQLite). External callers (bridge, events, server) that mutate cell fields directly must also call `state._emit_agent(cell)` before `state.save()`. Every iTerm2 API error must be caught and logged (never bare `except: pass`).
+- Python: no framework beyond aiohttp + iterm2. All state mutations go through `MatrixState` methods which call `self._emit()` (to queue a delta) then targeted `self._db_save_*()` methods (to persist only the changed rows). External callers (bridge, events, server) that mutate cell fields directly must call `state._emit_agent(cell)` then `state._db_save_agent(cell)` — skip the DB write for ephemeral-only changes (activity, process, path). Every iTerm2 API error must be caught and logged (never bare `except: pass`).
 - JS: no build step, no framework. Eight plain script files loaded in order (constants → ws → render → commands → modals → board → templates → main). All functions are global. State is patched in-place from WebSocket delta messages, then re-rendered. Full state is only received on initial connect or after a resync.
 - CSS: single file, CSS custom properties for theming, monospace font throughout.
 - `window.confirm()` and `window.alert()` do not work in iTerm2's WKWebView — use the custom `showConfirm()` modal instead.
@@ -81,12 +94,20 @@ There are no automated tests. To test changes:
    ~/Library/Application\ Support/iTerm2/Scripts/loom/loom/loom.log
    ```
 4. Test in the Toolbelt panel: create groups, add agents, click agent to select → add child terminals, drag terminals between drawer and standalone, remove agent (cascade), relaunch, broadcast, right-click → edit name/color, keyboard nav (arrows within group, Tab between groups, Cmd+Option+Arrows from terminal)
+5. Verify SQLite persistence: restart daemon, confirm state survives. Check `loom.db` exists in install dir.
+6. Verify delta sync: open browser devtools → Network → WS tab, confirm messages are `type: "delta"` (not full state) after initial connect.
+7. Verify CLI offline reads: `make stop`, then `loom task list` — should work without daemon running.
 
 ## Install location
 
 Files are installed to:
 ```
 ~/Library/Application Support/iTerm2/Scripts/loom/loom/
+```
+Runtime data (created by the daemon, not installed by `make deploy`):
+```
+~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.db    # SQLite state
+~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log   # daemon log
 ```
 This is an iTerm2 "full environment" script project with its own bundled Python 3.14 at:
 ```
