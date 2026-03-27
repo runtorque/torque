@@ -150,6 +150,8 @@ class ITerm2Bridge:
                 cell.worktree_repo_root = ""
                 cell.worktree_base_branch = ""
 
+        for cell in self.state.agents.values():
+            self.state._emit_agent(cell)
         self.state.save()
         stopped = sum(1 for c in self.state.agents.values()
                       if c.status == "stopped")
@@ -170,6 +172,7 @@ class ITerm2Bridge:
             log.error("No current window — cannot create tab for '%s'",
                       cell.name)
             cell.status = "error"
+            self.state._emit_agent(cell)
             self.state.save()
             return
 
@@ -293,6 +296,7 @@ class ITerm2Bridge:
         # Resolve git info for all cell types
         await self._resolve_git_info(cell)
 
+        self.state._emit_agent(cell)
         self.state.save()
         self._start_prompt_monitor(cell)
         await self.reorder_tabs()
@@ -454,6 +458,7 @@ class ITerm2Bridge:
                     await mon.async_get()
                     if cell.session_id:
                         cell.status = "idle"
+                        self.state._emit_agent(cell)
                         self.state.save()
                         await self.state.broadcast()
         except asyncio.CancelledError:
@@ -509,6 +514,7 @@ class ITerm2Bridge:
                                 log.info("Auto-detected agent type '%s' "
                                          "for '%s' (process: %s)",
                                          adapter.name, cell.name, val)
+                        self.state._emit_agent(cell)
                         self.state.save()
                         await self.state.broadcast()
             except asyncio.CancelledError:
@@ -529,6 +535,7 @@ class ITerm2Bridge:
                         log.debug("Path changed for '%s': %s",
                                   cell.name, val)
                         await self._resolve_git_info(cell)
+                        self.state._emit_agent(cell)
                         self.state.save()
                         await self.state.broadcast()
             except asyncio.CancelledError:
@@ -557,6 +564,9 @@ class ITerm2Bridge:
                             update.active_session_changed.session_id)
                         changed = True
                     if changed:
+                        self.state._emit("focus_update",
+                            active_session_id=self.state.active_session_id,
+                            current_window_id=self.state.current_window_id)
                         await self.state.broadcast()
         except asyncio.CancelledError:
             raise
@@ -583,6 +593,7 @@ class ITerm2Bridge:
                             cell.activity_detail = ""
                             cell.error_message = ""
                             cell.needs_attention = False
+                            self.state._emit_agent(cell)
                             self.state.save()
                             for tasks in (self._prompt_tasks,
                                           self._job_tasks):

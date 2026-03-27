@@ -11,15 +11,17 @@ DEFAULT_COMMAND = os.environ.get("LOOM_DEFAULT_CMD", "claude")
 # The entry point sets SCRIPT_DIR before anything imports config.
 SCRIPT_DIR: Path = Path(__file__).parent
 STATE_FILE: Path = SCRIPT_DIR / "state.json"
+DB_FILE: Path = SCRIPT_DIR / "loom.db"
 WEBVIEW_FILE: Path = SCRIPT_DIR / "webview.html"
 LOG_FILE: Path = SCRIPT_DIR / "loom.log"
 
 
 def init_paths(script_dir: Path):
     """Called once from the entry point to anchor paths to the install location."""
-    global SCRIPT_DIR, STATE_FILE, WEBVIEW_FILE, LOG_FILE
+    global SCRIPT_DIR, STATE_FILE, DB_FILE, WEBVIEW_FILE, LOG_FILE
     SCRIPT_DIR = script_dir
     STATE_FILE = script_dir / "state.json"
+    DB_FILE = script_dir / "loom.db"
     WEBVIEW_FILE = script_dir / "webview.html"
     LOG_FILE = script_dir / "loom.log"
     _setup_logging()

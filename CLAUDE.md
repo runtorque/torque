@@ -18,8 +18,9 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
 
 - **Entry point**: `loom.py` — thin wrapper that anchors paths and calls `iterm2.run_forever(main)`
 - **Python package** (`loom/`):
-  - `config.py` — env vars, paths, logging setup
-  - `state.py` — `AgentCell` dataclass (with `parent_id` for terminal→agent hierarchy), `GroupSettings` dataclass (with `dispatch_lane`), `BoardTask` dataclass (task, group, instructions, context, criteria, assignee, labels, agent_id, lane, position), `MatrixState` (persistence, `_children` index, cascade delete, WS broadcast). Reserved lanes (`Backlog`, `In Progress`) are enforced — cannot be renamed or deleted.
+  - `config.py` — env vars, paths (`STATE_FILE`, `DB_FILE`, `WEBVIEW_FILE`, `LOG_FILE`), logging setup
+  - `db.py` — `LoomDB` (SQLite persistence layer, WAL mode, schema with 7 tables: `agents`, `groups`, `group_members`, `group_settings`, `board_tasks`, `board_lanes`, `ui_state`). Targeted write methods (`save_agent`, `save_board_task`, etc.), `save_all` (transitional bulk write), `load_all`, `migrate_from_json` (one-time state.json→SQLite migration)
+  - `state.py` — `AgentCell` dataclass (with `parent_id` for terminal→agent hierarchy), `GroupSettings` dataclass (with `dispatch_lane`), `BoardTask` dataclass (task, group, instructions, context, criteria, assignee, labels, agent_id, lane, position), `MatrixState` (SQLite persistence via `LoomDB`, `_children` index, cascade delete, delta WS broadcast). Reserved lanes (`Backlog`, `In Progress`) are enforced — cannot be renamed or deleted. Delta accumulator (`_emit`, `_delta_ops`, `_seq`) tracks changes per mutation; `broadcast()` sends only deltas, `snapshot_msg()` sends full state on connect/resync.
   - `templates.py` — `TemplateManager` (Jinja2 rendering, variable auto-discovery from AST, lenient/strict parse modes, `render_template` returns flat dict with `task`, `group`, `instructions`, `context`, `criteria`, `labels`, `worktree`, `terminals`). Templates use `task:` (not `prompt:`) for the main text field. Backward compat: old templates with `prompt:` still work.
   - `bridge.py` — `ITerm2Bridge` (create/close/focus/update sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection, `on_session_terminated` callback)
   - `worktree.py` — `WorktreeManager` (create/remove/validate worktrees, checkpoint/count_commits/list_checkpoints/rollback, diff_summary, is_merged, .gitignore management). Worktrees live in `.loom/worktrees/` in the repo root, branches named `loom/{agent-name}-{short-id}`
@@ -36,7 +37,7 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
 - **Webview** (`webview.html` + `static/`):
   - `static/style.css` — all styles (dark theme, narrow toolbelt layout)
   - `static/js/constants.js` — icon maps, process badge map, tab color presets, feature flags (`FILTER_BY_WINDOW`), agent type labels
-  - `static/js/ws.js` — WebSocket client, shared `state`, auto-reconnect, `selectedAgentId`, `focusedItemId`, `dragInProgress`, tab-focus sync, action messages
+  - `static/js/ws.js` — WebSocket client, shared `state`, auto-reconnect, `selectedAgentId`, `focusedItemId`, `dragInProgress`, tab-focus sync, action messages, delta patching (`_applyDelta`, `_rebuildChildren`, `_expectedSeq` sequence tracking, `resync` on gap)
   - `static/js/render.js` — `render()`, agent cells (three-state status dot: gray/green/red, activity detail, type label, worktree branch badge with diff stats), terminal drawer, FLIP animation, group collapse, per-group window filtering, `_navItems`/`_navAgents` lists for keyboard navigation
   - `static/js/commands.js` — agent click/dblclick, focus, remove (cascade-aware), drag-and-drop (agents, terminals, groups, reparent), broadcast, right-click context menu (with worktree ops: Create/Checkpoint/Remove Worktree)
   - `static/js/modals.js` — add group/agent/terminal modals (with `parent_id` support), edit agent/terminal modal, group settings modal (tabbed: Group/Agents/Terminals; Agents tab has boot command, worktree config, session resume, idle timeout, notifications), confirm dialog, color picker, hint tooltip popovers, task create/edit modal (task, group, assignee, instructions, context, criteria, labels), template-to-task flow (`openTaskFromTemplate` → `render_template` → pre-fills task modal)
@@ -45,8 +46,8 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
 
 ## Code conventions
 
-- Python: no framework beyond aiohttp + iterm2. All state mutations go through `MatrixState` methods which call `self.save()`. Every iTerm2 API error must be caught and logged (never bare `except: pass`).
-- JS: no build step, no framework. Eight plain script files loaded in order (constants → ws → render → commands → modals → board → templates → main). All functions are global. State is re-rendered from scratch on every WS message.
+- Python: no framework beyond aiohttp + iterm2. All state mutations go through `MatrixState` methods which call `self._emit()` (to queue a delta) then `self.save()` (to persist to SQLite). External callers (bridge, events, server) that mutate cell fields directly must also call `state._emit_agent(cell)` before `state.save()`. Every iTerm2 API error must be caught and logged (never bare `except: pass`).
+- JS: no build step, no framework. Eight plain script files loaded in order (constants → ws → render → commands → modals → board → templates → main). All functions are global. State is patched in-place from WebSocket delta messages, then re-rendered. Full state is only received on initial connect or after a resync.
 - CSS: single file, CSS custom properties for theming, monospace font throughout.
 - `window.confirm()` and `window.alert()` do not work in iTerm2's WKWebView — use the custom `showConfirm()` modal instead.
 

@@ -143,6 +143,9 @@ class EventBus:
             cell.session_tokens_in += d.get("input_tokens", 0)
             cell.session_tokens_out += d.get("output_tokens", 0)
 
+        # Emit delta for all event types
+        self._state._emit_agent(cell)
+
     def _schedule_broadcast(self):
         """Schedule a throttled broadcast (at most once per second)."""
         if not self._loop:
@@ -201,6 +204,7 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
                     cell.error_message = (
                         f"No activity for {timeout_min} minute"
                         f"{'s' if timeout_min != 1 else ''}")
+                    state._emit_agent(cell)
                     changed = True
                     if notifier:
                         notifier.on_health_alert(
@@ -214,6 +218,7 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
                 if cell.error_message != msg:
                     cell.needs_attention = True
                     cell.error_message = msg
+                    state._emit_agent(cell)
                     changed = True
                     if notifier:
                         notifier.on_health_alert(cell.id, msg)

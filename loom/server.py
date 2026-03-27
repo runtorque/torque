@@ -9,7 +9,8 @@ import aiohttp
 from aiohttp import web
 import iterm2
 
-from .config import WS_PORT, WEBVIEW_FILE, log
+from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, log
+from .db import LoomDB
 from dataclasses import asdict
 from .state import MatrixState
 from .bridge import ITerm2Bridge
@@ -38,6 +39,7 @@ async def _worktree_diff_updater(state: MatrixState,
                 cell.worktree_diff = diff
                 cell.worktree_dirty = dirty
                 cell.worktree_checkpoints = checkpoints
+                state._emit_agent(cell)
                 changed = True
         if changed:
             await state.broadcast()
@@ -97,7 +99,10 @@ def _template_to_yaml(name: str, data: dict) -> str:
 
 async def main(connection: iterm2.Connection):
     log.info("Loom starting (port=%d)", WS_PORT)
-    state = MatrixState()
+    db = LoomDB(DB_FILE)
+    db.init()
+    log.info("SQLite database opened at %s", DB_FILE)
+    state = MatrixState(db=db)
     state.load()
     log.info("State loaded: %d agents, %d groups",
              len(state.agents), len(state.groups))
@@ -145,6 +150,7 @@ async def main(connection: iterm2.Connection):
                 cell.needs_attention = True
                 cell.error_message = (
                     "Merge to main failed — merge manually")
+                state._emit_agent(cell)
                 state.save()
             return  # skip auto-checkpoint on merge turn
 
@@ -406,6 +412,11 @@ async def main(connection: iterm2.Connection):
             if cmd == "refresh":
                 pass
 
+            elif cmd == "resync":
+                # Client detected a sequence gap — send full snapshot
+                return {"type": "state", "seq": state._seq,
+                        **state.to_dict()}
+
             elif cmd == "add_group":
                 state.add_group(data["group"])
 
@@ -462,6 +473,7 @@ async def main(connection: iterm2.Connection):
                                 base_branch=gs.worktree_base_branch or "")
                             if wt_path:
                                 cell.directory = wt_path
+                                state._emit_agent(cell)
                                 state.save()
 
                     await bridge.create_session(
@@ -550,6 +562,7 @@ async def main(connection: iterm2.Connection):
                                         or "")
                                 if wt_path:
                                     cell.directory = wt_path
+                                    state._emit_agent(cell)
                                     state.save()
 
                         await bridge.create_session(
@@ -604,6 +617,7 @@ async def main(connection: iterm2.Connection):
                                         c.session_id,
                                         p if p.endswith("\r") else p + "\r")
                                     c.status = "running"
+                                    state._emit_agent(c)
                                     state.save()
                                     await state.broadcast()
                             asyncio.create_task(
@@ -682,6 +696,7 @@ async def main(connection: iterm2.Connection):
                 if cell and cell.session_id:
                     await bridge.send_text(cell.session_id, data["text"])
                     cell.status = "running"
+                    state._emit_agent(cell)
                     state.save()
 
             elif cmd == "broadcast_to_group":
@@ -691,6 +706,7 @@ async def main(connection: iterm2.Connection):
                         await bridge.send_text(
                             cell.session_id, data["text"])
                         cell.status = "running"
+                        state._emit_agent(cell)
                     # Also send to child terminals
                     for child_id in state._children.get(aid, []):
                         child = state.agents.get(child_id)
@@ -698,6 +714,7 @@ async def main(connection: iterm2.Connection):
                             await bridge.send_text(
                                 child.session_id, data["text"])
                             child.status = "running"
+                            state._emit_agent(child)
                 state.save()
 
             elif cmd == "relaunch_agent":
@@ -727,6 +744,7 @@ async def main(connection: iterm2.Connection):
                                 cell.worktree_branch = ""
                                 cell.worktree_repo_root = ""
                                 cell.worktree_base_branch = ""
+                                state._emit_agent(cell)
                                 state.save()
                         # Create new worktree if enabled and none exists
                         if not cell.worktree_path and gs.git_worktree \
@@ -742,6 +760,7 @@ async def main(connection: iterm2.Connection):
                                         or "")
                                 if wt_path:
                                     cell.directory = wt_path
+                                    state._emit_agent(cell)
                                     state.save()
                     await bridge.create_session(
                         cell, env_vars=env,
@@ -780,6 +799,7 @@ async def main(connection: iterm2.Connection):
                             base_branch=gs.worktree_base_branch or "")
                         if wt_path:
                             cell.directory = wt_path
+                            state._emit_agent(cell)
                             state.save()
                             # Relaunch if requested by the UI
                             if data.get("relaunch"):
@@ -806,6 +826,7 @@ async def main(connection: iterm2.Connection):
                     await worktree_mgr.remove(cell)
                     if repo_root:
                         cell.directory = repo_root
+                    state._emit_agent(cell)
                     state.save()
                     # Relaunch if requested by the UI
                     if data.get("relaunch") and cell.cell_type == "agent":
@@ -826,6 +847,7 @@ async def main(connection: iterm2.Connection):
                 if cell and cell.worktree_path:
                     msg = _checkpoint_message(cell)
                     await worktree_mgr.checkpoint(cell, message=msg)
+                    state._emit_agent(cell)
                     state.save()
 
             elif cmd == "worktree_history":
@@ -847,6 +869,7 @@ async def main(connection: iterm2.Connection):
                 sha = data.get("sha", "")
                 if cell and cell.worktree_path and sha:
                     await worktree_mgr.rollback(cell, sha)
+                    state._emit_agent(cell)
                     state.save()
 
             elif cmd == "worktree_merge":
@@ -880,6 +903,7 @@ async def main(connection: iterm2.Connection):
                             cell.session_id, prompt + "\r")
                         _pending_merges.add(cell.id)
                         cell.status = "running"
+                        state._emit_agent(cell)
                         state.save()
 
             # -- Board commands (Phase 5) --
@@ -943,8 +967,12 @@ async def main(connection: iterm2.Connection):
             elif cmd == "board_set_panel":
                 if "open" in data:
                     state.board_panel_open = bool(data["open"])
+                    state._emit("ui_update", key="board_panel_open",
+                                value=state.board_panel_open)
                 if "height" in data:
                     state.board_panel_height = int(data["height"])
+                    state._emit("ui_update", key="board_panel_height",
+                                value=state.board_panel_height)
                 state.save()
 
             elif cmd == "restart":
@@ -1007,7 +1035,7 @@ async def main(connection: iterm2.Connection):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         state._ws_clients.add(ws)
-        await ws.send_str(json.dumps({"type": "state", **state.to_dict()}))
+        await ws.send_str(state.snapshot_msg())
         try:
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:

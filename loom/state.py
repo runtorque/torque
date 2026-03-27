@@ -7,7 +7,8 @@ from typing import Optional
 
 from aiohttp import web
 
-from .config import DEFAULT_COMMAND, STATE_FILE, log
+from .config import DEFAULT_COMMAND, DB_FILE, STATE_FILE, log
+from .db import LoomDB
 
 _RESERVED_LANES = {"Backlog", "In Progress"}
 _DEFAULT_LANES = ["Backlog", "To Do", "In Progress", "Done"]
@@ -136,7 +137,8 @@ class GroupSettings:
 class MatrixState:
     """In-memory state for all groups and agents, with JSON persistence."""
 
-    def __init__(self):
+    def __init__(self, db: Optional[LoomDB] = None):
+        self.db: Optional[LoomDB] = db
         self.agents: dict[str, AgentCell] = {}
         self.groups: dict[str, list[str]] = {}
         self.group_settings: dict[str, GroupSettings] = {}
@@ -149,6 +151,24 @@ class MatrixState:
         self.board_tasks: dict[str, BoardTask] = {}
         self.board_panel_open: bool = False
         self.board_panel_height: int = 0  # 0 = use CSS default
+        # Delta broadcast accumulator
+        self._delta_ops: list[dict] = []
+        self._seq: int = 0
+
+    # -- Delta emission -----------------------------------------------------
+
+    def _emit(self, op: str, **kwargs):
+        """Accumulate a delta operation for the next broadcast."""
+        self._delta_ops.append({"op": op, **kwargs})
+
+    def _emit_agent(self, cell: AgentCell):
+        """Emit an agent_upsert delta with the full agent dict."""
+        self._emit("agent_upsert", **asdict(cell))
+
+    def _emit_group(self, name: str):
+        """Emit a group_update delta with the current member list."""
+        self._emit("group_update", name=name,
+                   agents=list(self.groups.get(name, [])))
 
     # -- Serialization ------------------------------------------------------
 
@@ -171,7 +191,14 @@ class MatrixState:
         }
 
     def save(self):
-        from .config import STATE_FILE  # re-read in case init_paths was called
+        """Persist current state to SQLite (full save, transitional).
+
+        In later phases, individual mutation methods will call targeted
+        db write methods instead.  For now this shim keeps all existing
+        callers working unchanged.
+        """
+        if not self.db:
+            return
         payload = {
             "agents": {aid: asdict(a) for aid, a in self.agents.items()},
             "groups": self.groups,
@@ -185,14 +212,25 @@ class MatrixState:
             "board_panel_open": self.board_panel_open,
             "board_panel_height": self.board_panel_height,
         }
-        STATE_FILE.write_text(json.dumps(payload, indent=2))
+        try:
+            self.db.save_all(payload)
+        except Exception:
+            log.exception("Failed to save state to SQLite")
 
     def load(self):
-        from .config import STATE_FILE
-        if not STATE_FILE.exists():
+        from .config import DB_FILE, STATE_FILE
+        if not self.db:
             return
+
+        # Migration: if DB is empty but state.json exists, import it
+        if not self.db.has_data() and STATE_FILE.exists():
+            self.db.migrate_from_json(STATE_FILE)
+
+        data = self.db.load_all()
+        if not data.get("agents") and not data.get("groups"):
+            return  # empty DB, nothing to load
+
         try:
-            data = json.loads(STATE_FILE.read_text())
             fields = set(AgentCell.__dataclass_fields__)
             for aid, raw in data.get("agents", {}).items():
                 filtered = {k: v for k, v in raw.items() if k in fields}
@@ -242,8 +280,8 @@ class MatrixState:
                 self.board_tasks[tid] = BoardTask(**filtered)
             self.board_panel_open = data.get("board_panel_open", False)
             self.board_panel_height = data.get("board_panel_height", 0)
-        except (json.JSONDecodeError, TypeError, KeyError):
-            log.exception("Failed to load state from %s", STATE_FILE)
+        except (TypeError, KeyError):
+            log.exception("Failed to load state from SQLite")
 
     def _rebuild_children(self):
         """Rebuild the parent→children index from parent_id fields."""
@@ -273,6 +311,7 @@ class MatrixState:
         for key, value in fields.items():
             if key in valid:
                 setattr(gs, key, value)
+        self._emit("group_settings_update", name=name, **asdict(gs))
         self.save()
 
     def next_cell_name(self, group: str, cell_type: str) -> str:
@@ -293,6 +332,8 @@ class MatrixState:
     def add_group(self, name: str):
         if name and name not in self.groups:
             self.groups[name] = []
+            self._emit_group(name)
+            self._emit("groups_reorder", groups=list(self.groups.keys()))
             self.save()
 
     def remove_group(self, name: str) -> list[AgentCell]:
@@ -302,13 +343,17 @@ class MatrixState:
                 cell = self.agents.pop(aid, None)
                 if cell:
                     removed.append(cell)
+                    self._emit("agent_remove", id=aid)
                     # Cascade: remove child terminals
                     for child_id in self._children.pop(aid, []):
                         child = self.agents.pop(child_id, None)
                         if child:
                             removed.append(child)
+                            self._emit("agent_remove", id=child_id)
             del self.groups[name]
             self.group_settings.pop(name, None)
+            self._emit("group_remove", name=name)
+            self._emit("groups_reorder", groups=list(self.groups.keys()))
             self.save()
         return removed
 
@@ -320,9 +365,12 @@ class MatrixState:
             for aid in self.groups[new]:
                 if aid in self.agents:
                     self.agents[aid].group = new
+                    self._emit_agent(self.agents[aid])
                     for child_id in self._children.get(aid, []):
                         if child_id in self.agents:
                             self.agents[child_id].group = new
+                            self._emit_agent(self.agents[child_id])
+            self._emit("group_rename", old_name=old, new_name=new)
             self.save()
 
     def _add_cell(
@@ -376,6 +424,11 @@ class MatrixState:
             self.groups[group].append(aid)
         if cell_type == "agent":
             self._children[aid] = []
+        self._emit_agent(cell)
+        if parent_id:
+            self._emit_agent(self.agents[parent_id])  # children changed
+        else:
+            self._emit_group(group)
         self.save()
         log.info("Cell created: id=%s type=%s parent=%s tab_color=%r "
                  "directory=%r", aid, cell_type, parent_id or "none",
@@ -390,6 +443,7 @@ class MatrixState:
         for key in ("name", "tab_color", "icon"):
             if key in fields:
                 setattr(cell, key, fields[key])
+        self._emit_agent(cell)
         self.save()
 
     def add_agent(self, **kw) -> Optional[AgentCell]:
@@ -405,11 +459,13 @@ class MatrixState:
         if not cell:
             return removed
         removed.append(cell)
+        self._emit("agent_remove", id=aid)
         # Remove from group list (top-level items only)
         if not cell.parent_id and cell.group in self.groups:
             self.groups[cell.group] = [
                 x for x in self.groups[cell.group] if x != aid
             ]
+            self._emit_group(cell.group)
         # If this is a child terminal, remove from parent's children list
         if cell.parent_id and cell.parent_id in self._children:
             self._children[cell.parent_id] = [
@@ -420,10 +476,12 @@ class MatrixState:
             child = self.agents.pop(child_id, None)
             if child:
                 removed.append(child)
+                self._emit("agent_remove", id=child_id)
         # Unlink from board tasks
         for t in self.board_tasks.values():
             if t.agent_id == aid:
                 t.agent_id = ""
+                self._emit("task_upsert", **asdict(t))
         self.save()
         return removed
 
@@ -431,6 +489,7 @@ class MatrixState:
         cell = self.agents.get(aid)
         if not cell or target_group not in self.groups:
             return
+        old_group = cell.group
         # Detach from parent if this is a child terminal being moved
         if cell.parent_id:
             old_parent = cell.parent_id
@@ -450,11 +509,16 @@ class MatrixState:
         else:
             self.groups[target_group].append(aid)
         cell.group = target_group
+        self._emit_agent(cell)
         # Move children along
         for child_id in self._children.get(aid, []):
             child = self.agents.get(child_id)
             if child:
                 child.group = target_group
+                self._emit_agent(child)
+        if old_group != target_group:
+            self._emit_group(old_group)
+        self._emit_group(target_group)
         self.save()
 
     def reorder_child(self, aid: str, parent_id: str, before: str = ""):
@@ -470,6 +534,8 @@ class MatrixState:
             children.insert(idx, aid)
         else:
             children.append(aid)
+        # Children order is derived from _children, emit parent for rebuild
+        self._emit_agent(self.agents[parent_id])
         self.save()
 
     def reparent_terminal(self, aid: str, new_parent_id: str):
@@ -480,6 +546,7 @@ class MatrixState:
         new_parent = self.agents.get(new_parent_id) if new_parent_id else None
         if new_parent_id and (not new_parent or new_parent.cell_type != "agent"):
             return
+        old_parent_id = cell.parent_id
         # Detach from old parent
         if cell.parent_id and cell.parent_id in self._children:
             self._children[cell.parent_id] = [
@@ -499,6 +566,12 @@ class MatrixState:
             cell.parent_id = ""
             if cell.group in self.groups:
                 self.groups[cell.group].append(aid)
+        self._emit_agent(cell)
+        if old_parent_id and old_parent_id in self.agents:
+            self._emit_agent(self.agents[old_parent_id])
+        if new_parent_id:
+            self._emit_agent(new_parent)
+        self._emit_group(cell.group)
         self.save()
 
     def move_group(self, name: str, before: str = ""):
@@ -512,6 +585,7 @@ class MatrixState:
         else:
             items.append((name, value))
         self.groups = dict(items)
+        self._emit("groups_reorder", groups=list(self.groups.keys()))
         self.save()
 
     def cells_with_awareness(self) -> list[AgentCell]:
@@ -561,6 +635,7 @@ class MatrixState:
                 "created_at", "updated_at")},
         )
         self.board_tasks[tid] = bt
+        self._emit("task_upsert", **asdict(bt))
         self.save()
         return bt
 
@@ -579,12 +654,14 @@ class MatrixState:
         if "lane" in fields and fields["lane"] != old_lane:
             self._board_reindex(old_lane)
             self._board_reindex(task.lane)
+        self._emit("task_upsert", **asdict(task))
         self.save()
 
     def board_remove_task(self, tid: str):
         task = self.board_tasks.pop(tid, None)
         if task:
             self._board_reindex(task.lane)
+            self._emit("task_remove", id=tid)
             self.save()
 
     def board_move_task(self, tid: str, lane: str,
@@ -607,6 +684,7 @@ class MatrixState:
         task.updated_at = datetime.now(timezone.utc).isoformat()
         self._board_reindex(old_lane)
         self._board_reindex(lane)
+        self._emit("task_upsert", **asdict(task))
         self.save()
 
     def board_reorder_task(self, tid: str, position: int):
@@ -621,6 +699,7 @@ class MatrixState:
         lane_tasks.insert(min(position, len(lane_tasks)), task)
         for i, t in enumerate(lane_tasks):
             t.position = i
+            self._emit("task_upsert", **asdict(t))
         self.save()
 
     def board_add_lane(self, name: str, position: Optional[int] = None):
@@ -630,6 +709,7 @@ class MatrixState:
             self.board_lanes.insert(min(position, len(self.board_lanes)), name)
         else:
             self.board_lanes.append(name)
+        self._emit("lanes_update", lanes=list(self.board_lanes))
         self.save()
 
     def board_rename_lane(self, old_name: str, new_name: str):
@@ -641,6 +721,8 @@ class MatrixState:
         for t in self.board_tasks.values():
             if t.lane == old_name:
                 t.lane = new_name
+                self._emit("task_upsert", **asdict(t))
+        self._emit("lanes_update", lanes=list(self.board_lanes))
         self.save()
 
     def board_remove_lane(self, name: str, move_tasks_to: str = ""):
@@ -653,13 +735,16 @@ class MatrixState:
         for t in self.board_tasks.values():
             if t.lane == name:
                 t.lane = target
+                self._emit("task_upsert", **asdict(t))
         self._board_reindex(target)
+        self._emit("lanes_update", lanes=list(self.board_lanes))
         self.save()
 
     def board_reorder_lanes(self, lanes: list[str]):
         if set(lanes) != set(self.board_lanes):
             return
         self.board_lanes = lanes
+        self._emit("lanes_update", lanes=list(self.board_lanes))
         self.save()
 
     def board_unlink_agent(self, agent_id: str):
@@ -668,18 +753,37 @@ class MatrixState:
         for t in self.board_tasks.values():
             if t.agent_id == agent_id:
                 t.agent_id = ""
+                self._emit("task_upsert", **asdict(t))
                 changed = True
         if changed:
             self.save()
 
     # -- WebSocket broadcast ------------------------------------------------
 
+    def snapshot_msg(self) -> str:
+        """Generate a full state snapshot message (for initial connect / resync)."""
+        return json.dumps({
+            "type": "state", "seq": self._seq, **self.to_dict()})
+
     async def broadcast(self):
-        snapshot = json.dumps({"type": "state", **self.to_dict()})
+        """Send accumulated deltas to all WS clients.
+
+        If there are no delta ops (e.g. broadcast after a focus change
+        where the _emit was called), this is a no-op — the delta was
+        already queued by _emit().
+        """
+        if not self._delta_ops:
+            return
+        self._seq += 1
+        msg = json.dumps({
+            "type": "delta", "seq": self._seq,
+            "ops": self._delta_ops,
+        })
+        self._delta_ops = []
         dead: set[web.WebSocketResponse] = set()
         for ws in self._ws_clients:
             try:
-                await ws.send_str(snapshot)
+                await ws.send_str(msg)
             except Exception:
                 dead.add(ws)
         self._ws_clients -= dead
