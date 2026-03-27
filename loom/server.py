@@ -184,7 +184,11 @@ async def main(connection: iterm2.Connection):
     asyncio.create_task(_worktree_diff_updater(state, worktree_mgr))
 
     # Register RPCs and install global key bindings
-    displaced_bindings = await keybindings.setup(connection, state, bridge)
+    _kb_overrides = state.global_settings.keybindings or None
+    displaced_bindings = await keybindings.setup(
+        connection, state, bridge, overrides=_kb_overrides)
+    # Mutable container so nested closures can reassign on keybinding change
+    _displaced = [displaced_bindings]
 
     async def _resolve_base_dir(group: str = "") -> str:
         """Resolve a base directory for template discovery."""
@@ -283,6 +287,14 @@ async def main(connection: iterm2.Connection):
                 "group": group,
                 "settings": asdict(gs),
                 "profiles": pnames,
+            }
+
+        # get_global_settings: respond directly
+        if cmd == "get_global_settings":
+            return {
+                "type": "global_settings",
+                "settings": asdict(state.global_settings),
+                "keybinding_defaults": keybindings.get_default_bindings(),
             }
 
         # list_templates: respond directly
@@ -423,6 +435,16 @@ async def main(connection: iterm2.Connection):
             elif cmd == "update_group_settings":
                 settings = data.get("settings", {})
                 state.update_group_settings(data["group"], **settings)
+
+            elif cmd == "update_global_settings":
+                settings = data.get("settings", {})
+                old_kb = state.global_settings.keybindings.copy()
+                state.update_global_settings(**settings)
+                new_kb = state.global_settings.keybindings
+                if new_kb != old_kb:
+                    _displaced[0] = await keybindings.reinstall(
+                        connection, _displaced[0],
+                        overrides=new_kb or None)
 
             elif cmd == "remove_group":
                 removed = state.remove_group(data["group"])
@@ -980,7 +1002,7 @@ async def main(connection: iterm2.Connection):
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")
-                await keybindings.remove(connection, displaced_bindings)
+                await keybindings.remove(connection, _displaced[0])
                 # Persist all agents (status etc.) before restart
                 for cell in state.agents.values():
                     state._db_save_agent(cell)

@@ -18,49 +18,93 @@ from .config import log
 # Prefix used to identify our RPC functions in binding params
 _RPC_PREFIX = "loom_"
 
-# Binding specs: (character, modifiers, keycode, rpc_invocation)
-_BINDING_SPECS = [
-    # Cmd+Option+Down → focus next cell
-    (0xF701,
-     [iterm2.keyboard.Modifier.COMMAND,
-      iterm2.keyboard.Modifier.OPTION,
-      iterm2.keyboard.Modifier.FUNCTION],
-     iterm2.keyboard.Keycode.DOWN_ARROW,
-     "loom_focus_next()"),
-    # Cmd+Option+Up → focus prev cell
-    (0xF700,
-     [iterm2.keyboard.Modifier.COMMAND,
-      iterm2.keyboard.Modifier.OPTION,
-      iterm2.keyboard.Modifier.FUNCTION],
-     iterm2.keyboard.Keycode.UP_ARROW,
-     "loom_focus_prev()"),
-    # Cmd+Option+Right → next agent
-    (0xF703,
-     [iterm2.keyboard.Modifier.COMMAND,
-      iterm2.keyboard.Modifier.OPTION,
-      iterm2.keyboard.Modifier.FUNCTION],
-     iterm2.keyboard.Keycode.RIGHT_ARROW,
-     "loom_next_agent()"),
-    # Cmd+Option+Left → prev agent
-    (0xF702,
-     [iterm2.keyboard.Modifier.COMMAND,
-      iterm2.keyboard.Modifier.OPTION,
-      iterm2.keyboard.Modifier.FUNCTION],
-     iterm2.keyboard.Keycode.LEFT_ARROW,
-     "loom_prev_agent()"),
-    # Cmd+Shift+B → toggle broadcast
-    (ord('B'),
-     [iterm2.keyboard.Modifier.COMMAND,
-      iterm2.keyboard.Modifier.SHIFT],
-     iterm2.keyboard.Keycode.ANSI_B,
-     "loom_toggle_broadcast()"),
-]
+# Action definitions: action_name → (default_character, default_modifiers,
+#                                     default_keycode, rpc_invocation)
+_ACTION_DEFAULTS = {
+    "focus_next": (0xF701,
+                   [iterm2.keyboard.Modifier.COMMAND,
+                    iterm2.keyboard.Modifier.OPTION,
+                    iterm2.keyboard.Modifier.FUNCTION],
+                   iterm2.keyboard.Keycode.DOWN_ARROW,
+                   "loom_focus_next()"),
+    "focus_prev": (0xF700,
+                   [iterm2.keyboard.Modifier.COMMAND,
+                    iterm2.keyboard.Modifier.OPTION,
+                    iterm2.keyboard.Modifier.FUNCTION],
+                   iterm2.keyboard.Keycode.UP_ARROW,
+                   "loom_focus_prev()"),
+    "next_agent": (0xF703,
+                   [iterm2.keyboard.Modifier.COMMAND,
+                    iterm2.keyboard.Modifier.OPTION,
+                    iterm2.keyboard.Modifier.FUNCTION],
+                   iterm2.keyboard.Keycode.RIGHT_ARROW,
+                   "loom_next_agent()"),
+    "prev_agent": (0xF702,
+                   [iterm2.keyboard.Modifier.COMMAND,
+                    iterm2.keyboard.Modifier.OPTION,
+                    iterm2.keyboard.Modifier.FUNCTION],
+                   iterm2.keyboard.Keycode.LEFT_ARROW,
+                   "loom_prev_agent()"),
+    "toggle_broadcast": (ord('B'),
+                         [iterm2.keyboard.Modifier.COMMAND,
+                          iterm2.keyboard.Modifier.SHIFT],
+                         iterm2.keyboard.Keycode.ANSI_B,
+                         "loom_toggle_broadcast()"),
+}
+
+_ACTION_LABELS = {
+    "focus_next": "Focus next cell",
+    "focus_prev": "Focus previous cell",
+    "next_agent": "Next agent",
+    "prev_agent": "Previous agent",
+    "toggle_broadcast": "Toggle broadcast",
+}
+
+# String → iterm2 enum mappings for settings overrides
+_MODIFIER_MAP = {
+    "command": iterm2.keyboard.Modifier.COMMAND,
+    "option": iterm2.keyboard.Modifier.OPTION,
+    "shift": iterm2.keyboard.Modifier.SHIFT,
+    "control": iterm2.keyboard.Modifier.CONTROL,
+    "function": iterm2.keyboard.Modifier.FUNCTION,
+}
+
+_KEYCODE_MAP = {kc.name: kc for kc in iterm2.keyboard.Keycode}
+
+# Keycodes that require the FUNCTION modifier
+_FUNCTION_KEYCODES = {
+    "UP_ARROW", "DOWN_ARROW", "LEFT_ARROW", "RIGHT_ARROW",
+    "HOME", "END", "PAGE_UP", "PAGE_DOWN", "FORWARD_DELETE",
+}
+_FUNCTION_KEYCODES.update(f"F{i}" for i in range(1, 21))
 
 
-def _make_bindings():
-    """Build KeyBinding objects from specs."""
+def _resolve_binding_specs(overrides=None):
+    """Build binding specs from defaults + any overrides from global settings."""
+    specs = []
+    for action, (char, mods, keycode, rpc) in _ACTION_DEFAULTS.items():
+        if overrides and action in overrides:
+            ov = overrides[action]
+            char = ov.get("character", char)
+            mods = [_MODIFIER_MAP[m] for m in ov.get("modifiers", [])
+                    if m in _MODIFIER_MAP]
+            kc_name = ov.get("keycode", "")
+            if kc_name and kc_name in _KEYCODE_MAP:
+                keycode = _KEYCODE_MAP[kc_name]
+            # Arrow/function keys need the FUNCTION modifier
+            if keycode and keycode.name in _FUNCTION_KEYCODES:
+                if iterm2.keyboard.Modifier.FUNCTION not in mods:
+                    mods.append(iterm2.keyboard.Modifier.FUNCTION)
+        specs.append((char, mods, keycode, rpc))
+    return specs
+
+
+def _make_bindings(specs=None):
+    """Build KeyBinding objects from specs or defaults."""
+    if specs is None:
+        specs = _resolve_binding_specs()
     bindings = []
-    for char, mods, keycode, invocation in _BINDING_SPECS:
+    for char, mods, keycode, invocation in specs:
         bindings.append(iterm2.binding.KeyBinding(
             character=char,
             modifiers=mods,
@@ -73,9 +117,18 @@ def _make_bindings():
     return bindings
 
 
-def _our_keys():
-    """Return the set of key strings we own."""
-    return {b.key for b in _make_bindings()}
+def get_default_bindings():
+    """Return the default keybinding specs as a serializable dict for the frontend."""
+    result = {}
+    for action, (char, mods, keycode, rpc) in _ACTION_DEFAULTS.items():
+        result[action] = {
+            "character": char,
+            "modifiers": [m.name.lower() for m in mods
+                          if m != iterm2.keyboard.Modifier.FUNCTION],
+            "keycode": keycode.name if keycode else "",
+            "label": _ACTION_LABELS.get(action, action),
+        }
+    return result
 
 
 def _is_ours(binding):
@@ -133,7 +186,7 @@ def _find_current_agent(state):
     return None, False
 
 
-async def install(connection):
+async def install(connection, specs=None):
     """Add our key bindings to the global set.
 
     Returns the list of displaced bindings for later restoration.
@@ -145,7 +198,7 @@ async def install(connection):
         log.exception("Failed to read global key bindings")
         return []
 
-    our_bindings = _make_bindings()
+    our_bindings = _make_bindings(specs)
     our_key_set = {b.key for b in our_bindings}
 
     # Save displaced bindings (same key combos, not ours from a prior run)
@@ -192,7 +245,17 @@ async def remove(connection, displaced=None):
         log.exception("Failed to remove global key bindings")
 
 
-async def setup(connection, state, bridge):
+async def reinstall(connection, displaced, overrides=None):
+    """Remove current bindings and install new ones with optional overrides.
+
+    Returns new displaced bindings list.
+    """
+    await remove(connection, displaced)
+    specs = _resolve_binding_specs(overrides)
+    return await install(connection, specs)
+
+
+async def setup(connection, state, bridge, overrides=None):
     """Register RPC functions and install global key bindings.
 
     Returns the displaced bindings list for cleanup on shutdown.
@@ -292,5 +355,6 @@ async def setup(connection, state, bridge):
     log.info("Loom RPCs registered")
 
     # Install global key bindings
-    displaced = await install(connection)
+    specs = _resolve_binding_specs(overrides)
+    displaced = await install(connection, specs)
     return displaced

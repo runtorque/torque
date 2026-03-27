@@ -161,6 +161,11 @@ CREATE TABLE IF NOT EXISTS ui_state (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS global_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -326,6 +331,16 @@ class LoomDB:
         self._conn.execute(
             "INSERT OR REPLACE INTO ui_state (key, value) VALUES (?,?)",
             (key, str(value)))
+        self._conn.commit()
+
+    def save_global_settings(self, gs):
+        """Persist global settings as key-value pairs."""
+        d = asdict(gs)
+        self._conn.execute("DELETE FROM global_settings")
+        for key, value in d.items():
+            self._conn.execute(
+                "INSERT INTO global_settings (key, value) VALUES (?,?)",
+                (key, json.dumps(value)))
         self._conn.commit()
 
     # -- Bulk save (transitional) -------------------------------------------
@@ -527,6 +542,14 @@ class LoomDB:
         for row in c.execute("SELECT key, value FROM ui_state"):
             ui[row[0]] = row[1]
 
+        # Global settings
+        global_settings = {}
+        for row in c.execute("SELECT key, value FROM global_settings"):
+            try:
+                global_settings[row[0]] = json.loads(row[1])
+            except (json.JSONDecodeError, TypeError):
+                global_settings[row[0]] = row[1]
+
         return {
             "agents": agents,
             "groups": groups,
@@ -536,6 +559,7 @@ class LoomDB:
             "board_tasks": board_tasks,
             "board_panel_open": ui.get("board_panel_open", "False") == "True",
             "board_panel_height": int(ui.get("board_panel_height", "0")),
+            "global_settings": global_settings,
         }
 
     def has_data(self) -> bool:

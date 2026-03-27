@@ -54,6 +54,8 @@ function connect() {
       }
     } else if (msg.type === 'template_rendered') {
       _handleTemplateRendered(msg);
+    } else if (msg.type === 'global_settings') {
+      _showGlobalSettingsModal(msg);
     } else if (msg.type === 'action') {
       handleAction(msg);
     }
@@ -163,6 +165,13 @@ function _applyDelta(ops) {
       case 'lanes_update':
         state.board_lanes = op.lanes;
         break;
+
+      case 'global_settings_update': {
+        const gs = Object.assign({}, op);
+        delete gs.op;
+        state.global_settings = gs;
+        break;
+      }
 
       case 'ui_update':
         state[op.key] = op.value;

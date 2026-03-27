@@ -1,5 +1,10 @@
-/* When true, only show agents/terminals belonging to the current window */
-const FILTER_BY_WINDOW = true;
+/* When true, only show agents/terminals belonging to the current window.
+   Reads from global settings state; falls back to true before state loads. */
+function getFilterByWindow() {
+  return (state && state.global_settings &&
+          state.global_settings.filter_by_window !== undefined)
+    ? state.global_settings.filter_by_window : true;
+}
 
 const AGENT_ICONS = ['\u2B21','\u25C8','\u25C6','\u25A3','\u2B22','\u25C9','\u25CE','\u25B2','\u2B1F','\u23E3'];
 

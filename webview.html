@@ -13,6 +13,7 @@
   <div id="conn-dot" title="Disconnected"></div>
   <h1>LOOM</h1>
   <button class="hdr-btn" onclick="restartDaemon()" title="Restart Loom">&#x21BB;</button>
+  <button class="hdr-btn" onclick="openGlobalSettings()" title="Settings">&#9881;</button>
   <button class="hdr-btn" onclick="openAddGroup()">+ Group</button>
 </header>
 
@@ -270,6 +271,55 @@
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" onclick="submitGroupSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Global Settings modal -->
+<div class="overlay" id="modal-global-settings">
+  <div class="modal modal-tall">
+    <h2>Settings</h2>
+    <div class="gs-tabs">
+      <button class="gs-tab active" data-tab="gls-general" onclick="switchGlsTab('gls-general')">General</button>
+      <button class="gs-tab" data-tab="gls-keybindings" onclick="switchGlsTab('gls-keybindings')">Keybindings</button>
+    </div>
+
+    <!-- General tab -->
+    <div class="gs-pane active" data-pane="gls-general">
+      <div class="gs-subtabs">
+        <button class="gs-subtab active" data-subtab="gls-server" onclick="switchGlsSubTab(this)">Server</button>
+        <button class="gs-subtab" data-subtab="gls-board" onclick="switchGlsSubTab(this)">Board</button>
+      </div>
+
+      <!-- Server sub-tab -->
+      <div class="gs-subpane active" data-subpane="gls-server">
+        <label>Default boot command
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
+            data-hint="The command used when creating new agents without a custom boot command. Overrides the LOOM_DEFAULT_CMD environment variable.">?</span>
+        </label>
+        <input id="gls-default-cmd" placeholder="claude" autocomplete="off">
+        <label class="gs-checkbox">
+          <input id="gls-filter-window" type="checkbox" checked> Filter by active window
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
+            data-hint="When enabled, only show agents belonging to the current iTerm2 window. Per-group 'Pin to active window' overrides this.">?</span>
+        </label>
+      </div>
+
+      <!-- Board sub-tab -->
+      <div class="gs-subpane" data-subpane="gls-board">
+        <label>Default lanes <span class="label-hint">one per line, used for new installations</span></label>
+        <textarea id="gls-default-lanes" rows="4" placeholder="Backlog&#10;To Do&#10;In Progress&#10;Done"></textarea>
+      </div>
+    </div>
+
+    <!-- Keybindings tab -->
+    <div class="gs-pane" data-pane="gls-keybindings">
+      <div id="gls-keybinding-list"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" onclick="submitGlobalSettings()">Save</button>
     </div>
   </div>
 </div>

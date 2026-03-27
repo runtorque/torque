@@ -156,6 +156,18 @@ class GroupSettings:
     dispatch_lane: str = "In Progress"  # lane for dispatched tasks
 
 
+@dataclass
+class GlobalSettings:
+    """App-wide settings for the Loom instance."""
+    # General > Server
+    default_command: str = ""        # empty = use config.DEFAULT_COMMAND (env var fallback)
+    filter_by_window: bool = True    # global default for window filtering
+    # General > Board
+    default_lanes: list[str] = field(default_factory=lambda: list(_DEFAULT_LANES))
+    # Keybindings — action name → {modifiers, keycode, character} overrides
+    keybindings: dict[str, dict] = field(default_factory=dict)
+
+
 class MatrixState:
     """In-memory state for all groups and agents, with JSON persistence."""
 
@@ -169,6 +181,8 @@ class MatrixState:
         self.current_window_id: Optional[str] = None
         self._children: dict[str, list[str]] = {}  # agent_id → [child terminal ids]
         self._ws_clients: set[web.WebSocketResponse] = set()
+        # Global settings
+        self.global_settings: GlobalSettings = GlobalSettings()
         # Board (Phase 5)
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
@@ -204,6 +218,7 @@ class MatrixState:
             "group_settings": {
                 n: asdict(gs) for n, gs in self.group_settings.items()
             },
+            "global_settings": asdict(self.global_settings),
             "children": self._children,
             "active_session_id": self.active_session_id,
             "current_window_id": self.current_window_id,
@@ -284,6 +299,13 @@ class MatrixState:
             except Exception:
                 log.exception("Failed to save UI state %s", key)
 
+    def _db_save_global_settings(self):
+        if self.db:
+            try:
+                self.db.save_global_settings(self.global_settings)
+            except Exception:
+                log.exception("Failed to save global settings")
+
     def load(self):
         from .config import DB_FILE, STATE_FILE
         if not self.db:
@@ -327,8 +349,17 @@ class MatrixState:
                     if cell.group in self.groups:
                         self.groups[cell.group].append(aid)
             self._rebuild_children()
-            # Board state
-            self.board_lanes = data.get("board_lanes", list(_DEFAULT_LANES))
+            # Global settings
+            gs_raw = data.get("global_settings")
+            if gs_raw:
+                gls_fields = set(GlobalSettings.__dataclass_fields__)
+                gls_filtered = {k: v for k, v in gs_raw.items()
+                                if k in gls_fields}
+                self.global_settings = GlobalSettings(**gls_filtered)
+            # Board state — use global default_lanes as fallback
+            default = (self.global_settings.default_lanes
+                       or list(_DEFAULT_LANES))
+            self.board_lanes = data.get("board_lanes") or default
             # Ensure reserved lanes exist
             for rl in ("Backlog", "In Progress"):
                 if rl not in self.board_lanes:
@@ -415,6 +446,25 @@ class MatrixState:
                 setattr(gs, key, value)
         self._emit("group_settings_update", name=name, **asdict(gs))
         self._db_save_group_settings(name)
+
+    # -- Global settings ----------------------------------------------------
+
+    def get_default_command(self) -> str:
+        """Return the effective default boot command.
+
+        Priority: global_settings > env var > 'claude'
+        """
+        return self.global_settings.default_command or DEFAULT_COMMAND
+
+    def update_global_settings(self, **fields):
+        """Update global settings fields."""
+        valid = set(GlobalSettings.__dataclass_fields__)
+        for key, value in fields.items():
+            if key in valid:
+                setattr(self.global_settings, key, value)
+        self._emit("global_settings_update",
+                    **asdict(self.global_settings))
+        self._db_save_global_settings()
 
     def next_cell_name(self, group: str, cell_type: str) -> str:
         """Generate the next auto-name based on group prefix settings."""
@@ -574,7 +624,7 @@ class MatrixState:
             slug=slug,
             cell_type=cell_type,
             profile=profile,
-            command=command or (DEFAULT_COMMAND if cell_type == "agent" else ""),
+            command=command or (self.get_default_command() if cell_type == "agent" else ""),
             directory=directory,
             tab_color=tab_color,
             icon=icon,

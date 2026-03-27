@@ -49,6 +49,7 @@ function closeModals() {
   document.querySelectorAll('.overlay').forEach(o => o.classList.remove('visible'));
   document.querySelectorAll('.hint-pop').forEach(p => p.remove());
   if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+  if (typeof _glsCapturing !== 'undefined' && _glsCapturing) _cancelCapture();
 }
 
 /* -- Confirm dialog (replaces window.confirm for WKWebView) ----------- */
@@ -890,5 +891,196 @@ function submitTask() {
   }
 
   _taskEditId = null;
+  closeModals();
+}
+
+/* -- Global Settings ---------------------------------------------------- */
+var _glsKeybindings = {};     // current keybinding overrides being edited
+var _glsDefaults = {};        // default keybinding specs from server
+var _glsCapturing = null;     // action name currently capturing a keypress
+
+function switchGlsTab(name) {
+  document.querySelectorAll('#modal-global-settings .gs-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('#modal-global-settings .gs-pane').forEach(p =>
+    p.classList.toggle('active', p.dataset.pane === name));
+}
+
+function switchGlsSubTab(btn) {
+  var container = btn.closest('.gs-pane');
+  container.querySelectorAll('.gs-subtab').forEach(t =>
+    t.classList.toggle('active', t === btn));
+  var target = btn.dataset.subtab;
+  container.querySelectorAll('.gs-subpane').forEach(p =>
+    p.classList.toggle('active', p.dataset.subpane === target));
+}
+
+function openGlobalSettings() {
+  send({ cmd: 'get_global_settings' });
+}
+
+function _showGlobalSettingsModal(data) {
+  var s = data.settings;
+  _glsDefaults = data.keybinding_defaults || {};
+  _glsKeybindings = Object.assign({}, s.keybindings || {});
+
+  // General > Server
+  document.getElementById('gls-default-cmd').value = s.default_command || '';
+  document.getElementById('gls-filter-window').checked =
+    s.filter_by_window !== undefined ? s.filter_by_window : true;
+
+  // General > Board
+  document.getElementById('gls-default-lanes').value =
+    (s.default_lanes || []).join('\n');
+
+  // Keybindings
+  _renderKeybindingList();
+
+  // Reset tabs
+  switchGlsTab('gls-general');
+  var firstSub = document.querySelector('#modal-global-settings .gs-subtab');
+  if (firstSub) switchGlsSubTab(firstSub);
+
+  document.getElementById('modal-global-settings').classList.add('visible');
+  document.getElementById('gls-default-cmd').focus();
+}
+
+function _kbDisplayName(action, binding) {
+  var b = binding || _glsDefaults[action] || {};
+  var mods = (b.modifiers || []).map(function(m) {
+    if (m === 'command') return '\u2318';
+    if (m === 'option') return '\u2325';
+    if (m === 'shift') return '\u21E7';
+    if (m === 'control') return '\u2303';
+    return m;
+  });
+  var key = (b.keycode || '').replace('ANSI_', '').replace('_ARROW', '');
+  var arrowMap = { 'UP': '\u2191', 'DOWN': '\u2193', 'LEFT': '\u2190', 'RIGHT': '\u2192' };
+  key = arrowMap[key] || key;
+  return mods.join('') + key;
+}
+
+function _renderKeybindingList() {
+  var container = document.getElementById('gls-keybinding-list');
+  var html = '';
+  for (var action in _glsDefaults) {
+    var def = _glsDefaults[action];
+    var current = _glsKeybindings[action] || null;
+    var display = _kbDisplayName(action, current);
+    var label = def.label || action;
+    var isCapturing = _glsCapturing === action;
+    html += '<div class="kb-row">';
+    html += '  <span class="kb-label">' + esc(label) + '</span>';
+    if (isCapturing) {
+      html += '  <span class="kb-combo kb-capturing">Press keys\u2026</span>';
+      html += '  <button class="kb-btn" onclick="_cancelCapture()">Cancel</button>';
+    } else {
+      html += '  <span class="kb-combo">' + display + '</span>';
+      html += '  <button class="kb-btn" onclick="_startCapture(\'' + action + '\')">Rebind</button>';
+      if (current) {
+        html += '  <button class="kb-btn" onclick="_resetKeybinding(\'' + action + '\')">Reset</button>';
+      }
+    }
+    html += '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function _startCapture(action) {
+  _glsCapturing = action;
+  _renderKeybindingList();
+  document.addEventListener('keydown', _captureKeydown, true);
+}
+
+function _cancelCapture() {
+  _glsCapturing = null;
+  document.removeEventListener('keydown', _captureKeydown, true);
+  _renderKeybindingList();
+}
+
+function _captureKeydown(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  // Ignore bare modifier presses
+  if (['Meta', 'Alt', 'Shift', 'Control'].includes(e.key)) return;
+
+  var modifiers = [];
+  if (e.metaKey) modifiers.push('command');
+  if (e.altKey) modifiers.push('option');
+  if (e.shiftKey) modifiers.push('shift');
+  if (e.ctrlKey) modifiers.push('control');
+
+  var keycode = _jsCodeToKeycode(e.code);
+  var character = _jsCodeToCharacter(e.code, e.key);
+
+  if (_glsCapturing && keycode) {
+    _glsKeybindings[_glsCapturing] = {
+      modifiers: modifiers,
+      keycode: keycode,
+      character: character,
+    };
+  }
+  _cancelCapture();
+}
+
+function _jsCodeToKeycode(code) {
+  var map = {
+    'ArrowUp': 'UP_ARROW', 'ArrowDown': 'DOWN_ARROW',
+    'ArrowLeft': 'LEFT_ARROW', 'ArrowRight': 'RIGHT_ARROW',
+    'Enter': 'RETURN', 'Tab': 'TAB', 'Space': 'SPACE',
+    'Backspace': 'DELETE', 'Escape': 'ESCAPE',
+    'Delete': 'FORWARD_DELETE',
+    'Home': 'HOME', 'End': 'END',
+    'PageUp': 'PAGE_UP', 'PageDown': 'PAGE_DOWN',
+  };
+  if (map[code]) return map[code];
+  var m = code.match(/^Key([A-Z])$/);
+  if (m) return 'ANSI_' + m[1];
+  var d = code.match(/^Digit(\d)$/);
+  if (d) return 'ANSI_' + d[1];
+  var f = code.match(/^F(\d+)$/);
+  if (f) return 'F' + f[1];
+  var punct = {
+    'Minus': 'ANSI_MINUS', 'Equal': 'ANSI_EQUAL',
+    'BracketLeft': 'ANSI_LEFT_BRACKET', 'BracketRight': 'ANSI_RIGHT_BRACKET',
+    'Backslash': 'ANSI_BACKSLASH', 'Semicolon': 'ANSI_SEMICOLON',
+    'Quote': 'ANSI_QUOTE', 'Comma': 'ANSI_COMMA',
+    'Period': 'ANSI_PERIOD', 'Slash': 'ANSI_SLASH',
+    'Backquote': 'ANSI_GRAVE',
+  };
+  return punct[code] || null;
+}
+
+function _jsCodeToCharacter(code, key) {
+  var arrowChars = {
+    'ArrowUp': 0xF700, 'ArrowDown': 0xF701,
+    'ArrowLeft': 0xF702, 'ArrowRight': 0xF703,
+  };
+  if (arrowChars[code]) return arrowChars[code];
+  if (key.length === 1) return key.charCodeAt(0);
+  var special = {
+    'Enter': 13, 'Tab': 9, 'Space': 32, 'Backspace': 127, 'Escape': 27,
+  };
+  return special[key] || 0;
+}
+
+function _resetKeybinding(action) {
+  delete _glsKeybindings[action];
+  _renderKeybindingList();
+}
+
+function submitGlobalSettings() {
+  var lanesText = document.getElementById('gls-default-lanes').value.trim();
+  var lanes = lanesText
+    ? lanesText.split('\n').map(function(l) { return l.trim(); }).filter(Boolean)
+    : [];
+
+  var settings = {
+    default_command: document.getElementById('gls-default-cmd').value.trim(),
+    filter_by_window: document.getElementById('gls-filter-window').checked,
+    default_lanes: lanes,
+    keybindings: _glsKeybindings,
+  };
+  send({ cmd: 'update_global_settings', settings: settings });
   closeModals();
 }

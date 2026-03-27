@@ -184,7 +184,7 @@ function moveFocusHorizontal(delta) {
     // Was on a terminal — focus the first child terminal of the new agent
     render();
     const childIds = state.children[nextAgentId] || [];
-    const wid = typeof FILTER_BY_WINDOW !== 'undefined' && FILTER_BY_WINDOW ? state.current_window_id : null;
+    const wid = getFilterByWindow() ? state.current_window_id : null;
     const firstChild = childIds.find(cid => {
       const ct = state.agents[cid];
       return ct && (!wid || !ct.window_id || ct.window_id === wid);

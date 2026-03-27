@@ -138,7 +138,7 @@ function render() {
       });
       // Only filter if there are active sessions; otherwise show everywhere
       if (hasActive) wid = state.current_window_id;
-    } else if (FILTER_BY_WINDOW) {
+    } else if (getFilterByWindow()) {
       wid = state.current_window_id;
     }
 
