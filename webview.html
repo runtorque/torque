@@ -366,29 +366,35 @@
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="An actionable task description, e.g. 'Create a summary of last week's deploys' instead of 'Weekly deploy report'.">?</span>
     </label>
     <input id="task-task-input" autocomplete="off"
-           onkeydown="if(event.key==='Escape')closeModals();">
+           onkeydown="if(event.key==='Enter')submitTask();if(event.key==='Escape')closeModals();">
     <label>Group <span class="label-req">*</span></label>
-    <select id="task-group-select"></select>
+    <select id="task-group-select"
+            onkeydown="if(event.key==='Escape')closeModals();"></select>
     <label>Assignee
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Agent name prefix for pool assignment (e.g. 'frontend'). Any agent matching this prefix can pick up the task.">?</span>
     </label>
-    <input id="task-assignee-input" autocomplete="off">
+    <input id="task-assignee-input" autocomplete="off"
+           onkeydown="if(event.key==='Enter')submitTask();if(event.key==='Escape')closeModals();">
     <label>Instructions
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Clear instructions on what the agent should do to complete this task.">?</span>
     </label>
-    <textarea id="task-instructions-input" rows="3"></textarea>
+    <textarea id="task-instructions-input" rows="3"
+              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
     <label>Context
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Any additional context the agent might need — relevant files, background info, constraints.">?</span>
     </label>
-    <textarea id="task-context-input" rows="2"></textarea>
+    <textarea id="task-context-input" rows="2"
+              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
     <label>Criteria
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Acceptance criteria for verifying completion. Also used by agents tasked with reviewing work.">?</span>
     </label>
-    <textarea id="task-criteria-input" rows="2"></textarea>
+    <textarea id="task-criteria-input" rows="2"
+              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
     <label>Labels
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Comma-separated labels used for orchestration, e.g. 'urgent, frontend, deploy'.">?</span>
     </label>
-    <input id="task-labels-input" autocomplete="off">
+    <input id="task-labels-input" autocomplete="off"
+           onkeydown="if(event.key==='Enter')submitTask();if(event.key==='Escape')closeModals();">
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" id="task-submit-btn" onclick="submitTask()">Create</button>
