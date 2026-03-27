@@ -190,13 +190,80 @@ class MatrixState:
             "board_panel_height": self.board_panel_height,
         }
 
-    def save(self):
-        """Persist current state to SQLite (full save, transitional).
+    # -- Targeted persistence helpers ----------------------------------------
 
-        In later phases, individual mutation methods will call targeted
-        db write methods instead.  For now this shim keeps all existing
-        callers working unchanged.
-        """
+    def _db_save_agent(self, cell: AgentCell):
+        """Persist a single agent to SQLite."""
+        if self.db:
+            try:
+                self.db.save_agent(cell)
+            except Exception:
+                log.exception("Failed to save agent %s", cell.id)
+
+    def _db_delete_agent(self, agent_id: str):
+        if self.db:
+            try:
+                self.db.delete_agent(agent_id)
+            except Exception:
+                log.exception("Failed to delete agent %s", agent_id)
+
+    def _db_save_groups(self):
+        """Persist all groups and their memberships."""
+        if self.db:
+            try:
+                self.db.save_groups(self.groups)
+                for gname, members in self.groups.items():
+                    self.db.save_group_members(gname, members)
+            except Exception:
+                log.exception("Failed to save groups")
+
+    def _db_save_group_settings(self, name: str):
+        if self.db and name in self.group_settings:
+            try:
+                self.db.save_group_settings(name, self.group_settings[name])
+            except Exception:
+                log.exception("Failed to save group settings for %s", name)
+
+    def _db_delete_group(self, name: str):
+        if self.db:
+            try:
+                self.db.delete_group(name)
+            except Exception:
+                log.exception("Failed to delete group %s", name)
+
+    def _db_save_task(self, task: BoardTask):
+        if self.db:
+            try:
+                self.db.save_board_task(task)
+            except Exception:
+                log.exception("Failed to save task %s", task.id)
+
+    def _db_delete_task(self, task_id: str):
+        if self.db:
+            try:
+                self.db.delete_board_task(task_id)
+            except Exception:
+                log.exception("Failed to delete task %s", task_id)
+
+    def _db_save_lanes(self):
+        if self.db:
+            try:
+                self.db.save_board_lanes(self.board_lanes)
+            except Exception:
+                log.exception("Failed to save board lanes")
+
+    def _db_save_ui(self, key: str, value):
+        if self.db:
+            try:
+                self.db.save_ui_state(key, value)
+            except Exception:
+                log.exception("Failed to save UI state %s", key)
+
+    def save(self):
+        """Full save — used by external callers (bridge, events, server)
+        that mutate cell fields directly. Persists only the agent they
+        changed (caller should pass the cell), but this fallback saves
+        everything for backward compatibility."""
         if not self.db:
             return
         payload = {
@@ -312,7 +379,7 @@ class MatrixState:
             if key in valid:
                 setattr(gs, key, value)
         self._emit("group_settings_update", name=name, **asdict(gs))
-        self.save()
+        self._db_save_group_settings(name)
 
     def next_cell_name(self, group: str, cell_type: str) -> str:
         """Generate the next auto-name based on group prefix settings."""
@@ -334,7 +401,7 @@ class MatrixState:
             self.groups[name] = []
             self._emit_group(name)
             self._emit("groups_reorder", groups=list(self.groups.keys()))
-            self.save()
+            self._db_save_groups()
 
     def remove_group(self, name: str) -> list[AgentCell]:
         removed: list[AgentCell] = []
@@ -354,7 +421,10 @@ class MatrixState:
             self.group_settings.pop(name, None)
             self._emit("group_remove", name=name)
             self._emit("groups_reorder", groups=list(self.groups.keys()))
-            self.save()
+            for r in removed:
+                self._db_delete_agent(r.id)
+            self._db_delete_group(name)
+            self._db_save_groups()
         return removed
 
     def rename_group(self, old: str, new: str):
@@ -371,7 +441,16 @@ class MatrixState:
                             self.agents[child_id].group = new
                             self._emit_agent(self.agents[child_id])
             self._emit("group_rename", old_name=old, new_name=new)
-            self.save()
+            # Persist: rename group, update agent group fields
+            self._db_save_groups()
+            if new in self.group_settings:
+                self._db_save_group_settings(new)
+            for aid in self.groups[new]:
+                if aid in self.agents:
+                    self._db_save_agent(self.agents[aid])
+                    for child_id in self._children.get(aid, []):
+                        if child_id in self.agents:
+                            self._db_save_agent(self.agents[child_id])
 
     def _add_cell(
         self,
@@ -429,7 +508,8 @@ class MatrixState:
             self._emit_agent(self.agents[parent_id])  # children changed
         else:
             self._emit_group(group)
-        self.save()
+        self._db_save_agent(cell)
+        self._db_save_groups()
         log.info("Cell created: id=%s type=%s parent=%s tab_color=%r "
                  "directory=%r", aid, cell_type, parent_id or "none",
                  cell.tab_color, cell.directory)
@@ -444,7 +524,7 @@ class MatrixState:
             if key in fields:
                 setattr(cell, key, fields[key])
         self._emit_agent(cell)
-        self.save()
+        self._db_save_agent(cell)
 
     def add_agent(self, **kw) -> Optional[AgentCell]:
         return self._add_cell(cell_type="agent", **kw)
@@ -482,7 +562,10 @@ class MatrixState:
             if t.agent_id == aid:
                 t.agent_id = ""
                 self._emit("task_upsert", **asdict(t))
-        self.save()
+                self._db_save_task(t)
+        for r in removed:
+            self._db_delete_agent(r.id)
+        self._db_save_groups()
         return removed
 
     def move_agent(self, aid: str, target_group: str, before: str = ""):
@@ -519,7 +602,12 @@ class MatrixState:
         if old_group != target_group:
             self._emit_group(old_group)
         self._emit_group(target_group)
-        self.save()
+        self._db_save_agent(cell)
+        for child_id in self._children.get(aid, []):
+            child = self.agents.get(child_id)
+            if child:
+                self._db_save_agent(child)
+        self._db_save_groups()
 
     def reorder_child(self, aid: str, parent_id: str, before: str = ""):
         """Reorder a child terminal within its parent's children list."""
@@ -536,7 +624,8 @@ class MatrixState:
             children.append(aid)
         # Children order is derived from _children, emit parent for rebuild
         self._emit_agent(self.agents[parent_id])
-        self.save()
+        # Children order is in-memory only (_children), group_members tracks it
+        self._db_save_groups()
 
     def reparent_terminal(self, aid: str, new_parent_id: str):
         """Attach a terminal to an agent (or detach if new_parent_id is empty)."""
@@ -572,7 +661,10 @@ class MatrixState:
         if new_parent_id:
             self._emit_agent(new_parent)
         self._emit_group(cell.group)
-        self.save()
+        self._db_save_agent(cell)
+        if old_parent_id and old_parent_id in self.agents:
+            self._db_save_agent(self.agents[old_parent_id])
+        self._db_save_groups()
 
     def move_group(self, name: str, before: str = ""):
         if name not in self.groups:
@@ -586,7 +678,7 @@ class MatrixState:
             items.append((name, value))
         self.groups = dict(items)
         self._emit("groups_reorder", groups=list(self.groups.keys()))
-        self.save()
+        self._db_save_groups()
 
     def cells_with_awareness(self) -> list[AgentCell]:
         """Return cells that have agent awareness active (agent_type set)."""
@@ -636,7 +728,7 @@ class MatrixState:
         )
         self.board_tasks[tid] = bt
         self._emit("task_upsert", **asdict(bt))
-        self.save()
+        self._db_save_task(bt)
         return bt
 
     def board_update_task(self, tid: str, **fields):
@@ -655,14 +747,14 @@ class MatrixState:
             self._board_reindex(old_lane)
             self._board_reindex(task.lane)
         self._emit("task_upsert", **asdict(task))
-        self.save()
+        self._db_save_task(task)
 
     def board_remove_task(self, tid: str):
         task = self.board_tasks.pop(tid, None)
         if task:
             self._board_reindex(task.lane)
             self._emit("task_remove", id=tid)
-            self.save()
+            self._db_delete_task(tid)
 
     def board_move_task(self, tid: str, lane: str,
                         position: Optional[int] = None):
@@ -685,7 +777,7 @@ class MatrixState:
         self._board_reindex(old_lane)
         self._board_reindex(lane)
         self._emit("task_upsert", **asdict(task))
-        self.save()
+        self._db_save_task(task)
 
     def board_reorder_task(self, tid: str, position: int):
         task = self.board_tasks.get(tid)
@@ -700,7 +792,8 @@ class MatrixState:
         for i, t in enumerate(lane_tasks):
             t.position = i
             self._emit("task_upsert", **asdict(t))
-        self.save()
+        for t in lane_tasks:
+            self._db_save_task(t)
 
     def board_add_lane(self, name: str, position: Optional[int] = None):
         if not name or name in self.board_lanes:
@@ -710,7 +803,7 @@ class MatrixState:
         else:
             self.board_lanes.append(name)
         self._emit("lanes_update", lanes=list(self.board_lanes))
-        self.save()
+        self._db_save_lanes()
 
     def board_rename_lane(self, old_name: str, new_name: str):
         if (old_name in _RESERVED_LANES or old_name not in self.board_lanes
@@ -723,7 +816,10 @@ class MatrixState:
                 t.lane = new_name
                 self._emit("task_upsert", **asdict(t))
         self._emit("lanes_update", lanes=list(self.board_lanes))
-        self.save()
+        self._db_save_lanes()
+        for t in self.board_tasks.values():
+            if t.lane == new_name:
+                self._db_save_task(t)
 
     def board_remove_lane(self, name: str, move_tasks_to: str = ""):
         if (name in _RESERVED_LANES or name not in self.board_lanes
@@ -738,14 +834,17 @@ class MatrixState:
                 self._emit("task_upsert", **asdict(t))
         self._board_reindex(target)
         self._emit("lanes_update", lanes=list(self.board_lanes))
-        self.save()
+        self._db_save_lanes()
+        for t in self.board_tasks.values():
+            if t.lane == target:
+                self._db_save_task(t)
 
     def board_reorder_lanes(self, lanes: list[str]):
         if set(lanes) != set(self.board_lanes):
             return
         self.board_lanes = lanes
         self._emit("lanes_update", lanes=list(self.board_lanes))
-        self.save()
+        self._db_save_lanes()
 
     def board_unlink_agent(self, agent_id: str):
         """Unlink an agent from all tasks (called when agent is removed)."""
@@ -754,9 +853,8 @@ class MatrixState:
             if t.agent_id == agent_id:
                 t.agent_id = ""
                 self._emit("task_upsert", **asdict(t))
+                self._db_save_task(t)
                 changed = True
-        if changed:
-            self.save()
 
     # -- WebSocket broadcast ------------------------------------------------
 

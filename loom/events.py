@@ -94,7 +94,7 @@ class EventBus:
             agent_sid = d.get("session_id", "")
             if agent_sid and agent_sid != cell.agent_session_id:
                 cell.agent_session_id = agent_sid
-                self._state.save()
+                self._state._db_save_agent(cell)
 
         elif et == "session_end":
             cell.activity = ""

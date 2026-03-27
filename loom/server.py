@@ -151,7 +151,7 @@ async def main(connection: iterm2.Connection):
                 cell.error_message = (
                     "Merge to main failed — merge manually")
                 state._emit_agent(cell)
-                state.save()
+                state._db_save_agent(cell)
             return  # skip auto-checkpoint on merge turn
 
         # Auto-checkpoint
@@ -161,7 +161,7 @@ async def main(connection: iterm2.Connection):
                 msg = _checkpoint_message(cell)
                 sha = await worktree_mgr.checkpoint(cell, message=msg)
                 if sha:
-                    state.save()
+                    state._db_save_agent(cell)
 
     async def _broadcast_toast(message, level="info"):
         """Send a toast notification to all WS clients."""
@@ -474,7 +474,7 @@ async def main(connection: iterm2.Connection):
                             if wt_path:
                                 cell.directory = wt_path
                                 state._emit_agent(cell)
-                                state.save()
+                                state._db_save_agent(cell)
 
                     await bridge.create_session(
                         cell, env_vars=env, shell=shell)
@@ -563,7 +563,7 @@ async def main(connection: iterm2.Connection):
                                 if wt_path:
                                     cell.directory = wt_path
                                     state._emit_agent(cell)
-                                    state.save()
+                                    state._db_save_agent(cell)
 
                         await bridge.create_session(
                             cell, env_vars=env, shell=shell)
@@ -618,7 +618,7 @@ async def main(connection: iterm2.Connection):
                                         p if p.endswith("\r") else p + "\r")
                                     c.status = "running"
                                     state._emit_agent(c)
-                                    state.save()
+                                    state._db_save_agent(c)
                                     await state.broadcast()
                             asyncio.create_task(
                                 _send_after_boot(cell, prompt))
@@ -697,7 +697,7 @@ async def main(connection: iterm2.Connection):
                     await bridge.send_text(cell.session_id, data["text"])
                     cell.status = "running"
                     state._emit_agent(cell)
-                    state.save()
+                    # Ephemeral status — no DB write needed
 
             elif cmd == "broadcast_to_group":
                 for aid in state.groups.get(data["group"], []):
@@ -715,7 +715,7 @@ async def main(connection: iterm2.Connection):
                                 child.session_id, data["text"])
                             child.status = "running"
                             state._emit_agent(child)
-                state.save()
+                # Ephemeral status — no DB write needed
 
             elif cmd == "relaunch_agent":
                 cell = state.agents.get(data["id"])
@@ -745,7 +745,7 @@ async def main(connection: iterm2.Connection):
                                 cell.worktree_repo_root = ""
                                 cell.worktree_base_branch = ""
                                 state._emit_agent(cell)
-                                state.save()
+                                state._db_save_agent(cell)
                         # Create new worktree if enabled and none exists
                         if not cell.worktree_path and gs.git_worktree \
                                 and cell.directory:
@@ -761,7 +761,7 @@ async def main(connection: iterm2.Connection):
                                 if wt_path:
                                     cell.directory = wt_path
                                     state._emit_agent(cell)
-                                    state.save()
+                                    state._db_save_agent(cell)
                     await bridge.create_session(
                         cell, env_vars=env,
                         init_script=init, shell=shell)
@@ -800,7 +800,7 @@ async def main(connection: iterm2.Connection):
                         if wt_path:
                             cell.directory = wt_path
                             state._emit_agent(cell)
-                            state.save()
+                            state._db_save_agent(cell)
                             # Relaunch if requested by the UI
                             if data.get("relaunch"):
                                 if cell.session_id:
@@ -827,7 +827,7 @@ async def main(connection: iterm2.Connection):
                     if repo_root:
                         cell.directory = repo_root
                     state._emit_agent(cell)
-                    state.save()
+                    state._db_save_agent(cell)
                     # Relaunch if requested by the UI
                     if data.get("relaunch") and cell.cell_type == "agent":
                         if cell.session_id:
@@ -848,7 +848,7 @@ async def main(connection: iterm2.Connection):
                     msg = _checkpoint_message(cell)
                     await worktree_mgr.checkpoint(cell, message=msg)
                     state._emit_agent(cell)
-                    state.save()
+                    state._db_save_agent(cell)
 
             elif cmd == "worktree_history":
                 cell = state.agents.get(data.get("id", ""))
@@ -870,7 +870,7 @@ async def main(connection: iterm2.Connection):
                 if cell and cell.worktree_path and sha:
                     await worktree_mgr.rollback(cell, sha)
                     state._emit_agent(cell)
-                    state.save()
+                    state._db_save_agent(cell)
 
             elif cmd == "worktree_merge":
                 cell = state.agents.get(data.get("id", ""))
@@ -904,7 +904,7 @@ async def main(connection: iterm2.Connection):
                         _pending_merges.add(cell.id)
                         cell.status = "running"
                         state._emit_agent(cell)
-                        state.save()
+                        # Ephemeral status — no DB write needed
 
             # -- Board commands (Phase 5) --
             elif cmd == "board_add_task":
@@ -969,16 +969,21 @@ async def main(connection: iterm2.Connection):
                     state.board_panel_open = bool(data["open"])
                     state._emit("ui_update", key="board_panel_open",
                                 value=state.board_panel_open)
+                    state._db_save_ui("board_panel_open",
+                                      state.board_panel_open)
                 if "height" in data:
                     state.board_panel_height = int(data["height"])
                     state._emit("ui_update", key="board_panel_height",
                                 value=state.board_panel_height)
-                state.save()
+                    state._db_save_ui("board_panel_height",
+                                      state.board_panel_height)
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")
                 await keybindings.remove(connection, displaced_bindings)
-                state.save()
+                # Persist all agents (status etc.) before restart
+                for cell in state.agents.values():
+                    state._db_save_agent(cell)
                 os.execv(sys.executable, [sys.executable] + sys.argv)
 
         except Exception as exc:

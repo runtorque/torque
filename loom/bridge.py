@@ -152,7 +152,7 @@ class ITerm2Bridge:
 
         for cell in self.state.agents.values():
             self.state._emit_agent(cell)
-        self.state.save()
+            self.state._db_save_agent(cell)
         stopped = sum(1 for c in self.state.agents.values()
                       if c.status == "stopped")
         log.info("Orphan reconnect: %d re-linked, %d remain stopped",
@@ -173,7 +173,7 @@ class ITerm2Bridge:
                       cell.name)
             cell.status = "error"
             self.state._emit_agent(cell)
-            self.state.save()
+            self.state._db_save_agent(cell)
             return
 
         tab = await window.async_create_tab(profile=cell.profile)
@@ -297,7 +297,7 @@ class ITerm2Bridge:
         await self._resolve_git_info(cell)
 
         self.state._emit_agent(cell)
-        self.state.save()
+        self.state._db_save_agent(cell)
         self._start_prompt_monitor(cell)
         await self.reorder_tabs()
 
@@ -459,7 +459,7 @@ class ITerm2Bridge:
                     if cell.session_id:
                         cell.status = "idle"
                         self.state._emit_agent(cell)
-                        self.state.save()
+                        self.state._db_save_agent(cell)
                         await self.state.broadcast()
         except asyncio.CancelledError:
             raise
@@ -515,7 +515,9 @@ class ITerm2Bridge:
                                          "for '%s' (process: %s)",
                                          adapter.name, cell.name, val)
                         self.state._emit_agent(cell)
-                        self.state.save()
+                        # Only persist if agent_type changed (persistent field)
+                        if val and cell.agent_type:
+                            self.state._db_save_agent(cell)
                         await self.state.broadcast()
             except asyncio.CancelledError:
                 raise
@@ -536,7 +538,7 @@ class ITerm2Bridge:
                                   cell.name, val)
                         await self._resolve_git_info(cell)
                         self.state._emit_agent(cell)
-                        self.state.save()
+                        # Ephemeral fields only — no DB write needed
                         await self.state.broadcast()
             except asyncio.CancelledError:
                 raise
@@ -594,7 +596,7 @@ class ITerm2Bridge:
                             cell.error_message = ""
                             cell.needs_attention = False
                             self.state._emit_agent(cell)
-                            self.state.save()
+                            self.state._db_save_agent(cell)
                             for tasks in (self._prompt_tasks,
                                           self._job_tasks):
                                 task = tasks.pop(cell.id, None)
