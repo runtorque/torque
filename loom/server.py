@@ -920,7 +920,11 @@ async def main(connection: iterm2.Connection):
                             f"main repo is at `{repo}`. If there "
                             f"are merge conflicts, resolve them. "
                             f"Do not delete the worktree branch "
-                            f"after merging.")
+                            f"after merging. Write a clear, "
+                            f"descriptive commit message that "
+                            f"summarizes everything this branch "
+                            f"accomplished — review the full diff "
+                            f"and commit history to inform it.")
                         extra = gs.worktree_merge_instructions.strip()
                         if extra:
                             prompt += " " + extra
@@ -1103,6 +1107,11 @@ async def main(connection: iterm2.Connection):
                                 parts.append(task.context)
                             if task.criteria:
                                 parts.append(task.criteria)
+                            task_ref = task.slug or tid
+                            parts.append(
+                                f"When you are done, run "
+                                f"`loom task move {task_ref} Done` "
+                                f"to mark the task as complete.")
                             prompt = "\n\n".join(parts)
 
                             if prompt:
