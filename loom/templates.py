@@ -217,8 +217,11 @@ class TemplateManager:
             return None
         raw = _migrate_syntax(raw)
 
-        # Parse leniently to get the prompt field
-        tpl = self._parse_lenient(raw) or {}
+        # Parse raw YAML (no Jinja2) to preserve {{ VAR }} placeholders
+        try:
+            tpl = parse_yaml(raw)
+        except Exception:
+            tpl = self._parse_lenient(raw) or {}
         prompt_raw = self._coalesce_prompt(tpl)
         if not prompt_raw:
             return None
