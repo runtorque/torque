@@ -128,12 +128,12 @@ function renderBoard() {
       + ' placeholder="Task description..."'
       + ' onkeydown="boardAddTaskKeydown(event)"'
       + ' onblur="boardCancelAddTask()">';
-    html += '<button class="board-add-tpl-btn" onmousedown="event.preventDefault()" onclick="boardToggleTemplateList()" title="Pick a template">Templates &#9662;</button>';
+    html += '<button class="board-add-tpl-btn" onmousedown="event.preventDefault()" onclick="boardToggleTemplateList()" title="Pick a template">From template &#9662;</button>';
     html += '</div>';
   } else {
-    html += '<div class="board-add-task">';
-    html += '<span onclick="boardStartAddTask()">+ Add task</span>';
-    html += '<button class="board-add-tpl-btn-idle" onclick="event.stopPropagation();boardToggleTemplateList()">Templates &#9662;</button>';
+    html += '<div class="board-add-task" onclick="boardStartAddTask()">';
+    html += '<span>+ Add task</span>';
+    html += '<button class="board-add-tpl-btn-idle" onclick="event.stopPropagation();boardToggleTemplateList()">From template &#9662;</button>';
     html += '</div>';
   }
 
