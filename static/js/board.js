@@ -8,6 +8,7 @@ var _boardFocusedTask = '';
 var _boardAddingTask = false;   // true when inline task input is shown
 var _boardAddingLane = false;
 var _boardTplDropdownWaiting = false;  // waiting for template list for dropdown
+var _boardTplList = null;              // fetched templates shown inline (null = hidden)
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
 var _boardPopover = null;      // {type, lane, rect} for lane settings popover
 var _boardDragId = '';          // card being dragged
@@ -172,12 +173,31 @@ function renderBoard() {
       + ' placeholder="Task description..."'
       + ' onkeydown="boardAddTaskKeydown(event)"'
       + ' onblur="boardCancelAddTask()">';
-    html += '<button class="board-add-tpl-btn" id="board-tpl-btn" onmousedown="event.preventDefault()" onclick="boardShowTemplateDropdown(event)" title="Pick a template">Templates &#9662;</button>';
+    html += '<button class="board-add-tpl-btn" onmousedown="event.preventDefault()" onclick="boardToggleTemplateList()" title="Pick a template">Templates &#9662;</button>';
     html += '</div>';
   } else {
     html += '<div class="board-add-task">';
     html += '<span onclick="boardStartAddTask()">+ Add task</span>';
-    html += '<button class="board-add-tpl-btn-idle" id="board-tpl-btn" onclick="event.stopPropagation();boardShowTemplateDropdown(event)">Templates &#9662;</button>';
+    html += '<button class="board-add-tpl-btn-idle" onclick="event.stopPropagation();boardToggleTemplateList()">Templates &#9662;</button>';
+    html += '</div>';
+  }
+
+  // Inline template list (shown below add-task)
+  if (_boardTplList !== null) {
+    html += '<div class="board-tpl-list">';
+    if (_boardTplList.length === 0) {
+      html += '<div class="board-tpl-empty">No templates found</div>';
+    } else {
+      for (var ti = 0; ti < _boardTplList.length; ti++) {
+        var tpl = _boardTplList[ti];
+        var tplName = esc(tpl.name).replace(/'/g, "\\'");
+        html += '<button class="board-tpl-item" onclick="_boardPickTemplate(\'' + tplName + '\')">';
+        html += '<span class="board-tpl-item-name">' + esc(tpl.name) + '</span>';
+        if (tpl.description) html += '<span class="board-tpl-item-desc">' + esc(tpl.description) + '</span>';
+        html += '</button>';
+      }
+    }
+    html += '<button class="board-tpl-item board-tpl-notemplate" onclick="_boardPickNoTemplate()">No template</button>';
     html += '</div>';
   }
 
@@ -295,12 +315,13 @@ function boardStartAddTask() {
 }
 
 function boardCancelAddTask() {
-  setTimeout(function() { _boardAddingTask = false; renderBoard(); }, 150);
+  setTimeout(function() { _boardAddingTask = false; _boardTplList = null; renderBoard(); }, 150);
 }
 
 function boardAddTaskKeydown(e) {
   if (e.key === 'Escape') {
     _boardAddingTask = false;
+    _boardTplList = null;
     renderBoard();
     return;
   }
@@ -308,6 +329,7 @@ function boardAddTaskKeydown(e) {
     var val = e.target.value.trim();
     if (!val) return;
     _boardAddingTask = false;
+    _boardTplList = null;
     var group = _currentGroup();
     var lane = _boardSelectedLane;
     send({ cmd: 'board_add_task', task: val, group: group, lane: lane });
@@ -315,47 +337,26 @@ function boardAddTaskKeydown(e) {
   }
 }
 
-function boardShowTemplateDropdown(evt) {
-  evt.stopPropagation();
-  _boardTplDropdownWaiting = true;
-  send({ cmd: 'list_templates', group: _currentGroup() });
+function boardToggleTemplateList() {
+  if (_boardTplList !== null) {
+    // Already open — close it
+    _boardTplList = null;
+    renderBoard();
+  } else {
+    // Fetch and show
+    _boardTplDropdownWaiting = true;
+    send({ cmd: 'list_templates', group: _currentGroup() });
+  }
 }
 
 function _boardShowTemplateList(msg) {
   _boardTplDropdownWaiting = false;
-  var templates = msg.templates || [];
-  var btn = document.getElementById('board-tpl-btn');
-  var menu = document.getElementById('ctx-menu');
-  if (!menu) return;
-
-  var html = '';
-  if (templates.length === 0) {
-    html += '<div style="padding:6px 10px;font-size:10px;color:var(--text-dim)">No templates found</div>';
-  } else {
-    for (var i = 0; i < templates.length; i++) {
-      var t = templates[i];
-      var label = esc(t.name);
-      if (t.description) label += ' <span style="color:var(--text-dim)">\u2014 ' + esc(t.description) + '</span>';
-      html += '<button onclick="_boardPickTemplate(\'' + esc(t.name).replace(/'/g, "\\'") + '\')">' + label + '</button>';
-    }
-  }
-  html += '<div class="ctx-sep"></div>';
-  html += '<button onclick="_closeCtxMenu();openAddTask(_boardSelectedLane)">No template</button>';
-
-  menu.innerHTML = html;
-  if (btn) {
-    var rect = btn.getBoundingClientRect();
-    menu.style.top = (rect.bottom + 2) + 'px';
-    menu.style.left = Math.min(rect.left, window.innerWidth - 160) + 'px';
-  } else {
-    menu.style.top = evt.clientY + 'px';
-    menu.style.left = evt.clientX + 'px';
-  }
-  menu.classList.add('open');
+  _boardTplList = msg.templates || [];
+  renderBoard();
 }
 
 function _boardPickTemplate(name) {
-  _closeCtxMenu();
+  _boardTplList = null;
   _boardAddingTask = false;
   // Open the task modal with the template pre-selected
   _taskEditId = null;
@@ -376,6 +377,12 @@ function _boardPickTemplate(name) {
   send({ cmd: 'list_templates', group: _currentGroup() });
   document.getElementById('modal-task').classList.add('visible');
   document.getElementById('task-task-input').focus();
+}
+
+function _boardPickNoTemplate() {
+  _boardTplList = null;
+  _boardAddingTask = false;
+  openAddTask(_boardSelectedLane);
 }
 
 /* ---- Add lane ------------------------------------------------------- */
