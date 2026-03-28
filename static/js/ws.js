@@ -41,7 +41,9 @@ function connect() {
     } else if (msg.type === 'worktree_history') {
       _showWorktreeHistory(msg);
     } else if (msg.type === 'templates') {
-      if (typeof _taskModalWaiting !== 'undefined' && _taskModalWaiting) {
+      if (typeof _boardTplDropdownWaiting !== 'undefined' && _boardTplDropdownWaiting) {
+        _boardShowTemplateList(msg);
+      } else if (typeof _taskModalWaiting !== 'undefined' && _taskModalWaiting) {
         _handleTaskTemplateList(msg);
       } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates') {
         tplEditorReceiveList(msg);

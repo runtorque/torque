@@ -7,6 +7,7 @@ var _boardSelectedLane = '';
 var _boardFocusedTask = '';
 var _boardAddingTask = false;   // true when inline task input is shown
 var _boardAddingLane = false;
+var _boardTplDropdownWaiting = false;  // waiting for template list for dropdown
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
 var _boardPopover = null;      // {type, lane, rect} for lane settings popover
 var _boardDragId = '';          // card being dragged
@@ -171,12 +172,12 @@ function renderBoard() {
       + ' placeholder="Task description..."'
       + ' onkeydown="boardAddTaskKeydown(event)"'
       + ' onblur="boardCancelAddTask()">';
-    html += '<button class="board-add-tpl-btn" onmousedown="event.preventDefault()" onclick="boardAddTaskWithTemplate()" title="Pick a template">&#9662;</button>';
+    html += '<button class="board-add-tpl-btn" id="board-tpl-btn" onmousedown="event.preventDefault()" onclick="boardShowTemplateDropdown(event)" title="Pick a template">Templates &#9662;</button>';
     html += '</div>';
   } else {
     html += '<div class="board-add-task">';
     html += '<span onclick="boardStartAddTask()">+ Add task</span>';
-    html += '<span class="board-add-caret" onclick="event.stopPropagation();boardAddTaskWithTemplate()" title="From template">&#9662;</span>';
+    html += '<button class="board-add-tpl-btn-idle" id="board-tpl-btn" onclick="event.stopPropagation();boardShowTemplateDropdown(event)">Templates &#9662;</button>';
     html += '</div>';
   }
 
@@ -314,9 +315,67 @@ function boardAddTaskKeydown(e) {
   }
 }
 
-function boardAddTaskWithTemplate() {
+function boardShowTemplateDropdown(evt) {
+  evt.stopPropagation();
+  _boardTplDropdownWaiting = true;
+  send({ cmd: 'list_templates', group: _currentGroup() });
+}
+
+function _boardShowTemplateList(msg) {
+  _boardTplDropdownWaiting = false;
+  var templates = msg.templates || [];
+  var btn = document.getElementById('board-tpl-btn');
+  var menu = document.getElementById('ctx-menu');
+  if (!menu) return;
+
+  var html = '';
+  if (templates.length === 0) {
+    html += '<div style="padding:6px 10px;font-size:10px;color:var(--text-dim)">No templates found</div>';
+  } else {
+    for (var i = 0; i < templates.length; i++) {
+      var t = templates[i];
+      var label = esc(t.name);
+      if (t.description) label += ' <span style="color:var(--text-dim)">\u2014 ' + esc(t.description) + '</span>';
+      html += '<button onclick="_boardPickTemplate(\'' + esc(t.name).replace(/'/g, "\\'") + '\')">' + label + '</button>';
+    }
+  }
+  html += '<div class="ctx-sep"></div>';
+  html += '<button onclick="_closeCtxMenu();openAddTask(_boardSelectedLane)">No template</button>';
+
+  menu.innerHTML = html;
+  if (btn) {
+    var rect = btn.getBoundingClientRect();
+    menu.style.top = (rect.bottom + 2) + 'px';
+    menu.style.left = Math.min(rect.left, window.innerWidth - 160) + 'px';
+  } else {
+    menu.style.top = evt.clientY + 'px';
+    menu.style.left = evt.clientX + 'px';
+  }
+  menu.classList.add('open');
+}
+
+function _boardPickTemplate(name) {
+  _closeCtxMenu();
   _boardAddingTask = false;
-  openAddTask(_boardSelectedLane);
+  // Open the task modal with the template pre-selected
+  _taskEditId = null;
+  _taskSelectedTemplate = name;
+  _taskTemplateVars = [];
+  _taskTemplateVarValues = {};
+
+  document.getElementById('task-modal-title').textContent = 'New Task';
+  document.getElementById('task-submit-btn').textContent = 'Create';
+  document.getElementById('task-task-input').value = '';
+  document.getElementById('task-assignee-input').value = '';
+  document.getElementById('task-labels-input').value = '';
+  document.getElementById('task-template-vars').innerHTML = '';
+  _populateTaskGroupSelect(_currentGroup());
+  document.getElementById('modal-task').dataset.lane = _boardSelectedLane || '';
+
+  _taskModalWaiting = true;
+  send({ cmd: 'list_templates', group: _currentGroup() });
+  document.getElementById('modal-task').classList.add('visible');
+  document.getElementById('task-task-input').focus();
 }
 
 /* ---- Add lane ------------------------------------------------------- */
