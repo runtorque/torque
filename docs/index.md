@@ -1,6 +1,6 @@
 # Loom
 
-Loom is a terminal session manager for AI agents. It runs inside iTerm2's Toolbelt sidebar, as a standalone browser window, or both simultaneously.
+Loom is an iTerm2 Toolbelt plugin that lets you manage AI agents and terminal sessions in a visual grid, directly inside your terminal.
 
 ## Why Loom?
 
@@ -16,7 +16,9 @@ When you're done with a task, remove the agent and its terminals are cleaned up 
 
 ## How it works
 
-Loom runs as a Python daemon that communicates with one or more UI clients over a local WebSocket. By default it registers a webview in iTerm2's Toolbelt sidebar, but the same UI can also be opened in any browser at `http://127.0.0.1:18932/` for a wider standalone view. Both clients show the same live state and can send commands simultaneously. The webview shows your groups, agents, and terminals in a compact grid. Clicking an agent focuses its iTerm2 tab. Creating an agent opens a new tab with your configured settings. Everything stays in sync.
+Loom runs as a Python daemon inside iTerm2's scripting infrastructure. It serves a webview UI in the Toolbelt sidebar panel, communicating over a local WebSocket. The webview shows your groups, agents, and terminals in a compact grid. Clicking an agent focuses its iTerm2 tab. Creating an agent opens a new tab with your configured settings. Everything stays in sync.
+
+Loom also supports a standalone mode where the UI runs in a browser window instead of the Toolbelt. This decouples the UI from iTerm2 and is the foundation for future support of other terminal emulators.
 
 ## Quick start
 
@@ -24,8 +26,7 @@ See [Getting Started](getting-started.md) to install and run Loom.
 
 ## Features
 
-- Visual grid of agents and terminals — in the iTerm2 Toolbelt, a browser window, or both
-- Three modes: Toolbelt-only, dual (Toolbelt + browser), standalone (browser only)
+- Visual grid of agents and terminals in the iTerm2 Toolbelt (or standalone browser window)
 - Groups with configurable defaults for directory, profile, shell, environment, and more
 - Per-agent and per-terminal setting overrides
 - Git worktree isolation per agent

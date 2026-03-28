@@ -4,7 +4,7 @@
 
 A group is a container for agents and terminals. It represents a unit of work --- a feature, a project, a bug fix, or any context you want to keep together.
 
-Groups appear as collapsible cards in the Loom UI (Toolbelt panel or standalone window). You can drag them to reorder, right-click for a context menu, or click the gear icon to configure [group settings](group-settings.md).
+Groups appear as collapsible cards in the Toolbelt panel. You can drag them to reorder, right-click for a context menu, or click the gear icon to configure [group settings](group-settings.md).
 
 Groups can be configured to only appear in windows where they have active sessions (see [Pin to active window](group-settings.md#pin-to-active-window)), keeping unrelated work out of sight.
 

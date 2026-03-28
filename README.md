@@ -1,14 +1,10 @@
 # Loom
 
-A terminal session manager for AI agents — runs inside iTerm2's Toolbelt, as a standalone window, or both at the same time.
+An iTerm2 Toolbelt plugin for managing AI agent and terminal sessions in a visual grid.
 
-If you work primarily in the terminal, you know how productive that environment can be. But running multiple AI agents alongside companion terminals quickly turns into tab chaos. Loom gives you a structured way to organize it all: **groups** for context, **agents** for AI sessions, and **child terminals** for supporting tasks. Spin up an agent with its own isolated environment, attach terminals for tests or logs, do your work, and tear it all down when you're done.
+If you work primarily in the terminal, you know how productive that environment can be. But running multiple AI agents alongside companion terminals quickly turns into tab chaos. Loom gives you a structured way to organize it all: **groups** for context, **agents** for AI sessions, and **child terminals** for supporting tasks — all managed from iTerm2's Toolbelt sidebar. Spin up an agent with its own isolated environment, attach terminals for tests or logs, do your work, and tear it all down when you're done.
 
-Loom supports three operating modes:
-
-- **Toolbelt** — embedded in iTerm2's sidebar (the default)
-- **Dual** — Toolbelt + a standalone browser window, both showing live state
-- **Standalone** — browser/desktop window only, no Toolbelt registration
+Loom also supports a **standalone mode** where the UI runs in a browser window instead of the Toolbelt. This is the foundation for supporting other terminal emulators (e.g. Ghostty) in the future.
 
 For full documentation, see the [docs site](docs/).
 
@@ -27,26 +23,24 @@ For full documentation, see the [docs site](docs/).
 
 ## Architecture
 
-A Python daemon and one or more UI clients communicate over a local WebSocket:
+Two components communicate over a local WebSocket:
 
 ```
-┌─────────────────────┐
-│ iTerm2 Toolbelt     │──┐
-│ (WKWebView)         │  │    ┌──────────────────────┐
-└─────────────────────┘  │    │ Python Daemon         │
-                         ├─WS→│ aiohttp server :18932 │
-┌─────────────────────┐  │    │ MatrixState ──► SQLite│
-│ Standalone Window   │──┘    │       │               │
-│ (Browser / Desktop) │       │       ▼               │
-└─────────────────────┘       │ iTerm2 Python API     │
-                              │ (tabs, sessions,      │
-                              │  monitors, profiles)  │
-                              └──────────────────────┘
+┌──────────────────┐         ┌────────────────────────┐
+│   Webview         │  WS     │  Python Daemon          │
+│  (HTML/JS)        │◄───────►│  aiohttp server :18932  │
+│  in Toolbelt      │         │  MatrixState ──► SQLite  │
+│  or Browser       │         │       │                  │
+└──────────────────┘         │       ▼                  │
+                              │  iTerm2 Python API       │
+                              │  (tabs, sessions,        │
+                              │   monitors, profiles)    │
+                              └────────────────────────┘
 ```
 
-**Python daemon** — Long-running process that manages state, runs an aiohttp HTTP + WebSocket server on `127.0.0.1:18932`, and bridges commands to the iTerm2 Python API. In toolbelt mode it also registers the sidebar webview. The terminal backend is abstracted behind a `TerminalAdapter` protocol, designed for future support of other terminals (e.g. Ghostty).
+**Python daemon** — Long-running iTerm2 script. Manages state, runs an aiohttp HTTP + WebSocket server on `127.0.0.1:18932`, registers the Toolbelt webview, and bridges commands to the iTerm2 Python API. The terminal backend is abstracted behind a `TerminalAdapter` protocol, designed for future support of other terminals (e.g. Ghostty).
 
-**Webview UI** — Connects to the daemon via WebSocket, renders the agent grid, sends commands back. No build step, no framework — plain vanilla JS. The same UI works in iTerm2's Toolbelt panel, a browser tab, or both simultaneously. All connected clients receive the same live state.
+**Webview UI** — Loaded by iTerm2's Toolbelt panel. Connects to the daemon via WebSocket, renders the agent grid, sends commands back. No build step, no framework — plain vanilla JS. In standalone mode, the same UI is served to a browser window instead.
 
 ## Prerequisites
 
@@ -69,30 +63,20 @@ make install
 make autolaunch
 ```
 
-### Toolbelt mode (default)
-
 1. **Scripts menu → loom** to start the daemon
 2. **View → Show Toolbelt** (Cmd+Shift+B)
 3. **Toolbelt gear menu → check "Loom"**
 
-### Dual mode (Toolbelt + browser)
+### Standalone mode
 
-With the daemon running (step 1 above), open a standalone window alongside the Toolbelt:
-
-```bash
-make open    # opens http://127.0.0.1:18932/ in your browser
-```
-
-Both the Toolbelt panel and the browser window show the same live state.
-
-### Standalone mode (no Toolbelt)
-
-Run the daemon externally without registering the Toolbelt panel:
+Loom can also run as a standalone browser window instead of the Toolbelt. This exists primarily to support terminal emulators other than iTerm2 in the future.
 
 ```bash
-make standalone    # starts daemon with LOOM_STANDALONE=1
-make open          # open the UI in a browser
+make standalone    # starts daemon with LOOM_STANDALONE=1 (no Toolbelt)
+make open          # opens http://127.0.0.1:18932/ in your browser
 ```
+
+You can also use `make open` alongside the Toolbelt to get the UI in a wider browser window.
 
 ## Usage
 

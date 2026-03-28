@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Loom is a terminal session manager for AI agents. It's a Python daemon (aiohttp server) that communicates with one or more webview UI clients over a local WebSocket. It can run inside iTerm2's Toolbelt sidebar, as a standalone browser/desktop window, or both simultaneously (dual mode). The terminal backend is abstracted behind a `TerminalAdapter` protocol; the current implementation (`ITerm2Adapter` in `bridge.py`) controls iTerm2.
+Loom is an iTerm2 Toolbelt plugin that manages AI agent and terminal sessions in a visual grid. It's a Python daemon (aiohttp server) that communicates with a webview UI over a local WebSocket. The primary UI is iTerm2's Toolbelt sidebar; a standalone browser mode also exists to support other terminal emulators in the future. The terminal backend is abstracted behind a `TerminalAdapter` protocol; the current implementation (`ITerm2Adapter` in `bridge.py`) controls iTerm2.
 
 ## Key commands
 
