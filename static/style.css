@@ -1057,18 +1057,13 @@ textarea:focus { border-color: var(--accent); }
 .board-add-task span { font-size: 10px; color: var(--text-dim); cursor: pointer; }
 .board-add-task-active {
   border-style: solid; border-color: var(--accent); opacity: 1;
-  padding: 0; gap: 0; overflow: hidden;
+  padding: 0; overflow: hidden;
 }
 .board-add-task-active .board-add-input {
-  border: none; border-radius: var(--radius) 0 0 var(--radius);
-  min-height: 26px;
+  border: none; border-radius: var(--radius);
+  min-height: 26px; resize: none;
+  line-height: 1.4;
 }
-.board-add-tpl-btn {
-  background: none; border: none; border-left: 1px solid var(--border);
-  color: var(--text-dim); font-size: 9px; cursor: pointer;
-  padding: 0 7px; min-height: 26px; white-space: nowrap;
-}
-.board-add-tpl-btn:hover { color: var(--accent); background: var(--bg); }
 .board-add-tpl-btn-idle {
   background: none; border: none;
   color: var(--text-dim); font-size: 9px; cursor: pointer;

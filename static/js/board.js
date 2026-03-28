@@ -124,11 +124,11 @@ function renderBoard() {
   // Add task: inline input or button (at top)
   if (_boardAddingTask) {
     html += '<div class="board-add-task board-add-task-active">';
-    html += '<input class="board-add-input" id="board-add-task-input"'
+    html += '<textarea class="board-add-input" id="board-add-task-input" rows="1"'
       + ' placeholder="Task description..."'
       + ' onkeydown="boardAddTaskKeydown(event)"'
-      + ' onblur="boardCancelAddTask()">';
-    html += '<button class="board-add-tpl-btn" onmousedown="event.preventDefault()" onclick="boardToggleTemplateList()" title="Pick a template">From template &#9662;</button>';
+      + ' oninput="boardAddTaskAutoResize(this)"'
+      + ' onblur="boardCancelAddTask()"></textarea>';
     html += '</div>';
   } else {
     html += '<div class="board-add-task" onclick="boardStartAddTask()">';
@@ -331,7 +331,8 @@ function boardAddTaskKeydown(e) {
     renderBoard();
     return;
   }
-  if (e.key === 'Enter') {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
     var val = e.target.value.trim();
     if (!val) return;
     _boardAddingTask = false;
@@ -341,6 +342,11 @@ function boardAddTaskKeydown(e) {
     send({ cmd: 'board_add_task', task: val, group: group, lane: lane });
     renderBoard();
   }
+}
+
+function boardAddTaskAutoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
 }
 
 function _boardCloseTplListHandler(e) {
