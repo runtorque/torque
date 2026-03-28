@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Loom is an iTerm2 Toolbelt plugin that manages AI agent and terminal sessions in a visual grid. It's a Python daemon (aiohttp server) that communicates with a webview UI over a local WebSocket.
+Loom is a terminal session manager for AI agents. It's a Python daemon (aiohttp server) that communicates with one or more webview UI clients over a local WebSocket. It can run inside iTerm2's Toolbelt sidebar, as a standalone browser/desktop window, or both simultaneously (dual mode). The terminal backend is abstracted behind a `TerminalAdapter` protocol; the current implementation (`ITerm2Adapter` in `bridge.py`) controls iTerm2.
 
 ## Key commands
 
@@ -10,21 +10,25 @@ Loom is an iTerm2 Toolbelt plugin that manages AI agent and terminal sessions in
 make deploy     # Stop old instance, install files, then restart from Scripts menu
 make stop       # Kill running instance on port 18932
 make check      # Show Python path, dep status, install status
+make open       # Open standalone UI in default browser (dual mode)
+make standalone # Launch daemon in standalone-only mode (no toolbelt)
 ```
 
 After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
+For dual mode, also run `make open` to get a browser window alongside the toolbelt.
 
 ## Architecture
 
-- **Entry point**: `loom.py` — thin wrapper that anchors paths and calls `iterm2.run_forever(main)`
+- **Entry point**: `loom.py` — thin wrapper that anchors paths and calls `iterm2.run_forever(main, retry=STANDALONE)`. In standalone mode, `retry=True` waits for iTerm2 and reconnects on restart.
 - **Python package** (`loom/`):
-  - `config.py` — env vars, paths (`STATE_FILE`, `DB_FILE`, `WEBVIEW_FILE`, `LOG_FILE`), logging setup
+  - `config.py` — env vars, paths (`STATE_FILE`, `DB_FILE`, `WEBVIEW_FILE`, `LOG_FILE`), mode flags (`STANDALONE`, `BIND_HOST`), logging setup
   - `db.py` — `LoomDB` (SQLite persistence layer, WAL mode, schema with 8 tables: `agents`, `groups`, `group_members`, `group_settings`, `board_tasks`, `board_lanes`, `ui_state`, `global_settings`). Targeted write methods (`save_agent`, `save_board_task`, `save_global_settings`, etc.), `load_all`, `migrate_from_json` (one-time state.json→SQLite migration), `save_all` (bulk write, used only by migration)
   - `state.py` — `AgentCell` dataclass (with `slug` auto-generated from name, `parent_id` for terminal→agent hierarchy), `GroupSettings` dataclass (with `dispatch_lane`), `GlobalSettings` dataclass (app-wide: `default_command`, `filter_by_window`, `focus_new_tabs`, `default_lanes`, `keybindings`), `BoardTask` dataclass (with `slug` auto-generated from task text; task, group, template_name, template_vars, assignee, labels, agent_id, lane, position), `MatrixState` (SQLite persistence via `LoomDB`, `group_slugs` dict, `_children` index, cascade delete, delta WS broadcast, `_slugify`/`_unique_slug` helpers for slug generation). `get_default_command()` resolves boot command priority: global settings → `LOOM_DEFAULT_CMD` env var → `"claude"`. Slugs are unique per resource type (agents+terminals share one namespace, groups another, tasks another). Agent slugs are derived from the agent name (e.g. `my-agent`). Terminal slugs are prefixed with their parent agent's slug using `:` separator (e.g. `my-agent:logs`); standalone terminals use the group slug as prefix. Slugs are regenerated on rename/reparent and cascaded to children when a parent agent is renamed. Reserved lanes (`Backlog`, `In Progress`) are enforced — cannot be renamed or deleted. Delta accumulator (`_emit`, `_delta_ops`, `_seq`) tracks changes per mutation; `broadcast()` sends only deltas, `snapshot_msg()` sends full state on connect/resync.
   - `templates.py` — `TemplateManager` (Jinja2 rendering, variable auto-discovery from AST, lenient/strict parse modes, `render_template` returns flat dict with `prompt`, `group`, `labels`, `worktree`, `terminals` + agent settings, `render_prompt` returns rendered prompt string for dispatch/preview, `validate_prompt` enforces `{{ TASK }}` requirement, `_coalesce_prompt` merges old-format fields into single prompt). Templates use `prompt:` for the main text field. All templates must contain `{{ TASK }}`. Backward compat: old templates with `task:`+`instructions:`+`context:`+`criteria:` are auto-coalesced into `prompt` on load.
-  - `bridge.py` — `ITerm2Bridge` (create/close/focus/update sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection, `on_session_terminated` callback)
+  - `terminal_adapter.py` — `TerminalAdapter` Protocol defining the terminal backend interface. Implemented by `ITerm2Adapter`; designed for future Ghostty adapter.
+  - `bridge.py` — `ITerm2Adapter` (implements `TerminalAdapter`; create/close/focus/update sessions, tab color, per-window tab reorder, PromptMonitor, VariableMonitor for jobName+path, git branch resolution, SessionTerminationMonitor, FocusMonitor for window/session tracking, orphan reconnection, `on_session_terminated` callback)
   - `worktree.py` — `WorktreeManager` (create/remove/validate worktrees, checkpoint/count_commits/list_checkpoints/rollback, diff_summary, is_merged, check_base_advanced, .gitignore management). Worktrees live in `.loom/worktrees/` in the repo root, branches named `loom/{agent-name}-{short-id}`. Merge detection: `is_merged` uses ancestry check (regular merges) then `git merge-tree --write-tree` simulation (squash merges). `check_base_advanced` is a fallback for squash merges with overlapping changes — verifies the base branch advanced and its new commits touch all files the branch changed.
-  - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/events` hook receiver, `/static/*` assets), all command dispatch, periodic worktree diff updater, `render_template` command (renders template for preview), `preview_prompt` command (renders full dispatch prompt for a task), `save_template` / `delete_template` commands (CRUD for template YAML files, scope-aware: project `.loom/templates/` or user `~/.loom/templates/`, validates `{{ TASK }}` on save), `get_global_settings` / `update_global_settings` commands (keybinding changes trigger `keybindings.reinstall()` at runtime), `dispatch_task` command (creates or reuses an agent, links task, moves to dispatch lane — if task has `template_name`, renders template prompt with `{TASK: task.task, **template_vars}`; if template missing, returns `dispatch_template_missing` warning; `force_no_template` flag bypasses; legacy fallback for old tasks with instructions/context/criteria — new agents get 2s boot delay before send; postscript appends `loom ai` reporting instructions), `ai_report` command (single handler for all `loom ai` actions — updates agent cell ephemeral fields + linked board task labels/lane/external_url atomically; actions: done, blocked, pr, merged, error, progress, ready)
+  - `server.py` — `main()`, aiohttp routes (`/` serves webview, `/ws` WebSocket, `/events` hook receiver, `/static/*` assets), conditional toolbelt registration (skipped when `STANDALONE`), configurable bind address (`BIND_HOST`), all command dispatch, periodic worktree diff updater, `render_template` command (renders template for preview), `preview_prompt` command (renders full dispatch prompt for a task), `save_template` / `delete_template` commands (CRUD for template YAML files, scope-aware: project `.loom/templates/` or user `~/.loom/templates/`, validates `{{ TASK }}` on save), `get_global_settings` / `update_global_settings` commands (keybinding changes trigger `keybindings.reinstall()` at runtime), `dispatch_task` command (creates or reuses an agent, links task, moves to dispatch lane — if task has `template_name`, renders template prompt with `{TASK: task.task, **template_vars}`; if template missing, returns `dispatch_template_missing` warning; `force_no_template` flag bypasses; legacy fallback for old tasks with instructions/context/criteria — new agents get 2s boot delay before send; postscript appends `loom ai` reporting instructions), `ai_report` command (single handler for all `loom ai` actions — updates agent cell ephemeral fields + linked board task labels/lane/external_url atomically; actions: done, blocked, pr, merged, error, progress, ready)
   - `events.py` — `EventBus` (throttled broadcast, `on_session_end` callback for auto-checkpoint), `EventLog` (per-cell ring buffer), `health_check` (30s periodic scan)
   - `notifications.py` — `NotificationManager` (macOS notifications via osascript, 5s batching window)
   - `keybindings.py` — global iTerm2 key binding lifecycle (RPC registration, install/remove/reinstall bindings). Default bindings: Cmd+Option+Arrow for cell/agent nav, Cmd+Shift+B for broadcast. Bindings are configurable via global settings (`_ACTION_DEFAULTS` dict, `_resolve_binding_specs` merges overrides). `reinstall()` swaps bindings at runtime when settings change. `get_default_bindings()` exports defaults for the frontend keybinding editor.
@@ -35,7 +39,7 @@ After `make deploy`, always restart from: **iTerm2 → Scripts menu → loom**
     - `gemini_cli.py` — template (process matching only)
     - `generic.py` — fallback (process monitoring only)
 - **Webview** (`webview.html` + `static/`):
-  - `static/style.css` — all styles (dark theme, narrow toolbelt layout)
+  - `static/style.css` — all styles (dark theme, narrow toolbelt layout, responsive breakpoints at 400/600/900px for standalone/dual mode)
   - `static/js/constants.js` — icon maps, process badge map, tab color presets, `getFilterByWindow()` (reads from `state.global_settings`, falls back to `true`), agent type labels
   - `static/js/ws.js` — WebSocket client, shared `state`, auto-reconnect, `selectedAgentId`, `focusedItemId`, `dragInProgress`, tab-focus sync, action messages, delta patching (`_applyDelta`, `_rebuildChildren`, `_expectedSeq` sequence tracking, `resync` on gap)
   - `static/js/render.js` — `render()`, agent cells (three-state status dot: gray/green/red, activity detail, type label, worktree branch badge with diff stats), terminal drawer, FLIP animation, group collapse, per-group window filtering, `_navItems`/`_navAgents` lists for keyboard navigation
@@ -108,6 +112,8 @@ There are no automated tests. To test changes:
 6. Verify SQLite persistence: restart daemon, confirm state survives. Check `loom.db` exists in install dir.
 7. Verify delta sync: open browser devtools → Network → WS tab, confirm messages are `type: "delta"` (not full state) after initial connect.
 8. Verify CLI offline reads: `make stop`, then `loom task list` — should work without daemon running.
+9. Test dual mode: with daemon running from Scripts menu, `make open` → browser window should show same state as toolbelt. Actions in either UI should be reflected in both.
+10. Test standalone mode: `make stop`, then `make standalone` → `make open` → daemon connects to iTerm2 externally, no toolbelt panel registered. Check log for "Standalone mode — toolbelt registration skipped".
 
 ## Install location
 

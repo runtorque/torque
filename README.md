@@ -1,8 +1,14 @@
 # Loom
 
-An iTerm2 Toolbelt plugin for managing AI agent and terminal sessions in a visual grid.
+A terminal session manager for AI agents — runs inside iTerm2's Toolbelt, as a standalone window, or both at the same time.
 
-If you work primarily in the terminal, you know how productive that environment can be. But running multiple AI agents alongside companion terminals quickly turns into tab chaos. Loom gives you a structured way to organize it all: **groups** for context, **agents** for AI sessions, and **child terminals** for supporting tasks — all managed from iTerm2's Toolbelt sidebar. Spin up an agent with its own isolated environment, attach terminals for tests or logs, do your work, and tear it all down when you're done.
+If you work primarily in the terminal, you know how productive that environment can be. But running multiple AI agents alongside companion terminals quickly turns into tab chaos. Loom gives you a structured way to organize it all: **groups** for context, **agents** for AI sessions, and **child terminals** for supporting tasks. Spin up an agent with its own isolated environment, attach terminals for tests or logs, do your work, and tear it all down when you're done.
+
+Loom supports three operating modes:
+
+- **Toolbelt** — embedded in iTerm2's sidebar (the default)
+- **Dual** — Toolbelt + a standalone browser window, both showing live state
+- **Standalone** — browser/desktop window only, no Toolbelt registration
 
 For full documentation, see the [docs site](docs/).
 
@@ -21,25 +27,26 @@ For full documentation, see the [docs site](docs/).
 
 ## Architecture
 
-Two components communicate over a local WebSocket:
+A Python daemon and one or more UI clients communicate over a local WebSocket:
 
 ```
-┌──────────────┐         ┌────────────────────────┐
-│   Webview     │  WS     │  Python Daemon          │
-│  (HTML/JS)    │◄───────►│  loom/          │
-│  in Toolbelt  │ :18932  │                         │
-└──────────────┘         │  MatrixState ──► JSON   │
-                          │       │                  │
-                          │       ▼                  │
-                          │  iTerm2 Python API       │
-                          │  (tabs, sessions,        │
-                          │   monitors, profiles)    │
-                          └────────────────────────┘
+┌─────────────────────┐
+│ iTerm2 Toolbelt     │──┐
+│ (WKWebView)         │  │    ┌──────────────────────┐
+└─────────────────────┘  │    │ Python Daemon         │
+                         ├─WS→│ aiohttp server :18932 │
+┌─────────────────────┐  │    │ MatrixState ──► SQLite│
+│ Standalone Window   │──┘    │       │               │
+│ (Browser / Desktop) │       │       ▼               │
+└─────────────────────┘       │ iTerm2 Python API     │
+                              │ (tabs, sessions,      │
+                              │  monitors, profiles)  │
+                              └──────────────────────┘
 ```
 
-**Python daemon** — Long-running iTerm2 script. Manages state, runs an aiohttp HTTP + WebSocket server on `127.0.0.1:18932`, registers the Toolbelt webview, and bridges commands to the iTerm2 Python API.
+**Python daemon** — Long-running process that manages state, runs an aiohttp HTTP + WebSocket server on `127.0.0.1:18932`, and bridges commands to the iTerm2 Python API. In toolbelt mode it also registers the sidebar webview. The terminal backend is abstracted behind a `TerminalAdapter` protocol, designed for future support of other terminals (e.g. Ghostty).
 
-**Webview UI** — Loaded by iTerm2's Toolbelt panel. Connects to the daemon via WebSocket, renders the agent grid, sends commands back. No build step, no framework — plain vanilla JS.
+**Webview UI** — Connects to the daemon via WebSocket, renders the agent grid, sends commands back. No build step, no framework — plain vanilla JS. The same UI works in iTerm2's Toolbelt panel, a browser tab, or both simultaneously. All connected clients receive the same live state.
 
 ## Prerequisites
 
@@ -62,11 +69,30 @@ make install
 make autolaunch
 ```
 
-Then:
+### Toolbelt mode (default)
 
-1. **Scripts menu → loom** to start
+1. **Scripts menu → loom** to start the daemon
 2. **View → Show Toolbelt** (Cmd+Shift+B)
 3. **Toolbelt gear menu → check "Loom"**
+
+### Dual mode (Toolbelt + browser)
+
+With the daemon running (step 1 above), open a standalone window alongside the Toolbelt:
+
+```bash
+make open    # opens http://127.0.0.1:18932/ in your browser
+```
+
+Both the Toolbelt panel and the browser window show the same live state.
+
+### Standalone mode (no Toolbelt)
+
+Run the daemon externally without registering the Toolbelt panel:
+
+```bash
+make standalone    # starts daemon with LOOM_STANDALONE=1
+make open          # open the UI in a browser
+```
 
 ## Usage
 
@@ -101,6 +127,8 @@ Click **↻** in the header to restart the daemon in-place. State is preserved; 
 |---|---|---|
 | `LOOM_PORT` | `18932` | HTTP + WebSocket server port |
 | `LOOM_DEFAULT_CMD` | `claude` | Default boot command for new agents |
+| `LOOM_STANDALONE` | (unset) | Set to `1` to skip Toolbelt registration (standalone mode) |
+| `LOOM_BIND_ALL` | (unset) | Set to `1` to bind to `0.0.0.0` instead of `127.0.0.1` |
 
 ## Make targets
 
@@ -113,6 +141,8 @@ Click **↻** in the header to restart the daemon in-place. State is preserved; 
 | `make uninstall` | Remove installed files and autolaunch symlink |
 | `make deps` | Install `aiohttp` into iTerm2's Python |
 | `make run` | Launch directly via iTerm2's Python |
+| `make standalone` | Launch in standalone mode (no Toolbelt) |
+| `make open` | Open the UI in the default browser |
 | `make check` | Print diagnostics (Python path, deps, install status) |
 
 ## File structure
@@ -120,14 +150,15 @@ Click **↻** in the header to restart the daemon in-place. State is preserved; 
 ```
 loom.py              # Entry point (anchors paths, boots daemon)
 loom/
-  config.py                  # Env vars, paths, logging setup
+  config.py                  # Env vars, paths, mode flags, logging setup
+  terminal_adapter.py        # TerminalAdapter protocol (backend abstraction)
   state.py                   # AgentCell, GroupSettings, MatrixState persistence
-  bridge.py                  # iTerm2 bridge (sessions, monitors, worktrees)
+  bridge.py                  # ITerm2Adapter (sessions, monitors, worktrees)
   server.py                  # aiohttp server, WebSocket command handler
   keybindings.py             # Global iTerm2 key binding lifecycle
-webview.html                 # Toolbelt UI shell (loads CSS + JS)
+webview.html                 # UI shell (loads CSS + JS)
 static/
-  style.css                  # Dark theme styles
+  style.css                  # Dark theme styles + responsive breakpoints
   js/
     constants.js             # Icon maps, process badges, color presets
     ws.js                    # WebSocket client, auto-reconnect
@@ -136,11 +167,11 @@ static/
     modals.js                # Add/edit/settings dialogs, color picker, tooltips
     main.js                  # Keyboard bindings, boot
 docs/                        # mkdocs documentation
-Makefile                     # Install, deploy, stop, check targets
+Makefile                     # Install, deploy, stop, standalone, open targets
 ```
 
 Auto-generated at runtime (in the install directory, not in the repo):
-- `state.json` — persisted groups and agents
+- `loom.db` — SQLite state database
 - `loom.log` — debug log
 
 ## Troubleshooting

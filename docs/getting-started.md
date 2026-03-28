@@ -28,12 +28,37 @@ make install
 
 ## Running
 
+Loom supports three modes. Pick the one that fits your workflow:
+
+### Toolbelt mode (default)
+
 1. Open iTerm2
 2. Go to **Scripts** menu and click **loom**
 3. Open the Toolbelt: **View > Show Toolbelt** (++cmd+shift+b++)
 4. In the Toolbelt gear menu, check **Loom**
 
 The Loom panel appears in the Toolbelt sidebar.
+
+### Dual mode (Toolbelt + standalone window)
+
+With the daemon running (step 2 above), open a standalone browser window:
+
+```bash
+make open
+```
+
+Both the Toolbelt panel and the browser show the same live state. Actions in either UI are reflected in both.
+
+### Standalone mode (no Toolbelt)
+
+Run the daemon externally, without registering the Toolbelt panel:
+
+```bash
+make standalone
+make open
+```
+
+This is useful for wider layouts or if you prefer the UI in a separate window.
 
 ## CLI
 
