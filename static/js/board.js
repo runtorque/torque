@@ -6,6 +6,7 @@
 var _boardSelectedLane = '';
 var _boardFocusedTask = '';
 var _boardAddingTask = false;   // true when inline task input is shown
+var _boardAddingTaskDraft = '';  // preserved text across blur/reopen
 var _boardAddingLane = false;
 var _boardTplDropdownWaiting = false;  // waiting for template list for dropdown
 var _boardTplList = null;              // fetched templates shown inline (null = hidden)
@@ -128,7 +129,7 @@ function renderBoard() {
       + ' placeholder="Task description..."'
       + ' onkeydown="boardAddTaskKeydown(event)"'
       + ' oninput="boardAddTaskAutoResize(this)"'
-      + ' onblur="boardCancelAddTask()"></textarea>';
+      + ' onblur="boardCancelAddTask()">' + esc(_boardAddingTaskDraft) + '</textarea>';
     html += '</div>';
   } else {
     html += '<div class="board-add-task" onclick="boardStartAddTask()">';
@@ -213,7 +214,12 @@ function renderBoard() {
   // Auto-focus inputs
   if (_boardAddingTask) {
     var tInp = document.getElementById('board-add-task-input');
-    if (tInp) tInp.focus();
+    if (tInp) {
+      boardAddTaskAutoResize(tInp);
+      tInp.focus();
+      // Place cursor at end
+      tInp.selectionStart = tInp.selectionEnd = tInp.value.length;
+    }
   } else if (_boardAddingLane) {
     var inp2 = document.getElementById('board-add-lane-input');
     if (inp2) inp2.focus();
@@ -321,12 +327,15 @@ function boardStartAddTask() {
 }
 
 function boardCancelAddTask() {
+  var el = document.getElementById('board-add-task-input');
+  if (el) _boardAddingTaskDraft = el.value;
   setTimeout(function() { _boardAddingTask = false; _boardTplList = null; renderBoard(); }, 150);
 }
 
 function boardAddTaskKeydown(e) {
   if (e.key === 'Escape') {
     _boardAddingTask = false;
+    _boardAddingTaskDraft = '';
     _boardTplList = null;
     renderBoard();
     return;
@@ -336,6 +345,7 @@ function boardAddTaskKeydown(e) {
     var val = e.target.value.trim();
     if (!val) return;
     _boardAddingTask = false;
+    _boardAddingTaskDraft = '';
     _boardTplList = null;
     var group = _currentGroup();
     var lane = _boardSelectedLane;
