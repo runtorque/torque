@@ -431,6 +431,7 @@ function boardLaneContextMenu(evt, lane) {
   menu.style.top = evt.clientY + 'px';
   menu.style.left = Math.min(evt.clientX, window.innerWidth - 140) + 'px';
   menu.classList.add('open');
+  _adjustCtxMenuOverflow();
 }
 
 /* ---- Lane settings popover ------------------------------------------ */
@@ -572,6 +573,7 @@ function boardCardMenu(evt, taskId) {
   menu.style.top = evt.clientY + 'px';
   menu.style.left = Math.min(evt.clientX, window.innerWidth - 140) + 'px';
   menu.classList.add('open');
+  _adjustCtxMenuOverflow();
 }
 
 /* ---- Card actions --------------------------------------------------- */
@@ -635,6 +637,7 @@ function boardLinkAgent(taskId) {
 
   menu.innerHTML = html;
   menu.classList.add('open');
+  _adjustCtxMenuOverflow();
 }
 
 function boardDoLinkAgent(taskId, agentId) {
@@ -670,6 +673,7 @@ function boardDispatchTask(taskId) {
 
   menu.innerHTML = html;
   menu.classList.add('open');
+  _adjustCtxMenuOverflow();
 }
 
 function boardDispatchToNew(taskId) {
@@ -702,6 +706,18 @@ function _handleDispatchTemplateMissing(msg) {
       }
       send(cmd);
     }
+  });
+}
+
+function _adjustCtxMenuOverflow() {
+  var menu = document.getElementById('ctx-menu');
+  if (!menu) return;
+  requestAnimationFrame(function() {
+    var rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth)
+      menu.style.left = Math.max(0, window.innerWidth - rect.width - 4) + 'px';
+    if (rect.bottom > window.innerHeight)
+      menu.style.top = Math.max(0, window.innerHeight - rect.height - 4) + 'px';
   });
 }
 
