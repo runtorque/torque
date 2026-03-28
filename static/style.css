@@ -972,6 +972,7 @@ textarea:focus { border-color: var(--accent); }
   padding: 6px 8px;
   display: flex; flex-direction: column; gap: 4px;
 }
+.board-cards > * { flex-shrink: 0; }
 .board-card {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px;
