@@ -184,6 +184,48 @@ class TemplateManager:
     GLOBAL_TEMPLATES_DIR = os.path.expanduser("~/.loom/templates")
 
     @staticmethod
+    def _coalesce_prompt(tpl: dict) -> str:
+        """Build a unified prompt from old-format or new-format fields.
+
+        New format: ``prompt`` key.
+        Old format: ``task`` + ``instructions`` + ``context`` + ``criteria``.
+        """
+        prompt = tpl.get("prompt", "")
+        if prompt:
+            return prompt
+        parts = []
+        for key in ("task", "instructions", "context", "criteria"):
+            val = tpl.get(key, "")
+            if val:
+                parts.append(val.rstrip())
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def validate_prompt(prompt: str) -> bool:
+        """Check that the prompt contains ``{{ TASK }}``."""
+        return bool(re.search(r'\{\{\s*TASK\s*(\|[^}]*)?\}\}', prompt))
+
+    def render_prompt(self, name: str, variables: dict,
+                      base_dir: str = "") -> str | None:
+        """Render only the template's prompt field with variables.
+
+        Returns the rendered prompt string, or None if the template is
+        not found.  Used by dispatch and preview.
+        """
+        raw = self._load_raw(name, base_dir)
+        if raw is None:
+            return None
+        raw = _migrate_syntax(raw)
+
+        # Parse leniently to get the prompt field
+        tpl = self._parse_lenient(raw) or {}
+        prompt_raw = self._coalesce_prompt(tpl)
+        if not prompt_raw:
+            return None
+
+        return self._render_str(prompt_raw, variables)
+
+    @staticmethod
     def find_templates_dirs(base_dir: str = "") -> list[str]:
         """Return template directories in priority order.
 
@@ -335,8 +377,7 @@ class TemplateManager:
 
         Returns a flat dict with resolved agent settings:
         {name, command, directory, profile, shell, tab_color, env_vars,
-         task, group, instructions, context, criteria, labels,
-         worktree, terminals}
+         prompt, group, labels, worktree, terminals}
         """
         if isinstance(tpl_or_name, str) and "\n" not in tpl_or_name:
             # It's a template name, load raw
@@ -371,8 +412,8 @@ class TemplateManager:
 
         agent = tpl.get("agent", {}) if isinstance(tpl, dict) else {}
 
-        # Backward compat: old templates use "prompt", new ones use "task"
-        task = tpl.get("task", "") or tpl.get("prompt", "")
+        # Coalesce prompt from new or old format
+        prompt = self._coalesce_prompt(tpl)
 
         return {
             "name": agent.get("name_prefix", tpl.get("name", "agent")),
@@ -382,11 +423,8 @@ class TemplateManager:
             "shell": agent.get("shell", ""),
             "tab_color": agent.get("tab_color", ""),
             "env_vars": agent.get("env_vars", {}),
-            "task": task,
+            "prompt": prompt,
             "group": tpl.get("group", ""),
-            "instructions": tpl.get("instructions", ""),
-            "context": tpl.get("context", ""),
-            "criteria": tpl.get("criteria", ""),
             "labels": tpl.get("labels", []),
             "worktree": tpl.get("worktree", None),
             "terminals": tpl.get("terminals", []),
@@ -441,8 +479,8 @@ class TemplateManager:
     def _render_dict_fields(self, tpl: dict, variables: dict) -> dict:
         """Legacy: render individual fields of a parsed template dict."""
         agent = tpl.get("agent", {})
-        # Backward compat: old templates use "prompt", new ones use "task"
-        task_raw = tpl.get("task", "") or tpl.get("prompt", "{{ TASK }}")
+        # Coalesce prompt from new or old format
+        prompt_raw = self._coalesce_prompt(tpl) or "{{ TASK }}"
         return {
             "name": self._render_str(
                 agent.get("name_prefix", tpl.get("name", "agent")),
@@ -455,14 +493,8 @@ class TemplateManager:
             "tab_color": agent.get("tab_color", ""),
             "env_vars": {k: self._render_str(str(v or ""), variables)
                          for k, v in (agent.get("env_vars") or {}).items()},
-            "task": self._render_str(task_raw, variables),
+            "prompt": self._render_str(prompt_raw, variables),
             "group": self._render_str(tpl.get("group", ""), variables),
-            "instructions": self._render_str(
-                tpl.get("instructions", ""), variables),
-            "context": self._render_str(
-                tpl.get("context", ""), variables),
-            "criteria": self._render_str(
-                tpl.get("criteria", ""), variables),
             "labels": tpl.get("labels", []),
             "worktree": tpl.get("worktree", None),
             "terminals": tpl.get("terminals", []),

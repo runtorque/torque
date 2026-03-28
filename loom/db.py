@@ -137,23 +137,25 @@ CREATE TABLE IF NOT EXISTS group_settings (
 );
 
 CREATE TABLE IF NOT EXISTS board_tasks (
-    id           TEXT PRIMARY KEY,
-    task         TEXT NOT NULL,
-    slug         TEXT NOT NULL DEFAULT '',
-    group_name   TEXT NOT NULL DEFAULT '',
-    instructions TEXT NOT NULL DEFAULT '',
-    context      TEXT NOT NULL DEFAULT '',
-    criteria     TEXT NOT NULL DEFAULT '',
-    lane         TEXT NOT NULL DEFAULT 'Backlog',
-    position     INTEGER NOT NULL DEFAULT 0,
-    assignee     TEXT NOT NULL DEFAULT '',
-    agent_id     TEXT NOT NULL DEFAULT '',
-    labels       TEXT NOT NULL DEFAULT '[]',
-    created_at   TEXT NOT NULL DEFAULT '',
-    updated_at   TEXT NOT NULL DEFAULT '',
-    provider     TEXT NOT NULL DEFAULT '',
-    external_id  TEXT NOT NULL DEFAULT '',
-    external_url TEXT NOT NULL DEFAULT ''
+    id             TEXT PRIMARY KEY,
+    task           TEXT NOT NULL,
+    slug           TEXT NOT NULL DEFAULT '',
+    group_name     TEXT NOT NULL DEFAULT '',
+    template_name  TEXT NOT NULL DEFAULT '',
+    template_vars  TEXT NOT NULL DEFAULT '{}',
+    instructions   TEXT NOT NULL DEFAULT '',
+    context        TEXT NOT NULL DEFAULT '',
+    criteria       TEXT NOT NULL DEFAULT '',
+    lane           TEXT NOT NULL DEFAULT 'Backlog',
+    position       INTEGER NOT NULL DEFAULT 0,
+    assignee       TEXT NOT NULL DEFAULT '',
+    agent_id       TEXT NOT NULL DEFAULT '',
+    labels         TEXT NOT NULL DEFAULT '[]',
+    created_at     TEXT NOT NULL DEFAULT '',
+    updated_at     TEXT NOT NULL DEFAULT '',
+    provider       TEXT NOT NULL DEFAULT '',
+    external_id    TEXT NOT NULL DEFAULT '',
+    external_url   TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS board_lanes (
@@ -214,6 +216,17 @@ class LoomDB:
                 "ALTER TABLE group_settings ADD COLUMN "
                 "terminal_close_on_disconnect INTEGER NOT NULL DEFAULT 0")
             self._conn.commit()
+        # Migrate: add template_name and template_vars columns to board_tasks
+        for col, default in [("template_name", "''"),
+                             ("template_vars", "'{}'")]:
+            try:
+                self._conn.execute(
+                    f"SELECT {col} FROM board_tasks LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE board_tasks ADD COLUMN {col} "
+                    f"TEXT NOT NULL DEFAULT {default}")
+                self._conn.commit()
         # Set schema version if not present
         row = self._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
@@ -319,17 +332,21 @@ class LoomDB:
         """Upsert a board task."""
         d = asdict(task)
         labels = json.dumps(d.pop("labels", []))
+        template_vars = json.dumps(d.pop("template_vars", {}))
         # Map 'group' to 'group_name' for the DB column
         group_name = d.pop("group", "")
         self._conn.execute("""
             INSERT OR REPLACE INTO board_tasks
-                (id, task, slug, group_name, instructions, context, criteria,
+                (id, task, slug, group_name, template_name, template_vars,
+                 instructions, context, criteria,
                  lane, position, assignee, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
-            d["id"], d["task"], d["slug"], group_name, d["instructions"],
-            d["context"], d["criteria"], d["lane"], d["position"],
+            d["id"], d["task"], d["slug"], group_name,
+            d.get("template_name", ""), template_vars,
+            d["instructions"], d["context"], d["criteria"],
+            d["lane"], d["position"],
             d["assignee"], d["agent_id"], labels, d["created_at"],
             d["updated_at"], d["provider"], d["external_id"],
             d["external_url"],
@@ -452,17 +469,20 @@ class LoomDB:
             for tid, t in state_dict.get("board_tasks", {}).items():
                 d = dict(t) if isinstance(t, dict) else asdict(t)
                 labels = json.dumps(d.pop("labels", []))
+                template_vars = json.dumps(d.pop("template_vars", {}))
                 group_name = d.pop("group", "")
                 c.execute("""
                     INSERT INTO board_tasks
-                        (id, task, slug, group_name, instructions, context,
+                        (id, task, slug, group_name, template_name,
+                         template_vars, instructions, context,
                          criteria, lane, position, assignee, agent_id, labels,
                          created_at, updated_at, provider, external_id,
                          external_url)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""), d.get("slug", ""),
-                    group_name, d.get("instructions", ""),
+                    group_name, d.get("template_name", ""), template_vars,
+                    d.get("instructions", ""),
                     d.get("context", ""), d.get("criteria", ""),
                     d.get("lane", "Backlog"), d.get("position", 0),
                     d.get("assignee", ""), d.get("agent_id", ""), labels,
@@ -558,6 +578,12 @@ class LoomDB:
                     d["labels"] = json.loads(d.get("labels", "[]"))
                 except (json.JSONDecodeError, TypeError):
                     d["labels"] = []
+                # Decode template_vars JSON
+                try:
+                    d["template_vars"] = json.loads(
+                        d.get("template_vars", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    d["template_vars"] = {}
                 board_tasks[d["id"]] = d
 
         # UI state

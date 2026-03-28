@@ -41,7 +41,9 @@ function connect() {
     } else if (msg.type === 'worktree_history') {
       _showWorktreeHistory(msg);
     } else if (msg.type === 'templates') {
-      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates') {
+      if (typeof _taskModalWaiting !== 'undefined' && _taskModalWaiting) {
+        _handleTaskTemplateList(msg);
+      } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates') {
         tplEditorReceiveList(msg);
       } else {
         _showTemplateList(msg);
@@ -54,6 +56,10 @@ function connect() {
       }
     } else if (msg.type === 'template_rendered') {
       _handleTemplateRendered(msg);
+    } else if (msg.type === 'prompt_preview') {
+      _showPromptPreview(msg);
+    } else if (msg.type === 'dispatch_template_missing') {
+      _handleDispatchTemplateMissing(msg);
     } else if (msg.type === 'global_settings') {
       _showGlobalSettingsModal(msg);
     } else if (msg.type === 'action') {

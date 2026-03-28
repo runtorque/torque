@@ -145,6 +145,7 @@ function renderBoard() {
     var meta = '';
     if (t.group) meta += '<span class="board-card-group">' + esc(t.group) + '</span>';
     if (t.assignee) meta += '<span class="board-card-assignee">' + esc(t.assignee) + '</span>';
+    if (t.template_name) meta += '<span class="board-card-label board-card-template">' + esc(t.template_name) + '</span>';
     if (t.labels && t.labels.length) {
       for (var li = 0; li < t.labels.length; li++) {
         meta += '<span class="board-card-label">' + esc(t.labels[li]) + '</span>';
@@ -470,6 +471,9 @@ function boardCardMenu(evt, taskId) {
     html += '<button onclick="event.stopPropagation();boardLinkAgent(\'' + taskId + '\')">Link agent...</button>';
   }
 
+  // Preview prompt
+  html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
+
   html += '<div class="ctx-sep"></div>';
   html += '<button class="danger" onclick="boardDeleteTask(\'' + taskId + '\')">Delete</button>';
 
@@ -585,6 +589,29 @@ function boardDispatchToNew(taskId) {
 function boardDispatchToExisting(taskId, agentId) {
   _closeCtxMenu();
   send({ cmd: 'dispatch_task', id: taskId, agent_id: agentId });
+}
+
+function boardPreviewPrompt(taskId) {
+  _closeCtxMenu();
+  send({ cmd: 'preview_prompt', id: taskId });
+}
+
+function _handleDispatchTemplateMissing(msg) {
+  var taskId = msg.task_id;
+  var tplName = msg.template_name || '(unknown)';
+  showConfirm('Template "' + tplName + '" not found.\nDispatch without template?').then(function(yes) {
+    if (yes) {
+      // Task is already linked to an agent — re-dispatch to the same agent
+      var t = (state && state.board_tasks || {})[taskId];
+      var cmd = { cmd: 'dispatch_task', id: taskId, force_no_template: true };
+      if (t && t.agent_id) {
+        cmd.agent_id = t.agent_id;
+      } else {
+        cmd.create_agent = true;
+      }
+      send(cmd);
+    }
+  });
 }
 
 function _closeCtxMenu() {

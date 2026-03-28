@@ -1325,6 +1325,16 @@ def cmd_task_create(args):
         kwargs["assignee"] = args.assign
     if args.labels:
         kwargs["labels"] = [l.strip() for l in args.labels.split(",") if l.strip()]
+    if getattr(args, "template", None):
+        kwargs["template_name"] = args.template
+    if getattr(args, "var", None):
+        tvars = {}
+        for kv in args.var:
+            k, _, v = kv.partition("=")
+            if k:
+                tvars[k] = v
+        if tvars:
+            kwargs["template_vars"] = tvars
 
     resp = api_call("board_add_task", port=args.port, **kwargs)
     check_ok(resp)
@@ -1363,6 +1373,12 @@ def cmd_task_dispatch(args):
     if args.labels:
         ticket_kwargs["labels"] = [l.strip() for l in args.labels.split(",")
                                    if l.strip()]
+    if args.template:
+        ticket_kwargs["template_name"] = args.template
+        # Store non-TASK variables as template_vars
+        tvars = {k: v for k, v in variables.items() if k != "TASK"}
+        if tvars:
+            ticket_kwargs["template_vars"] = tvars
 
     # -- Launch the agent --
     if args.template:
@@ -1475,6 +1491,16 @@ def cmd_task_show(args):
     if t.get("labels"):
         print(f"  {'Labels:':<14} {', '.join(t['labels'])}")
 
+    if t.get("template_name"):
+        print(f"  {'Template:':<14} {t['template_name']}")
+    if t.get("template_vars"):
+        tvars = t["template_vars"]
+        if isinstance(tvars, dict) and tvars:
+            print(f"  {'Variables:':<14}")
+            for k, v in tvars.items():
+                print(f"    {k}: {v}")
+
+    # Backward compat: show legacy fields if present on old tasks
     for field, label in [("instructions", "Instructions"),
                          ("context", "Context"),
                          ("criteria", "Criteria")]:
@@ -1574,7 +1600,7 @@ def _filter_tasks(tasks, args):
 
 _TASK_EDIT_FIELDS = [
     "task", "lane", "group", "assignee", "labels",
-    "instructions", "context", "criteria",
+    "template_name", "template_vars",
 ]
 
 _TASK_EDIT_COMMENT = """\
@@ -1593,6 +1619,8 @@ def _task_to_yaml(t):
         val = t.get(key, "")
         if key == "labels":
             doc[key] = val if isinstance(val, list) else []
+        elif key == "template_vars":
+            doc[key] = val if isinstance(val, dict) else {}
         else:
             doc[key] = val or ""
     comment = _TASK_EDIT_COMMENT.format(id=t["id"])
@@ -1621,10 +1649,14 @@ def _yaml_to_fields(text, original):
         if key not in doc:
             continue
         new_val = doc[key]
-        old_val = original.get(key, "" if key != "labels" else [])
+        old_val = original.get(key, "" if key not in ("labels", "template_vars") else ([] if key == "labels" else {}))
         if key == "labels":
             new_val = new_val if isinstance(new_val, list) else []
             if new_val != old_val:
+                fields[key] = new_val
+        elif key == "template_vars":
+            new_val = new_val if isinstance(new_val, dict) else {}
+            if new_val != (old_val or {}):
                 fields[key] = new_val
         else:
             new_val = str(new_val) if new_val is not None else ""
@@ -1660,21 +1692,23 @@ def cmd_task_edit(args):
     # Check if any inline flags were provided
     has_flags = any(
         getattr(args, attr, None) is not None
-        for attr in ("task", "instructions", "context", "criteria",
-                     "assign", "labels", "group")
-    )
+        for attr in ("task", "template", "assign", "labels", "group")
+    ) or getattr(args, "var", None)
 
     if has_flags:
         # Inline flag mode (non-interactive)
         fields = {}
         if args.task is not None:
             fields["task"] = args.task
-        if args.instructions is not None:
-            fields["instructions"] = args.instructions
-        if args.context is not None:
-            fields["context"] = args.context
-        if args.criteria is not None:
-            fields["criteria"] = args.criteria
+        if getattr(args, "template", None) is not None:
+            fields["template_name"] = args.template
+        if getattr(args, "var", None):
+            tvars = {}
+            for kv in args.var:
+                k, _, v = kv.partition("=")
+                if k:
+                    tvars[k] = v
+            fields["template_vars"] = tvars
         if args.assign is not None:
             fields["assignee"] = args.assign
         if args.labels is not None:
@@ -2160,6 +2194,9 @@ def build_parser():
                    help="Target group (auto-detected if in a Loom session)")
     p.add_argument("-a", "--assign", metavar="PREFIX",
                    help="Assign to agent name prefix (e.g. 'frontend')")
+    p.add_argument("-t", "--template", help="Template name to attach")
+    p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
+                   help="Template variables (e.g., -v CONTEXT='some info')")
     p.add_argument("-l", "--labels", help="Comma-separated labels")
     p.set_defaults(func=cmd_task_create)
 
@@ -2199,9 +2236,9 @@ def build_parser():
                            help="Edit task fields")
     p.add_argument("identifier", help="Task ID, slug, or title")
     p.add_argument("-t", "--task", help="New task description")
-    p.add_argument("-i", "--instructions", help="Instructions text")
-    p.add_argument("-x", "--context", help="Context text")
-    p.add_argument("-k", "--criteria", help="Acceptance criteria")
+    p.add_argument("--template", help="Set or change template")
+    p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
+                   help="Set template variables")
     p.add_argument("-a", "--assign", help="Assignee prefix")
     p.add_argument("-l", "--labels", help="Comma-separated labels")
     p.add_argument("-g", "--group", help="Move to different group")

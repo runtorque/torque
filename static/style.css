@@ -1020,6 +1020,10 @@ textarea:focus { border-color: var(--accent); }
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-radius: 3px; padding: 0 4px; line-height: 14px;
 }
+.board-card-template {
+  color: var(--fg-dim); font-style: italic;
+  background: color-mix(in srgb, var(--fg-dim) 12%, transparent);
+}
 .board-card-agent {
   font-size: 9px; color: var(--accent);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

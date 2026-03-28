@@ -741,14 +741,26 @@ function _tplSubmit() {
   }
 
   if (_tplMode === 'task') {
-    // Render template and pre-fill the task modal
-    send({
-      cmd: 'render_template',
-      name: _tplName,
-      group: _tplGroup,
-      vars,
-    });
+    // Open the task modal with this template pre-selected
+    // TASK var goes into the task text field; other vars become template_vars
     closeModals();
+    _taskEditId = null;
+    _taskSelectedTemplate = _tplName;
+    _taskTemplateVarValues = {};
+    for (var vk in vars) {
+      if (vk !== 'TASK') _taskTemplateVarValues[vk] = vars[vk];
+    }
+    document.getElementById('task-modal-title').textContent = 'New Task';
+    document.getElementById('task-submit-btn').textContent = 'Create';
+    document.getElementById('task-task-input').value = vars['TASK'] || '';
+    document.getElementById('task-assignee-input').value = '';
+    document.getElementById('task-labels-input').value = '';
+    _populateTaskGroupSelect(_tplGroup || _currentGroup());
+    document.getElementById('modal-task').dataset.lane = _tplTaskLane || '';
+    _taskModalWaiting = true;
+    send({ cmd: 'list_templates', group: _tplGroup || _currentGroup() });
+    document.getElementById('modal-task').classList.add('visible');
+    document.getElementById('task-task-input').focus();
   } else {
     // Default: create agent from template
     send({
@@ -762,22 +774,26 @@ function _tplSubmit() {
 }
 
 function _handleTemplateRendered(msg) {
-  // Pre-fill the task modal with rendered template fields
+  // "Task from Template" flow: pre-fill task modal with template selected
   _taskEditId = null;
   document.getElementById('task-modal-title').textContent = 'New Task';
   document.getElementById('task-submit-btn').textContent = 'Create';
 
-  document.getElementById('task-task-input').value = msg.task || '';
+  document.getElementById('task-task-input').value = '';
   document.getElementById('task-assignee-input').value = '';
-  document.getElementById('task-instructions-input').value = msg.instructions || '';
-  document.getElementById('task-context-input').value = msg.context || '';
-  document.getElementById('task-criteria-input').value = msg.criteria || '';
   document.getElementById('task-labels-input').value = (msg.labels || []).join(', ');
+
+  _taskSelectedTemplate = msg.name || _tplName || '';
+  _taskTemplateVarValues = {};
 
   var group = msg.group || _tplGroup || _currentGroup();
   _populateTaskGroupSelect(group);
 
   document.getElementById('modal-task').dataset.lane = _tplTaskLane || '';
+
+  // Request template list to populate the picker
+  _taskModalWaiting = true;
+  send({ cmd: 'list_templates', group: group });
 
   document.getElementById('modal-task').classList.add('visible');
   document.getElementById('task-task-input').focus();
@@ -788,6 +804,11 @@ function _handleTemplateRendered(msg) {
 /* ------------------------------------------------------------------ */
 
 let _taskEditId = null;  // null = create mode, string = edit mode
+let _taskTemplates = [];        // cached template list for task modal
+let _taskSelectedTemplate = ''; // selected template name
+let _taskTemplateVars = [];     // variable definitions for selected template
+let _taskTemplateVarValues = {};// pre-filled variable values (from edit)
+let _taskModalWaiting = false;  // waiting for template list to populate picker
 
 function _currentGroup() {
   if (selectedAgentId && state && state.agents && state.agents[selectedAgentId]) {
@@ -802,17 +823,23 @@ function _currentGroup() {
 
 function openAddTask(lane) {
   _taskEditId = null;
+  _taskSelectedTemplate = '';
+  _taskTemplateVars = [];
+  _taskTemplateVarValues = {};
+
   document.getElementById('task-modal-title').textContent = 'New Task';
   document.getElementById('task-submit-btn').textContent = 'Create';
 
   document.getElementById('task-task-input').value = '';
   document.getElementById('task-assignee-input').value = '';
-  document.getElementById('task-instructions-input').value = '';
-  document.getElementById('task-context-input').value = '';
-  document.getElementById('task-criteria-input').value = '';
   document.getElementById('task-labels-input').value = '';
+  document.getElementById('task-template-vars').innerHTML = '';
 
   _populateTaskGroupSelect(_currentGroup());
+
+  // Request templates for picker
+  _taskModalWaiting = true;
+  send({ cmd: 'list_templates', group: _currentGroup() });
 
   document.getElementById('modal-task').classList.add('visible');
   document.getElementById('task-task-input').focus();
@@ -827,17 +854,23 @@ function openEditTask(taskId) {
   if (!t) return;
 
   _taskEditId = taskId;
+  _taskSelectedTemplate = t.template_name || '';
+  _taskTemplateVars = [];
+  _taskTemplateVarValues = t.template_vars || {};
+
   document.getElementById('task-modal-title').textContent = 'Edit Task';
   document.getElementById('task-submit-btn').textContent = 'Save';
 
   document.getElementById('task-task-input').value = t.task || '';
   document.getElementById('task-assignee-input').value = t.assignee || '';
-  document.getElementById('task-instructions-input').value = t.instructions || '';
-  document.getElementById('task-context-input').value = t.context || '';
-  document.getElementById('task-criteria-input').value = t.criteria || '';
   document.getElementById('task-labels-input').value = (t.labels || []).join(', ');
+  document.getElementById('task-template-vars').innerHTML = '';
 
   _populateTaskGroupSelect(t.group || _currentGroup());
+
+  // Request templates for picker
+  _taskModalWaiting = true;
+  send({ cmd: 'list_templates', group: t.group || _currentGroup() });
 
   document.getElementById('modal-task').classList.add('visible');
   document.getElementById('task-task-input').focus();
@@ -868,18 +901,15 @@ function submitTask() {
   }
 
   var assignee = document.getElementById('task-assignee-input').value.trim();
-  var instructions = document.getElementById('task-instructions-input').value.trim();
-  var context = document.getElementById('task-context-input').value.trim();
-  var criteria = document.getElementById('task-criteria-input').value.trim();
   var labelsRaw = document.getElementById('task-labels-input').value.trim();
   var labels = labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+  var templateVars = _collectTaskTemplateVars();
 
   if (_taskEditId) {
     // Edit mode
     var msg = { cmd: 'board_update_task', id: _taskEditId, task: task, group: group, assignee: assignee };
-    if (instructions !== undefined) msg.instructions = instructions;
-    if (context !== undefined) msg.context = context;
-    if (criteria !== undefined) msg.criteria = criteria;
+    msg.template_name = _taskSelectedTemplate;
+    msg.template_vars = templateVars;
     msg.labels = labels;
     send(msg);
   } else {
@@ -887,15 +917,122 @@ function submitTask() {
     var lane = document.getElementById('modal-task').dataset.lane || '';
     var msg = { cmd: 'board_add_task', task: task, group: group, lane: lane };
     if (assignee) msg.assignee = assignee;
-    if (instructions) msg.instructions = instructions;
-    if (context) msg.context = context;
-    if (criteria) msg.criteria = criteria;
+    if (_taskSelectedTemplate) msg.template_name = _taskSelectedTemplate;
+    if (Object.keys(templateVars).length) msg.template_vars = templateVars;
     if (labels.length) msg.labels = labels;
     send(msg);
   }
 
   _taskEditId = null;
   closeModals();
+}
+
+/* -- Task modal: template picker helpers -------------------------------- */
+
+function _populateTaskTemplateSelect(templates) {
+  _taskTemplates = templates;
+  var sel = document.getElementById('task-template-select');
+  sel.innerHTML = '<option value="">None</option>';
+  for (var i = 0; i < templates.length; i++) {
+    var t = templates[i];
+    var opt = document.createElement('option');
+    opt.value = t.name;
+    opt.textContent = t.name + (t.description ? ' \u2014 ' + t.description : '');
+    if (t.name === _taskSelectedTemplate) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  var previewBtn = document.getElementById('task-preview-btn');
+  if (previewBtn) previewBtn.style.display = _taskSelectedTemplate ? '' : 'none';
+  // Render variable fields for the selected template
+  if (_taskSelectedTemplate) {
+    var tpl = templates.find(function(t) { return t.name === _taskSelectedTemplate; });
+    if (tpl && tpl.vars) {
+      _taskTemplateVars = (tpl.vars || []).filter(function(v) { return v.name !== 'TASK'; });
+    } else {
+      _taskTemplateVars = [];
+    }
+  } else {
+    _taskTemplateVars = [];
+  }
+  _renderTaskTemplateVars();
+}
+
+function taskTemplateChanged() {
+  var sel = document.getElementById('task-template-select');
+  _taskSelectedTemplate = sel.value;
+  _taskTemplateVarValues = {};
+  var previewBtn = document.getElementById('task-preview-btn');
+  if (previewBtn) previewBtn.style.display = _taskSelectedTemplate ? '' : 'none';
+  if (_taskSelectedTemplate) {
+    var tpl = _taskTemplates.find(function(t) { return t.name === _taskSelectedTemplate; });
+    if (tpl && tpl.vars) {
+      _taskTemplateVars = (tpl.vars || []).filter(function(v) { return v.name !== 'TASK'; });
+    } else {
+      _taskTemplateVars = [];
+    }
+  } else {
+    _taskTemplateVars = [];
+  }
+  _renderTaskTemplateVars();
+}
+
+function _renderTaskTemplateVars() {
+  var container = document.getElementById('task-template-vars');
+  if (!_taskTemplateVars.length) {
+    container.innerHTML = '';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < _taskTemplateVars.length; i++) {
+    var v = _taskTemplateVars[i];
+    var savedVal = (_taskTemplateVarValues || {})[v.name] || '';
+    var val = savedVal || v.default || '';
+    html += '<label>' + esc(v.name) + '</label>';
+    html += '<input class="task-tpl-var" data-var="' + esc(v.name) + '" value="' + esc(val)
+          + '" placeholder="' + esc(v.default || v.name)
+          + '" autocomplete="off" onkeydown="if(event.key===\'Escape\')closeModals();">';
+  }
+  container.innerHTML = html;
+}
+
+function _collectTaskTemplateVars() {
+  var vars = {};
+  var els = document.querySelectorAll('.task-tpl-var');
+  for (var i = 0; i < els.length; i++) {
+    var name = els[i].dataset.var;
+    if (name && els[i].value) vars[name] = els[i].value;
+  }
+  return vars;
+}
+
+function previewTaskPrompt() {
+  var task = document.getElementById('task-task-input').value.trim();
+  var templateVars = _collectTaskTemplateVars();
+  send({
+    cmd: 'preview_prompt',
+    task: task,
+    template_name: _taskSelectedTemplate,
+    template_vars: templateVars,
+    group: document.getElementById('task-group-select').value,
+  });
+}
+
+function _handleTaskTemplateList(msg) {
+  // Called when template list arrives and task modal is open
+  _taskModalWaiting = false;
+  _populateTaskTemplateSelect(msg.templates || []);
+}
+
+function _showPromptPreview(msg) {
+  document.getElementById('prompt-preview-content').textContent = msg.prompt || '(empty)';
+  var warnEl = document.getElementById('prompt-preview-warning');
+  if (msg.warning) {
+    warnEl.textContent = msg.warning;
+    warnEl.style.display = '';
+  } else {
+    warnEl.style.display = 'none';
+  }
+  document.getElementById('modal-prompt-preview').classList.add('visible');
 }
 
 /* -- Global Settings ---------------------------------------------------- */

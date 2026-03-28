@@ -21,9 +21,11 @@ class BoardTask:
     task: str                   # actionable task description (required)
     slug: str = ""              # auto-generated from task text
     group: str = ""             # owning group (must be an existing group)
-    instructions: str = ""      # clear instructions for the agent (optional)
-    context: str = ""           # additional context the agent might need (optional)
-    criteria: str = ""          # acceptance criteria / verification (optional)
+    template_name: str = ""     # template used for prompt rendering (optional)
+    template_vars: dict = field(default_factory=dict)  # template variable values
+    instructions: str = ""      # DEPRECATED — kept for backward compat
+    context: str = ""           # DEPRECATED — kept for backward compat
+    criteria: str = ""          # DEPRECATED — kept for backward compat
     lane: str = "Backlog"
     position: int = 0
     assignee: str = ""          # agent name prefix for pool assignment (optional)

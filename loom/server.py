@@ -68,13 +68,12 @@ def _template_to_yaml(name: str, data: dict) -> str:
     if data.get("worktree"):
         lines.append("\nworktree: true")
 
-    # Text block fields
-    for field in ("task", "instructions", "context", "criteria"):
-        val = data.get(field, "")
-        if val:
-            lines.append(f"\n{field}: |")
-            for l in val.rstrip("\n").split("\n"):
-                lines.append(f"  {l}")
+    # Prompt field (replaces task/instructions/context/criteria)
+    prompt = data.get("prompt", "")
+    if prompt:
+        lines.append(f"\nprompt: |")
+        for l in prompt.rstrip("\n").split("\n"):
+            lines.append(f"  {l}")
 
     # Labels
     labels = data.get("labels", [])
@@ -360,11 +359,8 @@ async def main(connection: iterm2.Connection):
             rendered = template_mgr.render_template(raw, variables)
             return {"type": "template_rendered",
                     "name": data["name"],
-                    "task": rendered.get("task", ""),
+                    "prompt": rendered.get("prompt", ""),
                     "group": rendered.get("group", ""),
-                    "instructions": rendered.get("instructions", ""),
-                    "context": rendered.get("context", ""),
-                    "criteria": rendered.get("criteria", ""),
                     "labels": rendered.get("labels", [])}
 
         # save_template: write template YAML to disk
@@ -373,6 +369,11 @@ async def main(connection: iterm2.Connection):
             if not name:
                 return {"type": "error", "message": "Template name required"}
             tpl_data = data.get("template", {})
+            # Validate {{ TASK }} in prompt
+            prompt = tpl_data.get("prompt", "")
+            if not template_mgr.validate_prompt(prompt):
+                return {"type": "error",
+                        "message": "Template prompt must contain {{ TASK }}"}
             scope = data.get("scope", "project")  # "project" or "user"
             base_dir = await _resolve_base_dir(data.get("group", ""))
 
@@ -627,21 +628,8 @@ async def main(connection: iterm2.Connection):
                                         or gs.terminal_init_script,
                                     shell=t_shell)
 
-                        # Compose prompt from task + structured fields
-                        parts = []
-                        task_text = rendered.get("task", "")
-                        if task_text:
-                            parts.append(task_text)
-                        instr = rendered.get("instructions", "")
-                        if instr:
-                            parts.append(instr)
-                        ctx = rendered.get("context", "")
-                        if ctx:
-                            parts.append(ctx)
-                        crit = rendered.get("criteria", "")
-                        if crit:
-                            parts.append(crit)
-                        prompt = "\n\n".join(parts)
+                        # Use the rendered prompt directly
+                        prompt = rendered.get("prompt", "")
 
                         if prompt and cell.session_id:
                             async def _send_after_boot(c, p):
@@ -966,9 +954,8 @@ async def main(connection: iterm2.Connection):
                     task=data.get("task", ""),
                     group=data.get("group", ""),
                     lane=data.get("lane", ""),
-                    instructions=data.get("instructions", ""),
-                    context=data.get("context", ""),
-                    criteria=data.get("criteria", ""),
+                    template_name=data.get("template_name", ""),
+                    template_vars=data.get("template_vars", {}),
                     assignee=data.get("assignee", ""),
                     agent_id=data.get("agent_id", ""),
                     labels=data.get("labels", []),
@@ -1106,28 +1093,57 @@ async def main(connection: iterm2.Connection):
 
                         if cell:
                             # Link task to agent and move to In Progress
+                            dispatch_lane = \
+                                state.get_group_settings(group) \
+                                    .dispatch_lane or "In Progress"
                             state.board_update_task(
                                 tid, agent_id=cell.id,
-                                lane="In Progress")
+                                lane=dispatch_lane)
 
-                            # Compose prompt from task fields
-                            parts = []
-                            if task.task:
-                                parts.append(task.task)
-                            if task.instructions:
-                                parts.append(task.instructions)
-                            if task.context:
-                                parts.append(task.context)
-                            if task.criteria:
-                                parts.append(task.criteria)
-                            task_ref = task.slug or tid
-                            parts.append(
-                                f"When you are done, run "
-                                f"`loom task move {task_ref} Done` "
-                                f"to mark the task as complete.")
-                            prompt = "\n\n".join(parts)
+                            # Compose prompt: template-aware
+                            prompt = None
+                            if task.template_name \
+                                    and not data.get("force_no_template"):
+                                base_dir = await _resolve_base_dir(group)
+                                tvars = {"TASK": task.task,
+                                         **(task.template_vars or {})}
+                                rendered = template_mgr.render_prompt(
+                                    task.template_name, tvars,
+                                    base_dir=base_dir)
+                                if rendered is None:
+                                    # Template deleted — warn frontend
+                                    result = {
+                                        "type":
+                                            "dispatch_template_missing",
+                                        "task_id": tid,
+                                        "template_name":
+                                            task.template_name}
+                                    prompt = None
+                                else:
+                                    prompt = rendered
+                            elif task.instructions or task.context \
+                                    or task.criteria:
+                                # Legacy fallback for old tasks
+                                parts = []
+                                if task.task:
+                                    parts.append(task.task)
+                                if task.instructions:
+                                    parts.append(task.instructions)
+                                if task.context:
+                                    parts.append(task.context)
+                                if task.criteria:
+                                    parts.append(task.criteria)
+                                prompt = "\n\n".join(parts)
+                            else:
+                                prompt = task.task
 
                             if prompt:
+                                task_ref = task.slug or tid
+                                prompt += (
+                                    f"\n\nWhen you are done, run "
+                                    f"`loom task move {task_ref} Done` "
+                                    f"to mark the task as complete.")
+
                                 if agent_id and cell.session_id:
                                     # Existing agent — send immediately
                                     await bridge.send_text(
@@ -1151,6 +1167,40 @@ async def main(connection: iterm2.Connection):
                                             await state.broadcast()
                                     asyncio.create_task(
                                         _dispatch_send(cell, prompt))
+
+            elif cmd == "preview_prompt":
+                # Preview rendered prompt for a task or inline params
+                tid = data.get("id", "")
+                tpl_name = data.get("template_name", "")
+                task_text = data.get("task", "")
+                tvars = data.get("template_vars", {})
+                tpl_group = data.get("group", "")
+
+                if tid and not task_text:
+                    t = state.board_tasks.get(tid)
+                    if t:
+                        task_text = t.task
+                        tpl_name = tpl_name or t.template_name
+                        tvars = tvars or t.template_vars or {}
+                        tpl_group = tpl_group or t.group
+
+                if tpl_name:
+                    base_dir = await _resolve_base_dir(tpl_group)
+                    rendered = template_mgr.render_prompt(
+                        tpl_name,
+                        {"TASK": task_text, **tvars},
+                        base_dir=base_dir)
+                    if rendered is None:
+                        result = {"type": "prompt_preview",
+                                  "prompt": task_text,
+                                  "warning": f"Template "
+                                             f"\"{tpl_name}\" not found"}
+                    else:
+                        result = {"type": "prompt_preview",
+                                  "prompt": rendered}
+                else:
+                    result = {"type": "prompt_preview",
+                              "prompt": task_text}
 
             elif cmd == "board_add_lane":
                 name = data.get("name", "").strip()

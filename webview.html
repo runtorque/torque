@@ -378,39 +378,45 @@
     <label>Task <span class="label-req">*</span>
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="An actionable task description, e.g. 'Create a summary of last week's deploys' instead of 'Weekly deploy report'.">?</span>
     </label>
-    <input id="task-task-input" autocomplete="off"
-           onkeydown="if(event.key==='Enter')submitTask();if(event.key==='Escape')closeModals();">
+    <textarea id="task-task-input" rows="2" autocomplete="off"
+              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
     <label>Group <span class="label-req">*</span></label>
     <select id="task-group-select"
             onkeydown="if(event.key==='Escape')closeModals();"></select>
+    <label>Template
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optionally attach a template. The template's prompt wraps the task text with instructions and context.">?</span>
+    </label>
+    <select id="task-template-select" onchange="taskTemplateChanged()"
+            onkeydown="if(event.key==='Escape')closeModals();">
+      <option value="">None</option>
+    </select>
+    <div id="task-template-vars"></div>
     <label>Assignee
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Agent name prefix for pool assignment (e.g. 'frontend'). Any agent matching this prefix can pick up the task.">?</span>
     </label>
     <input id="task-assignee-input" autocomplete="off"
            onkeydown="if(event.key==='Enter')submitTask();if(event.key==='Escape')closeModals();">
-    <label>Instructions
-      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Clear instructions on what the agent should do to complete this task.">?</span>
-    </label>
-    <textarea id="task-instructions-input" rows="3"
-              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-    <label>Context
-      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Any additional context the agent might need — relevant files, background info, constraints.">?</span>
-    </label>
-    <textarea id="task-context-input" rows="2"
-              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-    <label>Criteria
-      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Acceptance criteria for verifying completion. Also used by agents tasked with reviewing work.">?</span>
-    </label>
-    <textarea id="task-criteria-input" rows="2"
-              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
     <label>Labels
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Comma-separated labels used for orchestration, e.g. 'urgent, frontend, deploy'.">?</span>
     </label>
     <input id="task-labels-input" autocomplete="off"
            onkeydown="if(event.key==='Enter')submitTask();if(event.key==='Escape')closeModals();">
     <div class="modal-actions">
+      <button class="btn-secondary" id="task-preview-btn" onclick="previewTaskPrompt()" style="display:none">Preview</button>
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" id="task-submit-btn" onclick="submitTask()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- Prompt preview modal -->
+<div class="overlay" id="modal-prompt-preview">
+  <div class="modal modal-tall">
+    <h2>Rendered Prompt</h2>
+    <pre id="prompt-preview-content" style="white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;font-size:11px;line-height:1.4;padding:8px;background:var(--bg-cell);border-radius:4px;"></pre>
+    <div id="prompt-preview-warning" style="display:none;color:var(--status-orange);margin-top:6px;font-size:11px;"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('modal-prompt-preview').classList.remove('visible')">Close</button>
     </div>
   </div>
 </div>

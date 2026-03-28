@@ -189,15 +189,18 @@ function renderTemplatesEditor() {
   html += '<label class="gs-checkbox"><input id="tpled-worktree" type="checkbox"' + (d.worktree ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Git worktree per agent</label>';
   html += '</details>';
 
-  // Task fields (with Jinja2 highlighting)
-  html += '<label>Task</label>';
-  html += _tplHighlightWrap('tpled-task', d.task || d.prompt || '');
-  html += '<label>Instructions</label>';
-  html += _tplHighlightWrap('tpled-instructions', d.instructions || '');
-  html += '<label>Context</label>';
-  html += _tplHighlightWrap('tpled-context', d.context || '');
-  html += '<label>Criteria</label>';
-  html += _tplHighlightWrap('tpled-criteria', d.criteria || '');
+  // Prompt field (coalesce old format on load)
+  var prompt = d.prompt || '';
+  if (!prompt) {
+    var _parts = [];
+    if (d.task) _parts.push(d.task);
+    if (d.instructions) _parts.push(d.instructions);
+    if (d.context) _parts.push(d.context);
+    if (d.criteria) _parts.push(d.criteria);
+    prompt = _parts.join('\n\n');
+  }
+  html += '<label>Prompt <span class="label-req">*</span> <span class="label-hint">must contain {{ TASK }}</span></label>';
+  html += _tplHighlightWrap('tpled-prompt', prompt);
   html += '<label>Labels</label>';
   html += '<input id="tpled-labels" value="' + esc((d.labels || []).join(', ')) + '" placeholder="comma-separated" autocomplete="off" onchange="tplEditorMarkDirty()">';
 
@@ -299,18 +302,23 @@ function _tplSyncScroll(el) {
 }
 
 function _tplEditorFindVars() {
-  // Quick scan for {{ VAR }} and {{ VAR | default(...) }} in all text fields
+  // Quick scan for {{ VAR }} in prompt field
   var texts = [];
-  var el;
-  var ids = ['tpled-task', 'tpled-instructions', 'tpled-context', 'tpled-criteria'];
-  for (var i = 0; i < ids.length; i++) {
-    el = document.getElementById(ids[i]);
-    if (el) texts.push(el.value);
-  }
+  var el = document.getElementById('tpled-prompt');
+  if (el) texts.push(el.value);
   // Also scan current data before form exists
   if (texts.join('').length === 0 && _tplEditorData) {
     var d = _tplEditorData;
-    texts = [d.task || d.prompt || '', d.instructions || '', d.context || '', d.criteria || ''];
+    var prompt = d.prompt || '';
+    if (!prompt) {
+      var _parts = [];
+      if (d.task) _parts.push(d.task);
+      if (d.instructions) _parts.push(d.instructions);
+      if (d.context) _parts.push(d.context);
+      if (d.criteria) _parts.push(d.criteria);
+      prompt = _parts.join('\n\n');
+    }
+    texts = [prompt];
   }
   var seen = {};
   var result = [];
@@ -356,6 +364,16 @@ function tplEditorSave() {
   var labelsRaw = (document.getElementById('tpled-labels').value || '').trim();
   var labels = labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
 
+  var prompt = document.getElementById('tpled-prompt').value || '';
+
+  // Validate {{ TASK }} is present
+  if (!/\{\{\s*TASK\s*(\|[^}]*)?\}\}/.test(prompt)) {
+    var promptEl = document.getElementById('tpled-prompt');
+    if (promptEl) { promptEl.focus(); promptEl.classList.add('input-error'); }
+    _showToast('Prompt must contain {{ TASK }}', 'error');
+    return;
+  }
+
   var tplData = {
     description: (document.getElementById('tpled-desc').value || '').trim(),
     agent: {
@@ -366,10 +384,7 @@ function tplEditorSave() {
     },
     group: (document.getElementById('tpled-group').value || '').trim(),
     worktree: document.getElementById('tpled-worktree').checked,
-    task: document.getElementById('tpled-task').value || '',
-    instructions: document.getElementById('tpled-instructions').value || '',
-    context: document.getElementById('tpled-context').value || '',
-    criteria: document.getElementById('tpled-criteria').value || '',
+    prompt: prompt,
     labels: labels,
   };
 
@@ -431,10 +446,7 @@ function _tplEditorReadForm() {
     },
     group: (document.getElementById('tpled-group').value || '').trim(),
     worktree: document.getElementById('tpled-worktree').checked,
-    task: document.getElementById('tpled-task').value || '',
-    instructions: document.getElementById('tpled-instructions').value || '',
-    context: document.getElementById('tpled-context').value || '',
-    criteria: document.getElementById('tpled-criteria').value || '',
+    prompt: document.getElementById('tpled-prompt').value || '',
     labels: labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [],
   };
 }
