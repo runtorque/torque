@@ -119,7 +119,7 @@ function renderBoard() {
 
   // Cards for selected lane
   var tasks = _boardTasksInLane(_boardSelectedLane);
-  html += '<div class="board-cards" id="board-cards" onclick="boardCloseTplList()">';
+  html += '<div class="board-cards" id="board-cards">';
 
   // Add task: inline input or button (at top)
   if (_boardAddingTask) {
@@ -139,17 +139,23 @@ function renderBoard() {
 
   // Inline template list (shown below add-task)
   if (_boardTplList !== null) {
-    html += '<div class="board-tpl-list" onclick="event.stopPropagation()">';
+    html += '<div class="board-tpl-list">';
     if (_boardTplList.length === 0) {
       html += '<div class="board-tpl-empty">No templates found</div>';
     } else {
-      for (var ti = 0; ti < _boardTplList.length; ti++) {
-        var tpl = _boardTplList[ti];
-        var tplName = esc(tpl.name).replace(/'/g, "\\'");
-        html += '<button class="board-tpl-item" onclick="_boardPickTemplate(\'' + tplName + '\')">';
-        html += '<span class="board-tpl-item-name">' + esc(tpl.name) + '</span>';
-        if (tpl.description) html += '<span class="board-tpl-item-desc">' + esc(tpl.description) + '</span>';
-        html += '</button>';
+      var projectTpls = _boardTplList.filter(function(t) { return !t.global; });
+      var userTpls = _boardTplList.filter(function(t) { return t.global; });
+      if (projectTpls.length) {
+        html += '<div class="board-tpl-group-label">Project</div>';
+        for (var pi = 0; pi < projectTpls.length; pi++) {
+          html += _boardTplItemHtml(projectTpls[pi]);
+        }
+      }
+      if (userTpls.length) {
+        html += '<div class="board-tpl-group-label">User</div>';
+        for (var ui = 0; ui < userTpls.length; ui++) {
+          html += _boardTplItemHtml(userTpls[ui]);
+        }
       }
     }
     html += '<button class="board-tpl-item board-tpl-notemplate" onclick="_boardPickNoTemplate()">No template</button>';
@@ -337,29 +343,40 @@ function boardAddTaskKeydown(e) {
   }
 }
 
-function boardCloseTplList() {
-  if (_boardTplList !== null) {
+function _boardCloseTplListHandler(e) {
+  var list = document.querySelector('.board-tpl-list');
+  if (list && !list.contains(e.target)) {
     _boardTplList = null;
+    document.removeEventListener('mousedown', _boardCloseTplListHandler, true);
     renderBoard();
   }
 }
 
 function boardToggleTemplateList() {
   if (_boardTplList !== null) {
-    // Already open — close it
     _boardTplList = null;
+    document.removeEventListener('mousedown', _boardCloseTplListHandler, true);
     renderBoard();
   } else {
-    // Fetch and show
     _boardTplDropdownWaiting = true;
     send({ cmd: 'list_templates', group: _currentGroup() });
   }
+}
+
+function _boardTplItemHtml(tpl) {
+  var tplName = esc(tpl.name).replace(/'/g, "\\'");
+  var h = '<button class="board-tpl-item" onclick="_boardPickTemplate(\'' + tplName + '\')">';
+  h += '<span class="board-tpl-item-name">' + esc(tpl.name) + '</span>';
+  if (tpl.description) h += '<span class="board-tpl-item-desc">' + esc(tpl.description) + '</span>';
+  h += '</button>';
+  return h;
 }
 
 function _boardShowTemplateList(msg) {
   _boardTplDropdownWaiting = false;
   _boardTplList = msg.templates || [];
   renderBoard();
+  document.addEventListener('mousedown', _boardCloseTplListHandler, true);
 }
 
 function _boardPickTemplate(name) {
