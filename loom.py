@@ -14,10 +14,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from loom.config import init_paths  # noqa: E402
+from loom.config import init_paths, STANDALONE  # noqa: E402
 init_paths(SCRIPT_DIR)
 
 import iterm2                       # noqa: E402
 from loom.server import main        # noqa: E402
 
-iterm2.run_forever(main)
+# In standalone-only mode, retry=True waits for iTerm2 to launch and
+# reconnects if it restarts.  In toolbelt/dual mode, iTerm2 is already
+# running (it launched us).
+iterm2.run_forever(main, retry=STANDALONE)

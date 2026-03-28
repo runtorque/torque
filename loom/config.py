@@ -7,6 +7,12 @@ from pathlib import Path
 WS_PORT = int(os.environ.get("LOOM_PORT", 18932))
 DEFAULT_COMMAND = os.environ.get("LOOM_DEFAULT_CMD", "claude")
 
+# Standalone mode: daemon runs outside iTerm2's script environment,
+# no toolbelt webview registration.  Dual mode (toolbelt + browser)
+# works without this flag — just open http://127.0.0.1:<port>/.
+STANDALONE = os.environ.get("LOOM_STANDALONE", "").lower() in ("1", "true", "yes")
+BIND_HOST = "0.0.0.0" if os.environ.get("LOOM_BIND_ALL") else "127.0.0.1"
+
 # Paths resolve relative to the *installed* entry-point script, not this file.
 # The entry point sets SCRIPT_DIR before anything imports config.
 SCRIPT_DIR: Path = Path(__file__).parent

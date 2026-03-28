@@ -1385,3 +1385,21 @@ textarea.task-tpl-var, #task-task-input {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ------------------------------------------------------------------ */
+/* Standalone / wide layout (dual mode or standalone window)           */
+/* ------------------------------------------------------------------ */
+@media (min-width: 400px) {
+  .modal { max-width: 360px; }
+  .agent-grid { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
+}
+@media (min-width: 600px) {
+  html, body { font-size: 12px; }
+  .modal { max-width: 440px; }
+  .agent-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  main { padding: 12px; }
+  header { padding: 10px 14px; }
+}
+@media (min-width: 900px) {
+  .modal { max-width: 520px; }
+}

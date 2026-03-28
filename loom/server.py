@@ -9,11 +9,11 @@ import aiohttp
 from aiohttp import web
 import iterm2
 
-from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, log
+from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, STANDALONE, BIND_HOST, log
 from .db import LoomDB
 from dataclasses import asdict
 from .state import MatrixState
-from .bridge import ITerm2Bridge
+from .bridge import ITerm2Adapter
 from .events import EventLog, EventBus, health_check
 from .adapters import get_adapter
 from .notifications import NotificationManager
@@ -114,7 +114,7 @@ async def main(connection: iterm2.Connection):
     asyncio.create_task(health_check(state, event_log, event_bus, notifier))
     log.info("Event bus, health monitor, and notifications started")
 
-    bridge = ITerm2Bridge(connection, state)
+    bridge = ITerm2Adapter(connection, state)
     worktree_mgr = WorktreeManager()
     template_mgr = TemplateManager()
 
@@ -1482,24 +1482,28 @@ async def main(connection: iterm2.Connection):
 
     runner = web.AppRunner(app_server)
     await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", WS_PORT, reuse_address=True)
+    site = web.TCPSite(runner, BIND_HOST, WS_PORT, reuse_address=True)
     try:
         await site.start()
     except OSError as exc:
         log.error("Cannot bind port %d: %s — is another instance running?",
                   WS_PORT, exc)
         raise
-    log.info("HTTP/WS server listening on 127.0.0.1:%d", WS_PORT)
+    log.info("HTTP/WS server listening on %s:%d", BIND_HOST, WS_PORT)
 
-    # -- Register toolbelt --------------------------------------------------
+    # -- Register toolbelt (skipped in standalone-only mode) ----------------
 
-    await iterm2.tool.async_register_web_view_tool(
-        connection,
-        display_name="Loom",
-        identifier="com.loom.toolbelt",
-        reveal_if_already_registered=True,
-        url=f"http://127.0.0.1:{WS_PORT}/",
-    )
-    log.info("Toolbelt webview registered — Loom ready")
+    if not STANDALONE:
+        await iterm2.tool.async_register_web_view_tool(
+            connection,
+            display_name="Loom",
+            identifier="com.loom.toolbelt",
+            reveal_if_already_registered=True,
+            url=f"http://127.0.0.1:{WS_PORT}/",
+        )
+        log.info("Toolbelt webview registered — Loom ready")
+    else:
+        log.info("Standalone mode — toolbelt registration skipped")
+        log.info("Open http://127.0.0.1:%d/ in a browser", WS_PORT)
 
     await asyncio.Future()

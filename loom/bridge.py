@@ -15,7 +15,7 @@ from .adapters import detect_agent_type, detect_by_command, get_adapter
 _TITLE_RE = re.compile(r"^\[(.+?)\]\s+(.+)$")
 
 
-class ITerm2Bridge:
+class ITerm2Adapter:
 
     def __init__(self, connection: iterm2.Connection, state: MatrixState):
         self.conn = connection

@@ -15,7 +15,7 @@ GLOBAL_PYTHON  := $(shell ls $(HOME)/.config/iterm2/AppSupport/iterm2env*/versio
                     2>/dev/null | sort -V | tail -1)
 ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
 
-.PHONY: install uninstall run deps check stop deploy autolaunch cli
+.PHONY: install uninstall run deps check stop deploy autolaunch cli standalone open
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
@@ -63,6 +63,7 @@ install:
 	   loom/server.py loom/keybindings.py \
 	   loom/events.py loom/notifications.py \
 	   loom/worktree.py loom/templates.py \
+	   loom/terminal_adapter.py \
 	   loom/db.py \
 	   "$(SCRIPT_DIR)/loom/"
 	cp loom/adapters/__init__.py loom/adapters/base.py \
@@ -146,6 +147,21 @@ cli:
 		echo "  Add to your PATH if not already:"; \
 		echo "    export PATH=\"\$$HOME/.local/bin:\$$PATH\"";; \
 	esac
+
+## standalone: Run Loom in standalone-only mode (no toolbelt, connects to iTerm2 externally)
+standalone: install
+	@if [ -z "$(ITERM2_PYTHON)" ]; then \
+		echo "Error: iTerm2 Python not found. Run make install first."; \
+		exit 1; \
+	fi
+	@LOOM_STANDALONE=1 nohup "$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
+		>> "$(SCRIPT_DIR)/loom/loom.log" 2>&1 &
+	@echo "Loom standalone started (PID $$!). Logs: $(SCRIPT_DIR)/loom/loom.log"
+	@echo "Open http://127.0.0.1:$(or $(LOOM_PORT),18932)/ in a browser"
+
+## open: Open the Loom UI in the default browser (works in dual or standalone mode)
+open:
+	@open "http://127.0.0.1:$(or $(LOOM_PORT),18932)/"
 
 ## check: Verify prerequisites
 check:
