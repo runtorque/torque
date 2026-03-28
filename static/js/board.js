@@ -192,8 +192,25 @@ function renderBoard() {
     if (t.template_name) meta += '<span class="board-card-label board-card-template">' + esc(t.template_name) + '</span>';
     if (t.labels && t.labels.length) {
       for (var li = 0; li < t.labels.length; li++) {
-        meta += '<span class="board-card-label">' + esc(t.labels[li]) + '</span>';
+        var lb = t.labels[li];
+        if (lb.startsWith('pr:')) {
+          var prCls = lb === 'pr:merged' ? 'board-label-pr-merged'
+            : lb === 'pr:draft' ? 'board-label-pr-draft'
+            : 'board-label-pr-open';
+          meta += '<span class="board-card-label ' + prCls + '">' + esc(lb) + '</span>';
+        } else if (lb === 'blocked') {
+          meta += '<span class="board-card-label board-label-blocked">' + esc(lb) + '</span>';
+        } else if (lb === 'error') {
+          meta += '<span class="board-card-label board-label-error">' + esc(lb) + '</span>';
+        } else {
+          meta += '<span class="board-card-label">' + esc(lb) + '</span>';
+        }
       }
+    }
+    if (t.external_url) {
+      meta += '<a class="board-card-pr-link" href="' + esc(t.external_url)
+        + '" onclick="event.stopPropagation();window.open(this.href);return false"'
+        + ' title="' + esc(t.external_url) + '">&#x1F517;</a>';
     }
     if (meta) html += '<div class="board-card-meta">' + meta + '</div>';
     if (t.agent_id) {

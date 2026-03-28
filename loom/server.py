@@ -1138,11 +1138,17 @@ async def main(connection: iterm2.Connection):
                                 prompt = task.task
 
                             if prompt:
-                                task_ref = task.slug or tid
                                 prompt += (
-                                    f"\n\nWhen you are done, run "
-                                    f"`loom task move {task_ref} Done` "
-                                    f"to mark the task as complete.")
+                                    "\n\nReport your progress with"
+                                    " these commands:\n"
+                                    "- `loom ai done` — task complete\n"
+                                    "- `loom ai pr URL` — opened"
+                                    " a pull request\n"
+                                    "- `loom ai merged` — PR merged\n"
+                                    "- `loom ai blocked \"reason\"`"
+                                    " — need user input\n"
+                                    "- `loom ai error \"message\"`"
+                                    " — unrecoverable error")
 
                                 if agent_id and cell.session_id:
                                     # Existing agent — send immediately
@@ -1236,6 +1242,119 @@ async def main(connection: iterm2.Connection):
                                 value=state.board_panel_height)
                     state._db_save_ui("board_panel_height",
                                       state.board_panel_height)
+
+            elif cmd == "ai_report":
+                cell_id = data.get("cell_id", "")
+                action = data.get("action", "")
+                message = data.get("message", "")
+                task_id = data.get("task_id", "")
+                url = data.get("url", "")
+                is_draft = data.get("draft", False)
+
+                cell = state.agents.get(cell_id)
+                if not cell:
+                    result = {"type": "error",
+                              "message": f"Cell {cell_id} not found"}
+                else:
+                    task = state.board_tasks.get(task_id) \
+                        if task_id else None
+
+                    def _add_label(t, label):
+                        if label not in t.labels:
+                            t.labels.append(label)
+
+                    def _replace_prefix_labels(t, prefix, new_label):
+                        t.labels = [
+                            l for l in t.labels
+                            if not l.startswith(prefix)]
+                        t.labels.append(new_label)
+
+                    def _save_task(t):
+                        from datetime import datetime, timezone
+                        t.updated_at = datetime.now(
+                            timezone.utc).isoformat()
+                        state._emit("task_upsert", **asdict(t))
+                        state._db_save_task(t)
+
+                    if action == "done":
+                        cell.activity = ""
+                        cell.activity_detail = ""
+                        cell.needs_attention = False
+                        cell.error_message = ""
+                        if message:
+                            cell.last_summary = message
+                        state._emit_agent(cell)
+                        if task and task.lane != "Done":
+                            state.board_move_task(task.id, "Done")
+
+                    elif action == "blocked":
+                        cell.needs_attention = True
+                        cell.activity = "waiting"
+                        cell.activity_detail = message
+                        state._emit_agent(cell)
+                        if task:
+                            _add_label(task, "blocked")
+                            _save_task(task)
+
+                    elif action == "pr":
+                        cell.activity_detail = "PR opened"
+                        state._emit_agent(cell)
+                        if task:
+                            task.external_url = url
+                            _replace_prefix_labels(
+                                task, "pr:",
+                                "pr:draft" if is_draft
+                                else "pr:open")
+                            _save_task(task)
+
+                    elif action == "merged":
+                        cell.activity = ""
+                        cell.activity_detail = ""
+                        cell.needs_attention = False
+                        cell.error_message = ""
+                        state._emit_agent(cell)
+                        if task:
+                            if url:
+                                task.external_url = url
+                            _replace_prefix_labels(
+                                task, "pr:", "pr:merged")
+                            if task.lane != "Done":
+                                state.board_move_task(
+                                    task.id, "Done")
+                            else:
+                                _save_task(task)
+
+                    elif action == "error":
+                        cell.error_message = message
+                        cell.needs_attention = True
+                        state._emit_agent(cell)
+                        if task:
+                            _add_label(task, "error")
+                            _save_task(task)
+
+                    elif action == "progress":
+                        cell.activity_detail = message
+                        if cell.needs_attention:
+                            cell.needs_attention = False
+                        state._emit_agent(cell)
+
+                    elif action == "ready":
+                        cell.activity = ""
+                        cell.activity_detail = "ready"
+                        cell.needs_attention = False
+                        cell.error_message = ""
+                        state._emit_agent(cell)
+                        if task:
+                            if task.lane != "Done":
+                                state.board_move_task(
+                                    task.id, "Done")
+                            task.agent_id = ""
+                            _save_task(task)
+
+                    else:
+                        result = {"type": "error",
+                                  "message":
+                                      f"Unknown ai action: {action}"}
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")

@@ -2012,6 +2012,199 @@ def cmd_board_lanes(args):
 
 
 # ---------------------------------------------------------------------------
+# AI agent reporting commands
+# ---------------------------------------------------------------------------
+
+
+def _resolve_self(port):
+    """Resolve the calling agent's cell and active task(s).
+
+    Uses LOOM_CELL_ID (preferred) or ITERM_SESSION_ID fallback.
+    Returns (cell_dict, task_or_None, active_tasks_list).
+    """
+    cell_id = os.environ.get("LOOM_CELL_ID", "")
+    state_data = get_state(port)
+
+    if cell_id:
+        cell = state_data.get("agents", {}).get(cell_id)
+        if not cell:
+            die(f"LOOM_CELL_ID={cell_id} not found in state")
+    else:
+        cell, _parent, _group = detect_context(state_data)
+        if not cell:
+            die("Cannot identify agent — not in a Loom-managed session\n"
+                "  (LOOM_CELL_ID not set and ITERM_SESSION_ID not matched)")
+        cell_id = cell["id"]
+
+    # Find linked task(s)
+    tasks = state_data.get("board_tasks", {})
+    linked = [t for t in tasks.values() if t.get("agent_id") == cell_id]
+    # Prefer tasks in an active lane (not Done, not Backlog)
+    active = [t for t in linked if t.get("lane") not in ("Done", "Backlog")]
+    task = active[0] if len(active) == 1 else None
+
+    return cell, task, active
+
+
+def _resolve_self_and_task(args, require_task=True):
+    """Resolve agent + task, with optional explicit TASK override."""
+    cell, task, active = _resolve_self(args.port)
+    explicit = getattr(args, "task_ref", None)
+
+    if explicit:
+        st = get_state(args.port)
+        task = resolve_task(st, explicit)
+    elif require_task and not task:
+        if len(active) > 1:
+            slugs = ", ".join(t.get("slug", t["id"][:6]) for t in active)
+            die(f"Multiple active tasks for this agent: {slugs}\n"
+                "  Specify the task: loom ai done TASK_SLUG")
+        die("No active task linked to this agent")
+
+    return cell, task
+
+
+def cmd_ai_done(args):
+    cell, task = _resolve_self_and_task(args)
+    kwargs = {"cell_id": cell["id"], "action": "done"}
+    if task:
+        kwargs["task_id"] = task["id"]
+    if args.message:
+        kwargs["message"] = args.message
+    resp = api_call("ai_report", port=args.port, **kwargs)
+    check_ok(resp)
+    label = task.get("slug", task["id"][:6]) if task else ""
+    print(f"Done{' — ' + label if label else ''}")
+
+
+def cmd_ai_blocked(args):
+    cell, task = _resolve_self_and_task(args, require_task=False)
+    kwargs = {"cell_id": cell["id"], "action": "blocked",
+              "message": args.reason}
+    if task:
+        kwargs["task_id"] = task["id"]
+    resp = api_call("ai_report", port=args.port, **kwargs)
+    check_ok(resp)
+    print(f"Blocked: {args.reason}")
+
+
+def cmd_ai_pr(args):
+    cell, task = _resolve_self_and_task(args)
+    kwargs = {"cell_id": cell["id"], "action": "pr", "url": args.url}
+    if task:
+        kwargs["task_id"] = task["id"]
+    if args.draft:
+        kwargs["draft"] = True
+    resp = api_call("ai_report", port=args.port, **kwargs)
+    check_ok(resp)
+    print(f"PR recorded: {args.url}")
+
+
+def cmd_ai_merged(args):
+    cell, task = _resolve_self_and_task(args)
+    kwargs = {"cell_id": cell["id"], "action": "merged"}
+    if task:
+        kwargs["task_id"] = task["id"]
+    if args.url:
+        kwargs["url"] = args.url
+    resp = api_call("ai_report", port=args.port, **kwargs)
+    check_ok(resp)
+    print("Merged")
+
+
+def cmd_ai_error(args):
+    cell, task = _resolve_self_and_task(args, require_task=False)
+    kwargs = {"cell_id": cell["id"], "action": "error",
+              "message": args.message}
+    if task:
+        kwargs["task_id"] = task["id"]
+    resp = api_call("ai_report", port=args.port, **kwargs)
+    check_ok(resp)
+    print(f"Error reported: {args.message}")
+
+
+def cmd_ai_progress(args):
+    cell, task = _resolve_self_and_task(args, require_task=False)
+    kwargs = {"cell_id": cell["id"], "action": "progress",
+              "message": args.message}
+    if task:
+        kwargs["task_id"] = task["id"]
+    resp = api_call("ai_report", port=args.port, **kwargs)
+    check_ok(resp)
+    print(f"Progress: {args.message}")
+
+
+def cmd_ai_ready(args):
+    cell, task = _resolve_self_and_task(args, require_task=False)
+    kwargs = {"cell_id": cell["id"], "action": "ready"}
+    if task:
+        kwargs["task_id"] = task["id"]
+    resp = api_call("ai_report", port=args.port, **kwargs)
+    check_ok(resp)
+    print("Ready for next task")
+
+
+def cmd_ai_context(args):
+    cell_id = os.environ.get("LOOM_CELL_ID", "")
+    # Use local state (works offline)
+    st = get_state_local(args.port)
+
+    if cell_id:
+        cell = st.get("agents", {}).get(cell_id)
+    else:
+        cell, _, _ = detect_context(st)
+
+    if not cell:
+        die("Cannot identify agent — not in a Loom-managed session")
+
+    # Find linked tasks
+    tasks = st.get("board_tasks", {})
+    linked = [t for t in tasks.values()
+              if t.get("agent_id") == cell["id"]]
+
+    if args.json:
+        print(json.dumps({"agent": cell, "tasks": linked}, indent=2))
+        return
+
+    # Human-readable summary
+    slug = cell.get("slug", "") or cell["id"]
+    print(f"Agent: {cell['name']} ({slug})")
+    print(f"  Group:    {cell.get('group', '')}")
+    print(f"  Status:   {cell.get('status', '')}")
+
+    agent_type = cell.get("agent_type", "")
+    if agent_type:
+        print(f"  Type:     {agent_type}")
+
+    directory = cell.get("directory", "")
+    if directory:
+        print(f"  Dir:      {directory}")
+
+    wt_branch = cell.get("worktree_branch", "")
+    if wt_branch:
+        print(f"  Worktree: {cell.get('worktree_path', '')}"
+              f"  ({wt_branch})")
+        base = cell.get("worktree_base_branch", "")
+        if base:
+            print(f"  Base:     {base}")
+
+    if not linked:
+        print("\n  No linked tasks")
+    else:
+        for t in linked:
+            tslug = t.get("slug", "") or t["id"][:6]
+            print(f"\nTask: {t.get('task', '')}")
+            print(f"  Slug:     {tslug}")
+            print(f"  Lane:     {t.get('lane', '')}")
+            if t.get("template_name"):
+                print(f"  Template: {t['template_name']}")
+            if t.get("labels"):
+                print(f"  Labels:   {', '.join(t['labels'])}")
+            if t.get("external_url"):
+                print(f"  PR:       {t['external_url']}")
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -2306,6 +2499,57 @@ def build_parser():
 
     p = brd_sub.add_parser("lanes", help="List lanes")
     p.set_defaults(func=cmd_board_lanes)
+
+    # -- ai (agent reporting) -----------------------------------------------
+    ai = sub.add_parser("ai", help="Agent reporting (used by AI agents)")
+    ai.set_defaults(func=None, _sub_parser=ai)
+    ai_sub = ai.add_subparsers(dest="ai_cmd")
+
+    p = ai_sub.add_parser("done", help="Mark task as done")
+    p.add_argument("-m", "--message", help="Completion summary")
+    p.add_argument("task_ref", nargs="?",
+                   help="Task slug/ID (auto-detected)")
+    p.set_defaults(func=cmd_ai_done)
+
+    p = ai_sub.add_parser("blocked", help="Signal blocked on user input")
+    p.add_argument("reason", help="Why the agent is blocked")
+    p.add_argument("task_ref", nargs="?",
+                   help="Task slug/ID (auto-detected)")
+    p.set_defaults(func=cmd_ai_blocked)
+
+    p = ai_sub.add_parser("pr", help="Report a pull request opened")
+    p.add_argument("url", help="Pull request URL")
+    p.add_argument("--draft", action="store_true",
+                   help="Mark as draft PR")
+    p.add_argument("task_ref", nargs="?",
+                   help="Task slug/ID (auto-detected)")
+    p.set_defaults(func=cmd_ai_pr)
+
+    p = ai_sub.add_parser("merged", help="Report PR merged")
+    p.add_argument("url", nargs="?", help="Pull request URL")
+    p.add_argument("task_ref", nargs="?",
+                   help="Task slug/ID (auto-detected)")
+    p.set_defaults(func=cmd_ai_merged)
+
+    p = ai_sub.add_parser("error", help="Report an unrecoverable error")
+    p.add_argument("message", help="Error description")
+    p.add_argument("task_ref", nargs="?",
+                   help="Task slug/ID (auto-detected)")
+    p.set_defaults(func=cmd_ai_error)
+
+    p = ai_sub.add_parser("progress", help="Report current progress")
+    p.add_argument("message", help="Progress description")
+    p.add_argument("task_ref", nargs="?",
+                   help="Task slug/ID (auto-detected)")
+    p.set_defaults(func=cmd_ai_progress)
+
+    p = ai_sub.add_parser("ready", help="Signal ready for next task")
+    p.add_argument("task_ref", nargs="?",
+                   help="Task slug/ID (auto-detected)")
+    p.set_defaults(func=cmd_ai_ready)
+
+    p = ai_sub.add_parser("context", help="Show current agent context")
+    p.set_defaults(func=cmd_ai_context)
 
     # -- logs ---------------------------------------------------------------
     p = sub.add_parser("logs", help="Tail daemon log")
