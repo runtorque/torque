@@ -2,7 +2,9 @@
 
 ## Executive Summary
 
-Loom can become a standalone desktop application that controls iTerm2 (and eventually Ghostty) from outside the toolbelt. The current architecture is already well-suited for this: the UI is a plain HTML/CSS/JS webview served by an aiohttp server, and all iTerm2 interaction is isolated in `bridge.py` and `keybindings.py`. The iTerm2 Python API works identically from external processes — no API capabilities are lost by moving outside the toolbelt.
+Loom can run as both an iTerm2 toolbelt panel AND a standalone desktop window simultaneously. The architecture already supports this: the aiohttp server broadcasts state to all connected WebSocket clients, so the toolbelt webview and a standalone window are simply two UI clients seeing the same live state. No mode switching or restart required — open a browser or native window alongside the toolbelt and both stay in sync.
+
+The iTerm2 Python API works identically from external processes, so when running standalone-only (without the toolbelt), no API capabilities are lost. The daemon can also run headless (no toolbelt registration) for pure standalone or Ghostty-only workflows.
 
 Ghostty support is feasible but limited. Ghostty's AppleScript API (macOS, v1.3+) covers session creation and text input, but lacks the event monitoring and session observation that Loom relies on heavily. A Ghostty adapter would require polling-based workarounds and would not reach feature parity with the iTerm2 adapter.
 
@@ -23,6 +25,8 @@ Ghostty support is feasible but limited. Ghostty's AppleScript API (macOS, v1.3+
 ```
 
 **Key observation:** The webview and the server are already decoupled. The webview connects via `ws://${location.host}/ws` — no iTerm2-specific JavaScript APIs are used. All iTerm2 interaction happens server-side through `bridge.py`.
+
+**Multi-client observation:** The WebSocket broadcast loop in `server.py` already sends every delta to *all* connected clients. If two browsers/webviews connect to `/ws`, they both receive the same state updates and both can send commands. This means dual-mode (toolbelt + standalone) works out of the box at the transport layer — no multiplexing or session isolation needed.
 
 ### iTerm2 API Surface (35 methods across 3 modules)
 
@@ -47,11 +51,42 @@ These workarounds make the UI portable to any browser/webview:
 
 ---
 
-## Phase 1: Standalone Desktop App (iTerm2 Backend)
+## Phase 1: Dual-Mode Desktop App (Toolbelt + Standalone)
 
-**Goal:** Run Loom as a standalone window that controls iTerm2 externally.
+**Goal:** Run Loom simultaneously as an iTerm2 toolbelt panel and a standalone desktop window. Both UIs connect to the same daemon and stay in sync. Users can also choose to run standalone-only (no toolbelt) or toolbelt-only (current behavior).
 
-### 1.1 External iTerm2 Connection
+### 1.1 Why Dual-Mode Works Already
+
+The aiohttp server broadcasts every delta to all connected WebSocket clients. The toolbelt's WKWebView and a standalone window's webview are just two clients connecting to `ws://127.0.0.1:18932/ws`. Both receive the same state, both can send commands, and actions from either side are reflected in both instantly.
+
+```
+┌─────────────────────┐
+│ iTerm2 Toolbelt     │──┐
+│ (WKWebView)         │  │    ┌──────────────────────┐
+└─────────────────────┘  │    │ Loom Daemon           │
+                         ├─WS→│ aiohttp server        │
+┌─────────────────────┐  │    │ bridge.py → iTerm2 API│
+│ Standalone Window   │──┘    │ SQLite state          │
+│ (PyWebView/Tauri/   │      └──────────────────────┘
+│  Browser)           │
+└─────────────────────┘
+```
+
+No multiplexing, session isolation, or leader election needed. All clients are equal peers.
+
+### 1.2 Three Operating Modes
+
+| Mode | Toolbelt Registered | Standalone Window | How to Launch |
+|------|-------------------|-------------------|---------------|
+| **Toolbelt-only** (current) | Yes | No | iTerm2 Scripts menu |
+| **Dual** | Yes | Yes | Scripts menu + `make standalone` or `open http://127.0.0.1:18932/` |
+| **Standalone-only** | No | Yes | `LOOM_STANDALONE=1 loom` (daemon connects to iTerm2 externally) |
+
+In dual mode, the daemon runs inside iTerm2 as it does today (launched from the Scripts menu). The standalone window is just a second client — it can be a browser tab, a PyWebView window, or a Tauri app pointing at the same URL the toolbelt uses. No server changes needed for this mode.
+
+Standalone-only mode is for users who don't want the toolbelt panel, or who are using Ghostty (Phase 3). The daemon runs as an external process and connects to iTerm2 via the Python API's Unix socket.
+
+### 1.3 External iTerm2 Connection (Standalone-Only Mode)
 
 The `iterm2` Python package works identically from external processes. Connection flow:
 
@@ -59,32 +94,29 @@ The `iterm2` Python package works identically from external processes. Connectio
 2. Authentication via AppleScript: `tell application "iTerm2" to request cookie and key for app named "Loom"`
 3. All 35 API methods work without restriction
 
-**Prerequisites for users:**
+**Prerequisites for users (standalone-only mode):**
 - iTerm2 Preferences > General > Magic > "Enable Python API" must be on
 - First launch triggers a macOS Automation permission prompt (one-time)
 
 **No code changes needed in `bridge.py` or `keybindings.py`** — they already use the `iterm2` package generically. The only difference is how the connection is established.
 
-### 1.2 Entry Point Changes
-
-**Current:** `loom.py` calls `iterm2.run_forever(main)` which manages the connection lifecycle inside iTerm2's script environment.
-
-**Standalone:** Same call, but from an external process. `iterm2.run_forever` handles external authentication automatically.
+### 1.4 Entry Point Changes
 
 ```python
 # loom.py — modified entry point
 import os
 import sys
 
+# Standalone-only mode: daemon runs outside iTerm2, no toolbelt registration
 STANDALONE = os.environ.get("LOOM_STANDALONE", "").lower() in ("1", "true", "yes")
 
 def main_standalone():
-    """Launch as standalone app — connect to iTerm2 externally."""
+    """Launch as external daemon — connect to iTerm2 over Unix socket."""
     import iterm2
     iterm2.run_forever(main, retry=True)  # retry=True waits for iTerm2 to launch
 
 def main_toolbelt():
-    """Launch as iTerm2 toolbelt script (current behavior)."""
+    """Launch as iTerm2 script (current behavior). Toolbelt + dual mode."""
     import iterm2
     iterm2.run_forever(main)
 
@@ -95,13 +127,14 @@ if __name__ == "__main__":
         main_toolbelt()
 ```
 
-### 1.3 Server Changes
+### 1.5 Server Changes
 
-Remove toolbelt registration when standalone:
+Toolbelt registration is only skipped in standalone-only mode. In dual mode, the toolbelt is registered as usual and the standalone window connects alongside it:
 
 ```python
 # server.py — conditional toolbelt registration
 if not STANDALONE:
+    # Registers toolbelt panel (works in both toolbelt-only and dual mode)
     await iterm2.tool.async_register_web_view_tool(
         connection,
         display_name="Loom",
@@ -118,9 +151,9 @@ bind_host = "0.0.0.0" if os.environ.get("LOOM_BIND_ALL") else "127.0.0.1"
 site = web.TCPSite(runner, bind_host, WS_PORT, reuse_address=True)
 ```
 
-### 1.4 Desktop Window Options
+### 1.6 Desktop Window Options
 
-The webview needs a native window. Three viable approaches:
+For the standalone window (used in both dual and standalone-only modes), there are several approaches. In dual mode, even the simplest option (a browser tab) works since the daemon is already running inside iTerm2:
 
 #### Option A: Tauri (Recommended)
 
@@ -159,9 +192,9 @@ The webview needs a native window. Three viable approaches:
 - **Pros:** No new dependencies, instant
 - **Cons:** Browser chrome, no native window controls, no tray icon
 
-**Recommendation:** Start with **Option C (PyWebView)** for rapid iteration since it's pure Python and requires no new toolchain. Graduate to **Option A (Tauri)** when native window features (docking, tray, always-on-top) become important.
+**Recommendation:** Start with **Option D (plain browser)** for dual mode — it's zero effort since the server already serves the full UI. For standalone-only mode, use **Option C (PyWebView)** so the window feels like a native app. Graduate to **Option A (Tauri)** when native window features (docking, tray, always-on-top) become important.
 
-### 1.5 UI Adjustments for Standalone
+### 1.7 UI Adjustments for Standalone
 
 The current CSS is optimized for iTerm2's narrow toolbelt panel (~280px wide). A standalone window can be resized freely.
 
@@ -171,17 +204,20 @@ Changes needed:
 - Add window chrome controls if using Tauri (title bar, minimize/maximize/close)
 - Add a "Connect to iTerm2" status indicator (connection may not be immediate)
 
-### 1.6 Lifecycle Management
+### 1.8 Lifecycle Management
 
-| Concern | Toolbelt (current) | Standalone |
-|---------|-------------------|------------|
-| **Start** | iTerm2 Scripts menu | `loom` CLI or app launcher |
-| **Stop** | Kill process / Scripts menu | Quit app / `make stop` |
-| **iTerm2 restart** | `iterm2.run_forever` reconnects | Same — `retry=True` reconnects |
-| **Loom crash** | Manual restart from Scripts menu | Launchd/systemd auto-restart |
-| **Port conflict** | `make stop` | Same |
+| Concern | Toolbelt-only | Dual Mode | Standalone-only |
+|---------|--------------|-----------|-----------------|
+| **Daemon start** | iTerm2 Scripts menu | iTerm2 Scripts menu | `loom` CLI / launchd |
+| **Standalone window** | N/A | `open http://…` / PyWebView | PyWebView / Tauri / browser |
+| **Daemon stop** | Kill process / Scripts menu | Same | `make stop` / quit app |
+| **iTerm2 restart** | `run_forever` reconnects | Same | `retry=True` reconnects |
+| **Standalone window close** | N/A | Toolbelt keeps working | Daemon keeps running (headless) |
+| **Port conflict** | `make stop` | Same | Same |
 
-For production standalone, register a `launchd` plist for auto-start:
+In dual mode, closing the standalone window has no effect on the daemon or the toolbelt — the daemon's lifecycle is tied to iTerm2, not the standalone window. The standalone window can be reopened at any time by navigating to `http://127.0.0.1:18932/`.
+
+For standalone-only production use, register a `launchd` plist for auto-start:
 
 ```xml
 <!-- ~/Library/LaunchAgents/com.loom.daemon.plist -->
@@ -207,15 +243,16 @@ For production standalone, register a `launchd` plist for auto-start:
 
 | Task | Files Changed | Scope |
 |------|--------------|-------|
-| Entry point standalone mode | `loom.py` | ~20 lines |
+| **Dual mode (zero effort)** | None | Already works — open browser to `http://127.0.0.1:18932/` |
+| Entry point standalone-only mode | `loom.py` | ~20 lines |
 | Conditional toolbelt registration | `server.py` | ~5 lines |
 | Config flag + bind address | `config.py` | ~5 lines |
-| PyWebView wrapper | New: `standalone.py` | ~30 lines |
+| PyWebView wrapper (standalone window) | New: `standalone.py` | ~30 lines |
 | CSS responsive breakpoints | `static/style.css` | ~50 lines |
 | Connection status indicator | `webview.html`, `ws.js` | ~20 lines |
-| Makefile target (`make standalone`) | `Makefile` | ~10 lines |
+| Makefile targets (`make standalone`, `make open`) | `Makefile` | ~15 lines |
 
-**Total: ~140 lines of changes. No architectural rewrites needed.**
+**Dual mode: works today with zero changes.** Standalone-only mode: ~145 lines. No architectural rewrites needed.
 
 ---
 
@@ -609,9 +646,9 @@ cask "loom" do
 end
 ```
 
-### 5.3 Keep Toolbelt Mode
+### 5.3 All Three Modes Supported
 
-The toolbelt mode should remain supported. Detection:
+The packaging must preserve all three operating modes:
 
 ```python
 # loom/config.py
@@ -621,19 +658,28 @@ def is_iterm2_script_env():
     """Detect if running inside iTerm2's script environment."""
     return "ITERM2_COOKIE" in os.environ and "ITERM_SESSION_ID" in os.environ
 
-STANDALONE = not is_iterm2_script_env() or os.environ.get("LOOM_STANDALONE") == "1"
+# Only skip toolbelt registration when explicitly in standalone-only mode
+STANDALONE = os.environ.get("LOOM_STANDALONE", "").lower() in ("1", "true", "yes")
 ```
+
+| Distribution | Toolbelt-only | Dual | Standalone-only |
+|-------------|--------------|------|-----------------|
+| iTerm2 Script (current) | Default | Open browser alongside | Set `LOOM_STANDALONE=1` |
+| macOS `.app` bundle | N/A | Launch app + Scripts menu | Default |
+| Homebrew | N/A | Both install paths | `loom --standalone` |
 
 ---
 
 ## Implementation Roadmap
 
-### Sprint 1: Standalone iTerm2 (Phase 1)
-- Add `LOOM_STANDALONE` flag and conditional toolbelt registration
-- Add PyWebView launcher (`standalone.py`)
-- Add responsive CSS for wider windows
-- Add `make standalone` target
-- Test: full functionality via standalone window controlling iTerm2
+### Sprint 1: Dual-Mode + Standalone (Phase 1)
+- Verify dual mode works (open browser to existing server — should work already)
+- Add `LOOM_STANDALONE` flag for standalone-only mode
+- Conditional toolbelt registration
+- Add PyWebView launcher (`standalone.py`) for native standalone window
+- Add responsive CSS for wider standalone layouts
+- Add `make standalone` and `make open` targets
+- Test: toolbelt + browser side-by-side (dual), standalone-only controlling iTerm2
 
 ### Sprint 2: Adapter Abstraction (Phase 2)
 - Define `TerminalAdapter` protocol
@@ -661,7 +707,9 @@ STANDALONE = not is_iterm2_script_env() or os.environ.get("LOOM_STANDALONE") == 
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|-----------|
-| iTerm2 external auth fails silently | Low | High | Clear error messages, setup wizard |
+| Dual-mode UI divergence (toolbelt narrow, standalone wide) | Medium | Low | Responsive CSS with breakpoints; test both layouts |
+| Concurrent commands from two clients cause race conditions | Low | Low | State mutations are serialized through asyncio event loop |
+| iTerm2 external auth fails silently (standalone-only) | Low | High | Clear error messages, setup wizard |
 | Ghostty AppleScript API changes (pre-1.0 stability) | Medium | Medium | Pin minimum version, adapter versioning |
 | Polling overhead for Ghostty monitoring | Low | Low | 2s interval is fine; tune if needed |
 | PyWebView rendering differences vs WKWebView | Low | Low | Both use WebKit on macOS |
@@ -674,7 +722,9 @@ STANDALONE = not is_iterm2_script_env() or os.environ.get("LOOM_STANDALONE") == 
 
 | Decision | Rationale |
 |----------|-----------|
-| Keep toolbelt mode alongside standalone | Many users prefer integrated toolbelt; no reason to remove it |
+| Dual-mode as default, not a migration | Toolbelt + standalone are just two WS clients to the same server — no architecture change needed |
+| Three modes: toolbelt-only, dual, standalone-only | Covers all use cases without forcing users to choose |
+| Browser tab for dual mode, PyWebView for standalone-only | Dual mode needs zero new deps; standalone-only benefits from a native window |
 | PyWebView first, Tauri later | Zero new toolchain for initial standalone; upgrade path exists |
 | Ghostty macOS-only initially | D-Bus API too limited for Linux; AppleScript covers macOS well |
 | Polling for Ghostty monitoring | Only viable approach; 2s latency acceptable |
