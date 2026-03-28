@@ -121,52 +121,7 @@ function renderBoard() {
   var tasks = _boardTasksInLane(_boardSelectedLane);
   html += '<div class="board-cards" id="board-cards">';
 
-  if (tasks.length === 0) {
-    html += '<div class="board-empty">No tasks in this lane</div>';
-  }
-
-  for (var j = 0; j < tasks.length; j++) {
-    var t = tasks[j];
-    var dotClass = t.agent_id ? _boardAgentStatus(t.agent_id) : '';
-    var focused = t.id === _boardFocusedTask ? ' focused' : '';
-    html += '<div class="board-card' + focused + '"'
-      + ' data-task-id="' + t.id + '"'
-      + ' draggable="true"'
-      + ' ondragstart="boardCardDragStart(event,\'' + t.id + '\')"'
-      + ' ondragend="boardCardDragEnd(event)"'
-      + ' ondragover="boardCardDragOver(event)"'
-      + ' ondragleave="boardCardDragLeave(event)"'
-      + ' ondrop="boardCardDrop(event)"'
-      + ' onclick="boardFocusTask(\'' + t.id + '\')"'
-      + ' oncontextmenu="boardCardMenu(event,\'' + t.id + '\')"'
-      + ' ondblclick="openEditTask(\'' + t.id + '\')">';
-    html += '<div class="board-card-dot ' + dotClass + '"></div>';
-    html += '<div class="board-card-info">';
-    html += '<div class="board-card-title">' + esc(t.task || '') + '</div>';
-    // Meta line: group badge + assignee + labels
-    var meta = '';
-    if (t.group) meta += '<span class="board-card-group">' + esc(t.group) + '</span>';
-    if (t.assignee) meta += '<span class="board-card-assignee">' + esc(t.assignee) + '</span>';
-    if (t.template_name) meta += '<span class="board-card-label board-card-template">' + esc(t.template_name) + '</span>';
-    if (t.labels && t.labels.length) {
-      for (var li = 0; li < t.labels.length; li++) {
-        meta += '<span class="board-card-label">' + esc(t.labels[li]) + '</span>';
-      }
-    }
-    if (meta) html += '<div class="board-card-meta">' + meta + '</div>';
-    if (t.agent_id) {
-      var aName = _boardAgentName(t.agent_id);
-      if (aName) {
-        html += '<div class="board-card-agent" onclick="event.stopPropagation();boardFocusAgent(\'' + t.agent_id + '\')">'
-          + '&#x1F916; ' + esc(aName) + '</div>';
-      }
-    }
-    html += '</div>';
-    html += '<button class="board-card-menu-btn" onclick="event.stopPropagation();boardCardMenu(event,\'' + t.id + '\')" title="Actions">&#8942;</button>';
-    html += '</div>';
-  }
-
-  // Add task: inline input or button
+  // Add task: inline input or button (at top)
   if (_boardAddingTask) {
     html += '<div class="board-add-task board-add-task-active">';
     html += '<input class="board-add-input" id="board-add-task-input"'
@@ -198,6 +153,51 @@ function renderBoard() {
       }
     }
     html += '<button class="board-tpl-item board-tpl-notemplate" onclick="_boardPickNoTemplate()">No template</button>';
+    html += '</div>';
+  }
+
+  // Task cards
+  if (tasks.length === 0) {
+    html += '<div class="board-empty">No tasks in this lane</div>';
+  }
+
+  for (var j = 0; j < tasks.length; j++) {
+    var t = tasks[j];
+    var dotClass = t.agent_id ? _boardAgentStatus(t.agent_id) : '';
+    var focused = t.id === _boardFocusedTask ? ' focused' : '';
+    html += '<div class="board-card' + focused + '"'
+      + ' data-task-id="' + t.id + '"'
+      + ' draggable="true"'
+      + ' ondragstart="boardCardDragStart(event,\'' + t.id + '\')"'
+      + ' ondragend="boardCardDragEnd(event)"'
+      + ' ondragover="boardCardDragOver(event)"'
+      + ' ondragleave="boardCardDragLeave(event)"'
+      + ' ondrop="boardCardDrop(event)"'
+      + ' onclick="boardFocusTask(\'' + t.id + '\')"'
+      + ' oncontextmenu="boardCardMenu(event,\'' + t.id + '\')"'
+      + ' ondblclick="openEditTask(\'' + t.id + '\')">';
+    html += '<div class="board-card-dot ' + dotClass + '"></div>';
+    html += '<div class="board-card-info">';
+    html += '<div class="board-card-title">' + esc(t.task || '') + '</div>';
+    var meta = '';
+    if (t.group) meta += '<span class="board-card-group">' + esc(t.group) + '</span>';
+    if (t.assignee) meta += '<span class="board-card-assignee">' + esc(t.assignee) + '</span>';
+    if (t.template_name) meta += '<span class="board-card-label board-card-template">' + esc(t.template_name) + '</span>';
+    if (t.labels && t.labels.length) {
+      for (var li = 0; li < t.labels.length; li++) {
+        meta += '<span class="board-card-label">' + esc(t.labels[li]) + '</span>';
+      }
+    }
+    if (meta) html += '<div class="board-card-meta">' + meta + '</div>';
+    if (t.agent_id) {
+      var aName = _boardAgentName(t.agent_id);
+      if (aName) {
+        html += '<div class="board-card-agent" onclick="event.stopPropagation();boardFocusAgent(\'' + t.agent_id + '\')">'
+          + '&#x1F916; ' + esc(aName) + '</div>';
+      }
+    }
+    html += '</div>';
+    html += '<button class="board-card-menu-btn" onclick="event.stopPropagation();boardCardMenu(event,\'' + t.id + '\')" title="Actions">&#8942;</button>';
     html += '</div>';
   }
 
