@@ -1080,6 +1080,7 @@ textarea:focus { border-color: var(--accent); }
   display: flex; flex-direction: column;
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg-cell); margin: 2px 0 4px;
+  width: 66%; align-self: flex-end;
   overflow: hidden;
 }
 .board-tpl-item {
