@@ -654,6 +654,15 @@ textarea:focus { border-color: var(--accent); }
 textarea.task-tpl-var, #task-task-input {
   min-height: 0; resize: none; overflow: hidden;
 }
+.task-tpl-vars-group {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 8px 10px 6px; margin: 8px 0 0;
+}
+.task-tpl-vars-group legend {
+  font-size: 10px; font-weight: 600; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .04em;
+  padding: 0 4px;
+}
 
 #modal-confirm { z-index: 200; }
 #confirm-message { font-size: 12px; line-height: 1.5; }

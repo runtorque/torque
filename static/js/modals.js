@@ -984,7 +984,7 @@ function _renderTaskTemplateVars() {
     container.innerHTML = '';
     return;
   }
-  var html = '';
+  var html = '<fieldset class="task-tpl-vars-group"><legend>Template Variables</legend>';
   for (var i = 0; i < _taskTemplateVars.length; i++) {
     var v = _taskTemplateVars[i];
     var savedVal = (_taskTemplateVarValues || {})[v.name] || '';
@@ -995,6 +995,7 @@ function _renderTaskTemplateVars() {
           + '" oninput="taskAutoResize(this)"'
           + ' onkeydown="if(event.key===\'Escape\')closeModals();">' + esc(val) + '</textarea>';
   }
+  html += '</fieldset>';
   container.innerHTML = html;
   // Auto-resize pre-filled textareas
   container.querySelectorAll('textarea').forEach(taskAutoResize);
