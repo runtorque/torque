@@ -378,7 +378,8 @@
     <label>Task <span class="label-req">*</span>
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="An actionable task description, e.g. 'Create a summary of last week's deploys' instead of 'Weekly deploy report'.">?</span>
     </label>
-    <textarea id="task-task-input" rows="2" autocomplete="off"
+    <textarea id="task-task-input" rows="1" autocomplete="off"
+              oninput="taskAutoResize(this)"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
     <label>Group <span class="label-req">*</span></label>
     <select id="task-group-select"

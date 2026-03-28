@@ -651,6 +651,9 @@ textarea {
   min-height: 48px;
 }
 textarea:focus { border-color: var(--accent); }
+textarea.task-tpl-var, #task-task-input {
+  min-height: 0; resize: none; overflow: hidden;
+}
 
 #modal-confirm { z-index: 200; }
 #confirm-message { font-size: 12px; line-height: 1.5; }

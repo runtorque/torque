@@ -861,7 +861,8 @@ function openEditTask(taskId) {
   document.getElementById('task-modal-title').textContent = 'Edit Task';
   document.getElementById('task-submit-btn').textContent = 'Save';
 
-  document.getElementById('task-task-input').value = t.task || '';
+  var taskEl = document.getElementById('task-task-input');
+  taskEl.value = t.task || '';
   document.getElementById('task-assignee-input').value = t.assignee || '';
   document.getElementById('task-labels-input').value = (t.labels || []).join(', ');
   document.getElementById('task-template-vars').innerHTML = '';
@@ -873,8 +874,9 @@ function openEditTask(taskId) {
   send({ cmd: 'list_templates', group: t.group || _currentGroup() });
 
   document.getElementById('modal-task').classList.add('visible');
-  document.getElementById('task-task-input').focus();
-  document.getElementById('task-task-input').select();
+  taskAutoResize(taskEl);
+  taskEl.focus();
+  taskEl.select();
 }
 
 function _populateTaskGroupSelect(defaultGroup) {
@@ -988,11 +990,14 @@ function _renderTaskTemplateVars() {
     var savedVal = (_taskTemplateVarValues || {})[v.name] || '';
     var val = savedVal || v.default || '';
     html += '<label>' + esc(v.name) + '</label>';
-    html += '<input class="task-tpl-var" data-var="' + esc(v.name) + '" value="' + esc(val)
-          + '" placeholder="' + esc(v.default || v.name)
-          + '" autocomplete="off" onkeydown="if(event.key===\'Escape\')closeModals();">';
+    html += '<textarea class="task-tpl-var" data-var="' + esc(v.name)
+          + '" rows="1" placeholder="' + esc(v.default || v.name)
+          + '" oninput="taskAutoResize(this)"'
+          + ' onkeydown="if(event.key===\'Escape\')closeModals();">' + esc(val) + '</textarea>';
   }
   container.innerHTML = html;
+  // Auto-resize pre-filled textareas
+  container.querySelectorAll('textarea').forEach(taskAutoResize);
 }
 
 function _collectTaskTemplateVars() {
@@ -1021,6 +1026,11 @@ function _handleTaskTemplateList(msg) {
   // Called when template list arrives and task modal is open
   _taskModalWaiting = false;
   _populateTaskTemplateSelect(msg.templates || []);
+}
+
+function taskAutoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
 }
 
 function _showPromptPreview(msg) {

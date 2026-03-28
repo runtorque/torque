@@ -388,6 +388,8 @@ function _boardShowTemplateList(msg) {
 function _boardPickTemplate(name) {
   _boardTplList = null;
   _boardAddingTask = false;
+  document.removeEventListener('mousedown', _boardCloseTplListHandler, true);
+  renderBoard();
   // Open the task modal with the template pre-selected
   _taskEditId = null;
   _taskSelectedTemplate = name;
@@ -412,6 +414,8 @@ function _boardPickTemplate(name) {
 function _boardPickNoTemplate() {
   _boardTplList = null;
   _boardAddingTask = false;
+  document.removeEventListener('mousedown', _boardCloseTplListHandler, true);
+  renderBoard();
   openAddTask(_boardSelectedLane);
 }
 
