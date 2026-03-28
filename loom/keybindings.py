@@ -50,6 +50,21 @@ _ACTION_DEFAULTS = {
                           iterm2.keyboard.Modifier.SHIFT],
                          iterm2.keyboard.Keycode.ANSI_B,
                          "loom_toggle_broadcast()"),
+    "close_cell": (ord('C'),
+                   [iterm2.keyboard.Modifier.COMMAND,
+                    iterm2.keyboard.Modifier.OPTION],
+                   iterm2.keyboard.Keycode.ANSI_C,
+                   "loom_close_cell()"),
+    "add_agent": (ord('A'),
+                  [iterm2.keyboard.Modifier.COMMAND,
+                   iterm2.keyboard.Modifier.OPTION],
+                  iterm2.keyboard.Keycode.ANSI_A,
+                  "loom_add_agent()"),
+    "add_terminal": (ord('T'),
+                     [iterm2.keyboard.Modifier.COMMAND,
+                      iterm2.keyboard.Modifier.OPTION],
+                     iterm2.keyboard.Keycode.ANSI_T,
+                     "loom_add_terminal()"),
 }
 
 _ACTION_LABELS = {
@@ -58,6 +73,9 @@ _ACTION_LABELS = {
     "next_agent": "Next agent",
     "prev_agent": "Previous agent",
     "toggle_broadcast": "Toggle broadcast",
+    "close_cell": "Close cell",
+    "add_agent": "Add agent",
+    "add_terminal": "Add terminal",
 }
 
 # String → iterm2 enum mappings for settings overrides
@@ -322,6 +340,17 @@ async def setup(connection, state, bridge, overrides=None):
         prev_idx = (current_idx - 1) % len(ordered)
         await bridge.focus_session(ordered[prev_idx].session_id)
 
+    async def _send_action(action, **fields):
+        """Send an action message to all connected WebSocket clients."""
+        msg = json.dumps({"type": "action", "action": action, **fields})
+        dead = set()
+        for ws in state._ws_clients:
+            try:
+                await ws.send_str(msg)
+            except Exception:
+                dead.add(ws)
+        state._ws_clients -= dead
+
     @iterm2.RPC
     async def loom_toggle_broadcast():
         # Find the group of the currently active session
@@ -332,19 +361,38 @@ async def setup(connection, state, bridge, overrides=None):
                 break
         if not group:
             return
-        # Send action to webview
-        msg = json.dumps({
-            "type": "action",
-            "action": "toggle_broadcast",
-            "group": group,
-        })
-        dead = set()
-        for ws in state._ws_clients:
-            try:
-                await ws.send_str(msg)
-            except Exception:
-                dead.add(ws)
-        state._ws_clients -= dead
+        await _send_action("toggle_broadcast", group=group)
+
+    @iterm2.RPC
+    async def loom_close_cell():
+        for cell in state.agents.values():
+            if cell.session_id == state.active_session_id:
+                await _send_action("close_cell", cell_id=cell.id)
+                return
+
+    @iterm2.RPC
+    async def loom_add_agent():
+        # Find the group of the currently active session
+        group = None
+        for cell in state.agents.values():
+            if cell.session_id == state.active_session_id:
+                group = cell.group
+                break
+        if not group:
+            # Fall back to first group
+            groups = list(state.groups.keys())
+            group = groups[0] if groups else None
+        if group:
+            await _send_action("add_agent", group=group)
+
+    @iterm2.RPC
+    async def loom_add_terminal():
+        # Find the agent associated with the active session
+        current_agent, _ = _find_current_agent(state)
+        if current_agent:
+            await _send_action("add_terminal",
+                               group=current_agent.group,
+                               parent_id=current_agent.id)
 
     # Register all RPCs
     await loom_focus_next.async_register(connection, timeout=10)
@@ -352,6 +400,9 @@ async def setup(connection, state, bridge, overrides=None):
     await loom_next_agent.async_register(connection, timeout=10)
     await loom_prev_agent.async_register(connection, timeout=10)
     await loom_toggle_broadcast.async_register(connection, timeout=10)
+    await loom_close_cell.async_register(connection, timeout=10)
+    await loom_add_agent.async_register(connection, timeout=10)
+    await loom_add_terminal.async_register(connection, timeout=10)
     log.info("Loom RPCs registered")
 
     # Install global key bindings

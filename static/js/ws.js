@@ -243,5 +243,11 @@ function handleAction(msg) {
     } else if (msg.group) {
       openBroadcast(msg.group);
     }
+  } else if (msg.action === 'close_cell') {
+    if (msg.cell_id) removeAgent(msg.cell_id);
+  } else if (msg.action === 'add_agent') {
+    if (msg.group) quickAddAgent(msg.group);
+  } else if (msg.action === 'add_terminal') {
+    if (msg.group && msg.parent_id) quickAddTerminal(msg.group, msg.parent_id);
   }
 }
