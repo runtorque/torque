@@ -5,7 +5,7 @@
 // Client-side state
 var _boardSelectedLane = '';
 var _boardFocusedTask = '';
-// _boardAddingTask removed — task creation uses modal now
+var _boardAddingTask = false;   // true when inline task input is shown
 var _boardAddingLane = false;
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
 var _boardPopover = null;      // {type, lane, rect} for lane settings popover
@@ -164,17 +164,30 @@ function renderBoard() {
     html += '</div>';
   }
 
-  // Add task dropdown
-  html += '<div class="board-add-task" onclick="boardAddTaskMenu(event)">';
-  html += '<span>+ Add task</span>';
-  html += '<span class="board-add-caret">&#9662;</span>';
-  html += '</div>';
+  // Add task: inline input or button
+  if (_boardAddingTask) {
+    html += '<div class="board-add-task board-add-task-active">';
+    html += '<input class="board-add-input" id="board-add-task-input"'
+      + ' placeholder="Task description..."'
+      + ' onkeydown="boardAddTaskKeydown(event)"'
+      + ' onblur="boardCancelAddTask()">';
+    html += '<button class="board-add-tpl-btn" onmousedown="event.preventDefault()" onclick="boardAddTaskWithTemplate()" title="Pick a template">&#9662;</button>';
+    html += '</div>';
+  } else {
+    html += '<div class="board-add-task">';
+    html += '<span onclick="boardStartAddTask()">+ Add task</span>';
+    html += '<span class="board-add-caret" onclick="event.stopPropagation();boardAddTaskWithTemplate()" title="From template">&#9662;</span>';
+    html += '</div>';
+  }
 
   html += '</div>';
   panel.innerHTML = html;
 
   // Auto-focus inputs
-  if (_boardAddingLane) {
+  if (_boardAddingTask) {
+    var tInp = document.getElementById('board-add-task-input');
+    if (tInp) tInp.focus();
+  } else if (_boardAddingLane) {
     var inp2 = document.getElementById('board-add-lane-input');
     if (inp2) inp2.focus();
   }
@@ -275,23 +288,35 @@ function boardUpdateScrollArrows() {
 
 /* ---- Add task dropdown ---------------------------------------------- */
 
-function boardAddTaskMenu(evt) {
-  evt.stopPropagation();
-  var menu = document.getElementById('ctx-menu');
-  var html = '';
-  html += '<button onclick="_closeCtxMenu();openAddTask(_boardSelectedLane)">New task</button>';
-  html += '<button onclick="_closeCtxMenu();boardAddFromTemplate()">From template</button>';
-  menu.innerHTML = html;
-
-  var rect = evt.currentTarget.getBoundingClientRect();
-  menu.style.top = rect.top + 'px';
-  menu.style.left = Math.min(rect.left, window.innerWidth - 140) + 'px';
-  menu.classList.add('open');
+function boardStartAddTask() {
+  _boardAddingTask = true;
+  renderBoard();
 }
 
-function boardAddFromTemplate() {
-  var group = _currentGroup();
-  openTaskFromTemplate(group, _boardSelectedLane);
+function boardCancelAddTask() {
+  setTimeout(function() { _boardAddingTask = false; renderBoard(); }, 150);
+}
+
+function boardAddTaskKeydown(e) {
+  if (e.key === 'Escape') {
+    _boardAddingTask = false;
+    renderBoard();
+    return;
+  }
+  if (e.key === 'Enter') {
+    var val = e.target.value.trim();
+    if (!val) return;
+    _boardAddingTask = false;
+    var group = _currentGroup();
+    var lane = _boardSelectedLane;
+    send({ cmd: 'board_add_task', task: val, group: group, lane: lane });
+    renderBoard();
+  }
+}
+
+function boardAddTaskWithTemplate() {
+  _boardAddingTask = false;
+  openAddTask(_boardSelectedLane);
 }
 
 /* ---- Add lane ------------------------------------------------------- */
