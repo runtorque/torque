@@ -119,7 +119,7 @@ function renderBoard() {
 
   // Cards for selected lane
   var tasks = _boardTasksInLane(_boardSelectedLane);
-  html += '<div class="board-cards" id="board-cards">';
+  html += '<div class="board-cards" id="board-cards" onclick="boardCloseTplList()">';
 
   // Add task: inline input or button (at top)
   if (_boardAddingTask) {
@@ -139,7 +139,7 @@ function renderBoard() {
 
   // Inline template list (shown below add-task)
   if (_boardTplList !== null) {
-    html += '<div class="board-tpl-list">';
+    html += '<div class="board-tpl-list" onclick="event.stopPropagation()">';
     if (_boardTplList.length === 0) {
       html += '<div class="board-tpl-empty">No templates found</div>';
     } else {
@@ -333,6 +333,13 @@ function boardAddTaskKeydown(e) {
     var group = _currentGroup();
     var lane = _boardSelectedLane;
     send({ cmd: 'board_add_task', task: val, group: group, lane: lane });
+    renderBoard();
+  }
+}
+
+function boardCloseTplList() {
+  if (_boardTplList !== null) {
+    _boardTplList = null;
     renderBoard();
   }
 }

@@ -971,6 +971,7 @@ textarea:focus { border-color: var(--accent); }
   flex: 1; min-height: 0; overflow-y: auto;
   padding: 6px 8px;
   display: flex; flex-direction: column; gap: 4px;
+  position: relative;
 }
 .board-cards > * { flex-shrink: 0; }
 .board-card {
@@ -1075,13 +1076,16 @@ textarea:focus { border-color: var(--accent); }
 }
 .board-add-tpl-btn-idle:hover { color: var(--accent); }
 
-/* Inline template list (inside board cards area) */
+/* Inline template list (overlays cards) */
 .board-tpl-list {
   display: flex; flex-direction: column;
   border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--bg-cell); margin: 2px 0 4px;
-  width: 66%; align-self: flex-end;
+  background: var(--bg-cell);
+  width: 66%;
   overflow: hidden;
+  position: absolute; top: 34px; right: 0;
+  z-index: 20;
+  box-shadow: 0 4px 12px rgba(0,0,0,.3);
 }
 .board-tpl-item {
   display: flex; flex-direction: column; align-items: flex-start;
