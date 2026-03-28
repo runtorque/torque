@@ -1084,11 +1084,12 @@ textarea.task-tpl-var, #task-task-input {
   line-height: 1.4;
 }
 .board-add-tpl-btn-idle {
-  background: none; border: none;
+  background: var(--bg-cell); border: 1px solid var(--border);
+  border-radius: var(--radius);
   color: var(--text-dim); font-size: 9px; cursor: pointer;
-  margin-left: auto; padding: 0; white-space: nowrap;
+  margin-left: auto; padding: 3px 8px; white-space: nowrap;
 }
-.board-add-tpl-btn-idle:hover { color: var(--accent); }
+.board-add-tpl-btn-idle:hover { color: var(--text); border-color: var(--accent); }
 
 /* Inline template list (overlays cards) */
 .board-tpl-list {
