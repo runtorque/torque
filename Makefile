@@ -76,7 +76,7 @@ install:
 	@PYTHON="$(or $(PROJECT_PYTHON),$(shell ls "$(ITERM2_PROJECT)"/iterm2env/versions/3.*/bin/python3 \
 	    2>/dev/null | sort -V | tail -1))"; \
 	if [ -n "$$PYTHON" ]; then \
-		"$$PYTHON" -m pip install -q aiohttp jinja2 2>/dev/null || true; \
+		"$$PYTHON" -m pip install -q aiohttp jinja2 pyyaml 2>/dev/null || true; \
 	fi
 	@echo ""
 	@echo "Installed to $(SCRIPT_DIR)"
@@ -104,7 +104,7 @@ deps:
 		echo "Error: iTerm2 Python not found. Run make install first."; \
 		exit 1; \
 	fi
-	"$(ITERM2_PYTHON)" -m pip install aiohttp jinja2
+	"$(ITERM2_PYTHON)" -m pip install aiohttp jinja2 pyyaml
 	@echo "Done. Using: $(ITERM2_PYTHON)"
 
 ## run: Launch the script in the background (iTerm2 must be running with Python API enabled)

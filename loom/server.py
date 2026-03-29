@@ -8,6 +8,7 @@ import sys
 import aiohttp
 from aiohttp import web
 import iterm2
+import yaml
 
 from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, STANDALONE, BIND_HOST, log
 from .db import LoomDB
@@ -45,70 +46,81 @@ async def _worktree_diff_updater(state: MatrixState,
             await state.broadcast()
 
 
+class _BlockStr(str):
+    """Tagged string subclass so the YAML representer emits block scalar."""
+
+_ACTION_KEY_ORDER = [
+    "name", "description", "agent", "group", "worktree",
+    "prompt", "labels", "transitions", "terminals",
+]
+
+class _ActionDumper(yaml.SafeDumper):
+    pass
+
+_ActionDumper.add_representer(
+    _BlockStr,
+    lambda d, s: d.represent_scalar("tag:yaml.org,2002:str", s, style="|"),
+)
+
 def _action_to_yaml(name: str, data: dict) -> str:
     """Convert an action data dict to YAML text."""
-    lines = [f"name: {name}"]
+    doc = {"name": name}
     if data.get("description"):
-        lines.append(f"description: {data['description']}")
-    lines.append("")
+        doc["description"] = data["description"]
 
-    # Agent block
     agent = data.get("agent", {})
-    if any(agent.get(k) for k in ("name_prefix", "command", "tab_color",
-                                    "directory", "profile", "shell")):
-        lines.append("agent:")
-        for k in ("name_prefix", "command", "directory", "profile",
-                   "shell", "tab_color"):
-            if agent.get(k):
-                lines.append(f"  {k}: \"{agent[k]}\"" if k == "tab_color"
-                             else f"  {k}: {agent[k]}")
+    agent_keys = ("name_prefix", "command", "directory", "profile",
+                  "shell", "tab_color")
+    agent_block = {k: agent[k] for k in agent_keys if agent.get(k)}
+    if agent_block:
+        doc["agent"] = agent_block
 
     if data.get("group"):
-        lines.append(f"\ngroup: {data['group']}")
+        doc["group"] = data["group"]
     if data.get("worktree"):
-        lines.append("\nworktree: true")
+        doc["worktree"] = True
 
-    # Prompt field (replaces task/instructions/context/criteria)
     prompt = data.get("prompt", "")
     if prompt:
-        lines.append(f"\nprompt: |")
-        for l in prompt.rstrip("\n").split("\n"):
-            lines.append(f"  {l}")
+        doc["prompt"] = _BlockStr(prompt.rstrip("\n") + "\n")
 
-    # Labels
     labels = data.get("labels", [])
     if labels:
-        lines.append("\nlabels:")
-        for lb in labels:
-            lines.append(f"  - {lb}")
+        doc["labels"] = labels
 
-    # Transitions (pipeline)
     transitions = data.get("transitions", [])
     if transitions:
-        lines.append("\ntransitions:")
+        clean = []
         for tr in transitions:
             if isinstance(tr, dict):
                 if tr.get("ask"):
-                    lines.append("  - ask: true")
+                    entry = {"ask": True}
                     if tr.get("when"):
-                        lines.append(f"    when: {tr['when']}")
+                        entry["when"] = tr["when"]
+                    clean.append(entry)
                 elif tr.get("action"):
-                    lines.append(f"  - action: {tr['action']}")
+                    entry = {"action": tr["action"]}
                     if tr.get("when"):
-                        lines.append(f"    when: {tr['when']}")
+                        entry["when"] = tr["when"]
+                    clean.append(entry)
+        if clean:
+            doc["transitions"] = clean
 
-    # Terminals
     terminals = data.get("terminals", [])
     if terminals:
-        lines.append("\nterminals:")
+        clean = []
         for t in terminals:
-            tname = t.get("name", "shell")
-            lines.append(f"  - name: {tname}")
+            entry = {"name": t.get("name", "shell")}
             if t.get("command"):
-                lines.append(f"    command: {t['command']}")
+                entry["command"] = t["command"]
+            clean.append(entry)
+        doc["terminals"] = clean
 
-    lines.append("")
-    return "\n".join(lines)
+    # Sort keys in the canonical action order
+    ordered = {k: doc[k] for k in _ACTION_KEY_ORDER if k in doc}
+    return yaml.dump(ordered, Dumper=_ActionDumper,
+                     default_flow_style=False, sort_keys=False,
+                     allow_unicode=True)
 
 
 async def main(connection: iterm2.Connection):
