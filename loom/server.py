@@ -22,6 +22,10 @@ from .worktree import WorktreeManager
 from .actions import ActionManager
 from . import keybindings
 
+# Delay (seconds) before closing an agent after a successful merge.
+# TODO: make this a user-facing setting in global/group settings.
+CLOSE_AFTER_MERGE_DELAY = 5
+
 
 async def _worktree_diff_updater(state: MatrixState,
                                  worktree_mgr: WorktreeManager):
@@ -174,6 +178,7 @@ async def main(connection: iterm2.Connection):
                     f'"{cell.name}" merged to {cell.worktree_base_branch}',
                     "success")
                 if close_on_merge:
+                    await asyncio.sleep(CLOSE_AFTER_MERGE_DELAY)
                     removed = state.remove_agent(cell.id)
                     for c in removed:
                         if c.session_id:
