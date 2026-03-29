@@ -5,9 +5,6 @@ agent:
   name_prefix: feat
   tab_color: "#3fb950"
 
-labels:
-  - feature
-
 prompt: |
   You are implementing a feature. This is a quick, focused change — no review pipeline. Get it done cleanly in one pass.
 
@@ -19,6 +16,8 @@ prompt: |
 
   - Read the relevant code first to understand what exists
   - Write clean, minimal code — no speculative abstractions or premature generalization
-  - Add or update tests for any new behavior
-  - Run the test suite before finishing
   - Keep the diff focused — if you notice unrelated issues, leave them for a separate change
+  - Do NOT deploy the changes
+
+labels:
+  - feature
