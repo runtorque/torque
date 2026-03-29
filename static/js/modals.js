@@ -53,10 +53,13 @@ function closeModals() {
 }
 
 /* -- Confirm dialog (replaces window.confirm for WKWebView) ----------- */
-function showConfirm(message) {
+function showConfirm(message, opts) {
   return new Promise((resolve) => {
     _confirmResolve = resolve;
     document.getElementById('confirm-message').textContent = message;
+    const btn = document.getElementById('confirm-yes-btn');
+    btn.textContent = (opts && opts.label) || 'Remove';
+    btn.className = 'btn-primary ' + ((opts && opts.variant) || 'btn-danger');
     document.getElementById('modal-confirm').classList.add('visible');
   });
 }

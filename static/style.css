@@ -513,6 +513,8 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
 .btn-primary:hover { filter: brightness(1.15); }
 .btn-danger { background: var(--red); color: #fff; }
 .btn-danger:hover { filter: brightness(1.15); }
+.btn-green { background: var(--green); color: #fff; }
+.btn-green:hover { filter: brightness(1.15); }
 .hidden { display: none !important; }
 
 /* Color swatches */

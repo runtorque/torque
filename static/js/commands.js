@@ -304,7 +304,8 @@ async function worktreeMerge(id) {
   if (!cell) return;
   const base = cell.worktree_base_branch || 'main';
   if (await showConfirm(
-    `Merge "${cell.name}" into ${base}? Claude will perform the merge and resolve any conflicts. You\u2019ll be notified if it fails.`
+    `Merge "${cell.name}" into ${base}? Claude will perform the merge and resolve any conflicts. You\u2019ll be notified if it fails.`,
+    { label: 'Proceed', variant: 'btn-green' }
   )) {
     send({ cmd: 'worktree_merge', id });
   }
