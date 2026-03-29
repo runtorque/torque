@@ -303,11 +303,16 @@ async function worktreeMerge(id) {
   const cell = state.agents[id];
   if (!cell) return;
   const base = cell.worktree_base_branch || 'main';
-  if (await showConfirm(
+  const result = await showConfirm(
     `Merge "${cell.name}" into ${base}? Claude will perform the merge and resolve any conflicts. You\u2019ll be notified if it fails.`,
-    { label: 'Proceed', variant: 'btn-green' }
-  )) {
-    send({ cmd: 'worktree_merge', id });
+    {
+      label: 'Proceed', variant: 'btn-green',
+      checkboxes: [{ key: 'close_on_merge', label: 'Close agent after merge', checked: false }],
+    }
+  );
+  if (result) {
+    const close = result.close_on_merge || false;
+    send({ cmd: 'worktree_merge', id, close_on_merge: close });
   }
 }
 async function worktreeRemove(id) {

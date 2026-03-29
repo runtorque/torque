@@ -57,20 +57,41 @@ function showConfirm(message, opts) {
   return new Promise((resolve) => {
     _confirmResolve = resolve;
     document.getElementById('confirm-message').textContent = message;
+    const extras = document.getElementById('confirm-extras');
+    extras.innerHTML = '';
+    if (opts && opts.checkboxes) {
+      for (const cb of opts.checkboxes) {
+        const lbl = document.createElement('label');
+        lbl.className = 'gs-checkbox';
+        const inp = document.createElement('input');
+        inp.type = 'checkbox';
+        inp.checked = !!cb.checked;
+        inp.dataset.key = cb.key;
+        lbl.appendChild(inp);
+        lbl.appendChild(document.createTextNode(cb.label));
+        extras.appendChild(lbl);
+      }
+    }
     const btn = document.getElementById('confirm-yes-btn');
     btn.textContent = (opts && opts.label) || 'Remove';
     btn.className = 'btn-primary ' + ((opts && opts.variant) || 'btn-danger');
     document.getElementById('modal-confirm').classList.add('visible');
   });
 }
-function confirmYes() {
+function _confirmResult(accepted) {
   document.getElementById('modal-confirm').classList.remove('visible');
-  if (_confirmResolve) { _confirmResolve(true); _confirmResolve = null; }
+  if (!_confirmResolve) return;
+  if (!accepted) { _confirmResolve(false); _confirmResolve = null; return; }
+  const extras = document.getElementById('confirm-extras');
+  const boxes = extras.querySelectorAll('input[type="checkbox"]');
+  if (boxes.length === 0) { _confirmResolve(true); _confirmResolve = null; return; }
+  const result = {};
+  for (const b of boxes) result[b.dataset.key] = b.checked;
+  _confirmResolve(result);
+  _confirmResolve = null;
 }
-function confirmNo() {
-  document.getElementById('modal-confirm').classList.remove('visible');
-  if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
-}
+function confirmYes() { _confirmResult(true); }
+function confirmNo() { _confirmResult(false); }
 
 /* -- Add Group -------------------------------------------------------- */
 function openAddGroup() {

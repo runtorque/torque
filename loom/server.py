@@ -133,7 +133,8 @@ async def main(connection: iterm2.Connection):
     worktree_mgr = WorktreeManager()
     action_mgr = ActionManager()
 
-    _pending_merges: dict[str, str] = {}  # cell ID → pre-merge base SHA
+    # cell ID → (pre-merge base SHA, close_on_merge flag)
+    _pending_merges: dict[str, tuple[str, bool]] = {}
 
     def _checkpoint_message(cell) -> str:
         """Build a checkpoint commit message from the agent's last summary."""
@@ -148,7 +149,7 @@ async def main(connection: iterm2.Connection):
         """Handle agent turn completion: merge verification + auto-checkpoint."""
         # Check pending merge result
         if cell.id in _pending_merges:
-            pre_sha = _pending_merges.pop(cell.id)
+            pre_sha, close_on_merge = _pending_merges.pop(cell.id)
             merged = await worktree_mgr.is_merged(cell)
             if not merged and pre_sha:
                 merged = await worktree_mgr.check_base_advanced(
@@ -160,6 +161,19 @@ async def main(connection: iterm2.Connection):
                 await _broadcast_toast(
                     f'"{cell.name}" merged to {cell.worktree_base_branch}',
                     "success")
+                if close_on_merge:
+                    removed = state.remove_agent(cell.id)
+                    for c in removed:
+                        if c.session_id:
+                            await bridge.close_session(c.session_id)
+                        if c.agent_type and c.directory:
+                            adapter = get_adapter(c.agent_type)
+                            if hasattr(adapter, "uninstall_hooks"):
+                                adapter.uninstall_hooks(
+                                    os.path.expanduser(c.directory))
+                        event_bus.cleanup_cell(c.id)
+                        if c.worktree_path:
+                            await worktree_mgr.remove(c)
             else:
                 log.warning("Merge failed for '%s': branch %s not in %s",
                             cell.name, cell.worktree_branch,
@@ -1015,9 +1029,10 @@ async def main(connection: iterm2.Connection):
                                 pre_sha = out.decode().strip()
                         except Exception:
                             pass
+                        close_flag = bool(data.get("close_on_merge"))
                         await bridge.send_text(
                             cell.session_id, prompt + "\r")
-                        _pending_merges[cell.id] = pre_sha
+                        _pending_merges[cell.id] = (pre_sha, close_flag)
                         cell.status = "running"
                         state._emit_agent(cell)
                         # Ephemeral status — no DB write needed
