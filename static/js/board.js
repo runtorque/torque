@@ -15,6 +15,7 @@ var _boardPopover = null;      // {type, lane, rect} for lane settings popover
 var _boardDragId = '';          // card being dragged
 
 var _RESERVED_LANES = ['Backlog', 'In Progress'];
+var _boardFilterByGroup = true;  // When true, board shows only tasks from the current group
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -26,8 +27,21 @@ function _boardTasks() {
   return (state && state.board_tasks) || {};
 }
 
+/** Return visible tasks, optionally filtered to the current group. */
+function _boardVisibleTasks() {
+  var all = _boardTasks();
+  if (!_boardFilterByGroup) return all;
+  var grp = _currentGroup();
+  if (!grp) return all;
+  var out = {};
+  for (var id in all) {
+    if (all[id].group === grp) out[id] = all[id];
+  }
+  return out;
+}
+
 function _boardTasksInLane(lane) {
-  var tasks = _boardTasks();
+  var tasks = _boardVisibleTasks();
   var arr = [];
   for (var id in tasks) {
     if (tasks[id].lane === lane) arr.push(tasks[id]);
@@ -37,7 +51,7 @@ function _boardTasksInLane(lane) {
 }
 
 function _boardLaneCount(lane) {
-  var tasks = _boardTasks();
+  var tasks = _boardVisibleTasks();
   var n = 0;
   for (var id in tasks) {
     if (tasks[id].lane === lane) n++;
