@@ -429,9 +429,23 @@ class ITerm2Adapter:
             log.exception("Failed to update tab color for '%s'", cell.name)
 
     async def send_text(self, session_id: str, text: str):
+        """Send text to a terminal session.
+
+        For multi-line text ending with Enter (\\r or \\n), the Enter
+        is sent separately after a short delay so it lands outside
+        bracketed paste mode — otherwise apps like Claude Code show
+        "[Pasted N lines]" without submitting.
+        """
         session = await self._find_session(session_id)
         if session:
-            await session.async_send_text(text)
+            body = text.rstrip("\r\n")
+            trail = text[len(body):]
+            await session.async_send_text(body)
+            if trail and "\n" in body:
+                await asyncio.sleep(0.05)
+                await session.async_send_text(trail)
+            elif trail:
+                await session.async_send_text(trail)
 
     # -- Helpers ------------------------------------------------------------
 

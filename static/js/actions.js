@@ -497,7 +497,7 @@ function tplEditorSave() {
   }
 
   // Sanitize name for filename
-  name = name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+  name = name.replace(/[^a-zA-Z0-9_/.-]/g, '-').toLowerCase();
 
   var labelsRaw = (document.getElementById('tpled-labels').value || '').trim();
   var labels = labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
