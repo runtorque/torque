@@ -1466,9 +1466,9 @@ textarea.task-tpl-var, #task-task-input {
 .tpled-view-btn.active { background: var(--accent); color: var(--bg); }
 .tpled-view-btn:hover:not(.active) { color: var(--text); }
 
-/* Pipelines view */
+/* Pipelines canvas view */
 .tpled-pipelines {
-  flex: 1; overflow-y: auto; padding: 8px;
+  flex: 1; overflow: hidden; position: relative;
 }
 .tpled-pipelines-loading,
 .tpled-pipelines-empty {
@@ -1478,28 +1478,47 @@ textarea.task-tpl-var, #task-task-input {
   background: var(--bg-hover); padding: 1px 4px; border-radius: 2px;
   font-size: 10px;
 }
-.pipeline-graph {
-  margin-bottom: 16px; padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
+.pl-canvas-wrap {
+  width: 100%; height: 100%; overflow: hidden;
+  cursor: grab; position: relative;
 }
-.pipeline-graph:last-child { border-bottom: none; }
-.pipeline-graph-title {
-  font-size: 11px; font-weight: 700; margin-bottom: 8px;
+.pl-canvas-wrap:active { cursor: grabbing; }
+.pl-canvas {
+  position: absolute; top: 0; left: 0;
+  transform-origin: 0 0;
 }
-.pipeline-graph-nodes {
-  display: flex; flex-direction: column; gap: 6px;
-}
-.pipeline-node {
+.pl-node {
+  position: absolute;
   background: var(--bg-hover); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 6px 8px; cursor: pointer;
+  border-radius: 6px; cursor: pointer;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  transition: border-color .15s, box-shadow .15s;
 }
-.pipeline-node:hover { border-color: var(--accent); }
-.pipeline-node-terminal { border-style: dashed; opacity: 0.7; }
-.pipeline-node-name { font-size: 11px; font-weight: 600; }
-.pipeline-node-edges { margin-top: 4px; }
-.pipeline-node-edge {
-  font-size: 9px; color: var(--text-dim);
-  padding: 1px 0;
+.pl-node:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.pl-node-terminal { border-style: dashed; opacity: 0.7; }
+.pl-node-entry { border-left: 3px solid var(--accent); }
+.pl-node-label {
+  font-size: 11px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 100%; padding: 0 8px;
+}
+.pl-node-sub {
+  font-size: 8px; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.pl-node-ask {
+  position: absolute;
+  background: var(--bg); border: 1px dashed var(--yellow);
+  border-radius: 12px; cursor: default;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0.85;
+}
+.pl-node-ask .pl-node-label {
+  font-size: 10px; font-weight: 500; color: var(--yellow);
 }
 
 /* ------------------------------------------------------------------ */

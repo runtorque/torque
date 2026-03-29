@@ -451,11 +451,13 @@ class TemplateManager:
         """Scan all templates and discover pipelines from transitions.
 
         Returns a list of pipeline dicts:
-        [{name, templates: [str], edges: [{from, to, when}]}]
+        [{name, templates: [str], edges: [{from, to, when}],
+          asks: [{from, when}]}]
         """
         templates = self.list_templates(base_dir)
         # Build adjacency: load transitions for each template
         graph = {}  # name → [{to, when}]
+        asks = {}   # name → [{when}]
         all_names = set()
         for t in templates:
             if t.get("shadowed"):
@@ -465,11 +467,17 @@ class TemplateManager:
             tpl = self.load_template(name, base_dir)
             transitions = (tpl.get("transitions") or []) if tpl else []
             edges = []
+            tpl_asks = []
             for tr in transitions:
-                if isinstance(tr, dict) and tr.get("template"):
-                    edges.append({"to": tr["template"],
-                                  "when": tr.get("when", "")})
+                if isinstance(tr, dict):
+                    if tr.get("template"):
+                        edges.append({"to": tr["template"],
+                                      "when": tr.get("when", "")})
+                    elif tr.get("ask"):
+                        tpl_asks.append({"when": tr.get("when", "")})
             graph[name] = edges
+            if tpl_asks:
+                asks[name] = tpl_asks
 
         # Build undirected connected components
         adj = {n: set() for n in all_names}
@@ -521,10 +529,17 @@ class TemplateManager:
                         edges.append({"from": n, "to": e["to"],
                                       "when": e["when"]})
 
+            # Collect ask transitions for templates in this component
+            comp_asks = []
+            for n in comp:
+                for a in asks.get(n, []):
+                    comp_asks.append({"from": n, "when": a["when"]})
+
             pipelines.append({
                 "name": name,
                 "templates": sorted(comp),
                 "edges": edges,
+                "asks": comp_asks,
             })
 
         return sorted(pipelines, key=lambda p: p["name"])

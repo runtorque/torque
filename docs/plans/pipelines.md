@@ -777,12 +777,11 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 ### Step 9: Pipeline visualization — Templates panel (`static/js/templates.js`) ✅
 
 - Editor/Pipelines view toggle in the Templates panel header
-- `renderPipelinesView()` calls server `discover_pipelines`, renders discovered pipelines
-- BFS-based layout: entry point detection → depth assignment → vertical node placement
-- Nodes rendered as styled boxes with template name and outgoing transitions (adjacency list)
-- Terminal nodes get dashed border style
-- Click-to-edit: clicking a node switches to Editor view with that template selected
-- Multiple pipeline support with dividers between them
+- `renderPipelinesView()` renders a pannable/zoomable canvas (CSS transform pan/zoom, mouse drag + scroll wheel)
+- BFS-based layout: entry nodes (no inbound) at top, terminal nodes (no outbound) at bottom, centered per layer
+- Template nodes as styled HTML divs positioned absolutely — entry nodes have accent left border, terminal nodes have dashed borders. Click to open in editor.
+- Ask transitions rendered as small pill-shaped nodes snug to the right of their source, connected by a dashed line. Each template gets its own independent ask node. Layer widths account for ask nodes so they never overlap other templates.
+- SVG edges: forward edges as smooth vertical bezier curves with arrowheads. Back-edges route via the left or right side (whichever is closer to the target) using quadratic bezier S-curves that arrive horizontally. Multiple back-edges on the same side get staggered channels.
 - Pipeline data is re-fetched on every view switch to reflect template edits
 
 ### Step 9b: Transitions editor — Templates panel (`static/js/templates.js`) ✅

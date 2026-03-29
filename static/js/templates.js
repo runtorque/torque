@@ -593,11 +593,23 @@ function _tplEditorReadForm() {
   };
 }
 
-/* ---- Pipeline view -------------------------------------------------- */
+/* ---- Pipeline view (canvas with pan/zoom) --------------------------- */
+
+var _plZoom = 1;
+var _plPanX = 0;
+var _plPanY = 0;
+var _plDragging = false;
+var _plDragStartX = 0;
+var _plDragStartY = 0;
+var _plPanStartX = 0;
+var _plPanStartY = 0;
 
 function tplSwitchView(view) {
   _tplPanelView = view;
-  if (view === 'pipelines') _tplPipelinesData = null;
+  if (view === 'pipelines') {
+    _tplPipelinesData = null;
+    _plZoom = 1; _plPanX = 0; _plPanY = 0;
+  }
   renderTemplatesPanel();
 }
 
@@ -606,7 +618,7 @@ function renderPipelinesView() {
   if (!el) return;
 
   if (!_tplPipelinesData) {
-    el.innerHTML = '<div class="tpled-pipelines-loading">Loading…</div>';
+    el.innerHTML = '<div class="tpled-pipelines-loading">Loading\u2026</div>';
     send({ cmd: 'discover_pipelines', group: _currentGroup() || '' });
     return;
   }
@@ -619,94 +631,413 @@ function renderPipelinesView() {
     return;
   }
 
-  var html = '';
+  // Merge all pipelines into a single graph
+  var allEdges = [];
+  var allAsks = [];
+  var allTemplates = {};
   for (var pi = 0; pi < pipelines.length; pi++) {
     var p = pipelines[pi];
-    html += '<div class="pipeline-graph">';
-    html += '<div class="pipeline-graph-title">' + esc(p.name)
-      + ' <span class="dim">(' + p.templates.length + ' templates)</span></div>';
+    for (var ti = 0; ti < p.templates.length; ti++) allTemplates[p.templates[ti]] = true;
+    for (var ei = 0; ei < p.edges.length; ei++) allEdges.push(p.edges[ei]);
+    if (p.asks) for (var ai = 0; ai < p.asks.length; ai++) allAsks.push(p.asks[ai]);
+  }
+  var templateNames = Object.keys(allTemplates).sort();
 
-    // Build adjacency for layout
-    var adj = {};
-    var incoming = {};
-    for (var ei = 0; ei < p.edges.length; ei++) {
-      var e = p.edges[ei];
-      adj[e.from] = adj[e.from] || [];
-      adj[e.from].push(e);
-      incoming[e.to] = (incoming[e.to] || 0) + 1;
-    }
-
-    // BFS to assign depth levels
-    var depths = {};
-    var entryPoints = [];
-    for (var ti = 0; ti < p.templates.length; ti++) {
-      if (!incoming[p.templates[ti]]) entryPoints.push(p.templates[ti]);
-    }
-    if (!entryPoints.length) entryPoints = [p.templates[0]];
-
-    var queue = [];
-    for (var epi = 0; epi < entryPoints.length; epi++) {
-      depths[entryPoints[epi]] = 0;
-      queue.push(entryPoints[epi]);
-    }
-    while (queue.length) {
-      var node = queue.shift();
-      var edges = adj[node] || [];
-      for (var eii = 0; eii < edges.length; eii++) {
-        var target = edges[eii].to;
-        if (depths[target] === undefined) {
-          depths[target] = (depths[node] || 0) + 1;
-          queue.push(target);
-        }
-      }
-    }
-    // Assign remaining (cyclic-only nodes)
-    for (var ti = 0; ti < p.templates.length; ti++) {
-      if (depths[p.templates[ti]] === undefined) depths[p.templates[ti]] = 0;
-    }
-
-    // Group by depth
-    var maxDepth = 0;
-    var byDepth = {};
-    for (var tname in depths) {
-      var d = depths[tname];
-      if (d > maxDepth) maxDepth = d;
-      byDepth[d] = byDepth[d] || [];
-      byDepth[d].push(tname);
-    }
-
-    // Render nodes by depth
-    html += '<div class="pipeline-graph-nodes">';
-    for (var d = 0; d <= maxDepth; d++) {
-      var nodes = byDepth[d] || [];
-      for (var ni = 0; ni < nodes.length; ni++) {
-        var n = nodes[ni];
-        var nodeEdges = adj[n] || [];
-        var isTerminal = !nodeEdges.length;
-        var cls = isTerminal ? ' pipeline-node-terminal' : '';
-        html += '<div class="pipeline-node' + cls + '"'
-          + ' onclick="tplSwitchView(\'editor\');tplEditorOnSelect(\'project:' + esc(n) + '\')"'
-          + ' title="Click to edit">';
-        html += '<div class="pipeline-node-name">' + esc(n) + '</div>';
-        if (nodeEdges.length) {
-          html += '<div class="pipeline-node-edges">';
-          for (var nei = 0; nei < nodeEdges.length; nei++) {
-            var ne = nodeEdges[nei];
-            html += '<div class="pipeline-node-edge">→ ' + esc(ne.to);
-            if (ne.when) html += ' <span class="dim">"' + esc(ne.when) + '"</span>';
-            html += '</div>';
-          }
-          html += '</div>';
-        } else {
-          html += '<div class="pipeline-node-edges"><div class="pipeline-node-edge dim">(terminal)</div></div>';
-        }
-        html += '</div>';
-      }
-    }
-    html += '</div></div>';
+  // Build adjacency
+  var adj = {};
+  var inCount = {};
+  for (var i = 0; i < templateNames.length; i++) {
+    adj[templateNames[i]] = [];
+    inCount[templateNames[i]] = 0;
+  }
+  for (var i = 0; i < allEdges.length; i++) {
+    var e = allEdges[i];
+    if (adj[e.from]) adj[e.from].push(e);
+    if (inCount[e.to] !== undefined) inCount[e.to]++;
   }
 
-  el.innerHTML = html;
+  // BFS layout: assign layers
+  var depths = {};
+  var queue = [];
+  for (var i = 0; i < templateNames.length; i++) {
+    if (inCount[templateNames[i]] === 0) {
+      depths[templateNames[i]] = 0;
+      queue.push(templateNames[i]);
+    }
+  }
+  if (!queue.length) { // fully cyclic
+    depths[templateNames[0]] = 0;
+    queue.push(templateNames[0]);
+  }
+  while (queue.length) {
+    var node = queue.shift();
+    var edges = adj[node] || [];
+    for (var i = 0; i < edges.length; i++) {
+      var target = edges[i].to;
+      if (depths[target] === undefined) {
+        depths[target] = (depths[node] || 0) + 1;
+        queue.push(target);
+      }
+    }
+  }
+  for (var i = 0; i < templateNames.length; i++) {
+    if (depths[templateNames[i]] === undefined) depths[templateNames[i]] = 0;
+  }
+
+  // Group by layer
+  var maxDepth = 0;
+  var byDepth = {};
+  for (var name in depths) {
+    var d = depths[name];
+    if (d > maxDepth) maxDepth = d;
+    byDepth[d] = byDepth[d] || [];
+    byDepth[d].push(name);
+  }
+
+  // Compute node positions
+  var NODE_W = 140;
+  var NODE_H = 40;
+  var ASK_W = 70;
+  var ASK_H = 28;
+  var ASK_GAP = 10;
+  var GAP_X = 40;
+  var GAP_Y = 60;
+  var nodePos = {}; // name → {x, y}
+
+  // Count back-edges for left channel reservation
+  var backEdgeCount = 0;
+  for (var i = 0; i < allEdges.length; i++) {
+    if ((depths[allEdges[i].to] || 0) <= (depths[allEdges[i].from] || 0)) backEdgeCount++;
+  }
+  var LEFT_CHANNEL = backEdgeCount ? 30 + backEdgeCount * 16 : 0;
+
+  // Pre-compute which templates have asks (for width calculation)
+  var asksForTpl = {}; // name → count
+  for (var ai = 0; ai < allAsks.length; ai++) {
+    var src = allAsks[ai].from;
+    asksForTpl[src] = (asksForTpl[src] || 0) + 1;
+  }
+
+  // Calculate layer widths accounting for ask nodes next to their source
+  // Each item in a layer is: [NODE_W] + optional [ASK_GAP + ASK_W * askCount]
+  // Then GAP_X between items
+  function layerItemWidth(name) {
+    var w = NODE_W;
+    var ac = asksForTpl[name] || 0;
+    if (ac) w += ASK_GAP + ac * ASK_W + (ac - 1) * 8;
+    return w;
+  }
+
+  var maxLayerW = 0;
+  for (var d = 0; d <= maxDepth; d++) {
+    var nodes = byDepth[d] || [];
+    var w = 0;
+    for (var ni = 0; ni < nodes.length; ni++) {
+      if (ni > 0) w += GAP_X;
+      w += layerItemWidth(nodes[ni]);
+    }
+    if (w > maxLayerW) maxLayerW = w;
+  }
+  maxLayerW = Math.max(maxLayerW, NODE_W);
+
+  // Position nodes: center each layer, ask nodes snug to the right of their source
+  var askNodes = [];
+  for (var d = 0; d <= maxDepth; d++) {
+    var nodes = byDepth[d] || [];
+    var layerW = 0;
+    for (var ni = 0; ni < nodes.length; ni++) {
+      if (ni > 0) layerW += GAP_X;
+      layerW += layerItemWidth(nodes[ni]);
+    }
+    var curX = LEFT_CHANNEL + (maxLayerW - layerW) / 2;
+    for (var ni = 0; ni < nodes.length; ni++) {
+      if (ni > 0) curX += GAP_X;
+      nodePos[nodes[ni]] = {
+        x: curX,
+        y: d * (NODE_H + GAP_Y)
+      };
+      curX += NODE_W;
+      // Place ask nodes for this template
+      var ac = asksForTpl[nodes[ni]] || 0;
+      if (ac) {
+        curX += ASK_GAP;
+        var askIdx = 0;
+        for (var aai = 0; aai < allAsks.length; aai++) {
+          if (allAsks[aai].from === nodes[ni]) {
+            askNodes.push({
+              id: 'ask-' + nodes[ni] + '-' + askIdx,
+              from: nodes[ni],
+              when: allAsks[aai].when,
+              x: curX,
+              y: nodePos[nodes[ni]].y + (NODE_H - ASK_H) / 2
+            });
+            curX += ASK_W + (askIdx < ac - 1 ? 8 : 0);
+            askIdx++;
+          }
+        }
+      }
+    }
+  }
+
+  // Canvas dimensions
+  var maxRight = LEFT_CHANNEL + maxLayerW;
+  for (var ai = 0; ai < askNodes.length; ai++) {
+    var r = askNodes[ai].x + ASK_W;
+    if (r > maxRight) maxRight = r;
+  }
+
+  // Pre-count right-side back-edges for canvas width
+  var rightBackCount = 0;
+  for (var i = 0; i < allEdges.length; i++) {
+    var e = allEdges[i];
+    if ((depths[e.to] || 0) <= (depths[e.from] || 0)) {
+      var fc = (nodePos[e.from] || {}).x || 0;
+      var tc = (nodePos[e.to] || {}).x || 0;
+      if (tc + NODE_W / 2 >= fc + NODE_W / 2) rightBackCount++;
+    }
+  }
+  var canvasW = maxRight + 60 + rightBackCount * 16 + (rightBackCount ? 30 : 0);
+  var canvasH = (maxDepth + 1) * (NODE_H + GAP_Y) - GAP_Y + 80;
+
+  // Build HTML
+  el.innerHTML = '<div class="pl-canvas-wrap" id="pl-canvas-wrap">'
+    + '<div class="pl-canvas" id="pl-canvas" style="width:' + canvasW + 'px;height:' + canvasH + 'px"></div></div>';
+
+  var canvas = document.getElementById('pl-canvas');
+
+  // SVG for edges
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', canvasW);
+  svg.setAttribute('height', canvasH);
+  svg.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;';
+
+  // Arrow marker
+  var defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  var marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+  marker.setAttribute('id', 'pl-arrow');
+  marker.setAttribute('viewBox', '0 0 10 10');
+  marker.setAttribute('refX', '10');
+  marker.setAttribute('refY', '5');
+  marker.setAttribute('markerWidth', '8');
+  marker.setAttribute('markerHeight', '8');
+  marker.setAttribute('orient', 'auto-start-reverse');
+  var arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arrowPath.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+  arrowPath.setAttribute('fill', 'var(--text-dim)');
+  marker.appendChild(arrowPath);
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  // Draw edges
+  var PAD = 40; // canvas padding
+  var backEdgeLeftIdx = 0;
+  var backEdgeRightIdx = 0;
+  for (var i = 0; i < allEdges.length; i++) {
+    var e = allEdges[i];
+    var from = nodePos[e.from];
+    var to = nodePos[e.to];
+    if (!from || !to) continue;
+
+    var isBackEdge = (depths[e.to] || 0) <= (depths[e.from] || 0);
+
+    var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    var d;
+    if (isBackEdge) {
+      // Decide side: route through the side closest to the target
+      var fromCenterX = from.x + NODE_W / 2;
+      var toCenterX = to.x + NODE_W / 2;
+      var goRight = toCenterX >= fromCenterX;
+
+      var x1, x2, channelX;
+      if (goRight) {
+        // Exit right side of source, enter right side of target
+        x1 = from.x + NODE_W + PAD;
+        x2 = to.x + NODE_W + PAD;
+        channelX = maxRight + PAD + 20 + backEdgeRightIdx * 16;
+        backEdgeRightIdx++;
+      } else {
+        // Exit left side of source, enter left side of target
+        x1 = from.x + PAD;
+        x2 = to.x + PAD;
+        channelX = PAD - 20 - backEdgeLeftIdx * 16;
+        backEdgeLeftIdx++;
+      }
+      var y1 = from.y + NODE_H / 2 + PAD;
+      var y2 = to.y + NODE_H / 2 + PAD;
+      // Two quadratic curves joined at the channel midpoint:
+      // 1) source → channel (exits horizontally, turns vertical)
+      // 2) channel → target (turns from vertical, arrives horizontally)
+      var midY = (y1 + y2) / 2;
+      d = 'M ' + x1 + ' ' + y1
+        + ' Q ' + channelX + ' ' + y1
+        + ' ' + channelX + ' ' + midY
+        + ' Q ' + channelX + ' ' + y2
+        + ' ' + x2 + ' ' + y2;
+      path.setAttribute('stroke-dasharray', '4 3');
+    } else {
+      // Forward edge: bottom center of source → top center of target
+      var x1 = from.x + NODE_W / 2 + PAD;
+      var y1 = from.y + NODE_H + PAD;
+      var x2 = to.x + NODE_W / 2 + PAD;
+      var y2 = to.y + PAD;
+      var cy = (y1 + y2) / 2;
+      d = 'M ' + x1 + ' ' + y1
+        + ' C ' + x1 + ' ' + cy
+        + ' ' + x2 + ' ' + cy
+        + ' ' + x2 + ' ' + y2;
+    }
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', 'var(--text-dim)');
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('marker-end', 'url(#pl-arrow)');
+
+    // Tooltip
+    if (e.when) {
+      var title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = e.when;
+      path.appendChild(title);
+      path.style.pointerEvents = 'stroke';
+      path.style.cursor = 'default';
+    }
+
+    svg.appendChild(path);
+  }
+
+  canvas.appendChild(svg);
+
+  // Render node divs
+  for (var i = 0; i < templateNames.length; i++) {
+    var name = templateNames[i];
+    var pos = nodePos[name];
+    var outEdges = adj[name] || [];
+    var isTerminal = outEdges.length === 0;
+    var isEntry = inCount[name] === 0;
+
+    var nodeEl = document.createElement('div');
+    nodeEl.className = 'pl-node' + (isTerminal ? ' pl-node-terminal' : '') + (isEntry ? ' pl-node-entry' : '');
+    nodeEl.style.cssText = 'left:' + (pos.x + 40) + 'px;top:' + (pos.y + 40) + 'px;width:' + NODE_W + 'px;height:' + NODE_H + 'px;';
+    nodeEl.setAttribute('data-tpl', name);
+    nodeEl.onclick = (function(n) {
+      return function() { tplSwitchView('editor'); tplEditorOnSelect('project:' + n); };
+    })(name);
+    nodeEl.title = 'Click to edit ' + name;
+
+    var label = document.createElement('div');
+    label.className = 'pl-node-label';
+    label.textContent = name;
+    nodeEl.appendChild(label);
+
+    if (outEdges.length) {
+      var sub = document.createElement('div');
+      sub.className = 'pl-node-sub';
+      sub.textContent = outEdges.length + ' transition' + (outEdges.length > 1 ? 's' : '');
+      nodeEl.appendChild(sub);
+    } else {
+      var sub = document.createElement('div');
+      sub.className = 'pl-node-sub dim';
+      sub.textContent = 'terminal';
+      nodeEl.appendChild(sub);
+    }
+
+    canvas.appendChild(nodeEl);
+  }
+
+  // Render ask nodes + their edges
+  for (var ai = 0; ai < askNodes.length; ai++) {
+    var ask = askNodes[ai];
+    // Dashed yellow connector from source right edge to ask node left edge
+    var srcPos = nodePos[ask.from];
+    if (srcPos) {
+      var x1 = srcPos.x + NODE_W + PAD;
+      var y1 = srcPos.y + NODE_H / 2 + PAD;
+      var x2 = ask.x + PAD;
+      var y2 = ask.y + ASK_H / 2 + PAD;
+      var epath = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      epath.setAttribute('x1', x1);
+      epath.setAttribute('y1', y1);
+      epath.setAttribute('x2', x2);
+      epath.setAttribute('y2', y2);
+      epath.setAttribute('stroke', 'var(--text-dim)');
+      epath.setAttribute('stroke-width', '1.5');
+      epath.setAttribute('stroke-dasharray', '4 3');
+      svg.appendChild(epath);
+    }
+
+    // Ask node div
+    var askEl = document.createElement('div');
+    askEl.className = 'pl-node-ask';
+    askEl.style.cssText = 'left:' + (ask.x + 40) + 'px;top:' + (ask.y + 40) + 'px;width:' + ASK_W + 'px;height:' + ASK_H + 'px;';
+    if (ask.when) askEl.title = ask.when;
+
+    var askLabel = document.createElement('div');
+    askLabel.className = 'pl-node-label';
+    askLabel.textContent = '\uD83D\uDC64 ask';
+    askEl.appendChild(askLabel);
+
+    canvas.appendChild(askEl);
+  }
+
+  // Apply current transform
+  _plApplyTransform();
+
+  // Set up pan/zoom events
+  var wrap = document.getElementById('pl-canvas-wrap');
+  if (wrap) {
+    wrap.onmousedown = _plMouseDown;
+    wrap.onwheel = _plWheel;
+  }
+}
+
+function _plApplyTransform() {
+  var canvas = document.getElementById('pl-canvas');
+  if (canvas) {
+    canvas.style.transform = 'translate(' + _plPanX + 'px,' + _plPanY + 'px) scale(' + _plZoom + ')';
+  }
+}
+
+function _plMouseDown(e) {
+  if (e.target.closest('.pl-node')) return; // let node clicks through
+  e.preventDefault();
+  _plDragging = true;
+  _plDragStartX = e.clientX;
+  _plDragStartY = e.clientY;
+  _plPanStartX = _plPanX;
+  _plPanStartY = _plPanY;
+  document.addEventListener('mousemove', _plMouseMove);
+  document.addEventListener('mouseup', _plMouseUp);
+}
+
+function _plMouseMove(e) {
+  if (!_plDragging) return;
+  _plPanX = _plPanStartX + (e.clientX - _plDragStartX);
+  _plPanY = _plPanStartY + (e.clientY - _plDragStartY);
+  _plApplyTransform();
+}
+
+function _plMouseUp() {
+  _plDragging = false;
+  document.removeEventListener('mousemove', _plMouseMove);
+  document.removeEventListener('mouseup', _plMouseUp);
+}
+
+function _plWheel(e) {
+  e.preventDefault();
+  var wrap = document.getElementById('pl-canvas-wrap');
+  if (!wrap) return;
+  var rect = wrap.getBoundingClientRect();
+  var mx = e.clientX - rect.left;
+  var my = e.clientY - rect.top;
+
+  var oldZoom = _plZoom;
+  var delta = e.deltaY > 0 ? 0.9 : 1.1;
+  _plZoom = Math.max(0.2, Math.min(3, _plZoom * delta));
+
+  // Zoom toward cursor
+  _plPanX = mx - (mx - _plPanX) * (_plZoom / oldZoom);
+  _plPanY = my - (my - _plPanY) * (_plZoom / oldZoom);
+
+  _plApplyTransform();
 }
 
 function tplReceivePipelines(msg) {
