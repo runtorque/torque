@@ -42,6 +42,16 @@ async function removeAgent(id) {
   if (childCount > 0) {
     msg = `Remove "${a.name}" and its ${childCount} terminal(s)?`;
   }
+  if (a.worktree_path) {
+    const warnings = [];
+    if ((a.worktree_checkpoints || 0) > 0) warnings.push('has unmerged commits');
+    if (a.worktree_dirty) warnings.push('has uncommitted changes');
+    if (warnings.length) {
+      msg += ' Its worktree ' + warnings.join(' and ') + '. All changes will be lost.';
+    } else {
+      msg += ' Its worktree will also be removed.';
+    }
+  }
   if (await showConfirm(msg)) {
     if (selectedAgentId === id) selectedAgentId = null;
     send({ cmd: 'remove_agent', id });
