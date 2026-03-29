@@ -193,12 +193,7 @@ function renderBoard() {
     if (t.labels && t.labels.length) {
       for (var li = 0; li < t.labels.length; li++) {
         var lb = t.labels[li];
-        if (lb.startsWith('pr:')) {
-          var prCls = lb === 'pr:merged' ? 'board-label-pr-merged'
-            : lb === 'pr:draft' ? 'board-label-pr-draft'
-            : 'board-label-pr-open';
-          meta += '<span class="board-card-label ' + prCls + '">' + esc(lb) + '</span>';
-        } else if (lb === 'blocked') {
+        if (lb === 'blocked') {
           meta += '<span class="board-card-label board-label-blocked">' + esc(lb) + '</span>';
         } else if (lb === 'error') {
           meta += '<span class="board-card-label board-label-error">' + esc(lb) + '</span>';

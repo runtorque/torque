@@ -1,0 +1,24 @@
+name: oneshot/fix
+description: Diagnose and fix a bug directly on the current branch
+
+agent:
+  name_prefix: fix
+  tab_color: "#f85149"
+
+labels:
+  - bugfix
+
+prompt: |
+  You are diagnosing and fixing a bug. This is a quick, targeted fix — no review pipeline. Focus on understanding the root cause before writing any code.
+
+  ## Bug report
+
+  {{ TASK }}
+
+  ## Approach
+
+  1. **Reproduce first** — confirm you can see the failure before changing anything
+  2. **Find the root cause** — don't just patch symptoms
+  3. **Write a failing test** that captures the bug, then make it pass with your fix
+  4. **Keep the fix minimal** — no drive-by refactors or unrelated changes
+  5. **Run the full test suite** to check for regressions

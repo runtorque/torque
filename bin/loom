@@ -2080,30 +2080,6 @@ def cmd_ai_blocked(args):
     print(f"Blocked: {args.reason}")
 
 
-def cmd_ai_pr(args):
-    cell, task = _resolve_self_and_task(args)
-    kwargs = {"cell_id": cell["id"], "action": "pr", "url": args.url}
-    if task:
-        kwargs["task_id"] = task["id"]
-    if args.draft:
-        kwargs["draft"] = True
-    resp = api_call("ai_report", port=args.port, **kwargs)
-    check_ok(resp)
-    print(f"PR recorded: {args.url}")
-
-
-def cmd_ai_merged(args):
-    cell, task = _resolve_self_and_task(args)
-    kwargs = {"cell_id": cell["id"], "action": "merged"}
-    if task:
-        kwargs["task_id"] = task["id"]
-    if args.url:
-        kwargs["url"] = args.url
-    resp = api_call("ai_report", port=args.port, **kwargs)
-    check_ok(resp)
-    print("Merged")
-
-
 def cmd_ai_error(args):
     cell, task = _resolve_self_and_task(args, require_task=False)
     kwargs = {"cell_id": cell["id"], "action": "error",
@@ -2657,20 +2633,6 @@ def build_parser():
     p.add_argument("task_ref", nargs="?",
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_blocked)
-
-    p = ai_sub.add_parser("pr", help="Report a pull request opened")
-    p.add_argument("url", help="Pull request URL")
-    p.add_argument("--draft", action="store_true",
-                   help="Mark as draft PR")
-    p.add_argument("task_ref", nargs="?",
-                   help="Task slug/ID (auto-detected)")
-    p.set_defaults(func=cmd_ai_pr)
-
-    p = ai_sub.add_parser("merged", help="Report PR merged")
-    p.add_argument("url", nargs="?", help="Pull request URL")
-    p.add_argument("task_ref", nargs="?",
-                   help="Task slug/ID (auto-detected)")
-    p.set_defaults(func=cmd_ai_merged)
 
     p = ai_sub.add_parser("error", help="Report an unrecoverable error")
     p.add_argument("message", help="Error description")

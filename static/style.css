@@ -1046,18 +1046,6 @@ textarea.task-tpl-var, #task-task-input {
   color: var(--fg-dim); font-style: italic;
   background: color-mix(in srgb, var(--fg-dim) 12%, transparent);
 }
-.board-label-pr-open {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 15%, transparent);
-}
-.board-label-pr-draft {
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--text-dim) 15%, transparent);
-}
-.board-label-pr-merged {
-  color: #a371f7;
-  background: color-mix(in srgb, #a371f7 15%, transparent);
-}
 .board-label-blocked {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 15%, transparent);

@@ -569,7 +569,7 @@ class WorktreeManager:
     async def _ensure_gitignore(self, repo_root: str):
         """Add Loom-managed paths to .gitignore if not already present."""
         gitignore = os.path.join(repo_root, ".gitignore")
-        entries = [".loom/", ".claude/settings.local.json"]
+        entries = [".loom/worktrees/", ".claude/settings.local.json"]
         try:
             content = ""
             if os.path.exists(gitignore):

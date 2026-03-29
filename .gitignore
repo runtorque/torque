@@ -1,6 +1,6 @@
 __pycache__/
 *.pyc
-.loom/
+.loom/worktrees/
 *.log
 .DS_Store
 state.json

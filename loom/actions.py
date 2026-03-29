@@ -264,7 +264,11 @@ class ActionManager:
         return dirs[0] if dirs else None
 
     def _load_raw(self, name: str, base_dir: str = "") -> str | None:
-        """Load an action file as raw text. Searches all action dirs."""
+        """Load an action file as raw text. Searches all action dirs.
+
+        Supports namespaced names like ``oneshot/feature`` which map to
+        ``actions/oneshot/feature.yaml``.
+        """
         for tdir in self.find_actions_dirs(base_dir):
             for suffix in ("", ".yaml", ".yml"):
                 path = os.path.join(tdir, name + suffix)
@@ -280,34 +284,40 @@ class ActionManager:
         across scopes, both are included — project actions are marked
         as the active one (used for dispatch), user actions with the
         same name are marked as ``shadowed``.
+
+        Supports subdirectory namespaces: ``oneshot/feature.yaml`` is
+        listed as action name ``oneshot/feature``.
         """
         results = []
         seen_names = set()  # track project-local names for shadowing
         for tdir in self.find_actions_dirs(base_dir):
-            for fname in sorted(os.listdir(tdir)):
-                if not fname.endswith((".yaml", ".yml")):
-                    continue
-                name = fname.rsplit(".", 1)[0]
-                path = os.path.join(tdir, fname)
-                is_global = (tdir == os.path.expanduser("~/.loom/actions"))
-                shadowed = is_global and name in seen_names
-                try:
-                    with open(path) as f:
-                        raw = f.read()
+            is_global = (tdir == os.path.expanduser("~/.loom/actions"))
+            for dirpath, _dirnames, filenames in os.walk(tdir):
+                for fname in sorted(filenames):
+                    if not fname.endswith((".yaml", ".yml")):
+                        continue
+                    rel = os.path.relpath(
+                        os.path.join(dirpath, fname), tdir)
+                    name = rel.rsplit(".", 1)[0]
+                    path = os.path.join(dirpath, fname)
+                    shadowed = is_global and name in seen_names
                     try:
-                        meta = parse_yaml(raw) or {}
+                        with open(path) as f:
+                            raw = f.read()
+                        try:
+                            meta = parse_yaml(raw) or {}
+                        except Exception:
+                            meta = {}
+                        desc = meta.get("description", "") if meta else ""
+                        avars = self.get_action_vars(raw)
                     except Exception:
-                        meta = {}
-                    desc = meta.get("description", "") if meta else ""
-                    avars = self.get_action_vars(raw)
-                except Exception:
-                    desc = "(parse error)"
-                    avars = []
-                results.append({"name": name, "description": desc,
-                                "vars": avars, "global": is_global,
-                                "dir": tdir, "shadowed": shadowed})
-                if not is_global:
-                    seen_names.add(name)
+                        desc = "(parse error)"
+                        avars = []
+                    results.append({"name": name, "description": desc,
+                                    "vars": avars, "global": is_global,
+                                    "dir": tdir, "shadowed": shadowed})
+                    if not is_global:
+                        seen_names.add(name)
         return sorted(results, key=lambda t: (t["global"], t["name"]))
 
     def load_action(self, name: str, base_dir: str = "") -> dict | None:

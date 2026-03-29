@@ -240,15 +240,18 @@ async def main(connection: iterm2.Connection):
     def _build_postscript(task, amgr, base_dir=""):
         """Build the loom-ai instruction block appended to dispatch prompts.
 
-        If the task's action declares transitions, the derive lines
-        are generated from them.  Otherwise only generic commands are shown.
+        Only shows commands relevant to the action's transitions.
+        ``done``, ``blocked``, and ``error`` are always included.
+        ``derive`` only appears when the action declares transitions.
+        ``ask`` only appears when an ``ask`` transition exists.
+        ``pr``/``merged`` are omitted (reserved for future PR actions).
         """
         lines = [
             "\n\nReport your progress with these commands:",
             "- `loom ai done` — task complete, no follow-up needed",
         ]
 
-        # Dynamic derive lines from action transitions
+        # Dynamic derive/ask lines from action transitions
         transitions = []
         if task.action_name:
             transitions = amgr.get_transitions(task.action_name,
@@ -264,18 +267,11 @@ async def main(connection: iterm2.Connection):
                         f"-t {tr['action']}`{desc}")
                 if tr.get("ask"):
                     has_ask = True
-        if not transitions:
-            # No transitions declared — show generic derive
-            lines.append(
-                "- `loom ai derive \"description\" -t ACTION`"
-                " — task complete, hand off to next agent")
-        if has_ask or not transitions:
+        if has_ask:
             lines.append(
                 "- `loom ai ask \"question\"`"
                 " — task complete, need human decision on next step")
         lines.extend([
-            "- `loom ai pr URL` — opened a pull request",
-            "- `loom ai merged` — PR merged",
             "- `loom ai blocked \"reason\"` — need user input",
             "- `loom ai error \"message\"` — unrecoverable error",
         ])
@@ -473,6 +469,7 @@ async def main(connection: iterm2.Connection):
                             os.remove(old_path)
                             break
             path = os.path.join(tdir, name + ".yaml")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             yaml_text = _action_to_yaml(name, act_data)
             with open(path, "w") as f:
                 f.write(yaml_text)
@@ -1368,8 +1365,6 @@ async def main(connection: iterm2.Connection):
                 action = data.get("action", "")
                 message = data.get("message", "")
                 task_id = data.get("task_id", "")
-                url = data.get("url", "")
-                is_draft = data.get("draft", False)
 
                 cell = state.agents.get(cell_id)
                 if not cell:
@@ -1382,12 +1377,6 @@ async def main(connection: iterm2.Connection):
                     def _add_label(t, label):
                         if label not in t.labels:
                             t.labels.append(label)
-
-                    def _replace_prefix_labels(t, prefix, new_label):
-                        t.labels = [
-                            l for l in t.labels
-                            if not l.startswith(prefix)]
-                        t.labels.append(new_label)
 
                     def _save_task(t):
                         from datetime import datetime, timezone
@@ -1415,34 +1404,6 @@ async def main(connection: iterm2.Connection):
                         if task:
                             _add_label(task, "blocked")
                             _save_task(task)
-
-                    elif action == "pr":
-                        cell.activity_detail = "PR opened"
-                        state._emit_agent(cell)
-                        if task:
-                            task.external_url = url
-                            _replace_prefix_labels(
-                                task, "pr:",
-                                "pr:draft" if is_draft
-                                else "pr:open")
-                            _save_task(task)
-
-                    elif action == "merged":
-                        cell.activity = ""
-                        cell.activity_detail = ""
-                        cell.needs_attention = False
-                        cell.error_message = ""
-                        state._emit_agent(cell)
-                        if task:
-                            if url:
-                                task.external_url = url
-                            _replace_prefix_labels(
-                                task, "pr:", "pr:merged")
-                            if task.lane != "Done":
-                                state.board_move_task(
-                                    task.id, "Done")
-                            else:
-                                _save_task(task)
 
                     elif action == "error":
                         cell.error_message = message
