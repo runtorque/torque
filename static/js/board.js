@@ -11,6 +11,7 @@ var _boardAddingLane = false;
 var _boardActDropdownWaiting = false;  // waiting for action list for dropdown
 var _boardActList = null;              // fetched actions shown inline (null = hidden)
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
+var _boardCardsScrollTop = 0;  // preserve cards scroll across re-renders
 var _boardPopover = null;      // {type, lane, rect} for lane settings popover
 var _boardDragId = '';          // card being dragged
 
@@ -78,7 +79,9 @@ function renderBoard() {
   var panel = document.getElementById('panel-board');
   if (!panel) return;
 
-  // Preserve in-progress draft before DOM rebuild
+  // Preserve scroll + draft before DOM rebuild
+  var _cardsEl = document.getElementById('board-cards');
+  if (_cardsEl) _boardCardsScrollTop = _cardsEl.scrollTop;
   if (_boardAddingTask) {
     var _inp = document.getElementById('board-add-task-input');
     if (_inp) _boardAddingTaskDraft = _inp.value;
@@ -296,6 +299,15 @@ function renderBoard() {
 
       _boardScrollLeft = tabsEl.scrollLeft;
       boardUpdateScrollArrows();
+    }
+
+    // Restore cards scroll position
+    var cardsEl = document.getElementById('board-cards');
+    if (cardsEl) {
+      cardsEl.scrollTop = _boardCardsScrollTop;
+      cardsEl.addEventListener('scroll', function() {
+        _boardCardsScrollTop = cardsEl.scrollTop;
+      });
     }
 
     // Render popover if open
