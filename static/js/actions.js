@@ -893,16 +893,40 @@ function renderPipelinesView() {
     path.setAttribute('fill', 'none');
     path.setAttribute('marker-end', 'url(#pl-arrow)');
 
-    // Tooltip
-    if (e.when) {
-      var title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-      title.textContent = e.when;
-      path.appendChild(title);
-      path.style.pointerEvents = 'stroke';
-      path.style.cursor = 'default';
-    }
-
     svg.appendChild(path);
+
+    // "When" button at edge midpoint
+    if (e.when) {
+      var mx, my;
+      if (isBackEdge) {
+        var fromCX = from.x + NODE_W / 2;
+        var toCX = to.x + NODE_W / 2;
+        var bGoRight = toCX >= fromCX;
+        var bx1 = bGoRight ? from.x + NODE_W + PAD : from.x + PAD;
+        var by1 = from.y + NODE_H / 2 + PAD;
+        var by2 = to.y + NODE_H / 2 + PAD;
+        var bChX = bGoRight
+          ? maxRight + PAD + 20 + (backEdgeRightIdx - 1) * 16
+          : PAD - 20 - (backEdgeLeftIdx - 1) * 16;
+        mx = bChX;
+        my = (by1 + by2) / 2;
+      } else {
+        var fx1 = from.x + NODE_W / 2 + PAD;
+        var fy1 = from.y + NODE_H + PAD;
+        var fx2 = to.x + NODE_W / 2 + PAD;
+        var fy2 = to.y + PAD;
+        mx = (fx1 + fx2) / 2;
+        my = (fy1 + fy2) / 2;
+      }
+      var whenBtn = document.createElement('div');
+      whenBtn.className = 'pl-when-btn';
+      whenBtn.style.left = mx + 'px';
+      whenBtn.style.top = my + 'px';
+      whenBtn.textContent = 'when';
+      whenBtn.dataset.when = e.when;
+      whenBtn.onclick = function(ev) { ev.stopPropagation(); _plShowWhenTip(this); };
+      canvas.appendChild(whenBtn);
+    }
   }
 
   canvas.appendChild(svg);
@@ -969,12 +993,16 @@ function renderPipelinesView() {
     var askEl = document.createElement('div');
     askEl.className = 'pl-node-ask';
     askEl.style.cssText = 'left:' + (ask.x + 40) + 'px;top:' + (ask.y + 40) + 'px;width:' + ASK_W + 'px;height:' + ASK_H + 'px;';
-    if (ask.when) askEl.title = ask.when;
-
     var askLabel = document.createElement('div');
     askLabel.className = 'pl-node-label';
     askLabel.textContent = '\uD83D\uDC64 ask';
     askEl.appendChild(askLabel);
+
+    if (ask.when) {
+      askEl.dataset.when = ask.when;
+      askEl.style.cursor = 'pointer';
+      askEl.onclick = function(ev) { ev.stopPropagation(); _plShowWhenTip(this); };
+    }
 
     canvas.appendChild(askEl);
   }
@@ -997,7 +1025,32 @@ function _plApplyTransform() {
   }
 }
 
+function _plShowWhenTip(btn) {
+  var existing = document.querySelector('.pl-when-tip');
+  if (existing) { existing.remove(); if (existing._src === btn) return; }
+  var tip = document.createElement('div');
+  tip.className = 'pl-when-tip';
+  tip.textContent = btn.dataset.when;
+  tip._src = btn;
+  document.body.appendChild(tip);
+  var r = btn.getBoundingClientRect();
+  tip.style.left = Math.max(4, Math.min(r.left + r.width / 2 - tip.offsetWidth / 2, window.innerWidth - tip.offsetWidth - 4)) + 'px';
+  tip.style.top = (r.top - tip.offsetHeight - 6) + 'px';
+  if (tip.getBoundingClientRect().top < 4) {
+    tip.style.top = (r.bottom + 6) + 'px';
+  }
+  setTimeout(function() {
+    function dismiss(ev) {
+      if (ev.target === btn) return;
+      tip.remove();
+      document.removeEventListener('click', dismiss, true);
+    }
+    document.addEventListener('click', dismiss, true);
+  }, 0);
+}
+
 function _plMouseDown(e) {
+  if (e.target.closest('.pl-when-btn')) return; // let when button clicks through
   if (e.target.closest('.pl-node')) return; // let node clicks through
   e.preventDefault();
   _plDragging = true;

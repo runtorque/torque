@@ -1510,6 +1510,27 @@ textarea.task-tpl-var, #task-task-input {
 .pl-node-ask .pl-node-label {
   font-size: 10px; font-weight: 500; color: var(--yellow);
 }
+.pl-when-btn {
+  position: absolute; transform: translate(-50%, -50%);
+  font-size: 9px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-dim); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 1px 7px; cursor: pointer;
+  z-index: 2; white-space: nowrap;
+}
+.pl-when-btn:hover {
+  color: var(--text); border-color: var(--accent);
+}
+.pl-when-tip {
+  position: fixed; z-index: 9999;
+  background: var(--bg-hover); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 10px; font-size: 11px;
+  max-width: 280px; line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  pointer-events: none;
+}
 
 /* ------------------------------------------------------------------ */
 /* Keybinding rows (global settings)                                   */
