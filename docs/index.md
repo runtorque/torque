@@ -38,4 +38,4 @@ See [Getting Started](getting-started.md) to install and run Loom.
 - Automatic tab reordering to keep managed sessions grouped
 - Per-group window filtering to keep unrelated work out of sight
 - `loom` CLI for scripting and automation (`make cli` to install)
-- `loom dispatch` to create agents from YAML templates with one command
+- `loom dispatch` to create agents from YAML actions with one command

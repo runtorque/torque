@@ -62,7 +62,7 @@ install:
 	   loom/state.py loom/bridge.py \
 	   loom/server.py loom/keybindings.py \
 	   loom/events.py loom/notifications.py \
-	   loom/worktree.py loom/templates.py \
+	   loom/worktree.py loom/actions.py \
 	   loom/terminal_adapter.py \
 	   loom/db.py \
 	   "$(SCRIPT_DIR)/loom/"

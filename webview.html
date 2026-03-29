@@ -351,14 +351,14 @@
   </div>
 </div>
 
-<!-- Template modal -->
-<div class="overlay" id="modal-template">
+<!-- Action modal -->
+<div class="overlay" id="modal-action">
   <div class="modal modal-tall">
-    <h2 id="tpl-title">From Template</h2>
+    <h2 id="tpl-title">From Action</h2>
     <div id="tpl-list-pane">
       <div id="tpl-list" class="tpl-list"></div>
       <div class="tpl-empty hidden" id="tpl-empty">
-        No templates found.<br>Add <code>.yaml</code> files to <code>.loom/templates/</code> in your project.
+        No actions found.<br>Add <code>.yaml</code> files to <code>.loom/actions/</code> in your project.
       </div>
     </div>
     <div id="tpl-vars-pane" class="hidden">
@@ -386,14 +386,14 @@
     <label>Group <span class="label-req">*</span></label>
     <select id="task-group-select"
             onkeydown="if(event.key==='Escape')closeModals();"></select>
-    <label>Template
-      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optionally attach a template. The template's prompt wraps the task text with instructions and context.">?</span>
+    <label>Action
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optionally attach an action. The action's prompt wraps the task text with instructions and context.">?</span>
     </label>
-    <select id="task-template-select" onchange="taskTemplateChanged()"
+    <select id="task-action-select" onchange="taskActionChanged()"
             onkeydown="if(event.key==='Escape')closeModals();">
       <option value="">None</option>
     </select>
-    <div id="task-template-vars"></div>
+    <div id="task-action-vars"></div>
     <label>Assignee
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Agent name prefix for pool assignment (e.g. 'frontend'). Any agent matching this prefix can pick up the task.">?</span>
     </label>
@@ -428,13 +428,13 @@
 <div id="bottom-panel" class="collapsed">
   <div class="panel-resize-handle" id="panel-resize-handle"></div>
   <div id="panel-board"></div>
-  <div id="panel-templates" class="panel-hidden"></div>
+  <div id="panel-actions" class="panel-hidden"></div>
 </div>
 
 <!-- Taskbar (dock for panel apps) -->
 <div id="taskbar">
   <button class="taskbar-app" data-app="board" onclick="togglePanel('board')">&#9776; Board</button>
-  <button class="taskbar-app" data-app="templates" onclick="togglePanel('templates')">&#9998; Templates</button>
+  <button class="taskbar-app" data-app="actions" onclick="togglePanel('actions')">&#9998; Actions</button>
 </div>
 
 <!-- Context menu (right-click) -->
@@ -458,7 +458,7 @@
 <script src="/static/js/commands.js"></script>
 <script src="/static/js/modals.js"></script>
 <script src="/static/js/board.js"></script>
-<script src="/static/js/templates.js"></script>
+<script src="/static/js/actions.js"></script>
 <script src="/static/js/main.js"></script>
 </body>
 </html>

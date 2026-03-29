@@ -40,28 +40,28 @@ function connect() {
       _showToast(msg.message, msg.level);
     } else if (msg.type === 'worktree_history') {
       _showWorktreeHistory(msg);
-    } else if (msg.type === 'templates') {
-      if (typeof _boardTplDropdownWaiting !== 'undefined' && _boardTplDropdownWaiting) {
-        _boardShowTemplateList(msg);
+    } else if (msg.type === 'actions') {
+      if (typeof _boardActDropdownWaiting !== 'undefined' && _boardActDropdownWaiting) {
+        _boardShowActionList(msg);
       } else if (typeof _taskModalWaiting !== 'undefined' && _taskModalWaiting) {
-        _handleTaskTemplateList(msg);
-      } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates') {
+        _handleTaskActionList(msg);
+      } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
         tplEditorReceiveList(msg);
       } else {
-        _showTemplateList(msg);
+        _showActionList(msg);
       }
-    } else if (msg.type === 'template_detail') {
-      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates') {
+    } else if (msg.type === 'action_detail') {
+      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
         tplEditorReceiveDetail(msg);
       } else {
-        _showTemplateVarForm(msg);
+        _showActionVarForm(msg);
       }
-    } else if (msg.type === 'template_rendered') {
-      _handleTemplateRendered(msg);
+    } else if (msg.type === 'action_rendered') {
+      _handleActionRendered(msg);
     } else if (msg.type === 'prompt_preview') {
       _showPromptPreview(msg);
-    } else if (msg.type === 'dispatch_template_missing') {
-      _handleDispatchTemplateMissing(msg);
+    } else if (msg.type === 'dispatch_action_missing') {
+      _handleDispatchActionMissing(msg);
     } else if (msg.type === 'pipelines') {
       if (typeof tplReceivePipelines !== 'undefined') tplReceivePipelines(msg);
     } else if (msg.type === 'global_settings') {

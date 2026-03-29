@@ -71,33 +71,33 @@ loom logs -f             # tail the daemon log
 
 ### Dispatch
 
-Create an agent from a template and send it a task in one command:
+Create an agent from an action and send it a task in one command:
 
 ```bash
-loom dispatch "Fix the login bug" --template bugfix --wait
+loom dispatch "Fix the login bug" --action bugfix --wait
 loom dispatch "Fix it" -t bugfix -v TEST_COMMAND=pytest --wait
 ```
 
-Templates are Jinja2+YAML files. Loom looks in two locations (project-local takes precedence):
+Actions are Jinja2+YAML files. Loom looks in two locations (project-local takes precedence):
 
-- **Project**: `.loom/templates/` in your repo root
-- **Global**: `~/.loom/templates/` for templates shared across projects
+- **Project**: `.loom/actions/` in your repo root
+- **Global**: `~/.loom/actions/` for actions shared across projects
 
 Variables work anywhere in the file and are auto-discovered — no declaration needed. Defaults come from `| default()` filters. Copy the starters into your repo:
 
 ```bash
-mkdir -p .loom/templates
-cp templates/*.yaml .loom/templates/
+mkdir -p .loom/actions
+cp actions/*.yaml .loom/actions/
 ```
 
 Or install them globally:
 
 ```bash
-mkdir -p ~/.loom/templates
-cp templates/*.yaml ~/.loom/templates/
+mkdir -p ~/.loom/actions
+cp actions/*.yaml ~/.loom/actions/
 ```
 
-Manage templates with `loom template list`, `loom template show <name>`, and `loom template create <name>`. The toolbelt also has a "From Template" option in the New Agent dropdown.
+Manage actions with `loom action list`, `loom action show <name>`, and `loom action create <name>`. The toolbelt also has a "From Action" option in the New Agent dropdown.
 
 Run `loom --help` or `loom <command> --help` for the full reference.
 

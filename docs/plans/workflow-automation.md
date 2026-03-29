@@ -1,8 +1,8 @@
 # Implementation Plan: Workflow Automation (Phase 4a)
 
 **Roadmap phase**: 4 — Workflow Automation
-**Status**: Implemented (Jinja2 templates, task dispatch/create, template-to-task flow, structured task fields)
-**Goal**: Make Loom a task runner, not just a session manager. `loom task dispatch` combines ticket creation, agent launch, worktree setup, and task delivery into a single operation. `loom task create` parks tickets for later pickup. Templates make these tasks repeatable and integrate with the board's ticketing system.
+**Status**: Implemented (Jinja2 actions, task dispatch/create, action-to-task flow, structured task fields)
+**Goal**: Make Loom a task runner, not just a session manager. `loom task dispatch` combines ticket creation, agent launch, worktree setup, and task delivery into a single operation. `loom task create` parks tickets for later pickup. Actions make these tasks repeatable and integrate with the board's ticketing system.
 
 ---
 
@@ -14,20 +14,20 @@ For recurring workflows — bug fixes, code reviews, dependency updates — you 
 
 ## Design Principles
 
-1. **Templates are data, not code** — A template is a JSON file with pre-filled agent settings. No scripting language, no conditionals, no Turing-completeness. Complex workflows are shell scripts that call `loom dispatch`.
-2. **`loom dispatch` is the entry point** — One command that creates an agent from a template and sends it a prompt. It composes existing primitives (`add_agent` + `send_text` + `wait_for_idle`).
-3. **Templates layer on top of GroupSettings** — Templates don't replace group settings. They provide per-task overrides. The resolution cascade is: template field → group setting → system default.
-4. **No new server commands for v1** — Templates are resolved client-side in the CLI. The server receives the same `add_agent` and `send_text` payloads it already handles. This keeps the server simple and templates a CLI-only concept initially.
+1. **Actions are data, not code** — An action is a JSON file with pre-filled agent settings. No scripting language, no conditionals, no Turing-completeness. Complex workflows are shell scripts that call `loom dispatch`.
+2. **`loom dispatch` is the entry point** — One command that creates an agent from an action and sends it a prompt. It composes existing primitives (`add_agent` + `send_text` + `wait_for_idle`).
+3. **Actions layer on top of GroupSettings** — Actions don't replace group settings. They provide per-task overrides. The resolution cascade is: action field → group setting → system default.
+4. **No new server commands for v1** — Actions are resolved client-side in the CLI. The server receives the same `add_agent` and `send_text` payloads it already handles. This keeps the server simple and actions a CLI-only concept initially.
 
 ---
 
 ## Architecture
 
 ```
-loom dispatch "Fix the login bug" --template bugfix -g Backend
+loom dispatch "Fix the login bug" --action bugfix -g Backend
   │
-  │  1. Load template from .loom/templates/bugfix.yaml
-  │  2. Merge template fields with CLI flags
+  │  1. Load action from .loom/actions/bugfix.yaml
+  │  2. Merge action fields with CLI flags
   │
   ├──► POST /api/cmd  {"cmd": "add_agent", ...}
   │    Server creates agent + worktree + auto-terminals
@@ -42,13 +42,13 @@ loom dispatch "Fix the login bug" --template bugfix -g Backend
   └──► (if --wait) Poll until turn completes, print summary
 ```
 
-Templates stay in the CLI layer. The server is unaware of them — it just receives the resolved fields. This means templates work immediately without a server deploy.
+Actions stay in the CLI layer. The server is unaware of them — it just receives the resolved fields. This means actions work immediately without a server deploy.
 
 ---
 
-## Template Format
+## Action Format
 
-Templates live in `.loom/templates/` relative to the git repo root (same convention as `.loom/worktrees/`). Each template is a YAML file.
+Actions live in `.loom/actions/` relative to the git repo root (same convention as `.loom/worktrees/`). Each action is a YAML file.
 
 ```yaml
 name: fix
@@ -81,8 +81,8 @@ criteria: |
 
 | Field | Type | Description |
 |---|---|---|
-| `name` | string | Template identifier (matches filename without `.yaml`) |
-| `description` | string | Human-readable description for `loom template list` |
+| `name` | string | Action identifier (matches filename without `.yaml`) |
+| `description` | string | Human-readable description for `loom action list` |
 | `agent.name_prefix` | string | Agent name prefix. Full name: `{prefix}-{task_slug}` |
 | `agent.command` | string | Boot command override. Empty = use group default |
 | `agent.directory` | string | Working directory override. Empty = use group default |
@@ -103,11 +103,11 @@ criteria: |
 | `terminals[].directory` | string | Working directory (empty = same as agent) |
 | `terminals[].init_script` | string | Init script path |
 
-### Template resolution
+### Action resolution
 
-Fields cascade: **CLI flag → template field → group setting → system default**.
+Fields cascade: **CLI flag → action field → group setting → system default**.
 
-An empty string in a template field means "fall through to group settings." This lets templates be sparse — a review template might only set `prompt` and `tab_color`, inheriting everything else from the group.
+An empty string in an action field means "fall through to group settings." This lets actions be sparse — a review action might only set `prompt` and `tab_color`, inheriting everything else from the group.
 
 ### Variable interpolation
 
@@ -132,13 +132,13 @@ Arguments:
   description              Task description (sent to agent)
 
 Flags:
-  -t, --template NAME      Template name (looks in .loom/templates/)
+  -t, --action NAME        Action name (looks in .loom/actions/)
   -g, --group GROUP        Target group (auto-detected if omitted)
   -n, --name NAME          Agent name override
   -a, --assign PREFIX      Assign to agent name prefix (e.g. 'frontend')
   -c, --command CMD        Boot command override
   -d, --directory DIR      Working directory override
-  -v, --var KEY=VALUE      Template variables
+  -v, --var KEY=VALUE      Action variables
   -l, --labels LABELS      Comma-separated labels
   -w, --wait               Wait for the agent to finish
   --no-task                Create agent but don't send the task text
@@ -147,7 +147,7 @@ Flags:
 **Examples:**
 
 ```bash
-# Dispatch with template
+# Dispatch with action
 loom task dispatch "Fix the login bug" -t fix --wait
 
 # With custom test command
@@ -186,61 +186,61 @@ loom task create "Refactor the auth module"
 loom task create "Add rate limiting to API" -a backend -l feature,api
 ```
 
-### `loom template`
+### `loom action`
 
-Template management commands.
+Action management commands.
 
 ```
-loom template list                    # list available templates
-loom template show <name>             # show template contents
-loom template create <name>           # create a template interactively
+loom action list                    # list available actions
+loom action show <name>             # show action contents
+loom action create <name>           # create an action interactively
 ```
 
-`loom template list` scans `.loom/templates/` and shows name + description for each. `loom template show` pretty-prints the JSON. `loom template create` writes a starter template file.
+`loom action list` scans `.loom/actions/` and shows name + description for each. `loom action show` pretty-prints the JSON. `loom action create` writes a starter action file.
 
 ---
 
 ## Implementation Steps
 
-### Step 1: Template loader
+### Step 1: Action loader
 
 **File**: `bin/loom` (new functions)
 
-- `find_templates_dir()` — walk up from cwd to find `.loom/templates/`, return path or None
-- `load_template(name)` — read and parse `.loom/templates/{name}.yaml`, return dict
-- `list_templates()` — scan dir, return list of `{name, description}`
-- `render_prompt(template, task, agent_name, agent_id, branch, directory)` — substitute `${TASK}` etc.
+- `find_actions_dir()` — walk up from cwd to find `.loom/actions/`, return path or None
+- `load_action(name)` — read and parse `.loom/actions/{name}.yaml`, return dict
+- `list_actions()` — scan dir, return list of `{name, description}`
+- `render_prompt(action, task, agent_name, agent_id, branch, directory)` — substitute `${TASK}` etc.
 
 ### Step 2: `loom dispatch` command
 
 **File**: `bin/loom` (new subcommand)
 
 Sequence:
-1. Load template (if `--template` given)
-2. Resolve agent name: `--name` flag → `{template.name_prefix}-{task_slug}` → auto-generated
+1. Load action (if `--action` given)
+2. Resolve agent name: `--name` flag → `{action.name_prefix}-{task_slug}` → auto-generated
 3. Resolve group: `--group` flag → context detection → die
-4. Build `add_agent` payload, merging template fields with CLI flags
+4. Build `add_agent` payload, merging action fields with CLI flags
 5. Call `add_agent` API
 6. Poll state until the new agent has `session_id` and `status != "stopped"` (agent booted)
 7. Render prompt with variable substitution
 8. Call `send_text` API
 9. If `--wait`: call `wait_for_idle`
 
-### Step 3: `loom template` commands
+### Step 3: `loom action` commands
 
 **File**: `bin/loom` (new subcommands)
 
-- `loom template list` — scan `.loom/templates/`, print table
-- `loom template show <name>` — pretty-print YAML
-- `loom template create <name>` — write a starter template to `.loom/templates/{name}.yaml`
+- `loom action list` — scan `.loom/actions/`, print table
+- `loom action show <name>` — pretty-print YAML
+- `loom action create <name>` — write a starter action to `.loom/actions/{name}.yaml`
 
-### Step 4: Built-in starter templates
+### Step 4: Built-in starter actions
 
-**Files**: `templates/` directory in the repo (shipped as examples, not auto-installed)
+**Files**: `actions/` directory in the repo (shipped as examples, not auto-installed)
 
-Three starter templates in YAML format: `default.yaml`, `bugfix.yaml`, `review.yaml`.
+Three starter actions in YAML format: `default.yaml`, `bugfix.yaml`, `review.yaml`.
 
-Users copy these into their project's `.loom/templates/` and customize.
+Users copy these into their project's `.loom/actions/` and customize.
 
 ### Step 5: Agent boot readiness
 
@@ -267,8 +267,8 @@ A short additional delay (~1s) after boot detection ensures the shell and boot c
 
 ## What We're NOT Building (Yet)
 
-- **Template inheritance** — Templates are flat. No `extends: base-template` chains.
-- **Conditional logic in templates** — Jinja2 variables and filters only. No `{% if %}` blocks. Use separate templates for different scenarios.
+- **Action inheritance** — Actions are flat. No `extends: base-action` chains.
+- **Conditional logic in actions** — Jinja2 variables and filters only. No `{% if %}` blocks. Use separate actions for different scenarios.
 - **Pipeline composition** — Multi-step agent chains are shell scripts, not a Loom concept. `loom task dispatch --wait && loom task dispatch --wait` is a pipeline.
 - **Retry / fallback** — Deferred. Retry is `loom task dispatch --wait || loom task dispatch --wait` in a shell script for now.
 - **Auto-assignment** — Agents don't yet automatically pick up tickets matching their assignee prefix. Manual assignment or explicit dispatch required.
@@ -279,11 +279,11 @@ A short additional delay (~1s) after boot detection ensures the shell and boot c
 
 | File | Change |
 |---|---|
-| `loom/templates.py` | Template loading, Jinja2 rendering, variable discovery, `render_template` returns structured fields, `load_template_raw` for editor, scope-aware `list_templates` with overridden detection |
-| `loom/server.py` | `add_agent_from_template` handler, `render_template` command for board integration, `save_template` / `delete_template` CRUD commands (scope-aware) |
-| `bin/loom` | `task dispatch`, `task create`, `template` subcommands, template loader |
-| `static/js/modals.js` | Task create/edit modal, `openTaskFromTemplate` → `render_template` → pre-fill flow |
-| `static/js/board.js` | "+ Add task" dropdown with "New task" and "From template" options |
-| `static/js/templates.js` | **New** — Templates panel app (dropdown with Project/User optgroups, structured form editor, Jinja2 syntax highlighting, save/duplicate/delete, scope picker) |
-| `templates/*.yaml` | Seven starter templates: implement, fix, review, investigate, test, refactor, migrate |
+| `loom/actions.py` | Action loading, Jinja2 rendering, variable discovery, `render_action` returns structured fields, `load_action_raw` for editor, scope-aware `list_actions` with overridden detection |
+| `loom/server.py` | `add_agent_from_action` handler, `render_action` command for board integration, `save_action` / `delete_action` CRUD commands (scope-aware) |
+| `bin/loom` | `task dispatch`, `task create`, `action` subcommands, action loader |
+| `static/js/modals.js` | Task create/edit modal, `openTaskFromAction` → `render_action` → pre-fill flow |
+| `static/js/board.js` | "+ Add task" dropdown with "New task" and "From action" options |
+| `static/js/actions.js` | **New** — Actions panel app (dropdown with Project/User optgroups, structured form editor, Jinja2 syntax highlighting, save/duplicate/delete, scope picker) |
+| `actions/*.yaml` | Seven starter actions: implement, fix, review, investigate, test, refactor, migrate |
 | `docs/roadmap.md` | Update Phase 4 and Phase 5 status |

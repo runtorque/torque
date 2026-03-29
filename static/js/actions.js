@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------ */
-/* Templates panel app — template editor in the taskbar panel          */
+/* Actions panel app — action editor in the taskbar panel              */
 /* ------------------------------------------------------------------ */
 
 var _tplEditorList = [];       // cached template list
@@ -15,7 +15,7 @@ var _tplPipelinesData = null;  // cached pipeline discovery result
 
 function tplEditorLoad() {
   var group = _currentGroup();
-  send({ cmd: 'list_templates', group: group });
+  send({ cmd: 'list_actions', group: group });
 }
 
 function _tplKey(t) {
@@ -29,7 +29,7 @@ function _tplSelectedName() {
 }
 
 function tplEditorReceiveList(msg) {
-  _tplEditorList = msg.templates || [];
+  _tplEditorList = msg.actions || [];
 
   // If we just saved, select it with the right scope key
   if (msg.saved) {
@@ -50,13 +50,13 @@ function tplEditorReceiveList(msg) {
   if (_tplEditorSelected && !_tplEditorNew) {
     var name = _tplSelectedName();
     var group = _currentGroup();
-    send({ cmd: 'get_template', name: name, group: group, raw: true, scope: _tplEditorScope });
+    send({ cmd: 'get_action', name: name, group: group, raw: true, scope: _tplEditorScope });
   }
 }
 
 function tplEditorReceiveDetail(msg) {
   if (msg.name !== _tplSelectedName()) return;
-  _tplEditorData = msg.template || {};
+  _tplEditorData = msg.action || {};
   _tplEditorDirty = false;
   _tplEditorNew = false;
   renderTemplatesEditor();
@@ -68,14 +68,14 @@ function tplEditorReceiveDetail(msg) {
 /* ---- Render -------------------------------------------------------- */
 
 function renderTemplatesPanel() {
-  var panel = document.getElementById('panel-templates');
+  var panel = document.getElementById('panel-actions');
   if (!panel) return;
 
   var html = '';
 
   // Header bar
   html += '<div class="tpled-header">';
-  html += '<span class="tpled-header-title">Templates</span>';
+  html += '<span class="tpled-header-title">Actions</span>';
   html += '<select class="tpled-select" id="tpled-select" onchange="tplEditorOnSelect(this.value)">';
   html += '<option value="">Select\u2026</option>';
   var projectTpls = [];
@@ -105,7 +105,7 @@ function renderTemplatesPanel() {
     html += '</optgroup>';
   }
   html += '</select>';
-  html += '<button class="tpled-new-btn" onclick="tplEditorNew()" title="New template">+</button>';
+  html += '<button class="tpled-new-btn" onclick="tplEditorNew()" title="New action">+</button>';
   html += '<button class="tpled-new-btn" onclick="tplEditorLoad()" title="Refresh">&#x21BB;</button>';
   // View toggle
   html += '<div class="tpled-view-toggle">';
@@ -148,7 +148,7 @@ function tplEditorOnSelect(key) {
   _tplEditorDirty = false;
   renderTemplatesPanel();
   var group = _currentGroup();
-  send({ cmd: 'get_template', name: name, group: group, raw: true, scope: _tplEditorScope });
+  send({ cmd: 'get_action', name: name, group: group, raw: true, scope: _tplEditorScope });
 }
 
 function renderTemplatesEditor() {
@@ -157,10 +157,10 @@ function renderTemplatesEditor() {
 
   if (!_tplEditorData && !_tplEditorNew) {
     if (_tplEditorList.length === 0) {
-      el.innerHTML = '<div class="tpled-empty">No templates found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.loom/templates/</code>.</div>';
+      el.innerHTML = '<div class="tpled-empty">No actions found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.loom/actions/</code>.</div>';
     } else {
       el.innerHTML = '<div class="tpled-empty">'
-        + '<b>' + _tplEditorList.length + '</b> template' + (_tplEditorList.length !== 1 ? 's' : '') + ' available.<br>'
+        + '<b>' + _tplEditorList.length + '</b> action' + (_tplEditorList.length !== 1 ? 's' : '') + ' available.<br>'
         + 'Pick one from the dropdown above to view or edit.'
         + '</div>';
     }
@@ -177,8 +177,8 @@ function renderTemplatesEditor() {
   html += '<input id="tpled-name" value="' + esc(d.name || _tplEditorSelected || '') + '" autocomplete="off" onchange="tplEditorMarkDirty()">';
   html += '<label>Scope</label>';
   html += '<select id="tpled-scope" onchange="tplEditorMarkDirty()">';
-  html += '<option value="project"' + (_tplEditorScope === 'project' ? ' selected' : '') + '>Project (.loom/templates/)</option>';
-  html += '<option value="user"' + (_tplEditorScope === 'user' ? ' selected' : '') + '>User (~/.loom/templates/)</option>';
+  html += '<option value="project"' + (_tplEditorScope === 'project' ? ' selected' : '') + '>Project (.loom/actions/)</option>';
+  html += '<option value="user"' + (_tplEditorScope === 'user' ? ' selected' : '') + '>User (~/.loom/actions/)</option>';
   html += '</select>';
   html += '<label>Description</label>';
   html += '<input id="tpled-desc" value="' + esc(d.description || '') + '" autocomplete="off" onchange="tplEditorMarkDirty()">';
@@ -225,7 +225,7 @@ function renderTemplatesEditor() {
   html += '<summary>Transitions'
     + (transitions.length ? ' <span class="tpled-transitions-count">' + transitions.length + '</span>' : '')
     + ' <span class="hint-btn" onclick="event.preventDefault();event.stopPropagation();toggleHint(this)"'
-    + ' data-hint="Defines which templates this one can derive into. Agents can only hand off to templates listed here. Leave empty for terminal pipeline stages.">?</span>'
+    + ' data-hint="Defines which actions this one can derive into. Agents can only hand off to actions listed here. Leave empty for terminal pipeline stages.">?</span>'
     + '</summary>';
   html += '<div id="tpled-transitions">';
   for (var tri = 0; tri < transitions.length; tri++) {
@@ -291,8 +291,8 @@ function _tplHighlightWrap(id, value) {
 }
 
 function _tplShortenPath(p) {
-  // Strip .loom/templates suffix to show the project/user root
-  p = p.replace(/\/?\.loom\/templates\/?$/, '');
+  // Strip .loom/actions suffix to show the project/user root
+  p = p.replace(/\/?\.loom\/actions\/?$/, '');
   // Replace home dir with ~
   if (typeof navigator !== 'undefined') {
     // Detect home from common prefixes
@@ -370,7 +370,7 @@ function _tplEditorFindVars() {
 
 function _tplTransitionRow(idx, tr) {
   var isAsk = tr && tr.ask;
-  var tpl = (tr && tr.template) || '';
+  var tpl = (tr && tr.action) || '';
   var when = (tr && tr.when) || '';
   var html = '<div class="tpled-transition-entry" data-idx="' + idx + '">';
   html += '<button class="tpled-tr-remove" onclick="tplRemoveTransition(' + idx + ')" title="Remove transition">\u2715</button>';
@@ -379,13 +379,13 @@ function _tplTransitionRow(idx, tr) {
   html += '<div class="tpled-tr-field">';
   html += '<label class="tpled-tr-label">Type</label>';
   html += '<select class="tpled-tr-type" onchange="tplTransitionTypeChanged(this)">';
-  html += '<option value="template"' + (!isAsk ? ' selected' : '') + '>Template</option>';
+  html += '<option value="action"' + (!isAsk ? ' selected' : '') + '>Action</option>';
   html += '<option value="ask"' + (isAsk ? ' selected' : '') + '>Ask (human)</option>';
   html += '</select>';
   html += '</div>';
   // Template picker dropdown
   html += '<div class="tpled-tr-field">';
-  html += '<label class="tpled-tr-label">Template</label>';
+  html += '<label class="tpled-tr-label">Action</label>';
   html += '<select class="tpled-tr-template" onchange="tplEditorMarkDirty()"' + (isAsk ? ' disabled' : '') + '>';
   html += '<option value="">Select…</option>';
   var projectTpls = [];
@@ -466,7 +466,7 @@ function _tplReadTransitions() {
     if (type === 'ask') {
       result.push({ ask: true, when: when });
     } else if (tpl) {
-      var entry = { template: tpl };
+      var entry = { action: tpl };
       if (when) entry.when = when;
       result.push(entry);
     }
@@ -514,7 +514,7 @@ function tplEditorSave() {
 
   var transitions = _tplReadTransitions();
 
-  var tplData = {
+  var actData = {
     description: (document.getElementById('tpled-desc').value || '').trim(),
     agent: {
       name_prefix: (document.getElementById('tpled-agent-prefix').value || '').trim(),
@@ -532,9 +532,9 @@ function tplEditorSave() {
   var scope = document.getElementById('tpled-scope').value || 'project';
 
   var msg = {
-    cmd: 'save_template',
+    cmd: 'save_action',
     name: name,
-    template: tplData,
+    action: actData,
     group: _currentGroup(),
     scope: scope,
   };
@@ -554,9 +554,9 @@ function tplEditorSave() {
 
 function tplEditorDelete() {
   var name = _tplSelectedName();
-  showConfirm('Delete template "' + name + '"?').then(function(yes) {
+  showConfirm('Delete action "' + name + '"?').then(function(yes) {
     if (!yes) return;
-    send({ cmd: 'delete_template', name: name, group: _currentGroup() });
+    send({ cmd: 'delete_action', name: name, group: _currentGroup() });
   });
 }
 
@@ -627,28 +627,29 @@ function renderPipelinesView() {
   if (!pipelines.length) {
     el.innerHTML = '<div class="tpled-pipelines-empty">'
       + 'No pipelines found.<br>'
-      + '<span class="dim">Add <code>transitions</code> to your templates.</span></div>';
+      + '<span class="dim">Add <code>transitions</code> to your actions.</span></div>';
     return;
   }
 
   // Merge all pipelines into a single graph
   var allEdges = [];
   var allAsks = [];
-  var allTemplates = {};
+  var allActions = {};
   for (var pi = 0; pi < pipelines.length; pi++) {
     var p = pipelines[pi];
-    for (var ti = 0; ti < p.templates.length; ti++) allTemplates[p.templates[ti]] = true;
+    var pActions = p.actions || [];
+    for (var ti = 0; ti < pActions.length; ti++) allActions[pActions[ti]] = true;
     for (var ei = 0; ei < p.edges.length; ei++) allEdges.push(p.edges[ei]);
     if (p.asks) for (var ai = 0; ai < p.asks.length; ai++) allAsks.push(p.asks[ai]);
   }
-  var templateNames = Object.keys(allTemplates).sort();
+  var actionNames = Object.keys(allActions).sort();
 
   // Build adjacency
   var adj = {};
   var inCount = {};
-  for (var i = 0; i < templateNames.length; i++) {
-    adj[templateNames[i]] = [];
-    inCount[templateNames[i]] = 0;
+  for (var i = 0; i < actionNames.length; i++) {
+    adj[actionNames[i]] = [];
+    inCount[actionNames[i]] = 0;
   }
   for (var i = 0; i < allEdges.length; i++) {
     var e = allEdges[i];
@@ -659,15 +660,15 @@ function renderPipelinesView() {
   // BFS layout: assign layers
   var depths = {};
   var queue = [];
-  for (var i = 0; i < templateNames.length; i++) {
-    if (inCount[templateNames[i]] === 0) {
-      depths[templateNames[i]] = 0;
-      queue.push(templateNames[i]);
+  for (var i = 0; i < actionNames.length; i++) {
+    if (inCount[actionNames[i]] === 0) {
+      depths[actionNames[i]] = 0;
+      queue.push(actionNames[i]);
     }
   }
   if (!queue.length) { // fully cyclic
-    depths[templateNames[0]] = 0;
-    queue.push(templateNames[0]);
+    depths[actionNames[0]] = 0;
+    queue.push(actionNames[0]);
   }
   while (queue.length) {
     var node = queue.shift();
@@ -680,8 +681,8 @@ function renderPipelinesView() {
       }
     }
   }
-  for (var i = 0; i < templateNames.length; i++) {
-    if (depths[templateNames[i]] === undefined) depths[templateNames[i]] = 0;
+  for (var i = 0; i < actionNames.length; i++) {
+    if (depths[actionNames[i]] === undefined) depths[actionNames[i]] = 0;
   }
 
   // Group by layer
@@ -711,11 +712,11 @@ function renderPipelinesView() {
   }
   var LEFT_CHANNEL = backEdgeCount ? 30 + backEdgeCount * 16 : 0;
 
-  // Pre-compute which templates have asks (for width calculation)
-  var asksForTpl = {}; // name → count
+  // Pre-compute which actions have asks (for width calculation)
+  var asksForAct = {}; // name → count
   for (var ai = 0; ai < allAsks.length; ai++) {
     var src = allAsks[ai].from;
-    asksForTpl[src] = (asksForTpl[src] || 0) + 1;
+    asksForAct[src] = (asksForAct[src] || 0) + 1;
   }
 
   // Calculate layer widths accounting for ask nodes next to their source
@@ -723,7 +724,7 @@ function renderPipelinesView() {
   // Then GAP_X between items
   function layerItemWidth(name) {
     var w = NODE_W;
-    var ac = asksForTpl[name] || 0;
+    var ac = asksForAct[name] || 0;
     if (ac) w += ASK_GAP + ac * ASK_W + (ac - 1) * 8;
     return w;
   }
@@ -758,7 +759,7 @@ function renderPipelinesView() {
       };
       curX += NODE_W;
       // Place ask nodes for this template
-      var ac = asksForTpl[nodes[ni]] || 0;
+      var ac = asksForAct[nodes[ni]] || 0;
       if (ac) {
         curX += ASK_GAP;
         var askIdx = 0;
@@ -907,8 +908,8 @@ function renderPipelinesView() {
   canvas.appendChild(svg);
 
   // Render node divs
-  for (var i = 0; i < templateNames.length; i++) {
-    var name = templateNames[i];
+  for (var i = 0; i < actionNames.length; i++) {
+    var name = actionNames[i];
     var pos = nodePos[name];
     var outEdges = adj[name] || [];
     var isTerminal = outEdges.length === 0;

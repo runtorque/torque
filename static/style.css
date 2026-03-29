@@ -746,7 +746,7 @@ textarea.task-tpl-var, #task-task-input {
 }
 
 /* ------------------------------------------------------------------ */
-/* Template modal                                                       */
+/* Action modal                                                         */
 /* ------------------------------------------------------------------ */
 .tpl-list { display: flex; flex-direction: column; gap: 4px; }
 .tpl-item {
@@ -1155,7 +1155,7 @@ textarea.task-tpl-var, #task-task-input {
 }
 .board-add-tpl-btn-idle:hover { color: var(--text); border-color: var(--accent); }
 
-/* Inline template list (overlays cards) */
+/* Inline action list (overlays cards) */
 .board-tpl-list {
   display: flex; flex-direction: column;
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -1236,9 +1236,9 @@ textarea.task-tpl-var, #task-task-input {
 .panel-hidden { display: none !important; }
 
 /* ------------------------------------------------------------------ */
-/* Templates panel                                                     */
+/* Actions panel                                                       */
 /* ------------------------------------------------------------------ */
-#panel-templates {
+#panel-actions {
   display: flex; flex-direction: column;
   height: calc(100% - 5px);
 }

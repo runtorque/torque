@@ -1,7 +1,8 @@
-"""Template loading, variable extraction, and Jinja2 rendering.
+"""Action loading, variable extraction, and Jinja2 rendering.
 
-Templates are YAML files rendered through Jinja2 as a whole. Variables
-are auto-discovered from the Jinja2 AST — no explicit declaration
+Actions are YAML files where only the ``prompt`` field is rendered
+through Jinja2. All other fields are plain YAML. Variables are
+auto-discovered from the prompt's Jinja2 AST — no explicit declaration
 needed. Default values are extracted from ``| default()`` filters.
 """
 
@@ -17,12 +18,12 @@ try:
     _HAS_JINJA2 = True
 except ImportError:
     _HAS_JINJA2 = False
-    log.warning("jinja2 not installed — template rendering will use "
+    log.warning("jinja2 not installed — action rendering will use "
                 "basic variable substitution")
 
 
 # ---------------------------------------------------------------------------
-# Minimal YAML parser (same as bin/loom — stdlib only, covers templates)
+# Minimal YAML parser (same as bin/loom — stdlib only, covers actions)
 # ---------------------------------------------------------------------------
 
 def _yaml_parse_value(raw):
@@ -156,7 +157,7 @@ def _yaml_parse_block_scalar(lines, idx, parent_indent):
 
 
 # ---------------------------------------------------------------------------
-# TemplateManager
+# ActionManager
 # ---------------------------------------------------------------------------
 
 def _migrate_syntax(text):
@@ -164,7 +165,7 @@ def _migrate_syntax(text):
     return re.sub(r'\$\{(\w+)\}', r'{{ \1 }}', text)
 
 
-class TemplateManager:
+class ActionManager:
 
     def __init__(self):
         if _HAS_JINJA2:
@@ -181,21 +182,21 @@ class TemplateManager:
             self._env = None
             self._lenient_env = None
 
-    GLOBAL_TEMPLATES_DIR = os.path.expanduser("~/.loom/templates")
+    GLOBAL_ACTIONS_DIR = os.path.expanduser("~/.loom/actions")
 
     @staticmethod
-    def _coalesce_prompt(tpl: dict) -> str:
+    def _coalesce_prompt(act: dict) -> str:
         """Build a unified prompt from old-format or new-format fields.
 
         New format: ``prompt`` key.
         Old format: ``task`` + ``instructions`` + ``context`` + ``criteria``.
         """
-        prompt = tpl.get("prompt", "")
+        prompt = act.get("prompt", "")
         if prompt:
             return prompt
         parts = []
         for key in ("task", "instructions", "context", "criteria"):
-            val = tpl.get(key, "")
+            val = act.get(key, "")
             if val:
                 parts.append(val.rstrip())
         return "\n\n".join(parts)
@@ -207,34 +208,34 @@ class TemplateManager:
 
     def render_prompt(self, name: str, variables: dict,
                       base_dir: str = "") -> str | None:
-        """Render only the template's prompt field with variables.
+        """Render only the action's prompt field with variables.
 
-        Returns the rendered prompt string, or None if the template is
+        Returns the rendered prompt string, or None if the action is
         not found.  Used by dispatch and preview.
         """
         raw = self._load_raw(name, base_dir)
         if raw is None:
             return None
-        raw = _migrate_syntax(raw)
 
         # Parse raw YAML (no Jinja2) to preserve {{ VAR }} placeholders
         try:
-            tpl = parse_yaml(raw)
+            act = parse_yaml(raw)
         except Exception:
-            tpl = self._parse_lenient(raw) or {}
-        prompt_raw = self._coalesce_prompt(tpl)
+            act = {}
+        prompt_raw = self._coalesce_prompt(act)
         if not prompt_raw:
             return None
 
+        prompt_raw = _migrate_syntax(prompt_raw)
         return self._render_str(prompt_raw, variables)
 
     @staticmethod
-    def find_templates_dirs(base_dir: str = "") -> list[str]:
-        """Return template directories in priority order.
+    def find_actions_dirs(base_dir: str = "") -> list[str]:
+        """Return action directories in priority order.
 
         Searches up from base_dir (or cwd) for a project-local
-        .loom/templates/, then falls back to ~/.loom/templates/.
-        Project templates take precedence over global ones.
+        .loom/actions/, then falls back to ~/.loom/actions/.
+        Project actions take precedence over global ones.
         """
         dirs = []
         # Project-local: walk up from base_dir
@@ -242,7 +243,7 @@ class TemplateManager:
         if not os.path.isdir(d):
             d = os.getcwd()
         for _ in range(20):
-            candidate = os.path.join(d, ".loom", "templates")
+            candidate = os.path.join(d, ".loom", "actions")
             if os.path.isdir(candidate):
                 dirs.append(candidate)
                 break
@@ -250,21 +251,21 @@ class TemplateManager:
             if parent == d:
                 break
             d = parent
-        # Global: ~/.loom/templates/ (expand at call time for safety)
-        g = os.path.expanduser("~/.loom/templates")
+        # Global: ~/.loom/actions/ (expand at call time for safety)
+        g = os.path.expanduser("~/.loom/actions")
         if os.path.isdir(g) and g not in dirs:
             dirs.append(g)
         return dirs
 
     @staticmethod
-    def find_templates_dir(base_dir: str = "") -> str | None:
-        """Return the highest-priority templates directory, or None."""
-        dirs = TemplateManager.find_templates_dirs(base_dir)
+    def find_actions_dir(base_dir: str = "") -> str | None:
+        """Return the highest-priority actions directory, or None."""
+        dirs = ActionManager.find_actions_dirs(base_dir)
         return dirs[0] if dirs else None
 
     def _load_raw(self, name: str, base_dir: str = "") -> str | None:
-        """Load a template file as raw text. Searches all template dirs."""
-        for tdir in self.find_templates_dirs(base_dir):
+        """Load an action file as raw text. Searches all action dirs."""
+        for tdir in self.find_actions_dirs(base_dir):
             for suffix in ("", ".yaml", ".yml"):
                 path = os.path.join(tdir, name + suffix)
                 if os.path.isfile(path):
@@ -272,54 +273,58 @@ class TemplateManager:
                         return f.read()
         return None
 
-    def list_templates(self, base_dir: str = "") -> list[dict]:
-        """List all templates with name, description, vars, and scope.
+    def list_actions(self, base_dir: str = "") -> list[dict]:
+        """List all actions with name, description, vars, and scope.
 
-        Returns all templates from all directories. When names collide
-        across scopes, both are included — project templates are marked
-        as the active one (used for dispatch), user templates with the
+        Returns all actions from all directories. When names collide
+        across scopes, both are included — project actions are marked
+        as the active one (used for dispatch), user actions with the
         same name are marked as ``shadowed``.
         """
         results = []
         seen_names = set()  # track project-local names for shadowing
-        for tdir in self.find_templates_dirs(base_dir):
+        for tdir in self.find_actions_dirs(base_dir):
             for fname in sorted(os.listdir(tdir)):
                 if not fname.endswith((".yaml", ".yml")):
                     continue
                 name = fname.rsplit(".", 1)[0]
                 path = os.path.join(tdir, fname)
-                is_global = (tdir == os.path.expanduser("~/.loom/templates"))
+                is_global = (tdir == os.path.expanduser("~/.loom/actions"))
                 shadowed = is_global and name in seen_names
                 try:
                     with open(path) as f:
                         raw = f.read()
-                    raw = _migrate_syntax(raw)
-                    meta = self._parse_lenient(raw)
+                    try:
+                        meta = parse_yaml(raw) or {}
+                    except Exception:
+                        meta = {}
                     desc = meta.get("description", "") if meta else ""
-                    tvars = self.get_template_vars(raw)
+                    avars = self.get_action_vars(raw)
                 except Exception:
                     desc = "(parse error)"
-                    tvars = []
+                    avars = []
                 results.append({"name": name, "description": desc,
-                                "vars": tvars, "global": is_global,
+                                "vars": avars, "global": is_global,
                                 "dir": tdir, "shadowed": shadowed})
                 if not is_global:
                     seen_names.add(name)
         return sorted(results, key=lambda t: (t["global"], t["name"]))
 
-    def load_template(self, name: str, base_dir: str = "") -> dict | None:
-        """Load template metadata (parsed leniently). Returns dict or None."""
+    def load_action(self, name: str, base_dir: str = "") -> dict | None:
+        """Load action metadata (parsed as plain YAML). Returns dict or None."""
         raw = self._load_raw(name, base_dir)
         if raw is None:
             return None
-        raw = _migrate_syntax(raw)
-        return self._parse_lenient(raw) or {}
+        try:
+            return parse_yaml(raw) or {}
+        except Exception:
+            return None
 
-    def load_template_raw(self, name: str, base_dir: str = "") -> dict | None:
-        """Load template as raw YAML (no Jinja2 rendering).
+    def load_action_raw(self, name: str, base_dir: str = "") -> dict | None:
+        """Load action as raw YAML (no Jinja2 rendering).
 
         Preserves ``{{ VAR }}`` placeholders in field values.
-        Used by the template editor.
+        Used by the action editor.
         """
         raw = self._load_raw(name, base_dir)
         if raw is None:
@@ -329,21 +334,29 @@ class TemplateManager:
         except Exception:
             return None
 
-    def get_template_vars(self, raw_or_tpl) -> list[dict]:
-        """Auto-discover variables from the raw template text.
+    def get_action_vars(self, raw_or_act) -> list[dict]:
+        """Auto-discover variables from the action's prompt field.
 
-        Parses the entire file as a Jinja2 template to find referenced
-        variables. Extracts default values from ``| default()`` filters.
-        TASK is always listed first and marked as required.
+        Parses only the prompt field as a Jinja2 template to find
+        referenced variables. Extracts default values from
+        ``| default()`` filters. TASK is always listed first and
+        marked as required.
 
         Accepts either raw text (str) or a parsed dict (for backward
         compat — will just return TASK in that case).
         """
-        if isinstance(raw_or_tpl, dict):
-            # Legacy call with parsed dict — collect strings and scan
-            raw = self._dict_to_scannable(raw_or_tpl)
+        if isinstance(raw_or_act, dict):
+            # Legacy call with parsed dict — extract prompt only
+            prompt = self._coalesce_prompt(raw_or_act)
+            raw = _migrate_syntax(prompt) if prompt else ""
         else:
-            raw = _migrate_syntax(raw_or_tpl)
+            # Extract prompt from raw YAML, then scan only that
+            try:
+                parsed = parse_yaml(raw_or_act)
+            except Exception:
+                parsed = {}
+            prompt = self._coalesce_prompt(parsed) if parsed else ""
+            raw = _migrate_syntax(prompt) if prompt else ""
 
         # Discover variables and defaults from Jinja2 AST
         discovered = set()
@@ -374,52 +387,48 @@ class TemplateManager:
 
         return result
 
-    def render_template(self, tpl_or_name, variables: dict,
-                        base_dir: str = "") -> dict:
-        """Render the entire template file through Jinja2, then parse YAML.
+    def render_action(self, act_or_name, variables: dict,
+                      base_dir: str = "") -> dict:
+        """Parse the action YAML, render only the prompt through Jinja2.
 
         Returns a flat dict with resolved agent settings:
         {name, command, directory, profile, shell, tab_color, env_vars,
          prompt, group, labels, worktree, terminals}
         """
-        if isinstance(tpl_or_name, str) and "\n" not in tpl_or_name:
-            # It's a template name, load raw
-            raw = self._load_raw(tpl_or_name, base_dir)
+        if isinstance(act_or_name, str) and "\n" not in act_or_name:
+            # It's an action name, load raw
+            raw = self._load_raw(act_or_name, base_dir)
             if not raw:
                 return {}
-        elif isinstance(tpl_or_name, str):
-            raw = tpl_or_name
-        else:
-            # Legacy dict — render field by field
-            return self._render_dict_fields(tpl_or_name, variables)
-
-        raw = _migrate_syntax(raw)
-
-        # Render entire file through Jinja2
-        if self._env and _HAS_JINJA2:
             try:
-                tmpl = self._env.from_string(raw)
-                rendered_text = tmpl.render(**variables)
-            except Exception as exc:
-                log.warning("Jinja2 render failed: %s", exc)
-                rendered_text = self._fallback_render(raw, variables)
+                act = parse_yaml(raw)
+            except Exception:
+                return {}
+        elif isinstance(act_or_name, str):
+            raw = act_or_name
+            try:
+                act = parse_yaml(raw)
+            except Exception:
+                return {}
         else:
-            rendered_text = self._fallback_render(raw, variables)
+            # Legacy dict
+            act = act_or_name
 
-        # Parse the rendered YAML
-        try:
-            tpl = parse_yaml(rendered_text)
-        except Exception as exc:
-            log.warning("YAML parse failed after render: %s", exc)
+        if not isinstance(act, dict):
             return {}
 
-        agent = tpl.get("agent", {}) if isinstance(tpl, dict) else {}
+        agent = act.get("agent", {}) if isinstance(act, dict) else {}
 
-        # Coalesce prompt from new or old format
-        prompt = self._coalesce_prompt(tpl)
+        # Coalesce prompt from new or old format, then render through Jinja2
+        prompt_raw = self._coalesce_prompt(act)
+        if prompt_raw:
+            prompt_raw = _migrate_syntax(prompt_raw)
+            prompt = self._render_str(prompt_raw, variables)
+        else:
+            prompt = ""
 
         return {
-            "name": agent.get("name_prefix", tpl.get("name", "agent")),
+            "name": agent.get("name_prefix", act.get("name", "agent")),
             "command": agent.get("command", ""),
             "directory": agent.get("directory", ""),
             "profile": agent.get("profile", ""),
@@ -427,57 +436,71 @@ class TemplateManager:
             "tab_color": agent.get("tab_color", ""),
             "env_vars": agent.get("env_vars", {}),
             "prompt": prompt,
-            "group": tpl.get("group", ""),
-            "labels": tpl.get("labels", []),
-            "worktree": tpl.get("worktree", None),
-            "terminals": tpl.get("terminals", []),
-            "transitions": tpl.get("transitions", []),
-            "max_depth": tpl.get("max_depth", None),
+            "group": act.get("group", ""),
+            "labels": act.get("labels", []),
+            "worktree": act.get("worktree", None),
+            "terminals": act.get("terminals", []),
+            "transitions": act.get("transitions", []),
+            "max_depth": act.get("max_depth", None),
         }
 
-    def get_transitions(self, template_name: str,
+    def get_transitions(self, action_name: str,
                          base_dir: str = "") -> list[dict]:
-        """Return the transitions list for a template.
+        """Return the transitions list for an action.
 
-        Each entry is {template: str, when: str} or {ask: True, when: str}.
-        Returns [] if template has no transitions or is not found.
+        Each entry is {action: str, when: str} or {ask: True, when: str}.
+        Returns [] if action has no transitions or is not found.
         """
-        tpl = self.load_template(template_name, base_dir)
-        if not tpl:
+        act = self.load_action(action_name, base_dir)
+        if not act:
             return []
-        return tpl.get("transitions") or []
+        transitions = act.get("transitions") or []
+        result = []
+        for tr in transitions:
+            if isinstance(tr, dict):
+                action_target = tr.get("action", "")
+                if action_target:
+                    result.append({"action": action_target,
+                                   "when": tr.get("when", "")})
+                elif tr.get("ask"):
+                    result.append({"ask": True,
+                                   "when": tr.get("when", "")})
+            else:
+                result.append(tr)
+        return result
 
     def discover_pipelines(self, base_dir: str = "") -> list[dict]:
-        """Scan all templates and discover pipelines from transitions.
+        """Scan all actions and discover pipelines from transitions.
 
         Returns a list of pipeline dicts:
-        [{name, templates: [str], edges: [{from, to, when}],
+        [{name, actions: [str], edges: [{from, to, when}],
           asks: [{from, when}]}]
         """
-        templates = self.list_templates(base_dir)
-        # Build adjacency: load transitions for each template
+        actions = self.list_actions(base_dir)
+        # Build adjacency: load transitions for each action
         graph = {}  # name → [{to, when}]
         asks = {}   # name → [{when}]
         all_names = set()
-        for t in templates:
-            if t.get("shadowed"):
+        for a in actions:
+            if a.get("shadowed"):
                 continue
-            name = t["name"]
+            name = a["name"]
             all_names.add(name)
-            tpl = self.load_template(name, base_dir)
-            transitions = (tpl.get("transitions") or []) if tpl else []
+            act = self.load_action(name, base_dir)
+            transitions = (act.get("transitions") or []) if act else []
             edges = []
-            tpl_asks = []
+            act_asks = []
             for tr in transitions:
                 if isinstance(tr, dict):
-                    if tr.get("template"):
-                        edges.append({"to": tr["template"],
+                    target = tr.get("action")
+                    if target:
+                        edges.append({"to": target,
                                       "when": tr.get("when", "")})
                     elif tr.get("ask"):
-                        tpl_asks.append({"when": tr.get("when", "")})
+                        act_asks.append({"when": tr.get("when", "")})
             graph[name] = edges
-            if tpl_asks:
-                asks[name] = tpl_asks
+            if act_asks:
+                asks[name] = act_asks
 
         # Build undirected connected components
         adj = {n: set() for n in all_names}
@@ -529,7 +552,7 @@ class TemplateManager:
                         edges.append({"from": n, "to": e["to"],
                                       "when": e["when"]})
 
-            # Collect ask transitions for templates in this component
+            # Collect ask transitions for actions in this component
             comp_asks = []
             for n in comp:
                 for a in asks.get(n, []):
@@ -537,7 +560,7 @@ class TemplateManager:
 
             pipelines.append({
                 "name": name,
-                "templates": sorted(comp),
+                "actions": sorted(comp),
                 "edges": edges,
                 "asks": comp_asks,
             })
@@ -545,20 +568,6 @@ class TemplateManager:
         return sorted(pipelines, key=lambda p: p["name"])
 
     # -- Internal helpers ---------------------------------------------------
-
-    def _parse_lenient(self, raw: str) -> dict | None:
-        """Render with lenient undefined (unresolved vars → empty), parse."""
-        if self._lenient_env and _HAS_JINJA2:
-            try:
-                rendered = self._lenient_env.from_string(raw).render()
-                return parse_yaml(rendered)
-            except Exception:
-                pass
-        # Fallback: try parsing raw text directly
-        try:
-            return parse_yaml(raw)
-        except Exception:
-            return None
 
     @staticmethod
     def _extract_defaults(ast) -> dict[str, str]:
@@ -573,48 +582,6 @@ class TemplateManager:
                     if isinstance(arg, nodes.Const) and arg.value is not None:
                         defaults[node.node.name] = str(arg.value)
         return defaults
-
-    @staticmethod
-    def _dict_to_scannable(tpl: dict) -> str:
-        """Convert a parsed template dict back to scannable text."""
-        parts = []
-        def _walk(obj):
-            if isinstance(obj, str):
-                parts.append(obj)
-            elif isinstance(obj, dict):
-                for v in obj.values():
-                    _walk(v)
-            elif isinstance(obj, list):
-                for item in obj:
-                    _walk(item)
-        _walk(tpl)
-        return "\n".join(parts)
-
-    def _render_dict_fields(self, tpl: dict, variables: dict) -> dict:
-        """Legacy: render individual fields of a parsed template dict."""
-        agent = tpl.get("agent", {})
-        # Coalesce prompt from new or old format
-        prompt_raw = self._coalesce_prompt(tpl) or "{{ TASK }}"
-        return {
-            "name": self._render_str(
-                agent.get("name_prefix", tpl.get("name", "agent")),
-                variables),
-            "command": self._render_str(agent.get("command", ""), variables),
-            "directory": self._render_str(
-                agent.get("directory", ""), variables),
-            "profile": agent.get("profile", ""),
-            "shell": agent.get("shell", ""),
-            "tab_color": agent.get("tab_color", ""),
-            "env_vars": {k: self._render_str(str(v or ""), variables)
-                         for k, v in (agent.get("env_vars") or {}).items()},
-            "prompt": self._render_str(prompt_raw, variables),
-            "group": self._render_str(tpl.get("group", ""), variables),
-            "labels": tpl.get("labels", []),
-            "worktree": tpl.get("worktree", None),
-            "terminals": tpl.get("terminals", []),
-            "transitions": tpl.get("transitions", []),
-            "max_depth": tpl.get("max_depth", None),
-        }
 
     def _render_str(self, text: str, variables: dict) -> str:
         if not isinstance(text, str) or not text:

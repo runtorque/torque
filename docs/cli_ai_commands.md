@@ -187,7 +187,7 @@ loom ai context [--json]
 
 **Output:**
 - Agent: name, slug, group, status, worktree info
-- Task: description, lane, template, labels (if linked)
+- Task: description, lane, action, labels (if linked)
 - Group: name, settings summary
 
 This is a **read-only** command — no state changes. Uses `detect_context()` + SQLite direct reads (works offline).
@@ -209,7 +209,7 @@ Agent: fix-auth (fix-auth)
 Task: Fix authentication timeout on staging
   Slug:     fix-authentication-timeout
   Lane:     In Progress
-  Template: bugfix
+  Action:   bugfix
   Labels:   urgent
 ```
 

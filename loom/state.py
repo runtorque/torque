@@ -21,8 +21,8 @@ class BoardTask:
     task: str                   # actionable task description (required)
     slug: str = ""              # auto-generated from task text
     group: str = ""             # owning group (must be an existing group)
-    template_name: str = ""     # template used for prompt rendering (optional)
-    template_vars: dict = field(default_factory=dict)  # template variable values
+    action_name: str = ""       # action used for prompt rendering (optional)
+    action_vars: dict = field(default_factory=dict)  # action variable values
     instructions: str = ""      # DEPRECATED — kept for backward compat
     context: str = ""           # DEPRECATED — kept for backward compat
     criteria: str = ""          # DEPRECATED — kept for backward compat

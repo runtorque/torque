@@ -112,8 +112,8 @@ Registry in `loom/adapters/__init__.py` with `detect_agent_type()` (by process n
 | Adapter | File | Status | Integration |
 |---|---|---|---|
 | Claude Code | `claude_code.py` | Full | HTTP hooks (command hook for SessionStart), event parsing, activity inference, session resume |
-| Codex | `codex.py` | Template | Process matching only |
-| Gemini CLI | `gemini_cli.py` | Template | Process matching only |
+| Codex | `codex.py` | Stub | Process matching only |
+| Gemini CLI | `gemini_cli.py` | Stub | Process matching only |
 | Generic | `generic.py` | Full | Fallback, process monitoring only |
 
 ### Claude Code Adapter
@@ -217,8 +217,8 @@ loom/
     __init__.py          # Registry: detect_agent_type(), detect_by_command(), get_adapter()
     base.py              # AgentAdapter base class, AgentEvent dataclass, EVENT_TYPES
     claude_code.py       # Full: hooks, event parsing, activity inference, install/uninstall
-    codex.py             # Template: process/command matching only
-    gemini_cli.py        # Template: process/command matching only
+    codex.py             # Stub: process/command matching only
+    gemini_cli.py        # Stub: process/command matching only
     generic.py           # Fallback: always matches, process monitoring only
   events.py              # EventBus (throttled broadcast), EventLog (ring buffer), health_check
   notifications.py       # NotificationManager (5s batching, osascript)
@@ -248,7 +248,7 @@ Resolved during implementation:
 
 2. **Multi-window correlation** — `LOOM_CELL_ID` is the mandatory primary key, injected as env var and interpolated into HTTP hook headers. `cwd` matching is a debug fallback.
 
-3. **Adapter scope** — Claude Code is fully implemented. Gemini CLI and Codex are templates (process matching only). Generic is the fallback.
+3. **Adapter scope** — Claude Code is fully implemented. Gemini CLI and Codex are stubs (process matching only). Generic is the fallback.
 
 4. **Event volume / UI throttling** — Events update internal state immediately. WebSocket broadcasts are throttled to at most once per second (trailing-edge global timer).
 

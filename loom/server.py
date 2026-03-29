@@ -18,7 +18,7 @@ from .events import EventLog, EventBus, health_check
 from .adapters import get_adapter
 from .notifications import NotificationManager
 from .worktree import WorktreeManager
-from .templates import TemplateManager
+from .actions import ActionManager
 from . import keybindings
 
 
@@ -45,8 +45,8 @@ async def _worktree_diff_updater(state: MatrixState,
             await state.broadcast()
 
 
-def _template_to_yaml(name: str, data: dict) -> str:
-    """Convert a template data dict to YAML text."""
+def _action_to_yaml(name: str, data: dict) -> str:
+    """Convert an action data dict to YAML text."""
     lines = [f"name: {name}"]
     if data.get("description"):
         lines.append(f"description: {data['description']}")
@@ -92,8 +92,8 @@ def _template_to_yaml(name: str, data: dict) -> str:
                     lines.append("  - ask: true")
                     if tr.get("when"):
                         lines.append(f"    when: {tr['when']}")
-                elif tr.get("template"):
-                    lines.append(f"  - template: {tr['template']}")
+                elif tr.get("action"):
+                    lines.append(f"  - action: {tr['action']}")
                     if tr.get("when"):
                         lines.append(f"    when: {tr['when']}")
 
@@ -131,7 +131,7 @@ async def main(connection: iterm2.Connection):
 
     bridge = ITerm2Adapter(connection, state)
     worktree_mgr = WorktreeManager()
-    template_mgr = TemplateManager()
+    action_mgr = ActionManager()
 
     _pending_merges: dict[str, str] = {}  # cell ID → pre-merge base SHA
 
@@ -217,7 +217,7 @@ async def main(connection: iterm2.Connection):
     _displaced = [displaced_bindings]
 
     async def _resolve_base_dir(group: str = "") -> str:
-        """Resolve a base directory for template discovery."""
+        """Resolve a base directory for action discovery."""
         if group:
             gs = state.get_group_settings(group)
             d = gs.agent_directory or gs.default_directory
@@ -237,10 +237,10 @@ async def main(connection: iterm2.Connection):
 
     # -- Postscript builder -------------------------------------------------
 
-    def _build_postscript(task, tmgr, base_dir=""):
+    def _build_postscript(task, amgr, base_dir=""):
         """Build the loom-ai instruction block appended to dispatch prompts.
 
-        If the task's template declares transitions, the derive lines
+        If the task's action declares transitions, the derive lines
         are generated from them.  Otherwise only generic commands are shown.
         """
         lines = [
@@ -248,26 +248,26 @@ async def main(connection: iterm2.Connection):
             "- `loom ai done` — task complete, no follow-up needed",
         ]
 
-        # Dynamic derive lines from template transitions
+        # Dynamic derive lines from action transitions
         transitions = []
-        if task.template_name:
-            transitions = tmgr.get_transitions(task.template_name,
+        if task.action_name:
+            transitions = amgr.get_transitions(task.action_name,
                                                base_dir)
         has_ask = False
         for tr in transitions:
             if isinstance(tr, dict):
-                if tr.get("template"):
+                if tr.get("action"):
                     when = tr.get("when", "")
                     desc = f" — {when}" if when else ""
                     lines.append(
                         f"- `loom ai derive \"description\" "
-                        f"-t {tr['template']}`{desc}")
+                        f"-t {tr['action']}`{desc}")
                 if tr.get("ask"):
                     has_ask = True
         if not transitions:
             # No transitions declared — show generic derive
             lines.append(
-                "- `loom ai derive \"description\" -t TEMPLATE`"
+                "- `loom ai derive \"description\" -t ACTION`"
                 " — task complete, hand off to next agent")
         if has_ask or not transitions:
             lines.append(
@@ -389,21 +389,21 @@ async def main(connection: iterm2.Connection):
                 "keybinding_defaults": keybindings.get_default_bindings(),
             }
 
-        # list_templates: respond directly
-        if cmd == "list_templates":
+        # list_actions: respond directly
+        if cmd == "list_actions":
             base_dir = await _resolve_base_dir(data.get("group", ""))
-            templates = template_mgr.list_templates(base_dir)
-            return {"type": "templates", "group": data.get("group", ""),
-                    "templates": templates}
+            actions = action_mgr.list_actions(base_dir)
+            return {"type": "actions", "group": data.get("group", ""),
+                    "actions": actions}
 
-        # get_template: respond directly
-        if cmd == "get_template":
+        # get_action: respond directly
+        if cmd == "get_action":
             base_dir = await _resolve_base_dir(data.get("group", ""))
             scope = data.get("scope", "")
             # Scope-aware loading: search only the target directory
             raw = None
             if scope == "user":
-                gdir = os.path.expanduser("~/.loom/templates")
+                gdir = os.path.expanduser("~/.loom/actions")
                 for suffix in ("", ".yaml", ".yml"):
                     p = os.path.join(gdir, data["name"] + suffix)
                     if os.path.isfile(p):
@@ -411,90 +411,86 @@ async def main(connection: iterm2.Connection):
                             raw = f.read()
                         break
             if raw is None:
-                raw = template_mgr._load_raw(data["name"], base_dir)
+                raw = action_mgr._load_raw(data["name"], base_dir)
             if not raw:
                 return {"type": "error",
-                        "message": f"Template \"{data['name']}\" not found"}
+                        "message": f"Action \"{data['name']}\" not found"}
             # Editor mode: parse raw YAML without Jinja2 rendering
-            if data.get("raw"):
-                from .templates import parse_yaml
-                try:
-                    tpl = parse_yaml(raw) or {}
-                except Exception:
-                    tpl = {}
-            else:
-                tpl = template_mgr.load_template(
-                    data["name"], base_dir) or {}
-            tvars = template_mgr.get_template_vars(raw)
-            return {"type": "template_detail", "name": data["name"],
-                    "template": tpl, "vars": tvars}
+            from .actions import parse_yaml
+            try:
+                act = parse_yaml(raw) or {}
+            except Exception:
+                act = {}
+            avars = action_mgr.get_action_vars(raw)
+            return {"type": "action_detail", "name": data["name"],
+                    "action": act, "vars": avars}
 
-        # render_template: render template fields without creating an agent
-        if cmd == "render_template":
+        # render_action: render action prompt without creating an agent
+        if cmd == "render_action":
             base_dir = await _resolve_base_dir(data.get("group", ""))
-            raw = template_mgr._load_raw(data["name"], base_dir)
+            raw = action_mgr._load_raw(data["name"], base_dir)
             if not raw:
                 return {"type": "error",
-                        "message": f"Template \"{data['name']}\" not found"}
+                        "message": f"Action \"{data['name']}\" not found"}
             variables = data.get("vars", {})
-            rendered = template_mgr.render_template(raw, variables)
-            return {"type": "template_rendered",
+            rendered = action_mgr.render_action(raw, variables)
+            return {"type": "action_rendered",
                     "name": data["name"],
                     "prompt": rendered.get("prompt", ""),
                     "group": rendered.get("group", ""),
                     "labels": rendered.get("labels", [])}
 
-        # save_template: write template YAML to disk
-        if cmd == "save_template":
+        # save_action: write action YAML to disk
+        if cmd == "save_action":
             name = data.get("name", "").strip()
             if not name:
-                return {"type": "error", "message": "Template name required"}
-            tpl_data = data.get("template", {})
+                return {"type": "error", "message": "Action name required"}
+            act_data = data.get("action", {})
             # Validate {{ TASK }} in prompt
-            prompt = tpl_data.get("prompt", "")
-            if not template_mgr.validate_prompt(prompt):
+            prompt = act_data.get("prompt", "")
+            if not action_mgr.validate_prompt(prompt):
                 return {"type": "error",
-                        "message": "Template prompt must contain {{ TASK }}"}
+                        "message": "Action prompt must contain {{ TASK }}"}
             scope = data.get("scope", "project")  # "project" or "user"
             base_dir = await _resolve_base_dir(data.get("group", ""))
 
             if scope == "user":
-                tdir = os.path.expanduser("~/.loom/templates")
+                tdir = os.path.expanduser("~/.loom/actions")
                 os.makedirs(tdir, exist_ok=True)
             else:
-                tdir = template_mgr.find_templates_dir(base_dir)
+                tdir = action_mgr.find_actions_dir(base_dir)
                 if not tdir:
                     d = base_dir or os.getcwd()
-                    tdir = os.path.join(d, ".loom", "templates")
+                    tdir = os.path.join(d, ".loom", "actions")
                     os.makedirs(tdir, exist_ok=True)
             # Rename or scope change: delete old file from any location
             old_name = data.get("old_name", "")
             if old_name:
-                for old_dir in template_mgr.find_templates_dirs(base_dir):
+                for old_dir in action_mgr.find_actions_dirs(base_dir):
                     for suffix in (".yaml", ".yml"):
                         old_path = os.path.join(old_dir, old_name + suffix)
                         if os.path.isfile(old_path):
                             os.remove(old_path)
                             break
             path = os.path.join(tdir, name + ".yaml")
-            yaml_text = _template_to_yaml(name, tpl_data)
+            yaml_text = _action_to_yaml(name, act_data)
             with open(path, "w") as f:
                 f.write(yaml_text)
             # Return updated list
-            templates = template_mgr.list_templates(base_dir)
-            return {"type": "templates",
+            actions = action_mgr.list_actions(base_dir)
+            return {"type": "actions",
                     "group": data.get("group", ""),
-                    "templates": templates,
+                    "actions": actions,
                     "saved": name}
 
-        # delete_template: remove template file from disk
-        if cmd == "delete_template":
+        # delete_action: remove action file from disk
+        if cmd == "delete_action":
             name = data.get("name", "").strip()
             if not name:
-                return {"type": "error", "message": "Template name required"}
+                return {"type": "error", "message": "Action name required"}
             base_dir = await _resolve_base_dir(data.get("group", ""))
             deleted = False
-            for tdir in template_mgr.find_templates_dirs(base_dir):
+            for tdir in action_mgr.find_actions_dirs(base_dir):
                 for suffix in (".yaml", ".yml"):
                     path = os.path.join(tdir, name + suffix)
                     if os.path.isfile(path):
@@ -505,11 +501,11 @@ async def main(connection: iterm2.Connection):
                     break
             if not deleted:
                 return {"type": "error",
-                        "message": f"Template \"{name}\" not found"}
-            templates = template_mgr.list_templates(base_dir)
-            return {"type": "templates",
+                        "message": f"Action \"{name}\" not found"}
+            actions = action_mgr.list_actions(base_dir)
+            return {"type": "actions",
                     "group": data.get("group", ""),
-                    "templates": templates,
+                    "actions": actions,
                     "deleted": name}
 
         # -- Mutation commands: broadcast state at the end --
@@ -621,23 +617,23 @@ async def main(connection: iterm2.Connection):
                                 init_script=gs.terminal_init_script,
                                 shell=t_shell)
 
-            elif cmd == "add_agent_from_template":
+            elif cmd == "add_agent_from_action":
                 group = data["group"]
-                tpl_name = data["template"]
+                act_name = data["action"]
                 variables = data.get("vars", {})
                 base_dir = await _resolve_base_dir(group)
-                raw = template_mgr._load_raw(tpl_name, base_dir)
+                raw = action_mgr._load_raw(act_name, base_dir)
                 if not raw:
                     result = {"type": "error",
-                              "message": f"Template \"{tpl_name}\" not found"}
+                              "message": f"Action \"{act_name}\" not found"}
                 else:
-                    rendered = template_mgr.render_template(
+                    rendered = action_mgr.render_action(
                         raw, variables)
 
-                    # Template can override the target group
-                    tpl_group = rendered.get("group", "")
-                    if tpl_group and tpl_group in state.groups:
-                        group = tpl_group
+                    # Action can override the target group
+                    act_group = rendered.get("group", "")
+                    if act_group and act_group in state.groups:
+                        group = act_group
 
                     gs = state.get_group_settings(group)
 
@@ -656,7 +652,7 @@ async def main(connection: iterm2.Connection):
                     env = {**gs.env_vars, **gs.agent_env_vars,
                            **(rendered.get("env_vars") or {})} or None
 
-                    # Worktree: template can override group setting
+                    # Worktree: action can override group setting
                     want_worktree = rendered.get("worktree")
                     if want_worktree is None:
                         want_worktree = gs.git_worktree
@@ -684,7 +680,7 @@ async def main(connection: iterm2.Connection):
                         await bridge.create_session(
                             cell, env_vars=env, shell=shell)
 
-                        # Create template-defined child terminals
+                        # Create action-defined child terminals
                         for tterm in (rendered.get("terminals") or []):
                             t_name = tterm.get("name") \
                                 or state.next_cell_name(group, "terminal")
@@ -1035,8 +1031,8 @@ async def main(connection: iterm2.Connection):
                     task=data.get("task", ""),
                     group=data.get("group", ""),
                     lane=data.get("lane", ""),
-                    template_name=data.get("template_name", ""),
-                    template_vars=data.get("template_vars", {}),
+                    action_name=data.get("action_name", ""),
+                    action_vars=data.get("action_vars", {}),
                     assignee=data.get("assignee", ""),
                     agent_id=data.get("agent_id", ""),
                     labels=data.get("labels", []),
@@ -1230,25 +1226,25 @@ async def main(connection: iterm2.Connection):
                                 tid, agent_id=cell.id,
                                 lane=dispatch_lane)
 
-                            # Compose prompt: template-aware
+                            # Compose prompt: action-aware
                             prompt = None
                             base_dir = ""
-                            if task.template_name \
-                                    and not data.get("force_no_template"):
+                            if task.action_name \
+                                    and not data.get("force_no_action"):
                                 base_dir = await _resolve_base_dir(group)
                                 tvars = {"TASK": task.task,
-                                         **(task.template_vars or {})}
-                                rendered = template_mgr.render_prompt(
-                                    task.template_name, tvars,
+                                         **(task.action_vars or {})}
+                                rendered = action_mgr.render_prompt(
+                                    task.action_name, tvars,
                                     base_dir=base_dir)
                                 if rendered is None:
-                                    # Template deleted — warn frontend
+                                    # Action deleted — warn frontend
                                     result = {
                                         "type":
-                                            "dispatch_template_missing",
+                                            "dispatch_action_missing",
                                         "task_id": tid,
-                                        "template_name":
-                                            task.template_name}
+                                        "action_name":
+                                            task.action_name}
                                     prompt = None
                                 else:
                                     prompt = rendered
@@ -1270,8 +1266,8 @@ async def main(connection: iterm2.Connection):
 
                             if prompt:
                                 prompt += _build_postscript(
-                                    task, template_mgr,
-                                    base_dir if task.template_name
+                                    task, action_mgr,
+                                    base_dir if task.action_name
                                     else "")
 
                                 if agent_id and cell.session_id:
@@ -1301,30 +1297,30 @@ async def main(connection: iterm2.Connection):
             elif cmd == "preview_prompt":
                 # Preview rendered prompt for a task or inline params
                 tid = data.get("id", "")
-                tpl_name = data.get("template_name", "")
+                act_name = data.get("action_name", "")
                 task_text = data.get("task", "")
-                tvars = data.get("template_vars", {})
-                tpl_group = data.get("group", "")
+                avars = data.get("action_vars", {})
+                act_group = data.get("group", "")
 
                 if tid and not task_text:
                     t = state.board_tasks.get(tid)
                     if t:
                         task_text = t.task
-                        tpl_name = tpl_name or t.template_name
-                        tvars = tvars or t.template_vars or {}
-                        tpl_group = tpl_group or t.group
+                        act_name = act_name or t.action_name
+                        avars = avars or t.action_vars or {}
+                        act_group = act_group or t.group
 
-                if tpl_name:
-                    base_dir = await _resolve_base_dir(tpl_group)
-                    rendered = template_mgr.render_prompt(
-                        tpl_name,
-                        {"TASK": task_text, **tvars},
+                if act_name:
+                    base_dir = await _resolve_base_dir(act_group)
+                    rendered = action_mgr.render_prompt(
+                        act_name,
+                        {"TASK": task_text, **avars},
                         base_dir=base_dir)
                     if rendered is None:
                         result = {"type": "prompt_preview",
                                   "prompt": task_text,
-                                  "warning": f"Template "
-                                             f"\"{tpl_name}\" not found"}
+                                  "warning": f"Action "
+                                             f"\"{act_name}\" not found"}
                     else:
                         result = {"type": "prompt_preview",
                                   "prompt": rendered}
@@ -1477,8 +1473,8 @@ async def main(connection: iterm2.Connection):
 
                     elif action == "derive":
                         # Derive a new task and dispatch it
-                        tpl_name = data.get("template", "")
-                        tpl_vars = data.get("template_vars", {})
+                        act_name = data.get("action", "")
+                        act_vars = data.get("action_vars", {})
                         derive_group = data.get("group", "")
 
                         if not task:
@@ -1494,30 +1490,30 @@ async def main(connection: iterm2.Connection):
                             base_dir = await _resolve_base_dir(
                                 task.group)
                             cur_transitions = \
-                                template_mgr.get_transitions(
-                                    task.template_name, base_dir)
+                                action_mgr.get_transitions(
+                                    task.action_name, base_dir)
                             valid_targets = [
-                                t["template"] for t in cur_transitions
+                                t["action"] for t in cur_transitions
                                 if isinstance(t, dict)
-                                and t.get("template")]
-                            if cur_transitions and tpl_name \
-                                    and tpl_name not in valid_targets:
+                                and t.get("action")]
+                            if cur_transitions and act_name \
+                                    and act_name not in valid_targets:
                                 result = {
                                     "type": "error",
                                     "message":
-                                        f"Template '{task.template_name}'"
+                                        f"Action '{task.action_name}'"
                                         f" cannot transition to "
-                                        f"'{tpl_name}'. Valid: "
+                                        f"'{act_name}'. Valid: "
                                         f"{', '.join(valid_targets)}"}
                             else:
                                 # Check depth limit
                                 new_depth = task.pipeline_depth + 1
-                                tpl_meta = \
-                                    template_mgr.load_template(
-                                        tpl_name, base_dir) \
-                                    if tpl_name else None
+                                act_meta = \
+                                    action_mgr.load_action(
+                                        act_name, base_dir) \
+                                    if act_name else None
                                 max_d = (
-                                    (tpl_meta or {}).get("max_depth")
+                                    (act_meta or {}).get("max_depth")
                                     or state.global_settings
                                         .max_pipeline_depth
                                     or 0)
@@ -1553,8 +1549,8 @@ async def main(connection: iterm2.Connection):
                                         task=message,
                                         group=grp,
                                         lane="Backlog",
-                                        template_name=tpl_name,
-                                        template_vars=tpl_vars,
+                                        action_name=act_name,
+                                        action_vars=act_vars,
                                         labels=["derived"],
                                         parent_task_id=task.id,
                                         pipeline_depth=new_depth,
@@ -1654,7 +1650,7 @@ async def main(connection: iterm2.Connection):
                              "lane": t.lane,
                              "depth": t.pipeline_depth,
                              "agent_id": t.agent_id,
-                             "template_name": t.template_name,
+                             "action_name": t.action_name,
                              "parent_task_id": t.parent_task_id,
                              "labels": t.labels}
                             for t in chain
@@ -1664,7 +1660,7 @@ async def main(connection: iterm2.Connection):
             elif cmd == "discover_pipelines":
                 base_dir = await _resolve_base_dir(
                     data.get("group", ""))
-                pipelines = template_mgr.discover_pipelines(base_dir)
+                pipelines = action_mgr.discover_pipelines(base_dir)
                 result = {"type": "pipelines", "pipelines": pipelines}
 
             elif cmd == "restart":

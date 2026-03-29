@@ -141,8 +141,8 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     task           TEXT NOT NULL,
     slug           TEXT NOT NULL DEFAULT '',
     group_name     TEXT NOT NULL DEFAULT '',
-    template_name  TEXT NOT NULL DEFAULT '',
-    template_vars  TEXT NOT NULL DEFAULT '{}',
+    action_name    TEXT NOT NULL DEFAULT '',
+    action_vars    TEXT NOT NULL DEFAULT '{}',
     instructions   TEXT NOT NULL DEFAULT '',
     context        TEXT NOT NULL DEFAULT '',
     criteria       TEXT NOT NULL DEFAULT '',
@@ -216,9 +216,9 @@ class LoomDB:
                 "ALTER TABLE group_settings ADD COLUMN "
                 "terminal_close_on_disconnect INTEGER NOT NULL DEFAULT 0")
             self._conn.commit()
-        # Migrate: add template_name and template_vars columns to board_tasks
-        for col, default in [("template_name", "''"),
-                             ("template_vars", "'{}'")]:
+        # Migrate: add action_name and action_vars columns to board_tasks
+        for col, default in [("action_name", "''"),
+                             ("action_vars", "'{}'")]:
             try:
                 self._conn.execute(
                     f"SELECT {col} FROM board_tasks LIMIT 0")
@@ -345,12 +345,12 @@ class LoomDB:
         """Upsert a board task."""
         d = asdict(task)
         labels = json.dumps(d.pop("labels", []))
-        template_vars = json.dumps(d.pop("template_vars", {}))
+        action_vars = json.dumps(d.pop("action_vars", {}))
         # Map 'group' to 'group_name' for the DB column
         group_name = d.pop("group", "")
         self._conn.execute("""
             INSERT OR REPLACE INTO board_tasks
-                (id, task, slug, group_name, template_name, template_vars,
+                (id, task, slug, group_name, action_name, action_vars,
                  instructions, context, criteria,
                  lane, position, assignee, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url,
@@ -358,7 +358,7 @@ class LoomDB:
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d["slug"], group_name,
-            d.get("template_name", ""), template_vars,
+            d.get("action_name", ""), action_vars,
             d["instructions"], d["context"], d["criteria"],
             d["lane"], d["position"],
             d["assignee"], d["agent_id"], labels, d["created_at"],
@@ -485,12 +485,12 @@ class LoomDB:
             for tid, t in state_dict.get("board_tasks", {}).items():
                 d = dict(t) if isinstance(t, dict) else asdict(t)
                 labels = json.dumps(d.pop("labels", []))
-                template_vars = json.dumps(d.pop("template_vars", {}))
+                action_vars = json.dumps(d.pop("action_vars", {}))
                 group_name = d.pop("group", "")
                 c.execute("""
                     INSERT INTO board_tasks
-                        (id, task, slug, group_name, template_name,
-                         template_vars, instructions, context,
+                        (id, task, slug, group_name, action_name,
+                         action_vars, instructions, context,
                          criteria, lane, position, assignee, agent_id, labels,
                          created_at, updated_at, provider, external_id,
                          external_url, parent_task_id, pipeline_depth,
@@ -498,7 +498,7 @@ class LoomDB:
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""), d.get("slug", ""),
-                    group_name, d.get("template_name", ""), template_vars,
+                    group_name, d.get("action_name", ""), action_vars,
                     d.get("instructions", ""),
                     d.get("context", ""), d.get("criteria", ""),
                     d.get("lane", "Backlog"), d.get("position", 0),
@@ -597,12 +597,12 @@ class LoomDB:
                     d["labels"] = json.loads(d.get("labels", "[]"))
                 except (json.JSONDecodeError, TypeError):
                     d["labels"] = []
-                # Decode template_vars JSON
+                # Decode action_vars JSON
                 try:
-                    d["template_vars"] = json.loads(
-                        d.get("template_vars", "{}"))
+                    d["action_vars"] = json.loads(
+                        d.get("action_vars", "{}"))
                 except (json.JSONDecodeError, TypeError):
-                    d["template_vars"] = {}
+                    d["action_vars"] = {}
                 board_tasks[d["id"]] = d
 
         # UI state

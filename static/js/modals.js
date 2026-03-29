@@ -624,7 +624,7 @@ async function _doRollback(sha) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Template modal                                                       */
+/* Action modal                                                        */
 /* ------------------------------------------------------------------ */
 
 let _tplGroup = '';
@@ -633,25 +633,25 @@ let _tplData = null;
 let _tplMode = 'agent';  // 'agent' = create agent, 'task' = pre-fill task modal
 let _tplTaskLane = '';    // lane for task mode
 
-function openAddFromTemplate(group) {
+function openAddFromAction(group) {
   _tplGroup = group;
   _tplName = '';
   _tplData = null;
   _tplMode = 'agent';
-  send({ cmd: 'list_templates', group });
+  send({ cmd: 'list_actions', group });
 }
 
-function openTaskFromTemplate(group, lane) {
+function openTaskFromAction(group, lane) {
   _tplGroup = group;
   _tplName = '';
   _tplData = null;
   _tplMode = 'task';
   _tplTaskLane = lane || '';
-  send({ cmd: 'list_templates', group });
+  send({ cmd: 'list_actions', group });
 }
 
-function _showTemplateList(msg) {
-  const templates = msg.templates || [];
+function _showActionList(msg) {
+  const actions = msg.actions || [];
   const listEl = document.getElementById('tpl-list');
   const emptyEl = document.getElementById('tpl-empty');
   const listPane = document.getElementById('tpl-list-pane');
@@ -661,17 +661,17 @@ function _showTemplateList(msg) {
   varsPane.classList.add('hidden');
   document.getElementById('tpl-back-btn').classList.add('hidden');
   document.getElementById('tpl-submit-btn').classList.add('hidden');
-  document.getElementById('tpl-title').textContent = _tplMode === 'task' ? 'Task from Template' : 'From Template';
+  document.getElementById('tpl-title').textContent = _tplMode === 'task' ? 'Task from Action' : 'From Action';
 
-  if (templates.length === 0) {
+  if (actions.length === 0) {
     listEl.innerHTML = '';
     emptyEl.classList.remove('hidden');
   } else {
     emptyEl.classList.add('hidden');
     let html = '';
-    for (const t of templates) {
+    for (const t of actions) {
       const varCount = (t.vars || []).filter(v => v.name !== 'TASK').length;
-      html += `<button class="tpl-item" onclick="_selectTemplate('${esc(t.name)}')">`;
+      html += `<button class="tpl-item" onclick="_selectAction('${esc(t.name)}')">`;
       html += `<span class="tpl-item-name">${esc(t.name)}</span>`;
       if (t.description) html += `<span class="tpl-item-desc">${esc(t.description)}</span>`;
       if (varCount) html += `<span class="tpl-item-vars">${varCount} var${varCount > 1 ? 's' : ''}</span>`;
@@ -679,15 +679,15 @@ function _showTemplateList(msg) {
     }
     listEl.innerHTML = html;
   }
-  document.getElementById('modal-template').classList.add('visible');
+  document.getElementById('modal-action').classList.add('visible');
 }
 
-function _selectTemplate(name) {
+function _selectAction(name) {
   _tplName = name;
-  send({ cmd: 'get_template', name, group: _tplGroup });
+  send({ cmd: 'get_action', name, group: _tplGroup });
 }
 
-function _showTemplateVarForm(msg) {
+function _showActionVarForm(msg) {
   _tplData = msg;
   const vars = msg.vars || [];
 
@@ -698,7 +698,7 @@ function _showTemplateVarForm(msg) {
   document.getElementById('tpl-title').textContent = msg.name;
 
   const descEl = document.getElementById('tpl-description');
-  descEl.textContent = (msg.template || {}).description || '';
+  descEl.textContent = (msg.action || {}).description || '';
 
   const fieldsEl = document.getElementById('tpl-var-fields');
   let html = '';
@@ -720,7 +720,7 @@ function _showTemplateVarForm(msg) {
 }
 
 function _tplBack() {
-  send({ cmd: 'list_templates', group: _tplGroup });
+  send({ cmd: 'list_actions', group: _tplGroup });
 }
 
 function _tplSubmit() {
@@ -741,14 +741,14 @@ function _tplSubmit() {
   }
 
   if (_tplMode === 'task') {
-    // Open the task modal with this template pre-selected
-    // TASK var goes into the task text field; other vars become template_vars
+    // Open the task modal with this action pre-selected
+    // TASK var goes into the task text field; other vars become action_vars
     closeModals();
     _taskEditId = null;
-    _taskSelectedTemplate = _tplName;
-    _taskTemplateVarValues = {};
+    _taskSelectedAction = _tplName;
+    _taskActionVarValues = {};
     for (var vk in vars) {
-      if (vk !== 'TASK') _taskTemplateVarValues[vk] = vars[vk];
+      if (vk !== 'TASK') _taskActionVarValues[vk] = vars[vk];
     }
     document.getElementById('task-modal-title').textContent = 'New Task';
     document.getElementById('task-submit-btn').textContent = 'Create';
@@ -758,14 +758,14 @@ function _tplSubmit() {
     _populateTaskGroupSelect(_tplGroup || _currentGroup());
     document.getElementById('modal-task').dataset.lane = _tplTaskLane || '';
     _taskModalWaiting = true;
-    send({ cmd: 'list_templates', group: _tplGroup || _currentGroup() });
+    send({ cmd: 'list_actions', group: _tplGroup || _currentGroup() });
     document.getElementById('modal-task').classList.add('visible');
     document.getElementById('task-task-input').focus();
   } else {
-    // Default: create agent from template
+    // Default: create agent from action
     send({
-      cmd: 'add_agent_from_template',
-      template: _tplName,
+      cmd: 'add_agent_from_action',
+      action: _tplName,
       group: _tplGroup,
       vars,
     });
@@ -773,8 +773,8 @@ function _tplSubmit() {
   }
 }
 
-function _handleTemplateRendered(msg) {
-  // "Task from Template" flow: pre-fill task modal with template selected
+function _handleActionRendered(msg) {
+  // "Task from Action" flow: pre-fill task modal with action selected
   _taskEditId = null;
   document.getElementById('task-modal-title').textContent = 'New Task';
   document.getElementById('task-submit-btn').textContent = 'Create';
@@ -783,17 +783,17 @@ function _handleTemplateRendered(msg) {
   document.getElementById('task-assignee-input').value = '';
   document.getElementById('task-labels-input').value = (msg.labels || []).join(', ');
 
-  _taskSelectedTemplate = msg.name || _tplName || '';
-  _taskTemplateVarValues = {};
+  _taskSelectedAction = msg.name || _tplName || '';
+  _taskActionVarValues = {};
 
   var group = msg.group || _tplGroup || _currentGroup();
   _populateTaskGroupSelect(group);
 
   document.getElementById('modal-task').dataset.lane = _tplTaskLane || '';
 
-  // Request template list to populate the picker
+  // Request action list to populate the picker
   _taskModalWaiting = true;
-  send({ cmd: 'list_templates', group: group });
+  send({ cmd: 'list_actions', group: group });
 
   document.getElementById('modal-task').classList.add('visible');
   document.getElementById('task-task-input').focus();
@@ -804,11 +804,11 @@ function _handleTemplateRendered(msg) {
 /* ------------------------------------------------------------------ */
 
 let _taskEditId = null;  // null = create mode, string = edit mode
-let _taskTemplates = [];        // cached template list for task modal
-let _taskSelectedTemplate = ''; // selected template name
-let _taskTemplateVars = [];     // variable definitions for selected template
-let _taskTemplateVarValues = {};// pre-filled variable values (from edit)
-let _taskModalWaiting = false;  // waiting for template list to populate picker
+let _taskActions = [];          // cached action list for task modal
+let _taskSelectedAction = '';   // selected action name
+let _taskActionVars = [];       // variable definitions for selected action
+let _taskActionVarValues = {};  // pre-filled variable values (from edit)
+let _taskModalWaiting = false;  // waiting for action list to populate picker
 
 function _currentGroup() {
   if (selectedAgentId && state && state.agents && state.agents[selectedAgentId]) {
@@ -823,9 +823,9 @@ function _currentGroup() {
 
 function openAddTask(lane) {
   _taskEditId = null;
-  _taskSelectedTemplate = '';
-  _taskTemplateVars = [];
-  _taskTemplateVarValues = {};
+  _taskSelectedAction = '';
+  _taskActionVars = [];
+  _taskActionVarValues = {};
 
   document.getElementById('task-modal-title').textContent = 'New Task';
   document.getElementById('task-submit-btn').textContent = 'Create';
@@ -833,13 +833,13 @@ function openAddTask(lane) {
   document.getElementById('task-task-input').value = '';
   document.getElementById('task-assignee-input').value = '';
   document.getElementById('task-labels-input').value = '';
-  document.getElementById('task-template-vars').innerHTML = '';
+  document.getElementById('task-action-vars').innerHTML = '';
 
   _populateTaskGroupSelect(_currentGroup());
 
-  // Request templates for picker
+  // Request actions for picker
   _taskModalWaiting = true;
-  send({ cmd: 'list_templates', group: _currentGroup() });
+  send({ cmd: 'list_actions', group: _currentGroup() });
 
   document.getElementById('modal-task').classList.add('visible');
   document.getElementById('task-task-input').focus();
@@ -854,9 +854,9 @@ function openEditTask(taskId) {
   if (!t) return;
 
   _taskEditId = taskId;
-  _taskSelectedTemplate = t.template_name || '';
-  _taskTemplateVars = [];
-  _taskTemplateVarValues = t.template_vars || {};
+  _taskSelectedAction = t.action_name || '';
+  _taskActionVars = [];
+  _taskActionVarValues = t.action_vars || {};
 
   document.getElementById('task-modal-title').textContent = 'Edit Task';
   document.getElementById('task-submit-btn').textContent = 'Save';
@@ -865,13 +865,13 @@ function openEditTask(taskId) {
   taskEl.value = t.task || '';
   document.getElementById('task-assignee-input').value = t.assignee || '';
   document.getElementById('task-labels-input').value = (t.labels || []).join(', ');
-  document.getElementById('task-template-vars').innerHTML = '';
+  document.getElementById('task-action-vars').innerHTML = '';
 
   _populateTaskGroupSelect(t.group || _currentGroup());
 
-  // Request templates for picker
+  // Request actions for picker
   _taskModalWaiting = true;
-  send({ cmd: 'list_templates', group: t.group || _currentGroup() });
+  send({ cmd: 'list_actions', group: t.group || _currentGroup() });
 
   document.getElementById('modal-task').classList.add('visible');
   taskAutoResize(taskEl);
@@ -905,13 +905,13 @@ function submitTask() {
   var assignee = document.getElementById('task-assignee-input').value.trim();
   var labelsRaw = document.getElementById('task-labels-input').value.trim();
   var labels = labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
-  var templateVars = _collectTaskTemplateVars();
+  var actionVars = _collectTaskActionVars();
 
   if (_taskEditId) {
     // Edit mode
     var msg = { cmd: 'board_update_task', id: _taskEditId, task: task, group: group, assignee: assignee };
-    msg.template_name = _taskSelectedTemplate;
-    msg.template_vars = templateVars;
+    msg.action_name = _taskSelectedAction;
+    msg.action_vars = actionVars;
     msg.labels = labels;
     send(msg);
   } else {
@@ -919,8 +919,8 @@ function submitTask() {
     var lane = document.getElementById('modal-task').dataset.lane || '';
     var msg = { cmd: 'board_add_task', task: task, group: group, lane: lane };
     if (assignee) msg.assignee = assignee;
-    if (_taskSelectedTemplate) msg.template_name = _taskSelectedTemplate;
-    if (Object.keys(templateVars).length) msg.template_vars = templateVars;
+    if (_taskSelectedAction) msg.action_name = _taskSelectedAction;
+    if (Object.keys(actionVars).length) msg.action_vars = actionVars;
     if (labels.length) msg.labels = labels;
     send(msg);
   }
@@ -929,65 +929,65 @@ function submitTask() {
   closeModals();
 }
 
-/* -- Task modal: template picker helpers -------------------------------- */
+/* -- Task modal: action picker helpers ---------------------------------- */
 
-function _populateTaskTemplateSelect(templates) {
-  _taskTemplates = templates;
-  var sel = document.getElementById('task-template-select');
+function _populateTaskActionSelect(actions) {
+  _taskActions = actions;
+  var sel = document.getElementById('task-action-select');
   sel.innerHTML = '<option value="">None</option>';
-  for (var i = 0; i < templates.length; i++) {
-    var t = templates[i];
+  for (var i = 0; i < actions.length; i++) {
+    var t = actions[i];
     var opt = document.createElement('option');
     opt.value = t.name;
     opt.textContent = t.name + (t.description ? ' \u2014 ' + t.description : '');
-    if (t.name === _taskSelectedTemplate) opt.selected = true;
+    if (t.name === _taskSelectedAction) opt.selected = true;
     sel.appendChild(opt);
   }
   var previewBtn = document.getElementById('task-preview-btn');
-  if (previewBtn) previewBtn.style.display = _taskSelectedTemplate ? '' : 'none';
-  // Render variable fields for the selected template
-  if (_taskSelectedTemplate) {
-    var tpl = templates.find(function(t) { return t.name === _taskSelectedTemplate; });
-    if (tpl && tpl.vars) {
-      _taskTemplateVars = (tpl.vars || []).filter(function(v) { return v.name !== 'TASK'; });
+  if (previewBtn) previewBtn.style.display = _taskSelectedAction ? '' : 'none';
+  // Render variable fields for the selected action
+  if (_taskSelectedAction) {
+    var act = actions.find(function(t) { return t.name === _taskSelectedAction; });
+    if (act && act.vars) {
+      _taskActionVars = (act.vars || []).filter(function(v) { return v.name !== 'TASK'; });
     } else {
-      _taskTemplateVars = [];
+      _taskActionVars = [];
     }
   } else {
-    _taskTemplateVars = [];
+    _taskActionVars = [];
   }
-  _renderTaskTemplateVars();
+  _renderTaskActionVars();
 }
 
-function taskTemplateChanged() {
-  var sel = document.getElementById('task-template-select');
-  _taskSelectedTemplate = sel.value;
-  _taskTemplateVarValues = {};
+function taskActionChanged() {
+  var sel = document.getElementById('task-action-select');
+  _taskSelectedAction = sel.value;
+  _taskActionVarValues = {};
   var previewBtn = document.getElementById('task-preview-btn');
-  if (previewBtn) previewBtn.style.display = _taskSelectedTemplate ? '' : 'none';
-  if (_taskSelectedTemplate) {
-    var tpl = _taskTemplates.find(function(t) { return t.name === _taskSelectedTemplate; });
-    if (tpl && tpl.vars) {
-      _taskTemplateVars = (tpl.vars || []).filter(function(v) { return v.name !== 'TASK'; });
+  if (previewBtn) previewBtn.style.display = _taskSelectedAction ? '' : 'none';
+  if (_taskSelectedAction) {
+    var act = _taskActions.find(function(t) { return t.name === _taskSelectedAction; });
+    if (act && act.vars) {
+      _taskActionVars = (act.vars || []).filter(function(v) { return v.name !== 'TASK'; });
     } else {
-      _taskTemplateVars = [];
+      _taskActionVars = [];
     }
   } else {
-    _taskTemplateVars = [];
+    _taskActionVars = [];
   }
-  _renderTaskTemplateVars();
+  _renderTaskActionVars();
 }
 
-function _renderTaskTemplateVars() {
-  var container = document.getElementById('task-template-vars');
-  if (!_taskTemplateVars.length) {
+function _renderTaskActionVars() {
+  var container = document.getElementById('task-action-vars');
+  if (!_taskActionVars.length) {
     container.innerHTML = '';
     return;
   }
-  var html = '<fieldset class="task-tpl-vars-group"><legend>Template Variables</legend>';
-  for (var i = 0; i < _taskTemplateVars.length; i++) {
-    var v = _taskTemplateVars[i];
-    var savedVal = (_taskTemplateVarValues || {})[v.name] || '';
+  var html = '<fieldset class="task-tpl-vars-group"><legend>Action Variables</legend>';
+  for (var i = 0; i < _taskActionVars.length; i++) {
+    var v = _taskActionVars[i];
+    var savedVal = (_taskActionVarValues || {})[v.name] || '';
     var val = savedVal || v.default || '';
     html += '<label>' + esc(v.name) + '</label>';
     html += '<textarea class="task-tpl-var" data-var="' + esc(v.name)
@@ -1001,7 +1001,7 @@ function _renderTaskTemplateVars() {
   container.querySelectorAll('textarea').forEach(taskAutoResize);
 }
 
-function _collectTaskTemplateVars() {
+function _collectTaskActionVars() {
   var vars = {};
   var els = document.querySelectorAll('.task-tpl-var');
   for (var i = 0; i < els.length; i++) {
@@ -1013,20 +1013,20 @@ function _collectTaskTemplateVars() {
 
 function previewTaskPrompt() {
   var task = document.getElementById('task-task-input').value.trim();
-  var templateVars = _collectTaskTemplateVars();
+  var actionVars = _collectTaskActionVars();
   send({
     cmd: 'preview_prompt',
     task: task,
-    template_name: _taskSelectedTemplate,
-    template_vars: templateVars,
+    action_name: _taskSelectedAction,
+    action_vars: actionVars,
     group: document.getElementById('task-group-select').value,
   });
 }
 
-function _handleTaskTemplateList(msg) {
-  // Called when template list arrives and task modal is open
+function _handleTaskActionList(msg) {
+  // Called when action list arrives and task modal is open
   _taskModalWaiting = false;
-  _populateTaskTemplateSelect(msg.templates || []);
+  _populateTaskActionSelect(msg.actions || []);
 }
 
 function taskAutoResize(el) {

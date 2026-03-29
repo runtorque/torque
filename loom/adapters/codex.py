@@ -1,4 +1,4 @@
-"""Codex CLI adapter — template only (process matching, no hook integration yet)."""
+"""Codex CLI adapter — stub only (process matching, no hook integration yet)."""
 
 from .base import AgentAdapter
 

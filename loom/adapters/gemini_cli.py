@@ -1,4 +1,4 @@
-"""Gemini CLI adapter — template only (process matching, no hook integration yet)."""
+"""Gemini CLI adapter — stub only (process matching, no hook integration yet)."""
 
 from .base import AgentAdapter
 

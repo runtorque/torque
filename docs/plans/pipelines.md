@@ -1,7 +1,7 @@
 # Implementation Plan: Pipelines (Phase 4b)
 
 **Roadmap phase**: 4 — Workflow Automation
-**Status**: Implemented (core pipeline mechanics, template transitions, pipeline visualization, board chain indicators)
+**Status**: Implemented (core pipeline mechanics, action transitions, pipeline visualization, board chain indicators)
 **Goal**: Multi-step agent workflows through task derivation. An agent completes its task and creates a new derived task for the next agent. The chain is always forward-moving — no cycles, no retries on the same task. The "pipeline" is emergent from the parent-child task chain, not a declared DAG.
 
 ---
@@ -21,9 +21,9 @@ The goal is to let agents themselves drive the pipeline forward by deriving new 
 
 1. **Tasks only move forward** — An agent can mark its task as done and derive a new task. It cannot reopen its own task or send work backward. If a reviewer rejects work, it creates a *new* forward task ("fix this"), not a cycle back to the original.
 2. **Pipelines are emergent** — There is no `Pipeline` object. A pipeline is just a chain of tasks linked by `parent_task_id`. The chain is visible in the board UI and queryable via CLI, but Loom doesn't enforce a pipeline schema.
-3. **Templates declare valid transitions** — Each template lists which templates it can derive into via a `transitions` field. The agent picks from those options; the server rejects anything not on the list. This makes pipeline structure visible and enforceable without a separate pipeline config object. The pipeline graph is emergent from the union of all templates' transition lists.
+3. **Actions declare valid transitions** — Each action lists which actions it can derive into via a `transitions` field. The agent picks from those options; the server rejects anything not on the list. This makes pipeline structure visible and enforceable without a separate pipeline config object. The pipeline graph is emergent from the union of all actions' transition lists.
 4. **Human-in-the-loop is a first-class concept** — `loom ai ask` creates a derived task in Backlog instead of dispatching it. A human reviews, edits, and manually dispatches. This is the HITL gate.
-5. **Depth limits prevent runaway chains** — A configurable `max_pipeline_depth` (global setting, overridable per template) caps how deep a chain can go. When exceeded, the task gets a `needs_attention` flag instead of deriving.
+5. **Depth limits prevent runaway chains** — A configurable `max_pipeline_depth` (global setting, overridable per action) caps how deep a chain can go. When exceeded, the task gets a `needs_attention` flag instead of deriving.
 6. **The entire chain shares one worktree** — When an agent derives a new task, the new agent inherits the parent agent's worktree. This is essential: a review agent must see the code the implement agent wrote. The worktree is created for the root task and reused by every derived task in the chain. No new worktree is created on derive.
 
 ---
@@ -37,7 +37,7 @@ Agent A (impl) finishes task T1
   │
   ├── loom ai done                          ← marks T1 as Done
   ├── loom ai derive "Review the login      ← creates T2 in dispatch lane
-  │     implementation" --template review      T2.parent_task_id = T1.id
+  │     implementation" --action review         T2.parent_task_id = T1.id
   │                                            T2.pipeline_depth = T1.pipeline_depth + 1
   │                                            T2.pipeline_root_id = T1.pipeline_root_id
   │
@@ -47,12 +47,12 @@ Agent A (impl) finishes task T1
         │
         └── (rejection) loom ai derive      ← creates T3
               "Fix auth validation"            T3.parent_task_id = T2.id
-              --template fix                   T3.pipeline_depth = 2
+              --action fix                      T3.pipeline_depth = 2
               Agent C (fix) boots with T3
                 │
                 └── loom ai derive          ← creates T4
                       "Re-review auth"
-                      --template review
+                      --action review
                       ...chain continues
 ```
 
@@ -67,14 +67,14 @@ Agent A finishes task T1
   │
   └── Human sees T2 in Backlog
         ├── edits task description
-        ├── picks a template
+        ├── picks an action
         └── dispatches manually             ← T2 moves to In Progress, agent launches
 ```
 
 ### Depth limit enforcement
 
 ```
-Agent tries: loom ai derive "..." --template review
+Agent tries: loom ai derive "..." --action review
   │
   Server checks: task.pipeline_depth + 1 > max_pipeline_depth?
   │
@@ -86,7 +86,7 @@ Agent tries: loom ai derive "..." --template review
 ### Data flow
 
 ```
-loom ai derive "Review login" --template review
+loom ai derive "Review login" --action review
   │
   ├──► POST /api/cmd  {"cmd": "ai_report", "action": "derive", ...}
   │
@@ -122,7 +122,7 @@ Root task T1 (implement)
 
 **How it works:**
 
-1. The root task's agent creates a worktree normally (via group settings or template `worktree: true`). The worktree path and branch are stored on the `AgentCell`.
+1. The root task's agent creates a worktree normally (via group settings or action `worktree: true`). The worktree path and branch are stored on the `AgentCell`.
 2. When `derive` creates a new agent, it copies the parent agent's `worktree_path`, `worktree_branch`, and `git_root` fields to the new agent. It does NOT call `WorktreeManager.create()` — no new worktree, no new branch.
 3. The new agent's working directory is set to the inherited worktree path. The boot command runs inside it.
 4. The worktree's branch badge in the UI now shows which agent is currently active in it (the latest in the chain).
@@ -168,22 +168,22 @@ class GlobalSettings:
     max_pipeline_depth: int = 10   # 0 = unlimited
 ```
 
-### Template additions
+### Action additions
 
 ```yaml
-# .loom/templates/implement.yaml
+# .loom/actions/implement.yaml
 name: implement
 # ... existing fields ...
 
 # Pipeline fields (new)
-max_depth: 5          # override global max_pipeline_depth for chains using this template
+max_depth: 5          # override global max_pipeline_depth for chains using this action
 
 transitions:
-  - template: review
+  - action: review
     when: "Implementation is complete and ready for review"
-  - template: test
+  - action: test
     when: "Implementation needs dedicated test coverage first"
-  - template: fix
+  - action: fix
     when: "Found a bug during implementation that needs a separate fix"
   - ask: true
     when: "Need human input on how to proceed"
@@ -191,18 +191,18 @@ transitions:
 
 #### `transitions` field
 
-A list of valid next steps for this template. Each entry is either:
+A list of valid next steps for this action. Each entry is either:
 
-- `{template: "<name>", when: "<description>"}` — derive into another template. `when` is a human-readable hint included in the dispatch postscript so the agent knows when to pick this option.
+- `{action: "<name>", when: "<description>"}` — derive into another action. `when` is a human-readable hint included in the dispatch postscript so the agent knows when to pick this option.
 - `{ask: true, when: "<description>"}` — escalate to human. Always valid even if not listed, but listing it makes the option visible in the postscript and pipeline graph.
 
-**`done` is always implicitly valid** — an agent can always end the chain by calling `loom ai done` without deriving. Templates don't need to list it.
+**`done` is always implicitly valid** — an agent can always end the chain by calling `loom ai done` without deriving. Actions don't need to list it.
 
-**Server enforcement:** When an agent calls `loom ai derive -t <template>`, the server checks that the target template name appears in the current template's `transitions` list. If not, the derive is rejected with an error: `"Template 'review' cannot transition to 'deploy'. Valid transitions: review, fix"`. This prevents agents from inventing transitions that the user hasn't sanctioned.
+**Server enforcement:** When an agent calls `loom ai derive -t <action>`, the server checks that the target action name appears in the current action's `transitions` list. If not, the derive is rejected with an error: `"Action 'review' cannot transition to 'deploy'. Valid transitions: review, fix"`. This prevents agents from inventing transitions that the user hasn't sanctioned.
 
-**Templates with no `transitions` field** are terminal — calling `derive` from them always fails. The agent can only call `done`, `ask`, or `blocked`.
+**Actions with no `transitions` field** are terminal — calling `derive` from them always fails. The agent can only call `done`, `ask`, or `blocked`.
 
-The depth check uses the **deriving template's** `max_depth` if set, otherwise the global `max_pipeline_depth`.
+The depth check uses the **deriving action's** `max_depth` if set, otherwise the global `max_pipeline_depth`.
 
 ### DB schema changes
 
@@ -244,23 +244,23 @@ Creates a derived task and dispatches it.
   "action": "derive",
   "cell_id": "abc123",
   "message": "Review the login implementation",
-  "template": "review",
-  "template_vars": {"TEST_COMMAND": "pytest"},
+  "action": "review",
+  "action_vars": {"TEST_COMMAND": "pytest"},
   "group": ""
 }
 ```
 
 **Behavior:**
 1. Resolve the calling agent's linked task (`parent_task`) and the calling agent (`parent_agent`)
-2. Validate transition: load `parent_task.template_name`'s `transitions` list. If the target template is not in the list → refuse with error: `"Template '{current}' cannot transition to '{target}'. Valid: {list}"`
+2. Validate transition: load `parent_task.action_name`'s `transitions` list. If the target action is not in the list → refuse with error: `"Action '{current}' cannot transition to '{target}'. Valid: {list}"`
 3. Check depth: `parent_task.pipeline_depth + 1 > max_depth` → refuse with `needs_attention`
 4. Stop the parent agent (end its terminal session, freeing the worktree directory)
 5. Mark `parent_task` as Done (same as `ai_report(action="done")`)
 6. Create new `BoardTask`:
    - `task` = message
    - `group` = payload group or inherit from parent task
-   - `template_name` = template
-   - `template_vars` = template_vars
+   - `action_name` = action
+   - `action_vars` = action_vars
    - `parent_task_id` = parent_task.id
    - `pipeline_depth` = parent_task.pipeline_depth + 1
    - `pipeline_root_id` = parent_task.pipeline_root_id
@@ -343,8 +343,8 @@ Arguments:
   description              Task description for the next agent
 
 Flags:
-  -t, --template NAME      Template for the new task (required in most workflows)
-  -v, --var KEY=VALUE       Template variables (repeatable)
+  -t, --action NAME        Action for the new task (required in most workflows)
+  -v, --var KEY=VALUE       Action variables (repeatable)
   -g, --group GROUP         Target group (default: inherit from current task)
 ```
 
@@ -430,11 +430,11 @@ loom task list --chains              # add depth/root columns to table
 
 ## Dispatch Postscript
 
-The postscript appended to every dispatched prompt is now **dynamic** — it's generated from the current template's `transitions` field. This is how agents learn what they can do next, and it's the primary mechanism for guiding agent behavior within a pipeline.
+The postscript appended to every dispatched prompt is now **dynamic** — it's generated from the current action's `transitions` field. This is how agents learn what they can do next, and it's the primary mechanism for guiding agent behavior within a pipeline.
 
-**Postscript for a template with transitions:**
+**Postscript for an action with transitions:**
 
-If the dispatched task uses the `implement` template with transitions `[review, test, fix, ask]`:
+If the dispatched task uses the `implement` action with transitions `[review, test, fix, ask]`:
 
 ```
 Report your progress with these commands:
@@ -449,9 +449,9 @@ Report your progress with these commands:
 - `loom ai error "message"` — unrecoverable error
 ```
 
-The `when` descriptions from the template's `transitions` field become the help text for each derive option. The agent sees exactly which templates it can hand off to and when each one is appropriate.
+The `when` descriptions from the action's `transitions` field become the help text for each derive option. The agent sees exactly which actions it can hand off to and when each one is appropriate.
 
-**Postscript for a template with NO transitions (terminal):**
+**Postscript for an action with NO transitions (terminal):**
 
 ```
 Report your progress with these commands:
@@ -540,35 +540,35 @@ Tasks with the `human` label get a distinct visual treatment in the board:
 └────────────────────────────────────┘
 ```
 
-The `[Dispatch ▸]` button on human tasks opens the dispatch flow (pick template, fill vars, launch agent) without needing the context menu.
+The `[Dispatch ▸]` button on human tasks opens the dispatch flow (pick action, fill vars, launch agent) without needing the context menu.
 
 ---
 
 ## Pipeline Visualization
 
-Templates define transitions. The union of all templates' transitions forms a directed graph — the pipeline graph. Loom renders this graph so users can see the full flow at a glance, including loops.
+Actions define transitions. The union of all actions' transitions forms a directed graph — the pipeline graph. Loom renders this graph so users can see the full flow at a glance, including loops.
 
 ### Pipeline discovery
 
-A pipeline is a **connected component** in the template transition graph:
+A pipeline is a **connected component** in the action transition graph:
 
-1. Load all templates (project + user scope)
-2. Build a directed graph: nodes = template names, edges = `transitions[].template` values
+1. Load all actions (project + user scope)
+2. Build a directed graph: nodes = action names, edges = `transitions[].action` values
 3. Find connected components (undirected — if A→B, both A and B are in the same pipeline)
-4. Templates with no `transitions` field AND not referenced by any other template are standalone (not part of a pipeline)
-5. Each connected component is a named pipeline. The name is derived from the entry-point template (a node with no incoming edges, or the first alphabetically if the graph is fully cyclic)
+4. Actions with no `transitions` field AND not referenced by any other action are standalone (not part of a pipeline)
+5. Each connected component is a named pipeline. The name is derived from the entry-point action (a node with no incoming edges, or the first alphabetically if the graph is fully cyclic)
 
-**Example:** Given these templates:
+**Example:** Given these actions:
 
 ```yaml
 # implement.yaml
-transitions: [{template: review}, {template: test}]
+transitions: [{action: review}, {action: test}]
 
 # review.yaml
-transitions: [{template: fix}]
+transitions: [{action: fix}]
 
 # fix.yaml
-transitions: [{template: review}]
+transitions: [{action: review}]
 
 # test.yaml
 transitions: []
@@ -580,22 +580,22 @@ Discovery produces:
 - **Pipeline "implement"**: `implement → review ⇄ fix`, `implement → test`
 - **Standalone**: `investigate`
 
-### Where it lives: Templates panel
+### Where it lives: Actions panel
 
-The existing Templates panel in the taskbar gains a **view toggle** at the top:
+The existing Actions panel in the taskbar gains a **view toggle** at the top:
 
 ```
-[Templates ▾]  [Editor | Pipelines]
+[Actions ▾]  [Editor | Pipelines]
 ```
 
-- **Editor** (existing) — the template dropdown + form editor
+- **Editor** (existing) — the action dropdown + form editor
 - **Pipelines** (new) — the pipeline graph view
 
-When the user switches to the Pipelines view, Loom scans all templates, discovers pipelines, and renders them.
+When the user switches to the Pipelines view, Loom scans all actions, discovers pipelines, and renders them.
 
 ### Graph rendering
 
-Each discovered pipeline renders as a **vertical flow diagram** inside the panel. Nodes are template boxes, edges are arrows with transition labels. Loops are shown as back-edges curving along the right side.
+Each discovered pipeline renders as a **vertical flow diagram** inside the panel. Nodes are action boxes, edges are arrows with transition labels. Loops are shown as back-edges curving along the right side.
 
 **Layout algorithm (simple, no library):**
 
@@ -639,12 +639,12 @@ Each discovered pipeline renders as a **vertical flow diagram** inside the panel
 
 ```
 ┌─────────────────┐
-│ implement       │  ← template name
+│ implement       │  ← action name
 │ 2 transitions   │  ← outgoing count
 └─────────────────┘
 ```
 
-Clicking a node opens that template in the Editor view. Hovering a node highlights its edges. Hovering an edge shows the `when` description as a tooltip.
+Clicking a node opens that action in the Editor view. Hovering a node highlights its edges. Hovering an edge shows the `when` description as a tooltip.
 
 **Standalone/wider rendering (>600px):**
 
@@ -668,7 +668,7 @@ Pipeline: hotfix
 
 ### Interactive features
 
-- **Click node** → switches to Editor view with that template selected
+- **Click node** → switches to Editor view with that action selected
 - **Hover node** → highlights all edges connected to it
 - **Hover edge** → tooltip shows the `when` description
 - **Click edge** → no-op (edges aren't actionable)
@@ -688,7 +688,7 @@ loom pipeline list
 loom pipeline show feature
 
 # Output:
-# Pipeline: feature (4 templates)
+# Pipeline: feature (4 actions)
 #
 #   implement
 #     → review   "implementation is complete"
@@ -726,7 +726,7 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 - `derive`: validate transition → validate depth → mark parent Done → create child task → dispatch with worktree inheritance (reuse `dispatch_task` internals)
 - `ask`: mark parent Done → create child task in Backlog with `human` label → set `needs_attention`. Worktree persists on disk for later pickup.
 - Add `task_chain` command handler
-- Depth limit check reads template's `max_depth`, falls back to global `max_pipeline_depth`
+- Depth limit check reads action's `max_depth`, falls back to global `max_pipeline_depth`
 
 ### Step 2b: Worktree inheritance in dispatch (`loom/server.py`) ✅
 
@@ -734,19 +734,19 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 - When set: skip `WorktreeManager.create()`, copy worktree fields from the source agent and set the new agent's directory to the worktree path
 - HITL dispatch path: when dispatching a task with `parent_task_id`, walk the parent chain to find the last agent with a worktree and inherit from it
 
-### Step 3: Template support (`loom/templates.py`) ✅
+### Step 3: Action support (`loom/actions.py`) ✅
 
-- `transitions` parsed as an optional template field (list of `{template, when}` or `{ask, when}` dicts — not rendered through Jinja2)
-- `max_depth` parsed as an optional template field
-- `render_template` passes through `transitions` and `max_depth` in its return dict
-- `get_transitions(template_name)` helper returns the parsed transitions list for a template
-- `discover_pipelines(base_dir)` scans all templates, builds the transition graph, returns connected components as `[{name, templates, edges}]`
+- `transitions` parsed as an optional action field (list of `{action, when}` or `{ask, when}` dicts — not rendered through Jinja2)
+- `max_depth` parsed as an optional action field
+- `render_action` passes through `transitions` and `max_depth` in its return dict
+- `get_transitions(action_name)` helper returns the parsed transitions list for an action
+- `discover_pipelines(base_dir)` scans all actions, builds the transition graph, returns connected components as `[{name, actions, edges}]`
 
 ### Step 4: Dispatch postscript (`loom/server.py`) ✅
 
-- `_build_postscript()` generates the postscript dynamically from the template's `transitions` field
+- `_build_postscript()` generates the postscript dynamically from the action's `transitions` field
 - Each transition becomes a `loom ai derive -t <name>` line with the `when` description as help text
-- Templates with no transitions get a generic derive line
+- Actions with no transitions get a generic derive line
 - Derived tasks get pipeline context (parent task info, depth, root)
 
 ### Step 5: CLI — derive, ask, and pipeline (`bin/loom`) ✅
@@ -774,30 +774,30 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 
 - Not implemented yet. Deferred — the pipeline thread view provides equivalent functionality.
 
-### Step 9: Pipeline visualization — Templates panel (`static/js/templates.js`) ✅
+### Step 9: Pipeline visualization — Actions panel (`static/js/actions.js`) ✅
 
-- Editor/Pipelines view toggle in the Templates panel header
+- Editor/Pipelines view toggle in the Actions panel header
 - `renderPipelinesView()` renders a pannable/zoomable canvas (CSS transform pan/zoom, mouse drag + scroll wheel)
 - BFS-based layout: entry nodes (no inbound) at top, terminal nodes (no outbound) at bottom, centered per layer
-- Template nodes as styled HTML divs positioned absolutely — entry nodes have accent left border, terminal nodes have dashed borders. Click to open in editor.
-- Ask transitions rendered as small pill-shaped nodes snug to the right of their source, connected by a dashed line. Each template gets its own independent ask node. Layer widths account for ask nodes so they never overlap other templates.
+- Action nodes as styled HTML divs positioned absolutely — entry nodes have accent left border, terminal nodes have dashed borders. Click to open in editor.
+- Ask transitions rendered as small pill-shaped nodes snug to the right of their source, connected by a dashed line. Each action gets its own independent ask node. Layer widths account for ask nodes so they never overlap other actions.
 - SVG edges: forward edges as smooth vertical bezier curves with arrowheads. Back-edges route via the left or right side (whichever is closer to the target) using quadratic bezier S-curves that arrive horizontally. Multiple back-edges on the same side get staggered channels.
-- Pipeline data is re-fetched on every view switch to reflect template edits
+- Pipeline data is re-fetched on every view switch to reflect action edits
 
-### Step 9b: Transitions editor — Templates panel (`static/js/templates.js`) ✅
+### Step 9b: Transitions editor — Actions panel (`static/js/actions.js`) ✅
 
-- Collapsible "Transitions" section in the template editor form, between Labels and Variables
-- Each transition is an entry with: type dropdown (Template / Ask), template picker dropdown (grouped by Project/User, matching the existing template selector pattern), and a full-width auto-growing "When" textarea with label and `?` tooltip
+- Collapsible "Transitions" section in the action editor form, between Labels and Variables
+- Each transition is an entry with: type dropdown (Action / Ask), action picker dropdown (grouped by Project/User, matching the existing action selector pattern), and a full-width auto-growing "When" textarea with label and `?` tooltip
 - `+ Add transition` button to add new rows; `×` button to remove
 - Transitions count shown as a discrete pill badge in the section summary
 - `?` tooltip on the section header explains the purpose
-- Template picker shows "(missing)" for saved transitions referencing deleted templates
-- Transitions serialized to YAML on save via `_template_to_yaml()` and loaded back on edit
+- Action picker shows "(missing)" for saved transitions referencing deleted actions
+- Transitions serialized to YAML on save via `_action_to_yaml()` and loaded back on edit
 
 ### Step 10: Server — pipeline discovery (`loom/server.py`) ✅
 
-- `discover_pipelines` command handler calls `template_mgr.discover_pipelines()`, returns `{type: "pipelines", pipelines: [{name, templates, edges}]}`
-- Used by both the Templates panel (via WS) and the CLI (via REST)
+- `discover_pipelines` command handler calls `action_mgr.discover_pipelines()`, returns `{type: "pipelines", pipelines: [{name, actions, edges}]}`
+- Used by both the Actions panel (via WS) and the CLI (via REST)
 
 ### Step 11: Global settings UI (`static/js/modals.js`) ✅
 
@@ -816,13 +816,13 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 
 ## What We're NOT Building (Yet)
 
-- **Pipeline runtime objects** — There is no `Pipeline` model in the database. Pipelines are discovered at render time from template transitions. This keeps the data model simple and means editing a template instantly changes the pipeline graph.
+- **Pipeline runtime objects** — There is no `Pipeline` model in the database. Pipelines are discovered at render time from action transitions. This keeps the data model simple and means editing an action instantly changes the pipeline graph.
 - **Parallel branches** — Derivation is always serial (one child per derive call). An agent could call `derive` multiple times to create parallel branches, but there's no fan-out/fan-in primitive.
 - **Auto-retry** — If an agent errors, it doesn't auto-retry. A human or parent agent creates a new task.
 - **Pipeline-level status** — No aggregate "pipeline is 60% done" progress bar. The chain view shows individual task statuses.
 - **Cross-project pipelines** — Tasks and their chains are scoped to one project/board.
 - **Derive from UI** — The UI can view pipelines but derivation only happens via `loom ai derive` (agent-initiated) or `loom ai ask` (human gate). There's no "derive" button on task cards — that's what dispatch is for.
-- **Graph layout library** — The pipeline graph uses a simple BFS-based layout algorithm, not a full graph layout engine (dagre, elk, etc.). This keeps the zero-dependency constraint. Complex graphs with many cross-edges may not render perfectly, but typical pipelines (3-6 templates) will look clean.
+- **Graph layout library** — The pipeline graph uses a simple BFS-based layout algorithm, not a full graph layout engine (dagre, elk, etc.). This keeps the zero-dependency constraint. Complex graphs with many cross-edges may not render perfectly, but typical pipelines (3-6 actions) will look clean.
 
 ---
 
@@ -832,13 +832,13 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 |---|---|
 | `loom/state.py` | Add pipeline fields to `BoardTask`, `max_pipeline_depth` to `GlobalSettings`, `board_get_chain()` method |
 | `loom/db.py` | Add migration for `parent_task_id`, `pipeline_depth`, `pipeline_root_id` columns; update `save_board_task` and `save_all` |
-| `loom/server.py` | Extend `ai_report` with `derive`/`ask` actions (transition validation + worktree inheritance), add `task_chain` and `discover_pipelines` commands, `_build_postscript()` for dynamic postscript from template transitions, `_template_to_yaml()` serializes transitions, `dispatch_task` supports `inherit_worktree_from` + HITL parent-chain worktree resolution |
-| `loom/templates.py` | Parse `transitions` and `max_depth` from template YAML, add `get_transitions()`, `discover_pipelines()` (connected-component discovery) |
+| `loom/server.py` | Extend `ai_report` with `derive`/`ask` actions (transition validation + worktree inheritance), add `task_chain` and `discover_pipelines` commands, `_build_postscript()` for dynamic postscript from action transitions, `_action_to_yaml()` serializes transitions, `dispatch_task` supports `inherit_worktree_from` + HITL parent-chain worktree resolution |
+| `loom/actions.py` | Parse `transitions` and `max_depth` from action YAML, add `get_transitions()`, `discover_pipelines()` (connected-component discovery) |
 | `bin/loom` | Add `loom ai derive`, `loom ai ask`, `loom task chain`, `loom pipeline list/show` commands |
 | `static/js/board.js` | Chain indicators on cards, pipeline thread overlay with `boardViewPipeline()`, "View pipeline" context menu |
-| `static/js/templates.js` | Editor/Pipelines view toggle, pipeline graph renderer (BFS layout, node boxes with adjacency lists), transitions editor in template form (type dropdown, template picker with Project/User optgroups, auto-growing "When" textarea with label and tooltip) |
+| `static/js/actions.js` | Editor/Pipelines view toggle, pipeline graph renderer (BFS layout, node boxes with adjacency lists), transitions editor in action form (type dropdown, action picker with Project/User optgroups, auto-growing "When" textarea with label and tooltip) |
 | `static/js/ws.js` | Route `pipelines` response type to `tplReceivePipelines()` |
 | `static/js/modals.js` | `max_pipeline_depth` in global settings modal |
-| `static/style.css` | Styles for chain badges, pipeline thread overlay, pipeline graph nodes, transition editor rows (entry containers, type/template selects, when textarea/label, add/remove buttons), view toggle, count badge |
+| `static/style.css` | Styles for chain badges, pipeline thread overlay, pipeline graph nodes, transition editor rows (entry containers, type/action selects, when textarea/label, add/remove buttons), view toggle, count badge |
 | `webview.html` | `max_pipeline_depth` input in Board settings sub-tab |
 | `CLAUDE.md` | Document pipeline fields, transitions, derive/ask actions, pipeline CLI commands |

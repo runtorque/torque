@@ -10,7 +10,7 @@ This roadmap is organized into phases. Earlier phases lay the foundation that la
 
 Loom currently manages terminals. It doesn't know what the agents inside them are doing. This phase gives Loom eyes and ears.
 
-> **Status**: Core implemented. Claude Code has full integration (hooks, activity tracking, session resume, notifications). Other adapters are templates. See [implementation plan](plans/agent-awareness.md) for details.
+> **Status**: Core implemented. Claude Code has full integration (hooks, activity tracking, session resume, notifications). Other adapters are stubs. See [implementation plan](plans/agent-awareness.md) for details.
 
 ### Claude Code Hooks Integration ✅
 
@@ -28,7 +28,7 @@ Background health check runs every 30 seconds. Flags agents with no activity for
 
 ### Provider-Agnostic Adapter Framework ✅
 
-Pluggable adapter system with base class, registry, and auto-detection. Claude Code is fully implemented; Codex and Gemini CLI have template adapters (process matching only, ready for hook integration). New agents require only a single adapter file.
+Pluggable adapter system with base class, registry, and auto-detection. Claude Code is fully implemented; Codex and Gemini CLI have stub adapters (process matching only, ready for hook integration). New agents require only a single adapter file.
 
 ### Session Recording
 
@@ -115,13 +115,13 @@ Expose Loom as an MCP (Model Context Protocol) server. Any MCP-aware agent or to
 
 With awareness, worktrees, and programmatic access in place, Loom can start running work autonomously.
 
-> **Status**: Templates, dispatch, and pipelines implemented. See implementation plans for [templates](plans/workflow-automation.md) and [pipelines](plans/pipelines.md).
+> **Status**: Actions, dispatch, and pipelines implemented. See implementation plans for [actions](plans/workflow-automation.md) and [pipelines](plans/pipelines.md).
 
-### Agent Templates ✅
+### Agent Actions ✅
 
-YAML templates in `.loom/templates/` are rendered through Jinja2 as a whole — variables work anywhere in the file (names, directories, colors, task text, env vars). Variables are auto-discovered from the Jinja2 AST with no declaration needed. Default values are extracted from `| default()` filters.
+YAML actions in `.loom/actions/` are rendered through Jinja2 as a whole — variables work anywhere in the file (names, directories, colors, task text, env vars). Variables are auto-discovered from the Jinja2 AST with no declaration needed. Default values are extracted from `| default()` filters.
 
-Templates define structured task fields that map to the ticketing system:
+Actions define structured task fields that map to the ticketing system:
 
 ```yaml
 name: implement
@@ -142,13 +142,13 @@ criteria: |
   - Tests pass: `{{ TEST_COMMAND | default('npm test') }}`
 ```
 
-Templates support `task` (main description), `instructions`, `context`, `criteria` (acceptance criteria), `labels` (list), and `group` (override target group). Old templates with `prompt:` still work via backward compat.
+Actions support `task` (main description), `instructions`, `context`, `criteria` (acceptance criteria), `labels` (list), and `group` (override target group). Old actions with `prompt:` still work via backward compat.
 
-Loom searches two locations: project-local `.loom/templates/` (takes precedence) and user-global `~/.loom/templates/`. When both contain a template with the same name, the project one wins for dispatch; the user one is marked as "overridden" in the editor. The toolbelt has "From Template" options in both the agent creation dropdown and the board's "+ Add task" dropdown — the latter renders the template and pre-fills the task modal.
+Loom searches two locations: project-local `.loom/actions/` (takes precedence) and user-global `~/.loom/actions/`. When both contain an action with the same name, the project one wins for dispatch; the user one is marked as "overridden" in the editor. The toolbelt has "From Action" options in both the agent creation dropdown and the board's "+ Add task" dropdown — the latter renders the action and pre-fills the task modal.
 
-A **Templates panel** in the taskbar provides a full editor for creating and managing templates without leaving iTerm2. It shows project and user templates in separate dropdown groups with directory paths, and includes a structured form with Jinja2 syntax highlighting (expressions, filters, strings, parentheses), auto-expanding textareas, scope picker (project vs user), and auto-discovered variable display.
+An **Actions panel** in the taskbar provides a full editor for creating and managing actions without leaving iTerm2. It shows project and user actions in separate dropdown groups with directory paths, and includes a structured form with Jinja2 syntax highlighting (expressions, filters, strings, parentheses), auto-expanding textareas, scope picker (project vs user), and auto-discovered variable display.
 
-CLI: `loom template list`, `loom template show <name>`, `loom template create <name>`. Seven starter templates ship: `implement`, `fix`, `review`, `investigate`, `test`, `refactor`, `migrate`.
+CLI: `loom action list`, `loom action show <name>`, `loom action create <name>`. Seven starter actions ship: `implement`, `fix`, `review`, `investigate`, `test`, `refactor`, `migrate`.
 
 ### `loom task dispatch` / `loom task create` ✅
 
@@ -162,15 +162,15 @@ loom task dispatch "Fix the login bug" -t fix --wait
 loom task create "Update error handling in auth module" -a frontend
 ```
 
-`task dispatch` creates a board ticket in the "In Progress" lane, creates an agent from the template, links them via `agent_id`, and sends the task. `task create` parks a ticket in "Backlog" for later pickup. Both support `--assign PREFIX` for pool-based agent assignment and `--labels` for orchestration tagging.
+`task dispatch` creates a board ticket in the "In Progress" lane, creates an agent from the action, links them via `agent_id`, and sends the task. `task create` parks a ticket in "Backlog" for later pickup. Both support `--assign PREFIX` for pool-based agent assignment and `--labels` for orchestration tagging.
 
 ### Pipelines ✅
 
-Multi-step agent workflows through task derivation. Templates declare valid transitions via a `transitions` field — each entry names a target template and a `when` description. Agents drive the pipeline forward by calling `loom ai derive -t <template> "description"`, which marks the current task as Done, creates a derived task linked via `parent_task_id`, and dispatches a new agent. The server enforces that only declared transitions are allowed. The entire task chain shares one worktree.
+Multi-step agent workflows through task derivation. Actions declare valid transitions via a `transitions` field — each entry names a target action and a `when` description. Agents drive the pipeline forward by calling `loom ai derive -t <action> "description"`, which marks the current task as Done, creates a derived task linked via `parent_task_id`, and dispatches a new agent. The server enforces that only declared transitions are allowed. The entire task chain shares one worktree.
 
-`loom ai ask "question"` creates a human-in-the-loop gate — a derived task in Backlog that a human reviews and dispatches manually. Depth limits (`max_pipeline_depth` global setting, `max_depth` per template) prevent runaway chains.
+`loom ai ask "question"` creates a human-in-the-loop gate — a derived task in Backlog that a human reviews and dispatches manually. Depth limits (`max_pipeline_depth` global setting, `max_depth` per action) prevent runaway chains.
 
-The board shows chain indicators on derived task cards (`↳ depth N · from: parent`). Right-click → "View pipeline" opens a thread overlay showing the full chain. The Templates panel has an Editor/Pipelines view toggle — the Pipelines view discovers connected components from template transitions and renders the pipeline graph as nodes with adjacency lists. The template editor has a Transitions section for adding/editing transitions with a template picker dropdown and auto-growing "When" textarea.
+The board shows chain indicators on derived task cards (`↳ depth N · from: parent`). Right-click → "View pipeline" opens a thread overlay showing the full chain. The Actions panel has an Editor/Pipelines view toggle — the Pipelines view discovers connected components from action transitions and renders the pipeline graph as nodes with adjacency lists. The action editor has a Transitions section for adding/editing transitions with an action picker dropdown and auto-growing "When" textarea.
 
 CLI: `loom ai derive`, `loom ai ask`, `loom task chain`, `loom pipeline list`, `loom pipeline show`.
 
@@ -193,7 +193,7 @@ Since `loom dispatch` is scriptable, simple triggers work today via cron or CI c
 - **Inline dispatch button** on human/HITL task cards in the board
 - **Worktree cleanup guard** — prevent worktree removal on active pipeline chains
 - **Event-driven triggers** — built-in webhook/cron/CI trigger system
-- **Retry & fallback policies** — configurable per template or pipeline step
+- **Retry & fallback policies** — configurable per action or pipeline step
 
 ---
 
@@ -211,13 +211,13 @@ Tasks are structured tickets with fields designed for agent orchestration:
 - **Task** (required) — actionable description
 - **Group** (required) — owning group, must exist
 - **Assignee** — agent name prefix for pool assignment (e.g. "frontend" matches `frontend-1`, `frontend-2`)
-- **Instructions**, **Context**, **Criteria** — structured fields that map to template fields
+- **Instructions**, **Context**, **Criteria** — structured fields that map to action fields
 - **Labels** — for orchestration tagging
 
 Cards show group badge, assignee badge (amber), label badges, and linked agent name. Double-click opens the edit modal.
 
-- Create tasks via modal (New task or From template dropdown), edit, move, delete
-- "+ Add task" is a dropdown: **New task** opens the task modal, **From template** renders a template's fields and pre-fills the modal
+- Create tasks via modal (New task or From action dropdown), edit, move, delete
+- "+ Add task" is a dropdown: **New task** opens the task modal, **From action** renders an action's fields and pre-fills the modal
 - Drag cards to reorder or drop on lane tabs to move between lanes
 - Link/unlink agents (card dot reflects agent status, clicking focuses agent)
 - Resizable panel; open/closed state and height persist across restarts
@@ -227,7 +227,7 @@ Cards show group badge, assignee badge (amber), label badges, and linked agent n
 
 ### Taskbar ✅
 
-A dock at the bottom of the toolbelt for "panel apps". Currently hosts two apps: **Board** (Kanban task board) and **Templates** (template editor with Jinja2 highlighting). Future apps (logs viewer, cost dashboard, diff viewer) plug into the same dock. Clicking an app toggles its panel open/closed. Only one panel app is visible at a time.
+A dock at the bottom of the toolbelt for "panel apps". Currently hosts two apps: **Board** (Kanban task board) and **Actions** (action editor with Jinja2 highlighting). Future apps (logs viewer, cost dashboard, diff viewer) plug into the same dock. Clicking an app toggles its panel open/closed. Only one panel app is visible at a time.
 
 ### Provider Integrations
 
@@ -242,7 +242,7 @@ The plugin interface is generic: fetch tasks, update status, post comments. New 
 
 ### Auto-Assignment
 
-Loom watches the task board (or external provider) and automatically assigns incoming tasks to agents based on templates, priority, and available capacity. The user approves the assignment or lets it run.
+Loom watches the task board (or external provider) and automatically assigns incoming tasks to agents based on actions, priority, and available capacity. The user approves the assignment or lets it run.
 
 ### Remaining Work
 
@@ -308,7 +308,7 @@ Ship adapters for:
 
 ### Per-Agent Configuration
 
-Each agent adapter exposes its own configuration surface: model selection, tool permissions, system prompts, API keys. Loom's template system supports adapter-specific fields.
+Each agent adapter exposes its own configuration surface: model selection, tool permissions, system prompts, API keys. Loom's action system supports adapter-specific fields.
 
 ### Capability Discovery
 
@@ -332,7 +332,7 @@ Real-time view across all agents:
 - Timeline of events per agent
 - Errors and warnings
 - Resource usage (tokens, time, API calls)
-- Filterable by group, template, status
+- Filterable by group, action, status
 
 ### Audit Log
 
@@ -350,7 +350,7 @@ Role-based access control for the remote API:
 
 - **Viewer** — see agent status and logs
 - **Operator** — start/stop agents, approve PRs
-- **Admin** — configure templates, manage integrations, set budgets
+- **Admin** — configure actions, manage integrations, set budgets
 
 Supports API keys and OAuth.
 

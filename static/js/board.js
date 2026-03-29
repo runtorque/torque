@@ -8,8 +8,8 @@ var _boardFocusedTask = '';
 var _boardAddingTask = false;   // true when inline task input is shown
 var _boardAddingTaskDraft = '';  // preserved text across blur/reopen
 var _boardAddingLane = false;
-var _boardTplDropdownWaiting = false;  // waiting for template list for dropdown
-var _boardTplList = null;              // fetched templates shown inline (null = hidden)
+var _boardActDropdownWaiting = false;  // waiting for action list for dropdown
+var _boardActList = null;              // fetched actions shown inline (null = hidden)
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
 var _boardPopover = null;      // {type, lane, rect} for lane settings popover
 var _boardDragId = '';          // card being dragged
@@ -134,32 +134,32 @@ function renderBoard() {
   } else {
     html += '<div class="board-add-task" onclick="boardStartAddTask()">';
     html += '<span>+ Add task</span>';
-    html += '<button class="board-add-tpl-btn-idle" onclick="event.stopPropagation();boardToggleTemplateList()">From template &#9662;</button>';
+    html += '<button class="board-add-tpl-btn-idle" onclick="event.stopPropagation();boardToggleActionList()">From action &#9662;</button>';
     html += '</div>';
   }
 
-  // Inline template list (shown below add-task)
-  if (_boardTplList !== null) {
+  // Inline action list (shown below add-task)
+  if (_boardActList !== null) {
     html += '<div class="board-tpl-list">';
-    if (_boardTplList.length === 0) {
-      html += '<div class="board-tpl-empty">No templates found</div>';
+    if (_boardActList.length === 0) {
+      html += '<div class="board-tpl-empty">No actions found</div>';
     } else {
-      var projectTpls = _boardTplList.filter(function(t) { return !t.global; });
-      var userTpls = _boardTplList.filter(function(t) { return t.global; });
-      if (projectTpls.length) {
+      var projectActs = _boardActList.filter(function(t) { return !t.global; });
+      var userActs = _boardActList.filter(function(t) { return t.global; });
+      if (projectActs.length) {
         html += '<div class="board-tpl-group-label">Project</div>';
-        for (var pi = 0; pi < projectTpls.length; pi++) {
-          html += _boardTplItemHtml(projectTpls[pi]);
+        for (var pi = 0; pi < projectActs.length; pi++) {
+          html += _boardActItemHtml(projectActs[pi]);
         }
       }
-      if (userTpls.length) {
+      if (userActs.length) {
         html += '<div class="board-tpl-group-label">User</div>';
-        for (var ui = 0; ui < userTpls.length; ui++) {
-          html += _boardTplItemHtml(userTpls[ui]);
+        for (var ui = 0; ui < userActs.length; ui++) {
+          html += _boardActItemHtml(userActs[ui]);
         }
       }
     }
-    html += '<button class="board-tpl-item board-tpl-notemplate" onclick="_boardPickNoTemplate()">No template</button>';
+    html += '<button class="board-tpl-item board-tpl-notemplate" onclick="_boardPickNoAction()">No action</button>';
     html += '</div>';
   }
 
@@ -189,7 +189,7 @@ function renderBoard() {
     var meta = '';
     if (t.group) meta += '<span class="board-card-group">' + esc(t.group) + '</span>';
     if (t.assignee) meta += '<span class="board-card-assignee">' + esc(t.assignee) + '</span>';
-    if (t.template_name) meta += '<span class="board-card-label board-card-template">' + esc(t.template_name) + '</span>';
+    if (t.action_name) meta += '<span class="board-card-label board-card-template">' + esc(t.action_name) + '</span>';
     if (t.labels && t.labels.length) {
       for (var li = 0; li < t.labels.length; li++) {
         var lb = t.labels[li];
@@ -395,61 +395,61 @@ function _boardCloseTplListHandler(e) {
   }
 }
 
-function boardToggleTemplateList() {
-  if (_boardTplList !== null) {
-    _boardTplList = null;
+function boardToggleActionList() {
+  if (_boardActList !== null) {
+    _boardActList = null;
     document.removeEventListener('mousedown', _boardCloseTplListHandler, true);
     renderBoard();
   } else {
-    _boardTplDropdownWaiting = true;
-    send({ cmd: 'list_templates', group: _currentGroup() });
+    _boardActDropdownWaiting = true;
+    send({ cmd: 'list_actions', group: _currentGroup() });
   }
 }
 
-function _boardTplItemHtml(tpl) {
-  var tplName = esc(tpl.name).replace(/'/g, "\\'");
-  var h = '<button class="board-tpl-item" onclick="_boardPickTemplate(\'' + tplName + '\')">';
-  h += '<span class="board-tpl-item-name">' + esc(tpl.name) + '</span>';
-  if (tpl.description) h += '<span class="board-tpl-item-desc">' + esc(tpl.description) + '</span>';
+function _boardActItemHtml(act) {
+  var actName = esc(act.name).replace(/'/g, "\\'");
+  var h = '<button class="board-tpl-item" onclick="_boardPickAction(\'' + actName + '\')">';
+  h += '<span class="board-tpl-item-name">' + esc(act.name) + '</span>';
+  if (act.description) h += '<span class="board-tpl-item-desc">' + esc(act.description) + '</span>';
   h += '</button>';
   return h;
 }
 
-function _boardShowTemplateList(msg) {
-  _boardTplDropdownWaiting = false;
-  _boardTplList = msg.templates || [];
+function _boardShowActionList(msg) {
+  _boardActDropdownWaiting = false;
+  _boardActList = msg.actions || [];
   renderBoard();
   document.addEventListener('mousedown', _boardCloseTplListHandler, true);
 }
 
-function _boardPickTemplate(name) {
-  _boardTplList = null;
+function _boardPickAction(name) {
+  _boardActList = null;
   _boardAddingTask = false;
   document.removeEventListener('mousedown', _boardCloseTplListHandler, true);
   renderBoard();
-  // Open the task modal with the template pre-selected
+  // Open the task modal with the action pre-selected
   _taskEditId = null;
-  _taskSelectedTemplate = name;
-  _taskTemplateVars = [];
-  _taskTemplateVarValues = {};
+  _taskSelectedAction = name;
+  _taskActionVars = [];
+  _taskActionVarValues = {};
 
   document.getElementById('task-modal-title').textContent = 'New Task';
   document.getElementById('task-submit-btn').textContent = 'Create';
   document.getElementById('task-task-input').value = '';
   document.getElementById('task-assignee-input').value = '';
   document.getElementById('task-labels-input').value = '';
-  document.getElementById('task-template-vars').innerHTML = '';
+  document.getElementById('task-action-vars').innerHTML = '';
   _populateTaskGroupSelect(_currentGroup());
   document.getElementById('modal-task').dataset.lane = _boardSelectedLane || '';
 
   _taskModalWaiting = true;
-  send({ cmd: 'list_templates', group: _currentGroup() });
+  send({ cmd: 'list_actions', group: _currentGroup() });
   document.getElementById('modal-task').classList.add('visible');
   document.getElementById('task-task-input').focus();
 }
 
-function _boardPickNoTemplate() {
-  _boardTplList = null;
+function _boardPickNoAction() {
+  _boardActList = null;
   _boardAddingTask = false;
   document.removeEventListener('mousedown', _boardCloseTplListHandler, true);
   renderBoard();
@@ -767,14 +767,14 @@ function boardPreviewPrompt(taskId) {
   send({ cmd: 'preview_prompt', id: taskId });
 }
 
-function _handleDispatchTemplateMissing(msg) {
+function _handleDispatchActionMissing(msg) {
   var taskId = msg.task_id;
-  var tplName = msg.template_name || '(unknown)';
-  showConfirm('Template "' + tplName + '" not found.\nDispatch without template?').then(function(yes) {
+  var actName = msg.action_name || '(unknown)';
+  showConfirm('Action "' + actName + '" not found.\nDispatch without action?').then(function(yes) {
     if (yes) {
       // Task is already linked to an agent — re-dispatch to the same agent
       var t = (state && state.board_tasks || {})[taskId];
-      var cmd = { cmd: 'dispatch_task', id: taskId, force_no_template: true };
+      var cmd = { cmd: 'dispatch_task', id: taskId, force_no_action: true };
       if (t && t.agent_id) {
         cmd.agent_id = t.agent_id;
       } else {
