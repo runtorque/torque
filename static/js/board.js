@@ -32,7 +32,7 @@ function _boardTasksInLane(lane) {
   for (var id in tasks) {
     if (tasks[id].lane === lane) arr.push(tasks[id]);
   }
-  arr.sort(function(a, b) { return a.position - b.position; });
+  arr.sort(function(a, b) { return b.position - a.position; });
   return arr;
 }
 
@@ -864,7 +864,9 @@ function boardCardDrop(e) {
   var mid = rect.top + rect.height / 2;
   var pos = e.clientY < mid ? targetIdx : targetIdx + 1;
 
-  send({ cmd: 'board_reorder_task', id: _boardDragId, position: pos });
+  // UI is sorted newest-first (descending position), invert for server
+  var serverPos = tasks.length - pos;
+  send({ cmd: 'board_reorder_task', id: _boardDragId, position: serverPos });
   card.classList.remove('drop-before', 'drop-after');
 }
 

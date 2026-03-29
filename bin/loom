@@ -1549,6 +1549,7 @@ def cmd_task_list(args):
             [t for t in _filter_tasks(tasks, args).values()
              if t["lane"] == lane],
             key=lambda t: t.get("position", 0),
+            reverse=True,
         )
         if not lane_tasks and lane_filter:
             print(f"\n  {_bold(lane)} (0)")
@@ -1943,6 +1944,7 @@ def cmd_board_list(args):
         lane_tasks = sorted(
             [t for t in tasks.values() if t["lane"] == lane],
             key=lambda t: t.get("position", 0),
+            reverse=True,
         )
         print(f"\n  {_bold(lane)} ({len(lane_tasks)})")
         if not lane_tasks:
