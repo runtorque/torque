@@ -761,7 +761,8 @@ async def main(connection: iterm2.Connection):
                         resolve_group = p.group
                 gs = state.get_group_settings(resolve_group or group)
                 profile = data.get("profile") or gs.terminal_profile or gs.profile or "Default"
-                directory = data.get("directory") or gs.terminal_directory or gs.default_directory or ""
+                parent_wt = p.worktree_path if parent_id and p and p.worktree_path else ""
+                directory = data.get("directory") or parent_wt or gs.terminal_directory or gs.default_directory or ""
                 _tc = gs.terminal_tab_color
                 tab_color = data.get("tab_color") or (_tc if _tc != "none" else "") or gs.tab_color or ""
                 shell = data.get("shell") or gs.terminal_shell or gs.shell or ""
