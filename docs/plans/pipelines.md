@@ -1,7 +1,7 @@
 # Implementation Plan: Pipelines (Phase 4b)
 
 **Roadmap phase**: 4 — Workflow Automation
-**Status**: Planned
+**Status**: Implemented (core pipeline mechanics, template transitions, pipeline visualization, board chain indicators)
 **Goal**: Multi-step agent workflows through task derivation. An agent completes its task and creates a new derived task for the next agent. The chain is always forward-moving — no cycles, no retries on the same task. The "pipeline" is emergent from the parent-child task chain, not a declared DAG.
 
 ---
@@ -712,7 +712,7 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 
 ## Implementation Steps
 
-### Step 1: Data model (`loom/state.py`, `loom/db.py`)
+### Step 1: Data model (`loom/state.py`, `loom/db.py`) ✅
 
 - Add `parent_task_id`, `pipeline_depth`, `pipeline_root_id` fields to `BoardTask`
 - Add `max_pipeline_depth` to `GlobalSettings` (default: 10)
@@ -720,88 +720,98 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 - Update `save_board_task` and `load_all` to handle new columns
 - Add `board_get_chain(task_id)` method to `MatrixState` — returns all tasks with the same `pipeline_root_id`, ordered by depth then created_at
 
-### Step 2: Server — derive and ask actions (`loom/server.py`)
+### Step 2: Server — derive and ask actions (`loom/server.py`) ✅
 
 - Extend `ai_report` handler with `action="derive"` and `action="ask"` branches
-- `derive`: validate transition → validate depth → stop parent agent → mark parent Done → create child task → dispatch with worktree inheritance (reuse `dispatch_task` internals but skip `WorktreeManager.create()`)
-- `ask`: stop parent agent → mark parent Done → create child task in Backlog with `human` label → set `needs_attention`. Worktree persists on disk for later pickup.
+- `derive`: validate transition → validate depth → mark parent Done → create child task → dispatch with worktree inheritance (reuse `dispatch_task` internals)
+- `ask`: mark parent Done → create child task in Backlog with `human` label → set `needs_attention`. Worktree persists on disk for later pickup.
 - Add `task_chain` command handler
-- Add depth limit check helper: `_check_pipeline_depth(task, template)` → reads template's `max_depth`, falls back to global `max_pipeline_depth`
-- Add worktree inheritance helper: `_inherit_worktree(parent_agent, new_agent)` → copies `worktree_path`, `worktree_branch`, `git_root` from parent to child, sets child's working directory to the worktree path
+- Depth limit check reads template's `max_depth`, falls back to global `max_pipeline_depth`
 
-### Step 2b: Worktree inheritance in dispatch (`loom/server.py`)
+### Step 2b: Worktree inheritance in dispatch (`loom/server.py`) ✅
 
-- Modify `dispatch_task` to accept an optional `inherit_worktree_from` agent ID
-- When set: skip `WorktreeManager.create()`, instead copy worktree fields from the source agent and set the new agent's directory to the worktree path
-- Modify HITL dispatch path: when dispatching a task with `parent_task_id`, walk the parent chain to find the last agent with a worktree and inherit from it
-- Ensure `WorktreeManager.remove()` is NOT called when stopping an agent that's part of an active pipeline chain (the worktree belongs to the chain, not the individual agent)
+- `dispatch_task` accepts optional `inherit_worktree_from` agent ID
+- When set: skip `WorktreeManager.create()`, copy worktree fields from the source agent and set the new agent's directory to the worktree path
+- HITL dispatch path: when dispatching a task with `parent_task_id`, walk the parent chain to find the last agent with a worktree and inherit from it
 
-### Step 3: Template support (`loom/templates.py`)
+### Step 3: Template support (`loom/templates.py`) ✅
 
-- Add `transitions` as an optional template field (list of `{template, when}` or `{ask, when}` dicts — parsed but not rendered through Jinja2)
-- Add `max_depth` as an optional template field (parsed but not rendered through Jinja2)
+- `transitions` parsed as an optional template field (list of `{template, when}` or `{ask, when}` dicts — not rendered through Jinja2)
+- `max_depth` parsed as an optional template field
 - `render_template` passes through `transitions` and `max_depth` in its return dict
-- Add `get_transitions(template_name)` helper — returns the parsed transitions list for a template
-- Add `discover_pipelines(base_dir)` — scans all templates, builds the transition graph, returns connected components as `[{name, templates, edges}]`
+- `get_transitions(template_name)` helper returns the parsed transitions list for a template
+- `discover_pipelines(base_dir)` scans all templates, builds the transition graph, returns connected components as `[{name, templates, edges}]`
 
-### Step 4: Dispatch postscript (`loom/server.py`)
+### Step 4: Dispatch postscript (`loom/server.py`) ✅
 
-- Make the postscript dynamic: read the dispatched template's `transitions` field
-- Generate `loom ai derive -t <name>` lines from each transition, using `when` as the help text
-- Omit `derive` lines entirely for templates with no transitions
-- When dispatching a derived task, append pipeline context (parent task info, depth, root)
+- `_build_postscript()` generates the postscript dynamically from the template's `transitions` field
+- Each transition becomes a `loom ai derive -t <name>` line with the `when` description as help text
+- Templates with no transitions get a generic derive line
+- Derived tasks get pipeline context (parent task info, depth, root)
 
-### Step 5: CLI — derive, ask, and pipeline (`bin/loom`)
+### Step 5: CLI — derive, ask, and pipeline (`bin/loom`) ✅
 
-- Add `loom ai derive` subcommand: parse args → `api_call("ai_report", action="derive", ...)`
-- Add `loom ai ask` subcommand: parse args → `api_call("ai_report", action="ask", ...)`
-- Add `loom task chain` subcommand: resolve task → `api_call("task_chain", ...)` → render tree
-- Add `--pipeline` and `--chains` flags to `loom task list`
-- Add `loom pipeline list` subcommand: call `discover_pipelines` → render summary table
-- Add `loom pipeline show <name>` subcommand: render adjacency list with transition descriptions
+- `loom ai derive` subcommand: parse args → `api_call("ai_report", action="derive", ...)`
+- `loom ai ask` subcommand: parse args → `api_call("ai_report", action="ask", ...)`
+- `loom task chain` subcommand: resolve task → reads chain locally from SQLite → render tree
+- `loom pipeline list` subcommand: call `discover_pipelines` → render summary table
+- `loom pipeline show <name>` subcommand: render adjacency list with transition descriptions
 
-### Step 6: Board UI — chain indicators (`static/js/board.js`)
+### Step 6: Board UI — chain indicators (`static/js/board.js`) ✅
 
-- Extend `renderTaskCard` to show chain badge when `parent_task_id` is non-empty
-- Add parent task title resolution (look up in `state.board_tasks`)
-- Add `human` label visual treatment (open circle, inline dispatch button)
-- Add "View pipeline" to card context menu
+- Cards show chain badge when `parent_task_id` is non-empty (`↳ depth N · from: parent title`)
+- `human` label tasks show 👤 indicator in the chain badge
+- "View pipeline" added to card context menu (only for tasks in a chain)
 
-### Step 7: Board UI — pipeline thread view (`static/js/board.js`)
+### Step 7: Board UI — pipeline thread view (`static/js/board.js`) ✅
 
-- Build `renderPipelineThread(rootId)` — walks the chain, renders indented tree
-- Thread overlay positioned within the board panel
-- Click-to-focus on tasks in the thread
-- Branching support: group children by parent, indent accordingly
+- `boardViewPipeline(taskId)` walks the chain, renders an overlay with depth-indented items
+- Status indicators: `✓` (Done), `→` (In Progress), `○` (Backlog), `✕` (error)
+- Current task highlighted, clicking a task focuses it in the board
+- Thread overlay positioned within the board panel, closeable
 
 ### Step 8: Board UI — pipeline filter (`static/js/board.js`)
 
-- Add filter chip when a pipeline task is selected
-- Filter lane cards to `pipeline_root_id` match
-- Clear filter on chip dismiss or selecting a non-pipeline task
+- Not implemented yet. Deferred — the pipeline thread view provides equivalent functionality.
 
-### Step 9: Pipeline visualization — Templates panel (`static/js/templates.js`)
+### Step 9: Pipeline visualization — Templates panel (`static/js/templates.js`) ✅
 
-- Add Editor/Pipelines view toggle to the Templates panel header
-- Add `renderPipelinesView()` — calls server `discover_pipelines` command, renders discovered pipelines
-- Implement layout algorithm: entry point detection → BFS depth assignment → vertical node placement
-- Render nodes as styled `<div>` boxes with template name and transition count
-- Render edges as SVG `<path>` elements overlaid on the node layout
-- Render back-edges (loops) as curved paths along the right margin
+- Editor/Pipelines view toggle in the Templates panel header
+- `renderPipelinesView()` calls server `discover_pipelines`, renders discovered pipelines
+- BFS-based layout: entry point detection → depth assignment → vertical node placement
+- Nodes rendered as styled boxes with template name and outgoing transitions (adjacency list)
 - Terminal nodes get dashed border style
 - Click-to-edit: clicking a node switches to Editor view with that template selected
-- Hover highlighting: hovering a node dims unconnected edges, hovering an edge shows `when` tooltip
-- Multiple pipeline support: render separate sections with dividers
+- Multiple pipeline support with dividers between them
+- Pipeline data is re-fetched on every view switch to reflect template edits
 
-### Step 10: Server — pipeline discovery (`loom/server.py`)
+### Step 9b: Transitions editor — Templates panel (`static/js/templates.js`) ✅
 
-- Add `discover_pipelines` command handler: calls `template_mgr.discover_pipelines()`, returns `{pipelines: [{name, templates: [...], edges: [{from, to, when}]}]}`
-- This is a read-only command used by both the Templates panel and the CLI
+- Collapsible "Transitions" section in the template editor form, between Labels and Variables
+- Each transition is an entry with: type dropdown (Template / Ask), template picker dropdown (grouped by Project/User, matching the existing template selector pattern), and a full-width auto-growing "When" textarea with label and `?` tooltip
+- `+ Add transition` button to add new rows; `×` button to remove
+- Transitions count shown as a discrete pill badge in the section summary
+- `?` tooltip on the section header explains the purpose
+- Template picker shows "(missing)" for saved transitions referencing deleted templates
+- Transitions serialized to YAML on save via `_template_to_yaml()` and loaded back on edit
 
-### Step 11: Global settings UI (`static/js/modals.js`)
+### Step 10: Server — pipeline discovery (`loom/server.py`) ✅
 
-- Add `max_pipeline_depth` field to Global Settings → General → Board tab
-- Number input with "0 = unlimited" hint
+- `discover_pipelines` command handler calls `template_mgr.discover_pipelines()`, returns `{type: "pipelines", pipelines: [{name, templates, edges}]}`
+- Used by both the Templates panel (via WS) and the CLI (via REST)
+
+### Step 11: Global settings UI (`static/js/modals.js`) ✅
+
+- `max_pipeline_depth` number input in Global Settings → General → Board tab
+- "0 = unlimited" hint label
+- Value persisted via `update_global_settings`
+
+### Remaining Work
+
+- **Pipeline lane filter** (Step 8) — filter board lane to show only tasks from one pipeline chain
+- **`--pipeline` and `--chains` flags** on `loom task list` CLI command
+- **Inline dispatch button** on human/HITL task cards in the board
+- **Worktree cleanup guard** — prevent `WorktreeManager.remove()` on worktrees belonging to active pipeline chains
 
 ---
 
@@ -822,13 +832,14 @@ The CLI renders the adjacency list form — compact and readable in a terminal. 
 | File | Change |
 |---|---|
 | `loom/state.py` | Add pipeline fields to `BoardTask`, `max_pipeline_depth` to `GlobalSettings`, `board_get_chain()` method |
-| `loom/db.py` | Add migration for `parent_task_id`, `pipeline_depth`, `pipeline_root_id` columns |
-| `loom/server.py` | Extend `ai_report` with `derive`/`ask` actions (with transition validation + worktree inheritance), add `task_chain` and `discover_pipelines` commands, make dispatch postscript dynamic from template transitions, modify `dispatch_task` for `inherit_worktree_from` path |
-| `loom/worktree.py` | Guard against removing worktrees that belong to active pipeline chains |
-| `loom/templates.py` | Parse `transitions` and `max_depth` from template YAML, add `get_transitions()`, `discover_pipelines()` |
-| `bin/loom` | Add `loom ai derive`, `loom ai ask`, `loom task chain`, `loom pipeline list/show` commands, `--pipeline`/`--chains` flags |
-| `static/js/board.js` | Chain indicators on cards, pipeline thread view, pipeline filter, human task treatment |
-| `static/js/templates.js` | Editor/Pipelines view toggle, pipeline graph renderer (node layout, SVG edges, back-edge curves, click-to-edit, hover tooltips) |
+| `loom/db.py` | Add migration for `parent_task_id`, `pipeline_depth`, `pipeline_root_id` columns; update `save_board_task` and `save_all` |
+| `loom/server.py` | Extend `ai_report` with `derive`/`ask` actions (transition validation + worktree inheritance), add `task_chain` and `discover_pipelines` commands, `_build_postscript()` for dynamic postscript from template transitions, `_template_to_yaml()` serializes transitions, `dispatch_task` supports `inherit_worktree_from` + HITL parent-chain worktree resolution |
+| `loom/templates.py` | Parse `transitions` and `max_depth` from template YAML, add `get_transitions()`, `discover_pipelines()` (connected-component discovery) |
+| `bin/loom` | Add `loom ai derive`, `loom ai ask`, `loom task chain`, `loom pipeline list/show` commands |
+| `static/js/board.js` | Chain indicators on cards, pipeline thread overlay with `boardViewPipeline()`, "View pipeline" context menu |
+| `static/js/templates.js` | Editor/Pipelines view toggle, pipeline graph renderer (BFS layout, node boxes with adjacency lists), transitions editor in template form (type dropdown, template picker with Project/User optgroups, auto-growing "When" textarea with label and tooltip) |
+| `static/js/ws.js` | Route `pipelines` response type to `tplReceivePipelines()` |
 | `static/js/modals.js` | `max_pipeline_depth` in global settings modal |
-| `static/style.css` | Styles for chain badges, thread view, human task cards, pipeline filter chip, pipeline graph nodes/edges/back-edges |
-| `docs/roadmap.md` | Update Phase 4 status |
+| `static/style.css` | Styles for chain badges, pipeline thread overlay, pipeline graph nodes, transition editor rows (entry containers, type/template selects, when textarea/label, add/remove buttons), view toggle, count badge |
+| `webview.html` | `max_pipeline_depth` input in Board settings sub-tab |
+| `CLAUDE.md` | Document pipeline fields, transitions, derive/ask actions, pipeline CLI commands |

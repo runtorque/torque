@@ -8,6 +8,8 @@ var _tplEditorData = null;     // loaded template data (parsed dict)
 var _tplEditorDirty = false;
 var _tplEditorNew = false;     // true when creating a new template
 var _tplEditorScope = 'project'; // 'project' or 'user'
+var _tplPanelView = 'editor';  // 'editor' or 'pipelines'
+var _tplPipelinesData = null;  // cached pipeline discovery result
 
 /* ---- Load & render ------------------------------------------------- */
 
@@ -105,13 +107,26 @@ function renderTemplatesPanel() {
   html += '</select>';
   html += '<button class="tpled-new-btn" onclick="tplEditorNew()" title="New template">+</button>';
   html += '<button class="tpled-new-btn" onclick="tplEditorLoad()" title="Refresh">&#x21BB;</button>';
+  // View toggle
+  html += '<div class="tpled-view-toggle">';
+  html += '<button class="tpled-view-btn' + (_tplPanelView === 'editor' ? ' active' : '') + '" onclick="tplSwitchView(\'editor\')">Editor</button>';
+  html += '<button class="tpled-view-btn' + (_tplPanelView === 'pipelines' ? ' active' : '') + '" onclick="tplSwitchView(\'pipelines\')">Pipelines</button>';
+  html += '</div>';
   html += '</div>';
 
-  // Editor area
-  html += '<div class="tpled-editor" id="tpled-editor"></div>';
+  // Content area depends on view
+  if (_tplPanelView === 'pipelines') {
+    html += '<div class="tpled-pipelines" id="tpled-pipelines"></div>';
+  } else {
+    html += '<div class="tpled-editor" id="tpled-editor"></div>';
+  }
 
   panel.innerHTML = html;
-  renderTemplatesEditor();
+  if (_tplPanelView === 'pipelines') {
+    renderPipelinesView();
+  } else {
+    renderTemplatesEditor();
+  }
 }
 
 function tplEditorOnSelect(key) {
@@ -203,6 +218,23 @@ function renderTemplatesEditor() {
   html += _tplHighlightWrap('tpled-prompt', prompt);
   html += '<label>Labels</label>';
   html += '<input id="tpled-labels" value="' + esc((d.labels || []).join(', ')) + '" placeholder="comma-separated" autocomplete="off" onchange="tplEditorMarkDirty()">';
+
+  // Transitions (pipeline)
+  var transitions = d.transitions || [];
+  html += '<details class="tpled-section tpled-transitions-section"' + (transitions.length ? ' open' : '') + '>';
+  html += '<summary>Transitions'
+    + (transitions.length ? ' <span class="tpled-transitions-count">' + transitions.length + '</span>' : '')
+    + ' <span class="hint-btn" onclick="event.preventDefault();event.stopPropagation();toggleHint(this)"'
+    + ' data-hint="Defines which templates this one can derive into. Agents can only hand off to templates listed here. Leave empty for terminal pipeline stages.">?</span>'
+    + '</summary>';
+  html += '<div id="tpled-transitions">';
+  for (var tri = 0; tri < transitions.length; tri++) {
+    var tr = transitions[tri];
+    html += _tplTransitionRow(tri, tr);
+  }
+  html += '</div>';
+  html += '<button class="tpled-transition-add" onclick="tplAddTransition()">+ Add transition</button>';
+  html += '</details>';
 
   // Variables (read-only, discovered)
   var vars = _tplEditorFindVars();
@@ -336,6 +368,112 @@ function _tplEditorFindVars() {
 
 /* ---- Actions ------------------------------------------------------- */
 
+function _tplTransitionRow(idx, tr) {
+  var isAsk = tr && tr.ask;
+  var tpl = (tr && tr.template) || '';
+  var when = (tr && tr.when) || '';
+  var html = '<div class="tpled-transition-entry" data-idx="' + idx + '">';
+  html += '<button class="tpled-tr-remove" onclick="tplRemoveTransition(' + idx + ')" title="Remove transition">\u2715</button>';
+  html += '<div class="tpled-transition-body">';
+  html += '<div class="tpled-transition-row">';
+  html += '<div class="tpled-tr-field">';
+  html += '<label class="tpled-tr-label">Type</label>';
+  html += '<select class="tpled-tr-type" onchange="tplTransitionTypeChanged(this)">';
+  html += '<option value="template"' + (!isAsk ? ' selected' : '') + '>Template</option>';
+  html += '<option value="ask"' + (isAsk ? ' selected' : '') + '>Ask (human)</option>';
+  html += '</select>';
+  html += '</div>';
+  // Template picker dropdown
+  html += '<div class="tpled-tr-field">';
+  html += '<label class="tpled-tr-label">Template</label>';
+  html += '<select class="tpled-tr-template" onchange="tplEditorMarkDirty()"' + (isAsk ? ' disabled' : '') + '>';
+  html += '<option value="">Select…</option>';
+  var projectTpls = [];
+  var userTpls = [];
+  for (var i = 0; i < _tplEditorList.length; i++) {
+    if (_tplEditorList[i].shadowed) continue;
+    (_tplEditorList[i].global ? userTpls : projectTpls).push(_tplEditorList[i]);
+  }
+  if (projectTpls.length) {
+    html += '<optgroup label="Project">';
+    for (var i = 0; i < projectTpls.length; i++) {
+      var sel = projectTpls[i].name === tpl ? ' selected' : '';
+      html += '<option value="' + esc(projectTpls[i].name) + '"' + sel + '>' + esc(projectTpls[i].name) + '</option>';
+    }
+    html += '</optgroup>';
+  }
+  if (userTpls.length) {
+    html += '<optgroup label="User">';
+    for (var i = 0; i < userTpls.length; i++) {
+      var sel = userTpls[i].name === tpl ? ' selected' : '';
+      html += '<option value="' + esc(userTpls[i].name) + '"' + sel + '>' + esc(userTpls[i].name) + '</option>';
+    }
+    html += '</optgroup>';
+  }
+  // If the saved value doesn't match any known template, still show it
+  if (tpl && !projectTpls.concat(userTpls).some(function(t) { return t.name === tpl; })) {
+    html += '<option value="' + esc(tpl) + '" selected>' + esc(tpl) + ' (missing)</option>';
+  }
+  html += '</select>';
+  html += '</div>';
+  html += '</div>';
+  html += '<label class="tpled-tr-when-label">When <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"'
+    + ' data-hint="Describes when the agent should pick this transition. This text is included in the dispatch prompt so the agent knows which option to choose.">?</span></label>';
+  html += '<textarea class="tpled-tr-when" placeholder="e.g. Implementation is complete and ready for review" rows="1" onchange="tplEditorMarkDirty()" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">' + esc(when) + '</textarea>';
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function tplTransitionTypeChanged(selectEl) {
+  var row = selectEl.closest('.tpled-transition-entry');
+  if (!row) return;
+  var tplSelect = row.querySelector('.tpled-tr-template');
+  if (selectEl.value === 'ask') {
+    tplSelect.disabled = true;
+    tplSelect.value = '';
+  } else {
+    tplSelect.disabled = false;
+  }
+  tplEditorMarkDirty();
+}
+
+function tplAddTransition() {
+  var container = document.getElementById('tpled-transitions');
+  if (!container) return;
+  var idx = container.querySelectorAll('.tpled-transition-entry').length;
+  container.insertAdjacentHTML('beforeend', _tplTransitionRow(idx, {}));
+  tplEditorMarkDirty();
+}
+
+function tplRemoveTransition(idx) {
+  var container = document.getElementById('tpled-transitions');
+  if (!container) return;
+  var entries = container.querySelectorAll('.tpled-transition-entry');
+  if (entries[idx]) entries[idx].remove();
+  tplEditorMarkDirty();
+}
+
+function _tplReadTransitions() {
+  var container = document.getElementById('tpled-transitions');
+  if (!container) return [];
+  var entries = container.querySelectorAll('.tpled-transition-entry');
+  var result = [];
+  for (var i = 0; i < entries.length; i++) {
+    var type = entries[i].querySelector('.tpled-tr-type').value;
+    var tpl = (entries[i].querySelector('.tpled-tr-template').value || '').trim();
+    var when = (entries[i].querySelector('.tpled-tr-when').value || '').trim();
+    if (type === 'ask') {
+      result.push({ ask: true, when: when });
+    } else if (tpl) {
+      var entry = { template: tpl };
+      if (when) entry.when = when;
+      result.push(entry);
+    }
+  }
+  return result;
+}
+
 function tplEditorMarkDirty() {
   _tplEditorDirty = true;
 }
@@ -374,6 +512,8 @@ function tplEditorSave() {
     return;
   }
 
+  var transitions = _tplReadTransitions();
+
   var tplData = {
     description: (document.getElementById('tpled-desc').value || '').trim(),
     agent: {
@@ -386,6 +526,7 @@ function tplEditorSave() {
     worktree: document.getElementById('tpled-worktree').checked,
     prompt: prompt,
     labels: labels,
+    transitions: transitions,
   };
 
   var scope = document.getElementById('tpled-scope').value || 'project';
@@ -448,5 +589,127 @@ function _tplEditorReadForm() {
     worktree: document.getElementById('tpled-worktree').checked,
     prompt: document.getElementById('tpled-prompt').value || '',
     labels: labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [],
+    transitions: _tplReadTransitions(),
   };
+}
+
+/* ---- Pipeline view -------------------------------------------------- */
+
+function tplSwitchView(view) {
+  _tplPanelView = view;
+  if (view === 'pipelines') _tplPipelinesData = null;
+  renderTemplatesPanel();
+}
+
+function renderPipelinesView() {
+  var el = document.getElementById('tpled-pipelines');
+  if (!el) return;
+
+  if (!_tplPipelinesData) {
+    el.innerHTML = '<div class="tpled-pipelines-loading">Loading…</div>';
+    send({ cmd: 'discover_pipelines', group: _currentGroup() || '' });
+    return;
+  }
+
+  var pipelines = _tplPipelinesData.pipelines || [];
+  if (!pipelines.length) {
+    el.innerHTML = '<div class="tpled-pipelines-empty">'
+      + 'No pipelines found.<br>'
+      + '<span class="dim">Add <code>transitions</code> to your templates.</span></div>';
+    return;
+  }
+
+  var html = '';
+  for (var pi = 0; pi < pipelines.length; pi++) {
+    var p = pipelines[pi];
+    html += '<div class="pipeline-graph">';
+    html += '<div class="pipeline-graph-title">' + esc(p.name)
+      + ' <span class="dim">(' + p.templates.length + ' templates)</span></div>';
+
+    // Build adjacency for layout
+    var adj = {};
+    var incoming = {};
+    for (var ei = 0; ei < p.edges.length; ei++) {
+      var e = p.edges[ei];
+      adj[e.from] = adj[e.from] || [];
+      adj[e.from].push(e);
+      incoming[e.to] = (incoming[e.to] || 0) + 1;
+    }
+
+    // BFS to assign depth levels
+    var depths = {};
+    var entryPoints = [];
+    for (var ti = 0; ti < p.templates.length; ti++) {
+      if (!incoming[p.templates[ti]]) entryPoints.push(p.templates[ti]);
+    }
+    if (!entryPoints.length) entryPoints = [p.templates[0]];
+
+    var queue = [];
+    for (var epi = 0; epi < entryPoints.length; epi++) {
+      depths[entryPoints[epi]] = 0;
+      queue.push(entryPoints[epi]);
+    }
+    while (queue.length) {
+      var node = queue.shift();
+      var edges = adj[node] || [];
+      for (var eii = 0; eii < edges.length; eii++) {
+        var target = edges[eii].to;
+        if (depths[target] === undefined) {
+          depths[target] = (depths[node] || 0) + 1;
+          queue.push(target);
+        }
+      }
+    }
+    // Assign remaining (cyclic-only nodes)
+    for (var ti = 0; ti < p.templates.length; ti++) {
+      if (depths[p.templates[ti]] === undefined) depths[p.templates[ti]] = 0;
+    }
+
+    // Group by depth
+    var maxDepth = 0;
+    var byDepth = {};
+    for (var tname in depths) {
+      var d = depths[tname];
+      if (d > maxDepth) maxDepth = d;
+      byDepth[d] = byDepth[d] || [];
+      byDepth[d].push(tname);
+    }
+
+    // Render nodes by depth
+    html += '<div class="pipeline-graph-nodes">';
+    for (var d = 0; d <= maxDepth; d++) {
+      var nodes = byDepth[d] || [];
+      for (var ni = 0; ni < nodes.length; ni++) {
+        var n = nodes[ni];
+        var nodeEdges = adj[n] || [];
+        var isTerminal = !nodeEdges.length;
+        var cls = isTerminal ? ' pipeline-node-terminal' : '';
+        html += '<div class="pipeline-node' + cls + '"'
+          + ' onclick="tplSwitchView(\'editor\');tplEditorOnSelect(\'project:' + esc(n) + '\')"'
+          + ' title="Click to edit">';
+        html += '<div class="pipeline-node-name">' + esc(n) + '</div>';
+        if (nodeEdges.length) {
+          html += '<div class="pipeline-node-edges">';
+          for (var nei = 0; nei < nodeEdges.length; nei++) {
+            var ne = nodeEdges[nei];
+            html += '<div class="pipeline-node-edge">→ ' + esc(ne.to);
+            if (ne.when) html += ' <span class="dim">"' + esc(ne.when) + '"</span>';
+            html += '</div>';
+          }
+          html += '</div>';
+        } else {
+          html += '<div class="pipeline-node-edges"><div class="pipeline-node-edge dim">(terminal)</div></div>';
+        }
+        html += '</div>';
+      }
+    }
+    html += '</div></div>';
+  }
+
+  el.innerHTML = html;
+}
+
+function tplReceivePipelines(msg) {
+  _tplPipelinesData = msg;
+  if (_tplPanelView === 'pipelines') renderPipelinesView();
 }

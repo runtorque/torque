@@ -115,7 +115,7 @@ Expose Loom as an MCP (Model Context Protocol) server. Any MCP-aware agent or to
 
 With awareness, worktrees, and programmatic access in place, Loom can start running work autonomously.
 
-> **Status**: Templates and dispatch implemented. See [implementation plan](plans/workflow-automation.md) for details.
+> **Status**: Templates, dispatch, and pipelines implemented. See implementation plans for [templates](plans/workflow-automation.md) and [pipelines](plans/pipelines.md).
 
 ### Agent Templates ✅
 
@@ -164,17 +164,15 @@ loom task create "Update error handling in auth module" -a frontend
 
 `task dispatch` creates a board ticket in the "In Progress" lane, creates an agent from the template, links them via `agent_id`, and sends the task. `task create` parks a ticket in "Backlog" for later pickup. Both support `--assign PREFIX` for pool-based agent assignment and `--labels` for orchestration tagging.
 
-### Pipeline Composition
+### Pipelines ✅
 
-Chain agents into multi-step workflows: Agent 1 implements → Agent 2 writes tests → Agent 3 reviews → auto-create PR if all pass. For now, multi-step workflows are shell scripts composing `loom dispatch --wait`:
+Multi-step agent workflows through task derivation. Templates declare valid transitions via a `transitions` field — each entry names a target template and a `when` description. Agents drive the pipeline forward by calling `loom ai derive -t <template> "description"`, which marks the current task as Done, creates a derived task linked via `parent_task_id`, and dispatches a new agent. The server enforces that only declared transitions are allowed. The entire task chain shares one worktree.
 
-```bash
-loom dispatch "implement login" -t impl --wait
-loom dispatch "write tests for login" -t test --wait
-loom dispatch "review login changes" -t review --wait
-```
+`loom ai ask "question"` creates a human-in-the-loop gate — a derived task in Backlog that a human reviews and dispatches manually. Depth limits (`max_pipeline_depth` global setting, `max_depth` per template) prevent runaway chains.
 
-Declarative pipeline definitions (YAML DAGs with parallel/sequential steps and conditional branches) are deferred until usage patterns emerge.
+The board shows chain indicators on derived task cards (`↳ depth N · from: parent`). Right-click → "View pipeline" opens a thread overlay showing the full chain. The Templates panel has an Editor/Pipelines view toggle — the Pipelines view discovers connected components from template transitions and renders the pipeline graph as nodes with adjacency lists. The template editor has a Transitions section for adding/editing transitions with a template picker dropdown and auto-growing "When" textarea.
+
+CLI: `loom ai derive`, `loom ai ask`, `loom task chain`, `loom pipeline list`, `loom pipeline show`.
 
 ### Event-Driven Triggers
 
@@ -191,7 +189,9 @@ Since `loom dispatch` is scriptable, simple triggers work today via cron or CI c
 
 ### Remaining Work
 
-- **Pipeline engine** — declarative YAML pipelines with DAG execution
+- **Pipeline lane filter** — filter board lane to show only tasks from one pipeline chain
+- **Inline dispatch button** on human/HITL task cards in the board
+- **Worktree cleanup guard** — prevent worktree removal on active pipeline chains
 - **Event-driven triggers** — built-in webhook/cron/CI trigger system
 - **Retry & fallback policies** — configurable per template or pipeline step
 

@@ -2204,6 +2204,151 @@ def cmd_ai_context(args):
                 print(f"  PR:       {t['external_url']}")
 
 
+def cmd_ai_derive(args):
+    cell, task = _resolve_self_and_task(args)
+    kwargs = {"cell_id": cell["id"], "action": "derive",
+              "message": args.description}
+    if task:
+        kwargs["task_id"] = task["id"]
+    if args.template:
+        kwargs["template"] = args.template
+    if args.var:
+        tvars = {}
+        for kv in args.var:
+            k, _, v = kv.partition("=")
+            if k:
+                tvars[k] = v
+        if tvars:
+            kwargs["template_vars"] = tvars
+    if args.group:
+        kwargs["group"] = args.group
+    resp = api_call("ai_report", port=args.port, **kwargs)
+    data = check_ok(resp)
+    new_tid = data.get("task_id", "")
+    new_aid = data.get("agent_id", "")
+    tpl = f" (template: {args.template})" if args.template else ""
+    print(f"Derived task {new_tid}{tpl}")
+    if new_aid:
+        print(f"  Agent: {new_aid}")
+
+
+def cmd_ai_ask(args):
+    cell, task = _resolve_self_and_task(args)
+    kwargs = {"cell_id": cell["id"], "action": "ask",
+              "message": args.question}
+    if task:
+        kwargs["task_id"] = task["id"]
+    resp = api_call("ai_report", port=args.port, **kwargs)
+    data = check_ok(resp)
+    new_tid = data.get("task_id", "")
+    print(f"Ask task created in Backlog: {new_tid}")
+    print("  A human will review and dispatch this task.")
+
+
+def cmd_task_chain(args):
+    st = get_state_local(args.port)
+    task = resolve_task(st, args.identifier)
+    # Get chain via API if daemon is running, else walk locally
+    root_id = task.get("pipeline_root_id") or task["id"]
+    tasks = st.get("board_tasks", {})
+    chain = [t for t in tasks.values()
+             if (t.get("pipeline_root_id") == root_id)
+             or (t["id"] == root_id)]
+    chain.sort(key=lambda t: (t.get("pipeline_depth", 0),
+                               t.get("created_at", "")))
+
+    if not chain or (len(chain) == 1
+                     and not chain[0].get("parent_task_id")):
+        print("This task is not part of a pipeline.")
+        return
+
+    if args.json:
+        print(json.dumps({"root_id": root_id, "chain": chain}, indent=2))
+        return
+
+    max_depth = max(t.get("pipeline_depth", 0) for t in chain)
+    print(f"{_bold('Pipeline')}: {root_id} (depth {max_depth})\n")
+    for t in chain:
+        depth = t.get("pipeline_depth", 0)
+        lane = t.get("lane", "")
+        tid = t.get("slug") or t["id"][:8]
+        task_text = t.get("task", "")[:50]
+        agent = ""
+        if t.get("agent_id"):
+            agents = st.get("agents", {})
+            a = agents.get(t["agent_id"])
+            if a:
+                agent = f"  {_dim(a.get('slug') or a.get('name', ''))}"
+
+        if lane == "Done":
+            icon = _green("✓")
+        elif "error" in t.get("labels", []):
+            icon = _red("✕")
+        elif lane == "Backlog":
+            icon = "○"
+        else:
+            icon = _yellow("→")
+
+        indent = "  " * depth
+        print(f"  {icon} {indent}[{depth}] {task_text:<40} "
+              f"{_dim(lane)}{agent}")
+
+
+def cmd_pipeline_list(args):
+    resp = api_call("discover_pipelines", port=args.port,
+                    group=args.group or "")
+    data = check_ok(resp)
+    pipelines = data.get("pipelines", [])
+    if not pipelines:
+        print("No pipelines found (templates need 'transitions' field)")
+        return
+
+    if args.json:
+        print(json.dumps(pipelines, indent=2))
+        return
+
+    print(f"{_bold('Pipelines')}\n")
+    for p in pipelines:
+        edge_strs = []
+        for e in p.get("edges", []):
+            edge_strs.append(f"{e['from']} → {e['to']}")
+        summary = ", ".join(edge_strs) if edge_strs else "(no edges)"
+        print(f"  {_bold(p['name']):<20} {_dim(summary)}")
+
+
+def cmd_pipeline_show(args):
+    resp = api_call("discover_pipelines", port=args.port,
+                    group=args.group or "")
+    data = check_ok(resp)
+    pipelines = data.get("pipelines", [])
+    match = [p for p in pipelines if p["name"] == args.name]
+    if not match:
+        die(f"Pipeline '{args.name}' not found")
+    p = match[0]
+
+    if args.json:
+        print(json.dumps(p, indent=2))
+        return
+
+    print(f"{_bold('Pipeline')}: {p['name']} "
+          f"({len(p['templates'])} templates)\n")
+
+    # Build adjacency for display
+    adj = {}
+    for e in p.get("edges", []):
+        adj.setdefault(e["from"], []).append(e)
+
+    for tname in sorted(p["templates"]):
+        edges = adj.get(tname, [])
+        print(f"  {_bold(tname)}")
+        for e in edges:
+            when = f'  "{e["when"]}"' if e.get("when") else ""
+            print(f"    → {e['to']}{_dim(when)}")
+        if not edges:
+            print(f"    {_dim('(terminal — no transitions)')}")
+        print()
+
+
 # ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
@@ -2450,6 +2595,10 @@ def build_parser():
                    help="Unassign the task")
     p.set_defaults(func=cmd_task_assign)
 
+    p = tsk_sub.add_parser("chain", help="Show pipeline derivation chain")
+    p.add_argument("identifier", help="Task ID, slug, or title")
+    p.set_defaults(func=cmd_task_chain)
+
     # -- template -----------------------------------------------------------
     tmpl = sub.add_parser("template", aliases=["tpl"],
                           help="Template management")
@@ -2550,6 +2699,43 @@ def build_parser():
 
     p = ai_sub.add_parser("context", help="Show current agent context")
     p.set_defaults(func=cmd_ai_context)
+
+    p = ai_sub.add_parser("derive",
+                          help="Derive a new task and dispatch next agent")
+    p.add_argument("description", help="Task description for the next agent")
+    p.add_argument("-t", "--template", help="Template for the new task")
+    p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
+                   help="Template variables")
+    p.add_argument("-g", "--group", help="Target group (inherit from task)")
+    p.add_argument("task_ref", nargs="?",
+                   help="Task slug/ID (auto-detected)")
+    p.set_defaults(func=cmd_ai_derive)
+
+    p = ai_sub.add_parser("ask",
+                          help="Create a task for human decision")
+    p.add_argument("question", help="Question for the human to review")
+    p.add_argument("task_ref", nargs="?",
+                   help="Task slug/ID (auto-detected)")
+    p.set_defaults(func=cmd_ai_ask)
+
+    # -- task chain ---------------------------------------------------------
+    # (added to task subcommand group)
+
+    # -- pipeline -----------------------------------------------------------
+    pipe = sub.add_parser("pipeline", aliases=["pl"],
+                          help="Pipeline discovery and visualization")
+    pipe.set_defaults(func=cmd_pipeline_list, _sub_parser=pipe)
+    pipe_sub = pipe.add_subparsers(dest="pipeline_cmd")
+
+    p = pipe_sub.add_parser("list", aliases=["ls"],
+                            help="List discovered pipelines")
+    p.add_argument("-g", "--group", help="Scope to group")
+    p.set_defaults(func=cmd_pipeline_list)
+
+    p = pipe_sub.add_parser("show", help="Show pipeline details")
+    p.add_argument("name", help="Pipeline name")
+    p.add_argument("-g", "--group", help="Scope to group")
+    p.set_defaults(func=cmd_pipeline_show)
 
     # -- logs ---------------------------------------------------------------
     p = sub.add_parser("logs", help="Tail daemon log")

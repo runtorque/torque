@@ -431,7 +431,103 @@ class TemplateManager:
             "labels": tpl.get("labels", []),
             "worktree": tpl.get("worktree", None),
             "terminals": tpl.get("terminals", []),
+            "transitions": tpl.get("transitions", []),
+            "max_depth": tpl.get("max_depth", None),
         }
+
+    def get_transitions(self, template_name: str,
+                         base_dir: str = "") -> list[dict]:
+        """Return the transitions list for a template.
+
+        Each entry is {template: str, when: str} or {ask: True, when: str}.
+        Returns [] if template has no transitions or is not found.
+        """
+        tpl = self.load_template(template_name, base_dir)
+        if not tpl:
+            return []
+        return tpl.get("transitions") or []
+
+    def discover_pipelines(self, base_dir: str = "") -> list[dict]:
+        """Scan all templates and discover pipelines from transitions.
+
+        Returns a list of pipeline dicts:
+        [{name, templates: [str], edges: [{from, to, when}]}]
+        """
+        templates = self.list_templates(base_dir)
+        # Build adjacency: load transitions for each template
+        graph = {}  # name → [{to, when}]
+        all_names = set()
+        for t in templates:
+            if t.get("shadowed"):
+                continue
+            name = t["name"]
+            all_names.add(name)
+            tpl = self.load_template(name, base_dir)
+            transitions = (tpl.get("transitions") or []) if tpl else []
+            edges = []
+            for tr in transitions:
+                if isinstance(tr, dict) and tr.get("template"):
+                    edges.append({"to": tr["template"],
+                                  "when": tr.get("when", "")})
+            graph[name] = edges
+
+        # Build undirected connected components
+        adj = {n: set() for n in all_names}
+        for src, edges in graph.items():
+            for e in edges:
+                target = e["to"]
+                if target in all_names:
+                    adj[src].add(target)
+                    adj.setdefault(target, set()).add(src)
+
+        visited = set()
+        components = []
+        for node in all_names:
+            if node in visited:
+                continue
+            # BFS to find connected component
+            component = set()
+            queue = [node]
+            while queue:
+                n = queue.pop(0)
+                if n in visited:
+                    continue
+                visited.add(n)
+                component.add(n)
+                for neighbour in adj.get(n, []):
+                    if neighbour not in visited:
+                        queue.append(neighbour)
+            # Only include if there are actual edges (not standalone)
+            has_edges = any(graph.get(n) for n in component)
+            if has_edges:
+                components.append(component)
+
+        # Build pipeline dicts
+        pipelines = []
+        for comp in components:
+            # Find entry points (nodes with no incoming edges within component)
+            incoming = set()
+            for n in comp:
+                for e in graph.get(n, []):
+                    if e["to"] in comp:
+                        incoming.add(e["to"])
+            entry_points = comp - incoming
+            name = sorted(entry_points)[0] if entry_points else sorted(comp)[0]
+
+            edges = []
+            for n in comp:
+                for e in graph.get(n, []):
+                    if e["to"] in comp:
+                        edges.append({"from": n, "to": e["to"],
+                                      "when": e["when"]})
+
+            pipelines.append({
+                "name": name,
+                "templates": sorted(comp),
+                "edges": edges,
+            })
+
+        return sorted(pipelines, key=lambda p: p["name"])
 
     # -- Internal helpers ---------------------------------------------------
 
@@ -501,6 +597,8 @@ class TemplateManager:
             "labels": tpl.get("labels", []),
             "worktree": tpl.get("worktree", None),
             "terminals": tpl.get("terminals", []),
+            "transitions": tpl.get("transitions", []),
+            "max_depth": tpl.get("max_depth", None),
         }
 
     def _render_str(self, text: str, variables: dict) -> str:

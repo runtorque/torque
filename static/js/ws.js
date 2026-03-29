@@ -62,6 +62,8 @@ function connect() {
       _showPromptPreview(msg);
     } else if (msg.type === 'dispatch_template_missing') {
       _handleDispatchTemplateMissing(msg);
+    } else if (msg.type === 'pipelines') {
+      if (typeof tplReceivePipelines !== 'undefined') tplReceivePipelines(msg);
     } else if (msg.type === 'global_settings') {
       _showGlobalSettingsModal(msg);
     } else if (msg.type === 'action') {

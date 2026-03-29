@@ -1086,6 +1086,8 @@ function _showGlobalSettingsModal(data) {
   // General > Board
   document.getElementById('gls-default-lanes').value =
     (s.default_lanes || []).join('\n');
+  document.getElementById('gls-max-pipeline-depth').value =
+    s.max_pipeline_depth !== undefined ? s.max_pipeline_depth : 10;
 
   // Keybindings
   _renderKeybindingList();
@@ -1235,6 +1237,7 @@ function submitGlobalSettings() {
     focus_new_tabs: document.getElementById('gls-focus-new-tabs').checked,
     default_lanes: lanes,
     keybindings: _glsKeybindings,
+    max_pipeline_depth: parseInt(document.getElementById('gls-max-pipeline-depth').value) || 0,
   };
   send({ cmd: 'update_global_settings', settings: settings });
   closeModals();

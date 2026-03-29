@@ -37,6 +37,10 @@ class BoardTask:
     provider: str = ""          # "jira", "linear", "github"
     external_id: str = ""       # e.g. "PROJ-123"
     external_url: str = ""      # link back to provider
+    # Pipeline fields (Phase 4b)
+    parent_task_id: str = ""    # task this was derived from (empty for root tasks)
+    pipeline_depth: int = 0     # 0 for root, auto-incremented from parent
+    pipeline_root_id: str = ""  # ID of the chain's root task (self.id for roots)
 
 
 @dataclass
@@ -171,6 +175,8 @@ class GlobalSettings:
     default_lanes: list[str] = field(default_factory=lambda: list(_DEFAULT_LANES))
     # Keybindings — action name → {modifiers, keycode, character} overrides
     keybindings: dict[str, dict] = field(default_factory=dict)
+    # Pipeline
+    max_pipeline_depth: int = 10  # 0 = unlimited
 
 
 class MatrixState:
@@ -885,7 +891,7 @@ class MatrixState:
             updated_at=now,
             **{k: v for k, v in kwargs.items()
                if k in BoardTask.__dataclass_fields__ and k not in
-               ("id", "task", "group", "lane", "position",
+               ("id", "task", "slug", "group", "lane", "position",
                 "created_at", "updated_at")},
         )
         self.board_tasks[tid] = bt
@@ -1009,6 +1015,17 @@ class MatrixState:
         self.board_lanes = lanes
         self._emit("lanes_update", lanes=list(self.board_lanes))
         self._db_save_lanes()
+
+    def board_get_chain(self, task_id: str) -> list[BoardTask]:
+        """Return all tasks in the same pipeline chain, ordered by depth."""
+        task = self.board_tasks.get(task_id)
+        if not task:
+            return []
+        root_id = task.pipeline_root_id or task.id
+        chain = [t for t in self.board_tasks.values()
+                 if (t.pipeline_root_id == root_id) or (t.id == root_id)]
+        chain.sort(key=lambda t: (t.pipeline_depth, t.created_at))
+        return chain
 
     def board_unlink_agent(self, agent_id: str):
         """Unlink an agent from all tasks (called when agent is removed)."""

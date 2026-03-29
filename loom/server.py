@@ -82,6 +82,21 @@ def _template_to_yaml(name: str, data: dict) -> str:
         for lb in labels:
             lines.append(f"  - {lb}")
 
+    # Transitions (pipeline)
+    transitions = data.get("transitions", [])
+    if transitions:
+        lines.append("\ntransitions:")
+        for tr in transitions:
+            if isinstance(tr, dict):
+                if tr.get("ask"):
+                    lines.append("  - ask: true")
+                    if tr.get("when"):
+                        lines.append(f"    when: {tr['when']}")
+                elif tr.get("template"):
+                    lines.append(f"  - template: {tr['template']}")
+                    if tr.get("when"):
+                        lines.append(f"    when: {tr['when']}")
+
     # Terminals
     terminals = data.get("terminals", [])
     if terminals:
@@ -219,6 +234,72 @@ async def main(connection: iterm2.Connection):
         except Exception:
             pass
         return ""
+
+    # -- Postscript builder -------------------------------------------------
+
+    def _build_postscript(task, tmgr, base_dir=""):
+        """Build the loom-ai instruction block appended to dispatch prompts.
+
+        If the task's template declares transitions, the derive lines
+        are generated from them.  Otherwise only generic commands are shown.
+        """
+        lines = [
+            "\n\nReport your progress with these commands:",
+            "- `loom ai done` — task complete, no follow-up needed",
+        ]
+
+        # Dynamic derive lines from template transitions
+        transitions = []
+        if task.template_name:
+            transitions = tmgr.get_transitions(task.template_name,
+                                               base_dir)
+        has_ask = False
+        for tr in transitions:
+            if isinstance(tr, dict):
+                if tr.get("template"):
+                    when = tr.get("when", "")
+                    desc = f" — {when}" if when else ""
+                    lines.append(
+                        f"- `loom ai derive \"description\" "
+                        f"-t {tr['template']}`{desc}")
+                if tr.get("ask"):
+                    has_ask = True
+        if not transitions:
+            # No transitions declared — show generic derive
+            lines.append(
+                "- `loom ai derive \"description\" -t TEMPLATE`"
+                " — task complete, hand off to next agent")
+        if has_ask or not transitions:
+            lines.append(
+                "- `loom ai ask \"question\"`"
+                " — task complete, need human decision on next step")
+        lines.extend([
+            "- `loom ai pr URL` — opened a pull request",
+            "- `loom ai merged` — PR merged",
+            "- `loom ai blocked \"reason\"` — need user input",
+            "- `loom ai error \"message\"` — unrecoverable error",
+        ])
+
+        # Pipeline context for derived tasks
+        if task.parent_task_id:
+            max_d = state.global_settings.max_pipeline_depth or "∞"
+            parent = state.board_tasks.get(task.parent_task_id)
+            root = state.board_tasks.get(task.pipeline_root_id)
+            ctx = (f"\n\nThis task is part of a pipeline "
+                   f"(depth {task.pipeline_depth}/{max_d}).")
+            if parent:
+                p_agent = ""
+                if parent.agent_id:
+                    a = state.agents.get(parent.agent_id)
+                    if a:
+                        p_agent = f", agent: {a.slug or a.name}"
+                ctx += (f"\nParent task: \"{parent.task[:80]}\" "
+                        f"({parent.lane}{p_agent})")
+            if root and root.id != (parent.id if parent else ""):
+                ctx += f"\nRoot task: \"{root.task[:80]}\""
+            lines.append(ctx)
+
+        return "\n".join(lines)
 
     # -- Command handler ----------------------------------------------------
 
@@ -1050,6 +1131,55 @@ async def main(connection: iterm2.Connection):
                                             state._emit_agent(cell)
                                             state._db_save_agent(cell)
 
+                                # Worktree inheritance (pipeline)
+                                inherit_from = data.get(
+                                    "inherit_worktree_from", "")
+                                if inherit_from:
+                                    src = state.agents.get(inherit_from)
+                                    if src and src.worktree_path:
+                                        cell.worktree_path = \
+                                            src.worktree_path
+                                        cell.worktree_branch = \
+                                            src.worktree_branch
+                                        cell.worktree_repo_root = \
+                                            src.worktree_repo_root
+                                        cell.worktree_base_branch = \
+                                            src.worktree_base_branch
+                                        cell.directory = \
+                                            src.worktree_path
+                                        state._emit_agent(cell)
+                                        state._db_save_agent(cell)
+                                elif not cell.worktree_path \
+                                        and task.parent_task_id:
+                                    # HITL dispatch: walk parent
+                                    # chain to find worktree
+                                    _ptid = task.parent_task_id
+                                    while _ptid:
+                                        _pt = state.board_tasks.get(
+                                            _ptid)
+                                        if not _pt:
+                                            break
+                                        if _pt.agent_id:
+                                            _pa = state.agents.get(
+                                                _pt.agent_id)
+                                            if _pa and \
+                                                    _pa.worktree_path:
+                                                cell.worktree_path = \
+                                                    _pa.worktree_path
+                                                cell.worktree_branch =\
+                                                    _pa.worktree_branch
+                                                cell.worktree_repo_root = \
+                                                    _pa.worktree_repo_root
+                                                cell.worktree_base_branch = \
+                                                    _pa.worktree_base_branch
+                                                cell.directory = \
+                                                    _pa.worktree_path
+                                                state._emit_agent(cell)
+                                                state._db_save_agent(
+                                                    cell)
+                                                break
+                                        _ptid = _pt.parent_task_id
+
                                 await bridge.create_session(
                                     cell, env_vars=env, shell=shell)
 
@@ -1102,6 +1232,7 @@ async def main(connection: iterm2.Connection):
 
                             # Compose prompt: template-aware
                             prompt = None
+                            base_dir = ""
                             if task.template_name \
                                     and not data.get("force_no_template"):
                                 base_dir = await _resolve_base_dir(group)
@@ -1138,17 +1269,10 @@ async def main(connection: iterm2.Connection):
                                 prompt = task.task
 
                             if prompt:
-                                prompt += (
-                                    "\n\nReport your progress with"
-                                    " these commands:\n"
-                                    "- `loom ai done` — task complete\n"
-                                    "- `loom ai pr URL` — opened"
-                                    " a pull request\n"
-                                    "- `loom ai merged` — PR merged\n"
-                                    "- `loom ai blocked \"reason\"`"
-                                    " — need user input\n"
-                                    "- `loom ai error \"message\"`"
-                                    " — unrecoverable error")
+                                prompt += _build_postscript(
+                                    task, template_mgr,
+                                    base_dir if task.template_name
+                                    else "")
 
                                 if agent_id and cell.session_id:
                                     # Existing agent — send immediately
@@ -1351,10 +1475,197 @@ async def main(connection: iterm2.Connection):
                             task.agent_id = ""
                             _save_task(task)
 
+                    elif action == "derive":
+                        # Derive a new task and dispatch it
+                        tpl_name = data.get("template", "")
+                        tpl_vars = data.get("template_vars", {})
+                        derive_group = data.get("group", "")
+
+                        if not task:
+                            result = {"type": "error",
+                                      "message":
+                                          "No linked task to derive from"}
+                        elif not message:
+                            result = {"type": "error",
+                                      "message":
+                                          "Derive requires a description"}
+                        else:
+                            # Validate transition
+                            base_dir = await _resolve_base_dir(
+                                task.group)
+                            cur_transitions = \
+                                template_mgr.get_transitions(
+                                    task.template_name, base_dir)
+                            valid_targets = [
+                                t["template"] for t in cur_transitions
+                                if isinstance(t, dict)
+                                and t.get("template")]
+                            if cur_transitions and tpl_name \
+                                    and tpl_name not in valid_targets:
+                                result = {
+                                    "type": "error",
+                                    "message":
+                                        f"Template '{task.template_name}'"
+                                        f" cannot transition to "
+                                        f"'{tpl_name}'. Valid: "
+                                        f"{', '.join(valid_targets)}"}
+                            else:
+                                # Check depth limit
+                                new_depth = task.pipeline_depth + 1
+                                tpl_meta = \
+                                    template_mgr.load_template(
+                                        tpl_name, base_dir) \
+                                    if tpl_name else None
+                                max_d = (
+                                    (tpl_meta or {}).get("max_depth")
+                                    or state.global_settings
+                                        .max_pipeline_depth
+                                    or 0)
+                                if max_d and new_depth > max_d:
+                                    cell.needs_attention = True
+                                    state._emit_agent(cell)
+                                    if task:
+                                        _add_label(task,
+                                                   "depth-limit")
+                                        _save_task(task)
+                                    result = {
+                                        "type": "error",
+                                        "message":
+                                            f"Pipeline depth limit "
+                                            f"({max_d}) reached"}
+                                else:
+                                    # Mark parent task as Done
+                                    cell.activity = ""
+                                    cell.activity_detail = ""
+                                    cell.needs_attention = False
+                                    cell.error_message = ""
+                                    state._emit_agent(cell)
+                                    if task.lane != "Done":
+                                        state.board_move_task(
+                                            task.id, "Done")
+                                    # Create derived task
+                                    grp = derive_group \
+                                        or task.group
+                                    root_id = \
+                                        task.pipeline_root_id \
+                                        or task.id
+                                    new_task = state.board_add_task(
+                                        task=message,
+                                        group=grp,
+                                        lane="Backlog",
+                                        template_name=tpl_name,
+                                        template_vars=tpl_vars,
+                                        labels=["derived"],
+                                        parent_task_id=task.id,
+                                        pipeline_depth=new_depth,
+                                        pipeline_root_id=root_id,
+                                    )
+                                    if new_task:
+                                        # Dispatch — reuse
+                                        # dispatch_task logic via
+                                        # handle_command
+                                        dispatch_data = {
+                                            "cmd": "dispatch_task",
+                                            "id": new_task.id,
+                                            "create_agent": True,
+                                        }
+                                        # Inherit worktree from
+                                        # parent agent
+                                        if cell.worktree_path:
+                                            dispatch_data[
+                                                "inherit_worktree_from"
+                                            ] = cell.id
+                                        await state.broadcast()
+                                        dr = await handle_command(
+                                            dispatch_data)
+                                        result = {
+                                            "type": "ok",
+                                            "task_id": new_task.id,
+                                            "agent_id":
+                                                new_task.agent_id}
+                                    else:
+                                        result = {
+                                            "type": "error",
+                                            "message":
+                                                "Failed to create "
+                                                "derived task"}
+
+                    elif action == "ask":
+                        # Create a derived task in Backlog for human
+                        if not task:
+                            result = {"type": "error",
+                                      "message":
+                                          "No linked task to derive from"}
+                        elif not message:
+                            result = {"type": "error",
+                                      "message":
+                                          "Ask requires a question"}
+                        else:
+                            # Mark parent task as Done
+                            cell.activity = ""
+                            cell.activity_detail = ""
+                            cell.needs_attention = True
+                            cell.error_message = ""
+                            state._emit_agent(cell)
+                            if task.lane != "Done":
+                                state.board_move_task(task.id, "Done")
+                            # Create HITL task in Backlog
+                            grp = task.group
+                            root_id = task.pipeline_root_id \
+                                or task.id
+                            new_task = state.board_add_task(
+                                task=message,
+                                group=grp,
+                                lane="Backlog",
+                                labels=["human", "derived"],
+                                parent_task_id=task.id,
+                                pipeline_depth=
+                                    task.pipeline_depth + 1,
+                                pipeline_root_id=root_id,
+                            )
+                            if new_task:
+                                result = {
+                                    "type": "ok",
+                                    "task_id": new_task.id}
+                            else:
+                                result = {
+                                    "type": "error",
+                                    "message":
+                                        "Failed to create ask task"}
+
                     else:
                         result = {"type": "error",
                                   "message":
                                       f"Unknown ai action: {action}"}
+
+            elif cmd == "task_chain":
+                tid = data.get("task_id", "")
+                task = state.board_tasks.get(tid)
+                if not task:
+                    result = {"type": "error",
+                              "message": "Task not found"}
+                else:
+                    chain = state.board_get_chain(tid)
+                    result = {
+                        "type": "ok",
+                        "root_id": task.pipeline_root_id or task.id,
+                        "chain": [
+                            {"id": t.id, "task": t.task,
+                             "lane": t.lane,
+                             "depth": t.pipeline_depth,
+                             "agent_id": t.agent_id,
+                             "template_name": t.template_name,
+                             "parent_task_id": t.parent_task_id,
+                             "labels": t.labels}
+                            for t in chain
+                        ],
+                    }
+
+            elif cmd == "discover_pipelines":
+                base_dir = await _resolve_base_dir(
+                    data.get("group", ""))
+                pipelines = template_mgr.discover_pipelines(base_dir)
+                result = {"type": "pipelines", "pipelines": pipelines}
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")

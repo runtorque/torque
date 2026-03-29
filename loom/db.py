@@ -227,6 +227,19 @@ class LoomDB:
                     f"ALTER TABLE board_tasks ADD COLUMN {col} "
                     f"TEXT NOT NULL DEFAULT {default}")
                 self._conn.commit()
+        # Migrate: add pipeline columns to board_tasks
+        for col, default in [("parent_task_id", "''"),
+                             ("pipeline_depth", "0"),
+                             ("pipeline_root_id", "''")]:
+            try:
+                self._conn.execute(
+                    f"SELECT {col} FROM board_tasks LIMIT 0")
+            except sqlite3.OperationalError:
+                col_type = "INTEGER" if col == "pipeline_depth" else "TEXT"
+                self._conn.execute(
+                    f"ALTER TABLE board_tasks ADD COLUMN {col} "
+                    f"{col_type} NOT NULL DEFAULT {default}")
+                self._conn.commit()
         # Set schema version if not present
         row = self._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
@@ -340,8 +353,9 @@ class LoomDB:
                 (id, task, slug, group_name, template_name, template_vars,
                  instructions, context, criteria,
                  lane, position, assignee, agent_id, labels, created_at,
-                 updated_at, provider, external_id, external_url)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 updated_at, provider, external_id, external_url,
+                 parent_task_id, pipeline_depth, pipeline_root_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d["slug"], group_name,
             d.get("template_name", ""), template_vars,
@@ -350,6 +364,8 @@ class LoomDB:
             d["assignee"], d["agent_id"], labels, d["created_at"],
             d["updated_at"], d["provider"], d["external_id"],
             d["external_url"],
+            d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
+            d.get("pipeline_root_id", ""),
         ))
         self._conn.commit()
 
@@ -477,8 +493,9 @@ class LoomDB:
                          template_vars, instructions, context,
                          criteria, lane, position, assignee, agent_id, labels,
                          created_at, updated_at, provider, external_id,
-                         external_url)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         external_url, parent_task_id, pipeline_depth,
+                         pipeline_root_id)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""), d.get("slug", ""),
                     group_name, d.get("template_name", ""), template_vars,
@@ -489,6 +506,8 @@ class LoomDB:
                     d.get("created_at", ""), d.get("updated_at", ""),
                     d.get("provider", ""), d.get("external_id", ""),
                     d.get("external_url", ""),
+                    d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
+                    d.get("pipeline_root_id", ""),
                 ))
 
             # UI state

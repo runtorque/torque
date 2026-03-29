@@ -213,6 +213,16 @@ function renderBoard() {
         + ' title="' + esc(t.external_url) + '">&#x1F517;</a>';
     }
     if (meta) html += '<div class="board-card-meta">' + meta + '</div>';
+    // Pipeline chain indicator
+    if (t.parent_task_id) {
+      var parentTask = (state.board_tasks || {})[t.parent_task_id];
+      var parentTitle = parentTask ? parentTask.task : '';
+      if (parentTitle && parentTitle.length > 40) parentTitle = parentTitle.substring(0, 40) + '…';
+      var chainInfo = '↳ depth ' + (t.pipeline_depth || 0);
+      if (parentTitle) chainInfo += ' · from: ' + esc(parentTitle);
+      if (t.labels && t.labels.indexOf('human') >= 0) chainInfo += ' · 👤';
+      html += '<div class="board-card-chain">' + chainInfo + '</div>';
+    }
     if (t.agent_id) {
       var aName = _boardAgentName(t.agent_id);
       if (aName) {
@@ -627,6 +637,11 @@ function boardCardMenu(evt, taskId) {
   // Preview prompt
   html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
 
+  // View pipeline (only if task is part of a chain)
+  if (task.parent_task_id || task.pipeline_root_id) {
+    html += '<button onclick="boardViewPipeline(\'' + taskId + '\')">View pipeline</button>';
+  }
+
   html += '<div class="ctx-sep"></div>';
   html += '<button class="danger" onclick="boardDeleteTask(\'' + taskId + '\')">Delete</button>';
 
@@ -927,6 +942,85 @@ function boardKeydown(e) {
   }
 
   return false;
+}
+
+/* ---- Pipeline thread view ------------------------------------------- */
+
+var _boardPipelineOverlay = false;
+
+function boardViewPipeline(taskId) {
+  _closeCtxMenu();
+  var tasks = _boardTasks();
+  var task = tasks[taskId];
+  if (!task) return;
+  var rootId = task.pipeline_root_id || task.id;
+
+  // Collect chain
+  var chain = [];
+  for (var id in tasks) {
+    var t = tasks[id];
+    if (t.pipeline_root_id === rootId || t.id === rootId) {
+      chain.push(t);
+    }
+  }
+  chain.sort(function(a, b) {
+    var dd = (a.pipeline_depth || 0) - (b.pipeline_depth || 0);
+    return dd !== 0 ? dd : (a.created_at || '').localeCompare(b.created_at || '');
+  });
+
+  if (chain.length <= 1) return;
+
+  var rootTask = tasks[rootId];
+  var rootTitle = rootTask ? rootTask.task : '';
+  if (rootTitle.length > 30) rootTitle = rootTitle.substring(0, 30) + '…';
+
+  var html = '<div class="pipeline-thread-header">'
+    + '<span class="pipeline-thread-title">Pipeline: ' + esc(rootTitle) + '</span>'
+    + '<button class="pipeline-thread-close" onclick="boardClosePipeline()">×</button>'
+    + '</div><div class="pipeline-thread-body">';
+
+  for (var i = 0; i < chain.length; i++) {
+    var t = chain[i];
+    var depth = t.pipeline_depth || 0;
+    var indent = depth * 16;
+    var icon;
+    if (t.lane === 'Done') icon = '<span class="pl-done">✓</span>';
+    else if (t.labels && t.labels.indexOf('error') >= 0) icon = '<span class="pl-error">✕</span>';
+    else if (t.lane === 'Backlog') icon = '<span class="pl-backlog">○</span>';
+    else icon = '<span class="pl-active">→</span>';
+
+    var human = (t.labels && t.labels.indexOf('human') >= 0) ? ' 👤' : '';
+    var cur = t.id === taskId ? ' pipeline-thread-current' : '';
+    var ttext = t.task || '';
+    if (ttext.length > 35) ttext = ttext.substring(0, 35) + '…';
+
+    html += '<div class="pipeline-thread-item' + cur + '"'
+      + ' style="padding-left:' + (8 + indent) + 'px"'
+      + ' onclick="boardFocusTask(\'' + t.id + '\');boardClosePipeline()">'
+      + icon + ' ' + esc(ttext) + human
+      + '<span class="pipeline-thread-lane">' + esc(t.lane) + '</span>'
+      + '</div>';
+  }
+
+  html += '</div>';
+
+  var overlay = document.getElementById('pipeline-thread-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'pipeline-thread-overlay';
+    overlay.className = 'pipeline-thread-overlay';
+    var panel = document.getElementById('panel-board');
+    if (panel) panel.appendChild(overlay);
+  }
+  overlay.innerHTML = html;
+  overlay.style.display = 'block';
+  _boardPipelineOverlay = true;
+}
+
+function boardClosePipeline() {
+  var overlay = document.getElementById('pipeline-thread-overlay');
+  if (overlay) overlay.style.display = 'none';
+  _boardPipelineOverlay = false;
 }
 
 /* ---- Close popover on outside click --------------------------------- */
