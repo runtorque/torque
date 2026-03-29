@@ -67,51 +67,6 @@ loom ai blocked "Design decision: should we use REST or GraphQL?"
 
 ---
 
-### `loom ai pr`
-
-Agent opened a pull request.
-
-```
-loom ai pr URL [--draft] [TASK]
-```
-
-**Effects:**
-- Stores URL in `external_url` on linked task
-- Adds label `pr:open` (or `pr:draft` if `--draft`) to task, removes stale `pr:*` labels
-- Sets agent `activity_detail = "PR opened: {url_short}"`
-- Triggers notification
-
-**Example:**
-```bash
-loom ai pr https://github.com/org/repo/pull/42
-loom ai pr https://github.com/org/repo/pull/42 --draft
-```
-
----
-
-### `loom ai merged`
-
-Agent merged or confirmed a PR was merged.
-
-```
-loom ai merged [URL] [TASK]
-```
-
-**Effects:**
-- Moves linked task to `Done` lane
-- If URL provided, stores/updates `external_url` on task
-- Replaces `pr:open`/`pr:draft` label with `pr:merged`
-- Clears agent activity fields
-- Triggers notification
-
-**Example:**
-```bash
-loom ai merged
-loom ai merged https://github.com/org/repo/pull/42
-```
-
----
-
 ### `loom ai error`
 
 Agent hit an unrecoverable error.
@@ -249,7 +204,7 @@ loom ai <subcommand> [args]
             context)              "ambiguous, specify TASK")
 ```
 
-For commands where a task is optional (`progress`, `context`), missing task is fine. For commands where a task is required (`done`, `merged`, `pr`), die if no task is linked.
+For commands where a task is optional (`progress`, `context`), missing task is fine. For commands where a task is required (`done`), die if no task is linked.
 
 The explicit `TASK` positional arg (slug or ID) is always accepted as an override for disambiguation.
 
@@ -263,11 +218,9 @@ A single server command handles all `loom ai` subcommands. The CLI translates ea
 {
   "cmd": "ai_report",
   "cell_id": "...",
-  "action": "done|blocked|pr|merged|error|progress|ready",
+  "action": "done|blocked|error|progress|ready|derive|ask",
   "message": "...",
-  "task_id": "...",
-  "url": "...",
-  "draft": false
+  "task_id": "..."
 }
 ```
 
@@ -306,8 +259,6 @@ All required state is already modeled:
 
 | Need | Existing field |
 |---|---|
-| PR URL | `BoardTask.external_url` |
-| PR status | `BoardTask.labels` (convention: `pr:open`, `pr:draft`, `pr:merged`) |
 | Agent blocked | `AgentCell.needs_attention` + `activity = "waiting"` |
 | Agent error | `AgentCell.error_message` + `needs_attention` |
 | Progress text | `AgentCell.activity_detail` |
@@ -318,19 +269,18 @@ All required state is already modeled:
 
 The `loom ai` commands use structured labels with `:` separators for machine-readable status:
 
-- `pr:open` — PR opened, awaiting review
-- `pr:draft` — draft PR
-- `pr:merged` — PR merged
 - `blocked` — agent waiting for user input
 - `error` — agent encountered an error
+- `derived` — task was created by `loom ai derive`
+- `human` — task needs human review (from `loom ai ask`)
+- `depth-limit` — pipeline depth limit reached
 
-These are additive (don't remove user-set labels) but exclusive within prefix (e.g. setting `pr:merged` removes `pr:open`).
+These are additive (don't remove user-set labels).
 
 ## Webview changes
 
 ### Task card enhancements
 
-- **PR badge**: If task has `external_url` and a `pr:*` label, show a small link icon on the card. Clicking opens the URL in the default browser (via `window.open()`).
 - **Blocked indicator**: If task has `blocked` label, show a yellow warning icon on the card.
 - **Error indicator**: If task has `error` label, show a red icon on the card.
 
@@ -351,25 +301,28 @@ prompt += f"\n\nWhen you are done, run `loom task move {task_ref} Done` to mark 
 
 With a richer instruction block:
 
-```python
-prompt += f"""
+The postscript is now dynamic — it only shows commands relevant to the action:
 
-When reporting progress, use these commands:
-- `loom ai done` — when the task is complete
-- `loom ai pr URL` — when you open a pull request
-- `loom ai merged` — when a PR is merged
-- `loom ai blocked "reason"` — when you need user input
-- `loom ai error "message"` — when you hit an unrecoverable error
-- `loom ai progress "message"` — to report what you're working on
-"""
+- `done`, `blocked`, and `error` are always included
+- `derive` only appears when the action declares `transitions`
+- `ask` only appears when an `ask` transition exists
+
+For an action with no transitions (e.g. `oneshot/feature`), the postscript is:
+```
+Report your progress with these commands:
+- `loom ai done` — task complete, no follow-up needed
+- `loom ai blocked "reason"` — need user input
+- `loom ai error "message"` — unrecoverable error
 ```
 
-This could also be:
-- A configurable template variable (`{{ LOOM_INSTRUCTIONS }}` auto-injected)
-- A group setting toggle (`dispatch_include_ai_instructions: true`)
-- Appended only when the agent type supports CLI (has shell access)
-
-**Recommendation:** Keep it as a hardcoded postscript initially (simple), make it configurable in a follow-up.
+For a pipeline action like `feature/implement` (transitions to `feature/review`):
+```
+Report your progress with these commands:
+- `loom ai done` — task complete, no follow-up needed
+- `loom ai derive "description" -t feature/review` — implementation is complete and ready for review
+- `loom ai blocked "reason"` — need user input
+- `loom ai error "message"` — unrecoverable error
+```
 
 ## CLI implementation
 
@@ -457,37 +410,6 @@ def cmd_ai_blocked(args):
     print(f"Blocked: {args.reason}")
 
 
-def cmd_ai_pr(args):
-    cell, task = _resolve_self_and_task(args)
-    kwargs = {
-        "cell_id": cell["id"],
-        "action": "pr",
-        "url": args.url,
-    }
-    if task:
-        kwargs["task_id"] = task["id"]
-    if args.draft:
-        kwargs["draft"] = True
-    resp = api_call("ai_report", port=args.port, **kwargs)
-    check_ok(resp)
-    print(f"PR recorded: {args.url}")
-
-
-def cmd_ai_merged(args):
-    cell, task = _resolve_self_and_task(args)
-    kwargs = {
-        "cell_id": cell["id"],
-        "action": "merged",
-    }
-    if task:
-        kwargs["task_id"] = task["id"]
-    if args.url:
-        kwargs["url"] = args.url
-    resp = api_call("ai_report", port=args.port, **kwargs)
-    check_ok(resp)
-    print("Merged")
-
-
 def cmd_ai_error(args):
     cell, task = _resolve_self_and_task(args, require_task=False)
     kwargs = {
@@ -572,18 +494,6 @@ p.add_argument("reason", help="Why the agent is blocked")
 p.add_argument("task_ref", nargs="?", help="Task slug/ID (auto-detected)")
 p.set_defaults(func=cmd_ai_blocked)
 
-p = ai_sub.add_parser("pr", help="Report a pull request opened")
-p.add_argument("url", help="Pull request URL")
-p.add_argument("--draft", action="store_true", help="Mark as draft PR")
-p.add_argument("task_ref", nargs="?", help="Task slug/ID (auto-detected)")
-p.set_defaults(func=cmd_ai_pr)
-
-p = ai_sub.add_parser("merged", help="Report PR merged")
-p.add_argument("url", nargs="?", help="Pull request URL")
-p.add_argument("task_ref", nargs="?", dest="task_ref",
-               help="Task slug/ID (auto-detected)")
-p.set_defaults(func=cmd_ai_merged)
-
 p = ai_sub.add_parser("error", help="Report an unrecoverable error")
 p.add_argument("message", help="Error description")
 p.add_argument("task_ref", nargs="?", help="Task slug/ID (auto-detected)")
@@ -645,29 +555,6 @@ elif cmd == "ai_report":
             state._emit_task(task)
             state._db_save_task(task)
 
-    elif action == "pr":
-        cell.activity_detail = f"PR opened"
-        state._emit_agent(cell)
-
-        if task:
-            task.external_url = url
-            _replace_prefix_label(task, "pr:", "pr:draft" if is_draft else "pr:open")
-            state._emit_task(task)
-            state._db_save_task(task)
-
-    elif action == "merged":
-        cell.activity = ""
-        cell.activity_detail = ""
-        cell.needs_attention = False
-        cell.error_message = ""
-        state._emit_agent(cell)
-
-        if task:
-            if url:
-                task.external_url = url
-            _replace_prefix_label(task, "pr:", "pr:merged")
-            state.move_task(task.id, "Done")
-
     elif action == "error":
         cell.error_message = message
         cell.needs_attention = True
@@ -711,9 +598,6 @@ def _add_label(task, label):
 def _remove_label(task, label):
     task.labels = [l for l in task.labels if l != label]
 
-def _replace_prefix_label(task, prefix, new_label):
-    task.labels = [l for l in task.labels if not l.startswith(prefix)]
-    task.labels.append(new_label)
 ```
 
 ## Implementation order
@@ -726,11 +610,10 @@ def _replace_prefix_label(task, prefix, new_label):
 4. **Update dispatch postscript** — replace `loom task move` with `loom ai` instructions
 5. **Label helpers** in `server.py`
 
-### Phase 2 — PR tracking
+### Phase 2 — Pipeline commands
 
-6. **CLI subcommands**: `pr`, `merged`
-7. **Task card PR badge** in `board.js` — clickable link icon for `external_url`
-8. **Label-based indicators** in `board.js` — visual badges for `pr:*`, `blocked`, `error` labels
+6. **CLI subcommands**: `derive`, `ask`
+7. **Label-based indicators** in `board.js` — visual badges for `blocked`, `error` labels
 
 ### Phase 3 — Ready + auto-dispatch
 

@@ -48,33 +48,39 @@ Actions stay in the CLI layer. The server is unaware of them — it just receive
 
 ## Action Format
 
-Actions live in `.loom/actions/` relative to the git repo root (same convention as `.loom/worktrees/`). Each action is a YAML file.
+Actions live in `.loom/actions/` relative to the git repo root (version-controlled — only `.loom/worktrees/` is gitignored). Each action is a YAML file. Actions support **subdirectory namespaces**: `oneshot/feature.yaml` → action name `oneshot/feature`.
 
 ```yaml
-name: fix
-description: Diagnose and fix a bug
+name: feature/implement
+description: Implement a feature in an isolated worktree
 
 agent:
-  name_prefix: fix
-  tab_color: "#f85149"
+  name_prefix: impl
+  tab_color: "#3fb950"
 
 worktree: true
-labels:
-  - bugfix
 
-task: |
+labels:
+  - feature
+
+transitions:
+  - action: feature/review
+    when: implementation is complete and ready for review
+
+prompt: |
+  You are implementing a feature in an isolated worktree branch. Your work will be reviewed by a separate agent when you're done, so focus on getting the implementation right — not on self-review.
+
+  ## Task
+
   {{ TASK }}
 
-instructions: |
-  1. Reproduce the bug — confirm you can see the failure before changing anything.
-  2. Identify the root cause.
-  3. Write a test that fails without the fix and passes with it.
-  4. Apply the minimal fix.
+  ## Approach
 
-criteria: |
-  - The bug no longer reproduces
-  - A regression test exists for this case
-  - Tests pass: `{{ TEST_COMMAND | default('npm test') }}`
+  - Read the relevant code first to understand the existing patterns and architecture
+  - Write clean, minimal code — no speculative abstractions or premature generalization
+  - Add or update tests to cover the new behavior
+  - Run the test suite to make sure nothing is broken
+  - Keep the diff focused — no unrelated changes
 ```
 
 ### Field reference
@@ -91,12 +97,11 @@ criteria: |
 | `agent.tab_color` | string | Hex color override |
 | `agent.env_vars` | dict | Additional env vars (merged on top of group defaults) |
 | `worktree` | bool | Create a git worktree for this agent (overrides group setting) |
-| `task` | string | Task description template (Jinja2). Replaces old `prompt` field. |
+| `prompt` | string | Unified prompt template (Jinja2). Must contain `{{ TASK }}`. |
 | `group` | string | Target group override. Empty = use CLI/UI group. |
-| `instructions` | string | Agent instructions template (Jinja2). Optional. |
-| `context` | string | Additional context template (Jinja2). Optional. |
-| `criteria` | string | Acceptance criteria template (Jinja2). Optional. |
 | `labels` | list | Labels for orchestration tagging. Optional. |
+| `transitions` | list | Valid next steps: `{action: name, when: desc}` or `{ask: true, when: desc}` |
+| `max_depth` | int | Max pipeline derivation depth. Optional. |
 | `terminals` | list | Child terminals to create alongside the agent |
 | `terminals[].name` | string | Terminal name |
 | `terminals[].command` | string | Boot command for the terminal |
@@ -111,11 +116,11 @@ An empty string in an action field means "fall through to group settings." This 
 
 ### Variable interpolation
 
-All text fields (`task`, `instructions`, `context`, `criteria`, agent name, directory, etc.) are rendered through Jinja2 with the provided variables. Variables are auto-discovered from the AST — no explicit declaration needed. Default values are extracted from `| default()` filters.
+Only the `prompt` field is rendered through Jinja2 with the provided variables. Variables are auto-discovered from the AST — no explicit declaration needed. Default values are extracted from `| default()` filters. All other fields are plain YAML.
 
 The `TASK` variable is always the task description passed to `loom task dispatch`. Custom variables are passed via `-v KEY=VALUE`.
 
-Legacy `${VAR}` syntax is automatically migrated to `{{ VAR }}`.
+Legacy `${VAR}` syntax is automatically migrated to `{{ VAR }}`. Old-format actions with `task:`+`instructions:`+`context:`+`criteria:` are auto-coalesced into a single `prompt` on load.
 
 ---
 
@@ -238,7 +243,12 @@ Sequence:
 
 **Files**: `actions/` directory in the repo (shipped as examples, not auto-installed)
 
-Three starter actions in YAML format: `default.yaml`, `bugfix.yaml`, `review.yaml`.
+Five starter actions in subdirectory namespaces:
+- `oneshot/feature.yaml` — quick feature, no pipeline
+- `oneshot/fix.yaml` — quick bugfix, no pipeline
+- `feature/implement.yaml` — implement feature in worktree (→ review)
+- `feature/review.yaml` — code review (→ fix-review or ask human)
+- `feature/fix-review.yaml` — fix review issues (→ review)
 
 Users copy these into their project's `.loom/actions/` and customize.
 
@@ -269,7 +279,7 @@ A short additional delay (~1s) after boot detection ensures the shell and boot c
 
 - **Action inheritance** — Actions are flat. No `extends: base-action` chains.
 - **Conditional logic in actions** — Jinja2 variables and filters only. No `{% if %}` blocks. Use separate actions for different scenarios.
-- **Pipeline composition** — Multi-step agent chains are shell scripts, not a Loom concept. `loom task dispatch --wait && loom task dispatch --wait` is a pipeline.
+- **Pipeline composition** — Now supported via `transitions` in actions and `loom ai derive`. Actions can declare valid next steps, forming pipelines (e.g. implement → review ↔ fix-review).
 - **Retry / fallback** — Deferred. Retry is `loom task dispatch --wait || loom task dispatch --wait` in a shell script for now.
 - **Auto-assignment** — Agents don't yet automatically pick up tickets matching their assignee prefix. Manual assignment or explicit dispatch required.
 
@@ -285,5 +295,6 @@ A short additional delay (~1s) after boot detection ensures the shell and boot c
 | `static/js/modals.js` | Task create/edit modal, `openTaskFromAction` → `render_action` → pre-fill flow |
 | `static/js/board.js` | "+ Add task" dropdown with "New task" and "From action" options |
 | `static/js/actions.js` | **New** — Actions panel app (dropdown with Project/User optgroups, structured form editor, Jinja2 syntax highlighting, save/duplicate/delete, scope picker) |
-| `actions/*.yaml` | Seven starter actions: implement, fix, review, investigate, test, refactor, migrate |
+| `actions/oneshot/*.yaml` | Two standalone actions: feature, fix |
+| `actions/feature/*.yaml` | Three pipeline actions: implement, review, fix-review |
 | `docs/roadmap.md` | Update Phase 4 and Phase 5 status |
