@@ -1228,7 +1228,8 @@ async def main(connection: iterm2.Connection):
                             base_dir = ""
                             if task.action_name \
                                     and not data.get("force_no_action"):
-                                base_dir = await _resolve_base_dir(group)
+                                base_dir = cell.directory \
+                                    or await _resolve_base_dir(group)
                                 tvars = {"TASK": task.task,
                                          **(task.action_vars or {})}
                                 rendered = action_mgr.render_prompt(

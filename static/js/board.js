@@ -64,6 +64,12 @@ function renderBoard() {
   var panel = document.getElementById('panel-board');
   if (!panel) return;
 
+  // Preserve in-progress draft before DOM rebuild
+  if (_boardAddingTask) {
+    var _inp = document.getElementById('board-add-task-input');
+    if (_inp) _boardAddingTaskDraft = _inp.value;
+  }
+
   var lanes = _boardLanes();
   if (!lanes.length) {
     panel.innerHTML = '<div class="board-empty">No lanes configured</div>';
