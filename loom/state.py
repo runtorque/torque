@@ -78,6 +78,8 @@ class AgentCell:
     error_message: str = ""  # last error, cleared on next successful event
     needs_attention: bool = False  # agent waiting for input or stuck
     last_summary: str = ""  # last assistant message on Stop (for checkpoint msgs)
+    # Context preservation (dispatch history)
+    tasks_dispatched: int = 0  # number of tasks sent to this agent (persisted)
     # Worktree status (Phase 2, ephemeral)
     worktree_dirty: bool = False  # has uncommitted changes
     worktree_diff: dict = field(default_factory=dict)  # {files, insertions, deletions}

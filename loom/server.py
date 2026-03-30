@@ -266,9 +266,43 @@ async def main(connection: iterm2.Connection):
             pass
         return ""
 
+    def _resolve_agent_id(identifier: str) -> str | None:
+        """Resolve an agent by slug, name (case-insensitive), ID, or prefix.
+
+        Returns the agent ID or None if not found.  Only matches
+        top-level agents (cell_type == 'agent'), not terminals.
+        """
+        if not identifier:
+            return None
+        # Exact ID
+        if identifier in state.agents:
+            c = state.agents[identifier]
+            if c.cell_type == "agent":
+                return c.id
+        # Slug match
+        ident_lower = identifier.lower()
+        for c in state.agents.values():
+            if c.cell_type != "agent":
+                continue
+            if c.slug and c.slug == identifier:
+                return c.id
+        # Name match (case-insensitive)
+        for c in state.agents.values():
+            if c.cell_type != "agent":
+                continue
+            if c.name.lower() == ident_lower:
+                return c.id
+        # ID prefix match
+        for c in state.agents.values():
+            if c.cell_type != "agent":
+                continue
+            if c.id.startswith(identifier):
+                return c.id
+        return None
+
     # -- Postscript builder -------------------------------------------------
 
-    def _build_postscript(task, amgr, base_dir=""):
+    def _build_postscript(task, amgr, base_dir="", is_clean=True):
         """Build the loom-ai instruction block appended to dispatch prompts.
 
         Only shows commands relevant to the action's transitions.
@@ -276,7 +310,13 @@ async def main(connection: iterm2.Connection):
         ``derive`` only appears when the action declares transitions.
         ``ask`` only appears when an ``ask`` transition exists.
         ``pr``/``merged`` are omitted (reserved for future PR actions).
+
+        When ``is_clean`` is False (agent already has context from prior
+        tasks), emits a one-liner reminder instead of the full reference.
         """
+        if not is_clean:
+            return ("\n\n---\nUse `loom ai done` when finished, "
+                    "or `loom ai blocked \"reason\"` if stuck.")
         lines = [
             "\n\nReport your progress with these commands:",
             "- `loom ai done` — task complete, no follow-up needed",
@@ -327,6 +367,82 @@ async def main(connection: iterm2.Connection):
             lines.append(ctx)
 
         return "\n".join(lines)
+
+    # -- Loom context builder -----------------------------------------------
+
+    def _build_loom_context(cell, task):
+        """Build the ``loom`` namespace dict for Jinja2 template rendering.
+
+        Provides agent identity, dispatch history, worktree state, task
+        metadata, and child terminal info — all derived from existing
+        state at render time.
+        """
+        # Agent identity
+        agent_ctx = {
+            "name": cell.name,
+            "slug": cell.slug,
+            "type": cell.agent_type,
+            "group": cell.group,
+            "directory": cell.directory,
+        }
+
+        # Dispatch history
+        linked = sorted(
+            (t for t in state.board_tasks.values()
+             if t.agent_id == cell.id and t.id != task.id),
+            key=lambda t: t.created_at,
+        )
+        context_ctx = {
+            "is_clean": cell.tasks_dispatched == 0,
+            "tasks_dispatched": cell.tasks_dispatched,
+            "previous_tasks": [
+                {"task": t.task, "lane": t.lane, "action": t.action_name}
+                for t in linked
+            ],
+        }
+
+        # Worktree state
+        worktree_ctx = {
+            "active": bool(cell.worktree_path),
+            "path": cell.worktree_path,
+            "branch": cell.worktree_branch,
+            "base_branch": cell.worktree_base_branch,
+            "dirty": cell.worktree_dirty,
+            "diff": cell.worktree_diff or {},
+            "checkpoints": cell.worktree_checkpoints,
+        }
+
+        # Current task metadata
+        task_ctx = {
+            "id": task.id,
+            "slug": task.slug,
+            "depth": task.pipeline_depth,
+            "is_derived": bool(task.parent_task_id),
+            "parent_task_id": task.parent_task_id,
+            "labels": list(task.labels),
+            "group": task.group,
+        }
+
+        # Child terminals of the target agent
+        terminals_ctx = []
+        for cid in state._children.get(cell.id, []):
+            ch = state.agents.get(cid)
+            if ch:
+                terminals_ctx.append({
+                    "name": ch.name,
+                    "slug": ch.slug,
+                    "current_path": ch.current_path,
+                    "current_process": ch.current_process,
+                    "current_branch": ch.current_branch,
+                })
+
+        return {
+            "agent": agent_ctx,
+            "context": context_ctx,
+            "worktree": worktree_ctx,
+            "task": task_ctx,
+            "terminals": terminals_ctx,
+        }
 
     # -- Command handler ----------------------------------------------------
 
@@ -478,6 +594,13 @@ async def main(connection: iterm2.Connection):
             if not action_mgr.validate_prompt(prompt):
                 return {"type": "error",
                         "message": "Action prompt must contain {{ TASK }}"}
+            # Reject 'loom' as a variable name (reserved namespace)
+            avars = action_mgr.get_action_vars(prompt)
+            for av in avars:
+                if av.get("name") == "loom":
+                    return {"type": "error",
+                            "message": "'loom' is a reserved variable "
+                                       "name"}
             scope = data.get("scope", "project")  # "project" or "user"
             base_dir = await _resolve_base_dir(data.get("group", ""))
 
@@ -1256,6 +1379,9 @@ async def main(connection: iterm2.Connection):
                                 tid, agent_id=cell.id,
                                 lane=dispatch_lane)
 
+                            # Build loom context for template rendering
+                            loom_ctx = _build_loom_context(cell, task)
+
                             # Compose prompt: action-aware
                             prompt = None
                             base_dir = ""
@@ -1267,7 +1393,8 @@ async def main(connection: iterm2.Connection):
                                          **(task.action_vars or {})}
                                 rendered = action_mgr.render_prompt(
                                     task.action_name, tvars,
-                                    base_dir=base_dir)
+                                    base_dir=base_dir,
+                                    loom_context=loom_ctx)
                                 if rendered is None:
                                     # Action deleted — warn frontend
                                     result = {
@@ -1296,19 +1423,47 @@ async def main(connection: iterm2.Connection):
                                 prompt = task.task
 
                             if prompt:
+                                is_clean = loom_ctx["context"]["is_clean"]
                                 prompt += _build_postscript(
                                     task, action_mgr,
                                     base_dir if task.action_name
-                                    else "")
+                                    else "",
+                                    is_clean=is_clean)
+
+                                # Track dispatch count
+                                cell.tasks_dispatched += 1
+                                state._emit_agent(cell)
+                                state._db_save_agent(cell)
 
                                 if agent_id and cell.session_id:
-                                    # Existing agent — send immediately
-                                    await bridge.send_text(
-                                        cell.session_id,
-                                        prompt if prompt.endswith("\r")
-                                        else prompt + "\r")
-                                    cell.status = "running"
-                                    state._emit_agent(cell)
+                                    delay = 3 if data.get(
+                                        "_self_dispatch") else 0
+                                    if delay:
+                                        # Self-dispatch: delay so
+                                        # prompt arrives after current
+                                        # agent turn finishes
+                                        async def _delayed(c, p, d):
+                                            await asyncio.sleep(d)
+                                            if c.session_id:
+                                                await bridge.send_text(
+                                                    c.session_id,
+                                                    p if p.endswith("\r")
+                                                    else p + "\r")
+                                                c.status = "running"
+                                                state._emit_agent(c)
+                                                await state.broadcast()
+                                        asyncio.create_task(
+                                            _delayed(cell, prompt,
+                                                     delay))
+                                    else:
+                                        # Existing agent — send now
+                                        await bridge.send_text(
+                                            cell.session_id,
+                                            prompt
+                                            if prompt.endswith("\r")
+                                            else prompt + "\r")
+                                        cell.status = "running"
+                                        state._emit_agent(cell)
                                 elif data.get("create_agent") \
                                         and cell.session_id:
                                     # New agent — wait for boot
@@ -1471,6 +1626,8 @@ async def main(connection: iterm2.Connection):
                         act_name = data.get("action", "")
                         act_vars = data.get("action_vars", {})
                         derive_group = data.get("group", "")
+                        reuse_self = data.get("reuse_self", False)
+                        target_agent = data.get("target_agent", "")
 
                         if not task:
                             result = {"type": "error",
@@ -1552,28 +1709,89 @@ async def main(connection: iterm2.Connection):
                                         pipeline_root_id=root_id,
                                     )
                                     if new_task:
-                                        # Dispatch — reuse
-                                        # dispatch_task logic via
-                                        # handle_command
-                                        dispatch_data = {
-                                            "cmd": "dispatch_task",
-                                            "id": new_task.id,
-                                            "create_agent": True,
-                                        }
-                                        # Inherit worktree from
-                                        # parent agent
-                                        if cell.worktree_path:
-                                            dispatch_data[
-                                                "inherit_worktree_from"
-                                            ] = cell.id
-                                        await state.broadcast()
-                                        dr = await handle_command(
-                                            dispatch_data)
-                                        result = {
-                                            "type": "ok",
-                                            "task_id": new_task.id,
-                                            "agent_id":
-                                                new_task.agent_id}
+                                        # Determine dispatch target
+                                        target_id = None
+                                        if reuse_self:
+                                            target_id = cell.id
+                                        elif target_agent:
+                                            target_id = \
+                                                _resolve_agent_id(
+                                                    target_agent)
+                                            if not target_id:
+                                                result = {
+                                                    "type": "error",
+                                                    "message":
+                                                        "Agent not "
+                                                        "found: "
+                                                        + target_agent
+                                                }
+
+                                        if result and \
+                                                result.get("type") \
+                                                == "error":
+                                            pass  # skip dispatch
+                                        elif target_id:
+                                            # Dispatch to existing
+                                            # agent
+                                            tgt = state.agents.get(
+                                                target_id)
+                                            dispatch_data = {
+                                                "cmd": "dispatch_task",
+                                                "id": new_task.id,
+                                                "agent_id": target_id,
+                                            }
+                                            if reuse_self:
+                                                dispatch_data[
+                                                    "_self_dispatch"
+                                                ] = True
+                                            # Inherit worktree from
+                                            # target agent
+                                            if tgt and \
+                                                    tgt.worktree_path:
+                                                dispatch_data[
+                                                    "inherit_worktree"
+                                                    "_from"
+                                                ] = target_id
+                                            elif cell.worktree_path:
+                                                dispatch_data[
+                                                    "inherit_worktree"
+                                                    "_from"
+                                                ] = cell.id
+                                            await state.broadcast()
+                                            dr = \
+                                                await handle_command(
+                                                    dispatch_data)
+                                            result = {
+                                                "type": "ok",
+                                                "task_id":
+                                                    new_task.id,
+                                                "agent_id":
+                                                    target_id}
+                                        else:
+                                            # Default: new agent
+                                            dispatch_data = {
+                                                "cmd":
+                                                    "dispatch_task",
+                                                "id": new_task.id,
+                                                "create_agent": True,
+                                            }
+                                            # Inherit worktree from
+                                            # parent agent
+                                            if cell.worktree_path:
+                                                dispatch_data[
+                                                    "inherit_worktree"
+                                                    "_from"
+                                                ] = cell.id
+                                            await state.broadcast()
+                                            dr = \
+                                                await handle_command(
+                                                    dispatch_data)
+                                            result = {
+                                                "type": "ok",
+                                                "task_id":
+                                                    new_task.id,
+                                                "agent_id":
+                                                    new_task.agent_id}
                                     else:
                                         result = {
                                             "type": "error",

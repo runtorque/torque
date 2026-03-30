@@ -165,6 +165,19 @@ def _migrate_syntax(text):
     return re.sub(r'\$\{(\w+)\}', r'{{ \1 }}', text)
 
 
+# Stub loom context for preview renders (no real agent/task).
+# Templates referencing loom.* get safe defaults instead of StrictUndefined errors.
+LOOM_CONTEXT_STUB = {
+    "agent":     {"name": "", "slug": "", "type": "", "group": "", "directory": ""},
+    "context":   {"is_clean": True, "tasks_dispatched": 0, "previous_tasks": []},
+    "worktree":  {"active": False, "path": "", "branch": "", "base_branch": "",
+                  "dirty": False, "diff": {}, "checkpoints": 0},
+    "task":      {"id": "", "slug": "", "depth": 0, "is_derived": False,
+                  "parent_task_id": "", "labels": [], "group": ""},
+    "terminals": [],
+}
+
+
 class ActionManager:
 
     def __init__(self):
@@ -207,11 +220,15 @@ class ActionManager:
         return bool(re.search(r'\{\{\s*TASK\s*(\|[^}]*)?\}\}', prompt))
 
     def render_prompt(self, name: str, variables: dict,
-                      base_dir: str = "") -> str | None:
+                      base_dir: str = "",
+                      loom_context: dict | None = None) -> str | None:
         """Render only the action's prompt field with variables.
 
         Returns the rendered prompt string, or None if the action is
         not found.  Used by dispatch and preview.
+
+        ``loom_context`` is injected as the ``loom`` namespace so
+        templates can branch on agent state (e.g. ``loom.context.is_clean``).
         """
         raw = self._load_raw(name, base_dir)
         if raw is None:
@@ -227,7 +244,9 @@ class ActionManager:
             return None
 
         prompt_raw = _migrate_syntax(prompt_raw)
-        return self._render_str(prompt_raw, variables)
+        render_vars = dict(variables)
+        render_vars["loom"] = loom_context or LOOM_CONTEXT_STUB
+        return self._render_str(prompt_raw, render_vars)
 
     @staticmethod
     def find_actions_dirs(base_dir: str = "") -> list[str]:
@@ -383,6 +402,8 @@ class ActionManager:
             discovered = set(re.findall(r'\{\{\s*(\w+)\s*', raw))
 
         # Build result: TASK first, then others alphabetically
+        # Filter out 'loom' — it's a reserved namespace injected at render time
+        discovered.discard("loom")
         result = []
         ordered = sorted(discovered - {"TASK"})
         if "TASK" in discovered:
@@ -398,7 +419,8 @@ class ActionManager:
         return result
 
     def render_action(self, act_or_name, variables: dict,
-                      base_dir: str = "") -> dict:
+                      base_dir: str = "",
+                      loom_context: dict | None = None) -> dict:
         """Parse the action YAML, render only the prompt through Jinja2.
 
         Returns a flat dict with resolved agent settings:
@@ -433,7 +455,9 @@ class ActionManager:
         prompt_raw = self._coalesce_prompt(act)
         if prompt_raw:
             prompt_raw = _migrate_syntax(prompt_raw)
-            prompt = self._render_str(prompt_raw, variables)
+            render_vars = dict(variables)
+            render_vars["loom"] = loom_context or LOOM_CONTEXT_STUB
+            prompt = self._render_str(prompt_raw, render_vars)
         else:
             prompt = ""
 

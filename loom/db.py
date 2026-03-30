@@ -28,6 +28,7 @@ _AGENT_PERSISTED_COLS = [
     "command", "directory", "tab_color", "icon", "window_id", "parent_id",
     "status", "worktree_path", "worktree_branch", "worktree_repo_root",
     "worktree_base_branch", "agent_type", "agent_session_id",
+    "tasks_dispatched",
 ]
 
 # GroupSettings fields that store dicts — persisted as JSON text.
@@ -240,6 +241,15 @@ class LoomDB:
                     f"ALTER TABLE board_tasks ADD COLUMN {col} "
                     f"{col_type} NOT NULL DEFAULT {default}")
                 self._conn.commit()
+        # Migrate: add tasks_dispatched column to agents
+        try:
+            self._conn.execute(
+                "SELECT tasks_dispatched FROM agents LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE agents ADD COLUMN "
+                "tasks_dispatched INTEGER NOT NULL DEFAULT 0")
+            self._conn.commit()
         # Set schema version if not present
         row = self._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
@@ -264,8 +274,9 @@ class LoomDB:
                 (id, name, slug, group_name, cell_type, session_id, profile,
                  command, directory, tab_color, icon, window_id, parent_id,
                  status, worktree_path, worktree_branch, worktree_repo_root,
-                 worktree_base_branch, agent_type, agent_session_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 worktree_base_branch, agent_type, agent_session_id,
+                 tasks_dispatched)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             cell.id, cell.name, cell.slug, cell.group, cell.cell_type,
             cell.session_id, cell.profile, cell.command, cell.directory,
@@ -273,6 +284,7 @@ class LoomDB:
             cell.status, cell.worktree_path, cell.worktree_branch,
             cell.worktree_repo_root, cell.worktree_base_branch,
             cell.agent_type, cell.agent_session_id,
+            cell.tasks_dispatched,
         ))
         self._conn.commit()
 
@@ -414,8 +426,9 @@ class LoomDB:
                          profile, command, directory, tab_color, icon,
                          window_id, parent_id, status, worktree_path,
                          worktree_branch, worktree_repo_root,
-                         worktree_base_branch, agent_type, agent_session_id)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         worktree_base_branch, agent_type, agent_session_id,
+                         tasks_dispatched)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     a.get("id", aid),
                     a.get("name", ""),
@@ -437,6 +450,7 @@ class LoomDB:
                     a.get("worktree_base_branch", ""),
                     a.get("agent_type", ""),
                     a.get("agent_session_id", ""),
+                    a.get("tasks_dispatched", 0),
                 ))
 
             # Groups + members
