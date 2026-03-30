@@ -467,6 +467,7 @@ async def main(connection: iterm2.Connection):
                     parent_agent_slug = pa.slug or pa.name
         task_ctx = {
             "id": task.id,
+            "title": task.task,
             "slug": task.slug,
             "description": task.description,
             "depth": task.pipeline_depth,

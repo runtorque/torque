@@ -540,7 +540,7 @@ function _tplEditorSaveInner() {
   var prompt = document.getElementById('tpled-prompt').value || '';
 
   // Validate {{ TASK }} is present
-  if (!/\{\{\s*TASK\s*(\|[^}]*)?\}\}/.test(prompt)) {
+  if (!/\{\{\s*TASK\s*(\|[^}]*)?\}\}/.test(prompt) && !/\{\{\s*loom\.task\.title\s*(\|[^}]*)?\}\}/.test(prompt)) {
     var promptEl = document.getElementById('tpled-prompt');
     if (promptEl) { promptEl.focus(); promptEl.classList.add('input-error'); }
     _showToast('Prompt must contain {{ TASK }}', 'error');

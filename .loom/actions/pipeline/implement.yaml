@@ -18,7 +18,7 @@ prompt: |
 
   ## Task
 
-  {{ TASK }}
+  {{ loom.task.title }}
 
   {% if loom.task.description %}
   ## Context

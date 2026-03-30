@@ -194,7 +194,7 @@ LOOM_CONTEXT_STUB = {
     "context":   {"is_clean": True, "tasks_dispatched": 0, "previous_tasks": []},
     "worktree":  {"active": False, "path": "", "branch": "", "base_branch": "",
                   "dirty": False, "diff": {}, "checkpoints": 0},
-    "task":      {"id": "", "slug": "", "description": "",
+    "task":      {"id": "", "title": "", "slug": "", "description": "",
                   "depth": 0, "is_derived": False,
                   "parent_task_id": "", "parent_agent_slug": "",
                   "labels": [], "group": "", "status": ""},
@@ -240,8 +240,12 @@ class ActionManager:
 
     @staticmethod
     def validate_prompt(prompt: str) -> bool:
-        """Check that the prompt contains ``{{ TASK }}``."""
-        return bool(re.search(r'\{\{\s*TASK\s*(\|[^}]*)?\}\}', prompt))
+        """Check that the prompt contains ``{{ TASK }}`` or
+        ``{{ loom.task.title }}``."""
+        return bool(
+            re.search(r'\{\{\s*TASK\s*(\|[^}]*)?\}\}', prompt)
+            or re.search(r'\{\{\s*loom\.task\.title\s*(\|[^}]*)?\}\}',
+                         prompt))
 
     def render_prompt(self, name: str, variables: dict,
                       base_dir: str = "",

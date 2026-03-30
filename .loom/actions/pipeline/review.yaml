@@ -19,7 +19,7 @@ prompt: |
 
   ## What was implemented
 
-  {{ TASK }}
+  {{ loom.task.title }}
 
   {% if loom.task.description %}
   ## Context
