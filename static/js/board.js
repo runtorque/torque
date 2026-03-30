@@ -688,14 +688,17 @@ function boardCardMenu(evt, taskId) {
   var menu = document.getElementById('ctx-menu');
   var lanes = _boardLanes();
 
+  var isDerived = !!task.parent_task_id;
   var html = '';
   html += '<button onclick="event.stopPropagation();boardEditTask(\'' + taskId + '\')">Edit</button>';
 
-  // Move to lane submenu
-  for (var i = 0; i < lanes.length; i++) {
-    if (lanes[i] !== task.lane) {
-      html += '<button onclick="boardMoveTaskToLane(\'' + taskId + '\',\''
-        + esc(lanes[i]).replace(/'/g, "\\'") + '\')">Move to ' + esc(lanes[i]) + '</button>';
+  // Move to lane — only for non-derived tasks (pipeline manages derived tasks)
+  if (!isDerived) {
+    for (var i = 0; i < lanes.length; i++) {
+      if (lanes[i] !== task.lane) {
+        html += '<button onclick="boardMoveTaskToLane(\'' + taskId + '\',\''
+          + esc(lanes[i]).replace(/'/g, "\\'") + '\')">Move to ' + esc(lanes[i]) + '</button>';
+      }
     }
   }
 
