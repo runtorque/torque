@@ -63,8 +63,17 @@ def _yaml_parse_block(lines, idx, base_indent):
         if indent < base_indent:
             break
         if stripped.startswith("- "):
-            lst, idx = _yaml_parse_list(lines, idx, indent)
-            return lst, idx
+            # Only treat as top-level list if we haven't parsed any
+            # keys yet — otherwise this is a bug (list at same indent
+            # as parent keys, which PyYAML produces for list values).
+            if not result:
+                lst, idx = _yaml_parse_list(lines, idx, indent)
+                return lst, idx
+            else:
+                # Shouldn't happen in well-formed YAML at this level;
+                # skip to avoid losing the dict we've built.
+                idx += 1
+                continue
         colon_pos = stripped.find(":")
         if colon_pos == -1:
             idx += 1
@@ -79,9 +88,22 @@ def _yaml_parse_block(lines, idx, base_indent):
             val, idx = _yaml_parse_block_scalar(lines, idx + 1, indent)
             result[key] = val
         elif rest == "":
+            # Empty value: peek at next non-blank line to decide
+            # if it's a nested block or a list at the same indent
             idx += 1
-            child, idx = _yaml_parse_block(lines, idx, indent + 1)
-            result[key] = child
+            peek_idx = idx
+            while peek_idx < len(lines):
+                peek = lines[peek_idx].lstrip()
+                if peek and not peek.startswith("#"):
+                    break
+                peek_idx += 1
+            if peek_idx < len(lines) and lines[peek_idx].lstrip().startswith("- "):
+                peek_indent = len(lines[peek_idx]) - len(lines[peek_idx].lstrip())
+                lst, idx = _yaml_parse_list(lines, peek_idx, peek_indent)
+                result[key] = lst
+            else:
+                child, idx = _yaml_parse_block(lines, idx, indent + 1)
+                result[key] = child
         else:
             result[key] = _yaml_parse_value(rest)
             idx += 1
