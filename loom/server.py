@@ -1953,6 +1953,54 @@ async def main(connection: iterm2.Connection):
                                             message[:80],
                                             task_id=new_task.id)
                                         # Determine dispatch target
+                                        # Enforce transition's declared
+                                        # target — ignore --self/--agent
+                                        # if the transition specifies a
+                                        # different target
+                                        tr_target = ""
+                                        if cur_transitions and act_name:
+                                            for tr in cur_transitions:
+                                                if isinstance(tr, dict) \
+                                                        and tr.get(
+                                                            "action"
+                                                        ) == act_name:
+                                                    tr_target = tr.get(
+                                                        "target", "")
+                                                    break
+                                        if tr_target == "self":
+                                            reuse_self = True
+                                            target_agent = ""
+                                        elif tr_target == "parent":
+                                            reuse_self = False
+                                            pt = state.board_tasks.get(
+                                                task.parent_task_id) \
+                                                if task.parent_task_id \
+                                                else None
+                                            if pt and pt.agent_id:
+                                                a = state.agents.get(
+                                                    pt.agent_id)
+                                                if a:
+                                                    target_agent = \
+                                                        a.slug or a.name
+                                        elif tr_target == "root":
+                                            reuse_self = False
+                                            rid = task.pipeline_root_id \
+                                                or task.id
+                                            rt = state.board_tasks.get(
+                                                rid)
+                                            if rt and rt.agent_id:
+                                                a = state.agents.get(
+                                                    rt.agent_id)
+                                                if a:
+                                                    target_agent = \
+                                                        a.slug or a.name
+                                        elif tr_target == "" \
+                                                and cur_transitions:
+                                            # No target declared — force
+                                            # new agent even if agent
+                                            # passed --self/--agent
+                                            reuse_self = False
+                                            target_agent = ""
                                         target_id = None
                                         if reuse_self:
                                             target_id = cell.id
