@@ -407,7 +407,12 @@ class ActionManager:
                 parsed = parse_yaml(raw_or_act)
             except Exception:
                 parsed = {}
-            prompt = self._coalesce_prompt(parsed) if parsed else ""
+            if isinstance(parsed, dict):
+                prompt = self._coalesce_prompt(parsed) if parsed else ""
+            else:
+                # Raw text is not valid YAML structure (or is a list);
+                # treat the entire input as the prompt template
+                prompt = raw_or_act
             raw = _migrate_syntax(prompt) if prompt else ""
 
         # Discover variables and defaults from Jinja2 AST
