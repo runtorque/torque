@@ -334,39 +334,51 @@ async def main(connection: iterm2.Connection):
                     f"-d \"details\" "
                     f"-t {tr['action']}`{desc}")
 
+        has_transitions = any(
+            isinstance(tr, dict) and tr.get("action")
+            for tr in transitions)
+        has_ask = any(
+            isinstance(tr, dict) and tr.get("ask")
+            for tr in transitions)
+
+        mandate = ""
+        if has_transitions or has_ask:
+            mandate = (
+                "\n\nIMPORTANT: When you are done, you MUST use one "
+                "of the transition commands below. Do NOT ask the "
+                "user directly — use `loom ai ask` instead so Loom "
+                "can track it. Do NOT just stop — always signal "
+                "completion via one of these commands.")
+
         if not is_clean:
-            abbrev = ("\n\n---\nUse `loom ai done` when finished, "
-                      "or `loom ai blocked \"reason\"` if stuck.")
-            derive_lines = []
-            has_ask = False
-            for tr in transitions:
-                if isinstance(tr, dict):
-                    if tr.get("action"):
-                        derive_lines.append(_derive_line(tr))
-                    if tr.get("ask"):
-                        has_ask = True
-            if derive_lines or has_ask:
+            abbrev = ("\n\n---" + mandate)
+            if has_transitions or has_ask:
                 abbrev += "\nAvailable transitions:"
-                abbrev += "\n" + "\n".join(derive_lines)
+                for tr in transitions:
+                    if isinstance(tr, dict) and tr.get("action"):
+                        abbrev += "\n" + _derive_line(tr)
                 if has_ask:
                     abbrev += ("\n- `loom ai ask \"question\"` "
                               "— pause for human input")
+                abbrev += ("\n- `loom ai done` "
+                           "— task complete, no follow-up")
+            else:
+                abbrev += ("\nUse `loom ai done` when finished, "
+                           "or `loom ai blocked \"reason\"` "
+                           "if stuck.")
             return abbrev
 
         lines = [
-            "\n\nReport your progress with these commands "
+            mandate,
+            "\nReport your progress with these commands "
             "(or use the equivalent loom_* MCP tools if available):",
             "- `loom ai done` — task complete, no follow-up needed",
         ]
 
         # Dynamic derive/ask lines from action transitions
-        has_ask = False
         for tr in transitions:
-            if isinstance(tr, dict):
-                if tr.get("action"):
-                    lines.append(_derive_line(tr))
-                if tr.get("ask"):
-                    has_ask = True
+            if isinstance(tr, dict) and tr.get("action"):
+                lines.append(_derive_line(tr))
         if has_ask:
             lines.append(
                 "- `loom ai ask \"question\"` "
