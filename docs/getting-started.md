@@ -97,7 +97,7 @@ mkdir -p ~/.loom/actions
 cp actions/*.yaml ~/.loom/actions/
 ```
 
-Manage actions with `loom action list`, `loom action show <name>`, and `loom action create <name>`. The toolbelt also has a "From Action" option in the New Agent dropdown.
+Manage actions with `loom action list`, `loom action show <name>`, and `loom action create <name>`. The toolbelt also has a "From Action" option in the New Agent dropdown. See [Actions & Templates](actions.md) for the full guide on writing prompts, using variables, and building pipelines.
 
 Run `loom --help` or `loom <command> --help` for the full reference.
 

@@ -63,3 +63,9 @@ Most things can be reordered by dragging:
 The broadcast bar lets you send a command to all sessions in a group at once. Open it by clicking the ++cmd++ button on a group header, pressing ++b++, or using ++cmd+shift+b++ from any terminal.
 
 All agents and their child terminals in the group receive the text. This is useful for commands like `git pull` or `npm install` that need to run everywhere.
+
+## Actions
+
+Actions are reusable prompt templates defined in YAML files. When you dispatch a task with an action, Loom renders the prompt template with the task description and sends it to the agent. Actions can declare transitions to create multi-step pipelines where agents hand off work to each other.
+
+See [Actions & Templates](actions.md) for the full guide.
