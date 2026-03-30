@@ -11,7 +11,7 @@ from aiohttp import web
 from .config import DEFAULT_COMMAND, log
 from .db import LoomDB
 
-_RESERVED_LANES = {"Backlog", "In Progress"}
+_RESERVED_LANES = {"Backlog", "To Do", "In Progress", "Done"}
 _DEFAULT_LANES = ["Backlog", "To Do", "In Progress", "Done"]
 
 
@@ -41,6 +41,7 @@ class BoardTask:
     parent_task_id: str = ""    # task this was derived from (empty for root tasks)
     pipeline_depth: int = 0     # 0 for root, auto-incremented from parent
     pipeline_root_id: str = ""  # ID of the chain's root task (self.id for roots)
+    status: str = ""            # pipeline status (e.g. "On Review", "Fixing")
 
 
 @dataclass
@@ -374,7 +375,7 @@ class MatrixState:
                        or list(_DEFAULT_LANES))
             self.board_lanes = data.get("board_lanes") or default
             # Ensure reserved lanes exist
-            for rl in ("Backlog", "In Progress"):
+            for rl in _RESERVED_LANES:
                 if rl not in self.board_lanes:
                     self.board_lanes.insert(0, rl)
             bt_fields = set(BoardTask.__dataclass_fields__)
@@ -1017,6 +1018,11 @@ class MatrixState:
         self.board_lanes = lanes
         self._emit("lanes_update", lanes=list(self.board_lanes))
         self._db_save_lanes()
+
+    def board_get_children(self, task_id: str) -> list[BoardTask]:
+        """Return direct children of a task (derived tasks)."""
+        return [t for t in self.board_tasks.values()
+                if t.parent_task_id == task_id]
 
     def board_get_chain(self, task_id: str) -> list[BoardTask]:
         """Return all tasks in the same pipeline chain, ordered by depth."""

@@ -1115,6 +1115,35 @@ textarea.task-tpl-var, #task-task-input {
 }
 .board-card:hover .board-card-menu-btn { opacity: 1; }
 .board-card-menu-btn:hover { background: var(--bg); color: var(--text); }
+/* Status badge */
+.board-card-status {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+  font-weight: 600;
+}
+/* Subordinate (derived) cards */
+.board-card-subordinate {
+  margin-left: 16px;
+  border-left: 2px solid var(--border);
+  min-height: 26px;
+  padding: 3px 6px;
+}
+.board-card-subordinate .board-card-title { font-size: 9px; }
+.board-card-subordinate .board-card-dot { width: 5px; height: 5px; }
+.board-card-subordinate .board-card-meta { gap: 2px; }
+.board-card-subordinate .board-card-label { font-size: 7px; }
+.board-card-subordinate .board-card-agent { font-size: 8px; }
+.board-card-subordinate .board-card-chain { font-size: 8px; }
+.board-card-subordinate .board-card-menu-btn { width: 16px; height: 16px; font-size: 10px; }
+.board-card-done { opacity: 0.5; }
+/* Collapse toggle */
+.board-card-collapse-btn {
+  width: 14px; height: 14px; font-size: 7px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--text-dim); flex-shrink: 0;
+  border-radius: 2px;
+}
+.board-card-collapse-btn:hover { background: var(--bg); }
 
 /* Add task inline */
 .board-add-task {

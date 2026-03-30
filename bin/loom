@@ -2263,9 +2263,11 @@ def cmd_task_chain(args):
         else:
             icon = _yellow("→")
 
+        status = t.get("status", "")
+        status_str = f"  [{status}]" if status else ""
         indent = "  " * depth
         print(f"  {icon} {indent}[{depth}] {task_text:<40} "
-              f"{_dim(lane)}{agent}")
+              f"{_dim(lane)}{status_str}{agent}")
 
 
 def cmd_pipeline_list(args):

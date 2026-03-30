@@ -173,7 +173,8 @@ LOOM_CONTEXT_STUB = {
     "worktree":  {"active": False, "path": "", "branch": "", "base_branch": "",
                   "dirty": False, "diff": {}, "checkpoints": 0},
     "task":      {"id": "", "slug": "", "depth": 0, "is_derived": False,
-                  "parent_task_id": "", "labels": [], "group": ""},
+                  "parent_task_id": "", "labels": [], "group": "",
+                  "status": ""},
     "terminals": [],
 }
 
@@ -494,8 +495,11 @@ class ActionManager:
             if isinstance(tr, dict):
                 action_target = tr.get("action", "")
                 if action_target:
-                    result.append({"action": action_target,
-                                   "when": tr.get("when", "")})
+                    entry = {"action": action_target,
+                             "when": tr.get("when", "")}
+                    if tr.get("status"):
+                        entry["status"] = tr["status"]
+                    result.append(entry)
                 elif tr.get("ask"):
                     result.append({"ask": True,
                                    "when": tr.get("when", "")})

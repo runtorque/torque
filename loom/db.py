@@ -156,7 +156,8 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     updated_at     TEXT NOT NULL DEFAULT '',
     provider       TEXT NOT NULL DEFAULT '',
     external_id    TEXT NOT NULL DEFAULT '',
-    external_url   TEXT NOT NULL DEFAULT ''
+    external_url   TEXT NOT NULL DEFAULT '',
+    status         TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS board_lanes (
@@ -241,6 +242,14 @@ class LoomDB:
                     f"ALTER TABLE board_tasks ADD COLUMN {col} "
                     f"{col_type} NOT NULL DEFAULT {default}")
                 self._conn.commit()
+        # Migrate: add status column to board_tasks
+        try:
+            self._conn.execute("SELECT status FROM board_tasks LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE board_tasks ADD COLUMN status "
+                "TEXT NOT NULL DEFAULT ''")
+            self._conn.commit()
         # Migrate: add tasks_dispatched column to agents
         try:
             self._conn.execute(
@@ -366,8 +375,8 @@ class LoomDB:
                  instructions, context, criteria,
                  lane, position, assignee, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url,
-                 parent_task_id, pipeline_depth, pipeline_root_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 parent_task_id, pipeline_depth, pipeline_root_id, status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d["slug"], group_name,
             d.get("action_name", ""), action_vars,
@@ -377,7 +386,7 @@ class LoomDB:
             d["updated_at"], d["provider"], d["external_id"],
             d["external_url"],
             d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
-            d.get("pipeline_root_id", ""),
+            d.get("pipeline_root_id", ""), d.get("status", ""),
         ))
         self._conn.commit()
 
@@ -508,8 +517,8 @@ class LoomDB:
                          criteria, lane, position, assignee, agent_id, labels,
                          created_at, updated_at, provider, external_id,
                          external_url, parent_task_id, pipeline_depth,
-                         pipeline_root_id)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         pipeline_root_id, status)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""), d.get("slug", ""),
                     group_name, d.get("action_name", ""), action_vars,
@@ -521,7 +530,7 @@ class LoomDB:
                     d.get("provider", ""), d.get("external_id", ""),
                     d.get("external_url", ""),
                     d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
-                    d.get("pipeline_root_id", ""),
+                    d.get("pipeline_root_id", ""), d.get("status", ""),
                 ))
 
             # UI state

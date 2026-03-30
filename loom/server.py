@@ -421,6 +421,7 @@ async def main(connection: iterm2.Connection):
             "parent_task_id": task.parent_task_id,
             "labels": list(task.labels),
             "group": task.group,
+            "status": task.status,
         }
 
         # Child terminals of the target agent
@@ -1574,6 +1575,29 @@ async def main(connection: iterm2.Connection):
                         state._emit("task_upsert", **asdict(t))
                         state._db_save_task(t)
 
+                    def _cascade_done(task_id):
+                        """Walk up parent chain, completing ancestors
+                        whose children are all Done."""
+                        t = state.board_tasks.get(task_id)
+                        if not t or not t.parent_task_id:
+                            return
+                        pid = t.parent_task_id
+                        while pid:
+                            parent = state.board_tasks.get(pid)
+                            if not parent:
+                                break
+                            if parent.lane == "Done":
+                                pid = parent.parent_task_id
+                                continue
+                            children = state.board_get_children(pid)
+                            if all(c.lane == "Done" for c in children):
+                                parent.status = ""
+                                state.board_move_task(pid, "Done")
+                                _save_task(parent)
+                                pid = parent.parent_task_id
+                            else:
+                                break
+
                     if action == "done":
                         cell.activity = ""
                         cell.activity_detail = ""
@@ -1584,6 +1608,10 @@ async def main(connection: iterm2.Connection):
                         state._emit_agent(cell)
                         if task and task.lane != "Done":
                             state.board_move_task(task.id, "Done")
+                        if task:
+                            task.status = ""
+                            _save_task(task)
+                            _cascade_done(task.id)
 
                     elif action == "blocked":
                         cell.needs_attention = True
@@ -1619,7 +1647,9 @@ async def main(connection: iterm2.Connection):
                                 state.board_move_task(
                                     task.id, "Done")
                             task.agent_id = ""
+                            task.status = ""
                             _save_task(task)
+                            _cascade_done(task.id)
 
                     elif action == "derive":
                         # Derive a new task and dispatch it
@@ -1682,15 +1712,40 @@ async def main(connection: iterm2.Connection):
                                             f"Pipeline depth limit "
                                             f"({max_d}) reached"}
                                 else:
-                                    # Mark parent task as Done
+                                    # Keep parent in In Progress;
+                                    # update its status from transition
                                     cell.activity = ""
                                     cell.activity_detail = ""
                                     cell.needs_attention = False
                                     cell.error_message = ""
                                     state._emit_agent(cell)
-                                    if task.lane != "Done":
-                                        state.board_move_task(
-                                            task.id, "Done")
+                                    # Determine status from transition
+                                    derive_status = ""
+                                    if cur_transitions and act_name:
+                                        for tr in cur_transitions:
+                                            if isinstance(tr, dict) \
+                                                    and tr.get("action") \
+                                                    == act_name:
+                                                derive_status = tr.get(
+                                                    "status", "")
+                                                break
+                                    if not derive_status and act_name:
+                                        derive_status = act_name
+                                    # Update parent task status
+                                    task.status = derive_status
+                                    _save_task(task)
+                                    # Propagate status to root
+                                    root_id_s = \
+                                        task.pipeline_root_id \
+                                        or task.id
+                                    if root_id_s != task.id:
+                                        root_t = \
+                                            state.board_tasks.get(
+                                                root_id_s)
+                                        if root_t:
+                                            root_t.status = \
+                                                derive_status
+                                            _save_task(root_t)
                                     # Create derived task
                                     grp = derive_group \
                                         or task.group
@@ -1810,14 +1865,24 @@ async def main(connection: iterm2.Connection):
                                       "message":
                                           "Ask requires a question"}
                         else:
-                            # Mark parent task as Done
+                            # Keep parent in In Progress with
+                            # "Awaiting Input" status
                             cell.activity = ""
                             cell.activity_detail = ""
                             cell.needs_attention = True
                             cell.error_message = ""
                             state._emit_agent(cell)
-                            if task.lane != "Done":
-                                state.board_move_task(task.id, "Done")
+                            task.status = "Awaiting Input"
+                            _save_task(task)
+                            # Propagate status to root
+                            root_id_s = task.pipeline_root_id \
+                                or task.id
+                            if root_id_s != task.id:
+                                root_t = state.board_tasks.get(
+                                    root_id_s)
+                                if root_t:
+                                    root_t.status = "Awaiting Input"
+                                    _save_task(root_t)
                             # Create HITL task in Backlog
                             grp = task.group
                             root_id = task.pipeline_root_id \
@@ -1861,6 +1926,7 @@ async def main(connection: iterm2.Connection):
                         "chain": [
                             {"id": t.id, "task": t.task,
                              "lane": t.lane,
+                             "status": t.status,
                              "depth": t.pipeline_depth,
                              "agent_id": t.agent_id,
                              "action_name": t.action_name,
