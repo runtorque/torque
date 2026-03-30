@@ -386,9 +386,10 @@ function _tplTransitionRow(idx, tr) {
   html += '</select>';
   html += '</div>';
   // Template picker dropdown
-  html += '<div class="tpled-tr-field">';
+  var hideIfAsk = isAsk ? ' style="display:none"' : '';
+  html += '<div class="tpled-tr-field tpled-tr-action-field"' + hideIfAsk + '>';
   html += '<label class="tpled-tr-label">Action</label>';
-  html += '<select class="tpled-tr-template" onchange="tplEditorMarkDirty()"' + (isAsk ? ' disabled' : '') + '>';
+  html += '<select class="tpled-tr-template" onchange="tplEditorMarkDirty()">';
   html += '<option value="">Select…</option>';
   var projectTpls = [];
   var userTpls = [];
@@ -419,9 +420,9 @@ function _tplTransitionRow(idx, tr) {
   html += '</select>';
   html += '</div>';
   // Target (agent handoff)
-  html += '<div class="tpled-tr-field">';
+  html += '<div class="tpled-tr-field tpled-tr-target-field"' + hideIfAsk + '>';
   html += '<label class="tpled-tr-label">Target</label>';
-  html += '<select class="tpled-tr-target" onchange="tplEditorMarkDirty()"' + (isAsk ? ' disabled' : '') + '>';
+  html += '<select class="tpled-tr-target" onchange="tplEditorMarkDirty()">';
   html += '<option value=""' + (!target ? ' selected' : '') + '>New agent</option>';
   html += '<option value="self"' + (target === 'self' ? ' selected' : '') + '>Self</option>';
   html += '<option value="parent"' + (target === 'parent' ? ' selected' : '') + '>Parent agent</option>';
@@ -430,10 +431,10 @@ function _tplTransitionRow(idx, tr) {
   html += '</div>';
   html += '</div>';
   // Status badge
-  html += '<div class="tpled-transition-row">';
+  html += '<div class="tpled-transition-row tpled-tr-status-row"' + hideIfAsk + '>';
   html += '<div class="tpled-tr-field" style="flex:1">';
   html += '<label class="tpled-tr-label">Status</label>';
-  html += '<input class="tpled-tr-status" type="text" placeholder="e.g. On Review" value="' + esc(status) + '" onchange="tplEditorMarkDirty()"' + (isAsk ? ' disabled' : '') + '>';
+  html += '<input class="tpled-tr-status" type="text" placeholder="e.g. On Review" value="' + esc(status) + '" onchange="tplEditorMarkDirty()">';
   html += '</div>';
   html += '</div>';
   html += '<label class="tpled-tr-when-label">When <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"'
@@ -447,17 +448,18 @@ function _tplTransitionRow(idx, tr) {
 function tplTransitionTypeChanged(selectEl) {
   var row = selectEl.closest('.tpled-transition-entry');
   if (!row) return;
-  var tplSelect = row.querySelector('.tpled-tr-template');
-  var targetSelect = row.querySelector('.tpled-tr-target');
-  var statusInput = row.querySelector('.tpled-tr-status');
   var isAsk = selectEl.value === 'ask';
-  tplSelect.disabled = isAsk;
-  if (targetSelect) targetSelect.disabled = isAsk;
-  if (statusInput) statusInput.disabled = isAsk;
+  var hide = isAsk ? 'none' : '';
+  row.querySelectorAll('.tpled-tr-action-field, .tpled-tr-target-field').forEach(function(el) { el.style.display = hide; });
+  var statusRow = row.querySelector('.tpled-tr-status-row');
+  if (statusRow) statusRow.style.display = hide;
   if (isAsk) {
-    tplSelect.value = '';
-    if (targetSelect) targetSelect.value = '';
-    if (statusInput) statusInput.value = '';
+    var tpl = row.querySelector('.tpled-tr-template');
+    var tgt = row.querySelector('.tpled-tr-target');
+    var st = row.querySelector('.tpled-tr-status');
+    if (tpl) tpl.value = '';
+    if (tgt) tgt.value = '';
+    if (st) st.value = '';
   }
   tplEditorMarkDirty();
 }
