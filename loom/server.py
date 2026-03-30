@@ -1247,6 +1247,7 @@ async def main(connection: iterm2.Connection):
                     task=data.get("task", ""),
                     group=data.get("group", ""),
                     lane=data.get("lane", ""),
+                    description=data.get("description", ""),
                     action_name=data.get("action_name", ""),
                     action_vars=data.get("action_vars", {}),
                     assignee=data.get("assignee", ""),

@@ -1492,6 +1492,12 @@ def cmd_task_show(args):
     if t.get("labels"):
         print(f"  {'Labels:':<14} {', '.join(t['labels'])}")
 
+    if t.get("description"):
+        print()
+        print(f"  {_bold('Description:')}")
+        for line in t["description"].splitlines():
+            print(f"    {line}")
+
     if t.get("action_name"):
         print(f"  {'Action:':<14} {t['action_name']}")
     if t.get("action_vars"):
