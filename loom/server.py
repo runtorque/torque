@@ -349,7 +349,12 @@ async def main(connection: iterm2.Connection):
             return abbrev
 
         lines = [
-            "\n\nReport your progress with these commands:",
+            ("\n\nFirst, name yourself based on your task "
+             "objective using "
+             "`loom ai name \"short-slug\"` "
+             "(2-4 word kebab-case, e.g. add-pagination, "
+             "fix-auth-bug)."),
+            "\nReport your progress with these commands:",
             "- `loom ai done` — task complete, no follow-up needed",
         ]
 
@@ -2031,6 +2036,21 @@ async def main(connection: iterm2.Connection):
                                     "type": "error",
                                     "message":
                                         "Failed to create ask task"}
+
+                    elif action == "name":
+                        if not message:
+                            result = {"type": "error",
+                                      "message":
+                                          "Name is required"}
+                        else:
+                            old_name = cell.name
+                            state.update_agent(cell.id,
+                                               name=message)
+                            if cell.session_id:
+                                await bridge.update_session(
+                                    cell, old_name)
+                            result = {"type": "ok",
+                                      "slug": cell.slug}
 
                     else:
                         result = {"type": "error",

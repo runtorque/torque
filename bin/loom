@@ -2112,6 +2112,15 @@ def cmd_ai_ready(args):
     print("Ready for next task")
 
 
+def cmd_ai_name(args):
+    cell, _ = _resolve_self_and_task(args, require_task=False)
+    kwargs = {"cell_id": cell["id"], "action": "name",
+              "message": args.name}
+    resp = api_call("ai_report", port=args.port, **kwargs)
+    data = check_ok(resp)
+    print(f"Renamed to: {data.get('slug', args.name)}")
+
+
 def cmd_ai_context(args):
     cell_id = os.environ.get("LOOM_CELL_ID", "")
     # Use local state (works offline)
@@ -2689,6 +2698,11 @@ def build_parser():
     p.add_argument("task_ref", nargs="?",
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_ready)
+
+    p = ai_sub.add_parser("name",
+                           help="Rename agent based on task objective")
+    p.add_argument("name", help="Short descriptive name (kebab-case)")
+    p.set_defaults(func=cmd_ai_name)
 
     p = ai_sub.add_parser("context", help="Show current agent context")
     p.set_defaults(func=cmd_ai_context)
