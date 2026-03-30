@@ -29,7 +29,7 @@ See [Getting Started](getting-started.md) to install and run Loom.
 - Visual grid of agents and terminals in the iTerm2 Toolbelt (or standalone browser window)
 - Groups with configurable defaults for directory, profile, shell, environment, and more
 - Per-agent and per-terminal setting overrides
-- Git worktree isolation per agent
+- [Git worktree isolation](worktrees.md) per agent (checkpoints, rollback, merge)
 - Auto-create companion terminals alongside new agents
 - Drag-and-drop reordering of groups, agents, and terminals
 - Broadcast commands to all sessions in a group
@@ -37,6 +37,7 @@ See [Getting Started](getting-started.md) to install and run Loom.
 - Tab color coding for visual organization
 - Automatic tab reordering to keep managed sessions grouped
 - Per-group window filtering to keep unrelated work out of sight
-- `loom` CLI for scripting and automation (`make cli` to install)
+- [Task board](board.md) with Kanban lanes, pipeline chains, and agent dispatch
+- [`loom` CLI](cli.md) for scripting and automation (`make cli` to install)
 - [Actions & templates](actions.md) for reusable prompt templates with Jinja2, variables, and pipeline transitions
 - `loom dispatch` to create agents from YAML actions with one command

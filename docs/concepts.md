@@ -19,7 +19,7 @@ Each agent can have its own:
 - Shell
 - Tab color
 - Environment variables
-- Git worktree (for isolated parallel work on the same repo)
+- [Git worktree](worktrees.md) (for isolated parallel work on the same repo)
 
 Agents are the primary unit of work. Select an agent to see its child terminals in a drawer below the grid.
 

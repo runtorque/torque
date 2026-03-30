@@ -58,7 +58,7 @@ make cli
 
 This symlinks `bin/loom` to `~/.local/bin/loom`. Make sure `~/.local/bin` is in your `PATH`.
 
-The CLI lets you control Loom from any terminal:
+The CLI lets you control Loom from any terminal (see [CLI Reference](cli.md) for all commands):
 
 ```bash
 loom status              # show agents in the current window
@@ -99,7 +99,7 @@ cp actions/*.yaml ~/.loom/actions/
 
 Manage actions with `loom action list`, `loom action show <name>`, and `loom action create <name>`. The toolbelt also has a "From Action" option in the New Agent dropdown. See [Actions & Templates](actions.md) for the full guide on writing prompts, using variables, and building pipelines.
 
-Run `loom --help` or `loom <command> --help` for the full reference.
+Run `loom --help` or `loom <command> --help` for the full reference. See also the [Task Board](board.md) and [Worktrees](worktrees.md) guides.
 
 ## Auto-launch
 
