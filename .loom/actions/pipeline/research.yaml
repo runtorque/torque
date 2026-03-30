@@ -25,6 +25,12 @@ prompt: |
 
   {{ TASK }}
 
+  {% if CONTEXT %}
+  ## Context
+
+  {{ CONTEXT }}
+  {% endif %}
+
   ## Approach
 
   - Read the codebase to understand the relevant architecture, patterns, and conventions
