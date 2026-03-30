@@ -39,10 +39,6 @@ prompt: |
   - Note any ambiguities or open questions about the task
   - If the task description is unclear or missing critical details, ask the user for clarification before proceeding
 
-  ## Output
+  ## Important
 
-  When you have enough context, transition to the planning step with a summary of your findings:
-  - What you learned about the codebase
-  - Which files and modules are involved
-  - Any constraints, risks, or edge cases you identified
-  - Open questions (if any remain, ask the user instead of guessing)
+  Your only job is research. Do NOT write a plan, write code, or enter plan mode. Only explore and read. When you have enough context, use `loom ai derive` to hand off to the planning step — include a summary of your findings in the derive description. If anything is unclear, use `loom ai ask` to get clarification from the user before proceeding.
