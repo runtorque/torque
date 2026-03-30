@@ -64,7 +64,7 @@ install:
 	   loom/events.py loom/notifications.py \
 	   loom/worktree.py loom/actions.py \
 	   loom/terminal_adapter.py \
-	   loom/db.py \
+	   loom/db.py loom/mcp.py \
 	   "$(SCRIPT_DIR)/loom/"
 	cp loom/adapters/__init__.py loom/adapters/base.py \
 	   loom/adapters/claude_code.py loom/adapters/codex.py \

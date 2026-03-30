@@ -21,6 +21,7 @@ from .notifications import NotificationManager
 from .worktree import WorktreeManager
 from .actions import ActionManager
 from . import keybindings
+from .mcp import create_mcp_handler
 
 # Delay (seconds) before closing an agent after a successful merge.
 # TODO: make this a user-facing setting in global/group settings.
@@ -1703,8 +1704,27 @@ async def main(connection: iterm2.Connection):
                     result = {"type": "error",
                               "message": f"Cell {cell_id} not found"}
                 else:
-                    task = state.board_tasks.get(task_id) \
-                        if task_id else None
+                    # Resolve task: explicit ID, or auto-detect from
+                    # cell's active (non-Done, non-Backlog) tasks.
+                    task = None
+                    if task_id:
+                        task = state.board_tasks.get(task_id)
+                    else:
+                        linked = [
+                            t for t in state.board_tasks.values()
+                            if t.agent_id == cell_id
+                            and t.lane not in ("Done", "Backlog")]
+                        if len(linked) == 1:
+                            task = linked[0]
+                        elif len(linked) > 1:
+                            slugs = ", ".join(
+                                t.slug or t.id[:6] for t in linked)
+                            result = {
+                                "type": "error",
+                                "message":
+                                    f"Multiple active tasks for cell"
+                                    f" {cell_id}: {slugs}"
+                                    f" — pass task_id explicitly"}
 
                     def _add_label(t, label):
                         if label not in t.labels:
@@ -1740,7 +1760,10 @@ async def main(connection: iterm2.Connection):
                             else:
                                 break
 
-                    if action == "done":
+                    if result and result.get("type") == "error":
+                        pass  # auto-resolve failed; skip action
+
+                    elif action == "done":
                         cell.activity = ""
                         cell.activity_detail = ""
                         cell.needs_attention = False
@@ -2308,6 +2331,7 @@ async def main(connection: iterm2.Connection):
     app_server.router.add_get("/ws", handle_ws)
     app_server.router.add_post("/events", handle_events)
     app_server.router.add_post("/api/cmd", handle_api_cmd)
+    app_server.router.add_post("/mcp", create_mcp_handler(handle_command, state))
     from .config import SCRIPT_DIR
     app_server.router.add_static("/static", SCRIPT_DIR / "static")
 
