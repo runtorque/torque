@@ -1,4 +1,4 @@
-"""EventBus, EventLog, and health monitoring."""
+"""EventBus, EventLog, PanelEventLog, and health monitoring."""
 
 import asyncio
 import time
@@ -6,6 +6,41 @@ from collections import deque
 
 from .adapters.base import AgentEvent
 from .config import log
+
+
+class PanelEventLog:
+    """Global in-memory ring buffer of high-level events for the Events panel.
+
+    Unlike EventLog (per-cell, low-level), this stores aggregate events
+    visible across the UI: task dispatched, completed, ask created, etc.
+    Not persisted — resets on daemon restart.
+    """
+
+    def __init__(self, max_size: int = 500):
+        self._max_size = max_size
+        self._events: deque[dict] = deque(maxlen=max_size)
+        self._id_counter = 0
+
+    def append(self, kind: str, cell_id: str, agent_name: str,
+               group: str, message: str, task_id: str = "") -> dict:
+        self._id_counter += 1
+        evt = {
+            "id": self._id_counter,
+            "timestamp": time.time(),
+            "kind": kind,
+            "cell_id": cell_id,
+            "agent_name": agent_name,
+            "group": group,
+            "message": message,
+            "task_id": task_id,
+        }
+        self._events.append(evt)
+        return evt
+
+    def get_recent(self, n: int = 100) -> list[dict]:
+        if n >= len(self._events):
+            return list(self._events)
+        return list(self._events)[-n:]
 
 
 class EventLog:
@@ -41,11 +76,13 @@ class EventBus:
     and schedules throttled WebSocket broadcasts (at most once per second).
     """
 
-    def __init__(self, state, event_log: EventLog, notifier=None):
+    def __init__(self, state, event_log: EventLog, notifier=None,
+                 panel_log: PanelEventLog | None = None):
         # state is a MatrixState — imported at runtime to avoid circular deps
         self._state = state
         self._log = event_log
         self._notifier = notifier
+        self._panel_log = panel_log
         self._timers: dict[str, asyncio.TimerHandle] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self.on_session_end = None  # async callback(cell) — agent finished turn
@@ -142,6 +179,28 @@ class EventBus:
         elif et == "cost_update":
             cell.session_tokens_in += d.get("input_tokens", 0)
             cell.session_tokens_out += d.get("output_tokens", 0)
+
+        # Emit panel event for key types
+        if self._panel_log and et in (
+                "session_start", "session_end", "error"):
+            kind_map = {
+                "session_start": "agent_started",
+                "session_end": "agent_finished",
+                "error": "agent_error",
+            }
+            msg = ""
+            if et == "error":
+                msg = d.get("error", "Unknown error")
+            elif et == "session_end":
+                msg = d.get("summary", "") or "Session ended"
+            pe = self._panel_log.append(
+                kind=kind_map[et],
+                cell_id=cell.id,
+                agent_name=cell.name,
+                group=cell.group,
+                message=msg,
+            )
+            self._state._emit("event_append", **pe)
 
         # Emit delta for all event types
         self._state._emit_agent(cell)

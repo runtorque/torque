@@ -6,6 +6,8 @@ var _activePanelApp = '';   // '' = collapsed, 'board' = board open
 var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
 var _panelStateRestored = false;  // true after first state message restores panel
 
+var _panelIds = ['panel-board', 'panel-actions', 'panel-events'];
+
 function togglePanel(appName) {
   var panel = document.getElementById('bottom-panel');
   var buttons = document.querySelectorAll('.taskbar-app');
@@ -26,28 +28,31 @@ function togglePanel(appName) {
       b.classList.toggle('active', b.dataset.app === appName);
     });
     // Show/hide panel content
-    var panelBoard = document.getElementById('panel-board');
-    var panelTpl = document.getElementById('panel-actions');
-    if (panelBoard) panelBoard.classList.toggle('panel-hidden', appName !== 'board');
-    if (panelTpl) panelTpl.classList.toggle('panel-hidden', appName !== 'actions');
+    _panelIds.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle('panel-hidden', id !== 'panel-' + appName);
+    });
     // Render the active app
     if (appName === 'board') renderBoard();
     if (appName === 'actions') tplEditorLoad();
+    if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
   }
   // Persist panel state to server
-  send({ cmd: 'board_set_panel', open: _activePanelApp === 'board' });
+  send({ cmd: 'board_set_panel', active: _activePanelApp || '' });
 }
 
 function _restorePanelState() {
   if (_panelStateRestored) return;
   _panelStateRestored = true;
 
-  var open = state.board_panel_open;
+  // panel_active: new key; backward compat from board_panel_open
+  var active = state.panel_active || '';
+  if (!active && state.board_panel_open) active = 'board';
   var height = state.board_panel_height;
   if (height > 0) _panelHeight = height;
 
-  if (open) {
-    _activePanelApp = 'board';
+  if (active) {
+    _activePanelApp = active;
     var panel = document.getElementById('bottom-panel');
     if (panel) {
       panel.classList.remove('collapsed');
@@ -55,14 +60,16 @@ function _restorePanelState() {
         panel.style.setProperty('--panel-height', _panelHeight + 'px');
       }
     }
-    var panelBoard = document.getElementById('panel-board');
-    var panelTpl = document.getElementById('panel-actions');
-    if (panelBoard) panelBoard.classList.remove('panel-hidden');
-    if (panelTpl) panelTpl.classList.add('panel-hidden');
-    document.querySelectorAll('.taskbar-app').forEach(function(b) {
-      b.classList.toggle('active', b.dataset.app === 'board');
+    _panelIds.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle('panel-hidden', id !== 'panel-' + active);
     });
-    renderBoard();
+    document.querySelectorAll('.taskbar-app').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.app === active);
+    });
+    if (active === 'board') renderBoard();
+    if (active === 'actions') tplEditorLoad();
+    if (active === 'events' && typeof renderEvents === 'function') renderEvents();
   }
 }
 

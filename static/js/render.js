@@ -265,10 +265,11 @@ function render() {
 
   if (oldRects) _applyFlip(main, oldRects);
 
-  // Render board panel if open
+  // Render active panel if open
   var bottomPanel = document.getElementById('bottom-panel');
   if (bottomPanel && !bottomPanel.classList.contains('collapsed')) {
-    renderBoard();
+    if (_activePanelApp === 'board') renderBoard();
+    if (_activePanelApp === 'events' && typeof renderEvents === 'function') renderEvents();
   }
 }
 

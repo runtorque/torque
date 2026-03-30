@@ -535,7 +535,7 @@ class LoomDB:
 
             # UI state
             c.execute("DELETE FROM ui_state")
-            for key in ("board_panel_open", "board_panel_height"):
+            for key in ("panel_active", "board_panel_height"):
                 val = state_dict.get(key)
                 if val is not None:
                     c.execute(
@@ -648,7 +648,9 @@ class LoomDB:
             "group_settings": group_settings,
             "board_lanes": board_lanes,
             "board_tasks": board_tasks,
-            "board_panel_open": ui.get("board_panel_open", "False") == "True",
+            "panel_active": ui.get("panel_active", "")
+                or ("board" if ui.get("board_panel_open", "False") == "True"
+                    else ""),
             "board_panel_height": int(ui.get("board_panel_height", "0")),
             "global_settings": global_settings,
         }

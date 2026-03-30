@@ -77,6 +77,7 @@ function connect() {
 function _handleFullState(msg) {
   const prevActive = state.active_session_id;
   state = msg;
+  if (!state.panel_events) state.panel_events = [];
   _expectedSeq = (msg.seq || 0) + 1;
   // Sync selection on first message (restore after restart/reconnect)
   // and whenever the active session changes
@@ -180,6 +181,16 @@ function _applyDelta(ops) {
         const gs = Object.assign({}, op);
         delete gs.op;
         state.global_settings = gs;
+        break;
+      }
+
+      case 'event_append': {
+        if (!state.panel_events) state.panel_events = [];
+        var evt = Object.assign({}, op);
+        delete evt.op;
+        state.panel_events.push(evt);
+        if (state.panel_events.length > 500)
+          state.panel_events = state.panel_events.slice(-500);
         break;
       }
 

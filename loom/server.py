@@ -15,7 +15,7 @@ from .db import LoomDB
 from dataclasses import asdict
 from .state import MatrixState
 from .bridge import ITerm2Adapter
-from .events import EventLog, EventBus, health_check
+from .events import EventLog, EventBus, PanelEventLog, health_check
 from .adapters import get_adapter
 from .notifications import NotificationManager
 from .worktree import WorktreeManager
@@ -138,9 +138,11 @@ async def main(connection: iterm2.Connection):
              len(state.agents), len(state.groups))
 
     event_log = EventLog()
+    panel_log = PanelEventLog()
+    state.panel_log = panel_log
     notifier = NotificationManager(state)
     notifier.start()
-    event_bus = EventBus(state, event_log, notifier)
+    event_bus = EventBus(state, event_log, notifier, panel_log=panel_log)
     event_bus.start()
     asyncio.create_task(health_check(state, event_log, event_bus, notifier))
     log.info("Event bus, health monitor, and notifications started")
@@ -1481,6 +1483,11 @@ async def main(connection: iterm2.Connection):
                                 cell.tasks_dispatched += 1
                                 state._emit_agent(cell)
                                 state._db_save_agent(cell)
+                                _panel_event(
+                                    "task_dispatched", cell.id,
+                                    cell.name, cell.group,
+                                    task.task[:80],
+                                    task_id=task.id)
 
                                 if agent_id and cell.session_id:
                                     delay = 3 if data.get(
@@ -1608,6 +1615,11 @@ async def main(connection: iterm2.Connection):
                                                 **asdict(root))
                                     state._db_save_task(root)
 
+                            _panel_event(
+                                "ask_resolved", agent.id,
+                                agent.name, agent.group,
+                                "Resolved: " + q,
+                                task_id=tid)
                             result = {"type": "ok",
                                       "task_id": tid}
 
@@ -1667,12 +1679,20 @@ async def main(connection: iterm2.Connection):
                 state.board_reorder_lanes(data.get("lanes", []))
 
             elif cmd == "board_set_panel":
-                if "open" in data:
-                    state.board_panel_open = bool(data["open"])
-                    state._emit("ui_update", key="board_panel_open",
-                                value=state.board_panel_open)
-                    state._db_save_ui("board_panel_open",
-                                      state.board_panel_open)
+                if "active" in data:
+                    state.panel_active = str(data["active"])
+                    state._emit("ui_update", key="panel_active",
+                                value=state.panel_active)
+                    state._db_save_ui("panel_active",
+                                      state.panel_active)
+                elif "open" in data:
+                    # Backward compat
+                    state.panel_active = "board" if data["open"] \
+                        else ""
+                    state._emit("ui_update", key="panel_active",
+                                value=state.panel_active)
+                    state._db_save_ui("panel_active",
+                                      state.panel_active)
                 if "height" in data:
                     state.board_panel_height = int(data["height"])
                     state._emit("ui_update", key="board_panel_height",
@@ -1742,6 +1762,10 @@ async def main(connection: iterm2.Connection):
                             task.status = ""
                             _save_task(task)
                             _cascade_done(task.id)
+                        _panel_event(
+                            "task_completed", cell.id,
+                            cell.name, cell.group,
+                            message or "Task completed")
 
                     elif action == "blocked":
                         cell.needs_attention = True
@@ -1751,6 +1775,9 @@ async def main(connection: iterm2.Connection):
                         if task:
                             _add_label(task, "blocked")
                             _save_task(task)
+                        _panel_event(
+                            "agent_blocked", cell.id,
+                            cell.name, cell.group, message)
 
                     elif action == "error":
                         cell.error_message = message
@@ -1759,6 +1786,9 @@ async def main(connection: iterm2.Connection):
                         if task:
                             _add_label(task, "error")
                             _save_task(task)
+                        _panel_event(
+                            "agent_error", cell.id,
+                            cell.name, cell.group, message)
 
                     elif action == "progress":
                         cell.activity_detail = message
@@ -1780,6 +1810,10 @@ async def main(connection: iterm2.Connection):
                             task.status = ""
                             _save_task(task)
                             _cascade_done(task.id)
+                        _panel_event(
+                            "task_completed", cell.id,
+                            cell.name, cell.group,
+                            "Ready (task completed)")
 
                     elif action == "derive":
                         # Derive a new task and dispatch it
@@ -1894,6 +1928,12 @@ async def main(connection: iterm2.Connection):
                                         pipeline_root_id=root_id,
                                     )
                                     if new_task:
+                                        _panel_event(
+                                            "task_derived",
+                                            cell.id, cell.name,
+                                            cell.group,
+                                            message[:80],
+                                            task_id=new_task.id)
                                         # Determine dispatch target
                                         target_id = None
                                         if reuse_self:
@@ -2031,6 +2071,11 @@ async def main(connection: iterm2.Connection):
                                 result = {
                                     "type": "ok",
                                     "task_id": new_task.id}
+                                _panel_event(
+                                    "ask_created", cell.id,
+                                    cell.name, cell.group,
+                                    message,
+                                    task_id=new_task.id)
                             else:
                                 result = {
                                     "type": "error",
@@ -2138,6 +2183,16 @@ async def main(connection: iterm2.Connection):
 
         # Always return 200 with empty JSON — never block the agent
         return web.json_response({})
+
+    # -- Panel event helper -------------------------------------------------
+
+    def _panel_event(kind, cell_id, agent_name, group, message,
+                     task_id=""):
+        """Append a panel event and queue a delta broadcast."""
+        pe = panel_log.append(
+            kind=kind, cell_id=cell_id, agent_name=agent_name,
+            group=group, message=message, task_id=task_id)
+        state._emit("event_append", **pe)
 
     # -- HTTP / WS routes ---------------------------------------------------
 

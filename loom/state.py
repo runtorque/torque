@@ -200,8 +200,9 @@ class MatrixState:
         # Board (Phase 5)
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
-        self.board_panel_open: bool = False
+        self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
         self.board_panel_height: int = 0  # 0 = use CSS default
+        self.panel_log = None  # PanelEventLog, set from server.py
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
         self._seq: int = 0
@@ -240,8 +241,9 @@ class MatrixState:
             "board_tasks": {
                 tid: asdict(t) for tid, t in self.board_tasks.items()
             },
-            "board_panel_open": self.board_panel_open,
+            "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
+            "panel_events": self.panel_log.get_recent(100) if self.panel_log else [],
         }
 
     # -- Targeted persistence helpers ----------------------------------------
@@ -390,7 +392,11 @@ class MatrixState:
                     raw["group"] = first_group
                 filtered = {k: v for k, v in raw.items() if k in bt_fields}
                 self.board_tasks[tid] = BoardTask(**filtered)
-            self.board_panel_open = data.get("board_panel_open", False)
+            # panel_active: new key; backward compat from board_panel_open
+            pa = data.get("panel_active", "")
+            if not pa and data.get("board_panel_open"):
+                pa = "board"
+            self.panel_active = pa
             self.board_panel_height = data.get("board_panel_height", 0)
             # Slug migration: generate slugs for resources that lack them.
             # Groups first (terminal slugs may reference group slugs),
