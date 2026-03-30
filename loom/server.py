@@ -2233,6 +2233,8 @@ async def main(connection: iterm2.Connection):
                             await ws.send_str(json.dumps(result))
                     except json.JSONDecodeError:
                         log.warning("Received malformed JSON from webview")
+                    except Exception:
+                        log.exception("Error handling WS command")
                 elif msg.type == aiohttp.WSMsgType.ERROR:
                     break
         finally:

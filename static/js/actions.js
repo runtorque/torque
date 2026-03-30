@@ -522,6 +522,9 @@ function tplEditorNew() {
 }
 
 function tplEditorSave() {
+  try { return _tplEditorSaveInner(); } catch(e) { _showToast('Save error: ' + e.message, 'error'); }
+}
+function _tplEditorSaveInner() {
   var name = (document.getElementById('tpled-name').value || '').trim();
   if (!name) {
     document.getElementById('tpled-name').focus();
