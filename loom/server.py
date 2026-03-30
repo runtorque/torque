@@ -354,7 +354,8 @@ async def main(connection: iterm2.Connection):
             return abbrev
 
         lines = [
-            "\n\nReport your progress with these commands:",
+            "\n\nReport your progress with these commands "
+            "(or use the equivalent loom_* MCP tools if available):",
             "- `loom ai done` — task complete, no follow-up needed",
         ]
 
