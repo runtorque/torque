@@ -445,7 +445,7 @@ class ITerm2Adapter:
                 # Multi-line: send body, wait for paste to register,
                 # then send \r to submit
                 await session.async_send_text(body)
-                await asyncio.sleep(0.15)
+                await asyncio.sleep(0.3)
                 await session.async_send_text("\r")
             else:
                 # Single-line: send as-is with trailing \r
