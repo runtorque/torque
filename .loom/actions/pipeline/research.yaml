@@ -25,6 +25,12 @@ prompt: |
 
   {{ TASK }}
 
+  {% if loom.task.description %}
+  ## Context
+
+  {{ loom.task.description }}
+  {% endif %}
+
   ## Approach
 
   - Read the codebase to understand the relevant architecture, patterns, and conventions

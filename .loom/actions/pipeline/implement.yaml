@@ -20,6 +20,12 @@ prompt: |
 
   {{ TASK }}
 
+  {% if loom.task.description %}
+  ## Context
+
+  {{ loom.task.description }}
+  {% endif %}
+
   ## Approach
 
   - Follow the plan from the previous steps — do not redesign or re-scope

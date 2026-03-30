@@ -23,6 +23,12 @@ prompt: |
 
   {{ TASK }}
 
+  {% if loom.task.description %}
+  ## Context
+
+  {{ loom.task.description }}
+  {% endif %}
+
   ## Writing the plan
 
   - Break the work into discrete, ordered steps
