@@ -26,6 +26,10 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Concepts: concepts.md
+  - Actions & Templates: actions.md
+  - Task Board: board.md
+  - Worktrees: worktrees.md
   - Group Settings: group-settings.md
   - Keyboard Shortcuts: keyboard-shortcuts.md
+  - CLI Reference: cli.md
   - Roadmap: roadmap.md
