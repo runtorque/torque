@@ -326,35 +326,12 @@ async def main(connection: iterm2.Connection):
             transitions = amgr.get_transitions(task.action_name,
                                                base_dir)
 
-        def _target_flag(tr):
-            """Resolve target field to CLI flags."""
-            target = tr.get("target", "")
-            if target == "self":
-                return " --self"
-            if target == "parent" and task.parent_task_id:
-                pt = state.board_tasks.get(task.parent_task_id)
-                if pt and pt.agent_id:
-                    a = state.agents.get(pt.agent_id)
-                    if a:
-                        slug = a.slug or a.name
-                        return f" --agent {slug}"
-            if target == "root":
-                rid = task.pipeline_root_id or task.id
-                rt = state.board_tasks.get(rid)
-                if rt and rt.agent_id:
-                    a = state.agents.get(rt.agent_id)
-                    if a:
-                        slug = a.slug or a.name
-                        return f" --agent {slug}"
-            return ""
-
         def _derive_line(tr):
             when = tr.get("when", "")
             desc = f" — {when}" if when else ""
-            flag = _target_flag(tr)
             return (f"- `loom ai derive \"short title\" "
                     f"-d \"details\" "
-                    f"-t {tr['action']}{flag}`{desc}")
+                    f"-t {tr['action']}`{desc}")
 
         if not is_clean:
             abbrev = ("\n\n---\nUse `loom ai done` when finished, "

@@ -2190,8 +2190,6 @@ def cmd_ai_context(args):
 
 
 def cmd_ai_derive(args):
-    if getattr(args, "reuse_self", False) and getattr(args, "agent", ""):
-        die("--self and --agent are mutually exclusive")
     cell, task = _resolve_self_and_task(args)
     kwargs = {"cell_id": cell["id"], "action": "derive",
               "message": args.description}
@@ -2211,10 +2209,6 @@ def cmd_ai_derive(args):
             kwargs["action_vars"] = tvars
     if args.group:
         kwargs["group"] = args.group
-    if getattr(args, "reuse_self", False):
-        kwargs["reuse_self"] = True
-    elif getattr(args, "agent", ""):
-        kwargs["target_agent"] = args.agent
     resp = api_call("ai_report", port=args.port, **kwargs)
     data = check_ok(resp)
     new_tid = data.get("task_id", "")
@@ -2726,10 +2720,6 @@ def build_parser():
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
                    help="Action variables")
     p.add_argument("-g", "--group", help="Target group (inherit from task)")
-    p.add_argument("--agent",
-                   help="Dispatch to existing agent (slug, name, or ID)")
-    p.add_argument("--self", action="store_true", dest="reuse_self",
-                   help="Dispatch to calling agent (same session)")
     p.add_argument("task_ref", nargs="?",
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_derive)
