@@ -432,20 +432,24 @@ class ITerm2Adapter:
         """Send text to a terminal session.
 
         For multi-line text ending with Enter (\\r or \\n), the Enter
-        is sent separately after a short delay so it lands outside
-        bracketed paste mode — otherwise apps like Claude Code show
+        is sent separately after a delay so it lands outside bracketed
+        paste mode — otherwise apps like Claude Code show
         "[Pasted N lines]" without submitting.
+
+        Always uses \\r (carriage return) for the trailing submit.
         """
         session = await self._find_session(session_id)
         if session:
             body = text.rstrip("\r\n")
-            trail = text[len(body):]
-            await session.async_send_text(body)
-            if trail and "\n" in body:
-                await asyncio.sleep(0.05)
-                await session.async_send_text(trail)
-            elif trail:
-                await session.async_send_text(trail)
+            if "\n" in body:
+                # Multi-line: send body, wait for paste to register,
+                # then send \r to submit
+                await session.async_send_text(body)
+                await asyncio.sleep(0.15)
+                await session.async_send_text("\r")
+            else:
+                # Single-line: send as-is with trailing \r
+                await session.async_send_text(body + "\r")
 
     # -- Helpers ------------------------------------------------------------
 
