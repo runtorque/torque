@@ -372,6 +372,8 @@ function _tplTransitionRow(idx, tr) {
   var isAsk = tr && tr.ask;
   var tpl = (tr && tr.action) || '';
   var when = (tr && tr.when) || '';
+  var target = (tr && tr.target) || '';
+  var status = (tr && tr.status) || '';
   var html = '<div class="tpled-transition-entry" data-idx="' + idx + '">';
   html += '<button class="tpled-tr-remove" onclick="tplRemoveTransition(' + idx + ')" title="Remove transition">\u2715</button>';
   html += '<div class="tpled-transition-body">';
@@ -416,6 +418,23 @@ function _tplTransitionRow(idx, tr) {
   }
   html += '</select>';
   html += '</div>';
+  // Target (agent handoff)
+  html += '<div class="tpled-tr-field">';
+  html += '<label class="tpled-tr-label">Target</label>';
+  html += '<select class="tpled-tr-target" onchange="tplEditorMarkDirty()"' + (isAsk ? ' disabled' : '') + '>';
+  html += '<option value=""' + (!target ? ' selected' : '') + '>New agent</option>';
+  html += '<option value="self"' + (target === 'self' ? ' selected' : '') + '>Self</option>';
+  html += '<option value="parent"' + (target === 'parent' ? ' selected' : '') + '>Parent agent</option>';
+  html += '<option value="root"' + (target === 'root' ? ' selected' : '') + '>Root agent</option>';
+  html += '</select>';
+  html += '</div>';
+  html += '</div>';
+  // Status badge
+  html += '<div class="tpled-transition-row">';
+  html += '<div class="tpled-tr-field" style="flex:1">';
+  html += '<label class="tpled-tr-label">Status</label>';
+  html += '<input class="tpled-tr-status" type="text" placeholder="e.g. On Review" value="' + esc(status) + '" onchange="tplEditorMarkDirty()"' + (isAsk ? ' disabled' : '') + '>';
+  html += '</div>';
   html += '</div>';
   html += '<label class="tpled-tr-when-label">When <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"'
     + ' data-hint="Describes when the agent should pick this transition. This text is included in the dispatch prompt so the agent knows which option to choose.">?</span></label>';
@@ -429,11 +448,16 @@ function tplTransitionTypeChanged(selectEl) {
   var row = selectEl.closest('.tpled-transition-entry');
   if (!row) return;
   var tplSelect = row.querySelector('.tpled-tr-template');
-  if (selectEl.value === 'ask') {
-    tplSelect.disabled = true;
+  var targetSelect = row.querySelector('.tpled-tr-target');
+  var statusInput = row.querySelector('.tpled-tr-status');
+  var isAsk = selectEl.value === 'ask';
+  tplSelect.disabled = isAsk;
+  if (targetSelect) targetSelect.disabled = isAsk;
+  if (statusInput) statusInput.disabled = isAsk;
+  if (isAsk) {
     tplSelect.value = '';
-  } else {
-    tplSelect.disabled = false;
+    if (targetSelect) targetSelect.value = '';
+    if (statusInput) statusInput.value = '';
   }
   tplEditorMarkDirty();
 }
@@ -463,11 +487,17 @@ function _tplReadTransitions() {
     var type = entries[i].querySelector('.tpled-tr-type').value;
     var tpl = (entries[i].querySelector('.tpled-tr-template').value || '').trim();
     var when = (entries[i].querySelector('.tpled-tr-when').value || '').trim();
+    var targetEl = entries[i].querySelector('.tpled-tr-target');
+    var target = targetEl ? (targetEl.value || '').trim() : '';
+    var statusEl = entries[i].querySelector('.tpled-tr-status');
+    var status = statusEl ? (statusEl.value || '').trim() : '';
     if (type === 'ask') {
       result.push({ ask: true, when: when });
     } else if (tpl) {
       var entry = { action: tpl };
       if (when) entry.when = when;
+      if (target) entry.target = target;
+      if (status) entry.status = status;
       result.push(entry);
     }
   }

@@ -12,6 +12,7 @@ transitions:
   - action: pipeline/implement
     when: issues were found that need to be fixed
     status: "Fixing"
+    target: parent
 
 prompt: |
   A previous agent (`{{ loom.task.parent_agent_slug }}`) implemented changes and your job is to check whether the work is correct and complete.
@@ -26,7 +27,6 @@ prompt: |
   - Does the code do what the task asked for?
   - Are there obvious bugs or missing pieces?
 
-  If everything looks good, use `loom ai done`. If there are issues, derive back to the implementing agent with a description of what needs to be fixed:
-  `loom ai derive "description" -t pipeline/implement --agent {{ loom.task.parent_agent_slug }}`
+  If everything looks good, use `loom ai done`. If there are issues, derive back to the implementing agent with a description of what needs to be fixed.
 
   Do NOT fix issues yourself, deploy anything, or make changes. Only review and report.

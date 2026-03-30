@@ -1462,6 +1462,19 @@ textarea.task-tpl-var, #task-task-input {
   resize: none; overflow: hidden;
   min-height: 24px;
 }
+.tpled-tr-status {
+  width: 100%; box-sizing: border-box;
+  font-size: 10px; padding: 4px 6px;
+  font-family: var(--font);
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.tpled-tr-target {
+  font-size: 10px; padding: 2px 4px;
+  font-family: var(--font);
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
 .tpled-tr-remove {
   position: absolute; top: 2px; right: 2px;
   width: 16px; height: 16px;

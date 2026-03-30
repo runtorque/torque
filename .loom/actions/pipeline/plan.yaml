@@ -12,7 +12,7 @@ transitions:
   - action: pipeline/implement
     when: the plan is confirmed by the user and ready for implementation
     status: "Implementing"
-    self: true
+    target: self
   - ask: true
     when: you need the user to review and confirm the plan before proceeding
 

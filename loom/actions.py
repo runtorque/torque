@@ -499,8 +499,13 @@ class ActionManager:
                              "when": tr.get("when", "")}
                     if tr.get("status"):
                         entry["status"] = tr["status"]
-                    if tr.get("self"):
-                        entry["self"] = True
+                    # target: self | parent | root | new (default)
+                    target = tr.get("target", "")
+                    # Backward compat: self: true → target: self
+                    if not target and tr.get("self"):
+                        target = "self"
+                    if target:
+                        entry["target"] = target
                     result.append(entry)
                 elif tr.get("ask"):
                     result.append({"ask": True,

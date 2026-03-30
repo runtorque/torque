@@ -14,7 +14,7 @@ transitions:
   - action: pipeline/plan
     when: research is complete and you have enough context to write a plan
     status: "Planning"
-    self: true
+    target: self
   - ask: true
     when: you need clarification or additional details from the user before proceeding
 

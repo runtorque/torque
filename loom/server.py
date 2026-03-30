@@ -106,6 +106,10 @@ def _action_to_yaml(name: str, data: dict) -> str:
                     entry = {"action": tr["action"]}
                     if tr.get("when"):
                         entry["when"] = tr["when"]
+                    if tr.get("status"):
+                        entry["status"] = tr["status"]
+                    if tr.get("target"):
+                        entry["target"] = tr["target"]
                     clean.append(entry)
         if clean:
             doc["transitions"] = clean
@@ -322,9 +326,36 @@ async def main(connection: iterm2.Connection):
             transitions = amgr.get_transitions(task.action_name,
                                                base_dir)
 
+        def _target_flag(tr):
+            """Resolve target field to CLI flags."""
+            target = tr.get("target", "")
+            if target == "self":
+                return " --self"
+            if target == "parent" and task.parent_task_id:
+                pt = state.board_tasks.get(task.parent_task_id)
+                if pt and pt.agent_id:
+                    a = state.agents.get(pt.agent_id)
+                    if a:
+                        slug = a.slug or a.name
+                        return f" --agent {slug}"
+            if target == "root":
+                rid = task.pipeline_root_id or task.id
+                rt = state.board_tasks.get(rid)
+                if rt and rt.agent_id:
+                    a = state.agents.get(rt.agent_id)
+                    if a:
+                        slug = a.slug or a.name
+                        return f" --agent {slug}"
+            return ""
+
+        def _derive_line(tr):
+            when = tr.get("when", "")
+            desc = f" — {when}" if when else ""
+            flag = _target_flag(tr)
+            return (f"- `loom ai derive \"description\" "
+                    f"-t {tr['action']}{flag}`{desc}")
+
         if not is_clean:
-            # Abbreviated postscript — but include derive/ask
-            # if the action has transitions
             abbrev = ("\n\n---\nUse `loom ai done` when finished, "
                       "or `loom ai blocked \"reason\"` if stuck.")
             derive_lines = []
@@ -332,14 +363,7 @@ async def main(connection: iterm2.Connection):
             for tr in transitions:
                 if isinstance(tr, dict):
                     if tr.get("action"):
-                        when = tr.get("when", "")
-                        desc = f" — {when}" if when else ""
-                        self_flag = " --self" if tr.get("self") \
-                            else ""
-                        derive_lines.append(
-                            f"- `loom ai derive \"description\" "
-                            f"-t {tr['action']}{self_flag}`"
-                            f"{desc}")
+                        derive_lines.append(_derive_line(tr))
                     if tr.get("ask"):
                         has_ask = True
             if derive_lines or has_ask:
@@ -351,12 +375,7 @@ async def main(connection: iterm2.Connection):
             return abbrev
 
         lines = [
-            ("\n\nFirst, name yourself based on your task "
-             "objective using "
-             "`loom ai name \"short-slug\"` "
-             "(2-4 word kebab-case, e.g. add-pagination, "
-             "fix-auth-bug)."),
-            "\nReport your progress with these commands:",
+            "\n\nReport your progress with these commands:",
             "- `loom ai done` — task complete, no follow-up needed",
         ]
 
@@ -365,13 +384,7 @@ async def main(connection: iterm2.Connection):
         for tr in transitions:
             if isinstance(tr, dict):
                 if tr.get("action"):
-                    when = tr.get("when", "")
-                    desc = f" — {when}" if when else ""
-                    self_flag = " --self" if tr.get("self") \
-                        else ""
-                    lines.append(
-                        f"- `loom ai derive \"description\" "
-                        f"-t {tr['action']}{self_flag}`{desc}")
+                    lines.append(_derive_line(tr))
                 if tr.get("ask"):
                     has_ask = True
         if has_ask:
