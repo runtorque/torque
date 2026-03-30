@@ -1012,13 +1012,22 @@ function taskActionChanged() {
 
 function _renderTaskActionVars() {
   var container = document.getElementById('task-action-vars');
-  if (!_taskActionVars.length) {
+  // If action template has variable definitions, use those
+  var vars = _taskActionVars;
+  // Fallback: if no definitions but task has stored values (action deleted),
+  // build variable list from the stored keys
+  if (!vars.length && _taskActionVarValues && Object.keys(_taskActionVarValues).length) {
+    vars = Object.keys(_taskActionVarValues).map(function(k) {
+      return { name: k, default: '' };
+    });
+  }
+  if (!vars.length) {
     container.innerHTML = '';
     return;
   }
   var html = '<fieldset class="task-tpl-vars-group"><legend>Action Variables</legend>';
-  for (var i = 0; i < _taskActionVars.length; i++) {
-    var v = _taskActionVars[i];
+  for (var i = 0; i < vars.length; i++) {
+    var v = vars[i];
     var savedVal = (_taskActionVarValues || {})[v.name] || '';
     var val = savedVal || v.default || '';
     html += '<label>' + esc(v.name) + '</label>';
