@@ -41,7 +41,9 @@ TOOLS = [
     {
         "name": "loom_done",
         "description": (
-            "Mark the current task as complete and move it to Done."
+            "Mark the current task as complete and move it to Done. "
+            "Triggers cascade completion — if all sibling tasks of "
+            "the parent are also Done, the parent moves to Done too."
         ),
         "inputSchema": {
             "type": "object",
@@ -133,11 +135,11 @@ TOOLS = [
     {
         "name": "loom_derive",
         "description": (
-            "Derive a subtask and dispatch it to a new or existing agent. "
-            "Creates a child task linked to the current task's pipeline. "
-            "The parent task stays In Progress while the derived task is "
-            "worked on. The action's transitions field controls which "
-            "actions can be derived."
+            "Derive a subtask and dispatch it. The parent task stays "
+            "In Progress with a status badge while the derived task "
+            "is worked on. The action's transitions field controls "
+            "which actions can be derived and where the task is routed "
+            "(new agent, self, parent agent, or root agent)."
         ),
         "inputSchema": {
             "type": "object",
@@ -168,19 +170,6 @@ TOOLS = [
                         "Target group (defaults to current task's group)."
                     ),
                 },
-                "target_agent": {
-                    "type": "string",
-                    "description": (
-                        "Slug/name/ID of an existing agent to dispatch to."
-                    ),
-                },
-                "reuse_self": {
-                    "type": "boolean",
-                    "description": (
-                        "If true, dispatch the derived task back to this "
-                        "agent."
-                    ),
-                },
             },
             "required": ["description"],
         },
@@ -188,9 +177,10 @@ TOOLS = [
     {
         "name": "loom_ask",
         "description": (
-            "Create a task for human review (human-in-the-loop). "
-            "Pauses the current pipeline and creates a task in Backlog "
-            "with the 'human' label. A human will review and respond."
+            "Pause for human input. Sets the parent task status to "
+            "'Awaiting Input' and creates a task in Backlog with the "
+            "'human' label. A human will resolve it with an answer "
+            "that is sent back to this agent."
         ),
         "inputSchema": {
             "type": "object",
@@ -268,10 +258,6 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
             payload["action_vars"] = args["action_vars"]
         if args.get("group"):
             payload["group"] = args["group"]
-        if args.get("target_agent"):
-            payload["target_agent"] = args["target_agent"]
-        if args.get("reuse_self"):
-            payload["reuse_self"] = True
     elif action == "ask":
         payload["message"] = args.get("question", "")
 
