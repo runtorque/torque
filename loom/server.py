@@ -446,12 +446,20 @@ async def main(connection: iterm2.Connection):
         }
 
         # Current task metadata
+        parent_agent_slug = ""
+        if task.parent_task_id:
+            pt = state.board_tasks.get(task.parent_task_id)
+            if pt and pt.agent_id:
+                pa = state.agents.get(pt.agent_id)
+                if pa:
+                    parent_agent_slug = pa.slug or pa.name
         task_ctx = {
             "id": task.id,
             "slug": task.slug,
             "depth": task.pipeline_depth,
             "is_derived": bool(task.parent_task_id),
             "parent_task_id": task.parent_task_id,
+            "parent_agent_slug": parent_agent_slug,
             "labels": list(task.labels),
             "group": task.group,
             "status": task.status,

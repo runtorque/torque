@@ -173,8 +173,8 @@ LOOM_CONTEXT_STUB = {
     "worktree":  {"active": False, "path": "", "branch": "", "base_branch": "",
                   "dirty": False, "diff": {}, "checkpoints": 0},
     "task":      {"id": "", "slug": "", "depth": 0, "is_derived": False,
-                  "parent_task_id": "", "labels": [], "group": "",
-                  "status": ""},
+                  "parent_task_id": "", "parent_agent_slug": "",
+                  "labels": [], "group": "", "status": ""},
     "terminals": [],
 }
 
