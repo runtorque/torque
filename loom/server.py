@@ -1778,7 +1778,7 @@ async def main(connection: iterm2.Connection):
 
                     elif action == "derive":
                         # Derive a new task and dispatch it
-                        act_name = data.get("action", "")
+                        act_name = data.get("action_name", "")
                         act_vars = data.get("action_vars", {})
                         derive_group = data.get("group", "")
                         reuse_self = data.get("reuse_self", False)

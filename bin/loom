@@ -2181,7 +2181,7 @@ def cmd_ai_derive(args):
     if task:
         kwargs["task_id"] = task["id"]
     if args.action:
-        kwargs["action"] = args.action
+        kwargs["action_name"] = args.action
     if args.var:
         tvars = {}
         for kv in args.var:
