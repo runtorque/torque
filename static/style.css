@@ -654,7 +654,7 @@ textarea {
 }
 textarea:focus { border-color: var(--accent); }
 textarea.task-tpl-var, #task-task-input {
-  min-height: 0; resize: none; overflow: hidden;
+  min-height: 0; max-height: 30vh; resize: none; overflow-y: auto;
 }
 .prompt-preview-text {
   white-space: pre-wrap; word-break: break-word;
