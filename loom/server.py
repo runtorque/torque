@@ -1444,7 +1444,11 @@ async def main(connection: iterm2.Connection):
                                     and not data.get("force_no_action"):
                                 base_dir = cell.directory \
                                     or await _resolve_base_dir(group)
-                                tvars = {"TASK": task.task,
+                                task_text = task.task
+                                if task.description:
+                                    task_text += "\n\n" \
+                                        + task.description
+                                tvars = {"TASK": task_text,
                                          **(task.action_vars or {})}
                                 rendered = action_mgr.render_prompt(
                                     task.action_name, tvars,
@@ -1467,6 +1471,8 @@ async def main(connection: iterm2.Connection):
                                 parts = []
                                 if task.task:
                                     parts.append(task.task)
+                                if task.description:
+                                    parts.append(task.description)
                                 if task.instructions:
                                     parts.append(task.instructions)
                                 if task.context:
@@ -1475,7 +1481,10 @@ async def main(connection: iterm2.Connection):
                                     parts.append(task.criteria)
                                 prompt = "\n\n".join(parts)
                             else:
-                                prompt = task.task
+                                plain = task.task
+                                if task.description:
+                                    plain += "\n\n" + task.description
+                                prompt = plain
 
                             if prompt:
                                 is_clean = loom_ctx["context"]["is_clean"]
