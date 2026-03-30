@@ -1435,6 +1435,7 @@ async def main(connection: iterm2.Connection):
                             state.board_update_task(
                                 tid, agent_id=cell.id,
                                 lane=dispatch_lane)
+                            cell.current_task_id = tid
 
                             # Build loom context for template rendering
                             loom_ctx = _build_loom_context(cell, task)
@@ -1719,27 +1720,21 @@ async def main(connection: iterm2.Connection):
                     result = {"type": "error",
                               "message": f"Cell {cell_id} not found"}
                 else:
-                    # Resolve task: explicit ID, or auto-detect from
-                    # cell's active (non-Done, non-Backlog) tasks.
+                    # Resolve task: explicit ID → current_task_id →
+                    # auto-detect from cell's active tasks.
                     task = None
                     if task_id:
                         task = state.board_tasks.get(task_id)
-                    else:
+                    elif cell.current_task_id:
+                        task = state.board_tasks.get(
+                            cell.current_task_id)
+                    if not task and not task_id:
                         linked = [
                             t for t in state.board_tasks.values()
                             if t.agent_id == cell_id
                             and t.lane not in ("Done", "Backlog")]
                         if len(linked) == 1:
                             task = linked[0]
-                        elif len(linked) > 1:
-                            slugs = ", ".join(
-                                t.slug or t.id[:6] for t in linked)
-                            result = {
-                                "type": "error",
-                                "message":
-                                    f"Multiple active tasks for cell"
-                                    f" {cell_id}: {slugs}"
-                                    f" — pass task_id explicitly"}
 
                     def _add_label(t, label):
                         if label not in t.labels:

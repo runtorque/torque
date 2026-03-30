@@ -82,6 +82,7 @@ class AgentCell:
     last_summary: str = ""  # last assistant message on Stop (for checkpoint msgs)
     # Context preservation (dispatch history)
     tasks_dispatched: int = 0  # number of tasks sent to this agent (persisted)
+    current_task_id: str = ""  # most recently dispatched task (ephemeral)
     # Worktree status (Phase 2, ephemeral)
     worktree_dirty: bool = False  # has uncommitted changes
     worktree_diff: dict = field(default_factory=dict)  # {files, insertions, deletions}
@@ -94,6 +95,7 @@ _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "activity", "activity_detail", "last_event_at",
                      "session_tokens_in", "session_tokens_out",
                      "error_message", "needs_attention", "last_summary",
+                     "current_task_id",
                      "worktree_dirty", "worktree_diff",
                      "worktree_checkpoints")
 
