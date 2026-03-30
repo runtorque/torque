@@ -28,3 +28,5 @@ prompt: |
 
   If everything looks good, use `loom ai done`. If there are issues, derive back to the implementing agent with a description of what needs to be fixed:
   `loom ai derive "description" -t pipeline/implement --agent {{ loom.task.parent_agent_slug }}`
+
+  Do NOT fix issues yourself, deploy anything, or make changes. Only review and report.

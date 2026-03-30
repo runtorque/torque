@@ -41,4 +41,4 @@ prompt: |
 
   ## Important
 
-  Your only job is research. Do NOT write a plan, write code, or enter plan mode. Only explore and read. When you have enough context, use `loom ai derive` to hand off to the planning step — include a summary of your findings in the derive description. If anything is unclear, use `loom ai ask` to get clarification from the user before proceeding.
+  Your only job is research. Do NOT write a plan, write code, enter plan mode, or deploy anything. Only explore and read. When you have enough context, use `loom ai derive` to hand off to the planning step — include a summary of your findings in the derive description. If anything is unclear, use `loom ai ask` to get clarification from the user before proceeding.
