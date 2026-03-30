@@ -195,6 +195,9 @@ async def main(connection: iterm2.Connection):
                             if hasattr(adapter, "uninstall_hooks"):
                                 adapter.uninstall_hooks(
                                     os.path.expanduser(c.directory))
+                            if hasattr(adapter, "uninstall_mcp_config"):
+                                adapter.uninstall_mcp_config(
+                                    os.path.expanduser(c.directory))
                         event_bus.cleanup_cell(c.id)
                         if c.worktree_path:
                             await worktree_mgr.remove(c)
@@ -753,6 +756,9 @@ async def main(connection: iterm2.Connection):
                         if hasattr(adapter, "uninstall_hooks"):
                             adapter.uninstall_hooks(
                                 os.path.expanduser(c.directory))
+                        if hasattr(adapter, "uninstall_mcp_config"):
+                            adapter.uninstall_mcp_config(
+                                os.path.expanduser(c.directory))
                     event_bus.cleanup_cell(c.id)
                     if c.worktree_path:
                         await worktree_mgr.remove(c)
@@ -969,11 +975,14 @@ async def main(connection: iterm2.Connection):
                 for c in removed:
                     if c.session_id:
                         await bridge.close_session(c.session_id)
-                    # Clean up hooks
+                    # Clean up hooks and MCP config
                     if c.agent_type and c.directory:
                         adapter = get_adapter(c.agent_type)
                         if hasattr(adapter, "uninstall_hooks"):
                             adapter.uninstall_hooks(
+                                os.path.expanduser(c.directory))
+                        if hasattr(adapter, "uninstall_mcp_config"):
+                            adapter.uninstall_mcp_config(
                                 os.path.expanduser(c.directory))
                     # Clean up event bus state
                     event_bus.cleanup_cell(c.id)

@@ -121,14 +121,18 @@ class ITerm2Adapter:
                 # Resolve git info for all cell types
                 await self._resolve_git_info(cell)
 
-                # Re-install hooks for awareness agents (in case files
-                # were lost or working dir changed)
+                # Re-install hooks and MCP config for awareness agents
+                # (in case files were lost or working dir changed)
                 if cell.agent_type and cell.directory:
                     adapter = get_adapter(cell.agent_type)
                     hook_dir = os.path.expanduser(cell.directory)
                     if hasattr(adapter, "install_hooks"):
                         if adapter.install_hooks(hook_dir):
                             log.info("Re-installed hooks for '%s' in %s",
+                                     cell.name, hook_dir)
+                    if hasattr(adapter, "install_mcp_config"):
+                        if adapter.install_mcp_config(hook_dir):
+                            log.info("Re-installed MCP config for '%s' in %s",
                                      cell.name, hook_dir)
 
                 self._start_prompt_monitor(cell)
@@ -244,7 +248,7 @@ class ITerm2Adapter:
                 for k, v in env_vars.items())
             await session.async_send_text(f"export {exports}\n")
 
-        # Install agent hooks (if adapter supports it)
+        # Install agent hooks and MCP config (if adapter supports it)
         if cell.agent_type:
             adapter = get_adapter(cell.agent_type)
             hook_dir = os.path.expanduser(cell.directory) if cell.directory else ""
@@ -255,6 +259,10 @@ class ITerm2Adapter:
                 else:
                     log.warning("Failed to install hooks for '%s' in %s",
                                 cell.name, hook_dir)
+            if hook_dir and hasattr(adapter, "install_mcp_config"):
+                if adapter.install_mcp_config(hook_dir):
+                    log.info("Installed MCP config for '%s' in %s",
+                             cell.name, hook_dir)
 
         # Init script
         if init_script:
@@ -263,12 +271,17 @@ class ITerm2Adapter:
 
         # Boot command (with session resume for supported agents)
         boot_cmd = cell.command
-        if boot_cmd and cell.agent_session_id and cell.agent_type == "claude-code":
+        if boot_cmd and cell.agent_session_id and cell.agent_type:
             gs = self.state.get_group_settings(cell.group)
             if gs.agent_session_resume:
-                boot_cmd = f"{boot_cmd} --resume {shlex.quote(cell.agent_session_id)}"
-                log.info("Resuming Claude Code session %s for '%s'",
-                         cell.agent_session_id, cell.name)
+                adapter = get_adapter(cell.agent_type)
+                resumed = adapter.get_resume_command(
+                    boot_cmd, cell.agent_session_id)
+                if resumed:
+                    boot_cmd = resumed
+                    log.info("Resuming %s session %s for '%s'",
+                             adapter.display_name,
+                             cell.agent_session_id, cell.name)
         if boot_cmd:
             await session.async_send_text(boot_cmd + "\n")
             # Awareness agents start as idle — hooks will set activity

@@ -4,8 +4,9 @@ Implements just enough of the MCP spec (JSON-RPC 2.0 over POST) to expose
 loom ai commands as tools.  No external dependencies — uses aiohttp
 routes on the existing server.
 
-Agent identity comes from the ``X-Loom-Cell-Id`` header, which Claude Code
-populates from ``${LOOM_CELL_ID}`` in ``.mcp.json``.
+Agent identity comes from the ``X-Loom-Cell-Id`` header.  Claude Code
+populates it from ``${LOOM_CELL_ID}`` in ``.mcp.json``; Codex uses
+``env_http_headers`` in ``.codex/config.toml``.
 """
 
 import json

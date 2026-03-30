@@ -59,6 +59,10 @@ class ClaudeCodeAdapter(AgentAdapter):
     def get_env_vars(self, cell) -> dict[str, str]:
         return {"LOOM_CELL_ID": cell.id}
 
+    def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
+        import shlex
+        return f"{boot_cmd} --resume {shlex.quote(session_id)}"
+
     def get_hook_config(self, cell) -> dict | None:
         """Return the Claude Code hooks config to write for this cell.
 

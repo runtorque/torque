@@ -35,7 +35,7 @@ For dual mode, also run `make open` to get a browser window alongside the toolbe
   - `adapters/` — provider-agnostic agent awareness:
     - `base.py` — `AgentEvent` dataclass, `AgentAdapter` base class
     - `claude_code.py` — full integration: HTTP hooks (command hook for SessionStart), event parsing, activity inference, hook install/uninstall, session resume
-    - `codex.py` — stub (process matching only)
+    - `codex.py` — full integration: command hooks (SessionStart/PreToolUse/PostToolUse/Stop), event parsing, activity inference, MCP config install, session resume
     - `gemini_cli.py` — stub (process matching only)
     - `generic.py` — fallback (process monitoring only)
 - **Webview** (`webview.html` + `static/`):

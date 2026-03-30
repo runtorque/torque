@@ -54,6 +54,13 @@ class AgentAdapter:
         """Return extra environment variables to set when spawning."""
         return {}
 
+    def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
+        """Return the modified boot command for resuming a session.
+
+        Returns None if this adapter doesn't support session resume.
+        """
+        return None
+
     def parse_event(self, raw: dict, cell) -> AgentEvent | None:
         """Parse an incoming hook payload into a normalized AgentEvent.
 
