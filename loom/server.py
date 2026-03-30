@@ -309,24 +309,48 @@ async def main(connection: iterm2.Connection):
         ``done``, ``blocked``, and ``error`` are always included.
         ``derive`` only appears when the action declares transitions.
         ``ask`` only appears when an ``ask`` transition exists.
-        ``pr``/``merged`` are omitted (reserved for future PR actions).
 
         When ``is_clean`` is False (agent already has context from prior
-        tasks), emits a one-liner reminder instead of the full reference.
+        tasks), emits an abbreviated version with derive/ask commands
+        if the action has transitions.
         """
+        # Resolve transitions for this action
+        transitions = []
+        if task.action_name:
+            transitions = amgr.get_transitions(task.action_name,
+                                               base_dir)
+
         if not is_clean:
-            return ("\n\n---\nUse `loom ai done` when finished, "
-                    "or `loom ai blocked \"reason\"` if stuck.")
+            # Abbreviated postscript — but include derive/ask
+            # if the action has transitions
+            abbrev = ("\n\n---\nUse `loom ai done` when finished, "
+                      "or `loom ai blocked \"reason\"` if stuck.")
+            derive_lines = []
+            has_ask = False
+            for tr in transitions:
+                if isinstance(tr, dict):
+                    if tr.get("action"):
+                        when = tr.get("when", "")
+                        desc = f" — {when}" if when else ""
+                        derive_lines.append(
+                            f"- `loom ai derive \"description\" "
+                            f"-t {tr['action']}`{desc}")
+                    if tr.get("ask"):
+                        has_ask = True
+            if derive_lines or has_ask:
+                abbrev += "\nAvailable transitions:"
+                abbrev += "\n" + "\n".join(derive_lines)
+                if has_ask:
+                    abbrev += ("\n- `loom ai ask \"question\"` "
+                              "— pause for human input")
+            return abbrev
+
         lines = [
             "\n\nReport your progress with these commands:",
             "- `loom ai done` — task complete, no follow-up needed",
         ]
 
         # Dynamic derive/ask lines from action transitions
-        transitions = []
-        if task.action_name:
-            transitions = amgr.get_transitions(task.action_name,
-                                               base_dir)
         has_ask = False
         for tr in transitions:
             if isinstance(tr, dict):
@@ -340,8 +364,9 @@ async def main(connection: iterm2.Connection):
                     has_ask = True
         if has_ask:
             lines.append(
-                "- `loom ai ask \"question\"`"
-                " — task complete, need human decision on next step")
+                "- `loom ai ask \"question\"` "
+                "— pause for human input (creates a task in "
+                "Backlog for review)")
         lines.extend([
             "- `loom ai blocked \"reason\"` — need user input",
             "- `loom ai error \"message\"` — unrecoverable error",
@@ -360,8 +385,11 @@ async def main(connection: iterm2.Connection):
                     a = state.agents.get(parent.agent_id)
                     if a:
                         p_agent = f", agent: {a.slug or a.name}"
+                p_status = ""
+                if parent.status:
+                    p_status = f", status: {parent.status}"
                 ctx += (f"\nParent task: \"{parent.task[:80]}\" "
-                        f"({parent.lane}{p_agent})")
+                        f"({parent.lane}{p_status}{p_agent})")
             if root and root.id != (parent.id if parent else ""):
                 ctx += f"\nRoot task: \"{root.task[:80]}\""
             lines.append(ctx)
