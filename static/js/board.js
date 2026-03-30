@@ -724,11 +724,6 @@ function boardCardMenu(evt, taskId) {
   // Preview prompt
   html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
 
-  // View pipeline (only if task is part of a chain)
-  if (task.parent_task_id || task.pipeline_root_id) {
-    html += '<button onclick="boardViewPipeline(\'' + taskId + '\')">View pipeline</button>';
-  }
-
   html += '<div class="ctx-sep"></div>';
   html += '<button class="danger" onclick="boardDeleteTask(\'' + taskId + '\')">Delete</button>';
 
