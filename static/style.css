@@ -653,7 +653,7 @@ textarea {
   min-height: 48px;
 }
 textarea:focus { border-color: var(--accent); }
-textarea.task-tpl-var, #task-task-input {
+textarea.task-tpl-var, #task-task-input, #task-description-input {
   min-height: 0; max-height: 30vh; resize: none; overflow-y: auto;
 }
 .prompt-preview-text {

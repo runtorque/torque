@@ -777,6 +777,7 @@ function _tplSubmit() {
     document.getElementById('task-modal-title').textContent = 'New Task';
     document.getElementById('task-submit-btn').textContent = 'Create';
     document.getElementById('task-task-input').value = vars['TASK'] || '';
+    document.getElementById('task-description-input').value = '';
     document.getElementById('task-assignee-input').value = '';
     document.getElementById('task-labels-input').value = '';
     _populateTaskGroupSelect(_tplGroup || _currentGroup());
@@ -804,6 +805,7 @@ function _handleActionRendered(msg) {
   document.getElementById('task-submit-btn').textContent = 'Create';
 
   document.getElementById('task-task-input').value = '';
+  document.getElementById('task-description-input').value = '';
   document.getElementById('task-assignee-input').value = '';
   document.getElementById('task-labels-input').value = (msg.labels || []).join(', ');
 
@@ -855,6 +857,7 @@ function openAddTask(lane) {
   document.getElementById('task-submit-btn').textContent = 'Create';
 
   document.getElementById('task-task-input').value = '';
+  document.getElementById('task-description-input').value = '';
   document.getElementById('task-assignee-input').value = '';
   document.getElementById('task-labels-input').value = '';
   document.getElementById('task-action-vars').innerHTML = '';
@@ -887,6 +890,8 @@ function openEditTask(taskId) {
 
   var taskEl = document.getElementById('task-task-input');
   taskEl.value = t.task || '';
+  var descEl = document.getElementById('task-description-input');
+  descEl.value = t.description || '';
   document.getElementById('task-assignee-input').value = t.assignee || '';
   document.getElementById('task-labels-input').value = (t.labels || []).join(', ');
   document.getElementById('task-action-vars').innerHTML = '';
@@ -899,6 +904,7 @@ function openEditTask(taskId) {
 
   document.getElementById('modal-task').classList.add('visible');
   taskAutoResize(taskEl);
+  taskAutoResize(descEl);
   taskEl.focus();
   taskEl.select();
 }
@@ -926,6 +932,7 @@ function submitTask() {
     return;
   }
 
+  var description = document.getElementById('task-description-input').value.trim();
   var assignee = document.getElementById('task-assignee-input').value.trim();
   var labelsRaw = document.getElementById('task-labels-input').value.trim();
   var labels = labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
@@ -933,7 +940,7 @@ function submitTask() {
 
   if (_taskEditId) {
     // Edit mode
-    var msg = { cmd: 'board_update_task', id: _taskEditId, task: task, group: group, assignee: assignee };
+    var msg = { cmd: 'board_update_task', id: _taskEditId, task: task, group: group, assignee: assignee, description: description };
     msg.action_name = _taskSelectedAction;
     msg.action_vars = actionVars;
     msg.labels = labels;
@@ -942,6 +949,7 @@ function submitTask() {
     // Create mode
     var lane = document.getElementById('modal-task').dataset.lane || '';
     var msg = { cmd: 'board_add_task', task: task, group: group, lane: lane };
+    if (description) msg.description = description;
     if (assignee) msg.assignee = assignee;
     if (_taskSelectedAction) msg.action_name = _taskSelectedAction;
     if (Object.keys(actionVars).length) msg.action_vars = actionVars;

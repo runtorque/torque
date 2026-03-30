@@ -18,7 +18,8 @@ _DEFAULT_LANES = ["Backlog", "To Do", "In Progress", "Done"]
 @dataclass
 class BoardTask:
     id: str
-    task: str                   # actionable task description (required)
+    task: str                   # short title (required)
+    description: str = ""       # longer context / details (optional)
     slug: str = ""              # auto-generated from task text
     group: str = ""             # owning group (must be an existing group)
     action_name: str = ""       # action used for prompt rendering (optional)

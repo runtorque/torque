@@ -383,6 +383,11 @@
     <textarea id="task-task-input" rows="1" autocomplete="off"
               oninput="taskAutoResize(this)"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+    <label>Description</label>
+    <textarea id="task-description-input" rows="2" autocomplete="off"
+              placeholder="Optional longer context or details..."
+              oninput="taskAutoResize(this)"
+              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
     <label>Group <span class="label-req">*</span></label>
     <select id="task-group-select"
             onkeydown="if(event.key==='Escape')closeModals();"></select>

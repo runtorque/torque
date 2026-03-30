@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
 CREATE TABLE IF NOT EXISTS board_tasks (
     id             TEXT PRIMARY KEY,
     task           TEXT NOT NULL,
+    description    TEXT NOT NULL DEFAULT '',
     slug           TEXT NOT NULL DEFAULT '',
     group_name     TEXT NOT NULL DEFAULT '',
     action_name    TEXT NOT NULL DEFAULT '',
@@ -242,6 +243,15 @@ class LoomDB:
                     f"ALTER TABLE board_tasks ADD COLUMN {col} "
                     f"{col_type} NOT NULL DEFAULT {default}")
                 self._conn.commit()
+        # Migrate: add description column to board_tasks
+        try:
+            self._conn.execute(
+                "SELECT description FROM board_tasks LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE board_tasks ADD COLUMN description "
+                "TEXT NOT NULL DEFAULT ''")
+            self._conn.commit()
         # Migrate: add status column to board_tasks
         try:
             self._conn.execute("SELECT status FROM board_tasks LIMIT 0")
@@ -371,14 +381,16 @@ class LoomDB:
         group_name = d.pop("group", "")
         self._conn.execute("""
             INSERT OR REPLACE INTO board_tasks
-                (id, task, slug, group_name, action_name, action_vars,
+                (id, task, description, slug, group_name,
+                 action_name, action_vars,
                  instructions, context, criteria,
                  lane, position, assignee, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url,
                  parent_task_id, pipeline_depth, pipeline_root_id, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
-            d["id"], d["task"], d["slug"], group_name,
+            d["id"], d["task"], d.get("description", ""),
+            d["slug"], group_name,
             d.get("action_name", ""), action_vars,
             d["instructions"], d["context"], d["criteria"],
             d["lane"], d["position"],
@@ -512,15 +524,17 @@ class LoomDB:
                 group_name = d.pop("group", "")
                 c.execute("""
                     INSERT INTO board_tasks
-                        (id, task, slug, group_name, action_name,
+                        (id, task, description, slug, group_name,
+                         action_name,
                          action_vars, instructions, context,
                          criteria, lane, position, assignee, agent_id, labels,
                          created_at, updated_at, provider, external_id,
                          external_url, parent_task_id, pipeline_depth,
                          pipeline_root_id, status)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
-                    d.get("id", tid), d.get("task", ""), d.get("slug", ""),
+                    d.get("id", tid), d.get("task", ""),
+                    d.get("description", ""), d.get("slug", ""),
                     group_name, d.get("action_name", ""), action_vars,
                     d.get("instructions", ""),
                     d.get("context", ""), d.get("criteria", ""),

@@ -1320,6 +1320,8 @@ def cmd_task_create(args):
         "group": group,
         "lane": "Backlog",
     }
+    if getattr(args, "context", None):
+        kwargs["description"] = args.context
     if args.assign:
         kwargs["assignee"] = args.assign
     if args.labels:
@@ -2538,7 +2540,8 @@ def build_parser():
 
     p = tsk_sub.add_parser("create", aliases=["c"],
                            help="Create a ticket in the Backlog")
-    p.add_argument("description", help="Task description")
+    p.add_argument("description", help="Task title")
+    p.add_argument("-d", "--context", help="Longer description / context")
     p.add_argument("-g", "--group",
                    help="Target group (auto-detected if in a Loom session)")
     p.add_argument("-a", "--assign", metavar="PREFIX",
