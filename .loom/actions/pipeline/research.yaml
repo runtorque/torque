@@ -1,0 +1,42 @@
+name: pipeline/research
+description: Research a task — explore the codebase and gather context before planning
+
+agent:
+  name_prefix: research
+  tab_color: "#58a6ff"
+
+worktree: true
+
+labels:
+  - pipeline
+
+transitions:
+  - action: pipeline/plan
+    when: research is complete and you have enough context to write a plan
+    status: "Planning"
+    self: true
+  - ask: true
+    when: you need clarification or additional details from the user before proceeding
+
+prompt: |
+  You are researching a task before planning and implementing it. Your goal is to deeply understand the problem, explore the relevant code, and gather all the context needed to write a solid plan.
+
+  ## Task
+
+  {{ TASK }}
+
+  ## Approach
+
+  - Read the codebase to understand the relevant architecture, patterns, and conventions
+  - Identify the files and modules that will need to change
+  - Look for existing tests, related features, and potential conflicts
+  - Note any ambiguities or open questions about the task
+  - If the task description is unclear or missing critical details, ask the user for clarification before proceeding
+
+  ## Output
+
+  When you have enough context, transition to the planning step with a summary of your findings:
+  - What you learned about the codebase
+  - Which files and modules are involved
+  - Any constraints, risks, or edge cases you identified
+  - Open questions (if any remain, ask the user instead of guessing)

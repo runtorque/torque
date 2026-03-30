@@ -1,0 +1,36 @@
+name: pipeline/plan
+description: Write an implementation plan based on research findings
+
+agent:
+  name_prefix: plan
+  tab_color: "#d2a8ff"
+
+labels:
+  - pipeline
+
+transitions:
+  - action: pipeline/implement
+    when: the plan is confirmed by the user and ready for implementation
+    status: "Implementing"
+    self: true
+  - ask: true
+    when: you need the user to review and confirm the plan before proceeding
+
+prompt: |
+  You are writing an implementation plan. The previous research step gathered context about the codebase — use that context to design a concrete, step-by-step plan.
+
+  ## Task
+
+  {{ TASK }}
+
+  ## Writing the plan
+
+  - Break the work into discrete, ordered steps
+  - For each step, specify which files change and what the change is
+  - Call out any decisions that have trade-offs (and pick one with reasoning)
+  - Note what tests need to be added or updated
+  - Keep it actionable — every step should be something an agent can execute without ambiguity
+
+  ## Before proceeding
+
+  Ask the user to confirm the plan before transitioning to implementation. Present the plan clearly and wait for approval. Do not proceed to implementation without confirmation.

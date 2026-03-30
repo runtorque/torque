@@ -1,0 +1,31 @@
+name: pipeline/implement
+description: Implement the plan from the previous steps
+
+agent:
+  name_prefix: impl
+  tab_color: "#3fb950"
+
+labels:
+  - pipeline
+
+transitions:
+  - action: pipeline/review
+    when: implementation is complete and ready for review
+    status: "On Review"
+
+prompt: |
+  You are implementing a plan that was researched and designed in the previous steps. Follow the plan closely — the research and planning work has already been done, so focus on execution.
+
+  ## Task
+
+  {{ TASK }}
+
+  ## Approach
+
+  - Follow the plan from the previous steps — do not redesign or re-scope
+  - Write clean, minimal code that follows the existing patterns in the codebase
+  - Add or update tests to cover the new behavior
+  - Run the test suite to make sure nothing is broken
+  - Keep the diff focused — no unrelated changes
+
+  If you encounter something the plan didn't account for, handle it pragmatically. Only deviate from the plan when the plan is clearly wrong, and document what you changed and why in the derive description.

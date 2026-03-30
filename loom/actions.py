@@ -499,6 +499,8 @@ class ActionManager:
                              "when": tr.get("when", "")}
                     if tr.get("status"):
                         entry["status"] = tr["status"]
+                    if tr.get("self"):
+                        entry["self"] = True
                     result.append(entry)
                 elif tr.get("ask"):
                     result.append({"ask": True,

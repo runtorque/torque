@@ -332,9 +332,12 @@ async def main(connection: iterm2.Connection):
                     if tr.get("action"):
                         when = tr.get("when", "")
                         desc = f" — {when}" if when else ""
+                        self_flag = " --self" if tr.get("self") \
+                            else ""
                         derive_lines.append(
                             f"- `loom ai derive \"description\" "
-                            f"-t {tr['action']}`{desc}")
+                            f"-t {tr['action']}{self_flag}`"
+                            f"{desc}")
                     if tr.get("ask"):
                         has_ask = True
             if derive_lines or has_ask:
@@ -357,9 +360,11 @@ async def main(connection: iterm2.Connection):
                 if tr.get("action"):
                     when = tr.get("when", "")
                     desc = f" — {when}" if when else ""
+                    self_flag = " --self" if tr.get("self") \
+                        else ""
                     lines.append(
                         f"- `loom ai derive \"description\" "
-                        f"-t {tr['action']}`{desc}")
+                        f"-t {tr['action']}{self_flag}`{desc}")
                 if tr.get("ask"):
                     has_ask = True
         if has_ask:
