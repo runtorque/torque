@@ -2189,6 +2189,8 @@ def cmd_ai_derive(args):
     cell, task = _resolve_self_and_task(args)
     kwargs = {"cell_id": cell["id"], "action": "derive",
               "message": args.description}
+    if getattr(args, "context", None):
+        kwargs["description"] = args.context
     if task:
         kwargs["task_id"] = task["id"]
     if args.action:
@@ -2712,7 +2714,8 @@ def build_parser():
 
     p = ai_sub.add_parser("derive",
                           help="Derive a new task and dispatch next agent")
-    p.add_argument("description", help="Task description for the next agent")
+    p.add_argument("description", help="Short task title for the next step")
+    p.add_argument("-d", "--context", help="Longer description / details")
     p.add_argument("-t", "--action", help="Action for the new task")
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
                    help="Action variables")

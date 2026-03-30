@@ -352,7 +352,8 @@ async def main(connection: iterm2.Connection):
             when = tr.get("when", "")
             desc = f" — {when}" if when else ""
             flag = _target_flag(tr)
-            return (f"- `loom ai derive \"description\" "
+            return (f"- `loom ai derive \"short title\" "
+                    f"-d \"details\" "
                     f"-t {tr['action']}{flag}`{desc}")
 
         if not is_clean:
@@ -1929,6 +1930,8 @@ async def main(connection: iterm2.Connection):
                                     root_id = \
                                         task.pipeline_root_id \
                                         or task.id
+                                    derive_desc = data.get(
+                                        "description", "")
                                     new_task = state.board_add_task(
                                         task=message,
                                         group=grp,
@@ -1939,6 +1942,7 @@ async def main(connection: iterm2.Connection):
                                         parent_task_id=task.id,
                                         pipeline_depth=new_depth,
                                         pipeline_root_id=root_id,
+                                        description=derive_desc,
                                     )
                                     if new_task:
                                         _panel_event(
