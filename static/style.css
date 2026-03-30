@@ -1144,6 +1144,13 @@ textarea.task-tpl-var, #task-task-input {
   border-radius: 2px;
 }
 .board-card-collapse-btn:hover { background: var(--bg); }
+/* Resolve modal */
+.resolve-question {
+  font-size: 11px; color: var(--text-dim);
+  background: var(--bg); border-radius: var(--radius);
+  padding: 6px 8px; margin: 0 0 8px 0;
+  white-space: pre-wrap; word-break: break-word;
+}
 
 /* Add task inline */
 .board-add-task {

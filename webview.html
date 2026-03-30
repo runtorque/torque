@@ -440,6 +440,21 @@
 <!-- Context menu (right-click) -->
 <div id="ctx-menu"></div>
 
+<!-- Resolve ask task -->
+<div class="overlay" id="modal-resolve">
+  <div class="modal">
+    <h3>Resolve</h3>
+    <p class="resolve-question" id="resolve-question"></p>
+    <textarea id="resolve-answer" class="task-input" rows="3" placeholder="Your answer..."
+      oninput="taskAutoResize(this)"
+      onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" onclick="submitResolve()">Resolve</button>
+    </div>
+  </div>
+</div>
+
 <!-- Confirm dialog (replaces window.confirm for WKWebView) -->
 <div class="overlay" id="modal-confirm">
   <div class="modal">

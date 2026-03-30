@@ -2219,6 +2219,32 @@ def cmd_ai_ask(args):
     print("  A human will review and dispatch this task.")
 
 
+def cmd_task_resolve(args):
+    st = get_state_local(args.port)
+    task = resolve_task(st, args.identifier)
+    if "human" not in task.get("labels", []):
+        _die("Not an ask task (missing 'human' label)")
+    answer = args.answer
+    if not answer:
+        # Read from stdin or prompt
+        import sys
+        if not sys.stdin.isatty():
+            answer = sys.stdin.read().strip()
+        else:
+            print(f"Question: {task.get('task', '')}")
+            print("Enter your answer (Ctrl+D to finish):")
+            try:
+                answer = sys.stdin.read().strip()
+            except EOFError:
+                answer = ""
+    if not answer:
+        _die("Answer is required")
+    resp = api_call("resolve_ask", port=args.port,
+                    id=task["id"], answer=answer)
+    check_ok(resp)
+    print(f"Resolved: answer sent to parent agent.")
+
+
 def cmd_task_chain(args):
     st = get_state_local(args.port)
     task = resolve_task(st, args.identifier)
@@ -2574,6 +2600,11 @@ def build_parser():
     p = tsk_sub.add_parser("chain", help="Show pipeline derivation chain")
     p.add_argument("identifier", help="Task ID, slug, or title")
     p.set_defaults(func=cmd_task_chain)
+
+    p = tsk_sub.add_parser("resolve", help="Resolve an ask task with an answer")
+    p.add_argument("identifier", help="Task ID, slug, or title")
+    p.add_argument("answer", nargs="?", help="Answer text")
+    p.set_defaults(func=cmd_task_resolve)
 
     # -- action -------------------------------------------------------------
     act = sub.add_parser("action", aliases=["act"],

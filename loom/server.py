@@ -1514,6 +1514,90 @@ async def main(connection: iterm2.Connection):
                                     asyncio.create_task(
                                         _dispatch_send(cell, prompt))
 
+            elif cmd == "resolve_ask":
+                # Resolve an ask task: send answer to parent's agent
+                tid = data.get("id", "")
+                answer = data.get("answer", "")
+                task = state.board_tasks.get(tid)
+                if not task:
+                    result = {"type": "error",
+                              "message": "Task not found"}
+                elif "human" not in (task.labels or []):
+                    result = {"type": "error",
+                              "message": "Not an ask task"}
+                elif not answer.strip():
+                    result = {"type": "error",
+                              "message": "Answer is required"}
+                elif not task.parent_task_id:
+                    result = {"type": "error",
+                              "message": "Ask task has no parent"}
+                else:
+                    parent = state.board_tasks.get(
+                        task.parent_task_id)
+                    if not parent:
+                        result = {"type": "error",
+                                  "message": "Parent task not found"}
+                    elif not parent.agent_id:
+                        result = {"type": "error",
+                                  "message": "Parent task has no "
+                                             "linked agent"}
+                    else:
+                        agent = state.agents.get(parent.agent_id)
+                        if not agent or not agent.session_id:
+                            result = {
+                                "type": "error",
+                                "message": "Parent agent not "
+                                           "available"}
+                        else:
+                            # Send answer to the parent's agent
+                            q = task.task
+                            if len(q) > 120:
+                                q = q[:120] + "…"
+                            msg = (f"Answer to your question "
+                                   f"\"{q}\":\n{answer}")
+                            await bridge.send_text(
+                                agent.session_id,
+                                msg + "\r")
+                            agent.status = "running"
+                            state._emit_agent(agent)
+
+                            # Move ask task to Done (no cascade)
+                            from datetime import datetime, timezone
+                            if task.lane != "Done":
+                                state.board_move_task(
+                                    task.id, "Done")
+                            task.status = ""
+                            task.updated_at = datetime.now(
+                                timezone.utc).isoformat()
+                            state._emit("task_upsert",
+                                        **asdict(task))
+                            state._db_save_task(task)
+
+                            # Clear parent "Awaiting Input" status
+                            parent.status = ""
+                            parent.updated_at = datetime.now(
+                                timezone.utc).isoformat()
+                            state._emit("task_upsert",
+                                        **asdict(parent))
+                            state._db_save_task(parent)
+
+                            # Clear root task status too
+                            root_id = parent.pipeline_root_id \
+                                or parent.id
+                            if root_id != parent.id:
+                                root = state.board_tasks.get(
+                                    root_id)
+                                if root and root.status:
+                                    root.status = ""
+                                    root.updated_at = datetime.now(
+                                        timezone.utc).isoformat()
+                                    state._emit("task_upsert",
+                                                **asdict(root))
+                                    state._db_save_task(root)
+
+                            result = {"type": "ok",
+                                      "task_id": tid}
+
             elif cmd == "preview_prompt":
                 # Preview rendered prompt for a task or inline params
                 tid = data.get("id", "")

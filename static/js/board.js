@@ -701,6 +701,11 @@ function boardCardMenu(evt, taskId) {
 
   html += '<div class="ctx-sep"></div>';
 
+  // Resolve (ask tasks with human label)
+  if (task.labels && task.labels.indexOf('human') >= 0 && task.lane !== 'Done') {
+    html += '<button onclick="event.stopPropagation();boardOpenResolve(\'' + taskId + '\')">Resolve...</button>';
+  }
+
   // Dispatch (only from Backlog)
   if (task.lane === 'Backlog') {
     html += '<button onclick="event.stopPropagation();boardDispatchTask(\'' + taskId + '\')">Dispatch...</button>';
@@ -1102,6 +1107,32 @@ function boardClosePipeline() {
   var overlay = document.getElementById('pipeline-thread-overlay');
   if (overlay) overlay.style.display = 'none';
   _boardPipelineOverlay = false;
+}
+
+/* ---- Resolve ask task ----------------------------------------------- */
+
+function boardOpenResolve(taskId) {
+  _closeCtxMenu();
+  var tasks = _boardTasks();
+  var task = tasks[taskId];
+  if (!task) return;
+  var modal = document.getElementById('modal-resolve');
+  document.getElementById('resolve-question').textContent = task.task || '';
+  document.getElementById('resolve-answer').value = '';
+  modal.dataset.taskId = taskId;
+  modal.classList.add('visible');
+  setTimeout(function() {
+    document.getElementById('resolve-answer').focus();
+  }, 50);
+}
+
+function submitResolve() {
+  var modal = document.getElementById('modal-resolve');
+  var taskId = modal.dataset.taskId;
+  var answer = document.getElementById('resolve-answer').value.trim();
+  if (!answer) return;
+  send({ cmd: 'resolve_ask', id: taskId, answer: answer });
+  closeModals();
 }
 
 /* ---- Close popover on outside click --------------------------------- */
