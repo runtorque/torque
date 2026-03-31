@@ -1,22 +1,9 @@
 name: feature/research
 description: Research a task, explore the codebase, and write an implementation plan
-
 agent:
   name_prefix: research
-  tab_color: "#58a6ff"
-
+  tab_color: '#58a6ff'
 worktree: true
-
-labels:
-  - feature
-
-transitions:
-  - action: feature/implement
-    when: the user has reviewed and approved the plan
-    status: "Implementing"
-  - ask: true
-    when: you need clarification or additional details from the user before proceeding
-
 prompt: |
   You are researching a task and writing an implementation plan. Your goal is to deeply understand the problem, explore the relevant code, and produce a concrete plan that another agent will execute.
 
@@ -52,3 +39,12 @@ prompt: |
   Report yourself as blocked using `loom ai blocked "Plan ready for review"`. This notifies the user so they can review the plan in your output. Do NOT derive to implementation yourself — the user will approve and dispatch the next step.
 
   Do NOT write code, deploy anything, or make changes. Only research and plan.
+labels:
+- feature
+transitions:
+- action: feature/implement
+  when: the user has reviewed and approved the plan
+  status: Implementing
+  target: self
+- ask: true
+  when: you need clarification or additional details from the user before proceeding
