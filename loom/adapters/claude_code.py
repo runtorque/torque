@@ -47,6 +47,7 @@ def _is_loom_hook_entry(entry: dict) -> bool:
 class ClaudeCodeAdapter(AgentAdapter):
     name = "claude-code"
     display_name = "Claude Code"
+    default_command = "claude"
 
     def match_process(self, process_name: str) -> bool:
         return process_name.lower() in ("claude", "claude-code")

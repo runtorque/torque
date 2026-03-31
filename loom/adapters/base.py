@@ -34,6 +34,7 @@ class AgentAdapter:
 
     name: str = ""
     display_name: str = ""
+    default_command: str = ""
 
     def match_process(self, process_name: str) -> bool:
         """Return True if this process name indicates this agent type."""

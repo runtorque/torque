@@ -1,5 +1,58 @@
 /* Modals — add group, add agent/terminal, confirm dialog, color picker */
 
+/* -- Provider cache (populated from get_config response) ------------------ */
+let _cachedProviders = [];  // [{name, display_name, command}, ...]
+
+function _populateProviderSelect(selectId, currentValue, includeGroupDefault) {
+  const sel = document.getElementById(selectId);
+  sel.innerHTML = '';
+  if (includeGroupDefault) {
+    const opt = document.createElement('option');
+    opt.value = ''; opt.textContent = 'Group default';
+    sel.appendChild(opt);
+  } else {
+    const opt = document.createElement('option');
+    opt.value = ''; opt.textContent = 'Default (Claude Code)';
+    sel.appendChild(opt);
+  }
+  for (const p of _cachedProviders) {
+    const opt = document.createElement('option');
+    opt.value = p.name; opt.textContent = p.display_name;
+    sel.appendChild(opt);
+  }
+  const cust = document.createElement('option');
+  cust.value = '__custom__'; cust.textContent = 'Custom\u2026';
+  sel.appendChild(cust);
+  sel.value = currentValue || '';
+}
+
+function _getProviderValue(selectId) {
+  const v = document.getElementById(selectId).value;
+  return v === '__custom__' ? '' : v;
+}
+
+function onGsProviderChange() {
+  const v = document.getElementById('gs-agent-provider').value;
+  const row = document.getElementById('gs-agent-boot-cmd-row');
+  if (v === '__custom__') {
+    row.classList.remove('hidden');
+  } else {
+    row.classList.add('hidden');
+    document.getElementById('gs-agent-boot-cmd').value = '';
+  }
+}
+
+function onAddProviderChange() {
+  const v = document.getElementById('add-provider-select').value;
+  const cmdRow = document.getElementById('add-cmd-row');
+  if (v === '__custom__') {
+    cmdRow.classList.remove('hidden');
+  } else {
+    cmdRow.classList.add('hidden');
+    document.getElementById('add-cmd-input').value = '';
+  }
+}
+
 /* -- Hint popover (for ? buttons) ---------------------------------------- */
 function toggleHint(btn) {
   const existing = document.querySelector('.hint-pop');
@@ -127,16 +180,19 @@ function _showAddModal(mode, group, config) {
   const argsRow = document.getElementById('add-args-row');
   const initRow = document.getElementById('add-init-row');
   const iconRow = document.getElementById('add-icon-row');
+  const providerRow = document.getElementById('add-provider-row');
   if (isTerminal) {
     cmdRow.classList.remove('hidden');
     argsRow.classList.remove('hidden');
     initRow.classList.remove('hidden');
     iconRow.classList.add('hidden');
+    providerRow.classList.add('hidden');
   } else {
     cmdRow.classList.add('hidden');
     argsRow.classList.add('hidden');
     initRow.classList.add('hidden');
     iconRow.classList.remove('hidden');
+    providerRow.classList.remove('hidden');
     _renderIconPicker('add-icon-picker', '', 'selectIcon');
   }
 
@@ -202,6 +258,9 @@ function _showAddModal(mode, group, config) {
     document.getElementById('add-cmd-input').value = gs.terminal_boot_command || '';
     document.getElementById('add-args-input').value = gs.terminal_command_args || '';
     document.getElementById('add-init-input').value = gs.terminal_init_script || '';
+  } else {
+    _populateProviderSelect('add-provider-select', gs.agent_provider || '', true);
+    onAddProviderChange();
   }
 
   const dir = (isAgent ? gs.agent_directory : gs.terminal_directory) || gs.default_directory;
@@ -414,7 +473,9 @@ function _showGroupSettings(group, data) {
   /* -- Agents tab -- */
   document.getElementById('gs-agent-directory').value = s.agent_directory || '';
   document.getElementById('gs-agent-shell').value = s.agent_shell || '';
+  _populateProviderSelect('gs-agent-provider', s.agent_provider || '', false);
   document.getElementById('gs-agent-boot-cmd').value = s.agent_boot_command || '';
+  onGsProviderChange();
   document.getElementById('gs-worktree').checked = s.git_worktree || false;
   document.getElementById('gs-wt-base-dir').value = s.worktree_base_dir || '.loom/worktrees';
   document.getElementById('gs-wt-base-branch').value = s.worktree_base_branch || '';
@@ -492,6 +553,7 @@ function submitGroupSettings() {
     agent_profile: document.getElementById('gs-agent-profile').value,
     agent_shell: document.getElementById('gs-agent-shell').value,
     agent_tab_color: _gsAgentColor,
+    agent_provider: _getProviderValue('gs-agent-provider'),
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
     agent_env_vars: _textToEnv('gs-agent-env-vars'),
     git_worktree: document.getElementById('gs-worktree').checked,
@@ -567,6 +629,10 @@ function submitAdd() {
     const init = document.getElementById('add-init-input').value.trim();
     if (args) msg.command_args = args;
     if (init) msg.init_script = init;
+  } else {
+    const prov = document.getElementById('add-provider-select').value;
+    if (prov && prov !== '__custom__') msg.provider = prov;
+    if (prov === '__custom__' && command) msg.command = command;
   }
 
   send(msg);

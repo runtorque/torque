@@ -36,6 +36,7 @@ def _is_loom_hook(hook: dict) -> bool:
 class CodexAdapter(AgentAdapter):
     name = "codex"
     display_name = "Codex"
+    default_command = "codex"
 
     def match_process(self, process_name: str) -> bool:
         return process_name.lower() == "codex"

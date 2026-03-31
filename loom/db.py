@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     agent_shell                 TEXT NOT NULL DEFAULT '',
     agent_tab_color             TEXT NOT NULL DEFAULT '',
     agent_env_vars              TEXT NOT NULL DEFAULT '{}',
+    agent_provider              TEXT NOT NULL DEFAULT '',
     agent_boot_command          TEXT NOT NULL DEFAULT '',
     git_worktree                INTEGER NOT NULL DEFAULT 0,
     worktree_base_dir           TEXT NOT NULL DEFAULT '.loom/worktrees',
@@ -208,6 +209,15 @@ class LoomDB:
             self._conn.execute(
                 "ALTER TABLE group_settings ADD COLUMN "
                 "dispatch_auto_terminals INTEGER NOT NULL DEFAULT 0")
+            self._conn.commit()
+        # Migrate: add agent_provider column
+        try:
+            self._conn.execute(
+                "SELECT agent_provider FROM group_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE group_settings ADD COLUMN "
+                "agent_provider TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
         # Migrate: add terminal_close_on_disconnect column
         try:

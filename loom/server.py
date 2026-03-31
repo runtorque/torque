@@ -16,7 +16,7 @@ from dataclasses import asdict
 from .state import MatrixState
 from .bridge import ITerm2Adapter
 from .events import EventLog, EventBus, PanelEventLog, health_check
-from .adapters import get_adapter
+from .adapters import get_adapter, get_providers, get_default_command_for_provider
 from .notifications import NotificationManager
 from .worktree import WorktreeManager
 from .actions import ActionManager, LOOM_CONTEXT_STUB
@@ -275,6 +275,22 @@ async def main(connection: iterm2.Connection):
         except Exception:
             pass
         return ""
+
+    def _resolve_provider_command(
+        provider: str, boot_command: str, default_command: str,
+    ) -> tuple[str, str]:
+        """Resolve (command, agent_type) from provider + boot_command.
+
+        When *provider* names a known adapter, the agent_type is set
+        explicitly and the command defaults to the adapter's default.
+        When *provider* is empty, auto-detection in bridge.py takes over.
+        """
+        if provider:
+            adapter_cmd = get_default_command_for_provider(provider)
+            if adapter_cmd:  # known provider
+                return (boot_command or adapter_cmd, provider)
+        # No provider — fall through to boot_command / global default
+        return (boot_command or default_command, "")
 
     def _resolve_agent_id(identifier: str) -> str | None:
         """Resolve an agent by slug, name (case-insensitive), ID, or prefix.
@@ -562,6 +578,7 @@ async def main(connection: iterm2.Connection):
                 "current_profile": current_profile,
                 "group_cells": group_cells,
                 "group_settings": asdict(gs),
+                "providers": get_providers(),
             }
 
         # get_group_settings: respond directly, no state mutation
@@ -581,6 +598,7 @@ async def main(connection: iterm2.Connection):
                 "group": group,
                 "settings": asdict(gs),
                 "profiles": pnames,
+                "providers": get_providers(),
             }
 
         # get_global_settings: respond directly
@@ -776,7 +794,11 @@ async def main(connection: iterm2.Connection):
                 shell = data.get("shell") or gs.agent_shell or gs.shell or ""
                 env = {**gs.env_vars, **gs.agent_env_vars, **(data.get("env_vars") or {})} or None
 
-                command = data.get("command", "") or gs.agent_boot_command
+                provider = data.get("provider", "") or gs.agent_provider
+                command, agent_type = _resolve_provider_command(
+                    provider,
+                    data.get("command", "") or gs.agent_boot_command,
+                    state.get_default_command())
                 icon = data.get("icon", "")
                 cell = state.add_agent(
                     name=data["name"], group=group,
@@ -786,6 +808,11 @@ async def main(connection: iterm2.Connection):
                     icon=icon,
                 )
                 if cell:
+                    if agent_type:
+                        cell.agent_type = agent_type
+                        state._emit_agent(cell)
+                        state._db_save_agent(cell)
+
                     # Git worktree — create before session so cwd is correct
                     if gs.git_worktree and cell.directory:
                         repo_root = await worktree_mgr.get_repo_root(
@@ -856,7 +883,12 @@ async def main(connection: iterm2.Connection):
                         or gs.profile or "Default"
                     directory = rendered.get("directory") \
                         or gs.agent_directory or gs.default_directory or ""
-                    command = rendered.get("command") or gs.agent_boot_command
+                    provider = rendered.get("provider", "") \
+                        or gs.agent_provider
+                    command, agent_type = _resolve_provider_command(
+                        provider,
+                        rendered.get("command", "") or gs.agent_boot_command,
+                        state.get_default_command())
                     _ac = gs.agent_tab_color
                     tab_color = rendered.get("tab_color") \
                         or (_ac if _ac != "none" else "") or gs.tab_color or ""
@@ -875,6 +907,10 @@ async def main(connection: iterm2.Connection):
                         command=command, directory=directory,
                         tab_color=tab_color)
                     if cell:
+                        if agent_type:
+                            cell.agent_type = agent_type
+                            state._emit_agent(cell)
+                            state._db_save_agent(cell)
                         if want_worktree and cell.directory:
                             repo_root = await worktree_mgr.get_repo_root(
                                 cell.directory)
@@ -1319,7 +1355,11 @@ async def main(connection: iterm2.Connection):
                             shell = gs.agent_shell or gs.shell or ""
                             env = {**gs.env_vars, **gs.agent_env_vars} \
                                 or None
-                            command = gs.agent_boot_command
+                            command, agent_type = \
+                                _resolve_provider_command(
+                                    gs.agent_provider,
+                                    gs.agent_boot_command,
+                                    state.get_default_command())
 
                             cell = state.add_agent(
                                 name=agent_name, group=group,
@@ -1327,6 +1367,10 @@ async def main(connection: iterm2.Connection):
                                 directory=directory,
                                 tab_color=tab_color)
                             if cell:
+                                if agent_type:
+                                    cell.agent_type = agent_type
+                                    state._emit_agent(cell)
+                                    state._db_save_agent(cell)
                                 # Worktree
                                 if gs.git_worktree and cell.directory:
                                     repo_root = \

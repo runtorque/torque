@@ -30,11 +30,13 @@ function connect() {
     } else if (msg.type === 'delta') {
       _handleDelta(msg);
     } else if (msg.type === 'config') {
+      if (msg.providers) _cachedProviders = msg.providers;
       if (_pendingModal) {
         _showAddModal(_pendingModal.mode, _pendingModal.group, msg);
         _pendingModal = null;
       }
     } else if (msg.type === 'group_settings') {
+      if (msg.providers) _cachedProviders = msg.providers;
       _showGroupSettings(msg.group, msg);
     } else if (msg.type === 'toast') {
       _showToast(msg.message, msg.level);

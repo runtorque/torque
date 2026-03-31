@@ -6,6 +6,7 @@ from .base import AgentAdapter
 class GeminiCliAdapter(AgentAdapter):
     name = "gemini-cli"
     display_name = "Gemini CLI"
+    default_command = "gemini"
 
     def match_process(self, process_name: str) -> bool:
         return process_name.lower() == "gemini"

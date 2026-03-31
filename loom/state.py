@@ -138,6 +138,7 @@ class GroupSettings:
     agent_shell: str = ""
     agent_tab_color: str = ""
     agent_env_vars: dict[str, str] = field(default_factory=dict)
+    agent_provider: str = ""  # adapter name ("claude-code", "codex", etc.) — empty = use default
     agent_boot_command: str = ""  # override default boot command (e.g. "codex")
     git_worktree: bool = False
     worktree_base_dir: str = ".loom/worktrees"  # directory for worktrees (relative to repo)

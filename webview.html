@@ -56,6 +56,10 @@
       </div>
       <label>Group</label>
       <select id="add-group-select"></select>
+      <div id="add-provider-row" class="hidden">
+        <label>Agent CLI</label>
+        <select id="add-provider-select" onchange="onAddProviderChange()"></select>
+      </div>
       <div id="add-cmd-row" class="hidden">
         <label>Boot command</label>
         <input id="add-cmd-input" placeholder="e.g. npm run dev" autocomplete="off">
@@ -177,8 +181,12 @@
         </select>
         <label>Tab color</label>
         <div class="color-swatches" id="gs-agent-color-swatches"></div>
-        <label>Boot command <span class="label-hint">override default</span></label>
-        <input id="gs-agent-boot-cmd" placeholder="claude" autocomplete="off">
+        <label>Agent CLI</label>
+        <select id="gs-agent-provider" onchange="onGsProviderChange()"></select>
+        <div id="gs-agent-boot-cmd-row" class="hidden">
+          <label>Boot command</label>
+          <input id="gs-agent-boot-cmd" placeholder="e.g. my-agent-cli" autocomplete="off">
+        </div>
         <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
         <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
         <label class="gs-checkbox">
