@@ -134,6 +134,10 @@ class ITerm2Adapter:
                         if adapter.install_mcp_config(hook_dir):
                             log.info("Re-installed MCP config for '%s' in %s",
                                      cell.name, hook_dir)
+                    if hasattr(adapter, "install_skills"):
+                        if adapter.install_skills(hook_dir):
+                            log.info("Re-installed skills for '%s' in %s",
+                                     cell.name, hook_dir)
 
                 self._start_prompt_monitor(cell)
 
@@ -262,6 +266,10 @@ class ITerm2Adapter:
             if hook_dir and hasattr(adapter, "install_mcp_config"):
                 if adapter.install_mcp_config(hook_dir):
                     log.info("Installed MCP config for '%s' in %s",
+                             cell.name, hook_dir)
+            if hook_dir and hasattr(adapter, "install_skills"):
+                if adapter.install_skills(hook_dir):
+                    log.info("Installed skills for '%s' in %s",
                              cell.name, hook_dir)
 
         # Init script

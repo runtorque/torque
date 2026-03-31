@@ -3,11 +3,85 @@
 import json
 import time
 from pathlib import Path
+from textwrap import dedent
 
 from .base import AgentAdapter, AgentEvent
 
 # Marker URL used to identify Loom-managed hooks during cleanup
 LOOM_HOOK_URL = "http://localhost:18932/events"
+
+# Skill directory prefix used to identify Loom-managed skills during cleanup
+LOOM_SKILL_PREFIX = "loom-"
+
+# ---------------------------------------------------------------------------
+# Slash command (skill) definitions — injected into .claude/skills/
+# ---------------------------------------------------------------------------
+
+SKILLS = {
+    "loom-status": {
+        "frontmatter": {
+            "name": "loom-status",
+            "description": (
+                "Show current Loom agent context, linked task, "
+                "and pipeline state"
+            ),
+            "allowed-tools": "mcp__loom__loom_context",
+        },
+        "body": dedent("""\
+            Show the current Loom agent context using the loom_context MCP tool.
+
+            Format the output clearly:
+            - Agent name, group, and status
+            - Current task title, lane, and action
+            - Pipeline info (parent task, depth) if this is a derived task
+            - Worktree branch and diff stats if in a worktree
+        """),
+    },
+    "loom-board": {
+        "frontmatter": {
+            "name": "loom-board",
+            "description": (
+                "Show the Loom task board with all lanes and tasks"
+            ),
+            "allowed-tools": "Bash",
+        },
+        "body": dedent("""\
+            Show the current Loom task board.
+
+            ## Board state
+            !`loom board list`
+
+            Summarize the board state: how many tasks in each lane,
+            any tasks that need attention (blocked/error labels),
+            and what's currently in progress.
+        """),
+    },
+    "loom-done": {
+        "frontmatter": {
+            "name": "loom-done",
+            "description": "Mark the current Loom task as complete",
+            "allowed-tools": "mcp__loom__loom_done",
+            "argument-hint": "[completion message]",
+        },
+        "body": dedent("""\
+            Mark the current task as complete using the loom_done MCP tool.
+
+            If $ARGUMENTS is provided, use it as the completion message.
+            Otherwise, write a brief summary of what was accomplished.
+        """),
+    },
+}
+
+
+def _render_skill_md(skill: dict) -> str:
+    """Render a skill dict into SKILL.md content with YAML frontmatter."""
+    lines = ["---"]
+    for key, value in skill["frontmatter"].items():
+        lines.append(f"{key}: {value}")
+    lines.append("---")
+    lines.append("")
+    lines.append(skill["body"])
+    return "\n".join(lines)
 
 
 # Tool name → human-readable activity detail
@@ -250,6 +324,47 @@ class ClaudeCodeAdapter(AgentAdapter):
             else:
                 existing["mcpServers"] = servers
                 mcp_file.write_text(json.dumps(existing, indent=2) + "\n")
+        except Exception:
+            pass  # Best-effort cleanup
+
+    def install_skills(self, working_dir: str) -> bool:
+        """Write Loom slash command skills into .claude/skills/.
+
+        Each skill is a directory with a SKILL.md file.  Overwrites
+        existing Loom skills to keep them in sync with the daemon version.
+        Returns True if at least one skill was installed successfully.
+        """
+        skills_dir = Path(working_dir) / ".claude" / "skills"
+        installed = 0
+        for name, skill in SKILLS.items():
+            try:
+                skill_dir = skills_dir / name
+                skill_dir.mkdir(parents=True, exist_ok=True)
+                (skill_dir / "SKILL.md").write_text(_render_skill_md(skill))
+                installed += 1
+            except Exception:
+                pass  # Best-effort per skill
+        return installed > 0
+
+    def uninstall_skills(self, working_dir: str):
+        """Remove Loom-managed skills from .claude/skills/.
+
+        Only removes directories matching the LOOM_SKILL_PREFIX.
+        """
+        skills_dir = Path(working_dir) / ".claude" / "skills"
+        if not skills_dir.exists():
+            return
+        try:
+            for child in skills_dir.iterdir():
+                if child.is_dir() and child.name.startswith(LOOM_SKILL_PREFIX):
+                    skill_md = child / "SKILL.md"
+                    if skill_md.exists():
+                        skill_md.unlink()
+                    # Remove dir if empty
+                    try:
+                        child.rmdir()
+                    except OSError:
+                        pass  # Not empty — user added files
         except Exception:
             pass  # Best-effort cleanup
 
