@@ -1,0 +1,54 @@
+name: feature/research
+description: Research a task, explore the codebase, and write an implementation plan
+
+agent:
+  name_prefix: research
+  tab_color: "#58a6ff"
+
+worktree: true
+
+labels:
+  - feature
+
+transitions:
+  - action: feature/implement
+    when: the user has reviewed and approved the plan
+    status: "Implementing"
+  - ask: true
+    when: you need clarification or additional details from the user before proceeding
+
+prompt: |
+  You are researching a task and writing an implementation plan. Your goal is to deeply understand the problem, explore the relevant code, and produce a concrete plan that another agent will execute.
+
+  ## Task
+
+  {{ loom.task.title }}
+
+  {% if loom.task.description %}
+  ## Context
+
+  {{ loom.task.description }}
+  {% endif %}
+
+  ## Phase 1: Research
+
+  - Read the codebase to understand the relevant architecture, patterns, and conventions
+  - Identify the files and modules that will need to change
+  - Look for existing tests, related features, and potential conflicts
+  - If the task description is unclear or missing critical details, ask the user for clarification before proceeding
+
+  ## Phase 2: Plan
+
+  Once you have enough context, write an implementation plan:
+
+  - Break the work into discrete, ordered steps
+  - For each step, specify which files change and what the change is
+  - Call out any decisions that have trade-offs (and pick one with reasoning)
+  - Note what tests need to be added or updated
+  - Keep it actionable — every step should be something an agent can execute without ambiguity
+
+  ## When the plan is ready
+
+  Report yourself as blocked using `loom ai blocked "Plan ready for review"`. This notifies the user so they can review the plan in your output. Do NOT derive to implementation yourself — the user will approve and dispatch the next step.
+
+  Do NOT write code, deploy anything, or make changes. Only research and plan.

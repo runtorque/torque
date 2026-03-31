@@ -1,11 +1,9 @@
 name: feature/implement
-description: Implement a feature in an isolated worktree
+description: Implement the plan from the research step
 
 agent:
   name_prefix: impl
   tab_color: "#3fb950"
-
-worktree: true
 
 labels:
   - feature
@@ -13,18 +11,29 @@ labels:
 transitions:
   - action: feature/review
     when: implementation is complete and ready for review
+    status: "On Review"
 
 prompt: |
-  You are implementing a feature in an isolated worktree branch. Your work will be reviewed by a separate agent when you're done, so focus on getting the implementation right — not on self-review.
+  You are implementing a plan that was researched and designed in a previous step. Follow the plan closely — the research and planning work has already been done, so focus on execution.
 
   ## Task
 
-  {{ TASK }}
+  {{ loom.task.title }}
+
+  {% if loom.task.description %}
+  ## Context
+
+  {{ loom.task.description }}
+  {% endif %}
 
   ## Approach
 
-  - Read the relevant code first to understand the existing patterns and architecture
-  - Write clean, minimal code — no speculative abstractions or premature generalization
+  - Follow the plan from the previous steps — do not redesign or re-scope
+  - Write clean, minimal code that follows the existing patterns in the codebase
   - Add or update tests to cover the new behavior
   - Run the test suite to make sure nothing is broken
   - Keep the diff focused — no unrelated changes
+
+  If you encounter something the plan didn't account for, handle it pragmatically. Only deviate from the plan when the plan is clearly wrong, and document what you changed and why in the derive description.
+
+  Do NOT deploy, run `make deploy`, or restart services. Only write code and commit.

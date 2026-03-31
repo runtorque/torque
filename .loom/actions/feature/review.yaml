@@ -1,47 +1,38 @@
 name: feature/review
-description: Review a branch for issues
+description: Review the implementation for correctness
 
 agent:
   name_prefix: review
   tab_color: "#a371f7"
 
 labels:
-  - review
+  - feature
 
 transitions:
-  - action: feature/fix-review
+  - action: feature/implement
     when: issues were found that need to be fixed
-  - ask: true
-    when: changes look correct but need human sign-off before merging
+    status: "Fixing"
+    target: parent
 
 prompt: |
-  You are a code reviewer. A previous agent implemented changes on a worktree branch and your job is to evaluate whether the work is correct, safe, and ready to merge. Be thorough but fair — flag real problems, not style preferences.
+  A previous agent (`{{ loom.task.parent_agent_slug }}`) implemented changes and your job is to check whether the work is correct and complete.
 
   ## What was implemented
 
-  {{ TASK }}
+  {{ loom.task.title }}
 
-  ## Review process
+  {% if loom.task.description %}
+  ## Context
 
-  1. **Read the full diff** — examine every changed file, not just the ones that look interesting
-  2. **Check correctness** — does the code actually do what the task asked for? Are there edge cases that would break it?
-  3. **Check for regressions** — run the test suite and verify it passes
-  4. **Flag issues** using this format for each one:
-     - **File and line**: `path/to/file.py:42`
-     - **Severity**: critical / warning / nit
-     - **Problem**: what's wrong
-     - **Fix**: what should change
+  {{ loom.task.description }}
+  {% endif %}
 
-  Look specifically for:
-  - Correctness bugs and unhandled edge cases
-  - Security issues (injection, auth bypass, secrets in code)
-  - Performance regressions (N+1 queries, unnecessary allocations)
-  - Missing error handling at system boundaries
-  - Dead code or unused imports introduced by the change
+  ## Review
 
-  ## Verdict
+  Read the full diff and verify:
+  - Does the code do what the task asked for?
+  - Are there obvious bugs or missing pieces?
 
-  End with one of:
-  - **Ship** — no issues, ready to merge
-  - **Ship with fixes** — minor issues that should be addressed first
-  - **Needs rework** — fundamental problems requiring significant changes
+  If everything looks good, use `loom ai done`. If there are issues, derive back to the implementing agent with a description of what needs to be fixed.
+
+  Do NOT fix issues yourself, deploy anything, or make changes. Only review and report.
