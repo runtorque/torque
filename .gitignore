@@ -7,3 +7,5 @@ state.json
 .claude/settings.local.json
 .mcp.json
 .claude/skills/loom-*/
+.codex/config.toml
+.codex/hooks.json
