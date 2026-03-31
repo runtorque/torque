@@ -566,6 +566,94 @@ class WorktreeManager:
             log.debug("count_commits failed for '%s'", cell.name)
         return 0
 
+    async def create_pr(self, cell, title: str = "",
+                        body: str = "") -> dict:
+        """Push the worktree branch and create a GitHub PR.
+
+        Returns dict with 'url' on success or 'error' on failure.
+        """
+        if not cell.worktree_path or not cell.worktree_branch:
+            return {"error": "No worktree branch found for this agent."}
+
+        wt = cell.worktree_path
+        branch = cell.worktree_branch
+        base = cell.worktree_base_branch or "main"
+
+        # Check gh CLI is available
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "gh", "--version",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+            if proc.returncode != 0:
+                return {"error": "GitHub CLI (gh) is not installed."}
+        except FileNotFoundError:
+            return {"error": "GitHub CLI (gh) is not installed."}
+
+        # Check this is a GitHub repo
+        proc = await asyncio.create_subprocess_exec(
+            "gh", "-C", wt, "repo", "view", "--json", "name",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err = stderr.decode().strip()
+            if "not a git repository" in err.lower():
+                return {"error": "Not a git repository."}
+            return {"error": f"Not a GitHub repository: {err}"}
+
+        # Check branch has commits ahead of base
+        count = await self.count_commits(cell)
+        if count == 0:
+            return {"error": f"Branch {branch} has no commits ahead "
+                             f"of {base}."}
+
+        # Push the branch
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", wt, "push", "-u", "origin", branch,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err = stderr.decode().strip()
+            return {"error": f"Failed to push branch: {err}"}
+
+        # Create PR
+        cmd = ["gh", "-C", wt, "pr", "create",
+               "--base", base,
+               "--head", branch,
+               "--title", title or branch,
+               "--body", body or ""]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err = stderr.decode().strip()
+            if "already exists" in err.lower():
+                # PR already exists — try to get its URL
+                p2 = await asyncio.create_subprocess_exec(
+                    "gh", "-C", wt, "pr", "view", branch,
+                    "--json", "url", "-q", ".url",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                out2, _ = await p2.communicate()
+                if p2.returncode == 0 and out2.decode().strip():
+                    return {"url": out2.decode().strip(),
+                            "existing": True}
+            return {"error": f"Failed to create PR: {err}"}
+
+        url = stdout.decode().strip()
+        log.info("Created PR for '%s': %s", cell.name, url)
+        return {"url": url}
+
     async def _ensure_gitignore(self, repo_root: str):
         """Add Loom-managed paths to .gitignore if not already present."""
         gitignore = os.path.join(repo_root, ".gitignore")

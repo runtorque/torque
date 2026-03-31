@@ -302,7 +302,7 @@ function _showWorktreeSubmenu(id) {
   html += `<div class="ctx-sep"></div>`;
   html += `<button onclick="closeContextMenu();worktreeCheckpoint('${id}')">Checkpoint</button>`;
   html += `<button onclick="closeContextMenu();worktreeHistory('${id}')">History\u2026</button>`;
-  html += `<button onclick="closeContextMenu();worktreeCreatePR('${id}')" disabled>Create PR</button>`;
+  html += `<button onclick="closeContextMenu();worktreeCreatePR('${id}')">Create PR</button>`;
   html += `<button onclick="closeContextMenu();worktreeMerge('${id}')">Merge to Main</button>`;
   html += `<div class="ctx-sep"></div>`;
   html += `<button class="danger" onclick="closeContextMenu();worktreeRemove('${id}')">Remove Worktree</button>`;
@@ -323,7 +323,29 @@ async function worktreeCreate(id) {
 }
 function worktreeCheckpoint(id) { send({ cmd: 'worktree_checkpoint', id }); }
 function worktreeHistory(id) { send({ cmd: 'worktree_history', id }); }
-function worktreeCreatePR(_id) { /* TODO: implement */ }
+async function worktreeCreatePR(id) {
+  const cell = state.agents[id];
+  if (!cell) return;
+  const branch = cell.worktree_branch || 'worktree branch';
+  const base = cell.worktree_base_branch || 'main';
+  if (!await showConfirm(
+    `Create a pull request from "${branch}" into ${base}? The branch will be pushed to origin first.`,
+    { label: 'Create PR', variant: 'btn-green' }
+  )) return;
+  send({ cmd: 'worktree_create_pr', id });
+}
+
+function _showWorktreePR(msg) {
+  if (msg.error) {
+    _showToast(msg.error, 'error');
+    return;
+  }
+  // Show PR URL in confirm dialog — reuse showConfirm flow
+  var label = (msg.message || 'PR created') + ': ' + msg.url;
+  showConfirm(label, { label: 'Open in browser', variant: 'btn-green' }).then(function(ok) {
+    if (ok) window.open(msg.url);
+  });
+}
 async function worktreeMerge(id) {
   const cell = state.agents[id];
   if (!cell) return;

@@ -31,25 +31,40 @@ function _getProviderValue(selectId) {
   return v === '__custom__' ? '' : v;
 }
 
+function _getProviderCommand(selectId) {
+  const v = document.getElementById(selectId).value;
+  if (!v) return 'claude';  // default provider
+  const p = _cachedProviders.find(p => p.name === v);
+  return p ? p.command : '';
+}
+
 function onGsProviderChange() {
   const v = document.getElementById('gs-agent-provider').value;
   const row = document.getElementById('gs-agent-boot-cmd-row');
+  const label = row.querySelector('label');
+  const input = document.getElementById('gs-agent-boot-cmd');
+  row.classList.remove('hidden');
   if (v === '__custom__') {
-    row.classList.remove('hidden');
+    label.textContent = 'Boot command';
+    input.placeholder = 'e.g. my-agent-cli';
   } else {
-    row.classList.add('hidden');
-    document.getElementById('gs-agent-boot-cmd').value = '';
+    label.textContent = 'Command override';
+    input.placeholder = _getProviderCommand('gs-agent-provider') + ' (default)';
   }
 }
 
 function onAddProviderChange() {
   const v = document.getElementById('add-provider-select').value;
   const cmdRow = document.getElementById('add-cmd-row');
+  const label = cmdRow.querySelector('label');
+  const input = document.getElementById('add-cmd-input');
+  cmdRow.classList.remove('hidden');
   if (v === '__custom__') {
-    cmdRow.classList.remove('hidden');
+    label.textContent = 'Boot command';
+    input.placeholder = 'e.g. npm run dev';
   } else {
-    cmdRow.classList.add('hidden');
-    document.getElementById('add-cmd-input').value = '';
+    label.textContent = 'Command override';
+    input.placeholder = _getProviderCommand('add-provider-select') + ' (default)';
   }
 }
 
@@ -651,7 +666,7 @@ function submitAdd() {
   } else {
     const prov = document.getElementById('add-provider-select').value;
     if (prov && prov !== '__custom__') msg.provider = prov;
-    if (prov === '__custom__' && command) msg.command = command;
+    if (command) msg.command = command;
     /* worktree overrides */
     const wtEnabled = document.getElementById('add-wt-enabled').checked;
     msg.git_worktree = wtEnabled;
@@ -874,7 +889,6 @@ function _tplSubmit() {
     document.getElementById('task-submit-btn').textContent = 'Create';
     document.getElementById('task-task-input').value = vars['TASK'] || '';
     document.getElementById('task-description-input').value = '';
-    document.getElementById('task-assignee-input').value = '';
     _setTaskLabels([]);
     _populateTaskGroupSelect(_tplGroup || _currentGroup());
     document.getElementById('modal-task').dataset.lane = _tplTaskLane || '';
@@ -902,7 +916,6 @@ function _handleActionRendered(msg) {
 
   document.getElementById('task-task-input').value = '';
   document.getElementById('task-description-input').value = '';
-  document.getElementById('task-assignee-input').value = '';
   _setTaskLabels(msg.labels || []);
 
   _taskSelectedAction = msg.name || _tplName || '';
@@ -988,7 +1001,6 @@ function openAddTask(lane) {
 
   document.getElementById('task-task-input').value = '';
   document.getElementById('task-description-input').value = '';
-  document.getElementById('task-assignee-input').value = '';
   _setTaskLabels([]);
   document.getElementById('task-action-vars').innerHTML = '';
 
@@ -1022,7 +1034,6 @@ function openEditTask(taskId) {
   taskEl.value = t.task || '';
   var descEl = document.getElementById('task-description-input');
   descEl.value = t.description || '';
-  document.getElementById('task-assignee-input').value = t.assignee || '';
   _setTaskLabels(t.labels || []);
   document.getElementById('task-action-vars').innerHTML = '';
 
@@ -1063,7 +1074,6 @@ function submitTask() {
   }
 
   var description = document.getElementById('task-description-input').value.trim();
-  var assignee = document.getElementById('task-assignee-input').value.trim();
   // Include any text still in the input as a label
   var pendingLabel = document.getElementById('task-labels-input').value.trim();
   if (pendingLabel && _taskLabels.indexOf(pendingLabel) < 0) _taskLabels.push(pendingLabel);
@@ -1072,7 +1082,7 @@ function submitTask() {
 
   if (_taskEditId) {
     // Edit mode
-    var msg = { cmd: 'board_update_task', id: _taskEditId, task: task, group: group, assignee: assignee, description: description };
+    var msg = { cmd: 'board_update_task', id: _taskEditId, task: task, group: group, description: description };
     msg.action_name = _taskSelectedAction;
     msg.action_vars = actionVars;
     msg.labels = labels;
@@ -1082,7 +1092,6 @@ function submitTask() {
     var lane = document.getElementById('modal-task').dataset.lane || '';
     var msg = { cmd: 'board_add_task', task: task, group: group, lane: lane };
     if (description) msg.description = description;
-    if (assignee) msg.assignee = assignee;
     if (_taskSelectedAction) msg.action_name = _taskSelectedAction;
     if (Object.keys(actionVars).length) msg.action_vars = actionVars;
     if (labels.length) msg.labels = labels;

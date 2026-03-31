@@ -9,15 +9,12 @@ var _boardAddingTask = false;   // true when inline task input is shown
 var _boardAddingTaskDraft = '';  // preserved text across blur/reopen
 var _boardAddingTaskAction = '';  // selected action name for inline add
 var _boardAddingTaskAgent = '';   // selected agent ID for inline add
-var _boardAddingLane = false;
 var _boardActDropdownWaiting = false;  // waiting for action list for dropdown
 var _boardActList = null;              // fetched actions shown inline (null = hidden)
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
 var _boardCardsScrollTop = 0;  // preserve cards scroll across re-renders
-var _boardPopover = null;      // {type, lane, rect} for lane settings popover
 var _boardDragId = '';          // card being dragged
 
-var _RESERVED_LANES = ['Backlog', 'To Do', 'In Progress', 'Done'];
 var _boardCollapsedTasks = {};  // task_id → true if collapsed
 var _boardFilterByGroup = true;  // When true, board shows only tasks from the current group
 
@@ -112,7 +109,6 @@ function _renderBoardCard(t, childrenOf, depth) {
   var meta = '';
   if (t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
   if (t.group && !isSubordinate) meta += '<span class="board-card-group">' + esc(t.group) + '</span>';
-  if (t.assignee) meta += '<span class="board-card-assignee">' + esc(t.assignee) + '</span>';
   if (t.action_name) meta += '<span class="board-card-label board-card-template">' + esc(t.action_name) + '</span>';
   if (t.labels && t.labels.length) {
     for (var li = 0; li < t.labels.length; li++) {
@@ -199,38 +195,20 @@ function renderBoard() {
     var l = lanes[i];
     var cnt = _boardLaneCount(l);
     var cls = l === _boardSelectedLane ? ' active' : '';
-    if (_RESERVED_LANES.indexOf(l) >= 0) cls += ' reserved';
     var escLane = esc(l).replace(/'/g, "\\'");
     html += '<button class="board-lane-tab' + cls + '"'
       + ' data-lane="' + esc(l) + '"'
       + ' onclick="boardSelectLane(\'' + escLane + '\')"'
-      + ' oncontextmenu="boardLaneContextMenu(event,\'' + escLane + '\')"'
       + ' ondragover="boardLaneTabDragOver(event)"'
       + ' ondragleave="boardLaneTabDragLeave(event)"'
       + ' ondrop="boardLaneTabDrop(event)">'
       + esc(l) + '<span class="lane-count">' + cnt + '</span>'
-      + (_RESERVED_LANES.indexOf(l) >= 0 ? '<span class="lane-lock">&#x1F512;</span>' : '')
       + '</button>';
   }
   html += '</div>';
   html += '<button class="board-lane-scroll-btn" id="board-scroll-right" onclick="boardScrollLanes(1)" title="Scroll right">&#9654;</button>';
 
-  // Lane actions: + and settings
-  html += '<div class="board-lane-actions">';
-  html += '<button class="board-lane-action-btn" onclick="boardStartAddLane()" title="Add lane">+</button>';
-  html += '<button class="board-lane-action-btn" onclick="boardOpenLaneSettings(event)" title="Lane settings">&#9881;</button>';
   html += '</div>';
-  html += '</div>';
-
-  // Inline add lane input
-  if (_boardAddingLane) {
-    html += '<div style="padding:4px 8px;border-bottom:1px solid var(--border)">';
-    html += '<input class="board-add-input" id="board-add-lane-input"'
-      + ' placeholder="Lane name..."'
-      + ' onkeydown="boardAddLaneKeydown(event)"'
-      + ' onblur="boardCancelAddLane()">';
-    html += '</div>';
-  }
 
   // Cards for selected lane
   var tasks = _boardTasksInLane(_boardSelectedLane);
@@ -336,9 +314,6 @@ function renderBoard() {
       // Place cursor at end
       tInp.selectionStart = tInp.selectionEnd = tInp.value.length;
     }
-  } else if (_boardAddingLane) {
-    var inp2 = document.getElementById('board-add-lane-input');
-    if (inp2) inp2.focus();
   }
 
   // Defer scroll restore + arrow update to after layout
@@ -381,8 +356,6 @@ function renderBoard() {
       });
     }
 
-    // Render popover if open
-    if (_boardPopover) _renderBoardPopover();
   });
 }
 
@@ -589,7 +562,6 @@ function _boardPickAction(name) {
   document.getElementById('task-modal-title').textContent = 'New Task';
   document.getElementById('task-submit-btn').textContent = 'Create';
   document.getElementById('task-task-input').value = '';
-  document.getElementById('task-assignee-input').value = '';
   document.getElementById('task-labels-input').value = '';
   document.getElementById('task-action-vars').innerHTML = '';
   _populateTaskGroupSelect(_currentGroup());
@@ -614,148 +586,6 @@ function _boardPickNoAction() {
   openAddTask(_boardSelectedLane);
 }
 
-/* ---- Add lane ------------------------------------------------------- */
-
-function boardStartAddLane() {
-  _boardAddingLane = true;
-  _boardClosePopover();
-  renderBoard();
-}
-
-function boardCancelAddLane() {
-  setTimeout(function() { _boardAddingLane = false; renderBoard(); }, 150);
-}
-
-function boardAddLaneKeydown(e) {
-  if (e.key === 'Escape') {
-    _boardAddingLane = false;
-    renderBoard();
-    return;
-  }
-  if (e.key === 'Enter') {
-    var val = e.target.value.trim();
-    if (val) {
-      send({ cmd: 'board_add_lane', name: val });
-    }
-    _boardAddingLane = false;
-  }
-}
-
-/* ---- Lane context menu (right-click) -------------------------------- */
-
-function boardLaneContextMenu(evt, lane) {
-  evt.preventDefault();
-  var reserved = _RESERVED_LANES.indexOf(lane) >= 0;
-  if (reserved) return;  // no context menu for reserved lanes
-
-  var menu = document.getElementById('ctx-menu');
-  var lanes = _boardLanes();
-  var escLane = esc(lane).replace(/'/g, "\\'");
-
-  var html = '<button onclick="event.stopPropagation();boardStartRenameLane(\'' + escLane + '\')">Rename</button>';
-  if (lanes.length > 1) {
-    html += '<button class="danger" onclick="boardRemoveLane(\'' + escLane + '\')">Delete lane</button>';
-  }
-  menu.innerHTML = html;
-  menu.style.top = evt.clientY + 'px';
-  menu.style.left = Math.min(evt.clientX, window.innerWidth - 140) + 'px';
-  menu.classList.add('open');
-  _adjustCtxMenuOverflow();
-}
-
-/* ---- Lane settings popover ------------------------------------------ */
-
-function boardOpenLaneSettings(evt) {
-  if (_boardPopover) { _boardClosePopover(); return; }
-  var btn = evt.currentTarget;
-  var rect = btn.getBoundingClientRect();
-  _boardPopover = { lane: _boardSelectedLane, rect: rect };
-  _renderBoardPopover();
-}
-
-function _renderBoardPopover() {
-  // Remove existing
-  var old = document.getElementById('board-lane-popover');
-  if (old) old.remove();
-
-  if (!_boardPopover) return;
-
-  var pop = document.createElement('div');
-  pop.id = 'board-lane-popover';
-  pop.className = 'board-lane-popover';
-
-  var lane = _boardPopover.lane;
-  var lanes = _boardLanes();
-
-  var reserved = _RESERVED_LANES.indexOf(lane) >= 0;
-  var escLane = esc(lane).replace(/'/g, "\\'");
-  var html = '';
-  if (!reserved) {
-    html += '<button onclick="event.stopPropagation();boardStartRenameLane(\'' + escLane + '\')">Rename</button>';
-    if (lanes.length > 1) {
-      html += '<button class="danger" onclick="boardRemoveLane(\'' + escLane + '\')">Delete lane</button>';
-    }
-  } else {
-    html += '<button disabled>Reserved lane</button>';
-  }
-  pop.innerHTML = html;
-
-  // Position below the settings button
-  var r = _boardPopover.rect;
-  pop.style.top = (r.bottom + 2) + 'px';
-  pop.style.right = (window.innerWidth - r.right) + 'px';
-  document.body.appendChild(pop);
-}
-
-function _boardClosePopover() {
-  _boardPopover = null;
-  var old = document.getElementById('board-lane-popover');
-  if (old) old.remove();
-}
-
-function boardStartRenameLane(lane) {
-  _boardClosePopover();
-
-  // Replace ctx-menu content with rename input
-  var menu = document.getElementById('ctx-menu');
-  menu.innerHTML = '<input id="board-rename-input" value="' + esc(lane) + '"'
-    + ' style="margin:4px;width:calc(100% - 8px);font-size:10px;padding:4px 6px"'
-    + ' onkeydown="boardRenameLaneKeydown(event,\'' + esc(lane).replace(/'/g, "\\'") + '\')"'
-    + ' onclick="event.stopPropagation()">';
-  menu.classList.add('open');
-  var inp = document.getElementById('board-rename-input');
-  if (inp) { inp.focus(); inp.select(); }
-}
-
-function boardRenameLaneKeydown(e, oldName) {
-  if (e.key === 'Escape') { _closeCtxMenu(); return; }
-  if (e.key === 'Enter') {
-    var val = e.target.value.trim();
-    if (val && val !== oldName) {
-      send({ cmd: 'board_rename_lane', old_name: oldName, new_name: val });
-      if (_boardSelectedLane === oldName) _boardSelectedLane = val;
-    }
-    _closeCtxMenu();
-  }
-}
-
-function boardRemoveLane(lane) {
-  _closeCtxMenu();
-  _boardClosePopover();
-
-  var lanes = _boardLanes();
-  var cnt = _boardLaneCount(lane);
-  var target = lanes[0] === lane ? lanes[1] : lanes[0];
-  var msg = 'Delete lane "' + lane + '"?';
-  if (cnt > 0) msg += '\n' + cnt + ' task(s) will move to "' + target + '".';
-
-  showConfirm(msg).then(function(yes) {
-    if (!yes) return;
-    send({ cmd: 'board_remove_lane', name: lane, move_tasks_to: target });
-    if (_boardSelectedLane === lane) _boardSelectedLane = target;
-  });
-}
-
 /* ---- Card context menu ---------------------------------------------- */
 
 function boardCardMenu(evt, taskId) {
@@ -771,22 +601,7 @@ function boardCardMenu(evt, taskId) {
   var html = '';
   html += '<button onclick="event.stopPropagation();boardEditTask(\'' + taskId + '\')">Edit</button>';
 
-  // Move to lane — only for non-derived tasks (pipeline manages derived tasks)
-  if (!isDerived) {
-    for (var i = 0; i < lanes.length; i++) {
-      if (lanes[i] !== task.lane) {
-        html += '<button onclick="boardMoveTaskToLane(\'' + taskId + '\',\''
-          + esc(lanes[i]).replace(/'/g, "\\'") + '\')">Move to ' + esc(lanes[i]) + '</button>';
-      }
-    }
-  }
-
   html += '<div class="ctx-sep"></div>';
-
-  // Resolve (ask tasks with human label)
-  if (task.labels && task.labels.indexOf('human') >= 0 && task.lane !== 'Done') {
-    html += '<button onclick="event.stopPropagation();boardOpenResolve(\'' + taskId + '\')">Resolve...</button>';
-  }
 
   // Dispatch (only from Backlog)
   if (task.lane === 'Backlog') {
@@ -800,8 +615,24 @@ function boardCardMenu(evt, taskId) {
     html += '<button onclick="event.stopPropagation();boardLinkAgent(\'' + taskId + '\')">Link agent...</button>';
   }
 
+  // Resolve (ask tasks with human label)
+  if (task.labels && task.labels.indexOf('human') >= 0 && task.lane !== 'Done') {
+    html += '<button onclick="event.stopPropagation();boardOpenResolve(\'' + taskId + '\')">Resolve...</button>';
+  }
+
   // Preview prompt
   html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
+
+  // Move to lane — only for non-derived tasks (pipeline manages derived tasks)
+  if (!isDerived) {
+    html += '<div class="ctx-sep"></div>';
+    for (var i = 0; i < lanes.length; i++) {
+      if (lanes[i] !== task.lane) {
+        html += '<button onclick="boardMoveTaskToLane(\'' + taskId + '\',\''
+          + esc(lanes[i]).replace(/'/g, "\\'") + '\')">Move to ' + esc(lanes[i]) + '</button>';
+      }
+    }
+  }
 
   // Copy ID
   html += '<div class="ctx-sep"></div>';
@@ -1143,14 +974,3 @@ function submitResolve() {
   closeModals();
 }
 
-/* ---- Close popover on outside click --------------------------------- */
-
-document.addEventListener('click', function(e) {
-  if (_boardPopover) {
-    var pop = document.getElementById('board-lane-popover');
-    if (pop && !pop.contains(e.target) &&
-        !e.target.closest('.board-lane-action-btn')) {
-      _boardClosePopover();
-    }
-  }
-});

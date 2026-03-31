@@ -32,13 +32,16 @@ function _eventsKindIcon(kind) {
     case 'task_derived':   return '\u2934';  // curve arrow
     case 'ask_created':    return '\u2753';  // question
     case 'ask_resolved':   return '\u2705';  // green check
+    case 'agent_progress': return '\u2026';  // ellipsis
+    case 'agent_renamed':  return '\u270E';  // pencil
+    case 'agent_waiting':  return '\u23F8';  // pause
     default:               return '\u2022';  // bullet
   }
 }
 
 function _eventsKindClass(kind) {
   if (kind === 'agent_error') return 'events-kind-error';
-  if (kind === 'agent_blocked' || kind === 'agent_idle') return 'events-kind-blocked';
+  if (kind === 'agent_blocked' || kind === 'agent_idle' || kind === 'agent_waiting') return 'events-kind-blocked';
   if (kind === 'ask_created') return 'events-kind-ask';
   if (kind === 'task_completed' || kind === 'ask_resolved' || kind === 'agent_finished') return 'events-kind-done';
   return '';

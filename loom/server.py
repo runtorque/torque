@@ -1258,6 +1258,34 @@ async def main(connection: iterm2.Connection):
                     state._emit_agent(cell)
                     state._db_save_agent(cell)
 
+            elif cmd == "worktree_create_pr":
+                cell = state.agents.get(data.get("id", ""))
+                if not cell or not cell.worktree_path:
+                    result = {"type": "worktree_pr",
+                              "error": "Agent has no worktree."}
+                else:
+                    # Build PR title from linked task or agent name
+                    title = data.get("title", "")
+                    if not title:
+                        for t in state.board_tasks.values():
+                            if t.agent_id == cell.id:
+                                title = t.task
+                                break
+                    if not title:
+                        title = cell.name
+                    pr_result = await worktree_mgr.create_pr(
+                        cell, title=title)
+                    if "error" in pr_result:
+                        result = {"type": "worktree_pr",
+                                  "error": pr_result["error"]}
+                    else:
+                        msg = ("PR already exists"
+                               if pr_result.get("existing")
+                               else "PR created")
+                        result = {"type": "worktree_pr",
+                                  "url": pr_result["url"],
+                                  "message": msg}
+
             elif cmd == "worktree_merge":
                 cell = state.agents.get(data.get("id", ""))
                 if cell and cell.worktree_path and cell.worktree_branch:
@@ -1322,7 +1350,6 @@ async def main(connection: iterm2.Connection):
                     description=data.get("description", ""),
                     action_name=data.get("action_name", ""),
                     action_vars=data.get("action_vars", {}),
-                    assignee=data.get("assignee", ""),
                     agent_id=data.get("agent_id", ""),
                     labels=data.get("labels", []),
                 )
@@ -1965,6 +1992,14 @@ async def main(connection: iterm2.Connection):
                         if cell.needs_attention:
                             cell.needs_attention = False
                         state._emit_agent(cell)
+                        # Panel event — replace last progress
+                        # for this agent to avoid flooding
+                        pe = panel_log.replace_last(
+                            "agent_progress", cell.id,
+                            agent_name=cell.name,
+                            group=cell.group,
+                            message=message)
+                        state._emit("event_append", **pe)
 
                     elif action == "ready":
                         cell.activity = ""
@@ -2317,6 +2352,10 @@ async def main(connection: iterm2.Connection):
                             if cell.session_id:
                                 await bridge.update_session(
                                     cell, old_name)
+                            _panel_event(
+                                "agent_renamed", cell.id,
+                                cell.name, cell.group,
+                                f"{old_name} \u2192 {cell.name}")
                             result = {"type": "ok",
                                       "slug": cell.slug}
 

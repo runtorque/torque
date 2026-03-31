@@ -151,7 +151,6 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     criteria       TEXT NOT NULL DEFAULT '',
     lane           TEXT NOT NULL DEFAULT 'Backlog',
     position       INTEGER NOT NULL DEFAULT 0,
-    assignee       TEXT NOT NULL DEFAULT '',
     agent_id       TEXT NOT NULL DEFAULT '',
     labels         TEXT NOT NULL DEFAULT '[]',
     created_at     TEXT NOT NULL DEFAULT '',
@@ -270,6 +269,15 @@ class LoomDB:
                 "ALTER TABLE board_tasks ADD COLUMN status "
                 "TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
+        # Migrate: drop assignee column from board_tasks
+        try:
+            self._conn.execute(
+                "SELECT assignee FROM board_tasks LIMIT 0")
+            self._conn.execute(
+                "ALTER TABLE board_tasks DROP COLUMN assignee")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already gone
         # Migrate: add tasks_dispatched column to agents
         try:
             self._conn.execute(
@@ -394,17 +402,17 @@ class LoomDB:
                 (id, task, description, slug, group_name,
                  action_name, action_vars,
                  instructions, context, criteria,
-                 lane, position, assignee, agent_id, labels, created_at,
+                 lane, position, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url,
                  parent_task_id, pipeline_depth, pipeline_root_id, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
             d.get("action_name", ""), action_vars,
             d["instructions"], d["context"], d["criteria"],
             d["lane"], d["position"],
-            d["assignee"], d["agent_id"], labels, d["created_at"],
+            d["agent_id"], labels, d["created_at"],
             d["updated_at"], d["provider"], d["external_id"],
             d["external_url"],
             d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
@@ -537,11 +545,11 @@ class LoomDB:
                         (id, task, description, slug, group_name,
                          action_name,
                          action_vars, instructions, context,
-                         criteria, lane, position, assignee, agent_id, labels,
+                         criteria, lane, position, agent_id, labels,
                          created_at, updated_at, provider, external_id,
                          external_url, parent_task_id, pipeline_depth,
                          pipeline_root_id, status)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""),
                     d.get("description", ""), d.get("slug", ""),
@@ -549,7 +557,7 @@ class LoomDB:
                     d.get("instructions", ""),
                     d.get("context", ""), d.get("criteria", ""),
                     d.get("lane", "Backlog"), d.get("position", 0),
-                    d.get("assignee", ""), d.get("agent_id", ""), labels,
+                    d.get("agent_id", ""), labels,
                     d.get("created_at", ""), d.get("updated_at", ""),
                     d.get("provider", ""), d.get("external_id", ""),
                     d.get("external_url", ""),

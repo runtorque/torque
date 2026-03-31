@@ -29,7 +29,6 @@ class BoardTask:
     criteria: str = ""          # DEPRECATED — kept for backward compat
     lane: str = "Backlog"
     position: int = 0
-    assignee: str = ""          # agent name prefix for pool assignment (optional)
     agent_id: str = ""          # concrete agent working on this (optional)
     labels: list[str] = field(default_factory=list)
     created_at: str = ""        # ISO 8601

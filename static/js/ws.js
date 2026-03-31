@@ -42,6 +42,8 @@ function connect() {
       _showToast(msg.message, msg.level);
     } else if (msg.type === 'worktree_history') {
       _showWorktreeHistory(msg);
+    } else if (msg.type === 'worktree_pr') {
+      _showWorktreePR(msg);
     } else if (msg.type === 'actions') {
       if (typeof _boardActDropdownWaiting !== 'undefined' && _boardActDropdownWaiting) {
         _boardShowActionList(msg);
@@ -190,7 +192,18 @@ function _applyDelta(ops) {
         if (!state.panel_events) state.panel_events = [];
         var evt = Object.assign({}, op);
         delete evt.op;
-        state.panel_events.push(evt);
+        // Replace existing event by ID (for replace_last updates)
+        var replaced = false;
+        if (evt.id) {
+          for (var ei = state.panel_events.length - 1; ei >= 0; ei--) {
+            if (state.panel_events[ei].id === evt.id) {
+              state.panel_events[ei] = evt;
+              replaced = true;
+              break;
+            }
+          }
+        }
+        if (!replaced) state.panel_events.push(evt);
         if (state.panel_events.length > 500)
           state.panel_events = state.panel_events.slice(-500);
         break;

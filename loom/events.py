@@ -37,6 +37,21 @@ class PanelEventLog:
         self._events.append(evt)
         return evt
 
+    def replace_last(self, kind: str, cell_id: str, **kwargs) -> dict:
+        """Replace the most recent event of *kind* for *cell_id*.
+
+        If no matching event exists, appends a new one.
+        Returns the updated/created event dict.
+        """
+        for evt in reversed(self._events):
+            if evt["kind"] == kind and evt["cell_id"] == cell_id:
+                evt["timestamp"] = time.time()
+                for k, v in kwargs.items():
+                    if k in evt:
+                        evt[k] = v
+                return evt
+        return self.append(kind=kind, cell_id=cell_id, **kwargs)
+
     def get_recent(self, n: int = 100) -> list[dict]:
         if n >= len(self._events):
             return list(self._events)
@@ -192,17 +207,20 @@ class EventBus:
 
         # Emit panel event for key types
         if self._panel_log and et in (
-                "session_start", "session_end", "error"):
+                "session_start", "session_end", "error", "waiting"):
             kind_map = {
                 "session_start": "agent_started",
                 "session_end": "agent_finished",
                 "error": "agent_error",
+                "waiting": "agent_waiting",
             }
             msg = ""
             if et == "error":
                 msg = d.get("error", "Unknown error")
             elif et == "session_end":
                 msg = d.get("summary", "") or "Session ended"
+            elif et == "waiting":
+                msg = d.get("reason", "") or "Waiting for permission"
             pe = self._panel_log.append(
                 kind=kind_map[et],
                 cell_id=cell.id,

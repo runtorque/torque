@@ -1322,8 +1322,6 @@ def cmd_task_create(args):
     }
     if getattr(args, "context", None):
         kwargs["description"] = args.context
-    if args.assign:
-        kwargs["assignee"] = args.assign
     if args.labels:
         kwargs["labels"] = [l.strip() for l in args.labels.split(",") if l.strip()]
     if getattr(args, "action", None):
@@ -1369,8 +1367,6 @@ def cmd_task_dispatch(args):
         "group": group,
         "lane": "In Progress",
     }
-    if args.assign:
-        ticket_kwargs["assignee"] = args.assign
     if args.labels:
         ticket_kwargs["labels"] = [l.strip() for l in args.labels.split(",")
                                    if l.strip()]
@@ -1479,8 +1475,6 @@ def cmd_task_show(args):
     print(f"  {'Lane:':<14} {t.get('lane', '')}")
     print(f"  {'Group:':<14} {t.get('group', '')}")
 
-    if t.get("assignee"):
-        print(f"  {'Assignee:':<14} {t['assignee']}")
     if t.get("agent_id"):
         agent = st.get("agents", {}).get(t["agent_id"])
         if agent:
@@ -1574,8 +1568,6 @@ def cmd_task_list(args):
                 a = st.get("agents", {}).get(t["agent_id"])
                 if a:
                     parts.append(_cyan("→ " + a["name"]))
-            elif t.get("assignee"):
-                parts.append(_dim("@ " + t["assignee"]))
             if t.get("labels"):
                 parts.append(_dim("[" + ", ".join(t["labels"]) + "]"))
             print("  ".join(parts))
@@ -1595,9 +1587,6 @@ def _filter_tasks(tasks, args):
         if hasattr(args, "group") and args.group:
             if t.get("group", "").lower() != args.group.lower():
                 continue
-        if hasattr(args, "assignee") and args.assignee:
-            if t.get("assignee", "").lower() != args.assignee.lower():
-                continue
         if hasattr(args, "label") and args.label:
             task_labels = [l.lower() for l in t.get("labels", [])]
             if args.label.lower() not in task_labels:
@@ -1607,7 +1596,7 @@ def _filter_tasks(tasks, args):
 
 
 _TASK_EDIT_FIELDS = [
-    "task", "lane", "group", "assignee", "labels",
+    "task", "lane", "group", "labels",
     "action_name", "action_vars",
 ]
 
@@ -1700,7 +1689,7 @@ def cmd_task_edit(args):
     # Check if any inline flags were provided
     has_flags = any(
         getattr(args, attr, None) is not None
-        for attr in ("task", "action", "assign", "labels", "group")
+        for attr in ("task", "action", "labels", "group")
     ) or getattr(args, "var", None)
 
     if has_flags:
@@ -1717,8 +1706,6 @@ def cmd_task_edit(args):
                 if k:
                     tvars[k] = v
             fields["action_vars"] = tvars
-        if args.assign is not None:
-            fields["assignee"] = args.assign
         if args.labels is not None:
             fields["labels"] = [l.strip() for l in args.labels.split(",")
                                 if l.strip()]
@@ -1755,29 +1742,6 @@ def cmd_task_move(args):
     check_ok(resp)
     print(f"Moved \"{t.get('task', '')}\" to {args.lane}")
 
-
-def cmd_task_assign(args):
-    """Assign or unassign a task to an agent."""
-    st = get_state_local(args.port)
-    t = resolve_task(st, args.identifier)
-
-    if args.clear:
-        resp = api_call("board_update_task", port=args.port,
-                        id=t["id"], agent_id="", assignee="")
-        check_ok(resp)
-        print(f"Unassigned task {t.get('slug', '') or t['id'][:6]}")
-        return
-
-    agent_ref = args.agent
-    if not agent_ref:
-        die("Provide an agent name/ID, or use --clear to unassign")
-
-    # Resolve agent
-    cell = resolve_cell(st, agent_ref)
-    resp = api_call("board_update_task", port=args.port,
-                    id=t["id"], agent_id=cell["id"])
-    check_ok(resp)
-    print(f"Assigned task {t.get('slug', '') or t['id'][:6]} to \"{cell['name']}\"")
 
 
 # -- Action -----------------------------------------------------------------
@@ -2546,8 +2510,6 @@ def build_parser():
     p.add_argument("-d", "--context", help="Longer description / context")
     p.add_argument("-g", "--group",
                    help="Target group (auto-detected if in a Loom session)")
-    p.add_argument("-a", "--assign", metavar="PREFIX",
-                   help="Assign to agent name prefix (e.g. 'frontend')")
     p.add_argument("-t", "--action", help="Action name to attach")
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
                    help="Action variables (e.g., -v CONTEXT='some info')")
@@ -2561,8 +2523,6 @@ def build_parser():
     p.add_argument("-g", "--group",
                    help="Target group (auto-detected if in a Loom session)")
     p.add_argument("-n", "--name", help="Agent name override")
-    p.add_argument("-a", "--assign", metavar="PREFIX",
-                   help="Assign to agent name prefix (e.g. 'frontend')")
     p.add_argument("-c", "--command", help="Boot command override")
     p.add_argument("-d", "--directory", help="Working directory override")
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
@@ -2582,7 +2542,6 @@ def build_parser():
                            help="List tasks (with optional filters)")
     p.add_argument("-l", "--lane", help="Filter by lane name")
     p.add_argument("-g", "--group", help="Filter by group name")
-    p.add_argument("-a", "--assignee", help="Filter by assignee")
     p.add_argument("--label", help="Filter by label")
     p.set_defaults(func=cmd_task_list)
 
@@ -2593,7 +2552,6 @@ def build_parser():
     p.add_argument("--action", help="Set or change action")
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
                    help="Set action variables")
-    p.add_argument("-a", "--assign", help="Assignee prefix")
     p.add_argument("-l", "--labels", help="Comma-separated labels")
     p.add_argument("-g", "--group", help="Move to different group")
     p.set_defaults(func=cmd_task_edit)
@@ -2603,13 +2561,6 @@ def build_parser():
     p.add_argument("identifier", help="Task ID, slug, or title")
     p.add_argument("-l", "--lane", required=True, help="Target lane")
     p.set_defaults(func=cmd_task_move)
-
-    p = tsk_sub.add_parser("assign", help="Assign task to an agent")
-    p.add_argument("identifier", help="Task ID, slug, or title")
-    p.add_argument("agent", nargs="?", help="Agent name, slug, or ID")
-    p.add_argument("--clear", action="store_true",
-                   help="Unassign the task")
-    p.set_defaults(func=cmd_task_assign)
 
     p = tsk_sub.add_parser("chain", help="Show pipeline derivation chain")
     p.add_argument("identifier", help="Task ID, slug, or title")

@@ -1007,30 +1007,10 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
-.board-lane-tab.reserved {
-  font-style: italic;
-}
 .board-lane-tab .lane-count {
   font-size: 9px; color: var(--text-dim);
   margin-left: 4px;
 }
-.board-lane-tab .lane-lock {
-  font-size: 7px; margin-left: 2px;
-  opacity: 0; transition: opacity .15s;
-  font-style: normal;
-}
-.board-lane-tab.reserved:hover .lane-lock { opacity: 0.5; }
-.board-lane-actions {
-  display: flex; align-items: center; gap: 0; flex-shrink: 0;
-  margin-left: auto;
-}
-.board-lane-action-btn {
-  font-size: 11px; color: var(--text-dim);
-  width: 24px; height: 24px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 3px;
-}
-.board-lane-action-btn:hover { color: var(--text); background: var(--bg-hover); }
 
 /* Card list */
 .board-cards {
@@ -1080,11 +1060,6 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   font-size: 8px; color: var(--text-dim);
   background: var(--bg); border-radius: 3px;
   padding: 0 4px; line-height: 14px;
-}
-.board-card-assignee {
-  font-size: 8px; color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 15%, transparent);
-  border-radius: 3px; padding: 0 4px; line-height: 14px;
 }
 .board-card-label {
   font-size: 8px; color: var(--accent);
@@ -1265,28 +1240,6 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-empty {
   text-align: center; color: var(--text-dim);
   font-size: 10px; padding: 16px 8px;
-}
-
-/* Lane settings popover */
-.board-lane-popover {
-  position: fixed; z-index: 160;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgba(0,0,0,.4);
-  padding: 2px; min-width: 120px;
-}
-.board-lane-popover button {
-  display: block; width: 100%;
-  padding: 5px 10px; font-size: 10px;
-  color: var(--text-dim); text-align: left;
-  border-radius: 3px; white-space: nowrap;
-}
-.board-lane-popover button:hover { background: var(--bg-hover); color: var(--text); }
-.board-lane-popover button.danger:hover { background: var(--red); color: #fff; }
-.board-lane-popover input {
-  margin: 4px; width: calc(100% - 8px);
-  font-size: 10px; padding: 4px 6px;
 }
 
 /* Dragging cards */
