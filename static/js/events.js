@@ -242,3 +242,10 @@ function eventsToggleGroupFilter() {
   _eventsFilterByGroup = !_eventsFilterByGroup;
   renderEvents();
 }
+
+function updateEventsAttentionBadge() {
+  var btn = document.querySelector('.taskbar-app[data-app="events"]');
+  if (!btn) return;
+  var items = _eventsGetAttentionItems();
+  btn.classList.toggle('panel-attention', items.length > 0);
+}

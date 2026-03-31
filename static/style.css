@@ -355,6 +355,15 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
 .detail-dir { color: var(--text-dim); }
 .detail-ins { color: var(--green); }
 .detail-del { color: var(--red); }
+.detail-row-event { align-items: flex-start; }
+.detail-last-event {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.detail-time { color: var(--text-dim); white-space: nowrap; }
 
 /* ------------------------------------------------------------------ */
 /* Terminal drawer (child terminals of selected agent)                  */
@@ -555,6 +564,12 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
 .icon-btn:hover { transform: scale(1.12); border-color: var(--text-dim); }
 .icon-btn.selected { border-color: var(--accent); background: rgba(88,166,255,.12); }
 .icon-btn[data-icon=""] { font-size: 9px; color: var(--text-dim); }
+
+/* Worktree section in add-agent modal */
+.add-wt-section {
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
 
 /* Group settings modal — tabbed layout */
 .modal-tall { max-height: 85vh; display: flex; flex-direction: column; }
@@ -904,6 +919,14 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 }
 .taskbar-app:hover { color: var(--text); background: var(--bg-hover); }
 .taskbar-app.active { color: var(--accent); background: rgba(88,166,255,.1); }
+.taskbar-app.panel-attention {
+  box-shadow: inset 0 0 0 1px var(--amber);
+  animation: panel-attention-pulse 2s ease-in-out infinite;
+}
+@keyframes panel-attention-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 1px var(--amber); }
+  50%      { box-shadow: inset 0 0 0 1px var(--amber), 0 0 4px var(--amber); }
+}
 
 /* ------------------------------------------------------------------ */
 /* Bottom panel (collapsible, hosts panel apps)                        */
@@ -1157,13 +1180,41 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-add-task span { font-size: 10px; color: var(--text-dim); cursor: pointer; }
 .board-add-task-active {
   border-style: solid; border-color: var(--accent); opacity: 1;
-  padding: 0; overflow: hidden;
+  padding: 0; overflow: visible; flex-direction: column;
 }
 .board-add-task-active .board-add-input {
   border: none; border-radius: var(--radius);
   min-height: 26px; resize: none;
   line-height: 1.4;
 }
+.board-add-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 2px 4px; border-top: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.board-add-toolbar-right { display: flex; gap: 4px; }
+.board-add-toolbar-btn {
+  background: var(--bg-cell); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text-dim);
+  font-size: 9px; cursor: pointer; padding: 2px 6px;
+  white-space: nowrap;
+}
+.board-add-toolbar-btn:hover { color: var(--text); border-color: var(--accent); }
+.board-add-clear-btn { border: none; background: none; }
+.board-add-submit-btn {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+  font-weight: 600;
+}
+.board-add-submit-btn:hover { opacity: .85; }
+.board-add-dropdown { position: relative; }
+.board-add-agent-list {
+  position: absolute; bottom: 100%; left: 0; z-index: 50;
+  min-width: 140px; max-height: 200px; overflow-y: auto;
+  background: var(--bg-cell); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 2px;
+  display: flex; flex-direction: column;
+}
+.board-add-agent-list .board-tpl-item.selected { color: var(--accent); }
 .board-add-tpl-btn-idle {
   background: var(--bg-cell); border: 1px solid var(--border);
   border-radius: var(--radius);

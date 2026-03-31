@@ -824,15 +824,21 @@ async def main(connection: iterm2.Connection):
                         state._db_save_agent(cell)
 
                     # Git worktree — create before session so cwd is correct
-                    if gs.git_worktree and cell.directory:
+                    # Per-agent overrides from Custom dialog take priority
+                    want_wt = data.get("git_worktree", gs.git_worktree)
+                    if want_wt and cell.directory:
+                        wt_base_dir = (data.get("worktree_base_dir")
+                                       or gs.worktree_base_dir
+                                       or ".loom/worktrees")
+                        wt_base_branch = (data.get("worktree_base_branch")
+                                          or gs.worktree_base_branch or "")
                         repo_root = await worktree_mgr.get_repo_root(
                             cell.directory)
                         if repo_root:
                             wt_path = await worktree_mgr.create(
                                 cell, repo_root,
-                                base_dir=gs.worktree_base_dir
-                                    or ".loom/worktrees",
-                                base_branch=gs.worktree_base_branch or "")
+                                base_dir=wt_base_dir,
+                                base_branch=wt_base_branch)
                             if wt_path:
                                 cell.directory = wt_path
                                 state._emit_agent(cell)

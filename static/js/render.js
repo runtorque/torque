@@ -271,6 +271,9 @@ function render() {
     if (_activePanelApp === 'board') renderBoard();
     if (_activePanelApp === 'events' && typeof renderEvents === 'function') renderEvents();
   }
+
+  // Update events attention badge regardless of panel state
+  if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
 }
 
 function agentStatusClass(a) {
@@ -374,7 +377,11 @@ function renderAgentDetails(a) {
   /* Last event */
   if (a.last_event_at > 0) {
     const ago = _relativeTime(a.last_event_at);
-    h += `<div class="detail-row"><span class="detail-label">Last event</span><span class="detail-val">${esc(ago)}</span></div>`;
+    if (a.last_event_text) {
+      h += `<div class="detail-row detail-row-event"><span class="detail-label">Last event</span><span class="detail-val detail-last-event">${esc(a.last_event_text)} <span class="detail-time">(${esc(ago)})</span></span></div>`;
+    } else {
+      h += `<div class="detail-row"><span class="detail-label">Last event</span><span class="detail-val">${esc(ago)}</span></div>`;
+    }
   }
 
   h += `</div>`;

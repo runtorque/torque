@@ -89,6 +89,23 @@
       <div class="color-swatches" id="add-color-swatches"></div>
       <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
       <textarea id="add-env-vars" rows="2" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+      <div id="add-wt-section" class="add-wt-section">
+        <label class="gs-checkbox">
+          <input id="add-wt-enabled" type="checkbox" onchange="_toggleAddWorktreeFields()"> Git worktree
+        </label>
+        <div id="add-wt-fields" style="display:none;padding-left:20px">
+          <label>Base directory <span class="label-hint">relative to repo root</span></label>
+          <input id="add-wt-base-dir" placeholder=".loom/worktrees" autocomplete="off">
+          <label>Base branch <span class="label-hint">empty = current HEAD</span></label>
+          <input id="add-wt-base-branch" placeholder="main" autocomplete="off">
+          <label class="gs-checkbox">
+            <input id="add-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
+          </label>
+          <label class="gs-checkbox">
+            <input id="add-wt-squash" type="checkbox"> Squash on merge
+          </label>
+        </div>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>

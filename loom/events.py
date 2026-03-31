@@ -138,6 +138,7 @@ class EventBus:
             cell.activity_detail = ""
             cell.error_message = ""
             cell.needs_attention = False
+            cell.last_event_text = "Session ended"
             summary = d.get("summary", "")
             if summary:
                 cell.last_summary = summary
@@ -147,12 +148,16 @@ class EventBus:
             cell.activity_detail = d.get("detail", "")
             cell.error_message = ""
             cell.needs_attention = False
+            if cell.activity_detail:
+                cell.last_event_text = cell.activity_detail
 
         elif et == "tool_start":
             cell.activity = "tool_call"
             cell.activity_detail = d.get("detail", d.get("tool", ""))
             cell.error_message = ""
             cell.needs_attention = False
+            if cell.activity_detail:
+                cell.last_event_text = cell.activity_detail
 
         elif et == "tool_end":
             cell.activity = "thinking"
@@ -167,14 +172,19 @@ class EventBus:
         elif et == "error":
             cell.error_message = d.get("error", "Unknown error")
             cell.needs_attention = True
+            cell.last_event_text = cell.error_message
 
         elif et == "waiting":
             cell.activity = "waiting"
             cell.activity_detail = d.get("reason", "")
             cell.needs_attention = True
+            if cell.activity_detail:
+                cell.last_event_text = cell.activity_detail
 
         elif et == "progress":
             cell.activity_detail = d.get("detail", "")
+            if cell.activity_detail:
+                cell.last_event_text = cell.activity_detail
 
         elif et == "cost_update":
             cell.session_tokens_in += d.get("input_tokens", 0)

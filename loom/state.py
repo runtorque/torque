@@ -75,6 +75,7 @@ class AgentCell:
     activity: str = ""  # "", "thinking", "tool_call", "writing", "waiting"
     activity_detail: str = ""  # e.g. "Editing server.py", "Running tests"
     last_event_at: float = 0.0  # timestamp of last event received
+    last_event_text: str = ""  # last meaningful event description
     session_tokens_in: int = 0  # cumulative input tokens this session
     session_tokens_out: int = 0  # cumulative output tokens this session
     error_message: str = ""  # last error, cleared on next successful event
@@ -92,7 +93,8 @@ class AgentCell:
 # Fields that are ephemeral (not meaningful across restarts)
 _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "current_branch", "git_root",
-                     "activity", "activity_detail", "last_event_at",
+                     "activity", "activity_detail",
+                     "last_event_at", "last_event_text",
                      "session_tokens_in", "session_tokens_out",
                      "error_message", "needs_attention", "last_summary",
                      "current_task_id",

@@ -288,6 +288,20 @@ function _showAddModal(mode, group, config) {
   const envObj = isAgent ? gs.agent_env_vars : gs.terminal_env_vars;
   document.getElementById('add-env-vars').value = _envToText(envObj);
 
+  /* worktree section — agents only */
+  const wtSection = document.getElementById('add-wt-section');
+  if (isTerminal) {
+    wtSection.classList.add('hidden');
+  } else {
+    wtSection.classList.remove('hidden');
+    document.getElementById('add-wt-enabled').checked = gs.git_worktree || false;
+    document.getElementById('add-wt-base-dir').value = gs.worktree_base_dir || '';
+    document.getElementById('add-wt-base-branch').value = gs.worktree_base_branch || '';
+    document.getElementById('add-wt-auto-checkpoint').checked = gs.worktree_auto_checkpoint || false;
+    document.getElementById('add-wt-squash').checked = gs.worktree_merge_squash !== false;
+    _toggleAddWorktreeFields();
+  }
+
   document.getElementById('modal-add').classList.add('visible');
   document.getElementById('add-name-input').focus();
 }
@@ -594,6 +608,11 @@ function _toggleWorktreeFields() {
   document.getElementById('gs-wt-fields').style.display = on ? 'block' : 'none';
 }
 
+function _toggleAddWorktreeFields() {
+  const on = document.getElementById('add-wt-enabled').checked;
+  document.getElementById('add-wt-fields').style.display = on ? 'block' : 'none';
+}
+
 function openAddAgent(group)              { _openAddModal('agent', group); }
 function openAddTerminal(group, parentId) { _openAddModal('terminal', group, parentId); }
 
@@ -633,6 +652,17 @@ function submitAdd() {
     const prov = document.getElementById('add-provider-select').value;
     if (prov && prov !== '__custom__') msg.provider = prov;
     if (prov === '__custom__' && command) msg.command = command;
+    /* worktree overrides */
+    const wtEnabled = document.getElementById('add-wt-enabled').checked;
+    msg.git_worktree = wtEnabled;
+    if (wtEnabled) {
+      const wtDir = document.getElementById('add-wt-base-dir').value.trim();
+      const wtBranch = document.getElementById('add-wt-base-branch').value.trim();
+      if (wtDir) msg.worktree_base_dir = wtDir;
+      if (wtBranch) msg.worktree_base_branch = wtBranch;
+      msg.worktree_auto_checkpoint = document.getElementById('add-wt-auto-checkpoint').checked;
+      msg.worktree_merge_squash = document.getElementById('add-wt-squash').checked;
+    }
   }
 
   send(msg);

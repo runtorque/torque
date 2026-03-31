@@ -7,6 +7,8 @@ var _boardSelectedLane = '';
 var _boardFocusedTask = '';
 var _boardAddingTask = false;   // true when inline task input is shown
 var _boardAddingTaskDraft = '';  // preserved text across blur/reopen
+var _boardAddingTaskAction = '';  // selected action name for inline add
+var _boardAddingTaskAgent = '';   // selected agent ID for inline add
 var _boardAddingLane = false;
 var _boardActDropdownWaiting = false;  // waiting for action list for dropdown
 var _boardActList = null;              // fetched actions shown inline (null = hidden)
@@ -242,6 +244,23 @@ function renderBoard() {
       + ' onkeydown="boardAddTaskKeydown(event)"'
       + ' oninput="boardAddTaskAutoResize(this)"'
       + ' onblur="boardCancelAddTask()">' + esc(_boardAddingTaskDraft) + '</textarea>';
+    html += '<div class="board-add-toolbar">';
+    html += '<button class="board-add-toolbar-btn board-add-clear-btn" onmousedown="event.preventDefault();boardClearAddTask()">Clear</button>';
+    html += '<div class="board-add-toolbar-right">';
+    // Agent dropdown
+    html += '<div class="board-add-dropdown" id="board-add-agent-wrap">';
+    var agentLabel = _boardAddingTaskAgent ? _boardAgentName(_boardAddingTaskAgent) : 'No agent';
+    html += '<button class="board-add-toolbar-btn" onmousedown="event.preventDefault();boardToggleAgentDropdown()">'
+      + esc(agentLabel) + ' &#9662;</button>';
+    html += '</div>';
+    // Action dropdown
+    var actionLabel = _boardAddingTaskAction || 'No action';
+    html += '<button class="board-add-toolbar-btn" onmousedown="event.preventDefault();boardToggleActionList()">'
+      + esc(actionLabel) + ' &#9662;</button>';
+    // Submit
+    html += '<button class="board-add-toolbar-btn board-add-submit-btn" onmousedown="event.preventDefault();boardSubmitAddTask()">Submit &#10132;</button>';
+    html += '</div>';
+    html += '</div>';
     html += '</div>';
   } else {
     html += '<div class="board-add-task" onclick="boardStartAddTask()">';
@@ -439,26 +458,74 @@ function boardCancelAddTask() {
   setTimeout(function() { _boardAddingTask = false; _boardTplList = null; renderBoard(); }, 150);
 }
 
+function boardClearAddTask() {
+  _boardAddingTask = false;
+  _boardAddingTaskDraft = '';
+  _boardAddingTaskAction = '';
+  _boardAddingTaskAgent = '';
+  _boardTplList = null;
+  renderBoard();
+}
+
+function boardSubmitAddTask() {
+  var el = document.getElementById('board-add-task-input');
+  var val = el ? el.value.trim() : '';
+  if (!val) return;
+  _boardAddingTask = false;
+  _boardAddingTaskDraft = '';
+  var msg = { cmd: 'board_add_task', task: val, group: _currentGroup(), lane: _boardSelectedLane };
+  if (_boardAddingTaskAction) msg.action_name = _boardAddingTaskAction;
+  if (_boardAddingTaskAgent) msg.agent_id = _boardAddingTaskAgent;
+  _boardAddingTaskAction = '';
+  _boardAddingTaskAgent = '';
+  _boardTplList = null;
+  send(msg);
+  renderBoard();
+}
+
 function boardAddTaskKeydown(e) {
   if (e.key === 'Escape') {
-    _boardAddingTask = false;
-    _boardAddingTaskDraft = '';
-    _boardTplList = null;
-    renderBoard();
+    boardClearAddTask();
     return;
   }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    var val = e.target.value.trim();
-    if (!val) return;
-    _boardAddingTask = false;
-    _boardAddingTaskDraft = '';
-    _boardTplList = null;
-    var group = _currentGroup();
-    var lane = _boardSelectedLane;
-    send({ cmd: 'board_add_task', task: val, group: group, lane: lane });
-    renderBoard();
+    boardSubmitAddTask();
   }
+}
+
+function boardToggleAgentDropdown() {
+  var wrap = document.getElementById('board-add-agent-wrap');
+  var existing = wrap ? wrap.querySelector('.board-add-agent-list') : null;
+  if (existing) { existing.remove(); return; }
+  var grp = _currentGroup();
+  var agents = [];
+  if (state && state.groups && state.groups[grp]) {
+    var aids = state.groups[grp];
+    for (var i = 0; i < aids.length; i++) {
+      var a = state.agents[aids[i]];
+      if (a && a.cell_type === 'agent') agents.push(a);
+    }
+  }
+  var listEl = document.createElement('div');
+  listEl.className = 'board-add-agent-list';
+  var noBtn = document.createElement('button');
+  noBtn.className = 'board-tpl-item' + (!_boardAddingTaskAgent ? ' selected' : '');
+  noBtn.textContent = 'No agent';
+  noBtn.onmousedown = function(e) { e.preventDefault(); };
+  noBtn.onclick = function() { _boardAddingTaskAgent = ''; listEl.remove(); renderBoard(); };
+  listEl.appendChild(noBtn);
+  for (var j = 0; j < agents.length; j++) {
+    (function(ag) {
+      var btn = document.createElement('button');
+      btn.className = 'board-tpl-item' + (ag.id === _boardAddingTaskAgent ? ' selected' : '');
+      btn.textContent = ag.name;
+      btn.onmousedown = function(e) { e.preventDefault(); };
+      btn.onclick = function() { _boardAddingTaskAgent = ag.id; listEl.remove(); renderBoard(); };
+      listEl.appendChild(btn);
+    })(agents[j]);
+  }
+  wrap.appendChild(listEl);
 }
 
 function boardAddTaskAutoResize(el) {
@@ -504,8 +571,14 @@ function _boardShowActionList(msg) {
 
 function _boardPickAction(name) {
   _boardActList = null;
-  _boardAddingTask = false;
   document.removeEventListener('mousedown', _boardCloseTplListHandler, true);
+  // If inline add is active, set action on the toolbar instead of opening modal
+  if (_boardAddingTask) {
+    _boardAddingTaskAction = name;
+    renderBoard();
+    return;
+  }
+  _boardAddingTask = false;
   renderBoard();
   // Open the task modal with the action pre-selected
   _taskEditId = null;
@@ -530,8 +603,13 @@ function _boardPickAction(name) {
 
 function _boardPickNoAction() {
   _boardActList = null;
-  _boardAddingTask = false;
   document.removeEventListener('mousedown', _boardCloseTplListHandler, true);
+  if (_boardAddingTask) {
+    _boardAddingTaskAction = '';
+    renderBoard();
+    return;
+  }
+  _boardAddingTask = false;
   renderBoard();
   openAddTask(_boardSelectedLane);
 }
