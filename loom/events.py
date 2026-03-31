@@ -206,9 +206,11 @@ class EventBus:
                 cell.last_event_text = cell.activity_detail
 
         elif et == "tool_end":
-            cell.activity = "thinking"
-            cell.activity_detail = ""
-            cell.needs_attention = False
+            # Don't overwrite state if the tool itself set needs_attention
+            # (e.g. loom ai blocked/error runs inside this tool call)
+            if not cell.needs_attention:
+                cell.activity = "thinking"
+                cell.activity_detail = ""
 
         elif et == "message":
             cell.activity = "thinking"
