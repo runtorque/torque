@@ -354,12 +354,16 @@ async function worktreeMerge(id) {
     `Merge "${cell.name}" into ${base}? Claude will perform the merge and resolve any conflicts. You\u2019ll be notified if it fails.`,
     {
       label: 'Proceed', variant: 'btn-green',
-      checkboxes: [{ key: 'close_on_merge', label: 'Close agent after merge', checked: false }],
+      checkboxes: [
+        { key: 'close_on_merge', label: 'Close agent after merge', checked: false },
+        { key: 'clear_context', label: 'Clear context after merge', checked: false },
+      ],
     }
   );
   if (result) {
     const close = result.close_on_merge || false;
-    send({ cmd: 'worktree_merge', id, close_on_merge: close });
+    const clear = result.clear_context || false;
+    send({ cmd: 'worktree_merge', id, close_on_merge: close, clear_context: clear });
   }
 }
 async function worktreeRemove(id) {

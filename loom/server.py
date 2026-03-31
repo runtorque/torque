@@ -157,8 +157,8 @@ async def main(connection: iterm2.Connection):
     worktree_mgr = WorktreeManager()
     action_mgr = ActionManager()
 
-    # cell ID → (pre-merge base SHA, close_on_merge flag)
-    _pending_merges: dict[str, tuple[str, bool]] = {}
+    # cell ID → (pre-merge base SHA, close_on_merge, clear_context)
+    _pending_merges: dict[str, tuple[str, bool, bool]] = {}
 
     async def _safe_remove_worktree(cell):
         """Remove a worktree only if no other agent shares it."""
@@ -192,7 +192,8 @@ async def main(connection: iterm2.Connection):
         """Handle agent turn completion: merge verification + auto-checkpoint."""
         # Check pending merge result
         if cell.id in _pending_merges:
-            pre_sha, close_on_merge = _pending_merges.pop(cell.id)
+            pre_sha, close_on_merge, clear_context = \
+                _pending_merges.pop(cell.id)
             merged = await worktree_mgr.is_merged(cell)
             if not merged and pre_sha:
                 merged = await worktree_mgr.check_base_advanced(
@@ -223,6 +224,16 @@ async def main(connection: iterm2.Connection):
                                 "Post-merge rebase failed for '%s'"
                                 " — worktree left as-is",
                                 cell.name)
+                if clear_context and not close_on_merge \
+                        and cell.session_id:
+                    # Send /clear to reset the agent's conversation
+                    await bridge.send_text(
+                        cell.session_id, "/clear\r")
+                    cell.tasks_dispatched = 0
+                    state._emit_agent(cell)
+                    state._db_save_agent(cell)
+                    log.info("Cleared context for '%s' after merge",
+                             cell.name)
                 if close_on_merge:
                     await asyncio.sleep(CLOSE_AFTER_MERGE_DELAY)
                     removed = state.remove_agent(cell.id)
@@ -439,7 +450,8 @@ async def main(connection: iterm2.Connection):
                     if isinstance(tr, dict) and tr.get("action"):
                         abbrev += "\n" + _derive_line(tr)
                 if has_ask:
-                    abbrev += ("\n- `loom ai ask \"question\"` "
+                    abbrev += ("\n- `loom ai ask \"title\" "
+                              "-d \"details\"` "
                               "— pause for human input")
                 abbrev += ("\n- `loom ai done` "
                            "— task complete, no follow-up")
@@ -462,9 +474,9 @@ async def main(connection: iterm2.Connection):
                 lines.append(_derive_line(tr))
         if has_ask:
             lines.append(
-                "- `loom ai ask \"question\"` "
+                "- `loom ai ask \"title\" -d \"details\"` "
                 "— pause for human input (creates a task in "
-                "Backlog for review)")
+                "Backlog for review; -d is optional)")
         lines.extend([
             "- `loom ai blocked \"reason\"` — need user input",
             "- `loom ai error \"message\"` — unrecoverable error",
@@ -1371,9 +1383,11 @@ async def main(connection: iterm2.Connection):
                         except Exception:
                             pass
                         close_flag = bool(data.get("close_on_merge"))
+                        clear_flag = bool(data.get("clear_context"))
                         await bridge.send_text(
                             cell.session_id, prompt + "\r")
-                        _pending_merges[cell.id] = (pre_sha, close_flag)
+                        _pending_merges[cell.id] = (
+                            pre_sha, close_flag, clear_flag)
                         cell.status = "running"
                         state._emit_agent(cell)
                         # Ephemeral status — no DB write needed
@@ -2354,6 +2368,8 @@ async def main(connection: iterm2.Connection):
                             grp = task.group
                             root_id = task.pipeline_root_id \
                                 or task.id
+                            ask_desc = data.get(
+                                "description", "")
                             new_task = state.board_add_task(
                                 task=message,
                                 group=grp,
@@ -2363,6 +2379,7 @@ async def main(connection: iterm2.Connection):
                                 pipeline_depth=
                                     task.pipeline_depth + 1,
                                 pipeline_root_id=root_id,
+                                description=ask_desc,
                             )
                             if new_task:
                                 result = {

@@ -2187,6 +2187,8 @@ def cmd_ai_ask(args):
     cell, task = _resolve_self_and_task(args)
     kwargs = {"cell_id": cell["id"], "action": "ask",
               "message": args.question}
+    if getattr(args, "description", None):
+        kwargs["description"] = args.description
     if task:
         kwargs["task_id"] = task["id"]
     resp = api_call("ai_report", port=args.port, **kwargs)
@@ -2678,6 +2680,8 @@ def build_parser():
     p = ai_sub.add_parser("ask",
                           help="Create a task for human decision")
     p.add_argument("question", help="Question for the human to review")
+    p.add_argument("-d", "--description",
+                   help="Longer description (question becomes the title)")
     p.add_argument("task_ref", nargs="?",
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_ask)

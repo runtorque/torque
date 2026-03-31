@@ -189,7 +189,14 @@ TOOLS = [
                 "question": {
                     "type": "string",
                     "description": (
-                        "The question or decision needed from a human."
+                        "Short title for the ask task."
+                    ),
+                },
+                "description": {
+                    "type": "string",
+                    "description": (
+                        "Longer description with full context "
+                        "(question becomes the title)."
                     ),
                 },
             },
@@ -261,6 +268,8 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
             payload["group"] = args["group"]
     elif action == "ask":
         payload["message"] = args.get("question", "")
+        if args.get("description"):
+            payload["description"] = args["description"]
 
     result = await handle_command(payload)
     if result and result.get("type") == "error":
