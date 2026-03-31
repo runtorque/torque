@@ -364,6 +364,30 @@ async def main(connection: iterm2.Connection):
                 return c.id
         return None
 
+    async def _send_agent_prompt(cell, prompt: str, *,
+                                 delay: float = 0,
+                                 persist: bool = False,
+                                 background: bool = False):
+        """Send a prompt to an agent session, optionally delayed."""
+        payload = prompt if prompt.endswith("\r") else prompt + "\r"
+
+        async def _run():
+            if delay:
+                await asyncio.sleep(delay)
+            if not cell.session_id:
+                return
+            await bridge.send_text(cell.session_id, payload)
+            cell.status = "running"
+            state._emit_agent(cell)
+            if persist:
+                state._db_save_agent(cell)
+            await state.broadcast()
+
+        if background:
+            asyncio.create_task(_run())
+        else:
+            await _run()
+
     # -- Postscript builder -------------------------------------------------
 
     def _build_postscript(task, amgr, base_dir="", is_clean=True):
@@ -1011,18 +1035,9 @@ async def main(connection: iterm2.Connection):
                         prompt = rendered.get("prompt", "")
 
                         if prompt and cell.session_id:
-                            async def _send_after_boot(c, p):
-                                await asyncio.sleep(2)
-                                if c.session_id:
-                                    await bridge.send_text(
-                                        c.session_id,
-                                        p if p.endswith("\r") else p + "\r")
-                                    c.status = "running"
-                                    state._emit_agent(c)
-                                    state._db_save_agent(c)
-                                    await state.broadcast()
-                            asyncio.create_task(
-                                _send_after_boot(cell, prompt))
+                            await _send_agent_prompt(
+                                cell, prompt, persist=True,
+                                background=True)
 
             elif cmd == "add_terminal":
                 group = data.get("group", "")
@@ -1661,43 +1676,17 @@ async def main(connection: iterm2.Connection):
                                         # Self-dispatch: delay so
                                         # prompt arrives after current
                                         # agent turn finishes
-                                        async def _delayed(c, p, d):
-                                            await asyncio.sleep(d)
-                                            if c.session_id:
-                                                await bridge.send_text(
-                                                    c.session_id,
-                                                    p if p.endswith("\r")
-                                                    else p + "\r")
-                                                c.status = "running"
-                                                state._emit_agent(c)
-                                                await state.broadcast()
-                                        asyncio.create_task(
-                                            _delayed(cell, prompt,
-                                                     delay))
+                                        await _send_agent_prompt(
+                                            cell, prompt,
+                                            delay=delay,
+                                            background=True)
                                     else:
                                         # Existing agent — send now
-                                        await bridge.send_text(
-                                            cell.session_id,
-                                            prompt
-                                            if prompt.endswith("\r")
-                                            else prompt + "\r")
-                                        cell.status = "running"
-                                        state._emit_agent(cell)
+                                        await _send_agent_prompt(cell, prompt)
                                 elif data.get("create_agent") \
                                         and cell.session_id:
-                                    # New agent — wait for boot
-                                    async def _dispatch_send(c, p):
-                                        await asyncio.sleep(2)
-                                        if c.session_id:
-                                            await bridge.send_text(
-                                                c.session_id,
-                                                p if p.endswith("\r")
-                                                else p + "\r")
-                                            c.status = "running"
-                                            state._emit_agent(c)
-                                            await state.broadcast()
-                                    asyncio.create_task(
-                                        _dispatch_send(cell, prompt))
+                                    await _send_agent_prompt(
+                                        cell, prompt, background=True)
 
             elif cmd == "resolve_ask":
                 # Resolve an ask task: send answer to parent's agent

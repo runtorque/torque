@@ -6,7 +6,7 @@ import shlex
 import time
 from pathlib import Path
 
-from .base import AgentAdapter, AgentEvent
+from .base import AgentAdapter, AgentEvent, InputReadyPolicy
 
 # Marker URL used to identify Loom-managed hooks during cleanup
 LOOM_HOOK_URL = "http://localhost:18932/events"
@@ -96,6 +96,24 @@ class CodexAdapter(AgentAdapter):
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
         base = boot_cmd.strip().split()[0]
         return f"{base} resume {shlex.quote(session_id)}"
+
+    def get_input_ready_policy(self) -> InputReadyPolicy:
+        """Wait for the Codex composer to fully initialize before first send."""
+        return InputReadyPolicy(
+            enabled=True,
+            timeout_seconds=8.0,
+            poll_interval_seconds=0.25,
+            stable_polls=2,
+        )
+
+    def is_input_ready_screen(self, screen_text: str) -> bool:
+        lower = screen_text.lower()
+        return (
+            "openai codex" in lower
+            and "model:" in lower
+            and "directory:" in lower
+            and "›" in screen_text
+        )
 
     def get_hook_config(self, cell) -> dict | None:
         """Return the Codex hooks.json structure for Loom integration.

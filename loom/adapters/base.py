@@ -25,6 +25,16 @@ class AgentEvent:
     data: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class InputReadyPolicy:
+    """Policy for waiting until an interactive TUI can accept submitted input."""
+
+    enabled: bool = False
+    timeout_seconds: float = 0.0
+    poll_interval_seconds: float = 0.25
+    stable_polls: int = 1
+
+
 class AgentAdapter:
     """Base class for agent type adapters.
 
@@ -61,6 +71,22 @@ class AgentAdapter:
         Returns None if this adapter doesn't support session resume.
         """
         return None
+
+    def get_submit_key(self) -> str:
+        """Return the key sequence that submits text in the adapter's TUI."""
+        return "\r"
+
+    def get_multiline_submit_delay(self) -> float:
+        """Return the delay before sending submit after a multi-line body."""
+        return 0.3
+
+    def get_input_ready_policy(self) -> InputReadyPolicy:
+        """Return how Loom should wait for the TUI to accept its first input."""
+        return InputReadyPolicy()
+
+    def is_input_ready_screen(self, screen_text: str) -> bool:
+        """Return True when the visible screen indicates the TUI is ready."""
+        return True
 
     def parse_event(self, raw: dict, cell) -> AgentEvent | None:
         """Parse an incoming hook payload into a normalized AgentEvent.

@@ -22,6 +22,7 @@ class ITerm2Adapter:
         self.state = state
         self._prompt_tasks: dict[str, asyncio.Task] = {}
         self._job_tasks: dict[str, asyncio.Task] = {}
+        self._input_ready_sessions: set[str] = set()
         self._term_task: Optional[asyncio.Task] = None
         self._focus_task: Optional[asyncio.Task] = None
         self.on_session_terminated = None  # async callback(cell)
@@ -227,6 +228,7 @@ class ITerm2Adapter:
         tab = await window.async_create_tab(profile=cell.profile)
         session = tab.current_session
         cell.session_id = session.session_id
+        self._input_ready_sessions.discard(session.session_id)
         cell.window_id = window.window_id
         log.info("Tab created: session_id=%s window=%s",
                  session.session_id, window.window_id)
@@ -488,27 +490,38 @@ class ITerm2Adapter:
     async def send_text(self, session_id: str, text: str):
         """Send text to a terminal session.
 
-        For multi-line text ending with Enter (\\r or \\n), the Enter
-        is sent separately after a delay so it lands outside bracketed
-        paste mode — otherwise apps like Claude Code show
-        "[Pasted N lines]" without submitting.
-
-        Always uses \\r (carriage return) for the trailing submit.
+        For multi-line prompts, the body is sent first and the submit
+        key is sent separately after a short delay. Some TUIs ignore an
+        early submit during startup, so the first send to adapters with
+        an input-ready policy waits until the visible screen stabilizes.
         """
         session = await self._find_session(session_id)
         if session:
+            cell = self._find_cell_by_session(session_id)
+            adapter = get_adapter(cell.agent_type) if cell else None
+            submit_key = adapter.get_submit_key() if adapter else "\r"
+            submit_delay = (
+                adapter.get_multiline_submit_delay()
+                if adapter else 0.3
+            )
+            if cell:
+                await self._wait_for_input_ready(session, cell)
             body = text.rstrip("\r\n")
             if "\n" in body:
-                # Multi-line: send body, wait for paste to register,
-                # then send \r to submit
+                # Multi-line: send body, then submit separately.
                 await session.async_send_text(body)
-                await asyncio.sleep(0.3)
-                await session.async_send_text("\r")
+                await asyncio.sleep(submit_delay)
+                await session.async_send_text(submit_key)
             else:
-                # Single-line: send as-is with trailing \r
-                await session.async_send_text(body + "\r")
+                await session.async_send_text(body + submit_key)
 
     # -- Helpers ------------------------------------------------------------
+
+    def _find_cell_by_session(self, session_id: str) -> AgentCell | None:
+        for cell in self.state.agents.values():
+            if cell.session_id == session_id:
+                return cell
+        return None
 
     async def _find_session(self, session_id: str):
         if not session_id:
@@ -520,6 +533,53 @@ class ITerm2Adapter:
                     if session.session_id == session_id:
                         return session
         return None
+
+    async def _read_screen_text(self, session) -> str:
+        try:
+            line_info = await session.async_get_line_info()
+            first = max(
+                getattr(line_info, "overflow", 0),
+                getattr(line_info, "first_visible_line_number", 0) - 10,
+            )
+            count = max(getattr(line_info, "mutable_area_height", 24) + 10, 24)
+            contents = await session.async_get_contents(first, count)
+            return "\n".join(
+                getattr(line, "string", "")
+                for line in contents
+            )
+        except Exception:
+            log.debug("Could not read visible screen for session %s",
+                      session.session_id)
+            return ""
+
+    async def _wait_for_input_ready(self, session, cell: AgentCell):
+        if cell.session_id in self._input_ready_sessions:
+            return
+        if not cell.agent_type:
+            self._input_ready_sessions.add(cell.session_id)
+            return
+
+        adapter = get_adapter(cell.agent_type)
+        policy = adapter.get_input_ready_policy()
+        if not policy.enabled:
+            self._input_ready_sessions.add(cell.session_id)
+            return
+
+        deadline = asyncio.get_running_loop().time() + policy.timeout_seconds
+        stable_polls = 0
+        while asyncio.get_running_loop().time() < deadline:
+            screen_text = await self._read_screen_text(session)
+            if screen_text and adapter.is_input_ready_screen(screen_text):
+                stable_polls += 1
+                if stable_polls >= max(policy.stable_polls, 1):
+                    self._input_ready_sessions.add(cell.session_id)
+                    return
+            else:
+                stable_polls = 0
+            await asyncio.sleep(policy.poll_interval_seconds)
+
+        log.info("Input-ready wait timed out for '%s' (type=%s, session=%s)",
+                 cell.name, cell.agent_type, cell.session_id)
 
     # -- Monitoring ---------------------------------------------------------
 
@@ -670,6 +730,7 @@ class ITerm2Adapter:
                         if cell.session_id == sid:
                             log.info("Session terminated: '%s' (session %s)",
                                      cell.name, sid)
+                            self._input_ready_sessions.discard(sid)
                             cell.status = "stopped"
                             cell.session_id = None
                             cell.current_process = ""
