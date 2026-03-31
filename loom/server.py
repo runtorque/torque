@@ -1202,7 +1202,11 @@ async def main(connection: iterm2.Connection):
                                 shell = (gs.agent_shell
                                          or gs.shell or "")
                                 await bridge.create_session(
-                                    cell, env_vars=env, shell=shell)
+                                    cell, env_vars=env, shell=shell,
+                                    target_session_id=data.get(
+                                        "target_session_id", ""),
+                                    target_window_id=data.get(
+                                        "target_window_id", ""))
 
             elif cmd == "worktree_remove":
                 cell = state.agents.get(data["id"])
@@ -2265,6 +2269,14 @@ async def main(connection: iterm2.Connection):
                                                     "inherit_worktree"
                                                     "_from"
                                                 ] = cell.id
+                                            if cell.session_id:
+                                                dispatch_data[
+                                                    "target_session_id"
+                                                ] = cell.session_id
+                                            if cell.window_id:
+                                                dispatch_data[
+                                                    "target_window_id"
+                                                ] = cell.window_id
                                             await state.broadcast()
                                             dr = \
                                                 await handle_command(

@@ -169,14 +169,50 @@ class ITerm2Adapter:
 
     # -- Session lifecycle --------------------------------------------------
 
+    def _find_window_for_session(self, app, session_id: str):
+        """Return the iTerm2 window containing the given session ID."""
+        if not session_id:
+            return None
+        for window in getattr(app, "windows", []):
+            for tab in getattr(window, "tabs", []):
+                sessions = getattr(tab, "sessions", None)
+                if not sessions:
+                    current = getattr(tab, "current_session", None)
+                    sessions = [current] if current else []
+                for session in sessions:
+                    if session and session.session_id == session_id:
+                        return window
+        return None
+
+    def _find_window_by_id(self, app, window_id: str):
+        """Return the iTerm2 window matching the given window ID."""
+        if not window_id:
+            return None
+        for window in getattr(app, "windows", []):
+            if getattr(window, "window_id", "") == window_id:
+                return window
+        return None
+
     async def create_session(self, cell: AgentCell, *,
                              env_vars: dict[str, str] | None = None,
                              init_script: str = "",
-                             shell: str = ""):
+                             shell: str = "",
+                             target_session_id: str = "",
+                             target_window_id: str = ""):
         log.info("Creating session for %s '%s' [%s]",
                  cell.cell_type, cell.name, cell.group)
         app = await iterm2.async_get_app(self.conn)
-        window = app.current_window
+        if cell.parent_id:
+            parent = self.state.agents.get(cell.parent_id)
+            if parent:
+                target_session_id = target_session_id or parent.session_id or ""
+                target_window_id = target_window_id or parent.window_id or ""
+
+        window = self._find_window_for_session(app, target_session_id)
+        if not window:
+            window = self._find_window_by_id(app, target_window_id)
+        if not window:
+            window = app.current_window
         if not window:
             log.error("No current window — cannot create tab for '%s'",
                       cell.name)

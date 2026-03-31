@@ -38,6 +38,8 @@ class TerminalAdapter(Protocol):
         env_vars: dict[str, str] | None = None,
         init_script: str = "",
         shell: str = "",
+        target_session_id: str = "",
+        target_window_id: str = "",
     ) -> None:
         """Create a new terminal session for the given cell."""
         ...
