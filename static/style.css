@@ -1695,6 +1695,11 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   font-size: 10px; color: var(--text-dim);
   text-align: center;
 }
+.events-loading {
+  padding: 8px 12px;
+  font-size: 10px; color: var(--text-dim);
+  text-align: center;
+}
 .events-entry {
   display: flex; align-items: baseline; gap: 6px;
   padding: 3px 10px;

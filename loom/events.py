@@ -9,17 +9,26 @@ from .config import log
 
 
 class PanelEventLog:
-    """Global in-memory ring buffer of high-level events for the Events panel.
+    """Global ring buffer of high-level events for the Events panel.
 
     Unlike EventLog (per-cell, low-level), this stores aggregate events
     visible across the UI: task dispatched, completed, ask created, etc.
-    Not persisted — resets on daemon restart.
+    When a *db* is provided, events are persisted to SQLite and the
+    in-memory deque acts as a write-through cache for the most recent
+    ``_max_size`` entries.
     """
 
-    def __init__(self, max_size: int = 500):
+    def __init__(self, max_size: int = 500, db=None):
         self._max_size = max_size
+        self._db = db
         self._events: deque[dict] = deque(maxlen=max_size)
-        self._id_counter = 0
+        # Seed id counter and hydrate deque from DB after restart
+        if db:
+            self._id_counter = db.get_panel_event_max_id()
+            for evt in db.load_panel_events(limit=max_size):
+                self._events.append(evt)
+        else:
+            self._id_counter = 0
 
     def append(self, kind: str, cell_id: str, agent_name: str,
                group: str, message: str, task_id: str = "") -> dict:
@@ -35,6 +44,12 @@ class PanelEventLog:
             "task_id": task_id,
         }
         self._events.append(evt)
+        if self._db:
+            try:
+                self._db.save_panel_event(evt)
+                self._db.trim_panel_events(self._max_size)
+            except Exception:
+                log.exception("Failed to persist panel event %s", evt["id"])
         return evt
 
     def replace_last(self, kind: str, cell_id: str, **kwargs) -> dict:
@@ -49,6 +64,12 @@ class PanelEventLog:
                 for k, v in kwargs.items():
                     if k in evt:
                         evt[k] = v
+                if self._db:
+                    try:
+                        self._db.update_panel_event(evt)
+                    except Exception:
+                        log.exception("Failed to update panel event %s",
+                                      evt["id"])
                 return evt
         return self.append(kind=kind, cell_id=cell_id, **kwargs)
 
@@ -56,6 +77,16 @@ class PanelEventLog:
         if n >= len(self._events):
             return list(self._events)
         return list(self._events)[-n:]
+
+    def get_page(self, limit: int = 50, before_id: int = 0) -> list[dict]:
+        """Return a page of older events from DB (for scroll pagination)."""
+        if self._db:
+            return self._db.load_panel_events(limit, before_id)
+        # Fallback: paginate from in-memory buffer
+        events = list(self._events)
+        if before_id:
+            events = [e for e in events if e["id"] < before_id]
+        return events[-limit:]
 
 
 class EventLog:

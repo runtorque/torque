@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+from collections import deque
 
 import aiohttp
 from aiohttp import web
@@ -144,7 +145,8 @@ async def main(connection: iterm2.Connection):
              len(state.agents), len(state.groups))
 
     event_log = EventLog()
-    panel_log = PanelEventLog()
+    panel_log = PanelEventLog(
+        max_size=state.global_settings.max_event_log, db=db)
     state.panel_log = panel_log
     notifier = NotificationManager(state)
     notifier.start()
@@ -683,6 +685,13 @@ async def main(connection: iterm2.Connection):
                 "keybinding_defaults": keybindings.get_default_bindings(),
             }
 
+        # get_events: paginated event log query
+        if cmd == "get_events":
+            before_id = int(data.get("before_id", 0))
+            limit = min(int(data.get("limit", 50)), 200)
+            events = panel_log.get_page(limit=limit, before_id=before_id)
+            return {"type": "events_page", "events": events}
+
         # list_actions: respond directly
         if cmd == "list_actions":
             base_dir = await _resolve_base_dir(data.get("group", ""))
@@ -837,6 +846,14 @@ async def main(connection: iterm2.Connection):
                     _displaced[0] = await keybindings.reinstall(
                         connection, _displaced[0],
                         overrides=new_kb or None)
+                # Propagate max_event_log to panel log
+                new_max = state.global_settings.max_event_log
+                if panel_log._max_size != new_max:
+                    panel_log._max_size = new_max
+                    panel_log._events = deque(
+                        panel_log._events, maxlen=new_max)
+                    if panel_log._db:
+                        panel_log._db.trim_panel_events(new_max)
 
             elif cmd == "suspend_keybindings":
                 await keybindings.remove(connection, _displaced[0])

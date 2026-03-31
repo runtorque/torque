@@ -5,6 +5,9 @@
 var _eventsFilterByGroup = true;
 var _eventsScrollTop = 0;
 var _eventsExpandedEntries = {};
+var _eventsLoading = false;
+var _eventsHasMore = true;
+var _eventsOldestId = 0;
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -152,13 +155,24 @@ function renderEvents() {
   if (count === 0) {
     html += '<div class="events-log-empty">No events yet</div>';
   }
+  if (_eventsLoading) {
+    html += '<div class="events-loading">Loading\u2026</div>';
+  }
   html += '</div>';
 
   panel.innerHTML = html;
 
   // Restore scroll
   logEl = panel.querySelector('.events-log');
-  if (logEl) logEl.scrollTop = _eventsScrollTop;
+  if (logEl) {
+    logEl.scrollTop = _eventsScrollTop;
+    logEl.addEventListener('scroll', _eventsOnScroll);
+  }
+
+  // Track oldest ID for pagination
+  if (events.length > 0) {
+    _eventsOldestId = events[0].id;
+  }
 
   // Auto-resize textareas
   panel.querySelectorAll('.events-resolve-textarea').forEach(function(ta) {
@@ -251,4 +265,48 @@ function updateEventsAttentionBadge() {
   if (!btn) return;
   var items = _eventsGetAttentionItems();
   btn.classList.toggle('panel-attention', items.length > 0);
+}
+
+/* ---- Scroll pagination ---------------------------------------------- */
+
+function _eventsOnScroll() {
+  var el = this;
+  // The log renders newest first (top) — "load more" triggers near the bottom
+  if (_eventsLoading || !_eventsHasMore) return;
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {
+    _eventsLoadMore();
+  }
+}
+
+function _eventsLoadMore() {
+  if (_eventsLoading || !_eventsHasMore || !_eventsOldestId) return;
+  _eventsLoading = true;
+  renderEvents();
+  send({ cmd: 'get_events', before_id: _eventsOldestId, limit: 50 });
+}
+
+function handleEventsPage(data) {
+  _eventsLoading = false;
+  var page = data.events || [];
+  if (page.length === 0) {
+    _eventsHasMore = false;
+    renderEvents();
+    return;
+  }
+  if (page.length < 50) _eventsHasMore = false;
+  // Merge older events into the front of state.panel_events
+  if (!state.panel_events) state.panel_events = [];
+  // Deduplicate by ID
+  var existing = {};
+  for (var i = 0; i < state.panel_events.length; i++) {
+    existing[state.panel_events[i].id] = true;
+  }
+  var toAdd = [];
+  for (var j = 0; j < page.length; j++) {
+    if (!existing[page[j].id]) toAdd.push(page[j]);
+  }
+  if (toAdd.length > 0) {
+    state.panel_events = toAdd.concat(state.panel_events);
+  }
+  renderEvents();
 }

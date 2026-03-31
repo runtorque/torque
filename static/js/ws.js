@@ -70,6 +70,8 @@ function connect() {
       if (typeof tplReceivePipelines !== 'undefined') tplReceivePipelines(msg);
     } else if (msg.type === 'global_settings') {
       _showGlobalSettingsModal(msg);
+    } else if (msg.type === 'events_page') {
+      if (typeof handleEventsPage === 'function') handleEventsPage(msg);
     } else if (msg.type === 'action') {
       handleAction(msg);
     }
@@ -83,6 +85,12 @@ function _handleFullState(msg) {
   state = msg;
   if (!state.panel_events) state.panel_events = [];
   _expectedSeq = (msg.seq || 0) + 1;
+  // Reset pagination state on full snapshot
+  if (typeof _eventsHasMore !== 'undefined') {
+    _eventsHasMore = true;
+    _eventsLoading = false;
+    _eventsOldestId = 0;
+  }
   // Sync selection on first message (restore after restart/reconnect)
   // and whenever the active session changes
   if (state.active_session_id &&

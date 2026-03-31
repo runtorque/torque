@@ -175,6 +175,18 @@ CREATE TABLE IF NOT EXISTS global_settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS panel_events (
+    id         INTEGER PRIMARY KEY,
+    timestamp  REAL    NOT NULL,
+    kind       TEXT    NOT NULL,
+    cell_id    TEXT    NOT NULL DEFAULT '',
+    agent_name TEXT    NOT NULL DEFAULT '',
+    group_name TEXT    NOT NULL DEFAULT '',
+    message    TEXT    NOT NULL DEFAULT '',
+    task_id    TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_panel_events_ts ON panel_events (timestamp);
 """
 
 
@@ -449,6 +461,75 @@ class LoomDB:
                 "INSERT INTO global_settings (key, value) VALUES (?,?)",
                 (key, json.dumps(value)))
         self._conn.commit()
+
+    # -- Panel events -------------------------------------------------------
+
+    def save_panel_event(self, evt: dict) -> int:
+        """Insert a panel event and return the assigned row ID."""
+        self._conn.execute(
+            "INSERT INTO panel_events "
+            "(id, timestamp, kind, cell_id, agent_name, group_name, "
+            "message, task_id) VALUES (?,?,?,?,?,?,?,?)",
+            (evt["id"], evt["timestamp"], evt["kind"],
+             evt.get("cell_id", ""), evt.get("agent_name", ""),
+             evt.get("group", ""), evt.get("message", ""),
+             evt.get("task_id", "")))
+        self._conn.commit()
+        return evt["id"]
+
+    def update_panel_event(self, evt: dict):
+        """Update an existing panel event row."""
+        self._conn.execute(
+            "UPDATE panel_events SET timestamp=?, kind=?, cell_id=?, "
+            "agent_name=?, group_name=?, message=?, task_id=? WHERE id=?",
+            (evt["timestamp"], evt["kind"], evt.get("cell_id", ""),
+             evt.get("agent_name", ""), evt.get("group", ""),
+             evt.get("message", ""), evt.get("task_id", ""),
+             evt["id"]))
+        self._conn.commit()
+
+    def trim_panel_events(self, max_size: int):
+        """Delete oldest events beyond *max_size*."""
+        self._conn.execute(
+            "DELETE FROM panel_events WHERE id NOT IN "
+            "(SELECT id FROM panel_events ORDER BY id DESC LIMIT ?)",
+            (max_size,))
+        self._conn.commit()
+
+    def load_panel_events(self, limit: int = 50,
+                          before_id: int = 0) -> list[dict]:
+        """Load a page of panel events ordered by id DESC.
+
+        Returns dicts with 'group' key (matching in-memory format).
+        """
+        if before_id:
+            rows = self._conn.execute(
+                "SELECT id, timestamp, kind, cell_id, agent_name, "
+                "group_name, message, task_id FROM panel_events "
+                "WHERE id < ? ORDER BY id DESC LIMIT ?",
+                (before_id, limit)).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, timestamp, kind, cell_id, agent_name, "
+                "group_name, message, task_id FROM panel_events "
+                "ORDER BY id DESC LIMIT ?",
+                (limit,)).fetchall()
+        events = []
+        for r in rows:
+            events.append({
+                "id": r[0], "timestamp": r[1], "kind": r[2],
+                "cell_id": r[3], "agent_name": r[4], "group": r[5],
+                "message": r[6], "task_id": r[7],
+            })
+        # Return in ascending id order (oldest first)
+        events.reverse()
+        return events
+
+    def get_panel_event_max_id(self) -> int:
+        """Return the highest panel_events id, or 0 if empty."""
+        row = self._conn.execute(
+            "SELECT MAX(id) FROM panel_events").fetchone()
+        return row[0] if row and row[0] is not None else 0
 
     # -- Bulk save (transitional) -------------------------------------------
 

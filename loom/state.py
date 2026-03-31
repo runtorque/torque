@@ -187,6 +187,8 @@ class GlobalSettings:
     keybindings: dict[str, dict] = field(default_factory=dict)
     # Pipeline
     max_pipeline_depth: int = 10  # 0 = unlimited
+    # Events
+    max_event_log: int = 500  # max persisted panel events
 
 
 class MatrixState:
@@ -250,7 +252,7 @@ class MatrixState:
             },
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
-            "panel_events": self.panel_log.get_recent(100) if self.panel_log else [],
+            "panel_events": self.panel_log.get_recent(50) if self.panel_log else [],
         }
 
     # -- Targeted persistence helpers ----------------------------------------
