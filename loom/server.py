@@ -159,6 +159,25 @@ async def main(connection: iterm2.Connection):
     # cell ID → (pre-merge base SHA, close_on_merge flag)
     _pending_merges: dict[str, tuple[str, bool]] = {}
 
+    async def _safe_remove_worktree(cell):
+        """Remove a worktree only if no other agent shares it."""
+        if not cell.worktree_path:
+            return
+        other_users = [a for a in state.agents.values()
+                       if a.id != cell.id
+                       and a.worktree_path == cell.worktree_path]
+        if other_users:
+            log.info("Skipping worktree removal for '%s' — shared with %s",
+                     cell.name,
+                     ", ".join(a.name for a in other_users))
+            cell.worktree_path = ""
+            cell.worktree_branch = ""
+            cell.worktree_base_branch = ""
+            cell.worktree_repo_root = ""
+            cell.worktree_checkpoints = 0
+        else:
+            await worktree_mgr.remove(cell)
+
     def _checkpoint_message(cell) -> str:
         """Build a checkpoint commit message from the agent's last summary."""
         summary = cell.last_summary.strip()
@@ -181,6 +200,8 @@ async def main(connection: iterm2.Connection):
                 log.info("Merge verified for '%s': branch %s merged into %s",
                          cell.name, cell.worktree_branch,
                          cell.worktree_base_branch)
+                cell.worktree_checkpoints = 0
+                state._emit_agent(cell)
                 await _broadcast_toast(
                     f'"{cell.name}" merged to {cell.worktree_base_branch}',
                     "success")
@@ -199,8 +220,7 @@ async def main(connection: iterm2.Connection):
                                 adapter.uninstall_mcp_config(
                                     os.path.expanduser(c.directory))
                         event_bus.cleanup_cell(c.id)
-                        if c.worktree_path:
-                            await worktree_mgr.remove(c)
+                        await _safe_remove_worktree(c)
             else:
                 log.warning("Merge failed for '%s': branch %s not in %s",
                             cell.name, cell.worktree_branch,
@@ -788,8 +808,7 @@ async def main(connection: iterm2.Connection):
                             adapter.uninstall_mcp_config(
                                 os.path.expanduser(c.directory))
                     event_bus.cleanup_cell(c.id)
-                    if c.worktree_path:
-                        await worktree_mgr.remove(c)
+                    await _safe_remove_worktree(c)
 
             elif cmd == "rename_group":
                 state.rename_group(data["group"], data["new_name"])
@@ -1038,8 +1057,7 @@ async def main(connection: iterm2.Connection):
                                 os.path.expanduser(c.directory))
                     # Clean up event bus state
                     event_bus.cleanup_cell(c.id)
-                    if c.worktree_path:
-                        await worktree_mgr.remove(c)
+                    await _safe_remove_worktree(c)
 
             elif cmd == "update_agent":
                 cell = state.agents.get(data["id"])
@@ -1191,7 +1209,7 @@ async def main(connection: iterm2.Connection):
                 if cell and cell.worktree_path:
                     # Restore directory to original repo root
                     repo_root = cell.worktree_repo_root
-                    await worktree_mgr.remove(cell)
+                    await _safe_remove_worktree(cell)
                     if repo_root:
                         cell.directory = repo_root
                     state._emit_agent(cell)

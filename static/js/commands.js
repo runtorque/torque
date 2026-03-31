@@ -13,6 +13,16 @@ function _showToast(message, level) {
   }, 4000);
 }
 
+function _worktreeSharedWith(cell) {
+  if (!cell.worktree_path || !state.agents) return '';
+  var names = [];
+  for (var aid in state.agents) {
+    var a = state.agents[aid];
+    if (a.id !== cell.id && a.worktree_path === cell.worktree_path) names.push(a.name);
+  }
+  return names.length ? '"' + names.join('", "') + '"' : '';
+}
+
 function focusAgent(id) { focusedItemId = id; send({ cmd: 'focus_agent', id }); }
 
 function onAgentClick(id) {
@@ -43,13 +53,18 @@ async function removeAgent(id) {
     msg = `Remove "${a.name}" and its ${childCount} terminal(s)?`;
   }
   if (a.worktree_path) {
-    const warnings = [];
-    if ((a.worktree_checkpoints || 0) > 0) warnings.push('has unmerged commits');
-    if (a.worktree_dirty) warnings.push('has uncommitted changes');
-    if (warnings.length) {
-      msg += ' Its worktree ' + warnings.join(' and ') + '. All changes will be lost.';
+    var sharedWith = _worktreeSharedWith(a);
+    if (sharedWith) {
+      msg += ' Its worktree is shared with ' + sharedWith + ' and will be kept.';
     } else {
-      msg += ' Its worktree will also be removed.';
+      const warnings = [];
+      if ((a.worktree_checkpoints || 0) > 0) warnings.push('has unmerged commits');
+      if (a.worktree_dirty) warnings.push('has uncommitted changes');
+      if (warnings.length) {
+        msg += ' Its worktree ' + warnings.join(' and ') + '. All changes will be lost.';
+      } else {
+        msg += ' Its worktree will also be removed.';
+      }
     }
   }
   if (await showConfirm(msg)) {
@@ -328,6 +343,14 @@ async function worktreeMerge(id) {
 async function worktreeRemove(id) {
   const cell = state.agents[id];
   if (!cell) return;
+  var sharedWith = _worktreeSharedWith(cell);
+  if (sharedWith) {
+    let msg = `Worktree for "${cell.name}" is shared with ${sharedWith}. Only the link will be removed.`;
+    if (await showConfirm(msg)) {
+      send({ cmd: 'worktree_remove', id, relaunch: !!cell.session_id });
+    }
+    return;
+  }
   const dirty = cell.worktree_dirty;
   const hasCommits = (cell.worktree_checkpoints || 0) > 0;
   const warnings = [];
