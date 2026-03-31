@@ -6,17 +6,37 @@ agent:
   tab_color: "#f85149"
 
 prompt: |
+  {% if loom.context.is_clean %}
   You are diagnosing and fixing a bug. This is a quick, targeted fix — no review pipeline. Focus on understanding the root cause before writing any code.
 
   ## Bug report
 
-  {{ TASK }}
+  {{ loom.task.title }}
+
+  {% if loom.task.description %}
+  ## Context
+
+  {{ loom.task.description }}
+  {% endif %}
 
   ## Approach
 
   1. Reproduce first — confirm you can see the failure before changing anything
   2. Find the root cause — don't just patch symptoms
   3. Keep the fix minimal — no drive-by refactors or unrelated changes
+  {% else %}
+  You have a new bug to fix. Same approach as before — understand the root cause before changing anything, keep the fix minimal. Do NOT deploy the changes.
+
+  ## Bug report
+
+  {{ loom.task.title }}
+
+  {% if loom.task.description %}
+  ## Context
+
+  {{ loom.task.description }}
+  {% endif %}
+  {% endif %}
 
 labels:
   - bugfix

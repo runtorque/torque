@@ -19,7 +19,7 @@ from .events import EventLog, EventBus, PanelEventLog, health_check
 from .adapters import get_adapter
 from .notifications import NotificationManager
 from .worktree import WorktreeManager
-from .actions import ActionManager
+from .actions import ActionManager, LOOM_CONTEXT_STUB
 from . import keybindings
 from .mcp import create_mcp_handler
 
@@ -1454,7 +1454,8 @@ async def main(connection: iterm2.Connection):
                             base_dir = ""
                             if task.action_name \
                                     and not data.get("force_no_action"):
-                                base_dir = cell.directory \
+                                base_dir = cell.worktree_repo_root \
+                                    or cell.directory \
                                     or await _resolve_base_dir(group)
                                 tvars = {"TASK": task.task,
                                          **(task.action_vars or {})}
@@ -1657,12 +1658,28 @@ async def main(connection: iterm2.Connection):
                         avars = avars or t.action_vars or {}
                         act_group = act_group or t.group
 
+                task_desc = data.get("description", "")
+                if tid and not task_desc:
+                    t = state.board_tasks.get(tid)
+                    if t:
+                        task_desc = t.description or ""
+
                 if act_name:
                     base_dir = await _resolve_base_dir(act_group)
+                    loom_ctx = {
+                        **LOOM_CONTEXT_STUB,
+                        "task": {
+                            **LOOM_CONTEXT_STUB["task"],
+                            "title": task_text,
+                            "description": task_desc,
+                            "group": act_group,
+                        },
+                    }
                     rendered = action_mgr.render_prompt(
                         act_name,
                         {"TASK": task_text, **avars},
-                        base_dir=base_dir)
+                        base_dir=base_dir,
+                        loom_context=loom_ctx)
                     if rendered is None:
                         result = {"type": "prompt_preview",
                                   "prompt": task_text,

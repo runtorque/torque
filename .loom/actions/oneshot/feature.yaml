@@ -6,11 +6,18 @@ agent:
   tab_color: "#3fb950"
 
 prompt: |
+  {% if loom.context.is_clean %}
   You are implementing a feature. This is a quick, focused change — no review pipeline. Get it done cleanly in one pass.
 
   ## Task
 
-  {{ TASK }}
+  {{ loom.task.title }}
+
+  {% if loom.task.description %}
+  ## Context
+
+  {{ loom.task.description }}
+  {% endif %}
 
   ## Approach
 
@@ -18,6 +25,19 @@ prompt: |
   - Write clean, minimal code — no speculative abstractions or premature generalization
   - Keep the diff focused — if you notice unrelated issues, leave them for a separate change
   - Do NOT deploy the changes
+  {% else %}
+  You have a new task. Follow the same approach as before — read the relevant code, then implement cleanly in one pass. Do NOT deploy the changes.
+
+  ## Task
+
+  {{ loom.task.title }}
+
+  {% if loom.task.description %}
+  ## Context
+
+  {{ loom.task.description }}
+  {% endif %}
+  {% endif %}
 
 labels:
   - feature

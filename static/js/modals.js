@@ -1054,14 +1054,18 @@ function _collectTaskActionVars() {
 
 function previewTaskPrompt() {
   var task = document.getElementById('task-task-input').value.trim();
+  var description = document.getElementById('task-description-input').value.trim();
   var actionVars = _collectTaskActionVars();
-  send({
+  var msg = {
     cmd: 'preview_prompt',
     task: task,
+    description: description,
     action_name: _taskSelectedAction,
     action_vars: actionVars,
     group: document.getElementById('task-group-select').value,
-  });
+  };
+  if (_taskEditId) msg.id = _taskEditId;
+  send(msg);
 }
 
 function _handleTaskActionList(msg) {
