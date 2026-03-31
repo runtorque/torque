@@ -821,6 +821,9 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .label-chips {
   display: flex; flex-wrap: wrap; gap: 4px;
 }
+.label-chips:not(:empty) {
+  margin-top: 6px;
+}
 .label-chip {
   display: inline-flex; align-items: center; gap: 2px;
   font-size: 10px; color: var(--accent);

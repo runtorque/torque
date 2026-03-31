@@ -925,17 +925,12 @@ class MatrixState:
             task.slug = self._unique_task_slug(task.task, exclude_id=tid)
         from datetime import datetime, timezone
         task.updated_at = datetime.now(timezone.utc).isoformat()
-        # Reindex if lane changed
-        if "lane" in fields and fields["lane"] != old_lane:
-            self._board_reindex(old_lane)
-            self._board_reindex(task.lane)
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
 
     def board_remove_task(self, tid: str):
         task = self.board_tasks.pop(tid, None)
         if task:
-            self._board_reindex(task.lane)
             self._emit("task_remove", id=tid)
             self._db_delete_task(tid)
 
@@ -957,8 +952,6 @@ class MatrixState:
             task.position = max_pos + 1
         from datetime import datetime, timezone
         task.updated_at = datetime.now(timezone.utc).isoformat()
-        self._board_reindex(old_lane)
-        self._board_reindex(lane)
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
 
@@ -1011,16 +1004,20 @@ class MatrixState:
         self.board_lanes.remove(name)
         target = move_tasks_to if move_tasks_to in self.board_lanes \
             else self.board_lanes[0]
+        max_pos = max(
+            (t.position for t in self.board_tasks.values()
+             if t.lane == target),
+            default=-1,
+        )
         for t in self.board_tasks.values():
             if t.lane == name:
+                max_pos += 1
                 t.lane = target
+                t.position = max_pos
                 self._emit("task_upsert", **asdict(t))
-        self._board_reindex(target)
+                self._db_save_task(t)
         self._emit("lanes_update", lanes=list(self.board_lanes))
         self._db_save_lanes()
-        for t in self.board_tasks.values():
-            if t.lane == target:
-                self._db_save_task(t)
 
     def board_reorder_lanes(self, lanes: list[str]):
         if set(lanes) != set(self.board_lanes):

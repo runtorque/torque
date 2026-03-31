@@ -764,6 +764,16 @@ async def main(connection: iterm2.Connection):
                         connection, _displaced[0],
                         overrides=new_kb or None)
 
+            elif cmd == "suspend_keybindings":
+                await keybindings.remove(connection, _displaced[0])
+
+            elif cmd == "resume_keybindings":
+                _kb_overrides = (state.global_settings.keybindings
+                                 or None)
+                _displaced[0] = await keybindings.reinstall(
+                    connection, _displaced[0],
+                    overrides=_kb_overrides)
+
             elif cmd == "remove_group":
                 removed = state.remove_group(data["group"])
                 for c in removed:

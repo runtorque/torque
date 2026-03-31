@@ -1292,12 +1292,14 @@ function _renderKeybindingList() {
 function _startCapture(action) {
   _glsCapturing = action;
   _renderKeybindingList();
+  send({ cmd: 'suspend_keybindings' });
   document.addEventListener('keydown', _captureKeydown, true);
 }
 
 function _cancelCapture() {
   _glsCapturing = null;
   document.removeEventListener('keydown', _captureKeydown, true);
+  send({ cmd: 'resume_keybindings' });
   _renderKeybindingList();
 }
 
@@ -1360,7 +1362,7 @@ function _jsCodeToCharacter(code, key) {
     'ArrowLeft': 0xF702, 'ArrowRight': 0xF703,
   };
   if (arrowChars[code]) return arrowChars[code];
-  if (key.length === 1) return key.charCodeAt(0);
+  if (key.length === 1) return key.toUpperCase().charCodeAt(0);
   var special = {
     'Enter': 13, 'Tab': 9, 'Space': 32, 'Backspace': 127, 'Escape': 27,
   };
