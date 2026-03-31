@@ -13,6 +13,7 @@ LOOM_HOOK_URL = "http://localhost:18932/events"
 
 # Marker comment for Loom-managed MCP config section
 _MCP_MARKER = "# -- Loom MCP server (managed by Loom, do not edit) --"
+_FEATURE_MARKER = "# -- Loom Codex hooks feature (managed by Loom, do not edit) --"
 
 # Regex to match the Loom MCP section in config.toml (marker through next
 # section header or EOF)
@@ -20,6 +21,16 @@ _MCP_SECTION_RE = re.compile(
     r"\n?" + re.escape(_MCP_MARKER) + r"\n"
     r"\[mcp_servers\.loom\]\n"
     r"(?:(?!\n\[)[^\n]*\n)*",
+)
+_FEATURES_SECTION_RE = re.compile(
+    r"(?ms)(^|\n)\[features\]\n(?P<body>(?:(?!\n\[).*\n?)*)"
+)
+_FEATURE_LINE_RE = re.compile(r"(?m)^codex_hooks\s*=.*(?:\n|$)")
+_MANAGED_FEATURE_BLOCK_RE = re.compile(
+    r"\n?" + re.escape(_FEATURE_MARKER) + r"\ncodex_hooks = true\n?"
+)
+_MANAGED_FEATURE_SECTION_RE = re.compile(
+    r"\n?" + re.escape(_FEATURE_MARKER) + r"\n\[features\]\ncodex_hooks = true\n?"
 )
 
 
@@ -31,6 +42,40 @@ def _is_loom_hook(hook: dict) -> bool:
     """Check if a single hook entry was installed by Loom (by URL marker)."""
     cmd = hook.get("command", "")
     return LOOM_HOOK_URL in cmd
+
+
+def _ensure_codex_hooks_enabled(content: str) -> str:
+    """Ensure config.toml enables Codex hooks for Loom-managed sessions."""
+    content = _MANAGED_FEATURE_SECTION_RE.sub("", content)
+
+    def _replace_features(match: re.Match[str]) -> str:
+        prefix = match.group(1)
+        body = _MANAGED_FEATURE_BLOCK_RE.sub("", match.group("body"))
+        body, replaced = _FEATURE_LINE_RE.subn(
+            f"{_FEATURE_MARKER}\ncodex_hooks = true\n", body, count=1
+        )
+        if not replaced:
+            if body and not body.endswith("\n"):
+                body += "\n"
+            body += f"{_FEATURE_MARKER}\ncodex_hooks = true\n"
+        return f"{prefix}[features]\n{body}"
+
+    updated, replaced = _FEATURES_SECTION_RE.subn(_replace_features, content, count=1)
+    if replaced:
+        return updated
+
+    content = content.rstrip("\n")
+    if content:
+        content += "\n"
+    content += f"\n{_FEATURE_MARKER}\n[features]\ncodex_hooks = true\n"
+    return content
+
+
+def _remove_codex_hooks_enabled(content: str) -> str:
+    """Remove Loom-managed Codex hook feature config from config.toml."""
+    content = _MANAGED_FEATURE_SECTION_RE.sub("", content)
+    content = _MANAGED_FEATURE_BLOCK_RE.sub("", content)
+    return content
 
 
 class CodexAdapter(AgentAdapter):
@@ -187,8 +232,12 @@ class CodexAdapter(AgentAdapter):
             if config_file.exists():
                 content = config_file.read_text()
 
-            # Remove existing Loom MCP section (if any)
+            # Remove existing Loom MCP section before mutating the rest of the
+            # file so we don't accidentally consume adjacent managed blocks.
             content = _MCP_SECTION_RE.sub("", content)
+
+            # Enable Codex hooks so hooks.json is actually loaded.
+            content = _ensure_codex_hooks_enabled(content)
 
             # Append fresh section
             content = content.rstrip("\n") + "\n" + loom_section
@@ -208,6 +257,7 @@ class CodexAdapter(AgentAdapter):
 
         try:
             content = config_file.read_text()
+            content = _remove_codex_hooks_enabled(content)
             content = _MCP_SECTION_RE.sub("", content)
             content = content.strip()
 
@@ -244,7 +294,9 @@ class CodexAdapter(AgentAdapter):
                 cell_id=cell.id, timestamp=now,
                 event_type="session_end",
                 data={
-                    "reason": raw.get("stop_reason", "completed"),
+                    "reason": raw.get("stop_reason")
+                    or raw.get("stopReason", "completed"),
+                    "summary": raw.get("last_assistant_message") or "",
                 },
             )
 

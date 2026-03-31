@@ -377,8 +377,9 @@ function renderAgentDetails(a) {
   /* Last event */
   if (a.last_event_at > 0) {
     const ago = _relativeTime(a.last_event_at);
+    const showAgo = ((Date.now() / 1000) - a.last_event_at) > 30;
     if (a.last_event_text) {
-      h += `<div class="detail-row detail-row-event"><span class="detail-label">Last event</span><span class="detail-val detail-last-event">${esc(a.last_event_text)} <span class="detail-time">(${esc(ago)})</span></span></div>`;
+      h += `<div class="detail-row detail-row-event"><span class="detail-label">Last event</span><span class="detail-val detail-last-event">${esc(a.last_event_text)}${showAgo ? ` <span class="detail-time">(${esc(ago)})</span>` : ''}</span></span></div>`;
     } else {
       h += `<div class="detail-row"><span class="detail-label">Last event</span><span class="detail-val">${esc(ago)}</span></div>`;
     }
