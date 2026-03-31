@@ -1288,26 +1288,12 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   height: calc(100% - 5px);
 }
 
-.panel-mode-tabs {
-  display: flex;
-  gap: 1px;
-  padding: 6px 8px 0;
-  background: var(--bg-hover);
-  border-bottom: 1px solid var(--border);
-}
-.panel-mode-tab {
-  font-size: 10px;
-  padding: 4px 10px;
-  border-radius: 6px 6px 0 0;
-  background: transparent;
-  color: var(--text-dim);
-}
-.panel-mode-tab.active {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-bottom-color: var(--bg);
-  margin-bottom: -1px;
+/* ------------------------------------------------------------------ */
+/* Agent templates panel                                               */
+/* ------------------------------------------------------------------ */
+#panel-templates {
+  display: flex; flex-direction: column;
+  height: calc(100% - 5px);
 }
 
 /* Header bar */

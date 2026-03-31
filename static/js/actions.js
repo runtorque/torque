@@ -10,27 +10,12 @@ var _tplEditorNew = false;     // true when creating a new template
 var _tplEditorScope = 'project'; // 'project' or 'user'
 var _tplPanelView = 'editor';  // 'editor' or 'pipelines'
 var _tplPipelinesData = null;  // cached pipeline discovery result
-var _panelEditorMode = 'actions'; // 'actions' or 'templates'
 
 /* ---- Load & render ------------------------------------------------- */
 
 function tplEditorLoad() {
-  if (_panelEditorMode === 'templates' && typeof agentTemplateEditorLoad === 'function') {
-    agentTemplateEditorLoad();
-    return;
-  }
   var group = _currentGroup();
-  send({ cmd: 'list_templates', group: group });
   send({ cmd: 'list_actions', group: group });
-}
-
-function switchPanelEditorMode(mode) {
-  _panelEditorMode = mode === 'templates' ? 'templates' : 'actions';
-  if (_panelEditorMode === 'templates' && typeof renderAgentTemplatesPanel === 'function') {
-    agentTemplateEditorLoad();
-  } else {
-    tplEditorLoad();
-  }
 }
 
 function _tplKey(t) {
@@ -44,7 +29,6 @@ function _tplSelectedName() {
 }
 
 function tplEditorReceiveList(msg) {
-  if (_panelEditorMode !== 'actions') return;
   _tplEditorList = msg.actions || [];
 
   // If we just saved, select it with the right scope key
@@ -71,7 +55,6 @@ function tplEditorReceiveList(msg) {
 }
 
 function tplEditorReceiveDetail(msg) {
-  if (_panelEditorMode !== 'actions') return;
   if (msg.name !== _tplSelectedName()) return;
   _tplEditorData = msg.action || {};
   _tplEditorDirty = false;
@@ -85,18 +68,10 @@ function tplEditorReceiveDetail(msg) {
 /* ---- Render -------------------------------------------------------- */
 
 function renderTemplatesPanel() {
-  if (_panelEditorMode === 'templates' && typeof renderAgentTemplatesPanel === 'function') {
-    renderAgentTemplatesPanel();
-    return;
-  }
   var panel = document.getElementById('panel-actions');
   if (!panel) return;
 
   var html = '';
-  html += '<div class="panel-mode-tabs">';
-  html += '<button class="panel-mode-tab active" onclick="switchPanelEditorMode(\'actions\')">Actions</button>';
-  html += '<button class="panel-mode-tab" onclick="switchPanelEditorMode(\'templates\')">Agent Templates</button>';
-  html += '</div>';
 
   // Header bar
   html += '<div class="tpled-header">';

@@ -6,7 +6,7 @@ var _activePanelApp = '';   // '' = collapsed, 'board' = board open
 var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
 var _panelStateRestored = false;  // true after first state message restores panel
 
-var _panelIds = ['panel-board', 'panel-actions', 'panel-events'];
+var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-events'];
 
 function togglePanel(appName) {
   var panel = document.getElementById('bottom-panel');
@@ -35,6 +35,7 @@ function togglePanel(appName) {
     // Render the active app
     if (appName === 'board') renderBoard();
     if (appName === 'actions') tplEditorLoad();
+    if (appName === 'templates' && typeof agentTemplateEditorLoad === 'function') agentTemplateEditorLoad();
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
   }
   // Persist panel state to server
@@ -69,6 +70,7 @@ function _restorePanelState() {
     });
     if (active === 'board') renderBoard();
     if (active === 'actions') tplEditorLoad();
+    if (active === 'templates' && typeof agentTemplateEditorLoad === 'function') agentTemplateEditorLoad();
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
   }
 }

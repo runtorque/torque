@@ -52,8 +52,7 @@ function connect() {
         _boardShowActionList(msg);
       } else if (typeof _taskModalWaiting !== 'undefined' && _taskModalWaiting) {
         _handleTaskActionList(msg);
-      } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions'
-          && typeof _panelEditorMode !== 'undefined' && _panelEditorMode === 'actions') {
+      } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
         tplEditorReceiveList(msg);
       } else {
         _showActionList(msg);
@@ -63,23 +62,17 @@ function connect() {
       if (typeof _taskTemplateWaiting !== 'undefined' && _taskTemplateWaiting) {
         _handleTaskTemplateList(msg);
       } else if (typeof _activePanelApp !== 'undefined'
-          && _activePanelApp === 'actions'
-          && typeof _panelEditorMode !== 'undefined'
-          && _panelEditorMode === 'templates'
+          && _activePanelApp === 'templates'
           && typeof agentTemplateReceiveList === 'function') {
         agentTemplateReceiveList(msg);
       } else if (typeof _activePanelApp !== 'undefined'
           && _activePanelApp === 'actions'
-          && typeof _panelEditorMode !== 'undefined'
-          && _panelEditorMode === 'actions'
           && typeof renderTemplatesEditor === 'function') {
         renderTemplatesEditor();
       }
     } else if (msg.type === 'template_detail') {
       if (typeof _activePanelApp !== 'undefined'
-          && _activePanelApp === 'actions'
-          && typeof _panelEditorMode !== 'undefined'
-          && _panelEditorMode === 'templates'
+          && _activePanelApp === 'templates'
           && typeof agentTemplateReceiveDetail === 'function') {
         agentTemplateReceiveDetail(msg);
       }
@@ -88,8 +81,7 @@ function connect() {
         _handleRenderedTemplate(msg);
       }
     } else if (msg.type === 'action_detail') {
-      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions'
-          && typeof _panelEditorMode !== 'undefined' && _panelEditorMode === 'actions') {
+      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
         tplEditorReceiveDetail(msg);
       } else {
         _showActionVarForm(msg);

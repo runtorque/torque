@@ -53,17 +53,13 @@ function agentTemplateReceiveDetail(msg) {
 }
 
 function renderAgentTemplatesPanel() {
-  var panel = document.getElementById('panel-actions');
+  var panel = document.getElementById('panel-templates');
   if (!panel) return;
 
   var html = '';
-  html += '<div class="panel-mode-tabs">';
-  html += '<button class="panel-mode-tab" onclick="switchPanelEditorMode(\'actions\')">Actions</button>';
-  html += '<button class="panel-mode-tab active" onclick="switchPanelEditorMode(\'templates\')">Agent Templates</button>';
-  html += '</div>';
 
   html += '<div class="tpled-header">';
-  html += '<span class="tpled-header-title">Agent Templates</span>';
+  html += '<span class="tpled-header-title">Agents</span>';
   html += '<select class="tpled-select" id="agent-tpl-select" onchange="agentTemplateSelect(this.value)">';
   html += '<option value="">Select\u2026</option>';
   var project = _agentTplList.filter(function(t) { return !t.global; });
