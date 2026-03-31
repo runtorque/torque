@@ -353,6 +353,20 @@ function renderAgentDetails(a) {
     h += `<div class="detail-row"><span class="detail-label">Activity</span><span class="detail-val">${esc(a.activity_detail)}</span></div>`;
   }
 
+  /* MCP Messages */
+  if (a.mcp_messages && a.mcp_messages.length) {
+    const icons = { progress: '\u25CF', done: '\u2714', ready: '\u2714', blocked: '\u26D4', error: '\u2716', derive: '\u2934', ask: '\u2753', name: '\u270E' };
+    h += `<div class="detail-row detail-row-mcp"><span class="detail-label">Messages</span>`;
+    h += `<div class="mcp-log">`;
+    const msgs = a.mcp_messages.slice(0, 20);
+    for (const m of msgs) {
+      const ico = icons[m.action] || '\u25CF';
+      const ago = _relativeTime(m.timestamp);
+      h += `<div class="mcp-entry mcp-${esc(m.action)}"><span class="mcp-icon">${ico}</span><span class="mcp-text">${esc(m.message)}</span><span class="mcp-time">${esc(ago)}</span></div>`;
+    }
+    h += `</div></div>`;
+  }
+
   /* Branch — worktree branch takes priority, then regular git branch */
   if (a.worktree_branch) {
     const branch = a.worktree_branch.replace(/^loom\//, '');

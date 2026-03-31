@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 
 import aiohttp
 from aiohttp import web
@@ -205,6 +206,23 @@ async def main(connection: iterm2.Connection):
                 await _broadcast_toast(
                     f'"{cell.name}" merged to {cell.worktree_base_branch}',
                     "success")
+                if not close_on_merge and cell.worktree_path:
+                    # Rebase onto base branch so the agent continues
+                    # from a clean state after a successful merge.
+                    valid = await worktree_mgr.validate(cell)
+                    if valid:
+                        ok = await worktree_mgr.rebase_onto_base(cell)
+                        if ok:
+                            cell.worktree_checkpoints = \
+                                await worktree_mgr.count_commits(cell)
+                            cell.worktree_dirty = False
+                            cell.worktree_diff = {}
+                            state._emit_agent(cell)
+                        else:
+                            log.warning(
+                                "Post-merge rebase failed for '%s'"
+                                " — worktree left as-is",
+                                cell.name)
                 if close_on_merge:
                     await asyncio.sleep(CLOSE_AFTER_MERGE_DELAY)
                     removed = state.remove_agent(cell.id)
@@ -1924,6 +1942,16 @@ async def main(connection: iterm2.Connection):
                             else:
                                 break
 
+                    def _append_mcp(c, act, msg=""):
+                        """Append an MCP message to the cell log."""
+                        c.mcp_messages.insert(0, {
+                            "action": act,
+                            "message": msg,
+                            "timestamp": time.time(),
+                        })
+                        if len(c.mcp_messages) > 20:
+                            c.mcp_messages[:] = c.mcp_messages[:20]
+
                     async def _auto_dispatch_next(c):
                         """Pick the next queued task for this agent."""
                         queued = sorted(
@@ -1955,6 +1983,7 @@ async def main(connection: iterm2.Connection):
                         if message:
                             cell.last_summary = message
                         cell.current_task_id = ""
+                        _append_mcp(cell, "done", message or "Done")
                         state._emit_agent(cell)
                         if task and task.lane != "Done":
                             state.board_move_task(task.id, "Done")
@@ -1972,6 +2001,7 @@ async def main(connection: iterm2.Connection):
                         cell.needs_attention = True
                         cell.activity = "waiting"
                         cell.activity_detail = message
+                        _append_mcp(cell, "blocked", message)
                         state._emit_agent(cell)
                         if task:
                             _add_label(task, "blocked")
@@ -1983,6 +2013,7 @@ async def main(connection: iterm2.Connection):
                     elif action == "error":
                         cell.error_message = message
                         cell.needs_attention = True
+                        _append_mcp(cell, "error", message)
                         state._emit_agent(cell)
                         if task:
                             _add_label(task, "error")
@@ -1995,6 +2026,7 @@ async def main(connection: iterm2.Connection):
                         cell.activity_detail = message
                         if cell.needs_attention:
                             cell.needs_attention = False
+                        _append_mcp(cell, "progress", message)
                         state._emit_agent(cell)
                         # Panel event — replace last progress
                         # for this agent to avoid flooding
@@ -2011,6 +2043,7 @@ async def main(connection: iterm2.Connection):
                         cell.needs_attention = False
                         cell.error_message = ""
                         cell.current_task_id = ""
+                        _append_mcp(cell, "ready", "Ready")
                         state._emit_agent(cell)
                         if task:
                             if task.lane != "Done":
@@ -2142,6 +2175,10 @@ async def main(connection: iterm2.Connection):
                                         description=derive_desc,
                                     )
                                     if new_task:
+                                        _append_mcp(
+                                            cell, "derive",
+                                            message[:80])
+                                        state._emit_agent(cell)
                                         _panel_event(
                                             "task_derived",
                                             cell.id, cell.name,
@@ -2311,6 +2348,7 @@ async def main(connection: iterm2.Connection):
                             cell.activity_detail = ""
                             cell.needs_attention = True
                             cell.error_message = ""
+                            _append_mcp(cell, "ask", message)
                             state._emit_agent(cell)
                             task.status = "Awaiting Input"
                             _save_task(task)
@@ -2359,6 +2397,7 @@ async def main(connection: iterm2.Connection):
                                           "Name is required"}
                         else:
                             old_name = cell.name
+                            _append_mcp(cell, "name", message)
                             state.update_agent(cell.id,
                                                name=message)
                             if cell.session_id:

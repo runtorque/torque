@@ -547,6 +547,41 @@ class WorktreeManager:
             log.debug("check_base_advanced failed for '%s'", cell.name)
             return False
 
+    async def rebase_onto_base(self, cell) -> bool:
+        """Rebase the worktree branch onto its base branch.
+
+        Returns True on success, False on failure (e.g. conflicts).
+        On failure the rebase is aborted so the worktree is left clean.
+        """
+        if not cell.worktree_path or not cell.worktree_base_branch:
+            return False
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", cell.worktree_path,
+                "rebase", cell.worktree_base_branch,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                err = stderr.decode().strip()
+                log.warning("Rebase failed for '%s': %s", cell.name, err)
+                # Abort to leave the worktree in a clean state
+                abort = await asyncio.create_subprocess_exec(
+                    "git", "-C", cell.worktree_path,
+                    "rebase", "--abort",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await abort.communicate()
+                return False
+            log.info("Rebased '%s' onto %s",
+                     cell.name, cell.worktree_base_branch)
+            return True
+        except Exception:
+            log.exception("Rebase failed for '%s'", cell.name)
+            return False
+
     async def count_commits(self, cell) -> int:
         """Count commits on the worktree branch since the fork point."""
         if not cell.worktree_path or not cell.worktree_base_branch:

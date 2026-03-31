@@ -364,6 +364,30 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
   overflow: hidden;
 }
 .detail-time { color: var(--text-dim); white-space: nowrap; }
+.detail-row-mcp { align-items: flex-start; }
+.mcp-log {
+  flex: 1; min-width: 0;
+  max-height: 72px; overflow-y: auto;
+  scrollbar-width: thin;
+}
+.mcp-entry {
+  display: flex; align-items: baseline; gap: 4px;
+  font-size: 9px; line-height: 14px;
+  padding: 0 0;
+}
+.mcp-icon { flex-shrink: 0; width: 12px; text-align: center; }
+.mcp-text {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mcp-time { color: var(--text-dim); flex-shrink: 0; font-size: 8px; }
+.mcp-done .mcp-icon, .mcp-ready .mcp-icon { color: var(--green); }
+.mcp-blocked .mcp-icon { color: var(--amber); }
+.mcp-error .mcp-icon { color: var(--red); }
+.mcp-derive .mcp-icon { color: var(--accent); }
+.mcp-ask .mcp-icon { color: var(--amber); }
+.mcp-name .mcp-icon { color: var(--text-dim); }
+.mcp-progress .mcp-icon { color: var(--text-dim); }
 
 /* ------------------------------------------------------------------ */
 /* Terminal drawer (child terminals of selected agent)                  */

@@ -87,6 +87,8 @@ class AgentCell:
     worktree_dirty: bool = False  # has uncommitted changes
     worktree_diff: dict = field(default_factory=dict)  # {files, insertions, deletions}
     worktree_checkpoints: int = 0  # number of checkpoint commits
+    # MCP message log (ephemeral)
+    mcp_messages: list = field(default_factory=list)  # [{action, message, timestamp}]
 
 
 # Fields that are ephemeral (not meaningful across restarts)
@@ -98,7 +100,7 @@ _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "error_message", "needs_attention", "last_summary",
                      "current_task_id",
                      "worktree_dirty", "worktree_diff",
-                     "worktree_checkpoints")
+                     "worktree_checkpoints", "mcp_messages")
 
 
 def _slugify(name: str, max_len: int = 40) -> str:
