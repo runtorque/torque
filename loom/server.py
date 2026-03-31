@@ -1355,6 +1355,25 @@ async def main(connection: iterm2.Connection):
                             if not cell:
                                 result = {"type": "error",
                                           "message": "Agent not found"}
+                            elif cell.current_task_id \
+                                    and cell.current_task_id != tid:
+                                # Agent is busy — queue the task
+                                active = state.board_tasks.get(
+                                    cell.current_task_id)
+                                if active and active.lane != "Done":
+                                    state.board_update_task(
+                                        tid, agent_id=cell.id)
+                                    state.board_move_task(tid, "To Do")
+                                    _panel_event(
+                                        "task_queued", cell.id,
+                                        cell.name, cell.group,
+                                        task.task[:80],
+                                        task_id=tid)
+                                    result = {
+                                        "type": "queued",
+                                        "task_id": tid,
+                                        "agent_id": cell.id}
+                                    cell = None  # skip dispatch below
                         elif data.get("create_agent"):
                             # Create a new agent
                             from loom.state import _slugify
@@ -1856,6 +1875,26 @@ async def main(connection: iterm2.Connection):
                             else:
                                 break
 
+                    async def _auto_dispatch_next(c):
+                        """Pick the next queued task for this agent."""
+                        queued = sorted(
+                            [t for t in state.board_tasks.values()
+                             if t.agent_id == c.id
+                             and t.lane == "To Do"],
+                            key=lambda t: t.position)
+                        if not queued:
+                            return
+                        nxt = queued[0]
+                        _panel_event(
+                            "task_auto_dispatched", c.id,
+                            c.name, c.group,
+                            nxt.task[:80], task_id=nxt.id)
+                        await state.broadcast()
+                        await handle_command({
+                            "cmd": "dispatch_task",
+                            "id": nxt.id,
+                            "agent_id": c.id})
+
                     if result and result.get("type") == "error":
                         pass  # auto-resolve failed; skip action
 
@@ -1866,6 +1905,7 @@ async def main(connection: iterm2.Connection):
                         cell.error_message = ""
                         if message:
                             cell.last_summary = message
+                        cell.current_task_id = ""
                         state._emit_agent(cell)
                         if task and task.lane != "Done":
                             state.board_move_task(task.id, "Done")
@@ -1877,6 +1917,7 @@ async def main(connection: iterm2.Connection):
                             "task_completed", cell.id,
                             cell.name, cell.group,
                             message or "Task completed")
+                        await _auto_dispatch_next(cell)
 
                     elif action == "blocked":
                         cell.needs_attention = True
@@ -1912,6 +1953,7 @@ async def main(connection: iterm2.Connection):
                         cell.activity_detail = "ready"
                         cell.needs_attention = False
                         cell.error_message = ""
+                        cell.current_task_id = ""
                         state._emit_agent(cell)
                         if task:
                             if task.lane != "Done":
@@ -1925,6 +1967,7 @@ async def main(connection: iterm2.Connection):
                             "task_completed", cell.id,
                             cell.name, cell.group,
                             "Ready (task completed)")
+                        await _auto_dispatch_next(cell)
 
                     elif action == "derive":
                         # Derive a new task and dispatch it
