@@ -63,6 +63,7 @@ install:
 	   loom/server.py loom/keybindings.py \
 	   loom/events.py loom/notifications.py \
 	   loom/worktree.py loom/actions.py \
+	   loom/templates.py \
 	   loom/terminal_adapter.py \
 	   loom/db.py loom/mcp.py \
 	   "$(SCRIPT_DIR)/loom/"
