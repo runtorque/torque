@@ -97,6 +97,8 @@ Click the **▾** dropdown next to "+ New" and select **Custom...** to configure
 - **Profile** — any iTerm2 profile (populated live from your config)
 - **Tab color** — colored badge on the native iTerm2 tab bar
 
+The same dropdown also surfaces saved **agent templates**, which let you reuse provider/model/system-prompt/worktree presets across groups and task dispatches.
+
 ### Broadcast
 
 Click the **⌘** button on a group header to open the broadcast bar. Text is sent to all live sessions in that group.

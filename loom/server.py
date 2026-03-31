@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import shlex
 import sys
 import time
 from collections import deque
@@ -22,6 +23,7 @@ from .adapters import get_adapter, get_providers, get_default_command_for_provid
 from .notifications import NotificationManager
 from .worktree import WorktreeManager
 from .actions import ActionManager, LOOM_CONTEXT_STUB
+from .templates import TemplateManager
 from . import keybindings
 from .mcp import create_mcp_handler
 
@@ -76,11 +78,15 @@ def _action_to_yaml(name: str, data: dict) -> str:
         doc["description"] = data["description"]
 
     agent = data.get("agent", {})
-    agent_keys = ("name_prefix", "command", "directory", "profile",
-                  "shell", "tab_color")
-    agent_block = {k: agent[k] for k in agent_keys if agent.get(k)}
-    if agent_block:
-        doc["agent"] = agent_block
+    if isinstance(agent, str):
+        if agent:
+            doc["agent"] = agent
+    else:
+        agent_keys = ("name_prefix", "command", "directory", "profile",
+                      "shell", "tab_color")
+        agent_block = {k: agent[k] for k in agent_keys if agent.get(k)}
+        if agent_block:
+            doc["agent"] = agent_block
 
     if data.get("group"):
         doc["group"] = data["group"]
@@ -158,6 +164,7 @@ async def main(connection: iterm2.Connection):
     bridge = ITerm2Adapter(connection, state)
     worktree_mgr = WorktreeManager()
     action_mgr = ActionManager()
+    template_mgr = TemplateManager()
 
     # cell ID → (pre-merge base SHA, close_on_merge, clear_context)
     _pending_merges: dict[str, tuple[str, bool, bool]] = {}
@@ -265,8 +272,7 @@ async def main(connection: iterm2.Connection):
 
         # Auto-checkpoint
         if cell.worktree_path and cell.cell_type == "agent":
-            gs = state.get_group_settings(cell.group)
-            if gs.worktree_auto_checkpoint:
+            if cell.worktree_auto_checkpoint:
                 msg = _checkpoint_message(cell)
                 sha = await worktree_mgr.checkpoint(cell, message=msg)
                 if sha:
@@ -342,6 +348,209 @@ async def main(connection: iterm2.Connection):
                 return (boot_command or adapter_cmd, provider)
         # No provider — fall through to boot_command / global default
         return (boot_command or default_command, "")
+
+    def _suggest_template_agent_name(group: str, template_name: str,
+                                     base_dir: str = "") -> str:
+        tpl = template_mgr.load_template(template_name, base_dir) or {}
+        base = (tpl.get("display_name")
+                or tpl.get("name", "").split("/")[-1].replace("-", " ")
+                or "Agent")
+        base = " ".join(w.capitalize() for w in base.split()) or "Agent"
+        existing = {
+            a.name for a in state.agents.values()
+            if a.group == group and a.cell_type == "agent"
+        }
+        if base not in existing:
+            return base
+        i = 2
+        while f"{base} {i}" in existing:
+            i += 1
+        return f"{base} {i}"
+
+    def _resolve_agent_launch_config(group: str, *,
+                                     base_dir: str = "",
+                                     explicit_template: str = "",
+                                     overrides: dict | None = None) -> dict:
+        gs = state.get_group_settings(group)
+        resolved = template_mgr.resolve_agent_config(
+            explicit_template, gs, overrides or {}, base_dir=base_dir)
+
+        provider = resolved.get("provider", "") or gs.agent_provider
+        raw_command = resolved.get("command", "") or gs.agent_boot_command
+        command, agent_type = _resolve_provider_command(
+            provider, raw_command, state.get_default_command())
+        adapter = get_adapter(agent_type or provider)
+        if not raw_command:
+            command += adapter.resolve_model_flags(resolved.get("model", ""))
+        max_turns = resolved.get("max_turns", 0)
+        if max_turns:
+            command += f" --max-turns {int(max_turns)}"
+        permissions = resolved.get("permissions", "")
+        if agent_type == "claude-code" and permissions:
+            if permissions == "skip":
+                command += " --dangerously-skip-permissions"
+            else:
+                command += f" --allowed-tools {shlex.quote(permissions)}"
+
+        tab_color = resolved.get("tab_color", "")
+        if tab_color == "none":
+            tab_color = ""
+        if not tab_color:
+            _ac = gs.agent_tab_color
+            if _ac == "none":
+                tab_color = ""
+            else:
+                tab_color = _ac or gs.tab_color or ""
+
+        directory = (resolved.get("directory", "")
+                     or gs.agent_directory or gs.default_directory or "")
+        profile = (resolved.get("profile", "")
+                   or gs.agent_profile or gs.profile or "Default")
+        shell = (resolved.get("shell", "")
+                 or gs.agent_shell or gs.shell or "")
+        env = {**gs.env_vars, **(resolved.get("env_vars") or {})} or None
+
+        return {
+            "provider": provider,
+            "agent_type": agent_type,
+            "command": command.strip(),
+            "profile": profile,
+            "directory": directory,
+            "shell": shell,
+            "tab_color": tab_color,
+            "icon": resolved.get("icon", ""),
+            "env_vars": env,
+            "system_prompt": resolved.get("system_prompt", ""),
+            "initial_prompt": resolved.get("initial_prompt", ""),
+            "template": resolved.get("template", ""),
+            "session_resume": resolved.get(
+                "session_resume", gs.agent_session_resume),
+            "idle_timeout": resolved.get(
+                "idle_timeout", gs.agent_idle_timeout),
+            "worktree": resolved.get("worktree", gs.git_worktree),
+            "worktree_base_dir": resolved.get(
+                "worktree_base_dir", gs.worktree_base_dir),
+            "worktree_base_branch": resolved.get(
+                "worktree_base_branch", gs.worktree_base_branch),
+            "worktree_auto_checkpoint": resolved.get(
+                "worktree_auto_checkpoint", gs.worktree_auto_checkpoint),
+            "worktree_merge_squash": resolved.get(
+                "worktree_merge_squash", gs.worktree_merge_squash),
+            "terminals": resolved.get("terminals", []),
+        }
+
+    async def _create_child_terminals(group: str, parent_cell,
+                                      terminals: list[dict] | None = None,
+                                      count: int = 0):
+        gs = state.get_group_settings(group)
+        created = []
+        if terminals:
+            for tterm in terminals:
+                t_name = tterm.get("name") or state.next_cell_name(
+                    group, "terminal")
+                t = state.add_terminal(
+                    name=t_name,
+                    group=group,
+                    profile=gs.terminal_profile or gs.profile or "Default",
+                    command=tterm.get("command") or "",
+                    directory=tterm.get("directory") or parent_cell.directory,
+                    tab_color=gs.terminal_tab_color or gs.tab_color or "",
+                    parent_id=parent_cell.id,
+                )
+                if t:
+                    await bridge.create_session(
+                        t,
+                        env_vars={**gs.env_vars, **gs.terminal_env_vars} or None,
+                        init_script=tterm.get("init_script")
+                        or gs.terminal_init_script,
+                        shell=gs.terminal_shell or gs.shell or "",
+                    )
+                    created.append(t)
+            return created
+
+        if count <= 0:
+            return created
+        t_profile = gs.terminal_profile or gs.profile or "Default"
+        t_dir = gs.terminal_directory or gs.default_directory or ""
+        _ttc = gs.terminal_tab_color
+        t_color = (_ttc if _ttc != "none" else "") or gs.tab_color or ""
+        t_shell = gs.terminal_shell or gs.shell or ""
+        t_env = {**gs.env_vars, **gs.terminal_env_vars} or None
+        t_cmd = gs.terminal_boot_command or ""
+        if gs.terminal_command_args and t_cmd:
+            t_cmd = (t_cmd + " " + gs.terminal_command_args).strip()
+        for _ in range(count):
+            t_name = state.next_cell_name(group, "terminal")
+            t = state.add_terminal(
+                name=t_name,
+                group=group,
+                profile=t_profile,
+                command=t_cmd,
+                directory=t_dir or parent_cell.directory,
+                tab_color=t_color,
+                parent_id=parent_cell.id,
+            )
+            if t:
+                await bridge.create_session(
+                    t,
+                    env_vars=t_env,
+                    init_script=gs.terminal_init_script,
+                    shell=t_shell,
+                )
+                created.append(t)
+        return created
+
+    async def _create_agent_with_config(group: str, name: str,
+                                        launch_cfg: dict, *,
+                                        explicit_template: str = "",
+                                        target_session_id: str = "",
+                                        target_window_id: str = ""):
+        cell = state.add_agent(
+            name=name, group=group,
+            profile=launch_cfg["profile"],
+            command=launch_cfg["command"],
+            directory=launch_cfg["directory"],
+            tab_color=launch_cfg["tab_color"],
+            icon=launch_cfg.get("icon", ""),
+        )
+        if not cell:
+            return None
+        cell.session_resume = bool(launch_cfg.get("session_resume", True))
+        cell.idle_timeout = int(launch_cfg.get("idle_timeout", 5) or 0)
+        cell.worktree_base_dir = (
+            launch_cfg.get("worktree_base_dir") or ".loom/worktrees")
+        cell.worktree_auto_checkpoint = bool(
+            launch_cfg.get("worktree_auto_checkpoint", False))
+        cell.worktree_merge_squash = bool(
+            launch_cfg.get("worktree_merge_squash", True))
+        cell.template = explicit_template or launch_cfg.get("template", "")
+        if launch_cfg.get("agent_type"):
+            cell.agent_type = launch_cfg["agent_type"]
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+
+        if launch_cfg.get("worktree") and cell.directory:
+            repo_root = await worktree_mgr.get_repo_root(cell.directory)
+            if repo_root:
+                wt_path = await worktree_mgr.create(
+                    cell, repo_root,
+                    base_dir=cell.worktree_base_dir or ".loom/worktrees",
+                    base_branch=launch_cfg.get("worktree_base_branch", ""),
+                )
+                if wt_path:
+                    cell.directory = wt_path
+                    state._emit_agent(cell)
+                    state._db_save_agent(cell)
+
+        await bridge.create_session(
+            cell,
+            env_vars=launch_cfg.get("env_vars"),
+            shell=launch_cfg.get("shell", ""),
+            system_prompt=launch_cfg.get("system_prompt", ""),
+            target_session_id=target_session_id,
+            target_window_id=target_window_id,
+        )
+        return cell
 
     def _resolve_agent_id(identifier: str) -> str | None:
         """Resolve an agent by slug, name (case-insensitive), ID, or prefix.
@@ -647,6 +856,8 @@ async def main(connection: iterm2.Connection):
                     })
 
             gs = state.get_group_settings(group)
+            resolved_defaults = template_mgr.resolve_agent_config(
+                "", gs, {}, base_dir=current_path or await _resolve_base_dir(group))
             return {
                 "type": "config",
                 "profiles": profile_names,
@@ -654,7 +865,10 @@ async def main(connection: iterm2.Connection):
                 "current_profile": current_profile,
                 "group_cells": group_cells,
                 "group_settings": asdict(gs),
+                "resolved_agent_defaults": resolved_defaults,
                 "providers": get_providers(),
+                "templates": template_mgr.list_templates(current_path
+                                                          or await _resolve_base_dir(group)),
             }
 
         # get_group_settings: respond directly, no state mutation
@@ -673,8 +887,12 @@ async def main(connection: iterm2.Connection):
                 "type": "group_settings",
                 "group": group,
                 "settings": asdict(gs),
+                "resolved_agent_defaults": template_mgr.resolve_agent_config(
+                    "", gs, {}, base_dir=await _resolve_base_dir(group)),
                 "profiles": pnames,
                 "providers": get_providers(),
+                "templates": template_mgr.list_templates(
+                    await _resolve_base_dir(group)),
             }
 
         # get_global_settings: respond directly
@@ -698,6 +916,75 @@ async def main(connection: iterm2.Connection):
             actions = action_mgr.list_actions(base_dir)
             return {"type": "actions", "group": data.get("group", ""),
                     "actions": actions}
+
+        if cmd == "list_templates":
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            return {
+                "type": "templates",
+                "group": data.get("group", ""),
+                "templates": template_mgr.list_templates(base_dir),
+            }
+
+        if cmd == "get_template":
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            scope = data.get("scope", "")
+            tpl = template_mgr.load_template(
+                data.get("name", ""), base_dir, scope=scope)
+            if not tpl:
+                return {"type": "error",
+                        "message": f"Template \"{data['name']}\" not found"}
+            return {"type": "template_detail", "name": data["name"],
+                    "template": tpl}
+
+        if cmd == "save_template":
+            name = data.get("name", "").strip()
+            if not name:
+                return {"type": "error", "message": "Template name required"}
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            scope = data.get("scope", "project")
+            old_name = data.get("old_name", "").strip()
+            if old_name and old_name != name:
+                template_mgr.delete_template(old_name, base_dir=base_dir)
+                template_mgr.delete_template(old_name, scope="user",
+                                             base_dir=base_dir)
+            template_mgr.save_template(
+                name, data.get("template", {}), scope=scope, base_dir=base_dir)
+            return {
+                "type": "templates",
+                "group": data.get("group", ""),
+                "templates": template_mgr.list_templates(base_dir),
+                "saved": name,
+            }
+
+        if cmd == "delete_template":
+            name = data.get("name", "").strip()
+            if not name:
+                return {"type": "error", "message": "Template name required"}
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            deleted = template_mgr.delete_template(
+                name, scope=data.get("scope", ""), base_dir=base_dir)
+            if not deleted:
+                return {"type": "error",
+                        "message": f"Template \"{name}\" not found"}
+            return {
+                "type": "templates",
+                "group": data.get("group", ""),
+                "templates": template_mgr.list_templates(base_dir),
+                "deleted": name,
+            }
+
+        if cmd == "render_template":
+            base_dir = await _resolve_base_dir(data.get("group", ""))
+            group = data.get("group", "")
+            gs = state.get_group_settings(group)
+            rendered = template_mgr.resolve_agent_config(
+                data.get("name", ""), gs, data.get("overrides", {}),
+                base_dir=base_dir)
+            return {
+                "type": "template_rendered",
+                "name": data.get("name", ""),
+                "config": rendered,
+            }
 
         # get_action: respond directly
         if cmd == "get_action":
@@ -886,82 +1173,37 @@ async def main(connection: iterm2.Connection):
 
             elif cmd == "add_agent":
                 group = data["group"]
-                gs = state.get_group_settings(group)
-                profile = data.get("profile") or gs.agent_profile or gs.profile or "Default"
-                directory = data.get("directory") or gs.agent_directory or gs.default_directory or ""
-                _ac = gs.agent_tab_color
-                tab_color = data.get("tab_color") or (_ac if _ac != "none" else "") or gs.tab_color or ""
-                shell = data.get("shell") or gs.agent_shell or gs.shell or ""
-                env = {**gs.env_vars, **gs.agent_env_vars, **(data.get("env_vars") or {})} or None
-
-                provider = data.get("provider", "") or gs.agent_provider
-                command, agent_type = _resolve_provider_command(
-                    provider,
-                    data.get("command", "") or gs.agent_boot_command,
-                    state.get_default_command())
-                icon = data.get("icon", "")
-                cell = state.add_agent(
-                    name=data["name"], group=group,
-                    profile=profile,
-                    command=command,
-                    directory=directory, tab_color=tab_color,
-                    icon=icon,
+                base_dir = await _resolve_base_dir(group)
+                explicit_template = data.get("template", "").strip()
+                launch_cfg = _resolve_agent_launch_config(
+                    group,
+                    base_dir=base_dir,
+                    explicit_template=explicit_template,
+                    overrides=data,
                 )
+                name = (data.get("name", "") or "").strip()
+                if not name:
+                    if explicit_template:
+                        name = _suggest_template_agent_name(
+                            group, explicit_template, base_dir)
+                    else:
+                        name = state.next_cell_name(group, "agent")
+                cell = await _create_agent_with_config(
+                    group, name, launch_cfg,
+                    explicit_template=explicit_template)
                 if cell:
-                    if agent_type:
-                        cell.agent_type = agent_type
-                        state._emit_agent(cell)
-                        state._db_save_agent(cell)
-
-                    # Git worktree — create before session so cwd is correct
-                    # Per-agent overrides from Custom dialog take priority
-                    want_wt = data.get("git_worktree", gs.git_worktree)
-                    if want_wt and cell.directory:
-                        wt_base_dir = (data.get("worktree_base_dir")
-                                       or gs.worktree_base_dir
-                                       or ".loom/worktrees")
-                        wt_base_branch = (data.get("worktree_base_branch")
-                                          or gs.worktree_base_branch or "")
-                        repo_root = await worktree_mgr.get_repo_root(
-                            cell.directory)
-                        if repo_root:
-                            wt_path = await worktree_mgr.create(
-                                cell, repo_root,
-                                base_dir=wt_base_dir,
-                                base_branch=wt_base_branch)
-                            if wt_path:
-                                cell.directory = wt_path
-                                state._emit_agent(cell)
-                                state._db_save_agent(cell)
-
-                    await bridge.create_session(
-                        cell, env_vars=env, shell=shell)
-
-                    # Auto-create child terminals
-                    t_profile = gs.terminal_profile or gs.profile or "Default"
-                    t_dir = gs.terminal_directory or gs.default_directory or ""
-                    _ttc = gs.terminal_tab_color
-                    t_color = (_ttc if _ttc != "none" else "") or gs.tab_color or ""
-                    t_shell = gs.terminal_shell or gs.shell or ""
-                    t_env = {**gs.env_vars, **gs.terminal_env_vars} or None
-                    t_cmd = gs.terminal_boot_command or ""
-                    if gs.terminal_command_args and t_cmd:
-                        t_cmd = (t_cmd + " " + gs.terminal_command_args).strip()
-                    for i in range(gs.auto_terminals):
-                        t_name = state.next_cell_name(group, "terminal")
-                        t = state.add_terminal(
-                            name=t_name, group=group,
-                            profile=t_profile,
-                            command=t_cmd,
-                            directory=t_dir or cell.directory,
-                            tab_color=t_color,
-                            parent_id=cell.id,
-                        )
-                        if t:
-                            await bridge.create_session(
-                                t, env_vars=t_env,
-                                init_script=gs.terminal_init_script,
-                                shell=t_shell)
+                    if launch_cfg.get("terminals"):
+                        await _create_child_terminals(
+                            group, cell, terminals=launch_cfg["terminals"])
+                    else:
+                        gs = state.get_group_settings(group)
+                        if gs.auto_terminals > 0:
+                            await _create_child_terminals(
+                                group, cell, count=gs.auto_terminals)
+                    if launch_cfg.get("initial_prompt") and cell.session_id:
+                        await _send_agent_prompt(
+                            cell, launch_cfg["initial_prompt"],
+                            background=True)
 
             elif cmd == "add_agent_from_action":
                 group = data["group"]
@@ -981,88 +1223,28 @@ async def main(connection: iterm2.Connection):
                     if act_group and act_group in state.groups:
                         group = act_group
 
-                    gs = state.get_group_settings(group)
-
                     # Use rendered values, falling through to group settings
                     name = data.get("name") or rendered["name"]
-                    profile = rendered.get("profile") or gs.agent_profile \
-                        or gs.profile or "Default"
-                    directory = rendered.get("directory") \
-                        or gs.agent_directory or gs.default_directory or ""
-                    provider = rendered.get("provider", "") \
-                        or gs.agent_provider
-                    command, agent_type = _resolve_provider_command(
-                        provider,
-                        rendered.get("command", "") or gs.agent_boot_command,
-                        state.get_default_command())
-                    _ac = gs.agent_tab_color
-                    tab_color = rendered.get("tab_color") \
-                        or (_ac if _ac != "none" else "") or gs.tab_color or ""
-                    shell = rendered.get("shell") or gs.agent_shell \
-                        or gs.shell or ""
-                    env = {**gs.env_vars, **gs.agent_env_vars,
-                           **(rendered.get("env_vars") or {})} or None
-
-                    # Worktree: action can override group setting
-                    want_worktree = rendered.get("worktree")
-                    if want_worktree is None:
-                        want_worktree = gs.git_worktree
-
-                    cell = state.add_agent(
-                        name=name, group=group, profile=profile,
-                        command=command, directory=directory,
-                        tab_color=tab_color)
+                    explicit_template = rendered.get("agent_template", "")
+                    launch_cfg = _resolve_agent_launch_config(
+                        group,
+                        base_dir=base_dir,
+                        explicit_template=explicit_template,
+                        overrides=rendered,
+                    )
+                    cell = await _create_agent_with_config(
+                        group, name, launch_cfg,
+                        explicit_template=explicit_template)
                     if cell:
-                        if agent_type:
-                            cell.agent_type = agent_type
-                            state._emit_agent(cell)
-                            state._db_save_agent(cell)
-                        if want_worktree and cell.directory:
-                            repo_root = await worktree_mgr.get_repo_root(
-                                cell.directory)
-                            if repo_root:
-                                wt_path = await worktree_mgr.create(
-                                    cell, repo_root,
-                                    base_dir=gs.worktree_base_dir
-                                        or ".loom/worktrees",
-                                    base_branch=gs.worktree_base_branch
-                                        or "")
-                                if wt_path:
-                                    cell.directory = wt_path
-                                    state._emit_agent(cell)
-                                    state._db_save_agent(cell)
-
-                        await bridge.create_session(
-                            cell, env_vars=env, shell=shell)
-
-                        # Create action-defined child terminals
-                        for tterm in (rendered.get("terminals") or []):
-                            t_name = tterm.get("name") \
-                                or state.next_cell_name(group, "terminal")
-                            t = state.add_terminal(
-                                name=t_name, group=group,
-                                profile=gs.terminal_profile
-                                    or gs.profile or "Default",
-                                command=tterm.get("command") or "",
-                                directory=tterm.get("directory")
-                                    or cell.directory,
-                                tab_color=gs.terminal_tab_color
-                                    or gs.tab_color or "",
-                                parent_id=cell.id)
-                            if t:
-                                t_shell = gs.terminal_shell \
-                                    or gs.shell or ""
-                                t_env = {**gs.env_vars,
-                                         **gs.terminal_env_vars} or None
-                                await bridge.create_session(
-                                    t, env_vars=t_env,
-                                    init_script=tterm.get("init_script")
-                                        or gs.terminal_init_script,
-                                    shell=t_shell)
+                        await _create_child_terminals(
+                            group, cell, terminals=rendered.get("terminals"))
 
                         # Use the rendered prompt directly
                         prompt = rendered.get("prompt", "")
 
+                        if launch_cfg.get("initial_prompt") and cell.session_id:
+                            await _send_agent_prompt(
+                                cell, launch_cfg["initial_prompt"])
                         if prompt and cell.session_id:
                             await _send_agent_prompt(
                                 cell, prompt, persist=True,
@@ -1169,13 +1351,50 @@ async def main(connection: iterm2.Connection):
                 cell = state.agents.get(data["id"])
                 if cell and cell.status == "stopped":
                     gs = state.get_group_settings(cell.group)
+                    base_dir = cell.worktree_repo_root or cell.directory \
+                        or await _resolve_base_dir(cell.group)
+                    launch_cfg = _resolve_agent_launch_config(
+                        cell.group,
+                        base_dir=base_dir,
+                        explicit_template=cell.template,
+                        overrides={},
+                    )
+                    cell.session_resume = bool(
+                        launch_cfg.get("session_resume", cell.session_resume))
+                    cell.idle_timeout = int(
+                        launch_cfg.get("idle_timeout", cell.idle_timeout) or 0)
+                    if cell.cell_type == "agent":
+                        cell.command = launch_cfg.get("command", cell.command)
+                        cell.profile = launch_cfg.get("profile", cell.profile)
+                        cell.tab_color = launch_cfg.get(
+                            "tab_color", cell.tab_color)
+                        cell.icon = launch_cfg.get("icon", cell.icon)
+                        cell.agent_type = launch_cfg.get(
+                            "agent_type", cell.agent_type)
+                        if not cell.worktree_path:
+                            cell.directory = launch_cfg.get(
+                                "directory", cell.directory)
+                    cell.worktree_base_dir = (
+                        launch_cfg.get("worktree_base_dir")
+                        or cell.worktree_base_dir
+                        or ".loom/worktrees")
+                    cell.worktree_auto_checkpoint = bool(
+                        launch_cfg.get(
+                            "worktree_auto_checkpoint",
+                            cell.worktree_auto_checkpoint))
+                    cell.worktree_merge_squash = bool(
+                        launch_cfg.get(
+                            "worktree_merge_squash",
+                            cell.worktree_merge_squash))
+                    state._emit_agent(cell)
+                    state._db_save_agent(cell)
                     if cell.cell_type == "terminal":
                         env = {**gs.env_vars, **gs.terminal_env_vars} or None
                         shell = gs.terminal_shell or gs.shell or ""
                         init = gs.terminal_init_script
                     else:
-                        env = {**gs.env_vars, **gs.agent_env_vars} or None
-                        shell = gs.agent_shell or gs.shell or ""
+                        env = launch_cfg.get("env_vars")
+                        shell = launch_cfg.get("shell", "")
                         init = ""
                         # Worktree handling on relaunch
                         if cell.worktree_path:
@@ -1195,16 +1414,17 @@ async def main(connection: iterm2.Connection):
                                 state._emit_agent(cell)
                                 state._db_save_agent(cell)
                         # Create new worktree if enabled and none exists
-                        if not cell.worktree_path and gs.git_worktree \
+                        if not cell.worktree_path and launch_cfg.get("worktree") \
                                 and cell.directory:
                             repo_root = await worktree_mgr.get_repo_root(
                                 cell.directory)
                             if repo_root:
                                 wt_path = await worktree_mgr.create(
                                     cell, repo_root,
-                                    base_dir=gs.worktree_base_dir
+                                    base_dir=cell.worktree_base_dir
                                         or ".loom/worktrees",
-                                    base_branch=gs.worktree_base_branch
+                                    base_branch=launch_cfg.get(
+                                        "worktree_base_branch", "")
                                         or "")
                                 if wt_path:
                                     cell.directory = wt_path
@@ -1212,7 +1432,8 @@ async def main(connection: iterm2.Connection):
                                     state._db_save_agent(cell)
                     await bridge.create_session(
                         cell, env_vars=env,
-                        init_script=init, shell=shell)
+                        init_script=init, shell=shell,
+                        system_prompt=launch_cfg.get("system_prompt", ""))
 
             elif cmd == "move_group":
                 state.move_group(data["group"], data.get("before", ""))
@@ -1242,9 +1463,10 @@ async def main(connection: iterm2.Connection):
                     if repo_root:
                         wt_path = await worktree_mgr.create(
                             cell, repo_root,
-                            base_dir=gs.worktree_base_dir
+                            base_dir=cell.worktree_base_dir
                                 or ".loom/worktrees",
-                            base_branch=gs.worktree_base_branch or "")
+                            base_branch=cell.worktree_base_branch
+                                or gs.worktree_base_branch or "")
                         if wt_path:
                             cell.directory = wt_path
                             state._emit_agent(cell)
@@ -1259,12 +1481,21 @@ async def main(connection: iterm2.Connection):
                                 # Clear session ID — the old session
                                 # may not exist (no prompts sent yet)
                                 cell.agent_session_id = ""
-                                env = {**gs.env_vars,
-                                       **gs.agent_env_vars} or None
-                                shell = (gs.agent_shell
-                                         or gs.shell or "")
+                                base_dir = cell.worktree_repo_root \
+                                    or cell.directory \
+                                    or await _resolve_base_dir(cell.group)
+                                launch_cfg = _resolve_agent_launch_config(
+                                    cell.group,
+                                    base_dir=base_dir,
+                                    explicit_template=cell.template,
+                                    overrides={},
+                                )
                                 await bridge.create_session(
-                                    cell, env_vars=env, shell=shell,
+                                    cell,
+                                    env_vars=launch_cfg.get("env_vars"),
+                                    shell=launch_cfg.get("shell", ""),
+                                    system_prompt=launch_cfg.get(
+                                        "system_prompt", ""),
                                     target_session_id=data.get(
                                         "target_session_id", ""),
                                     target_window_id=data.get(
@@ -1287,12 +1518,19 @@ async def main(connection: iterm2.Connection):
                         cell.status = "stopped"
                         cell.session_id = None
                         cell.agent_session_id = ""
-                        gs = state.get_group_settings(cell.group)
-                        env = {**gs.env_vars,
-                               **gs.agent_env_vars} or None
-                        shell = gs.agent_shell or gs.shell or ""
+                        base_dir = cell.worktree_repo_root or cell.directory \
+                            or await _resolve_base_dir(cell.group)
+                        launch_cfg = _resolve_agent_launch_config(
+                            cell.group,
+                            base_dir=base_dir,
+                            explicit_template=cell.template,
+                            overrides={},
+                        )
                         await bridge.create_session(
-                            cell, env_vars=env, shell=shell)
+                            cell,
+                            env_vars=launch_cfg.get("env_vars"),
+                            shell=launch_cfg.get("shell", ""),
+                            system_prompt=launch_cfg.get("system_prompt", ""))
 
             elif cmd == "worktree_checkpoint":
                 cell = state.agents.get(data["id"])
@@ -1366,7 +1604,7 @@ async def main(connection: iterm2.Connection):
                         base = cell.worktree_base_branch or "main"
                         branch = cell.worktree_branch
                         repo = cell.worktree_repo_root or ""
-                        squash = gs.worktree_merge_squash
+                        squash = cell.worktree_merge_squash
                         method = ("Squash merge" if squash
                                   else "Merge")
                         prompt = (
@@ -1418,6 +1656,7 @@ async def main(connection: iterm2.Connection):
                     description=data.get("description", ""),
                     action_name=data.get("action_name", ""),
                     action_vars=data.get("action_vars", {}),
+                    agent_template=data.get("agent_template", ""),
                     agent_id=data.get("agent_id", ""),
                     labels=data.get("labels", []),
                 )
@@ -1461,6 +1700,16 @@ async def main(connection: iterm2.Connection):
                                   "message": "No group available"}
                     else:
                         cell = None
+                        base_dir = await _resolve_base_dir(group)
+                        act_meta = action_mgr.load_action(
+                            task.action_name, base_dir) \
+                            if task.action_name else None
+                        action_template = ""
+                        if isinstance(act_meta, dict):
+                            raw_agent = act_meta.get("agent", "")
+                            if isinstance(raw_agent, str):
+                                action_template = raw_agent
+                        explicit_template = task.agent_template or action_template
                         agent_id = data.get("agent_id", "")
                         if agent_id:
                             # Dispatch to existing agent
@@ -1492,52 +1741,21 @@ async def main(connection: iterm2.Connection):
                             from loom.state import _slugify
                             slug = _slugify(task.task)
                             agent_name = slug or "agent"
-                            gs = state.get_group_settings(group)
-                            profile = gs.agent_profile \
-                                or gs.profile or "Default"
-                            directory = gs.agent_directory \
-                                or gs.default_directory or ""
-                            _ac = gs.agent_tab_color
-                            tab_color = (_ac if _ac != "none" else "") \
-                                or gs.tab_color or ""
-                            shell = gs.agent_shell or gs.shell or ""
-                            env = {**gs.env_vars, **gs.agent_env_vars} \
-                                or None
-                            command, agent_type = \
-                                _resolve_provider_command(
-                                    gs.agent_provider,
-                                    gs.agent_boot_command,
-                                    state.get_default_command())
-
-                            cell = state.add_agent(
-                                name=agent_name, group=group,
-                                profile=profile, command=command,
-                                directory=directory,
-                                tab_color=tab_color)
+                            launch_cfg = _resolve_agent_launch_config(
+                                group,
+                                base_dir=base_dir,
+                                explicit_template=explicit_template,
+                                overrides={},
+                            )
+                            cell = await _create_agent_with_config(
+                                group, agent_name, launch_cfg,
+                                explicit_template=explicit_template,
+                                target_session_id=data.get(
+                                    "target_session_id", ""),
+                                target_window_id=data.get(
+                                    "target_window_id", ""),
+                            )
                             if cell:
-                                if agent_type:
-                                    cell.agent_type = agent_type
-                                    state._emit_agent(cell)
-                                    state._db_save_agent(cell)
-                                # Worktree
-                                if gs.git_worktree and cell.directory:
-                                    repo_root = \
-                                        await worktree_mgr.get_repo_root(
-                                            cell.directory)
-                                    if repo_root:
-                                        wt_path = \
-                                            await worktree_mgr.create(
-                                                cell, repo_root,
-                                                base_dir=gs.worktree_base_dir
-                                                    or ".loom/worktrees",
-                                                base_branch=
-                                                    gs.worktree_base_branch
-                                                    or "")
-                                        if wt_path:
-                                            cell.directory = wt_path
-                                            state._emit_agent(cell)
-                                            state._db_save_agent(cell)
-
                                 # Worktree inheritance (pipeline)
                                 inherit_from = data.get(
                                     "inherit_worktree_from", "")
@@ -1587,46 +1805,17 @@ async def main(connection: iterm2.Connection):
                                                 break
                                         _ptid = _pt.parent_task_id
 
-                                await bridge.create_session(
-                                    cell, env_vars=env, shell=shell)
+                                if launch_cfg.get("terminals"):
+                                    await _create_child_terminals(
+                                        group, cell,
+                                        terminals=launch_cfg["terminals"])
 
                                 # Auto-create child terminals (off by default for dispatch)
-                                if gs.dispatch_auto_terminals:
-                                    t_profile = gs.terminal_profile \
-                                        or gs.profile or "Default"
-                                    t_dir = gs.terminal_directory \
-                                        or gs.default_directory or ""
-                                    _ttc = gs.terminal_tab_color
-                                    t_color = (_ttc if _ttc != "none" \
-                                        else "") or gs.tab_color or ""
-                                    t_shell = gs.terminal_shell \
-                                        or gs.shell or ""
-                                    t_env = {**gs.env_vars,
-                                             **gs.terminal_env_vars} \
-                                        or None
-                                    t_cmd = \
-                                        gs.terminal_boot_command or ""
-                                    if gs.terminal_command_args and t_cmd:
-                                        t_cmd = (t_cmd + " "
-                                                 + gs.terminal_command_args
-                                                 ).strip()
-                                    for i in range(gs.auto_terminals):
-                                        t_name = state.next_cell_name(
-                                            group, "terminal")
-                                        t = state.add_terminal(
-                                            name=t_name, group=group,
-                                            profile=t_profile,
-                                            command=t_cmd,
-                                            directory=t_dir
-                                                or cell.directory,
-                                            tab_color=t_color,
-                                            parent_id=cell.id)
-                                        if t:
-                                            await bridge.create_session(
-                                                t, env_vars=t_env,
-                                                init_script=
-                                                    gs.terminal_init_script,
-                                                shell=t_shell)
+                                gs = state.get_group_settings(group)
+                                if gs.dispatch_auto_terminals \
+                                        and gs.auto_terminals > 0:
+                                    await _create_child_terminals(
+                                        group, cell, count=gs.auto_terminals)
 
                         if cell:
                             # Link task to agent and move to In Progress
@@ -1684,7 +1873,8 @@ async def main(connection: iterm2.Connection):
 
                             if prompt:
                                 is_clean = loom_ctx["context"]["is_clean"]
-                                prompt += _build_postscript(
+                                final_prompt = prompt
+                                final_prompt += _build_postscript(
                                     task, action_mgr,
                                     base_dir if task.action_name
                                     else "",
@@ -1708,16 +1898,19 @@ async def main(connection: iterm2.Connection):
                                         # prompt arrives after current
                                         # agent turn finishes
                                         await _send_agent_prompt(
-                                            cell, prompt,
+                                            cell, final_prompt,
                                             delay=delay,
                                             background=True)
                                     else:
                                         # Existing agent — send now
-                                        await _send_agent_prompt(cell, prompt)
+                                        await _send_agent_prompt(cell, final_prompt)
                                 elif data.get("create_agent") \
                                         and cell.session_id:
+                                    if launch_cfg.get("initial_prompt"):
+                                        await _send_agent_prompt(
+                                            cell, launch_cfg["initial_prompt"])
                                     await _send_agent_prompt(
-                                        cell, prompt, background=True)
+                                        cell, final_prompt, background=True)
 
             elif cmd == "resolve_ask":
                 # Resolve an ask task: send answer to parent's agent

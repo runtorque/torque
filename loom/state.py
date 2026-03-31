@@ -24,6 +24,7 @@ class BoardTask:
     group: str = ""             # owning group (must be an existing group)
     action_name: str = ""       # action used for prompt rendering (optional)
     action_vars: dict = field(default_factory=dict)  # action variable values
+    agent_template: str = ""    # agent template used when creating a new agent
     instructions: str = ""      # DEPRECATED — kept for backward compat
     context: str = ""           # DEPRECATED — kept for backward compat
     criteria: str = ""          # DEPRECATED — kept for backward compat
@@ -57,6 +58,7 @@ class AgentCell:
     directory: str = ""  # working dir on create/relaunch
     tab_color: str = ""  # hex color for iTerm2 tab (e.g. "#f85149")
     icon: str = ""  # custom icon character (from AGENT_ICONS set)
+    template: str = ""  # template used to create this agent
     window_id: str = ""  # iTerm2 window this session lives in
     parent_id: str = ""  # for child terminals: the owning agent's ID
     status: str = "stopped"  # idle | running | error | stopped
@@ -67,7 +69,10 @@ class AgentCell:
     worktree_path: str = ""  # git worktree path (if created via group setting)
     worktree_branch: str = ""  # git worktree branch name
     worktree_repo_root: str = ""  # original repo root (needed for cleanup)
+    worktree_base_dir: str = ".loom/worktrees"  # worktree dir relative to repo root
     worktree_base_branch: str = ""  # branch the worktree forked from (e.g. main)
+    worktree_auto_checkpoint: bool = False  # auto-checkpoint on session end
+    worktree_merge_squash: bool = True  # squash when merging back to base
     # Agent awareness (Phase 1)
     agent_type: str = ""  # "claude-code", "codex", "gemini-cli", ""
     agent_session_id: str = ""  # agent's own session ID (e.g. Claude Code session)
@@ -83,6 +88,8 @@ class AgentCell:
     # Context preservation (dispatch history)
     tasks_dispatched: int = 0  # number of tasks sent to this agent (persisted)
     current_task_id: str = ""  # most recently dispatched task (ephemeral)
+    session_resume: bool = True  # whether relaunch should resume the prior session
+    idle_timeout: int = 5  # per-agent idle timeout in minutes
     # Worktree status (Phase 2, ephemeral)
     worktree_dirty: bool = False  # has uncommitted changes
     worktree_diff: dict = field(default_factory=dict)  # {files, insertions, deletions}
@@ -141,6 +148,7 @@ class GroupSettings:
     agent_shell: str = ""
     agent_tab_color: str = ""
     agent_env_vars: dict[str, str] = field(default_factory=dict)
+    default_agent_template: str = ""
     agent_provider: str = ""  # adapter name ("claude-code", "codex", etc.) — empty = use default
     agent_boot_command: str = ""  # override default boot command (e.g. "codex")
     git_worktree: bool = False

@@ -56,6 +56,12 @@
       </div>
       <label>Group</label>
       <select id="add-group-select"></select>
+      <div id="add-template-row" class="hidden">
+        <label>Template</label>
+        <select id="add-template-select" onchange="onAddTemplateChange()">
+          <option value="">None</option>
+        </select>
+      </div>
       <div id="add-provider-row" class="hidden">
         <label>Agent CLI</label>
         <select id="add-provider-select" onchange="onAddProviderChange()"></select>
@@ -200,6 +206,8 @@
         <div class="color-swatches" id="gs-agent-color-swatches"></div>
         <label>Agent CLI</label>
         <select id="gs-agent-provider" onchange="onGsProviderChange()"></select>
+        <label>Default agent template</label>
+        <select id="gs-default-agent-template"></select>
         <div id="gs-agent-boot-cmd-row" class="hidden">
           <label>Boot command</label>
           <input id="gs-agent-boot-cmd" placeholder="e.g. my-agent-cli" autocomplete="off">
@@ -428,6 +436,13 @@
             onkeydown="if(event.key==='Escape')closeModals();">
       <option value="">None</option>
     </select>
+    <label>Agent template
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optional agent template used when this task creates a new agent during dispatch.">?</span>
+    </label>
+    <select id="task-template-select"
+            onkeydown="if(event.key==='Escape')closeModals();">
+      <option value="">None</option>
+    </select>
     <div id="task-action-vars"></div>
     <label>Labels
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Type a label and press Enter to add it.">?</span>
@@ -508,6 +523,7 @@
 <script src="/static/js/modals.js"></script>
 <script src="/static/js/board.js"></script>
 <script src="/static/js/actions.js"></script>
+<script src="/static/js/templates.js"></script>
 <script src="/static/js/events.js"></script>
 <script src="/static/js/main.js"></script>
 </body>

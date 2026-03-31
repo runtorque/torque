@@ -198,6 +198,7 @@ class ITerm2Adapter:
                              env_vars: dict[str, str] | None = None,
                              init_script: str = "",
                              shell: str = "",
+                             system_prompt: str = "",
                              target_session_id: str = "",
                              target_window_id: str = ""):
         log.info("Creating session for %s '%s' [%s]",
@@ -294,6 +295,11 @@ class ITerm2Adapter:
         if cell.agent_type:
             adapter = get_adapter(cell.agent_type)
             hook_dir = os.path.expanduser(cell.directory) if cell.directory else ""
+            if hook_dir and system_prompt:
+                extra_flags = adapter.inject_system_prompt(
+                    hook_dir, system_prompt)
+                if extra_flags and extra_flags not in cell.command:
+                    cell.command = (cell.command + extra_flags).strip()
             if hook_dir and hasattr(adapter, "install_hooks"):
                 if adapter.install_hooks(hook_dir):
                     log.info("Installed hooks for '%s' (type=%s) in %s",
@@ -318,8 +324,7 @@ class ITerm2Adapter:
         # Boot command (with session resume for supported agents)
         boot_cmd = cell.command
         if boot_cmd and cell.agent_session_id and cell.agent_type:
-            gs = self.state.get_group_settings(cell.group)
-            if gs.agent_session_resume:
+            if cell.session_resume:
                 adapter = get_adapter(cell.agent_type)
                 resumed = adapter.get_resume_command(
                     boot_cmd, cell.agent_session_id)

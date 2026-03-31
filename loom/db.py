@@ -25,9 +25,11 @@ SCHEMA_VERSION = "1"
 
 _AGENT_PERSISTED_COLS = [
     "id", "name", "slug", "group_name", "cell_type", "session_id", "profile",
-    "command", "directory", "tab_color", "icon", "window_id", "parent_id",
-    "status", "worktree_path", "worktree_branch", "worktree_repo_root",
-    "worktree_base_branch", "agent_type", "agent_session_id",
+    "command", "directory", "tab_color", "icon", "template", "window_id",
+    "parent_id", "status", "worktree_path", "worktree_branch",
+    "worktree_repo_root", "worktree_base_dir", "worktree_base_branch",
+    "worktree_auto_checkpoint", "worktree_merge_squash", "agent_type",
+    "agent_session_id", "session_resume", "idle_timeout",
     "tasks_dispatched",
 ]
 
@@ -68,15 +70,21 @@ CREATE TABLE IF NOT EXISTS agents (
     directory             TEXT NOT NULL DEFAULT '',
     tab_color             TEXT NOT NULL DEFAULT '',
     icon                  TEXT NOT NULL DEFAULT '',
+    template              TEXT NOT NULL DEFAULT '',
     window_id             TEXT NOT NULL DEFAULT '',
     parent_id             TEXT NOT NULL DEFAULT '',
     status                TEXT NOT NULL DEFAULT 'stopped',
     worktree_path         TEXT NOT NULL DEFAULT '',
     worktree_branch       TEXT NOT NULL DEFAULT '',
     worktree_repo_root    TEXT NOT NULL DEFAULT '',
+    worktree_base_dir     TEXT NOT NULL DEFAULT '.loom/worktrees',
     worktree_base_branch  TEXT NOT NULL DEFAULT '',
+    worktree_auto_checkpoint INTEGER NOT NULL DEFAULT 0,
+    worktree_merge_squash INTEGER NOT NULL DEFAULT 1,
     agent_type            TEXT NOT NULL DEFAULT '',
-    agent_session_id      TEXT NOT NULL DEFAULT ''
+    agent_session_id      TEXT NOT NULL DEFAULT '',
+    session_resume        INTEGER NOT NULL DEFAULT 1,
+    idle_timeout          INTEGER NOT NULL DEFAULT 5
 );
 
 CREATE TABLE IF NOT EXISTS groups (
@@ -108,6 +116,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     agent_shell                 TEXT NOT NULL DEFAULT '',
     agent_tab_color             TEXT NOT NULL DEFAULT '',
     agent_env_vars              TEXT NOT NULL DEFAULT '{}',
+    default_agent_template      TEXT NOT NULL DEFAULT '',
     agent_provider              TEXT NOT NULL DEFAULT '',
     agent_boot_command          TEXT NOT NULL DEFAULT '',
     git_worktree                INTEGER NOT NULL DEFAULT 0,
@@ -146,6 +155,7 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     group_name     TEXT NOT NULL DEFAULT '',
     action_name    TEXT NOT NULL DEFAULT '',
     action_vars    TEXT NOT NULL DEFAULT '{}',
+    agent_template TEXT NOT NULL DEFAULT '',
     instructions   TEXT NOT NULL DEFAULT '',
     context        TEXT NOT NULL DEFAULT '',
     criteria       TEXT NOT NULL DEFAULT '',
@@ -242,7 +252,8 @@ class LoomDB:
             self._conn.commit()
         # Migrate: add action_name and action_vars columns to board_tasks
         for col, default in [("action_name", "''"),
-                             ("action_vars", "'{}'")]:
+                             ("action_vars", "'{}'"),
+                             ("agent_template", "''")]:
             try:
                 self._conn.execute(
                     f"SELECT {col} FROM board_tasks LIMIT 0")
@@ -291,13 +302,30 @@ class LoomDB:
         except sqlite3.OperationalError:
             pass  # column already gone
         # Migrate: add tasks_dispatched column to agents
+        for col, col_type, default in [
+            ("tasks_dispatched", "INTEGER", "0"),
+            ("template", "TEXT", "''"),
+            ("worktree_base_dir", "TEXT", "'.loom/worktrees'"),
+            ("worktree_auto_checkpoint", "INTEGER", "0"),
+            ("worktree_merge_squash", "INTEGER", "1"),
+            ("session_resume", "INTEGER", "1"),
+            ("idle_timeout", "INTEGER", "5"),
+        ]:
+            try:
+                self._conn.execute(f"SELECT {col} FROM agents LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE agents ADD COLUMN {col} "
+                    f"{col_type} NOT NULL DEFAULT {default}")
+                self._conn.commit()
+        # Migrate: add default_agent_template column
         try:
             self._conn.execute(
-                "SELECT tasks_dispatched FROM agents LIMIT 0")
+                "SELECT default_agent_template FROM group_settings LIMIT 0")
         except sqlite3.OperationalError:
             self._conn.execute(
-                "ALTER TABLE agents ADD COLUMN "
-                "tasks_dispatched INTEGER NOT NULL DEFAULT 0")
+                "ALTER TABLE group_settings ADD COLUMN "
+                "default_agent_template TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
         # Set schema version if not present
         row = self._conn.execute(
@@ -321,18 +349,24 @@ class LoomDB:
         self._conn.execute("""
             INSERT OR REPLACE INTO agents
                 (id, name, slug, group_name, cell_type, session_id, profile,
-                 command, directory, tab_color, icon, window_id, parent_id,
-                 status, worktree_path, worktree_branch, worktree_repo_root,
-                 worktree_base_branch, agent_type, agent_session_id,
+                 command, directory, tab_color, icon, template, window_id,
+                 parent_id, status, worktree_path, worktree_branch,
+                 worktree_repo_root, worktree_base_dir, worktree_base_branch,
+                 worktree_auto_checkpoint, worktree_merge_squash,
+                 agent_type, agent_session_id, session_resume, idle_timeout,
                  tasks_dispatched)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             cell.id, cell.name, cell.slug, cell.group, cell.cell_type,
             cell.session_id, cell.profile, cell.command, cell.directory,
-            cell.tab_color, cell.icon, cell.window_id, cell.parent_id,
-            cell.status, cell.worktree_path, cell.worktree_branch,
-            cell.worktree_repo_root, cell.worktree_base_branch,
-            cell.agent_type, cell.agent_session_id,
+            cell.tab_color, cell.icon, cell.template, cell.window_id,
+            cell.parent_id, cell.status, cell.worktree_path,
+            cell.worktree_branch, cell.worktree_repo_root,
+            cell.worktree_base_dir, cell.worktree_base_branch,
+            int(cell.worktree_auto_checkpoint),
+            int(cell.worktree_merge_squash), cell.agent_type,
+            cell.agent_session_id, int(cell.session_resume),
+            cell.idle_timeout,
             cell.tasks_dispatched,
         ))
         self._conn.commit()
@@ -412,16 +446,17 @@ class LoomDB:
         self._conn.execute("""
             INSERT OR REPLACE INTO board_tasks
                 (id, task, description, slug, group_name,
-                 action_name, action_vars,
+                 action_name, action_vars, agent_template,
                  instructions, context, criteria,
                  lane, position, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url,
                  parent_task_id, pipeline_depth, pipeline_root_id, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
             d.get("action_name", ""), action_vars,
+            d.get("agent_template", ""),
             d["instructions"], d["context"], d["criteria"],
             d["lane"], d["position"],
             d["agent_id"], labels, d["created_at"],
@@ -544,11 +579,13 @@ class LoomDB:
                     INSERT INTO agents
                         (id, name, slug, group_name, cell_type, session_id,
                          profile, command, directory, tab_color, icon,
-                         window_id, parent_id, status, worktree_path,
-                         worktree_branch, worktree_repo_root,
-                         worktree_base_branch, agent_type, agent_session_id,
-                         tasks_dispatched)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         template, window_id, parent_id, status,
+                         worktree_path, worktree_branch, worktree_repo_root,
+                         worktree_base_dir, worktree_base_branch,
+                         worktree_auto_checkpoint, worktree_merge_squash,
+                         agent_type, agent_session_id, session_resume,
+                         idle_timeout, tasks_dispatched)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     a.get("id", aid),
                     a.get("name", ""),
@@ -561,15 +598,21 @@ class LoomDB:
                     a.get("directory", ""),
                     a.get("tab_color", ""),
                     a.get("icon", ""),
+                    a.get("template", ""),
                     a.get("window_id", ""),
                     a.get("parent_id", ""),
                     a.get("status", "stopped"),
                     a.get("worktree_path", ""),
                     a.get("worktree_branch", ""),
                     a.get("worktree_repo_root", ""),
+                    a.get("worktree_base_dir", ".loom/worktrees"),
                     a.get("worktree_base_branch", ""),
+                    int(a.get("worktree_auto_checkpoint", False)),
+                    int(a.get("worktree_merge_squash", True)),
                     a.get("agent_type", ""),
                     a.get("agent_session_id", ""),
+                    int(a.get("session_resume", True)),
+                    a.get("idle_timeout", 5),
                     a.get("tasks_dispatched", 0),
                 ))
 
@@ -624,17 +667,18 @@ class LoomDB:
                 c.execute("""
                     INSERT INTO board_tasks
                         (id, task, description, slug, group_name,
-                         action_name,
+                         action_name, agent_template,
                          action_vars, instructions, context,
                          criteria, lane, position, agent_id, labels,
                          created_at, updated_at, provider, external_id,
                          external_url, parent_task_id, pipeline_depth,
                          pipeline_root_id, status)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""),
                     d.get("description", ""), d.get("slug", ""),
-                    group_name, d.get("action_name", ""), action_vars,
+                    group_name, d.get("action_name", ""),
+                    d.get("agent_template", ""), action_vars,
                     d.get("instructions", ""),
                     d.get("context", ""), d.get("criteria", ""),
                     d.get("lane", "Backlog"), d.get("position", 0),
@@ -675,6 +719,11 @@ class LoomDB:
             d = dict(zip(cols, row))
             # Map group_name back to 'group' for AgentCell
             d["group"] = d.pop("group_name")
+            d["worktree_auto_checkpoint"] = bool(
+                d.get("worktree_auto_checkpoint", 0))
+            d["worktree_merge_squash"] = bool(
+                d.get("worktree_merge_squash", 1))
+            d["session_resume"] = bool(d.get("session_resume", 1))
             agents[d["id"]] = d
 
         # Groups (ordered)

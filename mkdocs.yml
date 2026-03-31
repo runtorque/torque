@@ -26,6 +26,7 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Concepts: concepts.md
+  - Agent Templates: agent-templates.md
   - Actions & Templates: actions.md
   - Task Board: board.md
   - Task Lifecycle: task-lifecycle.md

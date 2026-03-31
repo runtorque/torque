@@ -27,7 +27,7 @@ loom board move fix-login -l Done           # move task between lanes
 
 ## Tasks
 
-A task is a unit of work with a description, optional action template, and metadata. Tasks can be linked to agents and organized into pipeline chains.
+A task is a unit of work with a description, optional action, optional agent template, and metadata. Tasks can be linked to agents and organized into pipeline chains.
 
 ### Creating tasks
 
@@ -57,7 +57,8 @@ loom task create "Fix auth tests" -t oneshot/fix -v MODULE=auth -v TEST_CMD=pyte
 | **Task** | The description --- what needs to be done. |
 | **Group** | Which group this task belongs to. |
 | **Lane** | Current board lane (Backlog, To Do, In Progress, Done, or custom). |
-| **Action** | Optional action template used to render the dispatch prompt. |
+| **Action** | Optional action used to render the dispatch prompt. |
+| **Agent template** | Optional template used when dispatch creates a new agent. |
 | **Variables** | Values for the action's template variables. |
 | **Assignee** | Optional assignee name. |
 | **Labels** | Tags for filtering and categorization. |
@@ -92,7 +93,7 @@ Dispatching connects a task to an agent. Loom creates (or reuses) an agent, link
 
 ### From the board UI
 
-Right-click a task card and select **Dispatch**. Loom creates a new agent in the task's group, using settings from the group configuration and the action template (if any).
+Right-click a task card and select **Dispatch**. Loom creates a new agent in the task's group, using group defaults, the selected agent template (if any), and the action (if any).
 
 ### From the CLI
 
@@ -110,7 +111,7 @@ loom dispatch "Fix the bug" -t oneshot/fix -g backend -w
 
 ### What happens during dispatch
 
-1. **Agent creation** --- a new agent is created with the task's slug as its name. Settings come from the group configuration and the action's `agent` section.
+1. **Agent creation** --- a new agent is created with the task's slug as its name. Settings come from the group configuration, the task's agent template, or the action's `agent` template reference.
 2. **Worktree** --- if the group has `git_worktree` enabled, an isolated worktree is created for the agent.
 3. **Task linking** --- the task's `agent_id` is set and its lane changes to the dispatch lane.
 4. **Prompt rendering** --- if the task has an action, Loom renders the prompt template with `{{ TASK }}`, action variables, and the [loom context namespace](actions.md#the-loom-context-namespace).

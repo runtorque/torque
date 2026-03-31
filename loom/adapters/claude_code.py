@@ -3,6 +3,7 @@
 import json
 import time
 from pathlib import Path
+import shlex
 from textwrap import dedent
 
 from .base import AgentAdapter, AgentEvent
@@ -133,6 +134,24 @@ class ClaudeCodeAdapter(AgentAdapter):
 
     def get_env_vars(self, cell) -> dict[str, str]:
         return {"LOOM_CELL_ID": cell.id}
+
+    def inject_system_prompt(self, working_dir: str, text: str) -> str:
+        if not text or not working_dir:
+            return ""
+        try:
+            claude_dir = Path(working_dir) / ".claude"
+            claude_dir.mkdir(parents=True, exist_ok=True)
+            (claude_dir / "instructions.md").write_text(
+                text.rstrip() + "\n"
+            )
+        except Exception:
+            return ""
+        return ""
+
+    def resolve_model_flags(self, model: str) -> str:
+        if not model:
+            return ""
+        return f" --model {shlex.quote(model)}"
 
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
         import shlex

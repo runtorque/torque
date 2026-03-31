@@ -38,6 +38,38 @@ function _getProviderCommand(selectId) {
   return p ? p.command : '';
 }
 
+function _populateTemplateSelect(selectId, currentValue, emptyLabel) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  sel.innerHTML = '';
+  const opt = document.createElement('option');
+  opt.value = '';
+  opt.textContent = emptyLabel || 'None';
+  sel.appendChild(opt);
+  const templates = (_cachedAgentTemplates || []).filter(t => !t.shadowed);
+  const project = templates.filter(t => !t.global);
+  const user = templates.filter(t => t.global);
+  function appendGroup(label, items) {
+    if (!items.length) return;
+    const group = document.createElement('optgroup');
+    group.label = label;
+    for (const t of items) {
+      const o = document.createElement('option');
+      o.value = t.name;
+      o.textContent = t.display_name || t.name;
+      group.appendChild(o);
+    }
+    sel.appendChild(group);
+  }
+  appendGroup('Project', project);
+  appendGroup('User', user);
+  sel.value = currentValue || '';
+}
+
+function _findTemplateMeta(name) {
+  return (_cachedAgentTemplates || []).find(t => t.name === name) || null;
+}
+
 function onGsProviderChange() {
   const v = document.getElementById('gs-agent-provider').value;
   const row = document.getElementById('gs-agent-boot-cmd-row');
@@ -96,6 +128,8 @@ let _pendingModal = null;
 let _selectedColor = '';
 let _selectedIcon = '';
 let _pendingParentId = '';
+let _addModalConfig = null;
+let _addTemplateApplied = '';
 
 function _renderIconPicker(containerId, selectedIcon, onClickFn) {
   let html = `<button class="icon-btn${!selectedIcon ? ' selected' : ''}" data-icon="" onclick="${onClickFn}('')" title="Auto">auto</button>`;
@@ -174,15 +208,22 @@ function submitGroup() {
 }
 
 /* -- Add Agent / Terminal (shared modal) ------------------------------ */
-function _openAddModal(mode, group, parentId) {
-  _pendingModal = { mode, group, parentId: parentId || '' };
+function _openAddModal(mode, group, parentId, templateName) {
+  _pendingModal = {
+    mode,
+    group,
+    parentId: parentId || '',
+    template: templateName || '',
+  };
   send({ cmd: 'get_config', group });
 }
 
 function _showAddModal(mode, group, config) {
   addCellMode = mode;
+  _addModalConfig = config;
   _selectedColor = '';
   _selectedIcon = '';
+  _addTemplateApplied = '';
   _pendingParentId = (_pendingModal && _pendingModal.parentId) || '';
 
   const parent = _pendingParentId ? state.agents[_pendingParentId] : null;
@@ -196,18 +237,21 @@ function _showAddModal(mode, group, config) {
   const initRow = document.getElementById('add-init-row');
   const iconRow = document.getElementById('add-icon-row');
   const providerRow = document.getElementById('add-provider-row');
+  const templateRow = document.getElementById('add-template-row');
   if (isTerminal) {
     cmdRow.classList.remove('hidden');
     argsRow.classList.remove('hidden');
     initRow.classList.remove('hidden');
     iconRow.classList.add('hidden');
     providerRow.classList.add('hidden');
+    templateRow.classList.add('hidden');
   } else {
     cmdRow.classList.add('hidden');
     argsRow.classList.add('hidden');
     initRow.classList.add('hidden');
     iconRow.classList.remove('hidden');
     providerRow.classList.remove('hidden');
+    templateRow.classList.remove('hidden');
     _renderIconPicker('add-icon-picker', '', 'selectIcon');
   }
 
@@ -263,6 +307,7 @@ function _showAddModal(mode, group, config) {
 
   /* pre-fill from group settings */
   const gs = config.group_settings || {};
+  const resolved = config.resolved_agent_defaults || {};
   const isAgent = mode === 'agent';
   const prefix = isAgent ? '' : gs.terminal_name_prefix;
   const nameInput = document.getElementById('add-name-input');
@@ -274,11 +319,16 @@ function _showAddModal(mode, group, config) {
     document.getElementById('add-args-input').value = gs.terminal_command_args || '';
     document.getElementById('add-init-input').value = gs.terminal_init_script || '';
   } else {
-    _populateProviderSelect('add-provider-select', gs.agent_provider || '', true);
+    _populateTemplateSelect('add-template-select',
+      (_pendingModal && _pendingModal.template) || '', 'Group default');
+    _populateProviderSelect('add-provider-select', resolved.provider || gs.agent_provider || '', true);
+    document.getElementById('add-cmd-input').value = resolved.command || '';
     onAddProviderChange();
   }
 
-  const dir = (isAgent ? gs.agent_directory : gs.terminal_directory) || gs.default_directory;
+  const dir = isAgent
+    ? (resolved.directory || gs.agent_directory || gs.default_directory)
+    : ((isAgent ? gs.agent_directory : gs.terminal_directory) || gs.default_directory);
   if (dir) {
     const optGrp = document.createElement('option');
     optGrp.value = dir;
@@ -287,20 +337,28 @@ function _showAddModal(mode, group, config) {
     optGrp.selected = true;
   }
 
-  const prof = (isAgent ? gs.agent_profile : gs.terminal_profile) || gs.profile;
+  const prof = isAgent
+    ? (resolved.profile || gs.agent_profile || gs.profile)
+    : ((isAgent ? gs.agent_profile : gs.terminal_profile) || gs.profile);
   if (prof) {
     for (const opt of psel.options) {
       if (opt.value === prof) { opt.selected = true; break; }
     }
   }
 
-  const shell = (isAgent ? gs.agent_shell : gs.terminal_shell) || gs.shell;
+  const shell = isAgent
+    ? (resolved.shell || gs.agent_shell || gs.shell)
+    : ((isAgent ? gs.agent_shell : gs.terminal_shell) || gs.shell);
   document.getElementById('add-shell-select').value = shell || '';
 
-  const color = (isAgent ? gs.agent_tab_color : gs.terminal_tab_color) || gs.tab_color;
+  const color = isAgent
+    ? (resolved.tab_color || gs.agent_tab_color || gs.tab_color)
+    : ((isAgent ? gs.agent_tab_color : gs.terminal_tab_color) || gs.tab_color);
   if (color && color !== 'none') selectColor(color);
 
-  const envObj = isAgent ? gs.agent_env_vars : gs.terminal_env_vars;
+  const envObj = isAgent
+    ? (resolved.env_vars || gs.agent_env_vars)
+    : gs.terminal_env_vars;
   document.getElementById('add-env-vars').value = _envToText(envObj);
 
   /* worktree section — agents only */
@@ -309,16 +367,88 @@ function _showAddModal(mode, group, config) {
     wtSection.classList.add('hidden');
   } else {
     wtSection.classList.remove('hidden');
-    document.getElementById('add-wt-enabled').checked = gs.git_worktree || false;
-    document.getElementById('add-wt-base-dir').value = gs.worktree_base_dir || '';
-    document.getElementById('add-wt-base-branch').value = gs.worktree_base_branch || '';
-    document.getElementById('add-wt-auto-checkpoint').checked = gs.worktree_auto_checkpoint || false;
-    document.getElementById('add-wt-squash').checked = gs.worktree_merge_squash !== false;
+    document.getElementById('add-wt-enabled').checked = !!resolved.worktree;
+    document.getElementById('add-wt-base-dir').value = resolved.worktree_base_dir || gs.worktree_base_dir || '';
+    document.getElementById('add-wt-base-branch').value = resolved.worktree_base_branch || gs.worktree_base_branch || '';
+    document.getElementById('add-wt-auto-checkpoint').checked = resolved.worktree_auto_checkpoint || false;
+    document.getElementById('add-wt-squash').checked = resolved.worktree_merge_squash !== false;
+    if (resolved.icon) selectIcon(resolved.icon);
     _toggleAddWorktreeFields();
   }
 
   document.getElementById('modal-add').classList.add('visible');
+  if (!isTerminal && _pendingModal && _pendingModal.template) {
+    onAddTemplateChange();
+  }
   document.getElementById('add-name-input').focus();
+}
+
+function _applyRenderedAddTemplate(config, templateName) {
+  if (!config || addCellMode !== 'agent') return;
+  _addTemplateApplied = templateName || '';
+  document.getElementById('add-provider-select').value = config.provider || '';
+  document.getElementById('add-cmd-input').value = config.command || '';
+  document.getElementById('add-shell-select').value = config.shell || '';
+  document.getElementById('add-env-vars').value = _envToText(config.env_vars || {});
+  document.getElementById('add-wt-enabled').checked = !!config.worktree;
+  document.getElementById('add-wt-base-dir').value = config.worktree_base_dir || '';
+  document.getElementById('add-wt-base-branch').value = config.worktree_base_branch || '';
+  document.getElementById('add-wt-auto-checkpoint').checked = !!config.worktree_auto_checkpoint;
+  document.getElementById('add-wt-squash').checked = config.worktree_merge_squash !== false;
+  if (config.profile) document.getElementById('add-profile-select').value = config.profile;
+  if (config.tab_color) selectColor(config.tab_color);
+  else selectColor('');
+  if (config.icon) selectIcon(config.icon);
+  else selectIcon('');
+  const dirSel = document.getElementById('add-dir-select');
+  const dirInput = document.getElementById('add-dir-input');
+  if (config.directory) {
+    let matched = false;
+    for (const opt of dirSel.options) {
+      if (opt.value === config.directory) {
+        dirSel.value = config.directory;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      dirSel.value = '__custom__';
+      dirInput.value = config.directory;
+      dirInput.classList.remove('hidden');
+    }
+  }
+  const nameInput = document.getElementById('add-name-input');
+  const meta = _findTemplateMeta(templateName);
+  if (nameInput && !nameInput.value.trim() && meta) {
+    nameInput.value = meta.display_name || meta.name.split('/').pop();
+  }
+  onAddProviderChange();
+  _toggleAddWorktreeFields();
+}
+
+function onAddTemplateChange() {
+  if (addCellMode !== 'agent') return;
+  const sel = document.getElementById('add-template-select');
+  const name = sel ? sel.value : '';
+  if (!name) {
+    if (_pendingModal) _pendingModal.template = '';
+    if (_addModalConfig) _showAddModal(addCellMode, document.getElementById('add-group-select').value, _addModalConfig);
+    return;
+  }
+  if (_pendingModal) _pendingModal.template = name;
+  send({
+    cmd: 'render_template',
+    group: document.getElementById('add-group-select').value,
+    name: name,
+  });
+}
+
+function _handleRenderedTemplate(msg) {
+  const modal = document.getElementById('modal-add');
+  if (!modal || !modal.classList.contains('visible')) return;
+  const sel = document.getElementById('add-template-select');
+  if (!sel || sel.value !== (msg.name || '')) return;
+  _applyRenderedAddTemplate(msg.config || {}, msg.name || '');
 }
 
 function onDirChange() {
@@ -503,6 +633,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-agent-directory').value = s.agent_directory || '';
   document.getElementById('gs-agent-shell').value = s.agent_shell || '';
   _populateProviderSelect('gs-agent-provider', s.agent_provider || '', false);
+  _populateTemplateSelect('gs-default-agent-template', s.default_agent_template || '', 'None');
   document.getElementById('gs-agent-boot-cmd').value = s.agent_boot_command || '';
   onGsProviderChange();
   document.getElementById('gs-worktree').checked = s.git_worktree || false;
@@ -582,6 +713,7 @@ function submitGroupSettings() {
     agent_profile: document.getElementById('gs-agent-profile').value,
     agent_shell: document.getElementById('gs-agent-shell').value,
     agent_tab_color: _gsAgentColor,
+    default_agent_template: document.getElementById('gs-default-agent-template').value,
     agent_provider: _getProviderValue('gs-agent-provider'),
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
     agent_env_vars: _textToEnv('gs-agent-env-vars'),
@@ -628,7 +760,9 @@ function _toggleAddWorktreeFields() {
   document.getElementById('add-wt-fields').style.display = on ? 'block' : 'none';
 }
 
-function openAddAgent(group)              { _openAddModal('agent', group); }
+function openAddAgent(group, templateName) {
+  _openAddModal('agent', group, '', templateName || '');
+}
 function openAddTerminal(group, parentId) { _openAddModal('terminal', group, parentId); }
 
 function submitAdd() {
@@ -664,6 +798,8 @@ function submitAdd() {
     if (args) msg.command_args = args;
     if (init) msg.init_script = init;
   } else {
+    const tpl = document.getElementById('add-template-select').value;
+    if (tpl) msg.template = tpl;
     const prov = document.getElementById('add-provider-select').value;
     if (prov && prov !== '__custom__') msg.provider = prov;
     if (command) msg.command = command;
@@ -881,6 +1017,7 @@ function _tplSubmit() {
     closeModals();
     _taskEditId = null;
     _taskSelectedAction = _tplName;
+    _taskSelectedTemplate = '';
     _taskActionVarValues = {};
     for (var vk in vars) {
       if (vk !== 'TASK') _taskActionVarValues[vk] = vars[vk];
@@ -893,7 +1030,9 @@ function _tplSubmit() {
     _populateTaskGroupSelect(_tplGroup || _currentGroup());
     document.getElementById('modal-task').dataset.lane = _tplTaskLane || '';
     _taskModalWaiting = true;
+    _taskTemplateWaiting = true;
     send({ cmd: 'list_actions', group: _tplGroup || _currentGroup() });
+    send({ cmd: 'list_templates', group: _tplGroup || _currentGroup() });
     document.getElementById('modal-task').classList.add('visible');
     document.getElementById('task-task-input').focus();
   } else {
@@ -919,6 +1058,7 @@ function _handleActionRendered(msg) {
   _setTaskLabels(msg.labels || []);
 
   _taskSelectedAction = msg.name || _tplName || '';
+  _taskSelectedTemplate = '';
   _taskActionVarValues = {};
 
   var group = msg.group || _tplGroup || _currentGroup();
@@ -928,7 +1068,9 @@ function _handleActionRendered(msg) {
 
   // Request action list to populate the picker
   _taskModalWaiting = true;
+  _taskTemplateWaiting = true;
   send({ cmd: 'list_actions', group: group });
+  send({ cmd: 'list_templates', group: group });
 
   document.getElementById('modal-task').classList.add('visible');
   document.getElementById('task-task-input').focus();
@@ -940,10 +1082,13 @@ function _handleActionRendered(msg) {
 
 let _taskEditId = null;  // null = create mode, string = edit mode
 let _taskActions = [];          // cached action list for task modal
+let _taskTemplates = [];        // cached templates for task modal
 let _taskSelectedAction = '';   // selected action name
+let _taskSelectedTemplate = ''; // selected template name
 let _taskActionVars = [];       // variable definitions for selected action
 let _taskActionVarValues = {};  // pre-filled variable values (from edit)
 let _taskModalWaiting = false;  // waiting for action list to populate picker
+let _taskTemplateWaiting = false; // waiting for template list
 let _taskLabels = [];           // current label chips
 
 function taskLabelsKeydown(e) {
@@ -993,6 +1138,7 @@ function _currentGroup() {
 function openAddTask(lane) {
   _taskEditId = null;
   _taskSelectedAction = '';
+  _taskSelectedTemplate = '';
   _taskActionVars = [];
   _taskActionVarValues = {};
 
@@ -1008,7 +1154,9 @@ function openAddTask(lane) {
 
   // Request actions for picker
   _taskModalWaiting = true;
+  _taskTemplateWaiting = true;
   send({ cmd: 'list_actions', group: _currentGroup() });
+  send({ cmd: 'list_templates', group: _currentGroup() });
 
   document.getElementById('modal-task').classList.add('visible');
   document.getElementById('task-task-input').focus();
@@ -1024,6 +1172,7 @@ function openEditTask(taskId) {
 
   _taskEditId = taskId;
   _taskSelectedAction = t.action_name || '';
+  _taskSelectedTemplate = t.agent_template || '';
   _taskActionVars = [];
   _taskActionVarValues = t.action_vars || {};
 
@@ -1041,7 +1190,9 @@ function openEditTask(taskId) {
 
   // Request actions for picker
   _taskModalWaiting = true;
+  _taskTemplateWaiting = true;
   send({ cmd: 'list_actions', group: t.group || _currentGroup() });
+  send({ cmd: 'list_templates', group: t.group || _currentGroup() });
 
   document.getElementById('modal-task').classList.add('visible');
   taskAutoResize(taskEl);
@@ -1074,6 +1225,7 @@ function submitTask() {
   }
 
   var description = document.getElementById('task-description-input').value.trim();
+  _taskSelectedTemplate = document.getElementById('task-template-select').value || '';
   // Include any text still in the input as a label
   var pendingLabel = document.getElementById('task-labels-input').value.trim();
   if (pendingLabel && _taskLabels.indexOf(pendingLabel) < 0) _taskLabels.push(pendingLabel);
@@ -1084,6 +1236,7 @@ function submitTask() {
     // Edit mode
     var msg = { cmd: 'board_update_task', id: _taskEditId, task: task, group: group, description: description };
     msg.action_name = _taskSelectedAction;
+    msg.agent_template = _taskSelectedTemplate;
     msg.action_vars = actionVars;
     msg.labels = labels;
     send(msg);
@@ -1093,6 +1246,7 @@ function submitTask() {
     var msg = { cmd: 'board_add_task', task: task, group: group, lane: lane };
     if (description) msg.description = description;
     if (_taskSelectedAction) msg.action_name = _taskSelectedAction;
+    if (_taskSelectedTemplate) msg.agent_template = _taskSelectedTemplate;
     if (Object.keys(actionVars).length) msg.action_vars = actionVars;
     if (labels.length) msg.labels = labels;
     send(msg);
@@ -1130,6 +1284,11 @@ function _populateTaskActionSelect(actions) {
     _taskActionVars = [];
   }
   _renderTaskActionVars();
+}
+
+function _populateTaskTemplateSelect(templates) {
+  _taskTemplates = templates;
+  _populateTemplateSelect('task-template-select', _taskSelectedTemplate, 'None');
 }
 
 function taskActionChanged() {
@@ -1213,6 +1372,11 @@ function _handleTaskActionList(msg) {
   // Called when action list arrives and task modal is open
   _taskModalWaiting = false;
   _populateTaskActionSelect(msg.actions || []);
+}
+
+function _handleTaskTemplateList(msg) {
+  _taskTemplateWaiting = false;
+  _populateTaskTemplateSelect(msg.templates || []);
 }
 
 function taskAutoResize(el) {

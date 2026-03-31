@@ -110,6 +110,7 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
   if (t.group && !isSubordinate) meta += '<span class="board-card-group">' + esc(t.group) + '</span>';
   if (t.action_name) meta += '<span class="board-card-label board-card-template">' + esc(t.action_name) + '</span>';
+  if (t.agent_template) meta += '<span class="board-card-label board-card-template">agent: ' + esc(t.agent_template) + '</span>';
   if (t.labels && t.labels.length) {
     for (var li = 0; li < t.labels.length; li++) {
       var lb = t.labels[li];
@@ -973,4 +974,3 @@ function submitResolve() {
   send({ cmd: 'resolve_ask', id: taskId, answer: answer });
   closeModals();
 }
-

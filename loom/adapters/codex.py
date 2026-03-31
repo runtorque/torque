@@ -93,6 +93,17 @@ class CodexAdapter(AgentAdapter):
     def get_env_vars(self, cell) -> dict[str, str]:
         return {"LOOM_CELL_ID": cell.id}
 
+    def inject_system_prompt(self, working_dir: str, text: str) -> str:
+        del working_dir
+        if not text:
+            return ""
+        return f" --instructions {shlex.quote(text)}"
+
+    def resolve_model_flags(self, model: str) -> str:
+        if not model:
+            return ""
+        return f" --model {shlex.quote(model)}"
+
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
         base = boot_cmd.strip().split()[0]
         return f"{base} resume {shlex.quote(session_id)}"

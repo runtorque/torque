@@ -6,6 +6,7 @@ let state = { agents: {}, groups: {}, children: {}, active_session_id: null };
 let dragInProgress = false;
 let selectedAgentId = null;
 let focusedItemId = null;
+let _cachedAgentTemplates = [];
 
 var _firstStateReceived = false;
 var _expectedSeq = 0;
@@ -31,12 +32,14 @@ function connect() {
       _handleDelta(msg);
     } else if (msg.type === 'config') {
       if (msg.providers) _cachedProviders = msg.providers;
+      if (msg.templates) _cachedAgentTemplates = msg.templates;
       if (_pendingModal) {
         _showAddModal(_pendingModal.mode, _pendingModal.group, msg);
         _pendingModal = null;
       }
     } else if (msg.type === 'group_settings') {
       if (msg.providers) _cachedProviders = msg.providers;
+      if (msg.templates) _cachedAgentTemplates = msg.templates;
       _showGroupSettings(msg.group, msg);
     } else if (msg.type === 'toast') {
       _showToast(msg.message, msg.level);
@@ -49,13 +52,44 @@ function connect() {
         _boardShowActionList(msg);
       } else if (typeof _taskModalWaiting !== 'undefined' && _taskModalWaiting) {
         _handleTaskActionList(msg);
-      } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
+      } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions'
+          && typeof _panelEditorMode !== 'undefined' && _panelEditorMode === 'actions') {
         tplEditorReceiveList(msg);
       } else {
         _showActionList(msg);
       }
+    } else if (msg.type === 'templates') {
+      _cachedAgentTemplates = msg.templates || [];
+      if (typeof _taskTemplateWaiting !== 'undefined' && _taskTemplateWaiting) {
+        _handleTaskTemplateList(msg);
+      } else if (typeof _activePanelApp !== 'undefined'
+          && _activePanelApp === 'actions'
+          && typeof _panelEditorMode !== 'undefined'
+          && _panelEditorMode === 'templates'
+          && typeof agentTemplateReceiveList === 'function') {
+        agentTemplateReceiveList(msg);
+      } else if (typeof _activePanelApp !== 'undefined'
+          && _activePanelApp === 'actions'
+          && typeof _panelEditorMode !== 'undefined'
+          && _panelEditorMode === 'actions'
+          && typeof renderTemplatesEditor === 'function') {
+        renderTemplatesEditor();
+      }
+    } else if (msg.type === 'template_detail') {
+      if (typeof _activePanelApp !== 'undefined'
+          && _activePanelApp === 'actions'
+          && typeof _panelEditorMode !== 'undefined'
+          && _panelEditorMode === 'templates'
+          && typeof agentTemplateReceiveDetail === 'function') {
+        agentTemplateReceiveDetail(msg);
+      }
+    } else if (msg.type === 'template_rendered') {
+      if (typeof _handleRenderedTemplate === 'function') {
+        _handleRenderedTemplate(msg);
+      }
     } else if (msg.type === 'action_detail') {
-      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
+      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions'
+          && typeof _panelEditorMode !== 'undefined' && _panelEditorMode === 'actions') {
         tplEditorReceiveDetail(msg);
       } else {
         _showActionVarForm(msg);

@@ -695,6 +695,7 @@ class WorktreeManager:
         entries = [
             ".loom/worktrees/",
             ".claude/settings.local.json",
+            ".claude/instructions.md",
             ".mcp.json",
             ".claude/skills/loom-*/",
             ".codex/config.toml",

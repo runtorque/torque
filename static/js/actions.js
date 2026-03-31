@@ -10,12 +10,27 @@ var _tplEditorNew = false;     // true when creating a new template
 var _tplEditorScope = 'project'; // 'project' or 'user'
 var _tplPanelView = 'editor';  // 'editor' or 'pipelines'
 var _tplPipelinesData = null;  // cached pipeline discovery result
+var _panelEditorMode = 'actions'; // 'actions' or 'templates'
 
 /* ---- Load & render ------------------------------------------------- */
 
 function tplEditorLoad() {
+  if (_panelEditorMode === 'templates' && typeof agentTemplateEditorLoad === 'function') {
+    agentTemplateEditorLoad();
+    return;
+  }
   var group = _currentGroup();
+  send({ cmd: 'list_templates', group: group });
   send({ cmd: 'list_actions', group: group });
+}
+
+function switchPanelEditorMode(mode) {
+  _panelEditorMode = mode === 'templates' ? 'templates' : 'actions';
+  if (_panelEditorMode === 'templates' && typeof renderAgentTemplatesPanel === 'function') {
+    agentTemplateEditorLoad();
+  } else {
+    tplEditorLoad();
+  }
 }
 
 function _tplKey(t) {
@@ -29,6 +44,7 @@ function _tplSelectedName() {
 }
 
 function tplEditorReceiveList(msg) {
+  if (_panelEditorMode !== 'actions') return;
   _tplEditorList = msg.actions || [];
 
   // If we just saved, select it with the right scope key
@@ -55,6 +71,7 @@ function tplEditorReceiveList(msg) {
 }
 
 function tplEditorReceiveDetail(msg) {
+  if (_panelEditorMode !== 'actions') return;
   if (msg.name !== _tplSelectedName()) return;
   _tplEditorData = msg.action || {};
   _tplEditorDirty = false;
@@ -68,10 +85,18 @@ function tplEditorReceiveDetail(msg) {
 /* ---- Render -------------------------------------------------------- */
 
 function renderTemplatesPanel() {
+  if (_panelEditorMode === 'templates' && typeof renderAgentTemplatesPanel === 'function') {
+    renderAgentTemplatesPanel();
+    return;
+  }
   var panel = document.getElementById('panel-actions');
   if (!panel) return;
 
   var html = '';
+  html += '<div class="panel-mode-tabs">';
+  html += '<button class="panel-mode-tab active" onclick="switchPanelEditorMode(\'actions\')">Actions</button>';
+  html += '<button class="panel-mode-tab" onclick="switchPanelEditorMode(\'templates\')">Agent Templates</button>';
+  html += '</div>';
 
   // Header bar
   html += '<div class="tpled-header">';
@@ -168,7 +193,9 @@ function renderTemplatesEditor() {
   }
 
   var d = _tplEditorData || {};
-  var agent = d.agent || {};
+  var agentTemplate = typeof d.agent === 'string' ? d.agent : '';
+  var agent = typeof d.agent === 'string' ? {} : (d.agent || {});
+  var agentUsesTemplate = !!agentTemplate;
 
   var html = '<div class="tpled-form">';
 
@@ -184,8 +211,31 @@ function renderTemplatesEditor() {
   html += '<input id="tpled-desc" value="' + esc(d.description || '') + '" autocomplete="off" onchange="tplEditorMarkDirty()">';
 
   // Agent block (collapsible)
-  html += '<details class="tpled-section"' + (agent.name_prefix || agent.tab_color || agent.command ? ' open' : '') + '>';
+  html += '<details class="tpled-section"' + (agentUsesTemplate || agent.name_prefix || agent.tab_color || agent.command ? ' open' : '') + '>';
   html += '<summary>Agent</summary>';
+  html += '<label>Agent template</label>';
+  html += '<select id="tpled-agent-template" onchange="tplEditorToggleAgentMode();tplEditorMarkDirty()">';
+  html += '<option value="">Legacy inline config</option>';
+  var projectAgentTpls = (_cachedAgentTemplates || []).filter(function(t) { return !t.global && !t.shadowed; });
+  var userAgentTpls = (_cachedAgentTemplates || []).filter(function(t) { return t.global && !t.shadowed; });
+  if (projectAgentTpls.length) {
+    html += '<optgroup label="Project">';
+    for (var ati = 0; ati < projectAgentTpls.length; ati++) {
+      var aSel = projectAgentTpls[ati].name === agentTemplate ? ' selected' : '';
+      html += '<option value="' + esc(projectAgentTpls[ati].name) + '"' + aSel + '>' + esc(projectAgentTpls[ati].display_name || projectAgentTpls[ati].name) + '</option>';
+    }
+    html += '</optgroup>';
+  }
+  if (userAgentTpls.length) {
+    html += '<optgroup label="User">';
+    for (var aui = 0; aui < userAgentTpls.length; aui++) {
+      var auSel = userAgentTpls[aui].name === agentTemplate ? ' selected' : '';
+      html += '<option value="' + esc(userAgentTpls[aui].name) + '"' + auSel + '>' + esc(userAgentTpls[aui].display_name || userAgentTpls[aui].name) + '</option>';
+    }
+    html += '</optgroup>';
+  }
+  html += '</select>';
+  html += '<div class="tpled-inline-agent-fields' + (agentUsesTemplate ? ' hidden' : '') + '" id="tpled-inline-agent-fields">';
   html += '<label>Name prefix</label>';
   html += '<input id="tpled-agent-prefix" value="' + esc(agent.name_prefix || '') + '" placeholder="e.g. fix" autocomplete="off" onchange="tplEditorMarkDirty()">';
   html += '<label>Tab color</label>';
@@ -194,6 +244,7 @@ function renderTemplatesEditor() {
   html += '<input id="tpled-agent-cmd" value="' + esc(agent.command || '') + '" placeholder="e.g. claude" autocomplete="off" onchange="tplEditorMarkDirty()">';
   html += '<label>Directory</label>';
   html += '<input id="tpled-agent-dir" value="' + esc(agent.directory || '') + '" autocomplete="off" onchange="tplEditorMarkDirty()">';
+  html += '</div>';
   html += '</details>';
 
   // Settings
@@ -276,6 +327,13 @@ function _tplAutoResize(el) {
       bd.style.height = el.style.height;
     }
   }
+}
+
+function tplEditorToggleAgentMode() {
+  var sel = document.getElementById('tpled-agent-template');
+  var wrap = document.getElementById('tpled-inline-agent-fields');
+  if (!sel || !wrap) return;
+  wrap.classList.toggle('hidden', !!sel.value);
 }
 
 function _tplHighlightWrap(id, value) {
@@ -548,21 +606,28 @@ function _tplEditorSaveInner() {
   }
 
   var transitions = _tplReadTransitions();
+  var agentTemplate = (document.getElementById('tpled-agent-template').value || '').trim();
+  var legacyAgent = {
+    name_prefix: (document.getElementById('tpled-agent-prefix').value || '').trim(),
+    tab_color: (document.getElementById('tpled-agent-color').value || '').trim(),
+    command: (document.getElementById('tpled-agent-cmd').value || '').trim(),
+    directory: (document.getElementById('tpled-agent-dir').value || '').trim(),
+  };
 
   var actData = {
     description: (document.getElementById('tpled-desc').value || '').trim(),
-    agent: {
-      name_prefix: (document.getElementById('tpled-agent-prefix').value || '').trim(),
-      tab_color: (document.getElementById('tpled-agent-color').value || '').trim(),
-      command: (document.getElementById('tpled-agent-cmd').value || '').trim(),
-      directory: (document.getElementById('tpled-agent-dir').value || '').trim(),
-    },
     group: (document.getElementById('tpled-group').value || '').trim(),
     worktree: document.getElementById('tpled-worktree').checked,
     prompt: prompt,
     labels: labels,
     transitions: transitions,
   };
+  if (agentTemplate) {
+    actData.agent = agentTemplate;
+  } else if (legacyAgent.name_prefix || legacyAgent.tab_color
+      || legacyAgent.command || legacyAgent.directory) {
+    actData.agent = legacyAgent;
+  }
 
   var scope = document.getElementById('tpled-scope').value || 'project';
 
@@ -614,7 +679,7 @@ function _tplEditorReadForm() {
   return {
     name: (document.getElementById('tpled-name').value || '').trim(),
     description: (document.getElementById('tpled-desc').value || '').trim(),
-    agent: {
+    agent: (document.getElementById('tpled-agent-template').value || '').trim() || {
       name_prefix: (document.getElementById('tpled-agent-prefix').value || '').trim(),
       tab_color: (document.getElementById('tpled-agent-color').value || '').trim(),
       command: (document.getElementById('tpled-agent-cmd').value || '').trim(),

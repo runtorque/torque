@@ -37,6 +37,7 @@ These settings override the group defaults when creating agents specifically. Le
 | **Shell** | Shell for agents. |
 | **Tab color** | Tab color for agents. Select the arrow (++up++) to inherit from the group, or ++x++ for no color. |
 | **Additional environment** | Extra environment variables for agents, merged with (and can override) the group environment. |
+| **Default agent template** | Optional base template applied to new agents in this group before group-specific `agent_*` overrides. |
 
 ### Git worktree per agent
 
@@ -73,14 +74,17 @@ Same as the agent version, but applies to the "+ New terminal" button.
 
 ## How defaults are resolved
 
-When creating an agent or terminal, settings are resolved in this order (first non-empty value wins):
+When creating an agent, Loom resolves settings in this order:
 
-1. Value provided in the custom creation dialog
-2. Agent-specific or terminal-specific override from group settings
-3. Group-level default
-4. System default (e.g., "Default" profile, no shell override)
+1. Group default agent template
+2. Group `agent_*` overrides
+3. Explicit agent template chosen on the agent, task, or action
+4. Values provided in the custom creation dialog
+5. Group-level defaults / system defaults where applicable
 
-For environment variables, all three levels are merged. Variables from more specific levels override those from less specific ones.
+For terminals, the old resolution still applies: terminal-specific overrides, then group defaults, then system defaults.
+
+For environment variables, all applicable levels are merged. More specific levels override less specific ones.
 
 For tab color, the agent/terminal tabs have three states:
 

@@ -24,6 +24,11 @@ Loom also supports a standalone mode where the UI runs in a browser window inste
 
 See [Getting Started](getting-started.md) to install and run Loom.
 
+## Core concepts
+
+- [Agent templates](agent-templates.md) for reusable agent configuration used by creation and dispatch
+- [Actions & templates](actions.md) for reusable action prompts, variables, and pipelines
+
 ## Features
 
 - Visual grid of agents and terminals in the iTerm2 Toolbelt (or standalone browser window)
@@ -39,5 +44,5 @@ See [Getting Started](getting-started.md) to install and run Loom.
 - Per-group window filtering to keep unrelated work out of sight
 - [Task board](board.md) with Kanban lanes, pipeline chains, and agent dispatch
 - [`loom` CLI](cli.md) for scripting and automation (`make cli` to install)
-- [Actions & templates](actions.md) for reusable prompt templates with Jinja2, variables, and pipeline transitions
+- [Actions & templates](actions.md) for reusable action prompts plus reusable agent templates
 - `loom dispatch` to create agents from YAML actions with one command

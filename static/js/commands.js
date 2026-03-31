@@ -88,6 +88,16 @@ function quickAddAgent(group) {
   if (gs.agent_always_custom_dialog) { openAddAgent(group); return; }
   send({ cmd: 'add_agent', name: _nextName('Agent'), group });
 }
+
+function newAgentFromTemplate(group, templateName) {
+  const gs = (state.group_settings || {})[group] || {};
+  if (gs.agent_always_custom_dialog) {
+    openAddAgent(group, templateName || '');
+    return;
+  }
+  send({ cmd: 'add_agent', group, template: templateName || '' });
+}
+
 function quickAddTerminal(group, parentId) {
   const gs = (state.group_settings || {})[group] || {};
   if (gs.terminal_always_custom_dialog) { openAddTerminal(group, parentId); return; }

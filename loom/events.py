@@ -307,8 +307,7 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
             if cell.last_event_at == 0.0:
                 continue  # never received an event
 
-            gs = state.get_group_settings(cell.group)
-            timeout_min = gs.agent_idle_timeout
+            timeout_min = cell.idle_timeout
             if timeout_min <= 0:
                 continue  # idle timeout disabled for this group
 

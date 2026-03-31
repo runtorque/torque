@@ -1,6 +1,11 @@
 # Actions & Templates
 
-Actions are reusable prompt templates that tell agents what to do. They define the system prompt, agent settings, and pipeline transitions in a single YAML file. When you dispatch a task, Loom renders the action's prompt with the task description and sends it to the agent.
+Loom now separates reusable agent configuration from reusable task prompts:
+
+- **Agent templates** define who does the work: provider, model, permissions, system prompt, worktree behavior, environment, and child terminals.
+- **Actions** define what work to do: the rendered prompt, labels, and pipeline transitions.
+
+When you dispatch a task, Loom resolves both pieces. The agent template creates the session, then the action prompt is rendered and sent to it.
 
 ## Why actions?
 
@@ -64,14 +69,14 @@ prompt: |
 | **name** | string | yes | Unique identifier. Supports namespaces: `feature/review` maps to `feature/review.yaml`. |
 | **description** | string | no | One-line description shown in the UI action picker. |
 | **prompt** | string | yes | The Jinja2 template rendered and sent to the agent. Must contain `{{ TASK }}`. |
-| **agent** | object | no | Agent settings applied when the action spawns a new agent. |
-| **agent.name_prefix** | string | no | Prefix for the agent name (e.g., `impl` produces `impl-fix-login-bug`). |
-| **agent.command** | string | no | Boot command override (default: group setting or `claude`). |
-| **agent.directory** | string | no | Working directory override. |
-| **agent.profile** | string | no | iTerm2 profile override. |
-| **agent.shell** | string | no | Shell override. |
-| **agent.tab_color** | string | no | Hex tab color (e.g., `"#3fb950"`). |
-| **agent.env_vars** | object | no | Environment variables to set. |
+| **agent** | string or object | no | Preferred: agent template name to use when the action spawns a new agent. Legacy inline agent mapping is still supported but deprecated. |
+| **agent.name_prefix** | string | no | Legacy inline field. Prefix for the agent name (deprecated). |
+| **agent.command** | string | no | Legacy inline field. Boot command override (deprecated). |
+| **agent.directory** | string | no | Legacy inline field. Working directory override (deprecated). |
+| **agent.profile** | string | no | Legacy inline field. iTerm2 profile override (deprecated). |
+| **agent.shell** | string | no | Legacy inline field. Shell override (deprecated). |
+| **agent.tab_color** | string | no | Legacy inline field. Hex tab color (deprecated). |
+| **agent.env_vars** | object | no | Legacy inline field. Environment variables to set (deprecated). |
 | **worktree** | boolean | no | If `true`, create an isolated git worktree for the agent. |
 | **labels** | list | no | Labels applied to the task on the board. |
 | **transitions** | list | no | Valid next actions for pipeline chaining (see [Pipelines](#pipelines)). |
@@ -190,7 +195,40 @@ prompt: |
 ```
 
 !!! note
-    Only the `prompt` field is rendered through Jinja2. All other fields (`name`, `description`, `agent.*`, etc.) are plain YAML.
+    Only the `prompt` field is rendered through Jinja2. Agent templates are static YAML in v1; they do not render Jinja2 expressions.
+
+## Agent templates
+
+Agent templates live alongside actions but in a separate directory:
+
+| Scope | Path |
+|-------|------|
+| **Project** | `.loom/agents/` |
+| **User** | `~/.loom/agents/` |
+
+They support the fields documented in the UI editor: provider, command override, model, permissions, system prompt, initial prompt, session resume, idle timeout, tab color, icon, worktree settings, environment variables, and child terminals.
+
+Actions can reference templates directly:
+
+```yaml
+name: feature/research
+agent: researcher
+
+prompt: |
+  {{ TASK }}
+```
+
+Legacy inline agent blocks still work:
+
+```yaml
+name: oneshot/fix
+agent:
+  command: codex
+  directory: /repo
+
+prompt: |
+  {{ TASK }}
+```
 
 ## The `loom` context namespace
 

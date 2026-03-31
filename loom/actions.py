@@ -482,7 +482,9 @@ class ActionManager:
         if not isinstance(act, dict):
             return {}
 
-        agent = act.get("agent", {}) if isinstance(act, dict) else {}
+        raw_agent = act.get("agent", {}) if isinstance(act, dict) else {}
+        agent = raw_agent if isinstance(raw_agent, dict) else {}
+        agent_template = raw_agent if isinstance(raw_agent, str) else ""
 
         # Coalesce prompt from new or old format, then render through Jinja2
         prompt_raw = self._coalesce_prompt(act)
@@ -502,6 +504,7 @@ class ActionManager:
             "shell": agent.get("shell", ""),
             "tab_color": agent.get("tab_color", ""),
             "env_vars": agent.get("env_vars", {}),
+            "agent_template": agent_template,
             "prompt": prompt,
             "group": act.get("group", ""),
             "labels": act.get("labels", []),

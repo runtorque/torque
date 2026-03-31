@@ -27,6 +27,16 @@ function renderSplitBtn(quickAction, customAction) {
     + `</div></div>`;
 }
 
+function _renderAgentTemplateMenuItems(group) {
+  const templates = (_cachedAgentTemplates || []).filter(t => !t.shadowed);
+  let html = '';
+  for (const t of templates) {
+    const label = t.display_name || t.name;
+    html += `<button onclick="event.stopPropagation();closeMenus();newAgentFromTemplate('${esc(group)}','${esc(t.name)}')">${esc(label)}</button>`;
+  }
+  return html;
+}
+
 function toggleMenu(chevron) {
   const menu = chevron.nextElementSibling;
   const wasOpen = menu.classList.contains('open');
@@ -209,7 +219,11 @@ function render() {
       html += `  <div class="cell-add-icon">+</div>`;
       html += `  <div class="cell-name">New</div>`;
       html += `  <button class="cell-add-drop" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>`;
-      html += `  <div class="split-menu"><button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button><button onclick="event.stopPropagation();closeMenus();openAddFromAction('${esc(gname)}')">From Action\u2026</button></div>`;
+      html += `  <div class="split-menu">`;
+      html += _renderAgentTemplateMenuItems(gname);
+      html += `<button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button>`;
+      html += `<button onclick="event.stopPropagation();closeMenus();openAddFromAction('${esc(gname)}')">From Action\u2026</button>`;
+      html += `</div>`;
       html += `</div>`;
     }
     html += `</div>`;

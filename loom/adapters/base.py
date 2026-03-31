@@ -1,6 +1,7 @@
 """AgentEvent dataclass and AgentAdapter base class."""
 
 from dataclasses import dataclass, field
+import shlex
 
 EVENT_TYPES = frozenset({
     "session_start",
@@ -64,6 +65,24 @@ class AgentAdapter:
     def get_env_vars(self, cell) -> dict[str, str]:
         """Return extra environment variables to set when spawning."""
         return {}
+
+    def inject_system_prompt(self, working_dir: str, text: str) -> str:
+        """Install provider-specific system-prompt state and return CLI flags.
+
+        File-based adapters can write into ``working_dir`` and return ``""``.
+        Flag-based adapters can return the shell-escaped suffix to append to
+        the boot command.
+        """
+        del working_dir
+        if not text:
+            return ""
+        return f" --instructions {shlex.quote(text)}"
+
+    def resolve_model_flags(self, model: str) -> str:
+        """Return provider-specific CLI flags for the selected model."""
+        if not model:
+            return ""
+        return f" --model {shlex.quote(model)}"
 
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
         """Return the modified boot command for resuming a session.
