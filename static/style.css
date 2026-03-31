@@ -1180,7 +1180,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-add-task span { font-size: 10px; color: var(--text-dim); cursor: pointer; }
 .board-add-task-active {
   border-style: solid; border-color: var(--accent); opacity: 1;
-  padding: 0; overflow: visible; flex-direction: column;
+  padding: 0; overflow: visible; flex-direction: column; align-items: stretch;
 }
 .board-add-task-active .board-add-input {
   border: none; border-radius: var(--radius);
