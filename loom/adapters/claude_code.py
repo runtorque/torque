@@ -196,6 +196,63 @@ class ClaudeCodeAdapter(AgentAdapter):
         except Exception:
             pass  # Best-effort cleanup
 
+    def install_mcp_config(self, working_dir: str) -> bool:
+        """Write Loom MCP server entry into .mcp.json.
+
+        Merges with any existing .mcp.json so user's other MCP servers
+        are preserved.  Uses ${LOOM_CELL_ID} and ${LOOM_PORT:-18932}
+        env-var syntax which Claude Code interpolates natively.
+        Returns True if config was installed successfully.
+        """
+        mcp_file = Path(working_dir) / ".mcp.json"
+
+        loom_entry = {
+            "type": "http",
+            "url": "http://127.0.0.1:${LOOM_PORT:-18932}/mcp",
+            "headers": {"X-Loom-Cell-Id": "${LOOM_CELL_ID}"},
+        }
+
+        try:
+            existing = {}
+            if mcp_file.exists():
+                text = mcp_file.read_text().strip()
+                if text:
+                    existing = json.loads(text)
+
+            servers = existing.setdefault("mcpServers", {})
+            servers["loom"] = loom_entry
+            mcp_file.write_text(json.dumps(existing, indent=2) + "\n")
+            return True
+        except Exception:
+            return False
+
+    def uninstall_mcp_config(self, working_dir: str):
+        """Remove Loom MCP server entry from .mcp.json.
+
+        If the file only contained the Loom entry, deletes it entirely.
+        """
+        mcp_file = Path(working_dir) / ".mcp.json"
+        if not mcp_file.exists():
+            return
+
+        try:
+            text = mcp_file.read_text().strip()
+            if not text:
+                mcp_file.unlink(missing_ok=True)
+                return
+
+            existing = json.loads(text)
+            servers = existing.get("mcpServers", {})
+            servers.pop("loom", None)
+
+            if not servers:
+                mcp_file.unlink(missing_ok=True)
+            else:
+                existing["mcpServers"] = servers
+                mcp_file.write_text(json.dumps(existing, indent=2) + "\n")
+        except Exception:
+            pass  # Best-effort cleanup
+
     def parse_event(self, raw: dict, cell) -> AgentEvent | None:
         """Parse a Claude Code hook HTTP payload into a normalized AgentEvent."""
         hook_event = raw.get("hook_event_name", "")
