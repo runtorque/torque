@@ -429,6 +429,7 @@ function boardUpdateScrollArrows() {
 
 function boardStartAddTask() {
   _boardAddingTask = true;
+  _boardFocusedTask = '';
   renderBoard();
 }
 
@@ -724,6 +725,11 @@ function boardCardMenu(evt, taskId) {
   // Preview prompt
   html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
 
+  // Copy ID
+  html += '<div class="ctx-sep"></div>';
+  html += '<button onclick="event.stopPropagation();boardCopyTaskId(\'' + taskId + '\')">'
+    + 'Copy ID: <span class="ctx-id">' + esc(taskId) + '</span></button>';
+
   html += '<div class="ctx-sep"></div>';
   html += '<button class="danger" onclick="boardDeleteTask(\'' + taskId + '\')">Delete</button>';
 
@@ -732,6 +738,10 @@ function boardCardMenu(evt, taskId) {
   menu.style.left = Math.min(evt.clientX, window.innerWidth - 140) + 'px';
   menu.classList.add('open');
   _adjustCtxMenuOverflow();
+}
+
+function boardCopyTaskId(taskId) {
+  navigator.clipboard.writeText(taskId).then(function() { _closeCtxMenu(); });
 }
 
 /* ---- Card actions --------------------------------------------------- */

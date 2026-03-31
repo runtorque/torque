@@ -405,10 +405,11 @@
     <input id="task-assignee-input" autocomplete="off"
            onkeydown="if(event.key==='Enter')submitTask();if(event.key==='Escape')closeModals();">
     <label>Labels
-      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Comma-separated labels used for orchestration, e.g. 'urgent, frontend, deploy'.">?</span>
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Type a label and press Enter to add it.">?</span>
     </label>
-    <input id="task-labels-input" autocomplete="off"
-           onkeydown="if(event.key==='Enter')submitTask();if(event.key==='Escape')closeModals();">
+    <input id="task-labels-input" autocomplete="off" placeholder="Type and press Enter"
+           onkeydown="taskLabelsKeydown(event)">
+    <div id="task-labels-chips" class="label-chips"></div>
     <div class="modal-actions">
       <button class="btn-secondary" id="task-preview-btn" onclick="previewTaskPrompt()" style="display:none">Preview</button>
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>

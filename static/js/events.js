@@ -4,6 +4,7 @@
 
 var _eventsFilterByGroup = true;
 var _eventsScrollTop = 0;
+var _eventsExpandedEntries = {};
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -142,7 +143,7 @@ function renderEvents() {
   for (var j = events.length - 1; j >= 0 && count < 200; j--) {
     var evt = events[j];
     if (grp && evt.group !== grp) continue;
-    html += _renderEventEntry(evt);
+    html += _renderEventEntry(evt, j);
     count++;
   }
   if (count === 0) {
@@ -201,9 +202,11 @@ function _renderAttentionCard(item) {
 
 /* ---- Log entry rendering -------------------------------------------- */
 
-function _renderEventEntry(evt) {
+function _renderEventEntry(evt, idx) {
   var kindClass = _eventsKindClass(evt.kind);
-  var html = '<div class="events-entry ' + kindClass + '">';
+  var expanded = _eventsExpandedEntries[idx] ? ' expanded' : '';
+  var html = '<div class="events-entry ' + kindClass + expanded + '"'
+    + ' onclick="eventsToggleEntry(' + idx + ')">';
   html += '<span class="events-entry-time">' + _eventsFormatTime(evt.timestamp) + '</span>';
   html += '<span class="events-entry-icon">' + _eventsKindIcon(evt.kind) + '</span>';
   if (evt.agent_name) {
@@ -227,6 +230,12 @@ function eventsResolveInline(taskId) {
 
 function eventsFocusAgent(cellId) {
   if (typeof focusAgent === 'function') focusAgent(cellId);
+}
+
+function eventsToggleEntry(idx) {
+  if (_eventsExpandedEntries[idx]) delete _eventsExpandedEntries[idx];
+  else _eventsExpandedEntries[idx] = true;
+  renderEvents();
 }
 
 function eventsToggleGroupFilter() {

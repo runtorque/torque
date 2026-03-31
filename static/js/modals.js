@@ -779,7 +779,7 @@ function _tplSubmit() {
     document.getElementById('task-task-input').value = vars['TASK'] || '';
     document.getElementById('task-description-input').value = '';
     document.getElementById('task-assignee-input').value = '';
-    document.getElementById('task-labels-input').value = '';
+    _setTaskLabels([]);
     _populateTaskGroupSelect(_tplGroup || _currentGroup());
     document.getElementById('modal-task').dataset.lane = _tplTaskLane || '';
     _taskModalWaiting = true;
@@ -807,7 +807,7 @@ function _handleActionRendered(msg) {
   document.getElementById('task-task-input').value = '';
   document.getElementById('task-description-input').value = '';
   document.getElementById('task-assignee-input').value = '';
-  document.getElementById('task-labels-input').value = (msg.labels || []).join(', ');
+  _setTaskLabels(msg.labels || []);
 
   _taskSelectedAction = msg.name || _tplName || '';
   _taskActionVarValues = {};
@@ -835,6 +835,40 @@ let _taskSelectedAction = '';   // selected action name
 let _taskActionVars = [];       // variable definitions for selected action
 let _taskActionVarValues = {};  // pre-filled variable values (from edit)
 let _taskModalWaiting = false;  // waiting for action list to populate picker
+let _taskLabels = [];           // current label chips
+
+function taskLabelsKeydown(e) {
+  if (e.key === 'Escape') { closeModals(); return; }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    var val = e.target.value.trim();
+    if (!val) return;
+    if (_taskLabels.indexOf(val) < 0) _taskLabels.push(val);
+    e.target.value = '';
+    _renderTaskLabelChips();
+  }
+}
+
+function taskRemoveLabel(idx) {
+  _taskLabels.splice(idx, 1);
+  _renderTaskLabelChips();
+}
+
+function _renderTaskLabelChips() {
+  var container = document.getElementById('task-labels-chips');
+  if (!container) return;
+  var html = '';
+  for (var i = 0; i < _taskLabels.length; i++) {
+    html += '<span class="label-chip">' + esc(_taskLabels[i])
+      + '<button onclick="taskRemoveLabel(' + i + ')">&times;</button></span>';
+  }
+  container.innerHTML = html;
+}
+
+function _setTaskLabels(labels) {
+  _taskLabels = (labels || []).slice();
+  _renderTaskLabelChips();
+}
 
 function _currentGroup() {
   if (selectedAgentId && state && state.agents && state.agents[selectedAgentId]) {
@@ -859,7 +893,7 @@ function openAddTask(lane) {
   document.getElementById('task-task-input').value = '';
   document.getElementById('task-description-input').value = '';
   document.getElementById('task-assignee-input').value = '';
-  document.getElementById('task-labels-input').value = '';
+  _setTaskLabels([]);
   document.getElementById('task-action-vars').innerHTML = '';
 
   _populateTaskGroupSelect(_currentGroup());
@@ -893,7 +927,7 @@ function openEditTask(taskId) {
   var descEl = document.getElementById('task-description-input');
   descEl.value = t.description || '';
   document.getElementById('task-assignee-input').value = t.assignee || '';
-  document.getElementById('task-labels-input').value = (t.labels || []).join(', ');
+  _setTaskLabels(t.labels || []);
   document.getElementById('task-action-vars').innerHTML = '';
 
   _populateTaskGroupSelect(t.group || _currentGroup());
@@ -934,8 +968,10 @@ function submitTask() {
 
   var description = document.getElementById('task-description-input').value.trim();
   var assignee = document.getElementById('task-assignee-input').value.trim();
-  var labelsRaw = document.getElementById('task-labels-input').value.trim();
-  var labels = labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+  // Include any text still in the input as a label
+  var pendingLabel = document.getElementById('task-labels-input').value.trim();
+  if (pendingLabel && _taskLabels.indexOf(pendingLabel) < 0) _taskLabels.push(pendingLabel);
+  var labels = _taskLabels.slice();
   var actionVars = _collectTaskActionVars();
 
   if (_taskEditId) {
