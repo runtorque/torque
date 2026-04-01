@@ -197,6 +197,46 @@ CREATE TABLE IF NOT EXISTS panel_events (
     task_id    TEXT    NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_panel_events_ts ON panel_events (timestamp);
+
+CREATE TABLE IF NOT EXISTS agent_history (
+    id                TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    slug              TEXT DEFAULT '',
+    "group"           TEXT DEFAULT '',
+    agent_type        TEXT DEFAULT '',
+    template          TEXT DEFAULT '',
+    created_at        REAL NOT NULL,
+    removed_at        REAL,
+    worktree_branch   TEXT DEFAULT '',
+    total_tokens_in   INTEGER DEFAULT 0,
+    total_tokens_out  INTEGER DEFAULT 0,
+    total_tasks       INTEGER DEFAULT 0,
+    status            TEXT DEFAULT 'active'
+);
+
+CREATE TABLE IF NOT EXISTS agent_tasks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id    TEXT NOT NULL,
+    task_id     TEXT NOT NULL,
+    task_title  TEXT NOT NULL,
+    started_at  REAL NOT NULL,
+    completed_at REAL,
+    outcome     TEXT DEFAULT '',
+    FOREIGN KEY (agent_id) REFERENCES agent_history(id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_agent ON agent_tasks (agent_id);
+
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id    TEXT NOT NULL,
+    task_id     TEXT DEFAULT '',
+    timestamp   REAL NOT NULL,
+    action      TEXT NOT NULL,
+    message     TEXT DEFAULT '',
+    FOREIGN KEY (agent_id) REFERENCES agent_history(id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_agent ON agent_messages (agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_task ON agent_messages (task_id);
 """
 
 
@@ -335,6 +375,8 @@ class LoomDB:
                 "ALTER TABLE group_settings ADD COLUMN "
                 "default_agent_template TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
+        # Backfill agent history for existing agents
+        self.backfill_agent_history()
         # Set schema version if not present
         row = self._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
@@ -576,6 +618,180 @@ class LoomDB:
         row = self._conn.execute(
             "SELECT MAX(id) FROM panel_events").fetchone()
         return row[0] if row and row[0] is not None else 0
+
+    # -- Agent history -------------------------------------------------------
+
+    def save_agent_history(self, record: dict):
+        """Insert or replace an agent history record."""
+        self._conn.execute("""
+            INSERT OR REPLACE INTO agent_history
+                (id, name, slug, "group", agent_type, template,
+                 created_at, removed_at, worktree_branch,
+                 total_tokens_in, total_tokens_out, total_tasks, status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            record["id"], record["name"], record.get("slug", ""),
+            record.get("group", ""), record.get("agent_type", ""),
+            record.get("template", ""), record["created_at"],
+            record.get("removed_at"), record.get("worktree_branch", ""),
+            record.get("total_tokens_in", 0),
+            record.get("total_tokens_out", 0),
+            record.get("total_tasks", 0),
+            record.get("status", "active"),
+        ))
+        self._conn.commit()
+
+    def update_agent_history(self, agent_id: str, **fields):
+        """Update specific fields on an agent history record."""
+        if not fields:
+            return
+        allowed = {"name", "slug", "group", "agent_type", "template",
+                   "removed_at", "worktree_branch", "total_tokens_in",
+                   "total_tokens_out", "total_tasks", "status"}
+        parts = []
+        vals = []
+        for k, v in fields.items():
+            if k not in allowed:
+                continue
+            col = f'"{k}"' if k == "group" else k
+            parts.append(f"{col}=?")
+            vals.append(v)
+        if not parts:
+            return
+        vals.append(agent_id)
+        self._conn.execute(
+            f"UPDATE agent_history SET {','.join(parts)} WHERE id=?",
+            vals)
+        self._conn.commit()
+
+    def save_agent_task(self, record: dict):
+        """Insert an agent-task association."""
+        self._conn.execute(
+            "INSERT INTO agent_tasks "
+            "(agent_id, task_id, task_title, started_at, completed_at, "
+            "outcome) VALUES (?,?,?,?,?,?)",
+            (record["agent_id"], record["task_id"],
+             record["task_title"], record["started_at"],
+             record.get("completed_at"), record.get("outcome", "")))
+        self._conn.commit()
+
+    def update_agent_task(self, agent_id: str, task_id: str, **fields):
+        """Update an agent-task record (completed_at, outcome)."""
+        parts = []
+        vals = []
+        for k in ("completed_at", "outcome"):
+            if k in fields:
+                parts.append(f"{k}=?")
+                vals.append(fields[k])
+        if not parts:
+            return
+        vals.extend([agent_id, task_id])
+        self._conn.execute(
+            f"UPDATE agent_tasks SET {','.join(parts)} "
+            f"WHERE agent_id=? AND task_id=?", vals)
+        self._conn.commit()
+
+    def save_agent_message(self, record: dict):
+        """Insert an agent message record."""
+        self._conn.execute(
+            "INSERT INTO agent_messages "
+            "(agent_id, task_id, timestamp, action, message) "
+            "VALUES (?,?,?,?,?)",
+            (record["agent_id"], record.get("task_id", ""),
+             record["timestamp"], record["action"],
+             record.get("message", "")))
+        self._conn.commit()
+
+    def load_agent_history(self, status_filter: str = "",
+                           limit: int = 50, offset: int = 0
+                           ) -> list[dict]:
+        """Load agent history records, active first."""
+        sql = (
+            "SELECT id, name, slug, \"group\", agent_type, template, "
+            "created_at, removed_at, worktree_branch, total_tokens_in, "
+            "total_tokens_out, total_tasks, status FROM agent_history")
+        params: list = []
+        if status_filter:
+            sql += " WHERE status=?"
+            params.append(status_filter)
+        sql += (" ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END,"
+                " created_at DESC LIMIT ? OFFSET ?")
+        params.extend([limit, offset])
+        rows = self._conn.execute(sql, params).fetchall()
+        cols = ["id", "name", "slug", "group", "agent_type", "template",
+                "created_at", "removed_at", "worktree_branch",
+                "total_tokens_in", "total_tokens_out", "total_tasks",
+                "status"]
+        return [dict(zip(cols, r)) for r in rows]
+
+    def load_agent_history_detail(self, agent_id: str
+                                  ) -> Optional[dict]:
+        """Load a single agent history record."""
+        row = self._conn.execute(
+            "SELECT id, name, slug, \"group\", agent_type, template, "
+            "created_at, removed_at, worktree_branch, total_tokens_in, "
+            "total_tokens_out, total_tasks, status "
+            "FROM agent_history WHERE id=?", (agent_id,)).fetchone()
+        if not row:
+            return None
+        cols = ["id", "name", "slug", "group", "agent_type", "template",
+                "created_at", "removed_at", "worktree_branch",
+                "total_tokens_in", "total_tokens_out", "total_tasks",
+                "status"]
+        return dict(zip(cols, row))
+
+    def load_agent_tasks(self, agent_id: str) -> list[dict]:
+        """Load task associations for an agent."""
+        rows = self._conn.execute(
+            "SELECT id, agent_id, task_id, task_title, started_at, "
+            "completed_at, outcome FROM agent_tasks "
+            "WHERE agent_id=? ORDER BY started_at DESC",
+            (agent_id,)).fetchall()
+        cols = ["id", "agent_id", "task_id", "task_title",
+                "started_at", "completed_at", "outcome"]
+        return [dict(zip(cols, r)) for r in rows]
+
+    def load_agent_messages(self, agent_id: str,
+                            limit: int = 100) -> list[dict]:
+        """Load messages for an agent, newest first."""
+        rows = self._conn.execute(
+            "SELECT id, agent_id, task_id, timestamp, action, message "
+            "FROM agent_messages WHERE agent_id=? "
+            "ORDER BY timestamp DESC LIMIT ?",
+            (agent_id, limit)).fetchall()
+        cols = ["id", "agent_id", "task_id", "timestamp",
+                "action", "message"]
+        return [dict(zip(cols, r)) for r in rows]
+
+    def load_agent_messages_by_task(self, task_id: str,
+                                    limit: int = 100) -> list[dict]:
+        """Load messages for a task, newest first."""
+        rows = self._conn.execute(
+            "SELECT id, agent_id, task_id, timestamp, action, message "
+            "FROM agent_messages WHERE task_id=? "
+            "ORDER BY timestamp DESC LIMIT ?",
+            (task_id, limit)).fetchall()
+        cols = ["id", "agent_id", "task_id", "timestamp",
+                "action", "message"]
+        return [dict(zip(cols, r)) for r in rows]
+
+    def backfill_agent_history(self):
+        """Create history records for existing agents that lack them."""
+        import time
+        rows = self._conn.execute(
+            "SELECT id, name, slug, group_name, agent_type, template, "
+            "worktree_branch, tasks_dispatched FROM agents "
+            "WHERE cell_type='agent' AND id NOT IN "
+            "(SELECT id FROM agent_history)").fetchall()
+        for r in rows:
+            self._conn.execute("""
+                INSERT OR IGNORE INTO agent_history
+                    (id, name, slug, "group", agent_type, template,
+                     created_at, worktree_branch, total_tasks, status)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+            """, (r[0], r[1], r[2], r[3], r[4], r[5],
+                  time.time(), r[6], r[7], "active"))
+        self._conn.commit()
 
     # -- Bulk save (transitional) -------------------------------------------
 

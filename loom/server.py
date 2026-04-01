@@ -199,6 +199,7 @@ async def main(connection: iterm2.Connection):
 
     async def _on_agent_session_end(cell):
         """Handle agent turn completion: merge verification + auto-checkpoint."""
+        state.history_snapshot_tokens(cell)
         # Check pending merge result
         if cell.id in _pending_merges:
             pre_sha, close_on_merge, clear_context = \
@@ -212,6 +213,7 @@ async def main(connection: iterm2.Connection):
                          cell.name, cell.worktree_branch,
                          cell.worktree_base_branch)
                 cell.worktree_checkpoints = 0
+                state.history_update_agent(cell, status="merged")
                 state._emit_agent(cell)
                 await _broadcast_toast(
                     f'"{cell.name}" merged to {cell.worktree_base_branch}',
@@ -528,6 +530,7 @@ async def main(connection: iterm2.Connection):
             cell.agent_type = launch_cfg["agent_type"]
         state._emit_agent(cell)
         state._db_save_agent(cell)
+        state.history_record_agent(cell)
 
         if launch_cfg.get("worktree") and cell.directory:
             repo_root = await worktree_mgr.get_repo_root(cell.directory)
@@ -541,6 +544,9 @@ async def main(connection: iterm2.Connection):
                     cell.directory = wt_path
                     state._emit_agent(cell)
                     state._db_save_agent(cell)
+                    state.history_update_agent(
+                        cell,
+                        worktree_branch=cell.worktree_branch)
 
         await bridge.create_session(
             cell,
@@ -912,6 +918,34 @@ async def main(connection: iterm2.Connection):
             limit = min(int(data.get("limit", 50)), 200)
             events = panel_log.get_page(limit=limit, before_id=before_id)
             return {"type": "events_page", "events": events}
+
+        # Agent history queries
+        if cmd == "get_agent_history":
+            status_filter = data.get("status", "")
+            limit = min(int(data.get("limit", 50)), 200)
+            offset = int(data.get("offset", 0))
+            records = db.load_agent_history(
+                status_filter=status_filter, limit=limit, offset=offset)
+            return {"type": "agent_history_list",
+                    "records": records}
+
+        if cmd == "get_agent_history_detail":
+            agent_id = data.get("agent_id", "")
+            if not agent_id:
+                return {"type": "error",
+                        "message": "agent_id required"}
+            record = db.load_agent_history_detail(agent_id)
+            if not record:
+                return {"type": "error",
+                        "message": "Agent not found in history"}
+            tasks = db.load_agent_tasks(agent_id)
+            messages = db.load_agent_messages(
+                agent_id,
+                limit=int(data.get("message_limit", 100)))
+            return {"type": "agent_history_detail",
+                    "record": record,
+                    "tasks": tasks,
+                    "messages": messages}
 
         # list_actions: respond directly
         if cmd == "list_actions":
@@ -1291,6 +1325,8 @@ async def main(connection: iterm2.Connection):
             elif cmd == "remove_agent":
                 removed = state.remove_agent(data["id"])
                 for c in removed:
+                    if c.cell_type == "agent":
+                        state.history_remove_agent(c)
                     if c.session_id:
                         await bridge.close_session(c.session_id)
                     # Clean up hooks and MCP config
@@ -1316,6 +1352,9 @@ async def main(connection: iterm2.Connection):
                     state.update_agent(data["id"], name=new_name,
                                        tab_color=new_color,
                                        icon=new_icon)
+                    if new_name != old_name and cell.cell_type == "agent":
+                        state.history_update_agent(
+                            cell, name=new_name, slug=cell.slug)
                     if cell.session_id:
                         await bridge.update_session(cell, old_name)
 
@@ -1829,6 +1868,7 @@ async def main(connection: iterm2.Connection):
                                 tid, agent_id=cell.id,
                                 lane=dispatch_lane)
                             cell.current_task_id = tid
+                            state.history_record_dispatch(cell, task)
 
                             # Build loom context for template rendering
                             loom_ctx = _build_loom_context(cell, task)
@@ -2178,6 +2218,12 @@ async def main(connection: iterm2.Connection):
                                 "agent_name": agent_name,
                             })
 
+                    def _record_history_msg(c, act, msg=""):
+                        """Persist to agent_messages history table."""
+                        state.history_record_message(
+                            c.id, act, msg,
+                            task_id=task.id if task else "")
+
                     async def _auto_dispatch_next(c):
                         """Pick the next queued task for this agent."""
                         queued = sorted(
@@ -2212,6 +2258,11 @@ async def main(connection: iterm2.Connection):
                         _append_mcp(cell, "done", message or "Done")
                         _append_task_msg(task, "done",
                                          message or "Done", cell.name)
+                        _record_history_msg(
+                            cell, "done", message or "Done")
+                        if task:
+                            state.history_complete_task(
+                                cell.id, task.id, "done")
                         state._emit_agent(cell)
                         if task and task.lane != "Done":
                             state.board_move_task(task.id, "Done")
@@ -2232,6 +2283,7 @@ async def main(connection: iterm2.Connection):
                         _append_mcp(cell, "blocked", message)
                         _append_task_msg(task, "blocked",
                                          message, cell.name)
+                        _record_history_msg(cell, "blocked", message)
                         state._emit_agent(cell)
                         if task:
                             _add_label(task, "blocked")
@@ -2246,6 +2298,7 @@ async def main(connection: iterm2.Connection):
                         _append_mcp(cell, "error", message)
                         _append_task_msg(task, "error",
                                          message, cell.name)
+                        _record_history_msg(cell, "error", message)
                         state._emit_agent(cell)
                         if task:
                             _add_label(task, "error")
@@ -2261,6 +2314,7 @@ async def main(connection: iterm2.Connection):
                         _append_mcp(cell, "progress", message)
                         _append_task_msg(task, "progress",
                                          message, cell.name)
+                        _record_history_msg(cell, "progress", message)
                         state._emit_agent(cell)
                         if task:
                             _save_task(task)
@@ -2282,6 +2336,11 @@ async def main(connection: iterm2.Connection):
                         _append_mcp(cell, "ready", "Ready")
                         _append_task_msg(task, "ready",
                                          message or "Ready", cell.name)
+                        _record_history_msg(
+                            cell, "ready", message or "Ready")
+                        if task:
+                            state.history_complete_task(
+                                cell.id, task.id, "ready")
                         state._emit_agent(cell)
                         if task:
                             if task.lane != "Done":
@@ -2419,6 +2478,9 @@ async def main(connection: iterm2.Connection):
                                         _append_task_msg(
                                             task, "derive",
                                             message, cell.name)
+                                        _record_history_msg(
+                                            cell, "derive",
+                                            message[:80])
                                         _save_task(task)
                                         state._emit_agent(cell)
                                         _panel_event(
@@ -2625,6 +2687,7 @@ async def main(connection: iterm2.Connection):
                             _append_mcp(cell, "ask", message)
                             _append_task_msg(task, "ask",
                                              message, cell.name)
+                            _record_history_msg(cell, "ask", message)
                             state._emit_agent(cell)
                             task.status = "Awaiting Input"
                             _save_task(task)
@@ -2679,10 +2742,15 @@ async def main(connection: iterm2.Connection):
                             _append_mcp(cell, "name", message)
                             _append_task_msg(task, "name",
                                              message, cell.name)
+                            _record_history_msg(
+                                cell, "name", message)
                             if task:
                                 _save_task(task)
                             state.update_agent(cell.id,
                                                name=message)
+                            state.history_update_agent(
+                                cell, name=message,
+                                slug=cell.slug)
                             if cell.session_id:
                                 await bridge.update_session(
                                     cell, old_name)

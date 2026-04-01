@@ -35,7 +35,13 @@ function togglePanel(appName) {
     // Render the active app
     if (appName === 'board') renderBoard();
     if (appName === 'actions') tplEditorLoad();
-    if (appName === 'templates' && typeof agentTemplateEditorLoad === 'function') agentTemplateEditorLoad();
+    if (appName === 'templates') {
+      if (typeof _agentsPanelView !== 'undefined' && _agentsPanelView === 'history') {
+        if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
+      } else if (typeof agentTemplateEditorLoad === 'function') {
+        agentTemplateEditorLoad();
+      }
+    }
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
   }
   // Persist panel state to server

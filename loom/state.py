@@ -341,6 +341,129 @@ class MatrixState:
             except Exception:
                 log.exception("Failed to save global settings")
 
+    # -- Agent history helpers -----------------------------------------------
+
+    def history_record_agent(self, cell: AgentCell):
+        """Record a new agent in the history table."""
+        if not self.db:
+            return
+        import time
+        try:
+            self.db.save_agent_history({
+                "id": cell.id,
+                "name": cell.name,
+                "slug": cell.slug,
+                "group": cell.group,
+                "agent_type": cell.agent_type,
+                "template": cell.template,
+                "created_at": time.time(),
+                "worktree_branch": cell.worktree_branch,
+                "status": "active",
+            })
+        except Exception:
+            log.exception("Failed to record agent history %s", cell.id)
+
+    def history_remove_agent(self, cell: AgentCell):
+        """Mark an agent as removed in history, snapshot final tokens."""
+        if not self.db:
+            return
+        import time
+        try:
+            # Read current totals and add session tokens
+            rec = self.db.load_agent_history_detail(cell.id)
+            prev_in = rec["total_tokens_in"] if rec else 0
+            prev_out = rec["total_tokens_out"] if rec else 0
+            self.db.update_agent_history(
+                cell.id,
+                removed_at=time.time(),
+                status="removed",
+                total_tokens_in=prev_in + cell.session_tokens_in,
+                total_tokens_out=prev_out + cell.session_tokens_out,
+            )
+        except Exception:
+            log.exception("Failed to update agent history on remove %s",
+                          cell.id)
+
+    def history_update_agent(self, cell: AgentCell, **fields):
+        """Update arbitrary fields on an agent's history record."""
+        if not self.db:
+            return
+        try:
+            self.db.update_agent_history(cell.id, **fields)
+        except Exception:
+            log.exception("Failed to update agent history %s", cell.id)
+
+    def history_record_dispatch(self, cell: AgentCell, task: BoardTask):
+        """Record a task dispatch in history."""
+        if not self.db:
+            return
+        import time
+        try:
+            self.db.save_agent_task({
+                "agent_id": cell.id,
+                "task_id": task.id,
+                "task_title": task.task,
+                "started_at": time.time(),
+            })
+            self.db.update_agent_history(
+                cell.id, total_tasks=(
+                    self.db.load_agent_history_detail(cell.id) or {}
+                ).get("total_tasks", 0) + 1)
+        except Exception:
+            log.exception("Failed to record dispatch history %s → %s",
+                          cell.id, task.id)
+
+    def history_record_message(self, cell_id: str, action: str,
+                               message: str, task_id: str = ""):
+        """Record an agent message (loom ai report) in history."""
+        if not self.db:
+            return
+        import time
+        try:
+            self.db.save_agent_message({
+                "agent_id": cell_id,
+                "task_id": task_id,
+                "timestamp": time.time(),
+                "action": action,
+                "message": message,
+            })
+        except Exception:
+            log.exception("Failed to record agent message %s/%s",
+                          cell_id, action)
+
+    def history_complete_task(self, agent_id: str, task_id: str,
+                              outcome: str):
+        """Mark an agent-task association as completed."""
+        if not self.db:
+            return
+        import time
+        try:
+            self.db.update_agent_task(
+                agent_id, task_id,
+                completed_at=time.time(), outcome=outcome)
+        except Exception:
+            log.exception("Failed to complete agent task %s/%s",
+                          agent_id, task_id)
+
+    def history_snapshot_tokens(self, cell: AgentCell):
+        """Snapshot current session tokens into history totals."""
+        if not self.db or not (cell.session_tokens_in
+                               or cell.session_tokens_out):
+            return
+        try:
+            rec = self.db.load_agent_history_detail(cell.id)
+            if not rec:
+                return
+            self.db.update_agent_history(
+                cell.id,
+                total_tokens_in=(rec["total_tokens_in"]
+                                 + cell.session_tokens_in),
+                total_tokens_out=(rec["total_tokens_out"]
+                                  + cell.session_tokens_out),
+            )
+        except Exception:
+            log.exception("Failed to snapshot tokens %s", cell.id)
+
     def load(self):
         from .config import DB_FILE, STATE_FILE
         if not self.db:

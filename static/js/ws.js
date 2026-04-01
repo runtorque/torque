@@ -98,6 +98,10 @@ function connect() {
       _showGlobalSettingsModal(msg);
     } else if (msg.type === 'events_page') {
       if (typeof handleEventsPage === 'function') handleEventsPage(msg);
+    } else if (msg.type === 'agent_history_list') {
+      if (typeof agentHistoryReceiveList === 'function') agentHistoryReceiveList(msg);
+    } else if (msg.type === 'agent_history_detail') {
+      if (typeof agentHistoryReceiveDetail === 'function') agentHistoryReceiveDetail(msg);
     } else if (msg.type === 'action') {
       handleAction(msg);
     }

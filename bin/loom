@@ -1059,6 +1059,201 @@ def cmd_agent_edit(args):
     print(f"Updated \"{cell['name']}\"")
 
 
+# -- Agent history commands -------------------------------------------------
+
+def db_read_agent_history(status_filter="", limit=50):
+    """Read agent history directly from SQLite."""
+    def _query(conn):
+        sql = (
+            'SELECT id, name, slug, "group", agent_type, template, '
+            'created_at, removed_at, worktree_branch, total_tokens_in, '
+            'total_tokens_out, total_tasks, status FROM agent_history')
+        params = []
+        if status_filter:
+            sql += ' WHERE status=?'
+            params.append(status_filter)
+        sql += (' ORDER BY CASE WHEN status=\'active\' THEN 0 ELSE 1 END,'
+                ' created_at DESC LIMIT ?')
+        params.append(limit)
+        rows = conn.execute(sql, params).fetchall()
+        cols = ["id", "name", "slug", "group", "agent_type", "template",
+                "created_at", "removed_at", "worktree_branch",
+                "total_tokens_in", "total_tokens_out", "total_tasks",
+                "status"]
+        return [dict(zip(cols, r)) for r in rows]
+    return _db_read(_query)
+
+
+def db_read_agent_history_detail(agent_id):
+    """Read a single agent history record + tasks + messages."""
+    def _query(conn):
+        c = conn.cursor()
+        row = c.execute(
+            'SELECT id, name, slug, "group", agent_type, template, '
+            'created_at, removed_at, worktree_branch, total_tokens_in, '
+            'total_tokens_out, total_tasks, status '
+            'FROM agent_history WHERE id=?', (agent_id,)).fetchone()
+        if not row:
+            return None
+        cols = ["id", "name", "slug", "group", "agent_type", "template",
+                "created_at", "removed_at", "worktree_branch",
+                "total_tokens_in", "total_tokens_out", "total_tasks",
+                "status"]
+        record = dict(zip(cols, row))
+        # Tasks
+        trows = c.execute(
+            'SELECT id, agent_id, task_id, task_title, started_at, '
+            'completed_at, outcome FROM agent_tasks '
+            'WHERE agent_id=? ORDER BY started_at DESC',
+            (agent_id,)).fetchall()
+        tcols = ["id", "agent_id", "task_id", "task_title",
+                 "started_at", "completed_at", "outcome"]
+        record["tasks"] = [dict(zip(tcols, r)) for r in trows]
+        # Messages
+        mrows = c.execute(
+            'SELECT id, agent_id, task_id, timestamp, action, message '
+            'FROM agent_messages WHERE agent_id=? '
+            'ORDER BY timestamp DESC LIMIT 100',
+            (agent_id,)).fetchall()
+        mcols = ["id", "agent_id", "task_id", "timestamp",
+                 "action", "message"]
+        record["messages"] = [dict(zip(mcols, r)) for r in mrows]
+        return record
+    return _db_read(_query)
+
+
+def db_read_agent_messages(agent_id, limit=50):
+    """Read agent messages from SQLite."""
+    def _query(conn):
+        rows = conn.execute(
+            'SELECT id, agent_id, task_id, timestamp, action, message '
+            'FROM agent_messages WHERE agent_id=? '
+            'ORDER BY timestamp DESC LIMIT ?',
+            (agent_id, limit)).fetchall()
+        cols = ["id", "agent_id", "task_id", "timestamp",
+                "action", "message"]
+        return [dict(zip(cols, r)) for r in rows]
+    return _db_read(_query)
+
+
+def _resolve_agent_history(identifier):
+    """Resolve an agent from history by ID, slug, or name prefix."""
+    records = db_read_agent_history(limit=500)
+    # Exact ID
+    for r in records:
+        if r["id"] == identifier:
+            return r
+    # Slug match
+    for r in records:
+        if r.get("slug") and r["slug"] == identifier:
+            return r
+    # Name match (case-insensitive)
+    ident_lower = identifier.lower()
+    for r in records:
+        if r["name"].lower() == ident_lower:
+            return r
+    # ID prefix
+    for r in records:
+        if r["id"].startswith(identifier):
+            return r
+    die(f"Agent not found in history: {identifier}")
+
+
+def _fmt_ts(ts):
+    """Format a Unix timestamp as a readable date string."""
+    if not ts:
+        return "-"
+    from datetime import datetime
+    dt = datetime.fromtimestamp(ts)
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _fmt_tokens(n):
+    """Format token count with K/M suffix."""
+    if not n:
+        return "-"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
+def cmd_agent_history_list(args):
+    if not _db_available():
+        die("SQLite database not found — is Loom installed?")
+    status = getattr(args, "status", "") or ""
+    limit = getattr(args, "limit", 50) or 50
+    records = db_read_agent_history(status_filter=status, limit=limit)
+    if not records:
+        print("No agent history records found.")
+        return
+    # Print table
+    print(f"{'Name':<25} {'Type':<12} {'Group':<15} {'Status':<10} "
+          f"{'Created':<18} {'Tasks':>5} {'Tokens In':>10} {'Tokens Out':>10}")
+    print("-" * 115)
+    for r in records:
+        print(f"{r['name'][:24]:<25} {r.get('agent_type', '')[:11]:<12} "
+              f"{r.get('group', '')[:14]:<15} {r['status']:<10} "
+              f"{_fmt_ts(r['created_at']):<18} "
+              f"{r.get('total_tasks', 0):>5} "
+              f"{_fmt_tokens(r.get('total_tokens_in', 0)):>10} "
+              f"{_fmt_tokens(r.get('total_tokens_out', 0)):>10}")
+
+
+def cmd_agent_history_show(args):
+    if not _db_available():
+        die("SQLite database not found — is Loom installed?")
+    rec = _resolve_agent_history(args.identifier)
+    detail = db_read_agent_history_detail(rec["id"])
+    if not detail:
+        die(f"Agent not found in history: {args.identifier}")
+
+    print(f"Agent: {detail['name']} ({detail['id']})")
+    print(f"  Status:    {detail['status']}")
+    print(f"  Type:      {detail.get('agent_type') or '-'}")
+    print(f"  Group:     {detail.get('group') or '-'}")
+    print(f"  Template:  {detail.get('template') or '-'}")
+    print(f"  Branch:    {detail.get('worktree_branch') or '-'}")
+    print(f"  Created:   {_fmt_ts(detail['created_at'])}")
+    print(f"  Removed:   {_fmt_ts(detail.get('removed_at'))}")
+    print(f"  Tokens:    {_fmt_tokens(detail.get('total_tokens_in', 0))} in"
+          f" / {_fmt_tokens(detail.get('total_tokens_out', 0))} out")
+    print(f"  Tasks:     {detail.get('total_tasks', 0)}")
+
+    tasks = detail.get("tasks", [])
+    if tasks:
+        print(f"\nTasks ({len(tasks)}):")
+        for t in tasks:
+            outcome = t.get("outcome") or "in-progress"
+            completed = _fmt_ts(t.get("completed_at"))
+            print(f"  [{outcome:<12}] {t['task_title'][:60]}"
+                  f"  (started {_fmt_ts(t['started_at'])}"
+                  f", completed {completed})")
+
+    messages = detail.get("messages", [])
+    if messages:
+        print(f"\nRecent messages ({len(messages)}):")
+        for m in messages[:20]:
+            print(f"  {_fmt_ts(m['timestamp'])} [{m['action']:<10}] "
+                  f"{m.get('message', '')[:80]}")
+
+
+def cmd_agent_history_messages(args):
+    if not _db_available():
+        die("SQLite database not found — is Loom installed?")
+    rec = _resolve_agent_history(args.identifier)
+    limit = getattr(args, "limit", 50) or 50
+    messages = db_read_agent_messages(rec["id"], limit=limit)
+    if not messages:
+        print(f"No messages found for agent \"{rec['name']}\".")
+        return
+    print(f"Messages for \"{rec['name']}\" ({len(messages)}):")
+    for m in messages:
+        print(f"  {_fmt_ts(m['timestamp'])} [{m['action']:<10}] "
+              f"{m.get('message', '')[:100]}")
+
+
 # -- Terminal commands ------------------------------------------------------
 
 def cmd_terminal_add(args):
@@ -2439,6 +2634,31 @@ def build_parser():
     p.add_argument("--name", help="New name")
     p.add_argument("--color", help="New tab color (hex)")
     p.set_defaults(func=cmd_agent_edit)
+
+    hist = agt_sub.add_parser("history", aliases=["hist"],
+                              help="Agent history (persistent)")
+    hist.set_defaults(func=None, _sub_parser=hist)
+    hist_sub = hist.add_subparsers(dest="history_cmd")
+
+    p = hist_sub.add_parser("list", aliases=["ls"],
+                            help="List agent history records")
+    p.add_argument("-s", "--status",
+                   choices=["active", "removed", "merged"],
+                   help="Filter by status")
+    p.add_argument("-n", "--limit", type=int, default=50,
+                   help="Max records (default: 50)")
+    p.set_defaults(func=cmd_agent_history_list)
+
+    p = hist_sub.add_parser("show", help="Show agent history detail")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
+    p.set_defaults(func=cmd_agent_history_show)
+
+    p = hist_sub.add_parser("messages", aliases=["msg"],
+                            help="Show agent message log")
+    p.add_argument("identifier", help="Agent ID, slug, or name")
+    p.add_argument("-n", "--limit", type=int, default=50,
+                   help="Max messages (default: 50)")
+    p.set_defaults(func=cmd_agent_history_messages)
 
     # -- terminal -----------------------------------------------------------
     trm = sub.add_parser("terminal", aliases=["t", "term"],

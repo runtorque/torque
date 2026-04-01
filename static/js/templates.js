@@ -1,6 +1,8 @@
 /* ------------------------------------------------------------------ */
-/* Agent templates editor                                              */
+/* Agent templates editor + history                                    */
 /* ------------------------------------------------------------------ */
+
+var _agentsPanelView = 'templates';  // 'templates' | 'history'
 
 var _agentTplList = [];
 var _agentTplSelected = '';
@@ -52,14 +54,37 @@ function agentTemplateReceiveDetail(msg) {
   renderAgentTemplatesEditor();
 }
 
+function agentsPanelSwitchView(view) {
+  _agentsPanelView = view;
+  if (view === 'history') {
+    agentHistoryLoad();
+  } else {
+    renderAgentTemplatesPanel();
+  }
+}
+
 function renderAgentTemplatesPanel() {
   var panel = document.getElementById('panel-templates');
   if (!panel) return;
 
   var html = '';
-
   html += '<div class="tpled-header">';
-  html += '<span class="tpled-header-title">Agents</span>';
+
+  // View toggle (Templates | History)
+  html += '<div class="tpled-view-toggle" style="margin-left:0;margin-right:auto">';
+  html += '<button class="tpled-view-btn' + (_agentsPanelView === 'templates' ? ' active' : '') + '" onclick="agentsPanelSwitchView(\'templates\')">Templates</button>';
+  html += '<button class="tpled-view-btn' + (_agentsPanelView === 'history' ? ' active' : '') + '" onclick="agentsPanelSwitchView(\'history\')">History</button>';
+  html += '</div>';
+
+  if (_agentsPanelView === 'history') {
+    html += '</div>';
+    html += '<div class="agent-history-container" id="agent-history-container"></div>';
+    panel.innerHTML = html;
+    renderAgentHistoryView();
+    return;
+  }
+
+  // Templates view (existing)
   html += '<select class="tpled-select" id="agent-tpl-select" onchange="agentTemplateSelect(this.value)">';
   html += '<option value="">Select\u2026</option>';
   var project = _agentTplList.filter(function(t) { return !t.global; });
@@ -326,4 +351,246 @@ function agentTemplateDuplicate() {
   renderAgentTemplatesPanel();
   var inp = document.getElementById('agent-template-name');
   if (inp) { inp.focus(); inp.select(); }
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Agent history view                                                  */
+/* ------------------------------------------------------------------ */
+
+var _agentHistoryRecords = [];
+var _agentHistoryFilter = '';       // '', 'active', 'removed', 'merged'
+var _agentHistorySearch = '';
+var _agentHistoryExpanded = '';     // agent ID currently expanded
+var _agentHistoryDetail = null;     // detail data for expanded agent
+
+function agentHistoryLoad() {
+  send({
+    cmd: 'get_agent_history',
+    status: _agentHistoryFilter,
+    limit: 100,
+  });
+}
+
+function agentHistoryReceiveList(msg) {
+  _agentHistoryRecords = msg.records || [];
+  if (_agentsPanelView === 'history') renderAgentTemplatesPanel();
+}
+
+function agentHistoryReceiveDetail(msg) {
+  _agentHistoryDetail = msg;
+  renderAgentHistoryExpanded();
+}
+
+function _ahFmtTs(ts) {
+  if (!ts) return '\u2014';
+  var d = new Date(ts * 1000);
+  var now = Date.now();
+  var diff = now - d.getTime();
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+  if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
+  return d.toLocaleDateString();
+}
+
+function _ahFmtTokens(n) {
+  if (!n) return '\u2014';
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return '' + n;
+}
+
+function _ahStatusBadge(status) {
+  var cls = 'ah-badge-removed';
+  if (status === 'active') cls = 'ah-badge-active';
+  else if (status === 'merged') cls = 'ah-badge-merged';
+  return '<span class="ah-badge ' + cls + '">' + esc(status) + '</span>';
+}
+
+function _ahActionIcon(action) {
+  var icons = {
+    done: '\u2713', ready: '\u2713', blocked: '\u26A0',
+    error: '\u2717', progress: '\u25B6', derive: '\u2192',
+    ask: '\u2753', name: '\u270E'
+  };
+  return icons[action] || '\u2022';
+}
+
+function agentHistorySetFilter(f) {
+  _agentHistoryFilter = f;
+  agentHistoryLoad();
+}
+
+function agentHistoryOnSearch(val) {
+  _agentHistorySearch = val.toLowerCase();
+  renderAgentHistoryView();
+}
+
+function agentHistoryToggle(agentId) {
+  if (_agentHistoryExpanded === agentId) {
+    _agentHistoryExpanded = '';
+    _agentHistoryDetail = null;
+    renderAgentHistoryView();
+  } else {
+    _agentHistoryExpanded = agentId;
+    _agentHistoryDetail = null;
+    renderAgentHistoryView();
+    send({ cmd: 'get_agent_history_detail', agent_id: agentId });
+  }
+}
+
+function agentHistoryFocusAgent(agentId) {
+  send({ cmd: 'focus_agent', id: agentId });
+}
+
+function renderAgentHistoryView() {
+  var container = document.getElementById('agent-history-container');
+  if (!container) return;
+
+  var html = '';
+
+  // Search + filter bar
+  html += '<div class="ah-toolbar">';
+  html += '<input class="ah-search" type="text" placeholder="Search agents\u2026" '
+    + 'value="' + esc(_agentHistorySearch) + '" '
+    + 'oninput="agentHistoryOnSearch(this.value)">';
+  var filters = [
+    ['', 'All'], ['active', 'Active'], ['removed', 'Removed'], ['merged', 'Merged']
+  ];
+  html += '<div class="ah-filters">';
+  for (var i = 0; i < filters.length; i++) {
+    var f = filters[i];
+    html += '<button class="ah-filter-btn' + (_agentHistoryFilter === f[0] ? ' active' : '') + '" '
+      + 'onclick="agentHistorySetFilter(\'' + f[0] + '\')">' + f[1] + '</button>';
+  }
+  html += '</div>';
+  html += '</div>';
+
+  // Filter records by search
+  var records = _agentHistoryRecords;
+  if (_agentHistorySearch) {
+    records = records.filter(function(r) {
+      return r.name.toLowerCase().indexOf(_agentHistorySearch) >= 0
+        || (r.group || '').toLowerCase().indexOf(_agentHistorySearch) >= 0
+        || (r.agent_type || '').toLowerCase().indexOf(_agentHistorySearch) >= 0;
+    });
+  }
+
+  if (!records.length) {
+    html += '<div class="ah-empty">No agent history records found.</div>';
+    container.innerHTML = html;
+    return;
+  }
+
+  // Agent list
+  html += '<div class="ah-list">';
+  for (var j = 0; j < records.length; j++) {
+    var r = records[j];
+    var expanded = _agentHistoryExpanded === r.id;
+    var isActive = r.status === 'active';
+    html += '<div class="ah-row' + (expanded ? ' expanded' : '') + '">';
+    html += '<div class="ah-row-header" onclick="agentHistoryToggle(\'' + esc(r.id) + '\')">';
+    html += '<span class="ah-expand-arrow">' + (expanded ? '\u25BC' : '\u25B6') + '</span>';
+    html += '<span class="ah-name">' + esc(r.name) + '</span>';
+    if (r.agent_type) {
+      var typeLabel = (typeof AGENT_TYPE_LABELS !== 'undefined' && AGENT_TYPE_LABELS[r.agent_type]) || r.agent_type;
+      html += '<span class="ah-type-badge">' + esc(typeLabel) + '</span>';
+    }
+    if (r.group) html += '<span class="ah-group">' + esc(r.group) + '</span>';
+    html += _ahStatusBadge(r.status);
+    html += '<span class="ah-meta">' + _ahFmtTs(r.created_at) + '</span>';
+    html += '<span class="ah-meta" title="Tasks">' + (r.total_tasks || 0) + ' tasks</span>';
+    var tokIn = r.total_tokens_in || 0;
+    var tokOut = r.total_tokens_out || 0;
+    if (tokIn || tokOut) {
+      html += '<span class="ah-meta ah-tokens" title="Tokens in/out">'
+        + _ahFmtTokens(tokIn) + '/' + _ahFmtTokens(tokOut) + '</span>';
+    }
+    if (isActive) {
+      html += '<button class="ah-focus-btn" onclick="event.stopPropagation();agentHistoryFocusAgent(\'' + esc(r.id) + '\')" title="Focus agent">\u2192</button>';
+    }
+    html += '</div>';  // ah-row-header
+
+    // Expanded detail area
+    if (expanded) {
+      html += '<div class="ah-detail" id="ah-detail-' + esc(r.id) + '">';
+      if (!_agentHistoryDetail) {
+        html += '<div class="ah-loading">Loading\u2026</div>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div>';  // ah-row
+  }
+  html += '</div>';
+
+  container.innerHTML = html;
+
+  // If we have detail, render it
+  if (_agentHistoryExpanded && _agentHistoryDetail) {
+    renderAgentHistoryExpanded();
+  }
+}
+
+function renderAgentHistoryExpanded() {
+  var detail = _agentHistoryDetail;
+  if (!detail || !detail.record) return;
+  var el = document.getElementById('ah-detail-' + detail.record.id);
+  if (!el) return;
+
+  var r = detail.record;
+  var html = '';
+
+  // Info grid
+  html += '<div class="ah-info">';
+  html += '<div class="ah-info-row"><span class="ah-label">Template</span><span>' + esc(r.template || '\u2014') + '</span></div>';
+  html += '<div class="ah-info-row"><span class="ah-label">Branch</span><span>' + esc(r.worktree_branch || '\u2014') + '</span></div>';
+  html += '<div class="ah-info-row"><span class="ah-label">Created</span><span>' + _ahFmtTs(r.created_at) + '</span></div>';
+  if (r.removed_at) {
+    html += '<div class="ah-info-row"><span class="ah-label">Removed</span><span>' + _ahFmtTs(r.removed_at) + '</span></div>';
+  }
+  html += '<div class="ah-info-row"><span class="ah-label">Tokens</span><span>' + _ahFmtTokens(r.total_tokens_in) + ' in / ' + _ahFmtTokens(r.total_tokens_out) + ' out</span></div>';
+  html += '</div>';
+
+  // Tasks
+  var tasks = detail.tasks || [];
+  if (tasks.length) {
+    html += '<div class="ah-section-title">Tasks (' + tasks.length + ')</div>';
+    html += '<div class="ah-tasks">';
+    for (var i = 0; i < tasks.length; i++) {
+      var t = tasks[i];
+      var outcome = t.outcome || 'in-progress';
+      var outClass = 'ah-outcome-' + outcome.replace(/[^a-z]/g, '');
+      html += '<div class="ah-task-row">';
+      html += '<span class="ah-task-outcome ' + outClass + '">' + esc(outcome) + '</span>';
+      html += '<span class="ah-task-title">' + esc(t.task_title) + '</span>';
+      html += '<span class="ah-meta">' + _ahFmtTs(t.started_at) + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // Messages
+  var messages = detail.messages || [];
+  if (messages.length) {
+    html += '<div class="ah-section-title">Messages (' + messages.length + ')</div>';
+    html += '<div class="ah-messages">';
+    for (var j = 0; j < messages.length; j++) {
+      var m = messages[j];
+      html += '<div class="ah-msg-row">';
+      html += '<span class="ah-msg-icon">' + _ahActionIcon(m.action) + '</span>';
+      html += '<span class="ah-msg-action">' + esc(m.action) + '</span>';
+      html += '<span class="ah-msg-text">' + esc(m.message || '') + '</span>';
+      html += '<span class="ah-meta">' + _ahFmtTs(m.timestamp) + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  if (!tasks.length && !messages.length) {
+    html += '<div class="ah-empty">No activity recorded.</div>';
+  }
+
+  el.innerHTML = html;
 }
