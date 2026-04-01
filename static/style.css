@@ -1355,8 +1355,9 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-filter-dropdown-search::placeholder { color: var(--text-dim); }
 .board-filter-dropdown-search:focus { box-shadow: inset 0 -1px 0 0 var(--accent); }
 .board-filter-dropdown-list {
-  max-height: 200px; overflow-y: auto;
+  max-height: 200px; overflow-y: auto; overflow-x: hidden;
   padding: 2px 0;
+  scrollbar-width: thin;
 }
 .board-filter-dropdown-item {
   display: flex; align-items: center; gap: 6px;
@@ -1368,7 +1369,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   margin: 0; flex-shrink: 0;
 }
 .board-filter-dropdown-name {
-  flex: 1; min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .board-filter-dropdown-count {
