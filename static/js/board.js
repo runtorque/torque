@@ -18,8 +18,11 @@ var _boardDragId = '';          // card being dragged
 var _boardCollapsedTasks = {};  // task_id → true if collapsed
 var _boardFilterByGroup = true;  // When true, board shows only tasks from the current group
 var _boardSearchQuery = '';      // text search filter
-var _boardFilterLabels = [];     // active label filters (AND logic)
+var _boardFilterLabels = [];     // active label filters (OR logic)
+var _boardFilterActions = [];    // active action name filters (OR logic)
 var _boardSearchTimer = null;    // debounce timer for search input
+var _boardFilterDropdownType = null;   // 'label' | 'action' | null
+var _boardFilterDropdownCleanup = null;
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -62,17 +65,28 @@ function _boardVisibleTasks() {
     }
     out = filtered;
   }
-  // Label filter (AND)
+  // Label filter (OR — task matches if it has ANY selected label)
   if (_boardFilterLabels.length) {
     var filtered = {};
     for (var id in out) {
       var t = out[id];
       var labels = t.labels || [];
-      var match = true;
+      var match = false;
       for (var i = 0; i < _boardFilterLabels.length; i++) {
-        if (labels.indexOf(_boardFilterLabels[i]) < 0) { match = false; break; }
+        if (labels.indexOf(_boardFilterLabels[i]) >= 0) { match = true; break; }
       }
       if (match) filtered[id] = t;
+    }
+    out = filtered;
+  }
+  // Action filter (OR — task matches if its action is any of the selected)
+  if (_boardFilterActions.length) {
+    var filtered = {};
+    for (var id in out) {
+      var t = out[id];
+      if (t.action_name && _boardFilterActions.indexOf(t.action_name) >= 0) {
+        filtered[id] = t;
+      }
     }
     out = filtered;
   }
@@ -99,34 +113,49 @@ function _boardLaneCount(lane) {
 }
 
 function _boardHasActiveFilters() {
-  return _boardSearchQuery !== '' || _boardFilterLabels.length > 0;
+  return _boardSearchQuery !== '' || _boardFilterLabels.length > 0 || _boardFilterActions.length > 0;
 }
 
-/** Collect all unique labels from visible tasks (before label filter). */
-function _boardAllLabels() {
-  // Use group-filtered tasks only (before search/label filters) for chip population
+/** Collect all labels with counts (before search/label/action filters). */
+function _boardAllLabelCounts() {
   var all = _boardTasks();
   var pool = {};
   if (_boardFilterByGroup) {
     var grp = _currentGroup();
     if (grp) {
       for (var id in all) { if (all[id].group === grp) pool[id] = all[id]; }
-    } else {
-      pool = all;
-    }
-  } else {
-    pool = all;
-  }
-  var labels = {};
+    } else { pool = all; }
+  } else { pool = all; }
+  var counts = {};
   for (var id in pool) {
     var t = pool[id];
     if (t.labels) {
-      for (var i = 0; i < t.labels.length; i++) labels[t.labels[i]] = true;
+      for (var i = 0; i < t.labels.length; i++) {
+        counts[t.labels[i]] = (counts[t.labels[i]] || 0) + 1;
+      }
     }
   }
-  var sorted = Object.keys(labels);
-  sorted.sort();
-  return sorted;
+  return counts;
+}
+
+/** Collect all action names with counts from tasks. */
+function _boardAllActionCounts() {
+  var all = _boardTasks();
+  var pool = {};
+  if (_boardFilterByGroup) {
+    var grp = _currentGroup();
+    if (grp) {
+      for (var id in all) { if (all[id].group === grp) pool[id] = all[id]; }
+    } else { pool = all; }
+  } else { pool = all; }
+  var counts = {};
+  for (var id in pool) {
+    var t = pool[id];
+    if (t.action_name) {
+      counts[t.action_name] = (counts[t.action_name] || 0) + 1;
+    }
+  }
+  return counts;
 }
 
 function _boardAgentStatus(agentId) {
@@ -271,27 +300,57 @@ function renderBoard() {
   var filtersActive = _boardHasActiveFilters();
 
   // Search & filter toolbar
-  var allLabels = _boardAllLabels();
-  if (allLabels.length || _boardSearchQuery) {
+  var labelCounts = _boardAllLabelCounts();
+  var actionCounts = _boardAllActionCounts();
+  var hasLabels = Object.keys(labelCounts).length > 0;
+  var hasActions = Object.keys(actionCounts).length > 0;
+  var showToolbar = hasLabels || hasActions || _boardSearchQuery || _boardFilterLabels.length || _boardFilterActions.length;
+
+  if (showToolbar) {
     html += '<div class="board-search-bar">';
     html += '<input type="text" class="board-search-input" id="board-search-input"'
       + ' placeholder="Search tasks..." value="' + esc(_boardSearchQuery) + '"'
       + ' oninput="boardUpdateSearch(this.value)">';
-    if (allLabels.length) {
-      html += '<div class="board-filter-chips">';
-      for (var li = 0; li < allLabels.length; li++) {
-        var lb = allLabels[li];
-        var active = _boardFilterLabels.indexOf(lb) >= 0 ? ' active' : '';
-        html += '<button class="board-filter-chip' + active + '"'
-          + ' onclick="boardToggleLabel(\'' + esc(lb).replace(/'/g, "\\'") + '\')">'
-          + esc(lb) + '</button>';
-      }
+    if (hasLabels || _boardFilterLabels.length) {
+      var lblCount = _boardFilterLabels.length;
+      html += '<div class="board-filter-btn-wrap" id="board-label-filter-wrap">';
+      html += '<button class="board-filter-btn' + (lblCount ? ' active' : '') + '"'
+        + ' onclick="boardToggleLabelFilter()">'
+        + 'Labels' + (lblCount ? ' <span class="board-filter-btn-count">' + lblCount + '</span>' : '')
+        + ' &#9662;</button>';
+      html += '</div>';
+    }
+    if (hasActions || _boardFilterActions.length) {
+      var actFCount = _boardFilterActions.length;
+      html += '<div class="board-filter-btn-wrap" id="board-action-filter-wrap">';
+      html += '<button class="board-filter-btn' + (actFCount ? ' active' : '') + '"'
+        + ' onclick="boardToggleActionFilter()">'
+        + 'Actions' + (actFCount ? ' <span class="board-filter-btn-count">' + actFCount + '</span>' : '')
+        + ' &#9662;</button>';
       html += '</div>';
     }
     if (filtersActive) {
       html += '<button class="board-filter-clear" onclick="boardClearFilters()">Clear</button>';
     }
     html += '</div>';
+
+    // Active filter chips
+    if (_boardFilterLabels.length || _boardFilterActions.length) {
+      html += '<div class="board-filter-active">';
+      for (var fi = 0; fi < _boardFilterLabels.length; fi++) {
+        var fl = _boardFilterLabels[fi];
+        html += '<span class="board-filter-active-chip board-filter-active-label"'
+          + ' onclick="boardRemoveFilterLabel(\'' + esc(fl).replace(/'/g, "\\'") + '\')">'
+          + esc(fl) + ' &times;</span>';
+      }
+      for (var fi = 0; fi < _boardFilterActions.length; fi++) {
+        var fa = _boardFilterActions[fi];
+        html += '<span class="board-filter-active-chip board-filter-active-action"'
+          + ' onclick="boardRemoveFilterAction(\'' + esc(fa).replace(/'/g, "\\'") + '\')">'
+          + esc(fa) + ' &times;</span>';
+      }
+      html += '</div>';
+    }
   }
 
   // Lane tab bar
@@ -302,6 +361,7 @@ function renderBoard() {
     var l = lanes[i];
     var cnt = _boardLaneCount(l);
     var cls = l === _boardSelectedLane ? ' active' : '';
+    if (filtersActive && cnt === 0) cls += ' empty-filtered';
     var escLane = esc(l).replace(/'/g, "\\'");
     html += '<button class="board-lane-tab' + cls + '"'
       + ' data-lane="' + esc(l) + '"'
@@ -555,13 +615,32 @@ function boardClearAddTask() {
   renderBoard();
 }
 
+/** Parse trailing %label tokens from inline task input. */
+function _boardParseInlineLabels(text) {
+  var tokens = text.trimEnd().split(/\s+/);
+  var labels = [];
+  while (tokens.length > 1 && tokens[tokens.length - 1].charAt(0) === '%') {
+    labels.push(tokens.pop().slice(1).toLowerCase());
+  }
+  // Deduplicate
+  var seen = {};
+  var unique = [];
+  for (var i = 0; i < labels.length; i++) {
+    if (!seen[labels[i]] && labels[i]) { seen[labels[i]] = true; unique.push(labels[i]); }
+  }
+  return { title: tokens.join(' '), labels: unique };
+}
+
 function boardSubmitAddTask() {
   var el = document.getElementById('board-add-task-input');
   var val = el ? el.value.trim() : '';
   if (!val) return;
+  var parsed = _boardParseInlineLabels(val);
+  if (!parsed.title) return;
   _boardAddingTask = false;
   _boardAddingTaskDraft = '';
-  var msg = { cmd: 'board_add_task', task: val, group: _currentGroup(), lane: _boardSelectedLane };
+  var msg = { cmd: 'board_add_task', task: parsed.title, group: _currentGroup(), lane: _boardSelectedLane };
+  if (parsed.labels.length) msg.labels = parsed.labels;
   if (_boardAddingTaskAction) msg.action_name = _boardAddingTaskAction;
   if (_boardAddingTaskAgent) msg.agent_id = _boardAddingTaskAgent;
   _boardAddingTaskAction = '';
@@ -1036,11 +1115,166 @@ function boardToggleLabel(label) {
   renderBoard();
 }
 
+function boardToggleAction(action) {
+  var idx = _boardFilterActions.indexOf(action);
+  if (idx >= 0) {
+    _boardFilterActions.splice(idx, 1);
+  } else {
+    _boardFilterActions.push(action);
+  }
+  _boardCardsScrollTop = 0;
+  renderBoard();
+}
+
+function boardRemoveFilterLabel(label) {
+  var idx = _boardFilterLabels.indexOf(label);
+  if (idx >= 0) {
+    _boardFilterLabels.splice(idx, 1);
+    _boardCardsScrollTop = 0;
+    renderBoard();
+  }
+}
+
+function boardRemoveFilterAction(action) {
+  var idx = _boardFilterActions.indexOf(action);
+  if (idx >= 0) {
+    _boardFilterActions.splice(idx, 1);
+    _boardCardsScrollTop = 0;
+    renderBoard();
+  }
+}
+
 function boardClearFilters() {
   _boardSearchQuery = '';
   _boardFilterLabels = [];
+  _boardFilterActions = [];
+  _boardCloseFilterDropdown();
   _boardCardsScrollTop = 0;
   renderBoard();
+}
+
+/* ---- Filter dropdowns ----------------------------------------------- */
+
+function boardToggleLabelFilter() {
+  if (_boardFilterDropdownType === 'label') {
+    _boardCloseFilterDropdown();
+    return;
+  }
+  _boardCloseFilterDropdown();
+  var counts = _boardAllLabelCounts();
+  var names = Object.keys(counts).sort();
+  if (!names.length) return;
+  _boardFilterDropdownType = 'label';
+  _boardOpenFilterDropdown('board-label-filter-wrap', 'label', names, counts, _boardFilterLabels);
+}
+
+function boardToggleActionFilter() {
+  if (_boardFilterDropdownType === 'action') {
+    _boardCloseFilterDropdown();
+    return;
+  }
+  _boardCloseFilterDropdown();
+  var counts = _boardAllActionCounts();
+  var names = Object.keys(counts).sort();
+  if (!names.length) return;
+  _boardFilterDropdownType = 'action';
+  _boardOpenFilterDropdown('board-action-filter-wrap', 'action', names, counts, _boardFilterActions);
+}
+
+function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
+  var wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  var btn = wrap.querySelector('.board-filter-btn');
+  if (!btn) return;
+  var rect = btn.getBoundingClientRect();
+
+  var dd = document.createElement('div');
+  dd.className = 'board-filter-dropdown';
+  dd.id = 'board-filter-dropdown-active';
+  dd.style.position = 'fixed';
+  dd.style.top = (rect.bottom + 2) + 'px';
+  dd.style.left = rect.left + 'px';
+
+  var search = document.createElement('input');
+  search.type = 'text';
+  search.className = 'board-filter-dropdown-search';
+  search.placeholder = 'Filter ' + kind + 's\u2026';
+  dd.appendChild(search);
+
+  var list = document.createElement('div');
+  list.className = 'board-filter-dropdown-list';
+  dd.appendChild(list);
+
+  function buildList(query) {
+    list.innerHTML = '';
+    var q = (query || '').toLowerCase();
+    for (var i = 0; i < names.length; i++) {
+      var name = names[i];
+      if (q && name.toLowerCase().indexOf(q) < 0) continue;
+      var row = document.createElement('label');
+      row.className = 'board-filter-dropdown-item';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = selectedArr.indexOf(name) >= 0;
+      (function(n) {
+        cb.addEventListener('change', function() {
+          if (kind === 'label') boardToggleLabel(n);
+          else boardToggleAction(n);
+          // Rebuild list to update checkbox states
+          buildList(search.value);
+        });
+      })(name);
+      row.appendChild(cb);
+      var span = document.createElement('span');
+      span.className = 'board-filter-dropdown-name';
+      span.textContent = name;
+      row.appendChild(span);
+      var badge = document.createElement('span');
+      badge.className = 'board-filter-dropdown-count';
+      badge.textContent = counts[name];
+      row.appendChild(badge);
+      list.appendChild(row);
+    }
+  }
+
+  buildList('');
+  search.addEventListener('input', function() { buildList(search.value); });
+
+  document.body.appendChild(dd);
+
+  // Adjust if dropdown overflows viewport
+  requestAnimationFrame(function() {
+    var ddRect = dd.getBoundingClientRect();
+    if (ddRect.right > window.innerWidth) {
+      dd.style.left = Math.max(0, window.innerWidth - ddRect.width - 4) + 'px';
+    }
+    if (ddRect.bottom > window.innerHeight) {
+      dd.style.top = Math.max(0, rect.top - ddRect.height - 2) + 'px';
+    }
+  });
+
+  search.focus();
+
+  // Close on outside click
+  var handler = function(e) {
+    if (!dd.contains(e.target) && !e.target.closest('.board-filter-btn')) {
+      _boardCloseFilterDropdown();
+    }
+  };
+  setTimeout(function() {
+    document.addEventListener('mousedown', handler, true);
+  }, 0);
+
+  _boardFilterDropdownCleanup = function() {
+    document.removeEventListener('mousedown', handler, true);
+    if (dd.parentNode) dd.remove();
+    _boardFilterDropdownCleanup = null;
+  };
+}
+
+function _boardCloseFilterDropdown() {
+  _boardFilterDropdownType = null;
+  if (_boardFilterDropdownCleanup) _boardFilterDropdownCleanup();
 }
 
 /* ---- Keyboard nav --------------------------------------------------- */

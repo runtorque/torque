@@ -75,6 +75,12 @@ async function removeAgent(id) {
 
 function relaunchAgent(id) { send({ cmd: 'relaunch_agent', id }); }
 
+async function clearAgentContext(id) {
+  if (await showConfirm("Clear this agent's context? This resets the conversation and the agent will receive full instructions on its next task.")) {
+    send({ cmd: 'clear_agent_context', id });
+  }
+}
+
 function _nextName(prefix) {
   const existing = Object.values(state.agents)
     .map(a => a.name)
@@ -423,6 +429,10 @@ function onCellContextMenu(e, id) {
         items.push({ label: 'Create Worktree', action: `worktreeCreate('${id}')` });
       }
     }
+  }
+  if (cell.cell_type === 'agent' && cell.session_id
+      && (cell.agent_type === 'claude-code' || cell.agent_type === 'codex')) {
+    items.push({ label: 'Clear context', action: `clearAgentContext('${id}')` });
   }
   items.push({ label: 'Remove', action: `removeAgent('${id}')`, danger: true });
   showContextMenu(e.clientX, e.clientY, items);

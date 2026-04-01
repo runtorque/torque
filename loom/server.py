@@ -1496,6 +1496,19 @@ async def main(connection: iterm2.Connection):
                                     data.get("before", ""))
                 await bridge.reorder_tabs()
 
+            elif cmd == "clear_agent_context":
+                cell = state.agents.get(data.get("id", ""))
+                if cell and cell.session_id and cell.cell_type == "agent":
+                    if cell.agent_type in ("claude-code", "codex"):
+                        await bridge.send_text(
+                            cell.session_id, "/clear\r")
+                    cell.tasks_dispatched = 0
+                    cell.agent_session_id = ""
+                    cell.current_task_id = ""
+                    cell.mcp_messages = []
+                    state._emit_agent(cell)
+                    state._db_save_agent(cell)
+
             elif cmd == "worktree_create":
                 cell = state.agents.get(data["id"])
                 if cell and not cell.worktree_path and cell.directory:
