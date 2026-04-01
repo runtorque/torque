@@ -1662,6 +1662,33 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 }
 .events-filter-btn:hover { color: var(--text); border-color: var(--accent); }
 .events-filter-btn.active { color: var(--accent); border-color: var(--accent); }
+.events-kind-filter {
+  font-size: 9px; padding: 2px 4px;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-family: inherit;
+}
+.events-kind-filter:focus { outline: none; border-color: var(--accent); }
+.events-search-row {
+  padding: 4px 8px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.events-search-input {
+  width: 100%; padding: 3px 6px;
+  font-size: 10px; font-family: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+}
+.events-search-input::placeholder { color: var(--text-dim); }
+.events-search-input:focus { outline: none; border-color: var(--accent); }
 
 /* Attention section */
 .events-attention {
@@ -1671,8 +1698,22 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   border-bottom: 1px solid var(--border);
   background: rgba(255,255,255,.02);
 }
+.events-attention-heading {
+  padding: 6px 12px 4px;
+  font-size: 9px; font-weight: 700;
+  color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.events-attention-count {
+  display: inline-block;
+  background: var(--status-red, #f85149);
+  color: #fff; font-size: 9px; font-weight: 700;
+  padding: 0 5px; border-radius: 8px;
+  min-width: 14px; text-align: center;
+  line-height: 14px; vertical-align: middle;
+}
 .events-attention-empty {
-  padding: 10px 12px;
+  padding: 6px 12px 10px;
   font-size: 10px; color: var(--text-dim);
   text-align: center;
 }
@@ -1680,7 +1721,15 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   padding: 8px 12px;
   border-left: 3px solid var(--border);
   border-bottom: 1px solid var(--border);
+  position: relative;
 }
+.events-dismiss-btn {
+  position: absolute; top: 6px; right: 8px;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim); font-size: 14px; line-height: 1;
+  padding: 0 2px;
+}
+.events-dismiss-btn:hover { color: var(--text); }
 .events-attention-card:last-child { border-bottom: none; }
 .events-attention-ask { border-left-color: var(--status-orange); }
 .events-attention-error { border-left-color: var(--status-red, #f85149); }
@@ -1767,6 +1816,31 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .events-kind-blocked .events-entry-icon { color: #d29922; }
 .events-kind-ask .events-entry-icon { color: var(--status-orange); }
 .events-kind-done .events-entry-icon { color: var(--status-green, #3fb950); }
+.events-date-separator {
+  font-size: 9px; color: var(--text-dim);
+  text-align: center; padding: 6px 10px 2px;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+}
+.events-date-separator:first-child { border-top: none; margin-top: 0; }
+.events-entry-error-detail {
+  white-space: pre-wrap !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+  position: relative;
+}
+.events-copy-btn {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 9px; padding: 1px 6px;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer; font-family: inherit;
+  vertical-align: middle;
+}
+.events-copy-btn:hover { color: var(--text); border-color: var(--accent); }
 
 /* ------------------------------------------------------------------ */
 /* Keybinding rows (global settings)                                   */

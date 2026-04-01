@@ -8,6 +8,11 @@ var _eventsExpandedEntries = {};
 var _eventsLoading = false;
 var _eventsHasMore = true;
 var _eventsOldestId = 0;
+var _eventsSearchQuery = '';
+var _eventsKindFilter = 'all';
+var _eventsDismissedIds = new Set();
+var _eventsSearchDebounce = null;
+var _eventsSearchHadFocus = false;
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -18,10 +23,49 @@ function _eventsCurrentGroup() {
 
 function _eventsFormatTime(ts) {
   var d = new Date(ts * 1000);
+  var now = Date.now();
+  var diffMs = now - d.getTime();
+  var diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 0) diffSec = 0;
+  if (diffSec < 60) return 'now';
+  if (diffSec < 3600) return Math.floor(diffSec / 60) + 'm ago';
+  if (diffSec < 86400) return Math.floor(diffSec / 3600) + 'h ago';
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var hh = String(d.getHours()).padStart(2, '0');
   var mm = String(d.getMinutes()).padStart(2, '0');
-  var ss = String(d.getSeconds()).padStart(2, '0');
-  return hh + ':' + mm + ':' + ss;
+  return months[d.getMonth()] + ' ' + d.getDate() + ', ' + hh + ':' + mm;
+}
+
+function _eventsDateLabel(ts) {
+  var d = new Date(ts * 1000);
+  var now = new Date();
+  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  var diff = Math.round((today - day) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[d.getMonth()] + ' ' + d.getDate();
+}
+
+var _eventsKindGroups = {
+  errors: ['agent_error', 'agent_blocked'],
+  tasks: ['task_dispatched', 'task_completed', 'task_derived', 'ask_created', 'ask_resolved'],
+  lifecycle: ['agent_started', 'agent_finished', 'agent_renamed', 'agent_waiting', 'agent_progress']
+};
+
+function _eventsMatchesFilters(evt) {
+  if (_eventsKindFilter !== 'all') {
+    var kinds = _eventsKindGroups[_eventsKindFilter];
+    if (kinds && kinds.indexOf(evt.kind) < 0) return false;
+  }
+  if (_eventsSearchQuery) {
+    var q = _eventsSearchQuery.toLowerCase();
+    var name = (evt.agent_name || '').toLowerCase();
+    var msg = (evt.message || '').toLowerCase();
+    if (name.indexOf(q) < 0 && msg.indexOf(q) < 0) return false;
+  }
+  return true;
 }
 
 function _eventsKindIcon(kind) {
@@ -127,11 +171,30 @@ function renderEvents() {
     + ' onclick="eventsToggleGroupFilter()" title="Filter by current group">'
     + (_eventsFilterByGroup ? '\u{1F4CC} Group' : '\u{1F30D} All')
     + '</button>';
+  html += '<select class="events-kind-filter" onchange="eventsSetKindFilter(this.value)">';
+  html += '<option value="all"' + (_eventsKindFilter === 'all' ? ' selected' : '') + '>All</option>';
+  html += '<option value="errors"' + (_eventsKindFilter === 'errors' ? ' selected' : '') + '>Errors</option>';
+  html += '<option value="tasks"' + (_eventsKindFilter === 'tasks' ? ' selected' : '') + '>Tasks</option>';
+  html += '<option value="lifecycle"' + (_eventsKindFilter === 'lifecycle' ? ' selected' : '') + '>Lifecycle</option>';
+  html += '</select>';
+  html += '</div>';
+  html += '<div class="events-search-row">';
+  html += '<input class="events-search-input" type="text" placeholder="Search events\u2026"'
+    + ' value="' + esc(_eventsSearchQuery) + '"'
+    + ' oninput="eventsOnSearchInput(this.value)">';
   html += '</div>';
 
   // Attention section
-  var attention = _eventsGetAttentionItems();
+  var allAttention = _eventsGetAttentionItems();
+  var attention = [];
+  for (var ai = 0; ai < allAttention.length; ai++) {
+    if (!_eventsDismissedIds.has(allAttention[ai].id)) attention.push(allAttention[ai]);
+  }
+  var attCount = attention.length;
   html += '<div class="events-attention">';
+  html += '<div class="events-attention-heading">Attention'
+    + (attCount > 0 ? ' <span class="events-attention-count">' + attCount + '</span>' : '')
+    + '</div>';
   if (attention.length === 0) {
     html += '<div class="events-attention-empty">No items need attention</div>';
   } else {
@@ -146,9 +209,16 @@ function renderEvents() {
   var events = (state && state.panel_events) || [];
   var grp = _eventsCurrentGroup();
   var count = 0;
+  var lastDateLabel = '';
   for (var j = events.length - 1; j >= 0 && count < 200; j--) {
     var evt = events[j];
     if (grp && evt.group !== grp) continue;
+    if (!_eventsMatchesFilters(evt)) continue;
+    var dateLabel = _eventsDateLabel(evt.timestamp);
+    if (dateLabel !== lastDateLabel) {
+      html += '<div class="events-date-separator">' + dateLabel + '</div>';
+      lastDateLabel = dateLabel;
+    }
     html += _renderEventEntry(evt, j);
     count++;
   }
@@ -174,6 +244,13 @@ function renderEvents() {
     _eventsOldestId = events[0].id;
   }
 
+  // Restore search input focus if it was active before re-render
+  if (_eventsSearchHadFocus) {
+    var searchInput = panel.querySelector('.events-search-input');
+    if (searchInput) { searchInput.focus(); searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length; }
+    _eventsSearchHadFocus = false;
+  }
+
   // Auto-resize textareas
   panel.querySelectorAll('.events-resolve-textarea').forEach(function(ta) {
     ta.style.height = 'auto';
@@ -185,6 +262,7 @@ function renderEvents() {
 
 function _renderAttentionCard(item) {
   var html = '<div class="events-attention-card events-attention-' + item.type + '">';
+  html += '<button class="events-dismiss-btn" onclick="event.stopPropagation();eventsDismiss(\'' + item.id + '\')" title="Dismiss">\u00D7</button>';
 
   if (item.type === 'ask') {
     html += '<div class="events-attention-label">&#x2753; Question'
@@ -221,7 +299,9 @@ function _renderAttentionCard(item) {
 
 function _renderEventEntry(evt, idx) {
   var kindClass = _eventsKindClass(evt.kind);
-  var expanded = _eventsExpandedEntries[idx] ? ' expanded' : '';
+  var isExpanded = _eventsExpandedEntries[idx];
+  var expanded = isExpanded ? ' expanded' : '';
+  var isError = (evt.kind === 'agent_error' || evt.kind === 'agent_blocked');
   var html = '<div class="events-entry ' + kindClass + expanded + '"'
     + ' onclick="eventsToggleEntry(' + idx + ')">';
   html += '<span class="events-entry-time">' + _eventsFormatTime(evt.timestamp) + '</span>';
@@ -229,7 +309,14 @@ function _renderEventEntry(evt, idx) {
   if (evt.agent_name) {
     html += '<span class="events-entry-agent">' + esc(evt.agent_name) + '</span>';
   }
-  html += '<span class="events-entry-text">' + esc(evt.message || evt.kind) + '</span>';
+  if (isExpanded && isError) {
+    html += '<span class="events-entry-text events-entry-error-detail">'
+      + esc(evt.message || evt.kind)
+      + '<button class="events-copy-btn" onclick="event.stopPropagation();eventsCopyMessage(' + idx + ')" title="Copy">Copy</button>'
+      + '</span>';
+  } else {
+    html += '<span class="events-entry-text">' + esc(evt.message || evt.kind) + '</span>';
+  }
   html += '</div>';
   return html;
 }
@@ -260,11 +347,43 @@ function eventsToggleGroupFilter() {
   renderEvents();
 }
 
+function eventsSetKindFilter(value) {
+  _eventsKindFilter = value;
+  renderEvents();
+}
+
+function eventsOnSearchInput(value) {
+  if (_eventsSearchDebounce) clearTimeout(_eventsSearchDebounce);
+  _eventsSearchDebounce = setTimeout(function() {
+    _eventsSearchQuery = value;
+    _eventsSearchHadFocus = true;
+    renderEvents();
+  }, 150);
+}
+
+function eventsDismiss(id) {
+  _eventsDismissedIds.add(id);
+  renderEvents();
+  updateEventsAttentionBadge();
+}
+
+function eventsCopyMessage(idx) {
+  var events = (state && state.panel_events) || [];
+  var evt = events[idx];
+  if (evt && evt.message) {
+    navigator.clipboard.writeText(evt.message);
+  }
+}
+
 function updateEventsAttentionBadge() {
   var btn = document.querySelector('.taskbar-app[data-app="events"]');
   if (!btn) return;
   var items = _eventsGetAttentionItems();
-  btn.classList.toggle('panel-attention', items.length > 0);
+  var visible = 0;
+  for (var i = 0; i < items.length; i++) {
+    if (!_eventsDismissedIds.has(items[i].id)) visible++;
+  }
+  btn.classList.toggle('panel-attention', visible > 0);
 }
 
 /* ---- Scroll pagination ---------------------------------------------- */
