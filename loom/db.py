@@ -292,6 +292,14 @@ class LoomDB:
                 "ALTER TABLE board_tasks ADD COLUMN status "
                 "TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
+        # Migrate: add messages column to board_tasks
+        try:
+            self._conn.execute("SELECT messages FROM board_tasks LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE board_tasks ADD COLUMN messages "
+                "TEXT NOT NULL DEFAULT '[]'")
+            self._conn.commit()
         # Migrate: drop assignee column from board_tasks
         try:
             self._conn.execute(
@@ -441,6 +449,7 @@ class LoomDB:
         d = asdict(task)
         labels = json.dumps(d.pop("labels", []))
         action_vars = json.dumps(d.pop("action_vars", {}))
+        messages = json.dumps(d.pop("messages", []))
         # Map 'group' to 'group_name' for the DB column
         group_name = d.pop("group", "")
         self._conn.execute("""
@@ -450,8 +459,9 @@ class LoomDB:
                  instructions, context, criteria,
                  lane, position, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url,
-                 parent_task_id, pipeline_depth, pipeline_root_id, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 parent_task_id, pipeline_depth, pipeline_root_id, status,
+                 messages)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
@@ -464,6 +474,7 @@ class LoomDB:
             d["external_url"],
             d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
             d.get("pipeline_root_id", ""), d.get("status", ""),
+            messages,
         ))
         self._conn.commit()
 
@@ -663,6 +674,7 @@ class LoomDB:
                 d = dict(t) if isinstance(t, dict) else asdict(t)
                 labels = json.dumps(d.pop("labels", []))
                 action_vars = json.dumps(d.pop("action_vars", {}))
+                messages = json.dumps(d.pop("messages", []))
                 group_name = d.pop("group", "")
                 c.execute("""
                     INSERT INTO board_tasks
@@ -672,8 +684,8 @@ class LoomDB:
                          criteria, lane, position, agent_id, labels,
                          created_at, updated_at, provider, external_id,
                          external_url, parent_task_id, pipeline_depth,
-                         pipeline_root_id, status)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         pipeline_root_id, status, messages)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""),
                     d.get("description", ""), d.get("slug", ""),
@@ -688,6 +700,7 @@ class LoomDB:
                     d.get("external_url", ""),
                     d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
                     d.get("pipeline_root_id", ""), d.get("status", ""),
+                    messages,
                 ))
 
             # UI state
@@ -788,6 +801,12 @@ class LoomDB:
                         d.get("action_vars", "{}"))
                 except (json.JSONDecodeError, TypeError):
                     d["action_vars"] = {}
+                # Decode messages JSON
+                try:
+                    d["messages"] = json.loads(
+                        d.get("messages", "[]"))
+                except (json.JSONDecodeError, TypeError):
+                    d["messages"] = []
                 board_tasks[d["id"]] = d
 
         # UI state

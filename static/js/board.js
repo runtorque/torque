@@ -212,6 +212,17 @@ function _renderBoardCard(t, childrenOf, depth) {
         + '&#x1F916; ' + esc(aName) + '</div>';
     }
   }
+  // Last activity message
+  if (t.messages && t.messages.length) {
+    var lastMsg = t.messages[t.messages.length - 1];
+    var msgText = lastMsg.message || '';
+    if (msgText.length > 60) msgText = msgText.substring(0, 57) + '...';
+    var msgClass = 'board-card-activity';
+    if (lastMsg.action === 'done' || lastMsg.action === 'ready') msgClass += ' board-card-activity-done';
+    else if (lastMsg.action === 'error') msgClass += ' board-card-activity-error';
+    else if (lastMsg.action === 'blocked') msgClass += ' board-card-activity-blocked';
+    cardHtml += '<div class="' + msgClass + '">' + esc(msgText) + '</div>';
+  }
   cardHtml += '</div>';
   cardHtml += '<button class="board-card-menu-btn" onclick="event.stopPropagation();boardCardMenu(event,\'' + t.id + '\')" title="Actions">&#8942;</button>';
   cardHtml += '</div>';

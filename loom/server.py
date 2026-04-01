@@ -2168,6 +2168,16 @@ async def main(connection: iterm2.Connection):
                         if len(c.mcp_messages) > 20:
                             c.mcp_messages[:] = c.mcp_messages[:20]
 
+                    def _append_task_msg(t, act, msg, agent_name):
+                        """Append to the task's persisted activity log."""
+                        if t:
+                            t.messages.append({
+                                "timestamp": time.time(),
+                                "action": act,
+                                "message": msg,
+                                "agent_name": agent_name,
+                            })
+
                     async def _auto_dispatch_next(c):
                         """Pick the next queued task for this agent."""
                         queued = sorted(
@@ -2200,6 +2210,8 @@ async def main(connection: iterm2.Connection):
                             cell.last_summary = message
                         cell.current_task_id = ""
                         _append_mcp(cell, "done", message or "Done")
+                        _append_task_msg(task, "done",
+                                         message or "Done", cell.name)
                         state._emit_agent(cell)
                         if task and task.lane != "Done":
                             state.board_move_task(task.id, "Done")
@@ -2218,6 +2230,8 @@ async def main(connection: iterm2.Connection):
                         cell.activity = "waiting"
                         cell.activity_detail = message
                         _append_mcp(cell, "blocked", message)
+                        _append_task_msg(task, "blocked",
+                                         message, cell.name)
                         state._emit_agent(cell)
                         if task:
                             _add_label(task, "blocked")
@@ -2230,6 +2244,8 @@ async def main(connection: iterm2.Connection):
                         cell.error_message = message
                         cell.needs_attention = True
                         _append_mcp(cell, "error", message)
+                        _append_task_msg(task, "error",
+                                         message, cell.name)
                         state._emit_agent(cell)
                         if task:
                             _add_label(task, "error")
@@ -2243,7 +2259,11 @@ async def main(connection: iterm2.Connection):
                         if cell.needs_attention:
                             cell.needs_attention = False
                         _append_mcp(cell, "progress", message)
+                        _append_task_msg(task, "progress",
+                                         message, cell.name)
                         state._emit_agent(cell)
+                        if task:
+                            _save_task(task)
                         # Panel event — replace last progress
                         # for this agent to avoid flooding
                         pe = panel_log.replace_last(
@@ -2260,6 +2280,8 @@ async def main(connection: iterm2.Connection):
                         cell.error_message = ""
                         cell.current_task_id = ""
                         _append_mcp(cell, "ready", "Ready")
+                        _append_task_msg(task, "ready",
+                                         message or "Ready", cell.name)
                         state._emit_agent(cell)
                         if task:
                             if task.lane != "Done":
@@ -2394,6 +2416,10 @@ async def main(connection: iterm2.Connection):
                                         _append_mcp(
                                             cell, "derive",
                                             message[:80])
+                                        _append_task_msg(
+                                            task, "derive",
+                                            message, cell.name)
+                                        _save_task(task)
                                         state._emit_agent(cell)
                                         _panel_event(
                                             "task_derived",
@@ -2597,6 +2623,8 @@ async def main(connection: iterm2.Connection):
                             cell.needs_attention = True
                             cell.error_message = ""
                             _append_mcp(cell, "ask", message)
+                            _append_task_msg(task, "ask",
+                                             message, cell.name)
                             state._emit_agent(cell)
                             task.status = "Awaiting Input"
                             _save_task(task)
@@ -2649,6 +2677,10 @@ async def main(connection: iterm2.Connection):
                         else:
                             old_name = cell.name
                             _append_mcp(cell, "name", message)
+                            _append_task_msg(task, "name",
+                                             message, cell.name)
+                            if task:
+                                _save_task(task)
                             state.update_agent(cell.id,
                                                name=message)
                             if cell.session_id:

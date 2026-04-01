@@ -1519,6 +1519,19 @@ def cmd_task_show(args):
         if t.get("external_url"):
             print(f"  {'URL:':<14} {t['external_url']}")
 
+    # Activity log
+    msgs = t.get("messages") or []
+    if msgs:
+        print()
+        print(f"  {_bold('Activity:')}")
+        for m in msgs:
+            ts = m.get("timestamp", 0)
+            hhmm = time.strftime("%H:%M", time.localtime(ts)) if ts else "??:??"
+            agent = m.get("agent_name", "?")
+            act = m.get("action", "")
+            txt = m.get("message", "")
+            print(f"    [{hhmm}] {agent}: {txt}  {_dim('(' + act + ')')}")
+
     print()
     if t.get("created_at"):
         print(f"  {_dim('Created: ' + t['created_at'])}")
