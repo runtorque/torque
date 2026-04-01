@@ -191,6 +191,7 @@ function renderAgentTemplatesEditor() {
   html += '<label>System prompt</label><textarea id="agent-template-system-prompt" rows="4" oninput="_tplAutoResize(this)" onchange="agentTemplateMarkDirty()">' + esc(d.system_prompt || '') + '</textarea>';
   html += '<label>Initial prompt</label><textarea id="agent-template-initial-prompt" rows="3" oninput="_tplAutoResize(this)" onchange="agentTemplateMarkDirty()">' + esc(d.initial_prompt || '') + '</textarea>';
   html += '<label class="gs-checkbox"><input id="agent-template-session-resume" type="checkbox"' + (d.session_resume !== false ? ' checked' : '') + ' onchange="agentTemplateMarkDirty()"> Resume session on relaunch</label>';
+  html += '<label>Idle timeout <span class="label-hint">minutes</span></label><input id="agent-template-idle-timeout" type="number" min="0" value="' + esc(d.idle_timeout != null ? d.idle_timeout : 5) + '" onchange="agentTemplateMarkDirty()">';
   html += '</details>';
 
   html += '<details class="tpled-section"' + (d.tab_color || d.icon ? ' open' : '') + '><summary>Visual</summary>';
@@ -289,6 +290,7 @@ function _agentTemplateReadForm() {
     system_prompt: document.getElementById('agent-template-system-prompt').value || '',
     initial_prompt: document.getElementById('agent-template-initial-prompt').value || '',
     session_resume: document.getElementById('agent-template-session-resume').checked,
+    idle_timeout: parseInt(document.getElementById('agent-template-idle-timeout').value, 10) || 0,
     tab_color: (document.getElementById('agent-template-color').value || '').trim(),
     icon: (document.getElementById('agent-template-icon').value || '').trim(),
     worktree: document.getElementById('agent-template-worktree').checked,
@@ -361,12 +363,6 @@ var _agentHistoryFilter = '';       // '', 'active', 'removed', 'merged'
 var _agentHistorySearch = '';
 var _agentHistoryExpanded = '';     // agent ID currently expanded
 var _agentHistoryDetail = null;     // detail data for expanded agent
-
-function _agentHistoryCurrentGroup() {
-  if (typeof selectedAgentId === 'undefined' || !selectedAgentId) return '';
-  if (!state || !state.agents || !state.agents[selectedAgentId]) return '';
-  return state.agents[selectedAgentId].group || '';
-}
 
 function agentHistoryLoad() {
   send({
@@ -473,12 +469,6 @@ function renderAgentHistoryView() {
 
   // Filter records by search
   var records = _agentHistoryRecords;
-  var group = _agentHistoryCurrentGroup();
-  if (group) {
-    records = records.filter(function(r) {
-      return (r.group || '') === group;
-    });
-  }
   if (_agentHistorySearch) {
     records = records.filter(function(r) {
       return r.name.toLowerCase().indexOf(_agentHistorySearch) >= 0

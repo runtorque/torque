@@ -170,16 +170,6 @@ function _boardAgentName(agentId) {
   return a ? a.name : '';
 }
 
-function _boardDepsBlocked(t) {
-  if (!t.depends_on || !t.depends_on.length) return false;
-  var tasks = _boardTasks();
-  for (var i = 0; i < t.depends_on.length; i++) {
-    var dep = tasks[t.depends_on[i]];
-    if (dep && dep.lane !== 'Done') return true;
-  }
-  return false;
-}
-
 /* ---- Card rendering ------------------------------------------------- */
 
 function _renderBoardCard(t, childrenOf, depth) {
@@ -220,19 +210,21 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (t.action_name) meta += '<span class="board-card-label board-card-template">' + esc(t.action_name) + '</span>';
   if (t.agent_template) meta += '<span class="board-card-label board-card-template">agent: ' + esc(t.agent_template) + '</span>';
   if (t.labels && t.labels.length) {
+    var userLbls = [], sysLbls = [];
     for (var li = 0; li < t.labels.length; li++) {
-      var lb = t.labels[li];
-      if (lb === 'blocked') {
-        meta += '<span class="board-card-label board-label-blocked">' + esc(lb) + '</span>';
-      } else if (lb === 'error') {
-        meta += '<span class="board-card-label board-label-error">' + esc(lb) + '</span>';
-      } else {
-        meta += '<span class="board-card-label">' + esc(lb) + '</span>';
-      }
+      if (isSystemLabel(t.labels[li])) sysLbls.push(t.labels[li]);
+      else userLbls.push(t.labels[li]);
     }
-  }
-  if (!isDone && _boardDepsBlocked(t)) {
-    meta += '<span class="board-card-label board-label-dep-blocked" title="Blocked by dependencies">&#x1F512; deps</span>';
+    for (var li = 0; li < userLbls.length; li++) {
+      meta += '<span class="board-card-label">' + esc(userLbls[li]) + '</span>';
+    }
+    for (var li = 0; li < sysLbls.length; li++) {
+      var lb = sysLbls[li];
+      var cls = 'board-card-label board-label-system';
+      if (lb === 'loom:blocked') cls += ' board-label-blocked';
+      else if (lb === 'loom:error') cls += ' board-label-error';
+      meta += '<span class="' + cls + '">' + esc(displayLabel(lb)) + '</span>';
+    }
   }
   if (t.external_url) {
     meta += '<a class="board-card-pr-link" href="' + esc(t.external_url)
@@ -243,7 +235,7 @@ function _renderBoardCard(t, childrenOf, depth) {
   // Pipeline chain indicator (only for subordinate cards)
   if (isSubordinate && t.parent_task_id) {
     var chainInfo = '↳ depth ' + (t.pipeline_depth || 0);
-    if (t.labels && t.labels.indexOf('human') >= 0) chainInfo += ' · awaiting human';
+    if (t.labels && t.labels.indexOf('loom:human') >= 0) chainInfo += ' · awaiting human';
     cardHtml += '<div class="board-card-chain">' + chainInfo + '</div>';
   }
   if (t.agent_id) {
@@ -824,11 +816,7 @@ function boardCardMenu(evt, taskId) {
 
   // Dispatch (only from Backlog)
   if (task.lane === 'Backlog') {
-    if (_boardDepsBlocked(task)) {
-      html += '<button disabled title="Blocked by unmet dependencies">Dispatch (blocked)</button>';
-    } else {
-      html += '<button onclick="event.stopPropagation();boardDispatchTask(\'' + taskId + '\')">Dispatch...</button>';
-    }
+    html += '<button onclick="event.stopPropagation();boardDispatchTask(\'' + taskId + '\')">Dispatch...</button>';
   }
 
   // Link/Unlink agent
@@ -839,7 +827,7 @@ function boardCardMenu(evt, taskId) {
   }
 
   // Resolve (ask tasks with human label)
-  if (task.labels && task.labels.indexOf('human') >= 0 && task.lane !== 'Done') {
+  if (task.labels && task.labels.indexOf('loom:human') >= 0 && task.lane !== 'Done') {
     html += '<button onclick="event.stopPropagation();boardOpenResolve(\'' + taskId + '\')">Resolve...</button>';
   }
 
@@ -1241,9 +1229,13 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
   function buildList(query) {
     list.innerHTML = '';
     var q = (query || '').toLowerCase();
+    var filtered = [];
     for (var i = 0; i < names.length; i++) {
-      var name = names[i];
-      if (q && name.toLowerCase().indexOf(q) < 0) continue;
+      if (q && names[i].toLowerCase().indexOf(q) < 0) continue;
+      filtered.push(names[i]);
+    }
+
+    function addRow(name) {
       var row = document.createElement('label');
       row.className = 'board-filter-dropdown-item';
       var cb = document.createElement('input');
@@ -1253,20 +1245,43 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
         cb.addEventListener('change', function() {
           if (kind === 'label') boardToggleLabel(n);
           else boardToggleAction(n);
-          // Rebuild list to update checkbox states
           buildList(search.value);
         });
       })(name);
       row.appendChild(cb);
       var span = document.createElement('span');
       span.className = 'board-filter-dropdown-name';
-      span.textContent = name;
+      span.textContent = (kind === 'label' && isSystemLabel(name)) ? displayLabel(name) : name;
       row.appendChild(span);
       var badge = document.createElement('span');
       badge.className = 'board-filter-dropdown-count';
       badge.textContent = counts[name];
       row.appendChild(badge);
       list.appendChild(row);
+    }
+
+    if (kind === 'label') {
+      var sysNames = [], userNames = [];
+      for (var i = 0; i < filtered.length; i++) {
+        if (isSystemLabel(filtered[i])) sysNames.push(filtered[i]);
+        else userNames.push(filtered[i]);
+      }
+      if (sysNames.length) {
+        var hdr = document.createElement('div');
+        hdr.className = 'board-filter-dropdown-header';
+        hdr.textContent = 'System';
+        list.appendChild(hdr);
+        for (var i = 0; i < sysNames.length; i++) addRow(sysNames[i]);
+      }
+      if (userNames.length) {
+        var hdr = document.createElement('div');
+        hdr.className = 'board-filter-dropdown-header';
+        hdr.textContent = 'Labels';
+        list.appendChild(hdr);
+        for (var i = 0; i < userNames.length; i++) addRow(userNames[i]);
+      }
+    } else {
+      for (var i = 0; i < filtered.length; i++) addRow(filtered[i]);
     }
   }
 

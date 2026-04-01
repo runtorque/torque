@@ -1,3 +1,7 @@
+/* System label helpers */
+function isSystemLabel(l) { return l.startsWith('loom:'); }
+function displayLabel(l) { return isSystemLabel(l) ? l.slice(5) : l; }
+
 /* When true, only show agents/terminals belonging to the current window.
    Reads from global settings state; falls back to true before state loads. */
 function getFilterByWindow() {

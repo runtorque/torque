@@ -66,6 +66,7 @@ initial_prompt: |
   Start by reading the relevant code before making recommendations.
 
 session_resume: true
+idle_timeout: 10
 
 tab_color: "#1f6feb"
 icon: "🔎"

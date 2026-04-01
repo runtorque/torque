@@ -78,21 +78,6 @@ header h1 {
 /* ------------------------------------------------------------------ */
 main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
 
-#diff-view-root {
-  display: none;
-  flex: 1;
-  min-height: 0;
-  background: var(--bg-surface);
-}
-body.diff-view-open #diff-view-root { display: flex; }
-body.diff-view-open main,
-body.diff-view-open #bottom-panel,
-body.diff-view-open #taskbar,
-body.diff-view-open #broadcast,
-body.diff-view-open #ctx-menu {
-  display: none !important;
-}
-
 /* ------------------------------------------------------------------ */
 /* Empty state                                                         */
 /* ------------------------------------------------------------------ */
@@ -244,6 +229,13 @@ body.diff-view-open #ctx-menu {
   font-size: 9px; text-align: center;
   max-width: 100%; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
+}
+.cell-task {
+  font-size: 7px; text-align: center;
+  max-width: 100%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-dim); margin-top: 1px;
+  line-height: 1.3;
 }
 .cell-status {
   position: absolute; top: 4px; right: 4px;
@@ -580,8 +572,8 @@ body.diff-view-open #ctx-menu {
 .btn-primary:hover { filter: brightness(1.15); }
 .btn-danger { background: var(--red); color: #fff; }
 .btn-danger:hover { filter: brightness(1.15); }
-.btn-green, .btn-safe { background: var(--green); color: #fff; }
-.btn-green:hover, .btn-safe:hover { filter: brightness(1.15); }
+.btn-green { background: var(--green); color: #fff; }
+.btn-green:hover { filter: brightness(1.15); }
 .hidden { display: none !important; }
 
 /* Color swatches */
@@ -908,24 +900,12 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   font-size: 12px; line-height: 1; color: var(--text-dim);
 }
 .label-chip button:hover { color: var(--text); }
-
-/* Dependency dropdown */
-.deps-dropdown {
-  position: absolute; left: 0; right: 0; z-index: 20;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  max-height: 160px;
-  overflow-y: auto;
-  margin-top: 2px;
-}
-.deps-option {
-  padding: 4px 8px;
-  cursor: pointer;
-  font-size: 11px;
-}
-.deps-option:hover {
-  background: var(--bg-hover);
+.label-chip-system {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 10px; color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
+  border-radius: 3px; padding: 1px 4px; line-height: 16px;
+  font-style: italic;
 }
 
 /* ------------------------------------------------------------------ */
@@ -977,125 +957,6 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast-success { border-color: var(--green); color: var(--green); }
 .toast-error { border-color: var(--red); color: var(--red); }
-
-/* ------------------------------------------------------------------ */
-/* Full-panel diff view                                                */
-/* ------------------------------------------------------------------ */
-.diff-view {
-  display: flex; flex-direction: column;
-  flex: 1; min-height: 0;
-}
-.diff-view-header {
-  padding: 10px 12px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-hover);
-  flex-shrink: 0;
-}
-.diff-view-title {
-  font-size: 12px; font-weight: 700;
-  color: var(--text);
-  word-break: break-word;
-}
-.diff-view-branch {
-  font-size: 10px; color: var(--accent);
-  margin-top: 3px;
-  word-break: break-word;
-}
-.diff-view-stats {
-  font-size: 10px; color: var(--text-dim);
-  margin-top: 4px;
-}
-.diff-view-content {
-  flex: 1; min-height: 0; overflow-y: auto;
-  padding: 0;
-}
-.diff-empty {
-  color: var(--text-dim);
-  text-align: center;
-  padding: 24px 12px;
-  font-size: 11px;
-}
-.diff-file-section {
-  border-bottom: 1px solid var(--border);
-}
-.diff-file-header {
-  position: sticky; top: 0; z-index: 1;
-  display: flex; align-items: center; gap: 6px;
-  width: 100%;
-  padding: 7px 10px;
-  background: #11161d;
-  border-bottom: 1px solid rgba(255,255,255,.04);
-  text-align: left;
-}
-.diff-file-header:hover { background: #171d25; }
-.diff-file-arrow {
-  color: var(--text-dim);
-  flex-shrink: 0;
-  width: 10px;
-}
-.diff-file-path {
-  flex: 1; min-width: 0;
-  font-weight: 700;
-  word-break: break-word;
-}
-.diff-file-status {
-  flex-shrink: 0;
-  font-size: 9px; color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: .05em;
-}
-.diff-file-summary {
-  display: flex; gap: 6px;
-  flex-shrink: 0;
-}
-.diff-file-stat {
-  font-size: 9px; font-weight: 600;
-}
-.diff-file-add { color: var(--green); }
-.diff-file-del { color: var(--red); }
-.diff-file-body {
-  padding-bottom: 6px;
-}
-.diff-hunk {
-  padding-top: 6px;
-}
-.diff-hunk-header {
-  padding: 0 10px 4px;
-  color: var(--text-dim);
-  font-style: italic;
-}
-.diff-hunk-body {
-  display: flex; flex-direction: column;
-}
-.diff-line {
-  display: flex; align-items: flex-start; gap: 6px;
-  padding: 1px 10px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.diff-line-prefix {
-  width: 8px;
-  flex-shrink: 0;
-  color: var(--text-dim);
-}
-.diff-line-text {
-  flex: 1; min-width: 0;
-}
-.diff-line-add { background: rgba(26,58,42,.75); }
-.diff-line-del { background: rgba(58,26,26,.75); }
-.diff-line-context { background: transparent; }
-.diff-binary {
-  padding: 10px;
-  color: var(--text-dim);
-  font-style: italic;
-}
-.diff-footer {
-  display: flex; justify-content: flex-end; gap: 8px;
-  padding: 8px 10px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-hover);
-  flex-shrink: 0;
-}
 
 /* ------------------------------------------------------------------ */
 /* Taskbar                                                             */
@@ -1269,18 +1130,18 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   color: var(--fg-dim); font-style: italic;
   background: color-mix(in srgb, var(--fg-dim) 12%, transparent);
 }
-.board-label-blocked {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 15%, transparent);
+.board-label-system {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
+  font-style: italic;
 }
-.board-label-error {
+.board-label-system.board-label-blocked {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+}
+.board-label-system.board-label-error {
   color: var(--red);
-  background: color-mix(in srgb, var(--red) 15%, transparent);
-}
-.board-label-dep-blocked {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 15%, transparent);
-  cursor: help;
+  background: color-mix(in srgb, var(--red) 12%, transparent);
 }
 .board-card-pr-link {
   font-size: 9px; text-decoration: none; cursor: pointer;
@@ -1537,6 +1398,10 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   font-size: 8px; color: var(--text-dim);
   background: var(--bg); border-radius: 7px;
   padding: 1px 5px; flex-shrink: 0;
+}
+.board-filter-dropdown-header {
+  font-size: 8px; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: .5px; padding: 5px 8px 2px;
 }
 /* Active filter chips row */
 .board-filter-active {
@@ -2019,6 +1884,16 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   color: var(--text-dim); text-transform: uppercase;
   letter-spacing: 0.5px; flex: 1;
 }
+.events-filter-btn {
+  font-size: 9px; padding: 2px 6px;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.events-filter-btn:hover { color: var(--text); border-color: var(--accent); }
+.events-filter-btn.active { color: var(--accent); border-color: var(--accent); }
 .events-kind-filter {
   font-size: 9px; padding: 2px 4px;
   border-radius: var(--radius);

@@ -352,30 +352,6 @@ def resolve_task(state_data, identifier):
     die(f"Task not found: {identifier}")
 
 
-def _resolve_dep_ids(state_data, depends_on_str):
-    """Resolve comma-separated task slugs/IDs to a list of task IDs."""
-    tasks = state_data.get("board_tasks", {})
-    ids = []
-    for token in depends_on_str.split(","):
-        token = token.strip()
-        if not token:
-            continue
-        # Exact ID
-        if token in tasks:
-            ids.append(token)
-            continue
-        # Slug match
-        slug_m = [t for t in tasks.values()
-                  if t.get("slug") and t["slug"] == token.lower()]
-        if len(slug_m) == 1:
-            ids.append(slug_m[0]["id"])
-        elif len(slug_m) > 1:
-            die(f"Ambiguous dependency slug \"{token}\"")
-        else:
-            die(f"Dependency task not found: \"{token}\"")
-    return ids
-
-
 def detect_context(state_data):
     """Auto-detect group and parent from the current iTerm2 session.
 
@@ -1553,10 +1529,6 @@ def cmd_task_create(args):
                 tvars[k] = v
         if tvars:
             kwargs["action_vars"] = tvars
-    if getattr(args, "depends_on", None):
-        dep_ids = _resolve_dep_ids(state_data, args.depends_on)
-        if dep_ids:
-            kwargs["depends_on"] = dep_ids
 
     resp = api_call("board_add_task", port=args.port, **kwargs)
     check_ok(resp)
@@ -1600,8 +1572,9 @@ def cmd_task_dispatch(args):
         if tvars:
             ticket_kwargs["action_vars"] = tvars
 
-    # -- Resolve agent name --
+    # -- Launch the agent --
     if args.action:
+        # Server-side rendering via add_agent_from_action
         act = load_action(args.action)
         act_agent = act.get("agent", {}) if act else {}
         if args.name:
@@ -1612,17 +1585,34 @@ def cmd_task_dispatch(args):
         else:
             slug = task_slug(args.description)
             agent_name = slug or "agent"
+
+        kwargs = {
+            "group": group,
+            "action": args.action,
+            "vars": variables,
+            "name": agent_name,
+        }
+        if args.command:
+            kwargs["command"] = args.command
+        if args.directory:
+            kwargs["directory"] = args.directory
+
+        if args.no_task:
+            variables.pop("TASK", None)
+            kwargs["vars"] = variables
+
+        resp = api_call("add_agent_from_action", port=args.port, **kwargs)
     else:
+        # No action — plain add_agent + send_text
         slug = task_slug(args.description)
         agent_name = args.name or slug or "agent"
+        kwargs = {"name": agent_name, "group": group}
+        if args.command:
+            kwargs["command"] = args.command
+        if args.directory:
+            kwargs["directory"] = args.directory
+        resp = api_call("add_agent", port=args.port, **kwargs)
 
-    # -- Create the agent --
-    kwargs = {"name": agent_name, "group": group}
-    if args.command:
-        kwargs["command"] = args.command
-    if args.directory:
-        kwargs["directory"] = args.directory
-    resp = api_call("add_agent", port=args.port, **kwargs)
     data = check_ok(resp)
 
     # Find the new agent in the returned state
@@ -1637,29 +1627,13 @@ def cmd_task_dispatch(args):
     # Create ticket and link to the agent
     ticket_kwargs["agent_id"] = cell_id
     resp2 = api_call("board_add_task", port=args.port, **ticket_kwargs)
-    data2 = check_ok(resp2)
+    check_ok(resp2)
 
     print(f"Agent \"{agent_name}\" created (id: {cell_id})")
     print(f"Ticket created in In Progress")
 
-    # Find the created task ID for dispatch
-    task_id = data2.get("task_id", "")
-    if not task_id:
-        # Fallback: find the task we just created
-        tasks = data2.get("board_tasks", {})
-        for tid, t in tasks.items():
-            if t.get("agent_id") == cell_id and t.get("group") == group:
-                task_id = tid
-                break
-
-    # Dispatch the task (renders action prompt if set, sends to agent)
-    if task_id and not args.no_task:
-        resp3 = api_call("dispatch_task", port=args.port,
-                         id=task_id, agent_id=cell_id)
-        check_ok(resp3)
-        print(f"Task dispatched to \"{agent_name}\"")
-    elif not args.no_task and not args.action:
-        # No task ID found — fall back to manual send
+    # For non-action dispatch, send task text manually
+    if not args.action and not args.no_task:
         booted = wait_for_boot(cell_id, args.port)
         if not booted:
             die("Agent failed to boot within 15 seconds")
@@ -1672,6 +1646,9 @@ def cmd_task_dispatch(args):
         print(f"Task sent to \"{agent_name}\"")
 
     if args.wait:
+        # For action dispatch, task is sent server-side after boot delay
+        if args.action:
+            time.sleep(3)
         rc = wait_for_idle(cell_id, agent_name, args.port)
         sys.exit(rc)
 
@@ -1702,22 +1679,9 @@ def cmd_task_show(args):
             agent_str = t["agent_id"][:6]
         print(f"  {'Agent:':<14} {agent_str}")
     if t.get("labels"):
-        print(f"  {'Labels:':<14} {', '.join(t['labels'])}")
-    if t.get("depends_on"):
-        tasks = st.get("board_tasks", {})
-        dep_strs = []
-        for dep_id in t["depends_on"]:
-            dep_t = tasks.get(dep_id)
-            if dep_t:
-                dep_lane = dep_t.get("lane", "?")
-                mark = "\u2713" if dep_lane == "Done" else "\u2717"
-                dep_slug = dep_t.get("slug") or dep_id[:6]
-                dep_strs.append(f"{mark} {dep_slug} ({dep_lane})")
-            else:
-                dep_strs.append(f"  {dep_id[:6]} [deleted]")
-        print(f"  {'Dependencies:'}")
-        for ds in dep_strs:
-            print(f"    {ds}")
+        def _fmt_label(lb):
+            return f"[{lb}]" if lb.startswith("loom:") else lb
+        print(f"  {'Labels:':<14} {', '.join(_fmt_label(l) for l in t['labels'])}")
 
     if t.get("description"):
         print()
@@ -1815,7 +1779,14 @@ def cmd_task_list(args):
                 if a:
                     parts.append(_cyan("→ " + a["name"]))
             if t.get("labels"):
-                parts.append(_dim("[" + ", ".join(t["labels"]) + "]"))
+                user_lbl = [l for l in t["labels"] if not l.startswith("loom:")]
+                sys_lbl = [l for l in t["labels"] if l.startswith("loom:")]
+                lbl_parts = []
+                if user_lbl:
+                    lbl_parts.append(", ".join(user_lbl))
+                if sys_lbl:
+                    lbl_parts.append(", ".join(f"[{l}]" for l in sys_lbl))
+                parts.append(_dim("  ".join(lbl_parts)))
             print("  ".join(parts))
 
     if not found_any:
@@ -1843,7 +1814,7 @@ def _filter_tasks(tasks, args):
 
 _TASK_EDIT_FIELDS = [
     "task", "lane", "group", "labels",
-    "action_name", "action_vars", "depends_on",
+    "action_name", "action_vars",
 ]
 
 _TASK_EDIT_COMMENT = """\
@@ -1860,7 +1831,7 @@ def _task_to_yaml(t):
     doc = {}
     for key in _TASK_EDIT_FIELDS:
         val = t.get(key, "")
-        if key == "labels" or key == "depends_on":
+        if key == "labels":
             doc[key] = val if isinstance(val, list) else []
         elif key == "action_vars":
             doc[key] = val if isinstance(val, dict) else {}
@@ -1892,8 +1863,8 @@ def _yaml_to_fields(text, original):
         if key not in doc:
             continue
         new_val = doc[key]
-        old_val = original.get(key, "" if key not in ("labels", "action_vars", "depends_on") else ([] if key in ("labels", "depends_on") else {}))
-        if key == "labels" or key == "depends_on":
+        old_val = original.get(key, "" if key not in ("labels", "action_vars") else ([] if key == "labels" else {}))
+        if key == "labels":
             new_val = new_val if isinstance(new_val, list) else []
             if new_val != old_val:
                 fields[key] = new_val
@@ -1935,7 +1906,7 @@ def cmd_task_edit(args):
     # Check if any inline flags were provided
     has_flags = any(
         getattr(args, attr, None) is not None
-        for attr in ("task", "action", "labels", "group", "depends_on")
+        for attr in ("task", "action", "labels", "group")
     ) or getattr(args, "var", None)
 
     if has_flags:
@@ -1957,9 +1928,6 @@ def cmd_task_edit(args):
                                 if l.strip()]
         if args.group is not None:
             fields["group"] = args.group
-        if getattr(args, "depends_on", None) is not None:
-            dep_ids = _resolve_dep_ids(st, args.depends_on)
-            fields["depends_on"] = dep_ids
     else:
         # Interactive editor mode
         original_text = _task_to_yaml(t)
@@ -2455,8 +2423,8 @@ def cmd_ai_ask(args):
 def cmd_task_resolve(args):
     st = get_state_local(args.port)
     task = resolve_task(st, args.identifier)
-    if "human" not in task.get("labels", []):
-        _die("Not an ask task (missing 'human' label)")
+    if "loom:human" not in task.get("labels", []):
+        _die("Not an ask task (missing 'loom:human' label)")
     answer = args.answer
     if not answer:
         # Read from stdin or prompt
@@ -2515,7 +2483,7 @@ def cmd_task_chain(args):
 
         if lane == "Done":
             icon = _green("✓")
-        elif "error" in t.get("labels", []):
+        elif "loom:error" in t.get("labels", []):
             icon = _red("✕")
         elif lane == "Backlog":
             icon = "○"
@@ -2795,8 +2763,6 @@ def build_parser():
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
                    help="Action variables (e.g., -v CONTEXT='some info')")
     p.add_argument("-l", "--labels", help="Comma-separated labels")
-    p.add_argument("--depends-on",
-                   help="Comma-separated task slugs/IDs this depends on")
     p.set_defaults(func=cmd_task_create)
 
     p = tsk_sub.add_parser("dispatch", aliases=["d"],
@@ -2837,8 +2803,6 @@ def build_parser():
                    help="Set action variables")
     p.add_argument("-l", "--labels", help="Comma-separated labels")
     p.add_argument("-g", "--group", help="Move to different group")
-    p.add_argument("--depends-on",
-                   help="Comma-separated task slugs/IDs (replaces deps)")
     p.set_defaults(func=cmd_task_edit)
 
     p = tsk_sub.add_parser("move", aliases=["mv"],

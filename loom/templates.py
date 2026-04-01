@@ -32,6 +32,7 @@ _TEMPLATE_KEY_ORDER = [
     "system_prompt",
     "initial_prompt",
     "session_resume",
+    "idle_timeout",
     "tab_color",
     "icon",
     "worktree",
@@ -57,7 +58,7 @@ _SCALAR_KEYS = {
     "worktree_base_branch",
 }
 
-_INT_KEYS = {"max_turns"}
+_INT_KEYS = {"max_turns", "idle_timeout"}
 _BOOL_KEYS = {
     "session_resume",
     "worktree",
@@ -356,6 +357,9 @@ class TemplateManager:
             ),
             "session_resume": getattr(
                 group_settings, "agent_session_resume", True
+            ),
+            "idle_timeout": getattr(
+                group_settings, "agent_idle_timeout", 5
             ),
         }
         result = _merge_agent_config(result, group_overrides)
