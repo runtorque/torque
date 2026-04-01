@@ -145,6 +145,7 @@ class EventBus:
                         event.cell_id, event.event_type)
             return
 
+        prev_activity = cell.activity
         self._apply(event, cell)
         self._log.append(event)
         log.info("Event: cell='%s' type=%s activity='%s' detail='%s'",
@@ -152,6 +153,9 @@ class EventBus:
                  cell.activity_detail[:50] if cell.activity_detail else "")
         if self._notifier:
             self._notifier.on_event(event)
+        # Auto-unlink agent from parent task when idle after derive
+        if prev_activity and not cell.activity and cell.current_task_id:
+            self._maybe_unlink_post_derive(cell)
         # Notify on agent turn completion (for auto-checkpoint, etc.)
         if event.event_type == "session_end" and self.on_session_end:
             try:
@@ -266,6 +270,23 @@ class EventBus:
         # Emit delta for all event types
         self._state._emit_agent(cell)
 
+    def _maybe_unlink_post_derive(self, cell):
+        """Unlink agent from its task if that task has derived children.
+
+        After an agent derives a subtask and then goes idle, it still holds
+        current_task_id for the parent task.  This blocks future dispatches.
+        Unlinking here frees the agent without triggering auto-dispatch.
+        """
+        task = self._state.board_tasks.get(cell.current_task_id)
+        if not task:
+            return
+        if self._state.board_get_children(task.id):
+            log.info("Auto-unlinking idle agent '%s' from post-derive task "
+                     "'%s'", cell.name, task.task[:60])
+            cell.current_task_id = ""
+            self._state._emit_agent(cell)
+            self._state._db_save_agent(cell)
+
     def _schedule_broadcast(self):
         """Schedule a throttled broadcast (at most once per second)."""
         if not self._loop:
@@ -308,6 +329,19 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
                 continue
             if cell.last_event_at == 0.0:
                 continue  # never received an event
+
+            # Fallback: unlink idle agent from post-derive parent task
+            # (catches cases where the activity_change event was missed)
+            if not cell.activity and cell.current_task_id:
+                task = state.board_tasks.get(cell.current_task_id)
+                if task and state.board_get_children(task.id):
+                    log.info("Health check: auto-unlinking idle agent '%s' "
+                             "from post-derive task '%s'",
+                             cell.name, task.task[:60])
+                    cell.current_task_id = ""
+                    state._emit_agent(cell)
+                    state._db_save_agent(cell)
+                    changed = True
 
             timeout_min = cell.idle_timeout
             if timeout_min <= 0:
