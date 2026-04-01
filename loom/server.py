@@ -1662,17 +1662,45 @@ async def main(connection: iterm2.Connection):
                         squash = cell.worktree_merge_squash
                         method = ("Squash merge" if squash
                                   else "Merge")
-                        prompt = (
-                            f"{method} the current branch "
-                            f"`{branch}` into `{base}`. The "
-                            f"main repo is at `{repo}`. If there "
-                            f"are merge conflicts, resolve them. "
-                            f"Do not delete the worktree branch "
-                            f"after merging. Write a clear, "
-                            f"descriptive commit message that "
-                            f"summarizes everything this branch "
-                            f"accomplished — review the full diff "
-                            f"and commit history to inform it.")
+                        if squash:
+                            prompt = (
+                                f"Squash merge the current branch "
+                                f"`{branch}` into `{base}`. The "
+                                f"main repo is at `{repo}`.\n\n"
+                                f"IMPORTANT: Do NOT use `git merge "
+                                f"--squash` — its three-way merge "
+                                f"can silently drop branch changes "
+                                f"when main has diverged. Instead:\n"
+                                f"1. `git checkout {base}`\n"
+                                f"2. `git diff HEAD {branch} "
+                                f"--diff-filter=D --name-only | "
+                                f"xargs git rm` (remove deleted "
+                                f"files)\n"
+                                f"3. `git checkout {branch} -- .` "
+                                f"(copy all branch files)\n"
+                                f"4. Verify `git diff {base} "
+                                f"{branch}` shows zero diff\n"
+                                f"5. Commit with a clear message\n\n"
+                                f"Do not delete the worktree branch "
+                                f"after merging. Write a clear, "
+                                f"descriptive commit message that "
+                                f"summarizes everything this branch "
+                                f"accomplished — review the full "
+                                f"diff and commit history to "
+                                f"inform it.")
+                        else:
+                            prompt = (
+                                f"Merge the current branch "
+                                f"`{branch}` into `{base}`. The "
+                                f"main repo is at `{repo}`. If "
+                                f"there are merge conflicts, "
+                                f"resolve them. Do not delete the "
+                                f"worktree branch after merging. "
+                                f"Write a clear, descriptive commit "
+                                f"message that summarizes everything "
+                                f"this branch accomplished — review "
+                                f"the full diff and commit history "
+                                f"to inform it.")
                         extra = gs.worktree_merge_instructions.strip()
                         if extra:
                             prompt += " " + extra
