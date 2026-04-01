@@ -9,3 +9,4 @@ state.json
 .claude/skills/loom-*/
 .codex/config.toml
 .codex/hooks.json
+.claude/instructions.md
