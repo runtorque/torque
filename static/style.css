@@ -387,6 +387,7 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  min-height: 2.4em;
 }
 .detail-time { color: var(--text-dim); white-space: nowrap; }
 .detail-row-mcp { align-items: flex-start; }
@@ -1055,6 +1056,9 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-lane-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+.board-lane-tab.dimmed {
+  opacity: 0.35;
 }
 .board-lane-tab .lane-count {
   font-size: 9px; color: var(--text-dim);

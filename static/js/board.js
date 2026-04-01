@@ -21,8 +21,7 @@ var _boardSearchQuery = '';      // text search filter
 var _boardFilterLabels = [];     // active label filters (OR logic)
 var _boardFilterActions = [];    // active action name filters (OR logic)
 var _boardSearchTimer = null;    // debounce timer for search input
-var _boardFilterDropdownType = null;   // 'label' | 'action' | null
-var _boardFilterDropdownCleanup = null;
+var _boardPreFilterLane = '';    // saved lane before search, restored on clear
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -299,6 +298,12 @@ function renderBoard() {
   var html = '';
   var filtersActive = _boardHasActiveFilters();
 
+  // Restore saved lane when filters clear (e.g. user backspaces search to empty)
+  if (!filtersActive && _boardPreFilterLane) {
+    _boardSelectedLane = _boardPreFilterLane;
+    _boardPreFilterLane = '';
+  }
+
   // Search & filter toolbar
   var labelCounts = _boardAllLabelCounts();
   var actionCounts = _boardAllActionCounts();
@@ -353,6 +358,21 @@ function renderBoard() {
     }
   }
 
+  // When filters become active, save the current lane; auto-select first non-empty lane
+  if (filtersActive) {
+    if (!_boardPreFilterLane) _boardPreFilterLane = _boardSelectedLane;
+    // Check if current lane has matches; if not, jump to first that does
+    var curCount = _boardLaneCount(_boardSelectedLane);
+    if (curCount === 0) {
+      for (var fi = 0; fi < lanes.length; fi++) {
+        if (_boardLaneCount(lanes[fi]) > 0) {
+          _boardSelectedLane = lanes[fi];
+          break;
+        }
+      }
+    }
+  }
+
   // Lane tab bar
   html += '<div class="board-lane-bar">';
   html += '<button class="board-lane-scroll-btn" id="board-scroll-left" onclick="boardScrollLanes(-1)" title="Scroll left">&#9664;</button>';
@@ -361,7 +381,7 @@ function renderBoard() {
     var l = lanes[i];
     var cnt = _boardLaneCount(l);
     var cls = l === _boardSelectedLane ? ' active' : '';
-    if (filtersActive && cnt === 0) cls += ' empty-filtered';
+    if (filtersActive && cnt === 0) cls += ' dimmed';
     var escLane = esc(l).replace(/'/g, "\\'");
     html += '<button class="board-lane-tab' + cls + '"'
       + ' data-lane="' + esc(l) + '"'
@@ -377,16 +397,8 @@ function renderBoard() {
 
   html += '</div>';
 
-  // Cards — when filters active, show across all lanes; otherwise selected lane only
-  var tasks;
-  if (filtersActive) {
-    var vis = _boardVisibleTasks();
-    tasks = [];
-    for (var id in vis) tasks.push(vis[id]);
-    tasks.sort(function(a, b) { return b.position - a.position; });
-  } else {
-    tasks = _boardTasksInLane(_boardSelectedLane);
-  }
+  // Cards — always show tasks in the selected lane
+  var tasks = _boardTasksInLane(_boardSelectedLane);
   html += '<div class="board-cards" id="board-cards">';
 
   // Add task: inline input or button (at top)
@@ -1150,6 +1162,10 @@ function boardClearFilters() {
   _boardFilterActions = [];
   _boardCloseFilterDropdown();
   _boardCardsScrollTop = 0;
+  if (_boardPreFilterLane) {
+    _boardSelectedLane = _boardPreFilterLane;
+    _boardPreFilterLane = '';
+  }
   renderBoard();
 }
 

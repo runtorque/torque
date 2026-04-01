@@ -394,11 +394,6 @@ function renderAgentDetails(a) {
     h += `</span></div>`;
   }
 
-  /* Activity */
-  if (a.agent_type && a.activity_detail && a.status !== 'stopped') {
-    h += `<div class="detail-row"><span class="detail-label">Activity</span><span class="detail-val">${esc(a.activity_detail)}</span></div>`;
-  }
-
   /* MCP Messages */
   if (a.mcp_messages && a.mcp_messages.length) {
     const icons = { progress: '\u25CF', done: '\u2714', ready: '\u2714', blocked: '\u26D4', error: '\u2716', derive: '\u2934', ask: '\u2753', name: '\u270E' };
