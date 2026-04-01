@@ -71,6 +71,14 @@ def db_read_board_tasks():
                 d["labels"] = json.loads(d.get("labels", "[]"))
             except (json.JSONDecodeError, TypeError):
                 d["labels"] = []
+            try:
+                d["messages"] = json.loads(d.get("messages", "[]"))
+            except (json.JSONDecodeError, TypeError):
+                d["messages"] = []
+            try:
+                d["action_vars"] = json.loads(d.get("action_vars", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                d["action_vars"] = {}
             tasks[d["id"]] = d
         return tasks
     return _db_read(_query)
@@ -152,6 +160,14 @@ def db_read_state():
                     d["labels"] = json.loads(d.get("labels", "[]"))
                 except (json.JSONDecodeError, TypeError):
                     d["labels"] = []
+                try:
+                    d["messages"] = json.loads(d.get("messages", "[]"))
+                except (json.JSONDecodeError, TypeError):
+                    d["messages"] = []
+                try:
+                    d["action_vars"] = json.loads(d.get("action_vars", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    d["action_vars"] = {}
                 tasks[d["id"]] = d
 
         return {
