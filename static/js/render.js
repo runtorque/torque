@@ -307,6 +307,18 @@ function agentStatusClass(a) {
   return 'idle';
 }
 
+function _getAgentTask(agentId) {
+  if (!state.board_tasks) return null;
+  for (const t of Object.values(state.board_tasks)) {
+    if (t.agent_id === agentId && t.lane !== 'Done') return t;
+  }
+  // Fall back to any linked task (including Done)
+  for (const t of Object.values(state.board_tasks)) {
+    if (t.agent_id === agentId) return t;
+  }
+  return null;
+}
+
 function renderAgentCell(a) {
   const active = a.session_id && a.session_id === state.active_session_id;
   const selected = a.id === selectedAgentId;
@@ -327,6 +339,11 @@ function renderAgentCell(a) {
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
+  /* Linked task */
+  const _ct = _getAgentTask(a.id);
+  if (_ct) {
+    h += `<div class="cell-task" title="${esc(_ct.task)}">${esc(_ct.task)}</div>`;
+  }
   /* Agent type badge */
   if (a.agent_type) {
     const typeInfo = AGENT_TYPE_LABELS[a.agent_type] || { short: a.agent_type.slice(0, 2).toUpperCase() };
@@ -361,6 +378,21 @@ function renderAgentDetails(a) {
   else if (statusCls === 'disconnected') h += 'Stopped';
   h += `</span>`;
   h += `</div>`;
+
+  /* Linked task */
+  const _dt = _getAgentTask(a.id);
+  if (_dt) {
+    h += `<div class="detail-row detail-row-task"><span class="detail-label">Task</span><span class="detail-val detail-task" title="${esc(_dt.task)}">${esc(_dt.task)}</span>`;
+    if (_dt.action_name) {
+      h += `<span class="detail-task-action">${esc(_dt.action_name)}</span>`;
+    }
+    if (_dt.status) {
+      h += `<span class="detail-task-status">${esc(_dt.status)}</span>`;
+    } else if (_dt.lane) {
+      h += `<span class="detail-task-lane">${esc(_dt.lane)}</span>`;
+    }
+    h += `</span></div>`;
+  }
 
   /* Activity */
   if (a.agent_type && a.activity_detail && a.status !== 'stopped') {
