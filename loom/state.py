@@ -91,7 +91,6 @@ class AgentCell:
     tasks_dispatched: int = 0  # number of tasks sent to this agent (persisted)
     current_task_id: str = ""  # most recently dispatched task (ephemeral)
     session_resume: bool = True  # whether relaunch should resume the prior session
-    idle_timeout: int = 5  # per-agent idle timeout in minutes
     # Worktree status (Phase 2, ephemeral)
     worktree_dirty: bool = False  # has uncommitted changes
     worktree_diff: dict = field(default_factory=dict)  # {files, insertions, deletions}
@@ -160,7 +159,6 @@ class GroupSettings:
     worktree_merge_squash: bool = True  # squash commits when merging to main
     worktree_merge_instructions: str = ""  # additional instructions appended to merge prompt
     agent_session_resume: bool = True  # resume session on relaunch
-    agent_idle_timeout: int = 5  # minutes before flagging agent as stuck (0=disable)
     agent_always_custom_dialog: bool = False
     # Agent notifications
     notifications: bool = False

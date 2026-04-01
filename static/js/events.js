@@ -2,7 +2,6 @@
 /* Events panel app — attention area + activity log                    */
 /* ------------------------------------------------------------------ */
 
-var _eventsFilterByGroup = true;
 var _eventsScrollTop = 0;
 var _eventsExpandedEntries = {};
 var _eventsLoading = false;
@@ -17,7 +16,6 @@ var _eventsSearchHadFocus = false;
 /* ---- Helpers -------------------------------------------------------- */
 
 function _eventsCurrentGroup() {
-  if (!_eventsFilterByGroup) return null;
   return (typeof _currentGroup === 'function') ? _currentGroup() : null;
 }
 
@@ -167,10 +165,6 @@ function renderEvents() {
   // Header
   html += '<div class="events-header">';
   html += '<span class="events-header-title">Events</span>';
-  html += '<button class="events-filter-btn' + (_eventsFilterByGroup ? ' active' : '') + '"'
-    + ' onclick="eventsToggleGroupFilter()" title="Filter by current group">'
-    + (_eventsFilterByGroup ? '\u{1F4CC} Group' : '\u{1F30D} All')
-    + '</button>';
   html += '<select class="events-kind-filter" onchange="eventsSetKindFilter(this.value)">';
   html += '<option value="all"' + (_eventsKindFilter === 'all' ? ' selected' : '') + '>All</option>';
   html += '<option value="errors"' + (_eventsKindFilter === 'errors' ? ' selected' : '') + '>Errors</option>';
@@ -339,11 +333,6 @@ function eventsFocusAgent(cellId) {
 function eventsToggleEntry(idx) {
   if (_eventsExpandedEntries[idx]) delete _eventsExpandedEntries[idx];
   else _eventsExpandedEntries[idx] = true;
-  renderEvents();
-}
-
-function eventsToggleGroupFilter() {
-  _eventsFilterByGroup = !_eventsFilterByGroup;
   renderEvents();
 }
 

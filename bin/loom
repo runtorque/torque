@@ -1572,9 +1572,8 @@ def cmd_task_dispatch(args):
         if tvars:
             ticket_kwargs["action_vars"] = tvars
 
-    # -- Launch the agent --
+    # -- Resolve agent name --
     if args.action:
-        # Server-side rendering via add_agent_from_action
         act = load_action(args.action)
         act_agent = act.get("agent", {}) if act else {}
         if args.name:
@@ -1585,34 +1584,17 @@ def cmd_task_dispatch(args):
         else:
             slug = task_slug(args.description)
             agent_name = slug or "agent"
-
-        kwargs = {
-            "group": group,
-            "action": args.action,
-            "vars": variables,
-            "name": agent_name,
-        }
-        if args.command:
-            kwargs["command"] = args.command
-        if args.directory:
-            kwargs["directory"] = args.directory
-
-        if args.no_task:
-            variables.pop("TASK", None)
-            kwargs["vars"] = variables
-
-        resp = api_call("add_agent_from_action", port=args.port, **kwargs)
     else:
-        # No action — plain add_agent + send_text
         slug = task_slug(args.description)
         agent_name = args.name or slug or "agent"
-        kwargs = {"name": agent_name, "group": group}
-        if args.command:
-            kwargs["command"] = args.command
-        if args.directory:
-            kwargs["directory"] = args.directory
-        resp = api_call("add_agent", port=args.port, **kwargs)
 
+    # -- Create the agent --
+    kwargs = {"name": agent_name, "group": group}
+    if args.command:
+        kwargs["command"] = args.command
+    if args.directory:
+        kwargs["directory"] = args.directory
+    resp = api_call("add_agent", port=args.port, **kwargs)
     data = check_ok(resp)
 
     # Find the new agent in the returned state
@@ -1627,13 +1609,29 @@ def cmd_task_dispatch(args):
     # Create ticket and link to the agent
     ticket_kwargs["agent_id"] = cell_id
     resp2 = api_call("board_add_task", port=args.port, **ticket_kwargs)
-    check_ok(resp2)
+    data2 = check_ok(resp2)
 
     print(f"Agent \"{agent_name}\" created (id: {cell_id})")
     print(f"Ticket created in In Progress")
 
-    # For non-action dispatch, send task text manually
-    if not args.action and not args.no_task:
+    # Find the created task ID for dispatch
+    task_id = data2.get("task_id", "")
+    if not task_id:
+        # Fallback: find the task we just created
+        tasks = data2.get("board_tasks", {})
+        for tid, t in tasks.items():
+            if t.get("agent_id") == cell_id and t.get("group") == group:
+                task_id = tid
+                break
+
+    # Dispatch the task (renders action prompt if set, sends to agent)
+    if task_id and not args.no_task:
+        resp3 = api_call("dispatch_task", port=args.port,
+                         id=task_id, agent_id=cell_id)
+        check_ok(resp3)
+        print(f"Task dispatched to \"{agent_name}\"")
+    elif not args.no_task and not args.action:
+        # No task ID found — fall back to manual send
         booted = wait_for_boot(cell_id, args.port)
         if not booted:
             die("Agent failed to boot within 15 seconds")
@@ -1646,9 +1644,6 @@ def cmd_task_dispatch(args):
         print(f"Task sent to \"{agent_name}\"")
 
     if args.wait:
-        # For action dispatch, task is sent server-side after boot delay
-        if args.action:
-            time.sleep(3)
         rc = wait_for_idle(cell_id, agent_name, args.port)
         sys.exit(rc)
 

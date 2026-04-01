@@ -97,7 +97,6 @@ class TemplateManagerTests(unittest.TestCase):
             worktree_auto_checkpoint=True,
             worktree_merge_squash=False,
             agent_session_resume=True,
-            agent_idle_timeout=9,
         )
 
         resolved = self.mgr.resolve_agent_config(
@@ -124,7 +123,6 @@ class TemplateManagerTests(unittest.TestCase):
         self.assertTrue(resolved["worktree_auto_checkpoint"])
         self.assertFalse(resolved["worktree_merge_squash"])
         self.assertFalse(resolved["session_resume"])
-        self.assertEqual(resolved["idle_timeout"], 9)
         self.assertEqual(
             resolved["env_vars"],
             {

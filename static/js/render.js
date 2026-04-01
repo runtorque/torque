@@ -222,7 +222,6 @@ function render() {
       html += `  <div class="split-menu">`;
       html += _renderAgentTemplateMenuItems(gname);
       html += `<button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button>`;
-      html += `<button onclick="event.stopPropagation();closeMenus();openAddFromAction('${esc(gname)}')">From Action\u2026</button>`;
       html += `</div>`;
       html += `</div>`;
     }
@@ -345,11 +344,6 @@ function renderAgentCell(a) {
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
-  /* Linked task */
-  const _ct = _getAgentTask(a.id);
-  if (_ct) {
-    h += `<div class="cell-task" title="${esc(_ct.task)}">${esc(_ct.task)}</div>`;
-  }
   /* Agent type badge */
   if (a.agent_type) {
     const typeInfo = AGENT_TYPE_LABELS[a.agent_type] || { short: a.agent_type.slice(0, 2).toUpperCase() };

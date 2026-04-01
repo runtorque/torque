@@ -245,13 +245,6 @@ body.diff-view-open #ctx-menu {
   max-width: 100%; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
-.cell-task {
-  font-size: 7px; text-align: center;
-  max-width: 100%; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
-  color: var(--text-dim); margin-top: 1px;
-  line-height: 1.3;
-}
 .cell-status {
   position: absolute; top: 4px; right: 4px;
   width: 7px; height: 7px; border-radius: 50%;
@@ -587,8 +580,8 @@ body.diff-view-open #ctx-menu {
 .btn-primary:hover { filter: brightness(1.15); }
 .btn-danger { background: var(--red); color: #fff; }
 .btn-danger:hover { filter: brightness(1.15); }
-.btn-green { background: var(--green); color: #fff; }
-.btn-green:hover { filter: brightness(1.15); }
+.btn-green, .btn-safe { background: var(--green); color: #fff; }
+.btn-green:hover, .btn-safe:hover { filter: brightness(1.15); }
 .hidden { display: none !important; }
 
 /* Color swatches */
@@ -2002,16 +1995,6 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   color: var(--text-dim); text-transform: uppercase;
   letter-spacing: 0.5px; flex: 1;
 }
-.events-filter-btn {
-  font-size: 9px; padding: 2px 6px;
-  border-radius: var(--radius);
-  color: var(--text-dim);
-  background: transparent;
-  border: 1px solid var(--border);
-  cursor: pointer;
-}
-.events-filter-btn:hover { color: var(--text); border-color: var(--accent); }
-.events-filter-btn.active { color: var(--accent); border-color: var(--accent); }
 .events-kind-filter {
   font-size: 9px; padding: 2px 4px;
   border-radius: var(--radius);

@@ -582,8 +582,6 @@ async def main(connection: iterm2.Connection):
             "template": resolved.get("template", ""),
             "session_resume": resolved.get(
                 "session_resume", gs.agent_session_resume),
-            "idle_timeout": resolved.get(
-                "idle_timeout", gs.agent_idle_timeout),
             "worktree": resolved.get("worktree", gs.git_worktree),
             "worktree_base_dir": resolved.get(
                 "worktree_base_dir", gs.worktree_base_dir),
@@ -673,7 +671,6 @@ async def main(connection: iterm2.Connection):
         if not cell:
             return None
         cell.session_resume = bool(launch_cfg.get("session_resume", True))
-        cell.idle_timeout = int(launch_cfg.get("idle_timeout", 5) or 0)
         cell.worktree_base_dir = (
             launch_cfg.get("worktree_base_dir") or ".loom/worktrees")
         cell.worktree_auto_checkpoint = bool(
@@ -1397,51 +1394,6 @@ async def main(connection: iterm2.Connection):
                             cell, launch_cfg["initial_prompt"],
                             background=True)
 
-            elif cmd == "add_agent_from_action":
-                group = data["group"]
-                act_name = data["action"]
-                variables = data.get("vars", {})
-                base_dir = await _resolve_base_dir(group)
-                raw = action_mgr._load_raw(act_name, base_dir)
-                if not raw:
-                    result = {"type": "error",
-                              "message": f"Action \"{act_name}\" not found"}
-                else:
-                    rendered = action_mgr.render_action(
-                        raw, variables)
-
-                    # Action can override the target group
-                    act_group = rendered.get("group", "")
-                    if act_group and act_group in state.groups:
-                        group = act_group
-
-                    # Use rendered values, falling through to group settings
-                    name = data.get("name") or rendered["name"]
-                    explicit_template = rendered.get("agent_template", "")
-                    launch_cfg = _resolve_agent_launch_config(
-                        group,
-                        base_dir=base_dir,
-                        explicit_template=explicit_template,
-                        overrides=rendered,
-                    )
-                    cell = await _create_agent_with_config(
-                        group, name, launch_cfg,
-                        explicit_template=explicit_template)
-                    if cell:
-                        await _create_child_terminals(
-                            group, cell, terminals=rendered.get("terminals"))
-
-                        # Use the rendered prompt directly
-                        prompt = rendered.get("prompt", "")
-
-                        if launch_cfg.get("initial_prompt") and cell.session_id:
-                            await _send_agent_prompt(
-                                cell, launch_cfg["initial_prompt"])
-                        if prompt and cell.session_id:
-                            await _send_agent_prompt(
-                                cell, prompt, persist=True,
-                                background=True)
-
             elif cmd == "add_terminal":
                 group = data.get("group", "")
                 parent_id = data.get("parent_id", "")
@@ -1558,8 +1510,6 @@ async def main(connection: iterm2.Connection):
                     )
                     cell.session_resume = bool(
                         launch_cfg.get("session_resume", cell.session_resume))
-                    cell.idle_timeout = int(
-                        launch_cfg.get("idle_timeout", cell.idle_timeout) or 0)
                     if cell.cell_type == "agent":
                         cell.command = launch_cfg.get("command", cell.command)
                         cell.profile = launch_cfg.get("profile", cell.profile)

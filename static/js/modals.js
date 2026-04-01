@@ -644,7 +644,6 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-wt-merge-instructions').value = s.worktree_merge_instructions || '';
   _toggleWorktreeFields();
   document.getElementById('gs-session-resume').checked = s.agent_session_resume !== false;
-  document.getElementById('gs-agent-idle-timeout').value = s.agent_idle_timeout != null ? s.agent_idle_timeout : 5;
   document.getElementById('gs-agent-always-custom').checked = s.agent_always_custom_dialog || false;
   document.getElementById('gs-dispatch-auto-terminals').checked = s.dispatch_auto_terminals || false;
   document.getElementById('gs-notifications').checked = s.notifications || false;
@@ -724,7 +723,6 @@ function submitGroupSettings() {
     worktree_merge_squash: document.getElementById('gs-wt-merge-squash').checked,
     worktree_merge_instructions: document.getElementById('gs-wt-merge-instructions').value.trim(),
     agent_session_resume: document.getElementById('gs-session-resume').checked,
-    agent_idle_timeout: parseInt(document.getElementById('gs-agent-idle-timeout').value) || 0,
     agent_always_custom_dialog: document.getElementById('gs-agent-always-custom').checked,
     dispatch_auto_terminals: document.getElementById('gs-dispatch-auto-terminals').checked,
     notifications: document.getElementById('gs-notifications').checked,
@@ -901,22 +899,12 @@ async function _doRollback(sha) {
 let _tplGroup = '';
 let _tplName = '';
 let _tplData = null;
-let _tplMode = 'agent';  // 'agent' = create agent, 'task' = pre-fill task modal
 let _tplTaskLane = '';    // lane for task mode
-
-function openAddFromAction(group) {
-  _tplGroup = group;
-  _tplName = '';
-  _tplData = null;
-  _tplMode = 'agent';
-  send({ cmd: 'list_actions', group });
-}
 
 function openTaskFromAction(group, lane) {
   _tplGroup = group;
   _tplName = '';
   _tplData = null;
-  _tplMode = 'task';
   _tplTaskLane = lane || '';
   send({ cmd: 'list_actions', group });
 }
@@ -932,7 +920,7 @@ function _showActionList(msg) {
   varsPane.classList.add('hidden');
   document.getElementById('tpl-back-btn').classList.add('hidden');
   document.getElementById('tpl-submit-btn').classList.add('hidden');
-  document.getElementById('tpl-title').textContent = _tplMode === 'task' ? 'Task from Action' : 'From Action';
+  document.getElementById('tpl-title').textContent = 'Task from Action';
 
   if (actions.length === 0) {
     listEl.innerHTML = '';
@@ -1011,40 +999,29 @@ function _tplSubmit() {
     }
   }
 
-  if (_tplMode === 'task') {
-    // Open the task modal with this action pre-selected
-    // TASK var goes into the task text field; other vars become action_vars
-    closeModals();
-    _taskEditId = null;
-    _taskSelectedAction = _tplName;
-    _taskSelectedTemplate = '';
-    _taskActionVarValues = {};
-    for (var vk in vars) {
-      if (vk !== 'TASK') _taskActionVarValues[vk] = vars[vk];
-    }
-    document.getElementById('task-modal-title').textContent = 'New Task';
-    document.getElementById('task-submit-btn').textContent = 'Create';
-    document.getElementById('task-task-input').value = vars['TASK'] || '';
-    document.getElementById('task-description-input').value = '';
-    _setTaskLabels([]);
-    _populateTaskGroupSelect(_tplGroup || _currentGroup());
-    document.getElementById('modal-task').dataset.lane = _tplTaskLane || '';
-    _taskModalWaiting = true;
-    _taskTemplateWaiting = true;
-    send({ cmd: 'list_actions', group: _tplGroup || _currentGroup() });
-    send({ cmd: 'list_templates', group: _tplGroup || _currentGroup() });
-    document.getElementById('modal-task').classList.add('visible');
-    document.getElementById('task-task-input').focus();
-  } else {
-    // Default: create agent from action
-    send({
-      cmd: 'add_agent_from_action',
-      action: _tplName,
-      group: _tplGroup,
-      vars,
-    });
-    closeModals();
+  // Open the task modal with this action pre-selected
+  // TASK var goes into the task text field; other vars become action_vars
+  closeModals();
+  _taskEditId = null;
+  _taskSelectedAction = _tplName;
+  _taskSelectedTemplate = '';
+  _taskActionVarValues = {};
+  for (var vk in vars) {
+    if (vk !== 'TASK') _taskActionVarValues[vk] = vars[vk];
   }
+  document.getElementById('task-modal-title').textContent = 'New Task';
+  document.getElementById('task-submit-btn').textContent = 'Create';
+  document.getElementById('task-task-input').value = vars['TASK'] || '';
+  document.getElementById('task-description-input').value = '';
+  _setTaskLabels([]);
+  _populateTaskGroupSelect(_tplGroup || _currentGroup());
+  document.getElementById('modal-task').dataset.lane = _tplTaskLane || '';
+  _taskModalWaiting = true;
+  _taskTemplateWaiting = true;
+  send({ cmd: 'list_actions', group: _tplGroup || _currentGroup() });
+  send({ cmd: 'list_templates', group: _tplGroup || _currentGroup() });
+  document.getElementById('modal-task').classList.add('visible');
+  document.getElementById('task-task-input').focus();
 }
 
 function _handleActionRendered(msg) {

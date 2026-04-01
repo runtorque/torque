@@ -67,7 +67,14 @@ async function removeAgent(id) {
       }
     }
   }
-  if (await showConfirm(msg)) {
+  var confirmOpts = {};
+  if (a.worktree_path && !_worktreeSharedWith(a)) {
+    var hasDanger = a.worktree_dirty || (a.worktree_checkpoints || 0) > 0;
+    confirmOpts.variant = hasDanger ? 'btn-danger' : 'btn-safe';
+  } else {
+    confirmOpts.variant = '';
+  }
+  if (await showConfirm(msg, confirmOpts)) {
     if (selectedAgentId === id) selectedAgentId = null;
     send({ cmd: 'remove_agent', id });
   }

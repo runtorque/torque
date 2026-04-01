@@ -416,7 +416,7 @@ class LoomDB:
             int(cell.worktree_auto_checkpoint),
             int(cell.worktree_merge_squash), cell.agent_type,
             cell.agent_session_id, int(cell.session_resume),
-            cell.idle_timeout,
+            0,  # idle_timeout column retained for schema compat
             cell.tasks_dispatched,
         ))
         self._conn.commit()
