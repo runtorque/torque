@@ -1366,7 +1366,13 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 }
 .board-filter-dropdown-item:hover { background: rgba(88,166,255,.08); }
 .board-filter-dropdown-item input[type="checkbox"] {
-  margin: 0; flex-shrink: 0;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 0;
+  flex-shrink: 0;
 }
 .board-filter-dropdown-name {
   flex: 1 1 auto;
