@@ -633,9 +633,12 @@ async def main(connection: iterm2.Connection):
         def _derive_line(tr):
             when = tr.get("when", "")
             desc = f" — {when}" if when else ""
+            suffix = ""
+            if tr.get("target") == "self":
+                suffix = " (returns task inline — proceed immediately)"
             return (f"- `loom ai derive \"short title\" "
                     f"-d \"details\" "
-                    f"-t {tr['action']}`{desc}")
+                    f"-t {tr['action']}`{desc}{suffix}")
 
         has_transitions = any(
             isinstance(tr, dict) and tr.get("action")
@@ -2467,9 +2470,45 @@ async def main(connection: iterm2.Connection):
                                                 result.get("type") \
                                                 == "error":
                                             pass  # skip dispatch
+                                        elif target_id == cell.id:
+                                            # Self-dispatch: link task
+                                            # inline, skip prompt render
+                                            # and send_text entirely
+                                            dl = state.get_group_settings(
+                                                new_task.group
+                                            ).dispatch_lane \
+                                                or "In Progress"
+                                            state.board_update_task(
+                                                new_task.id,
+                                                agent_id=cell.id,
+                                                lane=dl)
+                                            cell.current_task_id = \
+                                                new_task.id
+                                            cell.tasks_dispatched += 1
+                                            state._emit_agent(cell)
+                                            state._db_save_agent(cell)
+                                            _panel_event(
+                                                "task_dispatched",
+                                                cell.id, cell.name,
+                                                cell.group,
+                                                new_task.task[:80],
+                                                task_id=new_task.id)
+                                            await state.broadcast()
+                                            result = {
+                                                "type": "ok",
+                                                "task_id":
+                                                    new_task.id,
+                                                "agent_id":
+                                                    cell.id,
+                                                "proceed": True,
+                                                "task":
+                                                    new_task.task,
+                                                "description":
+                                                    new_task.description
+                                                    or ""}
                                         elif target_id:
-                                            # Dispatch to existing
-                                            # agent
+                                            # Dispatch to different
+                                            # existing agent
                                             tgt = state.agents.get(
                                                 target_id)
                                             dispatch_data = {
@@ -2477,10 +2516,6 @@ async def main(connection: iterm2.Connection):
                                                 "id": new_task.id,
                                                 "agent_id": target_id,
                                             }
-                                            if reuse_self:
-                                                dispatch_data[
-                                                    "_self_dispatch"
-                                                ] = True
                                             # Inherit worktree from
                                             # target agent
                                             if tgt and \
