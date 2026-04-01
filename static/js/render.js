@@ -284,6 +284,12 @@ function render() {
   if (bottomPanel && !bottomPanel.classList.contains('collapsed')) {
     if (_activePanelApp === 'board') renderBoard();
     if (_activePanelApp === 'events' && typeof renderEvents === 'function') renderEvents();
+    if (_activePanelApp === 'templates'
+        && typeof _agentsPanelView !== 'undefined'
+        && _agentsPanelView === 'history'
+        && typeof renderAgentHistoryView === 'function') {
+      renderAgentHistoryView();
+    }
   }
 
   // Update events attention badge regardless of panel state
