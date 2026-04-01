@@ -909,6 +909,25 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 }
 .label-chip button:hover { color: var(--text); }
 
+/* Dependency dropdown */
+.deps-dropdown {
+  position: absolute; left: 0; right: 0; z-index: 20;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  margin-top: 2px;
+}
+.deps-option {
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.deps-option:hover {
+  background: var(--bg-hover);
+}
+
 /* ------------------------------------------------------------------ */
 /* Drag and drop                                                       */
 /* ------------------------------------------------------------------ */
@@ -1257,6 +1276,11 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-label-error {
   color: var(--red);
   background: color-mix(in srgb, var(--red) 15%, transparent);
+}
+.board-label-dep-blocked {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+  cursor: help;
 }
 .board-card-pr-link {
   font-size: 9px; text-decoration: none; cursor: pointer;

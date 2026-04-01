@@ -450,6 +450,16 @@
     <input id="task-labels-input" autocomplete="off" placeholder="Type and press Enter"
            onkeydown="taskLabelsKeydown(event)">
     <div id="task-labels-chips" class="label-chips"></div>
+    <label>Dependencies
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
+            data-hint="Tasks that must be Done before this task can be dispatched. Type to search.">?</span>
+    </label>
+    <div style="position:relative">
+      <input id="task-deps-input" autocomplete="off" placeholder="Search tasks..."
+             oninput="taskDepsSearch(event)" onkeydown="taskDepsKeydown(event)">
+      <div id="task-deps-dropdown" class="deps-dropdown" style="display:none"></div>
+    </div>
+    <div id="task-deps-chips" class="label-chips"></div>
     <div class="modal-actions">
       <button class="btn-secondary" id="task-preview-btn" onclick="previewTaskPrompt()" style="display:none">Preview</button>
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>

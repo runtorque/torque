@@ -1826,6 +1826,7 @@ async def main(connection: iterm2.Connection):
                     agent_template=data.get("agent_template", ""),
                     agent_id=data.get("agent_id", ""),
                     labels=data.get("labels", []),
+                    depends_on=data.get("depends_on", []),
                 )
                 if not bt:
                     result = {"type": "error",
@@ -1841,10 +1842,23 @@ async def main(connection: iterm2.Connection):
                 state.board_remove_task(data.get("id", ""))
 
             elif cmd == "board_move_task":
+                _mv_id = data.get("id", "")
+                _mv_task = state.board_tasks.get(_mv_id)
+                _mv_old = _mv_task.lane if _mv_task else ""
+                _mv_new = data.get("lane", "")
                 state.board_move_task(
-                    data.get("id", ""),
-                    data.get("lane", ""),
-                    data.get("position"))
+                    _mv_id, _mv_new, data.get("position"))
+                # Moving out of Done may re-block dependents
+                if _mv_old == "Done" and _mv_new != "Done":
+                    for _dt in state.board_get_dependents(_mv_id):
+                        if _dt.lane != "Done":
+                            _panel_event(
+                                "task_blocked_by_dep", "",
+                                "", _dt.group,
+                                f"Task '{_dt.task[:60]}' is "
+                                "blocked again (dependency "
+                                "moved out of Done)",
+                                task_id=_dt.id)
 
             elif cmd == "board_reorder_task":
                 state.board_reorder_task(
@@ -1865,6 +1879,17 @@ async def main(connection: iterm2.Connection):
                     if not group:
                         result = {"type": "error",
                                   "message": "No group available"}
+                    elif not state.board_deps_met(task):
+                        unmet = [
+                            state.board_tasks[d].task[:40]
+                            for d in task.depends_on
+                            if d in state.board_tasks
+                            and state.board_tasks[d].lane != "Done"]
+                        result = {
+                            "type": "error",
+                            "message":
+                                "Blocked by dependencies: "
+                                + ", ".join(unmet)}
                     else:
                         cell = None
                         base_dir = await _resolve_base_dir(group)
@@ -2354,7 +2379,8 @@ async def main(connection: iterm2.Connection):
                         queued = sorted(
                             [t for t in state.board_tasks.values()
                              if t.agent_id == c.id
-                             and t.lane == "To Do"],
+                             and t.lane == "To Do"
+                             and state.board_deps_met(t)],
                             key=lambda t: t.position)
                         if not queued:
                             return
@@ -2395,6 +2421,17 @@ async def main(connection: iterm2.Connection):
                             task.status = ""
                             _save_task(task)
                             _cascade_done(task.id)
+                            # Notify dependents that are now unblocked
+                            for _dt in state.board_get_dependents(
+                                    task.id):
+                                if _dt.lane != "Done" \
+                                        and state.board_deps_met(_dt):
+                                    _panel_event(
+                                        "task_unblocked", "",
+                                        "", _dt.group,
+                                        f"Task '{_dt.task[:60]}'"
+                                        " is now unblocked",
+                                        task_id=_dt.id)
                         _panel_event(
                             "task_completed", cell.id,
                             cell.name, cell.group,
@@ -2475,6 +2512,17 @@ async def main(connection: iterm2.Connection):
                             task.status = ""
                             _save_task(task)
                             _cascade_done(task.id)
+                            # Notify dependents now unblocked
+                            for _dt in state.board_get_dependents(
+                                    task.id):
+                                if _dt.lane != "Done" \
+                                        and state.board_deps_met(_dt):
+                                    _panel_event(
+                                        "task_unblocked", "",
+                                        "", _dt.group,
+                                        f"Task '{_dt.task[:60]}'"
+                                        " is now unblocked",
+                                        task_id=_dt.id)
                         _panel_event(
                             "task_completed", cell.id,
                             cell.name, cell.group,

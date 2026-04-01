@@ -45,6 +45,8 @@ class BoardTask:
     status: str = ""            # pipeline status (e.g. "On Review", "Fixing")
     # Activity log — persisted history of agent reports on this task
     messages: list = field(default_factory=list)  # [{timestamp, action, message, agent_name}]
+    # Explicit dependencies — task IDs that must be Done before dispatch
+    depends_on: list = field(default_factory=list)  # [task_id, ...]
 
 
 @dataclass
@@ -1024,6 +1026,14 @@ class MatrixState:
         now = datetime.now(timezone.utc).isoformat()
         tid = uuid.uuid4().hex[:8]
         task_slug = self._unique_task_slug(task)
+        # Validate depends_on: strip non-existent IDs
+        if "depends_on" in kwargs:
+            deps = kwargs["depends_on"]
+            if isinstance(deps, list):
+                kwargs["depends_on"] = [d for d in deps
+                                        if d in self.board_tasks]
+            else:
+                kwargs.pop("depends_on", None)
         # Position = end of lane
         max_pos = max(
             (t.position for t in self.board_tasks.values() if t.lane == lane),
@@ -1052,6 +1062,16 @@ class MatrixState:
         task = self.board_tasks.get(tid)
         if not task:
             return
+        # Validate depends_on: strip self-refs, missing IDs, cycles
+        if "depends_on" in fields:
+            deps = fields["depends_on"]
+            if not isinstance(deps, list):
+                deps = []
+            deps = [d for d in deps
+                    if d != tid and d in self.board_tasks]
+            if self._board_check_dep_cycle(tid, deps):
+                return  # would create a cycle
+            fields["depends_on"] = deps
         valid = set(BoardTask.__dataclass_fields__) - {"id", "slug", "created_at"}
         old_lane = task.lane
         for key, value in fields.items():
@@ -1069,6 +1089,12 @@ class MatrixState:
         if task:
             self._emit("task_remove", id=tid)
             self._db_delete_task(tid)
+            # Clean up dependency references in other tasks
+            for t in self.board_tasks.values():
+                if tid in t.depends_on:
+                    t.depends_on.remove(tid)
+                    self._emit("task_upsert", **asdict(t))
+                    self._db_save_task(t)
 
     def board_move_task(self, tid: str, lane: str,
                         position: Optional[int] = None):
@@ -1166,6 +1192,36 @@ class MatrixState:
         """Return direct children of a task (derived tasks)."""
         return [t for t in self.board_tasks.values()
                 if t.parent_task_id == task_id]
+
+    def _board_check_dep_cycle(self, source_id: str,
+                               new_deps: list[str]) -> bool:
+        """DFS: True if adding new_deps to source_id creates a cycle."""
+        visited = set()
+        stack = list(new_deps)
+        while stack:
+            tid = stack.pop()
+            if tid == source_id:
+                return True
+            if tid in visited:
+                continue
+            visited.add(tid)
+            t = self.board_tasks.get(tid)
+            if t:
+                stack.extend(t.depends_on)
+        return False
+
+    def board_deps_met(self, task: BoardTask) -> bool:
+        """True if all depends_on tasks are Done (or deleted)."""
+        for dep_id in task.depends_on:
+            dep = self.board_tasks.get(dep_id)
+            if dep and dep.lane != "Done":
+                return False
+        return True
+
+    def board_get_dependents(self, task_id: str) -> list[BoardTask]:
+        """Tasks that have task_id in their depends_on."""
+        return [t for t in self.board_tasks.values()
+                if task_id in t.depends_on]
 
     def board_get_chain(self, task_id: str) -> list[BoardTask]:
         """Return all tasks in the same pipeline chain, ordered by depth."""

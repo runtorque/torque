@@ -1101,6 +1101,73 @@ function _setTaskLabels(labels) {
   _renderTaskLabelChips();
 }
 
+/* -- Task modal: dependency picker ---------------------------------------- */
+
+var _taskDeps = [];
+
+function taskDepsSearch(e) {
+  var val = e.target.value.trim().toLowerCase();
+  var dropdown = document.getElementById('task-deps-dropdown');
+  if (!val) { dropdown.style.display = 'none'; return; }
+  var tasks = (state && state.board_tasks) || {};
+  var html = '';
+  var count = 0;
+  for (var id in tasks) {
+    if (_taskDeps.indexOf(id) >= 0) continue;
+    if (_taskEditId && id === _taskEditId) continue;
+    var t = tasks[id];
+    var title = (t.task || '').toLowerCase();
+    var slug = (t.slug || '').toLowerCase();
+    if (title.indexOf(val) >= 0 || slug.indexOf(val) >= 0 || id.indexOf(val) >= 0) {
+      var laneBadge = '<span class="board-card-lane-badge">' + esc(t.lane || '') + '</span>';
+      html += '<div class="deps-option" onmousedown="event.preventDefault()" onclick="taskAddDep(\'' + id + '\')">'
+        + esc((t.task || '').substring(0, 50)) + ' ' + laneBadge + '</div>';
+      count++;
+      if (count >= 8) break;
+    }
+  }
+  dropdown.innerHTML = html;
+  dropdown.style.display = count ? '' : 'none';
+}
+
+function taskDepsKeydown(e) {
+  if (e.key === 'Escape') {
+    document.getElementById('task-deps-dropdown').style.display = 'none';
+  }
+}
+
+function taskAddDep(id) {
+  if (_taskDeps.indexOf(id) < 0) _taskDeps.push(id);
+  document.getElementById('task-deps-input').value = '';
+  document.getElementById('task-deps-dropdown').style.display = 'none';
+  _renderTaskDepChips();
+}
+
+function taskRemoveDep(idx) {
+  _taskDeps.splice(idx, 1);
+  _renderTaskDepChips();
+}
+
+function _renderTaskDepChips() {
+  var container = document.getElementById('task-deps-chips');
+  if (!container) return;
+  var tasks = (state && state.board_tasks) || {};
+  var html = '';
+  for (var i = 0; i < _taskDeps.length; i++) {
+    var t = tasks[_taskDeps[i]];
+    var label = t ? (t.task || '').substring(0, 30) : _taskDeps[i];
+    var laneBadge = t ? ' <span class="board-card-lane-badge" style="font-size:9px">' + esc(t.lane || '') + '</span>' : '';
+    html += '<span class="label-chip">' + esc(label) + laneBadge
+      + '<button onclick="taskRemoveDep(' + i + ')">&times;</button></span>';
+  }
+  container.innerHTML = html;
+}
+
+function _setTaskDeps(deps) {
+  _taskDeps = (deps || []).slice();
+  _renderTaskDepChips();
+}
+
 function _currentGroup() {
   if (selectedAgentId && state && state.agents && state.agents[selectedAgentId]) {
     return state.agents[selectedAgentId].group;
@@ -1125,6 +1192,7 @@ function openAddTask(lane) {
   document.getElementById('task-task-input').value = '';
   document.getElementById('task-description-input').value = '';
   _setTaskLabels([]);
+  _setTaskDeps([]);
   document.getElementById('task-action-vars').innerHTML = '';
 
   _populateTaskGroupSelect(_currentGroup());
@@ -1161,6 +1229,7 @@ function openEditTask(taskId) {
   var descEl = document.getElementById('task-description-input');
   descEl.value = t.description || '';
   _setTaskLabels(t.labels || []);
+  _setTaskDeps(t.depends_on || []);
   document.getElementById('task-action-vars').innerHTML = '';
 
   _populateTaskGroupSelect(t.group || _currentGroup());
@@ -1216,6 +1285,7 @@ function submitTask() {
     msg.agent_template = _taskSelectedTemplate;
     msg.action_vars = actionVars;
     msg.labels = labels;
+    msg.depends_on = _taskDeps.slice();
     send(msg);
   } else {
     // Create mode
@@ -1226,6 +1296,7 @@ function submitTask() {
     if (_taskSelectedTemplate) msg.agent_template = _taskSelectedTemplate;
     if (Object.keys(actionVars).length) msg.action_vars = actionVars;
     if (labels.length) msg.labels = labels;
+    if (_taskDeps.length) msg.depends_on = _taskDeps.slice();
     send(msg);
   }
 
