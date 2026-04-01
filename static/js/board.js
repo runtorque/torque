@@ -17,6 +17,9 @@ var _boardDragId = '';          // card being dragged
 
 var _boardCollapsedTasks = {};  // task_id → true if collapsed
 var _boardFilterByGroup = true;  // When true, board shows only tasks from the current group
+var _boardSearchQuery = '';      // text search filter
+var _boardFilterLabels = [];     // active label filters (AND logic)
+var _boardSearchTimer = null;    // debounce timer for search input
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -31,12 +34,47 @@ function _boardTasks() {
 /** Return visible tasks, optionally filtered to the current group. */
 function _boardVisibleTasks() {
   var all = _boardTasks();
-  if (!_boardFilterByGroup) return all;
-  var grp = _currentGroup();
-  if (!grp) return all;
   var out = {};
-  for (var id in all) {
-    if (all[id].group === grp) out[id] = all[id];
+  // Group filter
+  if (_boardFilterByGroup) {
+    var grp = _currentGroup();
+    if (grp) {
+      for (var id in all) {
+        if (all[id].group === grp) out[id] = all[id];
+      }
+    } else {
+      for (var id in all) out[id] = all[id];
+    }
+  } else {
+    for (var id in all) out[id] = all[id];
+  }
+  // Text search filter
+  if (_boardSearchQuery) {
+    var q = _boardSearchQuery.toLowerCase();
+    var filtered = {};
+    for (var id in out) {
+      var t = out[id];
+      if ((t.task && t.task.toLowerCase().indexOf(q) >= 0)
+        || (t.description && t.description.toLowerCase().indexOf(q) >= 0)
+        || (t.slug && t.slug.toLowerCase().indexOf(q) >= 0)) {
+        filtered[id] = t;
+      }
+    }
+    out = filtered;
+  }
+  // Label filter (AND)
+  if (_boardFilterLabels.length) {
+    var filtered = {};
+    for (var id in out) {
+      var t = out[id];
+      var labels = t.labels || [];
+      var match = true;
+      for (var i = 0; i < _boardFilterLabels.length; i++) {
+        if (labels.indexOf(_boardFilterLabels[i]) < 0) { match = false; break; }
+      }
+      if (match) filtered[id] = t;
+    }
+    out = filtered;
   }
   return out;
 }
@@ -58,6 +96,37 @@ function _boardLaneCount(lane) {
     if (tasks[id].lane === lane) n++;
   }
   return n;
+}
+
+function _boardHasActiveFilters() {
+  return _boardSearchQuery !== '' || _boardFilterLabels.length > 0;
+}
+
+/** Collect all unique labels from visible tasks (before label filter). */
+function _boardAllLabels() {
+  // Use group-filtered tasks only (before search/label filters) for chip population
+  var all = _boardTasks();
+  var pool = {};
+  if (_boardFilterByGroup) {
+    var grp = _currentGroup();
+    if (grp) {
+      for (var id in all) { if (all[id].group === grp) pool[id] = all[id]; }
+    } else {
+      pool = all;
+    }
+  } else {
+    pool = all;
+  }
+  var labels = {};
+  for (var id in pool) {
+    var t = pool[id];
+    if (t.labels) {
+      for (var i = 0; i < t.labels.length; i++) labels[t.labels[i]] = true;
+    }
+  }
+  var sorted = Object.keys(labels);
+  sorted.sort();
+  return sorted;
 }
 
 function _boardAgentStatus(agentId) {
@@ -108,6 +177,7 @@ function _renderBoardCard(t, childrenOf, depth) {
   cardHtml += '<div class="board-card-title">' + titlePrefix + esc(t.task || '') + '</div>';
   var meta = '';
   if (t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
+  if (_boardHasActiveFilters() && t.lane) meta += '<span class="board-card-lane-badge">' + esc(t.lane) + '</span>';
   if (t.group && !isSubordinate) meta += '<span class="board-card-group">' + esc(t.group) + '</span>';
   if (t.action_name) meta += '<span class="board-card-label board-card-template">' + esc(t.action_name) + '</span>';
   if (t.agent_template) meta += '<span class="board-card-label board-card-template">agent: ' + esc(t.agent_template) + '</span>';
@@ -187,6 +257,31 @@ function renderBoard() {
   }
 
   var html = '';
+  var filtersActive = _boardHasActiveFilters();
+
+  // Search & filter toolbar
+  var allLabels = _boardAllLabels();
+  if (allLabels.length || _boardSearchQuery) {
+    html += '<div class="board-search-bar">';
+    html += '<input type="text" class="board-search-input" id="board-search-input"'
+      + ' placeholder="Search tasks..." value="' + esc(_boardSearchQuery) + '"'
+      + ' oninput="boardUpdateSearch(this.value)">';
+    if (allLabels.length) {
+      html += '<div class="board-filter-chips">';
+      for (var li = 0; li < allLabels.length; li++) {
+        var lb = allLabels[li];
+        var active = _boardFilterLabels.indexOf(lb) >= 0 ? ' active' : '';
+        html += '<button class="board-filter-chip' + active + '"'
+          + ' onclick="boardToggleLabel(\'' + esc(lb).replace(/'/g, "\\'") + '\')">'
+          + esc(lb) + '</button>';
+      }
+      html += '</div>';
+    }
+    if (filtersActive) {
+      html += '<button class="board-filter-clear" onclick="boardClearFilters()">Clear</button>';
+    }
+    html += '</div>';
+  }
 
   // Lane tab bar
   html += '<div class="board-lane-bar">';
@@ -211,8 +306,16 @@ function renderBoard() {
 
   html += '</div>';
 
-  // Cards for selected lane
-  var tasks = _boardTasksInLane(_boardSelectedLane);
+  // Cards — when filters active, show across all lanes; otherwise selected lane only
+  var tasks;
+  if (filtersActive) {
+    var vis = _boardVisibleTasks();
+    tasks = [];
+    for (var id in vis) tasks.push(vis[id]);
+    tasks.sort(function(a, b) { return b.position - a.position; });
+  } else {
+    tasks = _boardTasksInLane(_boardSelectedLane);
+  }
   html += '<div class="board-cards" id="board-cards">';
 
   // Add task: inline input or button (at top)
@@ -296,7 +399,7 @@ function renderBoard() {
 
   // Task cards
   if (tasks.length === 0) {
-    html += '<div class="board-empty">No tasks in this lane</div>';
+    html += '<div class="board-empty">' + (filtersActive ? 'No matching tasks' : 'No tasks in this lane') + '</div>';
   }
 
   for (var j = 0; j < rootTasks.length; j++) {
@@ -895,6 +998,38 @@ function boardLaneTabDrop(e) {
     send({ cmd: 'board_move_task', id: _boardDragId, lane: lane });
   }
   tab.classList.remove('drop-target');
+}
+
+/* ---- Search & filter ------------------------------------------------ */
+
+function boardUpdateSearch(query) {
+  clearTimeout(_boardSearchTimer);
+  _boardSearchTimer = setTimeout(function() {
+    _boardSearchQuery = query;
+    _boardCardsScrollTop = 0;
+    renderBoard();
+    // Restore focus and cursor to search input
+    var inp = document.getElementById('board-search-input');
+    if (inp) { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }
+  }, 200);
+}
+
+function boardToggleLabel(label) {
+  var idx = _boardFilterLabels.indexOf(label);
+  if (idx >= 0) {
+    _boardFilterLabels.splice(idx, 1);
+  } else {
+    _boardFilterLabels.push(label);
+  }
+  _boardCardsScrollTop = 0;
+  renderBoard();
+}
+
+function boardClearFilters() {
+  _boardSearchQuery = '';
+  _boardFilterLabels = [];
+  _boardCardsScrollTop = 0;
+  renderBoard();
 }
 
 /* ---- Keyboard nav --------------------------------------------------- */
