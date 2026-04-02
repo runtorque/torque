@@ -21,8 +21,6 @@ var _boardSearchQuery = '';      // text search filter
 var _boardFilterLabels = [];     // active label filters (OR logic)
 var _boardFilterActions = [];    // active action name filters (OR logic)
 var _boardSearchTimer = null;    // debounce timer for search input
-var _boardFilterDropdownType = null;   // 'label' | 'action' | null
-var _boardFilterDropdownCleanup = null;
 var _boardPreFilterLane = '';    // saved lane before search, restored on clear
 
 /* ---- Helpers -------------------------------------------------------- */
@@ -172,16 +170,6 @@ function _boardAgentName(agentId) {
   return a ? a.name : '';
 }
 
-function _boardDepsBlocked(t) {
-  if (!t.depends_on || !t.depends_on.length) return false;
-  var tasks = _boardTasks();
-  for (var i = 0; i < t.depends_on.length; i++) {
-    var dep = tasks[t.depends_on[i]];
-    if (dep && dep.lane !== 'Done') return true;
-  }
-  return false;
-}
-
 /* ---- Card rendering ------------------------------------------------- */
 
 function _renderBoardCard(t, childrenOf, depth) {
@@ -228,7 +216,8 @@ function _renderBoardCard(t, childrenOf, depth) {
       else userLbls.push(t.labels[li]);
     }
     for (var li = 0; li < userLbls.length; li++) {
-      meta += '<span class="board-card-label">' + esc(userLbls[li]) + '</span>';
+      var lc = labelColor(userLbls[li]);
+      meta += '<span class="board-card-label" style="color:' + lc + ';background:color-mix(in srgb,' + lc + ' 15%,transparent)">' + esc(userLbls[li]) + '</span>';
     }
     for (var li = 0; li < sysLbls.length; li++) {
       var lb = sysLbls[li];
@@ -237,9 +226,6 @@ function _renderBoardCard(t, childrenOf, depth) {
       else if (lb === 'loom:error') cls += ' board-label-error';
       meta += '<span class="' + cls + '">' + esc(displayLabel(lb)) + '</span>';
     }
-  }
-  if (!isDone && _boardDepsBlocked(t)) {
-    meta += '<span class="board-card-label board-label-dep-blocked" title="Blocked by dependencies">&#x1F512; deps</span>';
   }
   if (t.external_url) {
     meta += '<a class="board-card-pr-link" href="' + esc(t.external_url)
@@ -364,7 +350,9 @@ function renderBoard() {
       html += '<div class="board-filter-active">';
       for (var fi = 0; fi < _boardFilterLabels.length; fi++) {
         var fl = _boardFilterLabels[fi];
+        var flStyle = isSystemLabel(fl) ? '' : ' style="color:' + labelColor(fl) + ';border-color:' + labelColor(fl) + '"';
         html += '<span class="board-filter-active-chip board-filter-active-label"'
+          + flStyle
           + ' onclick="boardRemoveFilterLabel(\'' + esc(fl).replace(/'/g, "\\'") + '\')">'
           + esc(fl) + ' &times;</span>';
       }
@@ -831,11 +819,7 @@ function boardCardMenu(evt, taskId) {
 
   // Dispatch (only from Backlog)
   if (task.lane === 'Backlog') {
-    if (_boardDepsBlocked(task)) {
-      html += '<button disabled title="Blocked by unmet dependencies">Dispatch (blocked)</button>';
-    } else {
-      html += '<button onclick="event.stopPropagation();boardDispatchTask(\'' + taskId + '\')">Dispatch...</button>';
-    }
+    html += '<button onclick="event.stopPropagation();boardDispatchTask(\'' + taskId + '\')">Dispatch...</button>';
   }
 
   // Link/Unlink agent
@@ -888,6 +872,19 @@ function boardCopyTaskId(taskId) {
 function boardFocusTask(id) {
   _boardFocusedTask = id;
   renderBoard();
+}
+
+/** Navigate to a task: switch to board panel, select its lane, focus it. */
+function boardNavigateToTask(taskId) {
+  var t = (state.board_tasks || {})[taskId];
+  if (!t) return;
+  if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') {
+    togglePanel('board');
+  }
+  if (t.lane && t.lane !== _boardSelectedLane) {
+    _boardSelectedLane = t.lane;
+  }
+  boardFocusTask(taskId);
 }
 
 function boardFocusAgent(agentId) {
@@ -1271,6 +1268,7 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
       var span = document.createElement('span');
       span.className = 'board-filter-dropdown-name';
       span.textContent = (kind === 'label' && isSystemLabel(name)) ? displayLabel(name) : name;
+      if (kind === 'label' && !isSystemLabel(name)) span.style.color = labelColor(name);
       row.appendChild(span);
       var badge = document.createElement('span');
       badge.className = 'board-filter-dropdown-count';

@@ -34,7 +34,8 @@ _AGENT_PERSISTED_COLS = [
 ]
 
 # GroupSettings fields that store dicts — persisted as JSON text.
-_GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars"}
+_GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars",
+                    "board_default_labels"}
 
 # GroupSettings fields that are booleans — stored as INTEGER 0/1.
 _GS_BOOL_FIELDS = {
@@ -144,7 +145,10 @@ CREATE TABLE IF NOT EXISTS group_settings (
     terminal_always_custom_dialog INTEGER NOT NULL DEFAULT 0,
     terminal_close_on_disconnect INTEGER NOT NULL DEFAULT 0,
     dispatch_lane               TEXT NOT NULL DEFAULT 'In Progress',
-    dispatch_auto_terminals     INTEGER NOT NULL DEFAULT 0
+    dispatch_auto_terminals     INTEGER NOT NULL DEFAULT 0,
+    board_default_labels        TEXT NOT NULL DEFAULT '[]',
+    board_default_lane          TEXT NOT NULL DEFAULT '',
+    board_default_action        TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS board_tasks (
@@ -340,15 +344,6 @@ class LoomDB:
                 "ALTER TABLE board_tasks ADD COLUMN messages "
                 "TEXT NOT NULL DEFAULT '[]'")
             self._conn.commit()
-        # Migrate: add depends_on column to board_tasks
-        try:
-            self._conn.execute(
-                "SELECT depends_on FROM board_tasks LIMIT 0")
-        except sqlite3.OperationalError:
-            self._conn.execute(
-                "ALTER TABLE board_tasks ADD COLUMN depends_on "
-                "TEXT NOT NULL DEFAULT '[]'")
-            self._conn.commit()
         # Migrate: drop assignee column from board_tasks
         try:
             self._conn.execute(
@@ -384,6 +379,18 @@ class LoomDB:
                 "ALTER TABLE group_settings ADD COLUMN "
                 "default_agent_template TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
+        # Migrate: add board_default_* columns to group_settings
+        for col, default in [("board_default_labels", "'[]'"),
+                             ("board_default_lane", "''"),
+                             ("board_default_action", "''")]:
+            try:
+                self._conn.execute(
+                    f"SELECT {col} FROM group_settings LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE group_settings ADD COLUMN "
+                    f"{col} TEXT NOT NULL DEFAULT {default}")
+                self._conn.commit()
         # Migrate: rename system labels with loom: prefix
         rows = self._conn.execute(
             "SELECT id, labels FROM board_tasks "
@@ -529,7 +536,6 @@ class LoomDB:
         labels = json.dumps(d.pop("labels", []))
         action_vars = json.dumps(d.pop("action_vars", {}))
         messages = json.dumps(d.pop("messages", []))
-        depends_on = json.dumps(d.pop("depends_on", []))
         # Map 'group' to 'group_name' for the DB column
         group_name = d.pop("group", "")
         self._conn.execute("""
@@ -540,8 +546,8 @@ class LoomDB:
                  lane, position, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url,
                  parent_task_id, pipeline_depth, pipeline_root_id, status,
-                 messages, depends_on)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 messages)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
@@ -554,7 +560,7 @@ class LoomDB:
             d["external_url"],
             d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
             d.get("pipeline_root_id", ""), d.get("status", ""),
-            messages, depends_on,
+            messages,
         ))
         self._conn.commit()
 
@@ -929,7 +935,6 @@ class LoomDB:
                 labels = json.dumps(d.pop("labels", []))
                 action_vars = json.dumps(d.pop("action_vars", {}))
                 messages = json.dumps(d.pop("messages", []))
-                depends_on = json.dumps(d.pop("depends_on", []))
                 group_name = d.pop("group", "")
                 c.execute("""
                     INSERT INTO board_tasks
@@ -939,8 +944,8 @@ class LoomDB:
                          criteria, lane, position, agent_id, labels,
                          created_at, updated_at, provider, external_id,
                          external_url, parent_task_id, pipeline_depth,
-                         pipeline_root_id, status, messages, depends_on)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         pipeline_root_id, status, messages)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""),
                     d.get("description", ""), d.get("slug", ""),
@@ -955,7 +960,7 @@ class LoomDB:
                     d.get("external_url", ""),
                     d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
                     d.get("pipeline_root_id", ""), d.get("status", ""),
-                    messages, depends_on,
+                    messages,
                 ))
 
             # UI state
@@ -1062,12 +1067,6 @@ class LoomDB:
                         d.get("messages", "[]"))
                 except (json.JSONDecodeError, TypeError):
                     d["messages"] = []
-                # Decode depends_on JSON
-                try:
-                    d["depends_on"] = json.loads(
-                        d.get("depends_on", "[]"))
-                except (json.JSONDecodeError, TypeError):
-                    d["depends_on"] = []
                 board_tasks[d["id"]] = d
 
         # UI state

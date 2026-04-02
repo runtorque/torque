@@ -44,170 +44,24 @@ async def _worktree_diff_updater(state: MatrixState,
             diff = await worktree_mgr.diff_summary(cell)
             dirty = await worktree_mgr.has_uncommitted_changes(cell)
             checkpoints = await worktree_mgr.count_commits(cell)
+            ahead = checkpoints
+            behind = await worktree_mgr.count_behind(cell)
+            merged = await worktree_mgr.is_merged(cell)
             if diff != cell.worktree_diff or dirty != cell.worktree_dirty \
-                    or checkpoints != cell.worktree_checkpoints:
+                    or checkpoints != cell.worktree_checkpoints \
+                    or behind != cell.worktree_behind \
+                    or ahead != cell.worktree_ahead \
+                    or merged != cell.worktree_merged:
                 cell.worktree_diff = diff
                 cell.worktree_dirty = dirty
                 cell.worktree_checkpoints = checkpoints
+                cell.worktree_behind = behind
+                cell.worktree_ahead = ahead
+                cell.worktree_merged = merged
                 state._emit_agent(cell)
                 changed = True
         if changed:
             await state.broadcast()
-
-
-def _parse_diff_git_paths(line: str) -> tuple[str, str]:
-    """Extract old/new paths from a ``diff --git`` header."""
-    try:
-        parts = shlex.split(line)
-    except ValueError:
-        return "", ""
-    if len(parts) < 4 or parts[0] != "diff" or parts[1] != "--git":
-        return "", ""
-    old_path = parts[2][2:] if parts[2].startswith("a/") else parts[2]
-    new_path = parts[3][2:] if parts[3].startswith("b/") else parts[3]
-    return old_path, new_path
-
-
-def _finalize_worktree_diff_file(file_info: dict) -> dict:
-    """Normalize a parsed diff file record for the frontend."""
-    path = file_info.get("new_path") or file_info.get("old_path") or ""
-    if file_info.get("status") == "deleted":
-        path = file_info.get("old_path") or path
-    file_info["path"] = path
-    file_info["insertions"] = 0
-    file_info["deletions"] = 0
-    for hunk in file_info.get("hunks", []):
-        for line in hunk.get("lines", []):
-            if line["type"] == "add":
-                file_info["insertions"] += 1
-            elif line["type"] == "del":
-                file_info["deletions"] += 1
-    return {
-        "path": file_info["path"],
-        "status": file_info.get("status") or "modified",
-        "insertions": file_info["insertions"],
-        "deletions": file_info["deletions"],
-        "binary": bool(file_info.get("binary")),
-        "hunks": file_info.get("hunks", []),
-    }
-
-
-def _parse_unified_diff(diff_text: str) -> list[dict]:
-    """Parse ``git diff`` unified output into structured file hunks."""
-    files: list[dict] = []
-    current_file = None
-    current_hunk = None
-
-    def finish_current():
-        nonlocal current_file, current_hunk
-        if not current_file:
-            return
-        if current_hunk:
-            current_file["hunks"].append(current_hunk)
-        files.append(_finalize_worktree_diff_file(current_file))
-        current_file = None
-        current_hunk = None
-
-    for raw_line in diff_text.splitlines():
-        if raw_line.startswith("diff --git "):
-            finish_current()
-            old_path, new_path = _parse_diff_git_paths(raw_line)
-            status = "renamed" if old_path and new_path and old_path != new_path else "modified"
-            current_file = {
-                "old_path": old_path,
-                "new_path": new_path,
-                "status": status,
-                "binary": False,
-                "hunks": [],
-            }
-            continue
-
-        if current_file is None:
-            continue
-
-        if raw_line.startswith("new file mode "):
-            current_file["status"] = "added"
-            continue
-        if raw_line.startswith("deleted file mode "):
-            current_file["status"] = "deleted"
-            continue
-        if raw_line.startswith("rename from "):
-            current_file["old_path"] = raw_line[len("rename from "):]
-            current_file["status"] = "renamed"
-            continue
-        if raw_line.startswith("rename to "):
-            current_file["new_path"] = raw_line[len("rename to "):]
-            current_file["status"] = "renamed"
-            continue
-        if raw_line.startswith("copy from "):
-            current_file["old_path"] = raw_line[len("copy from "):]
-            current_file["status"] = "copied"
-            continue
-        if raw_line.startswith("copy to "):
-            current_file["new_path"] = raw_line[len("copy to "):]
-            current_file["status"] = "copied"
-            continue
-        if raw_line.startswith("Binary files ") or raw_line == "GIT binary patch":
-            current_file["binary"] = True
-            current_hunk = None
-            continue
-        if raw_line.startswith("@@ "):
-            if current_hunk:
-                current_file["hunks"].append(current_hunk)
-            current_hunk = {"header": raw_line, "lines": []}
-            continue
-        if not current_hunk:
-            continue
-        if raw_line.startswith("+") and not raw_line.startswith("+++ "):
-            current_hunk["lines"].append({"type": "add", "text": raw_line[1:]})
-        elif raw_line.startswith("-") and not raw_line.startswith("--- "):
-            current_hunk["lines"].append({"type": "del", "text": raw_line[1:]})
-        elif raw_line.startswith(" "):
-            current_hunk["lines"].append({"type": "context", "text": raw_line[1:]})
-        elif raw_line.startswith("\\ No newline at end of file"):
-            current_hunk["lines"].append({"type": "context", "text": raw_line})
-
-    finish_current()
-    return files
-
-
-async def _worktree_full_diff(cell, worktree_mgr: WorktreeManager) -> dict:
-    """Build the structured diff payload for the worktree review view."""
-    if not cell or not cell.worktree_path:
-        return {"error": "Agent has no worktree."}
-
-    base_branch = cell.worktree_base_branch or "main"
-    try:
-        stats = await worktree_mgr.diff_summary(cell)
-        proc = await asyncio.create_subprocess_exec(
-            "git", "-C", cell.worktree_path,
-            "diff", "--no-color", "--find-renames", "--binary", "--unified=3",
-            f"{base_branch}...HEAD",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            err = stderr.decode().strip() or "Failed to load worktree diff."
-            return {"error": err}
-
-        files = _parse_unified_diff(stdout.decode())
-        if not stats:
-            stats = {
-                "files": len(files),
-                "insertions": sum(f.get("insertions", 0) for f in files),
-                "deletions": sum(f.get("deletions", 0) for f in files),
-            }
-        return {
-            "agent_name": cell.name,
-            "branch": cell.worktree_branch or "",
-            "base_branch": base_branch,
-            "stats": stats,
-            "files": files,
-        }
-    except Exception:
-        log.exception("Failed to build full diff for '%s'", cell.name)
-        return {"error": "Failed to load worktree diff."}
 
 
 class _BlockStr(str):
@@ -582,6 +436,8 @@ async def main(connection: iterm2.Connection):
             "template": resolved.get("template", ""),
             "session_resume": resolved.get(
                 "session_resume", gs.agent_session_resume),
+            "idle_timeout": resolved.get(
+                "idle_timeout", gs.agent_idle_timeout),
             "worktree": resolved.get("worktree", gs.git_worktree),
             "worktree_base_dir": resolved.get(
                 "worktree_base_dir", gs.worktree_base_dir),
@@ -671,6 +527,7 @@ async def main(connection: iterm2.Connection):
         if not cell:
             return None
         cell.session_resume = bool(launch_cfg.get("session_resume", True))
+        cell.idle_timeout = int(launch_cfg.get("idle_timeout", 5) or 0)
         cell.worktree_base_dir = (
             launch_cfg.get("worktree_base_dir") or ".loom/worktrees")
         cell.worktree_auto_checkpoint = bool(
@@ -1044,16 +901,17 @@ async def main(connection: iterm2.Connection):
             except Exception:
                 log.exception("Failed to query profiles")
                 pnames = ["Default"]
+            base_dir = await _resolve_base_dir(group)
             return {
                 "type": "group_settings",
                 "group": group,
                 "settings": asdict(gs),
                 "resolved_agent_defaults": template_mgr.resolve_agent_config(
-                    "", gs, {}, base_dir=await _resolve_base_dir(group)),
+                    "", gs, {}, base_dir=base_dir),
                 "profiles": pnames,
                 "providers": get_providers(),
-                "templates": template_mgr.list_templates(
-                    await _resolve_base_dir(group)),
+                "templates": template_mgr.list_templates(base_dir),
+                "actions": action_mgr.list_actions(base_dir),
             }
 
         # get_global_settings: respond directly
@@ -1394,6 +1252,51 @@ async def main(connection: iterm2.Connection):
                             cell, launch_cfg["initial_prompt"],
                             background=True)
 
+            elif cmd == "add_agent_from_action":
+                group = data["group"]
+                act_name = data["action"]
+                variables = data.get("vars", {})
+                base_dir = await _resolve_base_dir(group)
+                raw = action_mgr._load_raw(act_name, base_dir)
+                if not raw:
+                    result = {"type": "error",
+                              "message": f"Action \"{act_name}\" not found"}
+                else:
+                    rendered = action_mgr.render_action(
+                        raw, variables)
+
+                    # Action can override the target group
+                    act_group = rendered.get("group", "")
+                    if act_group and act_group in state.groups:
+                        group = act_group
+
+                    # Use rendered values, falling through to group settings
+                    name = data.get("name") or rendered["name"]
+                    explicit_template = rendered.get("agent_template", "")
+                    launch_cfg = _resolve_agent_launch_config(
+                        group,
+                        base_dir=base_dir,
+                        explicit_template=explicit_template,
+                        overrides=rendered,
+                    )
+                    cell = await _create_agent_with_config(
+                        group, name, launch_cfg,
+                        explicit_template=explicit_template)
+                    if cell:
+                        await _create_child_terminals(
+                            group, cell, terminals=rendered.get("terminals"))
+
+                        # Use the rendered prompt directly
+                        prompt = rendered.get("prompt", "")
+
+                        if launch_cfg.get("initial_prompt") and cell.session_id:
+                            await _send_agent_prompt(
+                                cell, launch_cfg["initial_prompt"])
+                        if prompt and cell.session_id:
+                            await _send_agent_prompt(
+                                cell, prompt, persist=True,
+                                background=True)
+
             elif cmd == "add_terminal":
                 group = data.get("group", "")
                 parent_id = data.get("parent_id", "")
@@ -1510,6 +1413,8 @@ async def main(connection: iterm2.Connection):
                     )
                     cell.session_resume = bool(
                         launch_cfg.get("session_resume", cell.session_resume))
+                    cell.idle_timeout = int(
+                        launch_cfg.get("idle_timeout", cell.idle_timeout) or 0)
                     if cell.cell_type == "agent":
                         cell.command = launch_cfg.get("command", cell.command)
                         cell.profile = launch_cfg.get("profile", cell.profile)
@@ -1714,13 +1619,6 @@ async def main(connection: iterm2.Connection):
                     "commits": commits,
                 }
 
-            elif cmd == "worktree_diff_full":
-                cell = state.agents.get(data.get("id", ""))
-                result = await _worktree_full_diff(cell, worktree_mgr)
-                result["type"] = "worktree_diff_full"
-                result["id"] = data.get("id", "")
-                return result
-
             elif cmd == "worktree_rollback":
                 cell = state.agents.get(data.get("id", ""))
                 sha = data.get("sha", "")
@@ -1844,17 +1742,26 @@ async def main(connection: iterm2.Connection):
 
             # -- Board commands (Phase 5) --
             elif cmd == "board_add_task":
+                # Apply per-group board defaults for fields not
+                # explicitly provided by the client
+                group = data.get("group", "")
+                gs = state.get_group_settings(group)
+                lane = data.get("lane", "") or gs.board_default_lane
+                action_name = data.get("action_name", "") or \
+                    gs.board_default_action
+                labels = data.get("labels", [])
+                if not labels and gs.board_default_labels:
+                    labels = list(gs.board_default_labels)
                 bt = state.board_add_task(
                     task=data.get("task", ""),
-                    group=data.get("group", ""),
-                    lane=data.get("lane", ""),
+                    group=group,
+                    lane=lane,
                     description=data.get("description", ""),
-                    action_name=data.get("action_name", ""),
+                    action_name=action_name,
                     action_vars=data.get("action_vars", {}),
                     agent_template=data.get("agent_template", ""),
                     agent_id=data.get("agent_id", ""),
-                    labels=data.get("labels", []),
-                    depends_on=data.get("depends_on", []),
+                    labels=labels,
                 )
                 if not bt:
                     result = {"type": "error",
@@ -1870,23 +1777,10 @@ async def main(connection: iterm2.Connection):
                 state.board_remove_task(data.get("id", ""))
 
             elif cmd == "board_move_task":
-                _mv_id = data.get("id", "")
-                _mv_task = state.board_tasks.get(_mv_id)
-                _mv_old = _mv_task.lane if _mv_task else ""
-                _mv_new = data.get("lane", "")
                 state.board_move_task(
-                    _mv_id, _mv_new, data.get("position"))
-                # Moving out of Done may re-block dependents
-                if _mv_old == "Done" and _mv_new != "Done":
-                    for _dt in state.board_get_dependents(_mv_id):
-                        if _dt.lane != "Done":
-                            _panel_event(
-                                "task_blocked_by_dep", "",
-                                "", _dt.group,
-                                f"Task '{_dt.task[:60]}' is "
-                                "blocked again (dependency "
-                                "moved out of Done)",
-                                task_id=_dt.id)
+                    data.get("id", ""),
+                    data.get("lane", ""),
+                    data.get("position"))
 
             elif cmd == "board_reorder_task":
                 state.board_reorder_task(
@@ -1907,17 +1801,6 @@ async def main(connection: iterm2.Connection):
                     if not group:
                         result = {"type": "error",
                                   "message": "No group available"}
-                    elif not state.board_deps_met(task):
-                        unmet = [
-                            state.board_tasks[d].task[:40]
-                            for d in task.depends_on
-                            if d in state.board_tasks
-                            and state.board_tasks[d].lane != "Done"]
-                        result = {
-                            "type": "error",
-                            "message":
-                                "Blocked by dependencies: "
-                                + ", ".join(unmet)}
                     else:
                         cell = None
                         base_dir = await _resolve_base_dir(group)
@@ -2407,8 +2290,7 @@ async def main(connection: iterm2.Connection):
                         queued = sorted(
                             [t for t in state.board_tasks.values()
                              if t.agent_id == c.id
-                             and t.lane == "To Do"
-                             and state.board_deps_met(t)],
+                             and t.lane == "To Do"],
                             key=lambda t: t.position)
                         if not queued:
                             return
@@ -2449,17 +2331,6 @@ async def main(connection: iterm2.Connection):
                             task.status = ""
                             _save_task(task)
                             _cascade_done(task.id)
-                            # Notify dependents that are now unblocked
-                            for _dt in state.board_get_dependents(
-                                    task.id):
-                                if _dt.lane != "Done" \
-                                        and state.board_deps_met(_dt):
-                                    _panel_event(
-                                        "task_unblocked", "",
-                                        "", _dt.group,
-                                        f"Task '{_dt.task[:60]}'"
-                                        " is now unblocked",
-                                        task_id=_dt.id)
                         _panel_event(
                             "task_completed", cell.id,
                             cell.name, cell.group,
@@ -2540,17 +2411,6 @@ async def main(connection: iterm2.Connection):
                             task.status = ""
                             _save_task(task)
                             _cascade_done(task.id)
-                            # Notify dependents now unblocked
-                            for _dt in state.board_get_dependents(
-                                    task.id):
-                                if _dt.lane != "Done" \
-                                        and state.board_deps_met(_dt):
-                                    _panel_event(
-                                        "task_unblocked", "",
-                                        "", _dt.group,
-                                        f"Task '{_dt.task[:60]}'"
-                                        " is now unblocked",
-                                        task_id=_dt.id)
                         _panel_event(
                             "task_completed", cell.id,
                             cell.name, cell.group,

@@ -368,30 +368,6 @@ def resolve_task(state_data, identifier):
     die(f"Task not found: {identifier}")
 
 
-def _resolve_dep_ids(state_data, depends_on_str):
-    """Resolve comma-separated task slugs/IDs to a list of task IDs."""
-    tasks = state_data.get("board_tasks", {})
-    ids = []
-    for token in depends_on_str.split(","):
-        token = token.strip()
-        if not token:
-            continue
-        # Exact ID
-        if token in tasks:
-            ids.append(token)
-            continue
-        # Slug match
-        slug_m = [t for t in tasks.values()
-                  if t.get("slug") and t["slug"] == token.lower()]
-        if len(slug_m) == 1:
-            ids.append(slug_m[0]["id"])
-        elif len(slug_m) > 1:
-            die(f"Ambiguous dependency slug \"{token}\"")
-        else:
-            die(f"Dependency task not found: \"{token}\"")
-    return ids
-
-
 def detect_context(state_data):
     """Auto-detect group and parent from the current iTerm2 session.
 
@@ -1569,10 +1545,6 @@ def cmd_task_create(args):
                 tvars[k] = v
         if tvars:
             kwargs["action_vars"] = tvars
-    if getattr(args, "depends_on", None):
-        dep_ids = _resolve_dep_ids(state_data, args.depends_on)
-        if dep_ids:
-            kwargs["depends_on"] = dep_ids
 
     resp = api_call("board_add_task", port=args.port, **kwargs)
     check_ok(resp)
@@ -1726,21 +1698,6 @@ def cmd_task_show(args):
         def _fmt_label(lb):
             return f"[{lb}]" if lb.startswith("loom:") else lb
         print(f"  {'Labels:':<14} {', '.join(_fmt_label(l) for l in t['labels'])}")
-    if t.get("depends_on"):
-        tasks = st.get("board_tasks", {})
-        dep_strs = []
-        for dep_id in t["depends_on"]:
-            dep_t = tasks.get(dep_id)
-            if dep_t:
-                dep_lane = dep_t.get("lane", "?")
-                mark = "\u2713" if dep_lane == "Done" else "\u2717"
-                dep_slug = dep_t.get("slug") or dep_id[:6]
-                dep_strs.append(f"{mark} {dep_slug} ({dep_lane})")
-            else:
-                dep_strs.append(f"  {dep_id[:6]} [deleted]")
-        print(f"  {'Dependencies:'}")
-        for ds in dep_strs:
-            print(f"    {ds}")
 
     if t.get("description"):
         print()
@@ -1873,7 +1830,7 @@ def _filter_tasks(tasks, args):
 
 _TASK_EDIT_FIELDS = [
     "task", "lane", "group", "labels",
-    "action_name", "action_vars", "depends_on",
+    "action_name", "action_vars",
 ]
 
 _TASK_EDIT_COMMENT = """\
@@ -1890,7 +1847,7 @@ def _task_to_yaml(t):
     doc = {}
     for key in _TASK_EDIT_FIELDS:
         val = t.get(key, "")
-        if key == "labels" or key == "depends_on":
+        if key == "labels":
             doc[key] = val if isinstance(val, list) else []
         elif key == "action_vars":
             doc[key] = val if isinstance(val, dict) else {}
@@ -1922,8 +1879,8 @@ def _yaml_to_fields(text, original):
         if key not in doc:
             continue
         new_val = doc[key]
-        old_val = original.get(key, "" if key not in ("labels", "action_vars", "depends_on") else ([] if key in ("labels", "depends_on") else {}))
-        if key == "labels" or key == "depends_on":
+        old_val = original.get(key, "" if key not in ("labels", "action_vars") else ([] if key == "labels" else {}))
+        if key == "labels":
             new_val = new_val if isinstance(new_val, list) else []
             if new_val != old_val:
                 fields[key] = new_val
@@ -1965,7 +1922,7 @@ def cmd_task_edit(args):
     # Check if any inline flags were provided
     has_flags = any(
         getattr(args, attr, None) is not None
-        for attr in ("task", "action", "labels", "group", "depends_on")
+        for attr in ("task", "action", "labels", "group")
     ) or getattr(args, "var", None)
 
     if has_flags:
@@ -1987,9 +1944,6 @@ def cmd_task_edit(args):
                                 if l.strip()]
         if args.group is not None:
             fields["group"] = args.group
-        if getattr(args, "depends_on", None) is not None:
-            dep_ids = _resolve_dep_ids(st, args.depends_on)
-            fields["depends_on"] = dep_ids
     else:
         # Interactive editor mode
         original_text = _task_to_yaml(t)
@@ -2825,8 +2779,6 @@ def build_parser():
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
                    help="Action variables (e.g., -v CONTEXT='some info')")
     p.add_argument("-l", "--labels", help="Comma-separated labels")
-    p.add_argument("--depends-on",
-                   help="Comma-separated task slugs/IDs this depends on")
     p.set_defaults(func=cmd_task_create)
 
     p = tsk_sub.add_parser("dispatch", aliases=["d"],
@@ -2867,8 +2819,6 @@ def build_parser():
                    help="Set action variables")
     p.add_argument("-l", "--labels", help="Comma-separated labels")
     p.add_argument("-g", "--group", help="Move to different group")
-    p.add_argument("--depends-on",
-                   help="Comma-separated task slugs/IDs (replaces deps)")
     p.set_defaults(func=cmd_task_edit)
 
     p = tsk_sub.add_parser("move", aliases=["mv"],

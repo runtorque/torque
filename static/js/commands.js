@@ -362,9 +362,9 @@ function _showWorktreePR(msg) {
     if (ok) window.open(msg.url);
   });
 }
-async function _confirmWorktreeMerge(id) {
+async function worktreeMerge(id) {
   const cell = state.agents[id];
-  if (!cell) return false;
+  if (!cell) return;
   const base = cell.worktree_base_branch || 'main';
   const result = await showConfirm(
     `Merge "${cell.name}" into ${base}? Claude will perform the merge and resolve any conflicts. You\u2019ll be notified if it fails.`,
@@ -380,13 +380,7 @@ async function _confirmWorktreeMerge(id) {
     const close = result.close_on_merge || false;
     const clear = result.clear_context || false;
     send({ cmd: 'worktree_merge', id, close_on_merge: close, clear_context: clear });
-    return true;
   }
-  return false;
-}
-
-function worktreeMerge(id) {
-  showDiffView(id);
 }
 async function worktreeRemove(id) {
   const cell = state.agents[id];

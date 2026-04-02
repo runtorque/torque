@@ -222,6 +222,7 @@ function render() {
       html += `  <div class="split-menu">`;
       html += _renderAgentTemplateMenuItems(gname);
       html += `<button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button>`;
+      html += `<button onclick="event.stopPropagation();closeMenus();openAddFromAction('${esc(gname)}')">From Action\u2026</button>`;
       html += `</div>`;
       html += `</div>`;
     }
@@ -283,12 +284,6 @@ function render() {
   if (bottomPanel && !bottomPanel.classList.contains('collapsed')) {
     if (_activePanelApp === 'board') renderBoard();
     if (_activePanelApp === 'events' && typeof renderEvents === 'function') renderEvents();
-    if (_activePanelApp === 'templates'
-        && typeof _agentsPanelView !== 'undefined'
-        && _agentsPanelView === 'history'
-        && typeof renderAgentHistoryView === 'function') {
-      renderAgentHistoryView();
-    }
   }
 
   // Update events attention badge regardless of panel state
@@ -344,6 +339,11 @@ function renderAgentCell(a) {
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
+  /* Linked task */
+  const _ct = _getAgentTask(a.id);
+  if (_ct) {
+    h += `<div class="cell-task" title="${esc(_ct.task)}">${esc(_ct.task)}</div>`;
+  }
   /* Agent type badge */
   if (a.agent_type) {
     const typeInfo = AGENT_TYPE_LABELS[a.agent_type] || { short: a.agent_type.slice(0, 2).toUpperCase() };
@@ -411,7 +411,21 @@ function renderAgentDetails(a) {
   /* Branch — worktree branch takes priority, then regular git branch */
   if (a.worktree_branch) {
     const branch = a.worktree_branch.replace(/^loom\//, '');
-    h += `<div class="detail-row"><span class="detail-label">Branch</span><span class="detail-val detail-branch">\u2387 ${esc(branch)} <span class="detail-wt-tag">worktree</span></span></div>`;
+    let branchExtra = '';
+    if (a.worktree_merged) {
+      branchExtra += ' <span class="detail-wt-tag detail-wt-merged">merged</span>';
+    } else {
+      branchExtra += ' <span class="detail-wt-tag">worktree</span>';
+    }
+    const behind = a.worktree_behind || 0;
+    const ahead = a.worktree_ahead || 0;
+    if (behind || ahead) {
+      let parts = [];
+      if (ahead) parts.push(`<span class="detail-ahead">\u2191${ahead}</span>`);
+      if (behind) parts.push(`<span class="detail-behind">\u2193${behind}</span>`);
+      branchExtra += ' ' + parts.join(' ');
+    }
+    h += `<div class="detail-row"><span class="detail-label">Branch</span><span class="detail-val detail-branch">\u2387 ${esc(branch)}${branchExtra}</span></div>`;
     const diff = a.worktree_diff || {};
     if (diff.files) {
       h += `<div class="detail-row"><span class="detail-label">Changes</span><span class="detail-val">${diff.files} file${diff.files !== 1 ? 's' : ''} <span class="detail-ins">+${diff.insertions || 0}</span> <span class="detail-del">-${diff.deletions || 0}</span></span></div>`;
