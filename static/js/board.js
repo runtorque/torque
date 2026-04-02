@@ -217,7 +217,8 @@ function _renderBoardCard(t, childrenOf, depth) {
       else userLbls.push(t.labels[li]);
     }
     for (var li = 0; li < userLbls.length; li++) {
-      meta += '<span class="board-card-label">' + esc(userLbls[li]) + '</span>';
+      var lc = labelColor(userLbls[li]);
+      meta += '<span class="board-card-label" style="background:' + lc + '22;color:' + lc + '">' + esc(userLbls[li]) + '</span>';
     }
     for (var li = 0; li < sysLbls.length; li++) {
       var lb = sysLbls[li];
