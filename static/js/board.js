@@ -21,10 +21,12 @@ var _boardSearchQuery = '';      // text search filter
 var _boardFilterLabels = [];     // active label filters (OR logic)
 var _boardFilterActions = [];    // active action name filters (OR logic)
 var _boardSearchTimer = null;    // debounce timer for search input
-var _boardFilterDropdownType = null;   // 'label' | 'action' | null
+var _boardFilterAgents = [];    // active agent ID filters (OR logic)
+var _boardFilterDropdownType = null;   // 'label' | 'action' | 'agent' | null
 var _boardFilterDropdownCleanup = null;
 var _boardPreFilterLane = '';    // saved lane before search, restored on clear
 var _boardShowSchedules = false; // true when "Schedules" tab is active
+var _boardRenderLimit = 50;      // virtual scroll: render this many root tasks initially
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -92,6 +94,17 @@ function _boardVisibleTasks() {
     }
     out = filtered;
   }
+  // Agent filter (OR — task matches if its agent_id is any of the selected)
+  if (_boardFilterAgents.length) {
+    var filtered = {};
+    for (var id in out) {
+      var t = out[id];
+      if (t.agent_id && _boardFilterAgents.indexOf(t.agent_id) >= 0) {
+        filtered[id] = t;
+      }
+    }
+    out = filtered;
+  }
   return out;
 }
 
@@ -115,7 +128,7 @@ function _boardLaneCount(lane) {
 }
 
 function _boardHasActiveFilters() {
-  return _boardSearchQuery !== '' || _boardFilterLabels.length > 0 || _boardFilterActions.length > 0;
+  return _boardSearchQuery !== '' || _boardFilterLabels.length > 0 || _boardFilterActions.length > 0 || _boardFilterAgents.length > 0;
 }
 
 /** Collect all labels with counts (before search/label/action filters). */
@@ -155,6 +168,26 @@ function _boardAllActionCounts() {
     var t = pool[id];
     if (t.action_name) {
       counts[t.action_name] = (counts[t.action_name] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+/** Collect all agent IDs with counts from tasks. */
+function _boardAllAgentCounts() {
+  var all = _boardTasks();
+  var pool = {};
+  if (_boardFilterByGroup) {
+    var grp = _currentGroup();
+    if (grp) {
+      for (var id in all) { if (all[id].group === grp) pool[id] = all[id]; }
+    } else { pool = all; }
+  } else { pool = all; }
+  var counts = {};
+  for (var id in pool) {
+    var t = pool[id];
+    if (t.agent_id) {
+      counts[t.agent_id] = (counts[t.agent_id] || 0) + 1;
     }
   }
   return counts;
@@ -332,9 +365,11 @@ function renderBoard() {
   // Search & filter toolbar
   var labelCounts = _boardAllLabelCounts();
   var actionCounts = _boardAllActionCounts();
+  var agentCounts = _boardAllAgentCounts();
   var hasLabels = Object.keys(labelCounts).length > 0;
   var hasActions = Object.keys(actionCounts).length > 0;
-  var showToolbar = hasLabels || hasActions || _boardSearchQuery || _boardFilterLabels.length || _boardFilterActions.length;
+  var hasAgents = Object.keys(agentCounts).length > 0;
+  var showToolbar = hasLabels || hasActions || hasAgents || _boardSearchQuery || _boardFilterLabels.length || _boardFilterActions.length || _boardFilterAgents.length;
 
   if (showToolbar) {
     html += '<div class="board-search-bar">';
@@ -359,13 +394,22 @@ function renderBoard() {
         + ' &#9662;</button>';
       html += '</div>';
     }
+    if (hasAgents || _boardFilterAgents.length) {
+      var agtFCount = _boardFilterAgents.length;
+      html += '<div class="board-filter-btn-wrap" id="board-agent-filter-wrap">';
+      html += '<button class="board-filter-btn' + (agtFCount ? ' active' : '') + '"'
+        + ' onclick="boardToggleAgentFilter()">'
+        + 'Agents' + (agtFCount ? ' <span class="board-filter-btn-count">' + agtFCount + '</span>' : '')
+        + ' &#9662;</button>';
+      html += '</div>';
+    }
     if (filtersActive) {
       html += '<button class="board-filter-clear" onclick="boardClearFilters()">Clear</button>';
     }
     html += '</div>';
 
     // Active filter chips
-    if (_boardFilterLabels.length || _boardFilterActions.length) {
+    if (_boardFilterLabels.length || _boardFilterActions.length || _boardFilterAgents.length) {
       html += '<div class="board-filter-active">';
       for (var fi = 0; fi < _boardFilterLabels.length; fi++) {
         var fl = _boardFilterLabels[fi];
@@ -378,6 +422,12 @@ function renderBoard() {
         html += '<span class="board-filter-active-chip board-filter-active-action"'
           + ' onclick="boardRemoveFilterAction(\'' + esc(fa).replace(/'/g, "\\'") + '\')">'
           + esc(fa) + ' &times;</span>';
+      }
+      for (var fi = 0; fi < _boardFilterAgents.length; fi++) {
+        var aid = _boardFilterAgents[fi];
+        html += '<span class="board-filter-active-chip board-filter-active-action"'
+          + ' onclick="boardRemoveFilterAgent(\'' + esc(aid).replace(/'/g, "\\'") + '\')">'
+          + esc(_boardAgentName(aid) || aid) + ' &times;</span>';
       }
       html += '</div>';
     }
@@ -526,8 +576,14 @@ function renderBoard() {
     html += '<div class="board-empty">' + (filtersActive ? 'No matching tasks' : 'No tasks in this lane') + '</div>';
   }
 
-  for (var j = 0; j < rootTasks.length; j++) {
+  var renderCap = Math.min(rootTasks.length, _boardRenderLimit);
+  for (var j = 0; j < renderCap; j++) {
     html += _renderBoardCard(rootTasks[j], childrenOf, 0);
+  }
+  if (rootTasks.length > renderCap) {
+    var remaining = rootTasks.length - renderCap;
+    html += '<div class="board-load-more" onclick="boardLoadMore()">'
+      + remaining + ' more task' + (remaining === 1 ? '' : 's') + ' — click or scroll to load</div>';
   }
 
   html += '</div>';
@@ -575,16 +631,33 @@ function renderBoard() {
       boardUpdateScrollArrows();
     }
 
-    // Restore cards scroll position
+    // Restore cards scroll position + infinite scroll
     var cardsEl = document.getElementById('board-cards');
     if (cardsEl) {
       cardsEl.scrollTop = _boardCardsScrollTop;
       cardsEl.addEventListener('scroll', function() {
         _boardCardsScrollTop = cardsEl.scrollTop;
+        // Load more when within 100px of the bottom
+        if (cardsEl.scrollTop + cardsEl.clientHeight >= cardsEl.scrollHeight - 100) {
+          boardLoadMore();
+        }
       });
     }
 
   });
+}
+
+/* ---- Virtual scroll ------------------------------------------------- */
+
+function boardLoadMore() {
+  var tasks = _boardTasksInLane(_boardSelectedLane || _boardLanes()[0] || '');
+  var allTasks = _boardVisibleTasks();
+  var rootCount = tasks.filter(function(t) {
+    return !t.parent_task_id || !allTasks[t.parent_task_id];
+  }).length;
+  if (_boardRenderLimit >= rootCount) return;
+  _boardRenderLimit += 50;
+  renderBoard();
 }
 
 /* ---- Lane selection ------------------------------------------------- */
@@ -597,6 +670,7 @@ function boardSelectLane(lane) {
   if (tabs) _boardScrollLeft = tabs.scrollLeft;
   _boardSelectedLane = lane;
   _boardFocusedTask = '';
+  _boardRenderLimit = 50;
   renderBoard();
 }
 
@@ -1155,6 +1229,7 @@ function boardUpdateSearch(query) {
   _boardSearchTimer = setTimeout(function() {
     _boardSearchQuery = query;
     _boardCardsScrollTop = 0;
+    _boardRenderLimit = 50;
     renderBoard();
     // Restore focus and cursor to search input
     var inp = document.getElementById('board-search-input');
@@ -1170,6 +1245,7 @@ function boardToggleLabel(label) {
     _boardFilterLabels.push(label);
   }
   _boardCardsScrollTop = 0;
+  _boardRenderLimit = 50;
   renderBoard();
 }
 
@@ -1181,6 +1257,7 @@ function boardToggleAction(action) {
     _boardFilterActions.push(action);
   }
   _boardCardsScrollTop = 0;
+  _boardRenderLimit = 50;
   renderBoard();
 }
 
@@ -1189,6 +1266,7 @@ function boardRemoveFilterLabel(label) {
   if (idx >= 0) {
     _boardFilterLabels.splice(idx, 1);
     _boardCardsScrollTop = 0;
+    _boardRenderLimit = 50;
     renderBoard();
   }
 }
@@ -1198,6 +1276,29 @@ function boardRemoveFilterAction(action) {
   if (idx >= 0) {
     _boardFilterActions.splice(idx, 1);
     _boardCardsScrollTop = 0;
+    _boardRenderLimit = 50;
+    renderBoard();
+  }
+}
+
+function boardToggleAgent(agentId) {
+  var idx = _boardFilterAgents.indexOf(agentId);
+  if (idx >= 0) {
+    _boardFilterAgents.splice(idx, 1);
+  } else {
+    _boardFilterAgents.push(agentId);
+  }
+  _boardCardsScrollTop = 0;
+  _boardRenderLimit = 50;
+  renderBoard();
+}
+
+function boardRemoveFilterAgent(agentId) {
+  var idx = _boardFilterAgents.indexOf(agentId);
+  if (idx >= 0) {
+    _boardFilterAgents.splice(idx, 1);
+    _boardCardsScrollTop = 0;
+    _boardRenderLimit = 50;
     renderBoard();
   }
 }
@@ -1206,8 +1307,10 @@ function boardClearFilters() {
   _boardSearchQuery = '';
   _boardFilterLabels = [];
   _boardFilterActions = [];
+  _boardFilterAgents = [];
   _boardCloseFilterDropdown();
   _boardCardsScrollTop = 0;
+  _boardRenderLimit = 50;
   if (_boardPreFilterLane) {
     _boardSelectedLane = _boardPreFilterLane;
     _boardPreFilterLane = '';
@@ -1243,6 +1346,21 @@ function boardToggleActionFilter() {
   _boardOpenFilterDropdown('board-action-filter-wrap', 'action', names, counts, _boardFilterActions);
 }
 
+function boardToggleAgentFilter() {
+  if (_boardFilterDropdownType === 'agent') {
+    _boardCloseFilterDropdown();
+    return;
+  }
+  _boardCloseFilterDropdown();
+  var counts = _boardAllAgentCounts();
+  var ids = Object.keys(counts).sort(function(a, b) {
+    return (_boardAgentName(a) || '').localeCompare(_boardAgentName(b) || '');
+  });
+  if (!ids.length) return;
+  _boardFilterDropdownType = 'agent';
+  _boardOpenFilterDropdown('board-agent-filter-wrap', 'agent', ids, counts, _boardFilterAgents);
+}
+
 function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
   var wrap = document.getElementById(wrapId);
   if (!wrap) return;
@@ -1272,7 +1390,8 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
     var q = (query || '').toLowerCase();
     var filtered = [];
     for (var i = 0; i < names.length; i++) {
-      if (q && names[i].toLowerCase().indexOf(q) < 0) continue;
+      var searchText = kind === 'agent' ? (_boardAgentName(names[i]) || names[i]) : names[i];
+      if (q && searchText.toLowerCase().indexOf(q) < 0) continue;
       filtered.push(names[i]);
     }
 
@@ -1285,6 +1404,7 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
       (function(n) {
         cb.addEventListener('change', function() {
           if (kind === 'label') boardToggleLabel(n);
+          else if (kind === 'agent') boardToggleAgent(n);
           else boardToggleAction(n);
           buildList(search.value);
         });
@@ -1292,7 +1412,9 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
       row.appendChild(cb);
       var span = document.createElement('span');
       span.className = 'board-filter-dropdown-name';
-      span.textContent = (kind === 'label' && isSystemLabel(name)) ? displayLabel(name) : name;
+      var displayName = kind === 'agent' ? (_boardAgentName(name) || name)
+        : (kind === 'label' && isSystemLabel(name)) ? displayLabel(name) : name;
+      span.textContent = displayName;
       row.appendChild(span);
       var badge = document.createElement('span');
       badge.className = 'board-filter-dropdown-count';

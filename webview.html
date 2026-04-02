@@ -459,8 +459,11 @@
     <label>Labels
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Type a label and press Enter to add it.">?</span>
     </label>
-    <input id="task-labels-input" autocomplete="off" placeholder="Type and press Enter"
-           onkeydown="taskLabelsKeydown(event)">
+    <div style="position:relative">
+      <input id="task-labels-input" autocomplete="off" placeholder="Type and press Enter"
+             oninput="taskLabelsSearch(event)" onkeydown="taskLabelsKeydown(event)">
+      <div id="task-labels-dropdown" class="deps-dropdown" style="display:none"></div>
+    </div>
     <div id="task-labels-chips" class="label-chips"></div>
     <label>Dependencies
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"

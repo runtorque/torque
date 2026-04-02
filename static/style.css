@@ -1321,6 +1321,12 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   text-align: center; color: var(--text-dim);
   font-size: 10px; padding: 16px 8px;
 }
+.board-load-more {
+  text-align: center; color: var(--dim);
+  font-size: 10px; padding: 10px 8px;
+  cursor: pointer;
+}
+.board-load-more:hover { color: var(--text); }
 
 /* Search & filter toolbar */
 .board-search-bar {
@@ -2303,7 +2309,7 @@ body.diff-view-open #ctx-menu {
   cursor: pointer;
   font-size: 11px;
 }
-.deps-option:hover {
+.deps-option:hover, .deps-option.active {
   background: var(--bg-hover);
 }
 
