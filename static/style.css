@@ -2140,6 +2140,8 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   .modal { max-width: 520px; }
 }
 
+.board-card-scheduled { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+
 /* -- Schedule UI ------------------------------------------------------ */
 .board-lane-tab-schedules { border-left: 1px solid var(--border); margin-left: auto; }
 .board-schedule-card { padding: 10px 12px; }

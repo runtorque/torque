@@ -43,6 +43,8 @@ class BoardTask:
     pipeline_depth: int = 0     # 0 for root, auto-incremented from parent
     pipeline_root_id: str = ""  # ID of the chain's root task (self.id for roots)
     status: str = ""            # pipeline status (e.g. "On Review", "Fixing")
+    # Scheduling
+    scheduled_at: str = ""      # ISO 8601 — auto-dispatch when this time arrives
     # Activity log — persisted history of agent reports on this task
     messages: list = field(default_factory=list)  # [{timestamp, action, message, agent_name}]
 

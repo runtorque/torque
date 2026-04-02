@@ -1569,10 +1569,13 @@ def cmd_task_create(args):
                 tvars[k] = v
         if tvars:
             kwargs["action_vars"] = tvars
+    if getattr(args, "at", None):
+        kwargs["scheduled_at"] = _parse_relative_time(args.at)
 
     resp = api_call("board_add_task", port=args.port, **kwargs)
     check_ok(resp)
-    print(f"Task added to Backlog")
+    scheduled = " (scheduled)" if kwargs.get("scheduled_at") else ""
+    print(f"Task added to Backlog{scheduled}")
 
 
 def cmd_task_dispatch(args):
@@ -1729,6 +1732,8 @@ def cmd_task_show(args):
         for line in t["description"].splitlines():
             print(f"    {line}")
 
+    if t.get("scheduled_at"):
+        print(f"  {'Scheduled:':<14} {t['scheduled_at']}")
     if t.get("action_name"):
         print(f"  {'Action:':<14} {t['action_name']}")
     if t.get("action_vars"):
@@ -1946,7 +1951,7 @@ def cmd_task_edit(args):
     # Check if any inline flags were provided
     has_flags = any(
         getattr(args, attr, None) is not None
-        for attr in ("task", "action", "labels", "group")
+        for attr in ("task", "action", "labels", "group", "at")
     ) or getattr(args, "var", None)
 
     if has_flags:
@@ -1968,6 +1973,8 @@ def cmd_task_edit(args):
                                 if l.strip()]
         if args.group is not None:
             fields["group"] = args.group
+        if getattr(args, "at", None) is not None:
+            fields["scheduled_at"] = _parse_relative_time(args.at)
     else:
         # Interactive editor mode
         original_text = _task_to_yaml(t)
@@ -3084,6 +3091,7 @@ def build_parser():
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
                    help="Action variables (e.g., -v CONTEXT='some info')")
     p.add_argument("-l", "--labels", help="Comma-separated labels")
+    p.add_argument("--at", help="Schedule dispatch (ISO 8601, +2h, tomorrow 09:00)")
     p.set_defaults(func=cmd_task_create)
 
     p = tsk_sub.add_parser("dispatch", aliases=["d"],
@@ -3124,6 +3132,7 @@ def build_parser():
                    help="Set action variables")
     p.add_argument("-l", "--labels", help="Comma-separated labels")
     p.add_argument("-g", "--group", help="Move to different group")
+    p.add_argument("--at", help="Schedule dispatch (ISO 8601, +2h, tomorrow 09:00)")
     p.set_defaults(func=cmd_task_edit)
 
     p = tsk_sub.add_parser("move", aliases=["mv"],

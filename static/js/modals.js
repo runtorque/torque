@@ -1159,6 +1159,8 @@ function openAddTask(lane) {
 
   document.getElementById('task-task-input').value = '';
   document.getElementById('task-description-input').value = '';
+  var schedInput = document.getElementById('task-scheduled-input');
+  if (schedInput) schedInput.value = '';
   _setTaskLabels([]);
   document.getElementById('task-action-vars').innerHTML = '';
 
@@ -1197,6 +1199,17 @@ function openEditTask(taskId) {
   descEl.value = t.description || '';
   _setTaskLabels(t.labels || []);
   document.getElementById('task-action-vars').innerHTML = '';
+
+  // Scheduled dispatch
+  var schedInput = document.getElementById('task-scheduled-input');
+  if (schedInput) {
+    if (t.scheduled_at) {
+      try { schedInput.value = new Date(t.scheduled_at).toISOString().slice(0, 16); }
+      catch(e) { schedInput.value = ''; }
+    } else {
+      schedInput.value = '';
+    }
+  }
 
   _populateTaskGroupSelect(t.group || _currentGroup());
 
@@ -1244,6 +1257,9 @@ function submitTask() {
   var labels = _taskLabels.concat(_taskSystemLabels);
   var actionVars = _collectTaskActionVars();
 
+  var schedVal = (document.getElementById('task-scheduled-input') || {}).value || '';
+  var scheduledAt = schedVal ? new Date(schedVal).toISOString() : '';
+
   if (_taskEditId) {
     // Edit mode
     var msg = { cmd: 'board_update_task', id: _taskEditId, task: task, group: group, description: description };
@@ -1251,6 +1267,7 @@ function submitTask() {
     msg.agent_template = _taskSelectedTemplate;
     msg.action_vars = actionVars;
     msg.labels = labels;
+    msg.scheduled_at = scheduledAt;
     send(msg);
   } else {
     // Create mode
@@ -1261,6 +1278,7 @@ function submitTask() {
     if (_taskSelectedTemplate) msg.agent_template = _taskSelectedTemplate;
     if (Object.keys(actionVars).length) msg.action_vars = actionVars;
     if (labels.length) msg.labels = labels;
+    if (scheduledAt) msg.scheduled_at = scheduledAt;
     send(msg);
   }
 

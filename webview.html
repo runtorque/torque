@@ -444,6 +444,11 @@
       <option value="">None</option>
     </select>
     <div id="task-action-vars"></div>
+    <label>Schedule dispatch
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Set a date/time to auto-dispatch this task. Leave empty to dispatch manually.">?</span>
+    </label>
+    <input type="datetime-local" id="task-scheduled-input"
+           onkeydown="if(event.key==='Escape')closeModals();">
     <label>Labels
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Type a label and press Enter to add it.">?</span>
     </label>

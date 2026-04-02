@@ -363,6 +363,15 @@ class LoomDB:
                 "ALTER TABLE board_tasks ADD COLUMN messages "
                 "TEXT NOT NULL DEFAULT '[]'")
             self._conn.commit()
+        # Migrate: add scheduled_at column to board_tasks
+        try:
+            self._conn.execute(
+                "SELECT scheduled_at FROM board_tasks LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE board_tasks ADD COLUMN scheduled_at "
+                "TEXT NOT NULL DEFAULT ''")
+            self._conn.commit()
         # Migrate: drop assignee column from board_tasks
         try:
             self._conn.execute(
@@ -553,8 +562,8 @@ class LoomDB:
                  lane, position, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url,
                  parent_task_id, pipeline_depth, pipeline_root_id, status,
-                 messages)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 scheduled_at, messages)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
@@ -567,6 +576,7 @@ class LoomDB:
             d["external_url"],
             d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
             d.get("pipeline_root_id", ""), d.get("status", ""),
+            d.get("scheduled_at", ""),
             messages,
         ))
         self._conn.commit()

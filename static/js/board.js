@@ -227,6 +227,9 @@ function _renderBoardCard(t, childrenOf, depth) {
       meta += '<span class="' + cls + '">' + esc(displayLabel(lb)) + '</span>';
     }
   }
+  if (t.scheduled_at) {
+    meta += '<span class="board-card-label board-card-scheduled">' + _schedFormatTime(t.scheduled_at) + '</span>';
+  }
   if (t.external_url) {
     meta += '<a class="board-card-pr-link" href="' + esc(t.external_url)
       + '" onclick="event.stopPropagation();window.open(this.href);return false"'

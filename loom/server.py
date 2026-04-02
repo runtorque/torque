@@ -70,6 +70,37 @@ async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
         await asyncio.sleep(30)
         now = datetime.now(dt_tz.utc)
         now_iso = now.isoformat()
+
+        # Check for tasks with scheduled_at that are due
+        task_changed = False
+        for task in list(state.board_tasks.values()):
+            if not task.scheduled_at or task.scheduled_at > now_iso:
+                continue
+            if task.agent_id:
+                continue  # already dispatched
+            if task.lane in ("In Progress", "Done"):
+                continue  # already active or done
+            log.info("Scheduled task '%s' (%s) is due — dispatching",
+                     task.task, task.id)
+            task.scheduled_at = ""  # clear so it doesn't fire again
+            state._emit("task_upsert", **asdict(task))
+            state._db_save_task(task)
+            task_changed = True
+            try:
+                await handle_command({
+                    "cmd": "dispatch_task",
+                    "id": task.id,
+                    "create_agent": True,
+                })
+                _panel_event("task_scheduled_dispatch", "", "",
+                             task.group, task.task[:80],
+                             task_id=task.id)
+            except Exception:
+                log.exception("Failed to dispatch scheduled task '%s'",
+                              task.id)
+        if task_changed:
+            await state.broadcast()
+
         due = state.schedule_get_due(now_iso)
         if not due:
             continue
