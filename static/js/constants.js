@@ -70,21 +70,6 @@ const AGENT_TYPE_LABELS = {
 };
 
 
-/* Deterministic label color from string hash.
-   Returns an HSL color string suitable for dark backgrounds. */
-const _LABEL_PALETTE = [
-  '#f85149', '#d29922', '#3fb950', '#2ea8a1', '#58a6ff',
-  '#a371f7', '#f778ba', '#d4a574', '#7ee787', '#79c0ff',
-  '#d2a8ff', '#ff9bce', '#ffa657', '#56d4dd', '#b3d364',
-];
-function labelColor(name) {
-  var h = 0;
-  for (var i = 0; i < name.length; i++) {
-    h = ((h << 5) - h + name.charCodeAt(i)) | 0;
-  }
-  return _LABEL_PALETTE[((h < 0 ? -h : h) % _LABEL_PALETTE.length)];
-}
-
 const TAB_COLORS = [
   { name: 'Red',    hex: '#f85149' },
   { name: 'Orange', hex: '#d29922' },

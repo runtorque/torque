@@ -611,31 +611,6 @@ function _textToEnv(id) {
   return env;
 }
 
-function _populateGsBoardLane(selected) {
-  var sel = document.getElementById('gs-board-default-lane');
-  var lanes = (state.board_lanes || []);
-  sel.innerHTML = '<option value="">First lane</option>';
-  for (var i = 0; i < lanes.length; i++) {
-    var opt = document.createElement('option');
-    opt.value = lanes[i]; opt.textContent = lanes[i];
-    if (lanes[i] === selected) opt.selected = true;
-    sel.appendChild(opt);
-  }
-}
-
-function _populateGsBoardAction(actions, selected) {
-  var sel = document.getElementById('gs-board-default-action');
-  sel.innerHTML = '<option value="">None</option>';
-  for (var i = 0; i < actions.length; i++) {
-    var a = actions[i];
-    var opt = document.createElement('option');
-    opt.value = a.name;
-    opt.textContent = a.name + (a.description ? ' \u2014 ' + a.description : '');
-    if (a.name === selected) opt.selected = true;
-    sel.appendChild(opt);
-  }
-}
-
 function _showGroupSettings(group, data) {
   _settingsGroup = group;
   const s = data.settings;
@@ -694,12 +669,6 @@ function _showGroupSettings(group, data) {
   _populateProfileSelect(document.getElementById('gs-terminal-profile'), data.profiles, s.terminal_profile, 'Same as group');
   _gsTerminalColor = s.terminal_tab_color || '';
   _renderSwatches('gs-terminal-color-swatches', _gsTerminalColor, 'selectGsTerminalColor', true);
-
-  /* -- Board tab -- */
-  _populateGsBoardLane(s.board_default_lane || '');
-  _populateGsBoardAction(data.actions || [], s.board_default_action || '');
-  document.getElementById('gs-board-default-labels').value =
-    (s.board_default_labels || []).join(', ');
 
   switchGsTab('group');
   document.getElementById('modal-group-settings').classList.add('visible');
@@ -774,11 +743,6 @@ function submitGroupSettings() {
     terminal_env_vars: _textToEnv('gs-terminal-env-vars'),
     terminal_always_custom_dialog: document.getElementById('gs-terminal-always-custom').checked,
     terminal_close_on_disconnect: document.getElementById('gs-terminal-close-on-disconnect').checked,
-    /* Board */
-    board_default_lane: document.getElementById('gs-board-default-lane').value,
-    board_default_action: document.getElementById('gs-board-default-action').value,
-    board_default_labels: document.getElementById('gs-board-default-labels').value
-      .split(',').map(function(s) { return s.trim(); }).filter(Boolean),
   };
 
   send({ cmd: 'update_group_settings', group: _settingsGroup, settings });
@@ -1643,5 +1607,280 @@ function submitGlobalSettings() {
     max_event_log: parseInt(document.getElementById('gls-max-event-log').value) || 500,
   };
   send({ cmd: 'update_global_settings', settings: settings });
+  closeModals();
+}
+
+/* ---- Schedule modal -------------------------------------------------- */
+
+var _schedEditId = '';        // empty = create mode, set = edit mode
+var _schedType = 'recurring'; // 'recurring' | 'oneshot'
+var _schedLabels = [];
+var _schedModalWaiting = false; // waiting for action list
+var _schedDeferredAction = '';  // action to select once list loads (edit mode)
+var _schedDeferredVars = {};    // vars to pre-fill once action is selected
+
+function openScheduleModal(editId) {
+  _schedEditId = editId || '';
+  _schedLabels = [];
+  _schedDeferredAction = '';
+  _schedDeferredVars = {};
+
+  // Populate group select
+  var sel = document.getElementById('schedule-group-select');
+  sel.innerHTML = '';
+  var groups = state.groups || {};
+  for (var g in groups) {
+    var opt = document.createElement('option');
+    opt.value = g;
+    opt.textContent = g;
+    sel.appendChild(opt);
+  }
+
+  // Populate action select (request from server)
+  var actionSel = document.getElementById('schedule-action-select');
+  actionSel.innerHTML = '<option value="">None</option>';
+  var grp = sel.value || '';
+  if (grp) {
+    _schedModalWaiting = true;
+    send({ cmd: 'list_actions', group: grp });
+  }
+
+  // Reset fields
+  document.getElementById('schedule-name-input').value = '';
+  document.getElementById('schedule-task-input').value = '';
+  document.getElementById('schedule-desc-input').value = '';
+  document.getElementById('schedule-cron-input').value = '';
+  document.getElementById('schedule-at-input').value = '';
+  document.getElementById('schedule-tz-input').value = '';
+  document.getElementById('schedule-action-vars').innerHTML = '';
+  document.getElementById('schedule-labels-chips').innerHTML = '';
+
+  if (_schedEditId) {
+    // Edit mode — populate from existing schedule
+    var s = (state.schedules || {})[_schedEditId];
+    if (!s) return;
+    document.getElementById('schedule-modal-title').textContent = 'Edit Schedule';
+    document.getElementById('schedule-submit-btn').textContent = 'Save';
+    document.getElementById('schedule-name-input').value = s.name || '';
+    document.getElementById('schedule-task-input').value = s.task_template || '';
+    document.getElementById('schedule-desc-input').value = s.description || '';
+    document.getElementById('schedule-tz-input').value = s.timezone || '';
+    if (s.group) sel.value = s.group;
+
+    if (s.cron_expr) {
+      _schedType = 'recurring';
+      document.getElementById('schedule-cron-input').value = s.cron_expr;
+    } else {
+      _schedType = 'oneshot';
+      if (s.scheduled_at) {
+        // Convert ISO to datetime-local format
+        try {
+          var d = new Date(s.scheduled_at);
+          document.getElementById('schedule-at-input').value =
+            d.toISOString().slice(0, 16);
+        } catch(e) {}
+      }
+    }
+
+    _schedLabels = (s.labels || []).slice();
+
+    // Set action — deferred until action list loads
+    if (s.action_name) {
+      _schedDeferredAction = s.action_name;
+      _schedDeferredVars = s.action_vars || {};
+    }
+  } else {
+    document.getElementById('schedule-modal-title').textContent = 'New Schedule';
+    document.getElementById('schedule-submit-btn').textContent = 'Create';
+    _schedType = 'recurring';
+  }
+
+  scheduleSetType(_schedType);
+  _schedRenderLabels();
+
+  document.getElementById('modal-schedule').classList.add('visible');
+  setTimeout(function() {
+    document.getElementById('schedule-name-input').focus();
+  }, 50);
+}
+
+function scheduleSetType(type) {
+  _schedType = type;
+  document.getElementById('schedule-type-recurring')
+    .classList.toggle('active', type === 'recurring');
+  document.getElementById('schedule-type-oneshot')
+    .classList.toggle('active', type === 'oneshot');
+  document.getElementById('schedule-cron-section')
+    .style.display = type === 'recurring' ? '' : 'none';
+  document.getElementById('schedule-at-section')
+    .style.display = type === 'oneshot' ? '' : 'none';
+}
+
+function scheduleSetCron(expr) {
+  document.getElementById('schedule-cron-input').value = expr;
+}
+
+var _schedActions = []; // cached action list for schedule modal
+
+function scheduleActionChanged() {
+  var sel = document.getElementById('schedule-action-select');
+  var action = sel.value;
+  var varsDiv = document.getElementById('schedule-action-vars');
+  varsDiv.innerHTML = '';
+  if (!action) return;
+
+  // Look up variables from cached action list
+  var act = null;
+  for (var i = 0; i < _schedActions.length; i++) {
+    if (_schedActions[i].name === action) { act = _schedActions[i]; break; }
+  }
+  if (act && act.vars) {
+    var varNames = act.vars.filter(function(v) { return v.name !== 'TASK' && v.name !== 'loom'; })
+      .map(function(v) { return v.name; });
+    _schedRenderActionVars(varNames);
+  }
+}
+
+function _schedRenderActionVars(vars) {
+  var div = document.getElementById('schedule-action-vars');
+  if (!div) return;
+  div.innerHTML = '';
+  if (!vars || !vars.length) return;
+
+  var fs = document.createElement('fieldset');
+  fs.className = 'action-vars-fieldset';
+  var legend = document.createElement('legend');
+  legend.textContent = 'Action variables';
+  fs.appendChild(legend);
+
+  for (var i = 0; i < vars.length; i++) {
+    var v = vars[i];
+    if (v === 'TASK' || v === 'loom') continue;
+    var label = document.createElement('label');
+    label.textContent = v;
+    var ta = document.createElement('textarea');
+    ta.className = 'action-var-input';
+    ta.rows = 1;
+    ta.dataset.var = v;
+    ta.oninput = function() { taskAutoResize(this); };
+    fs.appendChild(label);
+    fs.appendChild(ta);
+  }
+  div.appendChild(fs);
+}
+
+function scheduleLabelsKeydown(e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  var inp = document.getElementById('schedule-labels-input');
+  var val = inp.value.trim();
+  if (val && _schedLabels.indexOf(val) === -1) {
+    _schedLabels.push(val);
+    _schedRenderLabels();
+  }
+  inp.value = '';
+}
+
+function _schedRenderLabels() {
+  var div = document.getElementById('schedule-labels-chips');
+  div.innerHTML = '';
+  for (var i = 0; i < _schedLabels.length; i++) {
+    var lbl = _schedLabels[i];
+    var chip = document.createElement('span');
+    chip.className = 'label-chip';
+    chip.textContent = lbl;
+    chip.dataset.index = i;
+    chip.onclick = function() {
+      _schedLabels.splice(parseInt(this.dataset.index), 1);
+      _schedRenderLabels();
+    };
+    div.appendChild(chip);
+  }
+}
+
+function _handleScheduleActionList(msg) {
+  _schedModalWaiting = false;
+  var actions = msg.actions || [];
+  _schedActions = actions;
+  var sel = document.getElementById('schedule-action-select');
+  if (!sel) return;
+  var prev = sel.value;
+  sel.innerHTML = '<option value="">None</option>';
+  for (var i = 0; i < actions.length; i++) {
+    var a = actions[i];
+    var opt = document.createElement('option');
+    opt.value = a.name;
+    opt.textContent = a.name;
+    sel.appendChild(opt);
+  }
+  if (prev) sel.value = prev;
+
+  // Apply deferred action selection (edit mode)
+  if (_schedDeferredAction) {
+    sel.value = _schedDeferredAction;
+    _schedDeferredAction = '';
+    scheduleActionChanged();
+    // Pre-fill vars
+    if (_schedDeferredVars && Object.keys(_schedDeferredVars).length) {
+      var inputs = document.getElementById('schedule-action-vars')
+        .querySelectorAll('textarea');
+      for (var i = 0; i < inputs.length; i++) {
+        var key = inputs[i].dataset.var;
+        if (key && _schedDeferredVars[key]) {
+          inputs[i].value = _schedDeferredVars[key];
+        }
+      }
+      _schedDeferredVars = {};
+    }
+  }
+}
+
+function submitSchedule() {
+  var name = document.getElementById('schedule-name-input').value.trim();
+  var group = document.getElementById('schedule-group-select').value;
+  if (!name) return;
+  if (!group) return;
+
+  var payload = {
+    name: name,
+    group: group,
+    task_template: document.getElementById('schedule-task-input').value.trim(),
+    description: document.getElementById('schedule-desc-input').value.trim(),
+    timezone: document.getElementById('schedule-tz-input').value.trim(),
+    labels: _schedLabels.slice(),
+  };
+
+  if (_schedType === 'recurring') {
+    var cron = document.getElementById('schedule-cron-input').value.trim();
+    if (!cron) return;
+    payload.cron_expr = cron;
+  } else {
+    var at = document.getElementById('schedule-at-input').value;
+    if (!at) return;
+    payload.scheduled_at = new Date(at).toISOString();
+  }
+
+  var action = document.getElementById('schedule-action-select').value;
+  if (action) {
+    payload.action_name = action;
+    var vars = {};
+    var inputs = document.getElementById('schedule-action-vars')
+      .querySelectorAll('textarea');
+    for (var i = 0; i < inputs.length; i++) {
+      var key = inputs[i].dataset.var;
+      var val = inputs[i].value.trim();
+      if (key && val) vars[key] = val;
+    }
+    if (Object.keys(vars).length) payload.action_vars = vars;
+  }
+
+  if (_schedEditId) {
+    payload.cmd = 'schedule_update';
+    payload.id = _schedEditId;
+  } else {
+    payload.cmd = 'schedule_create';
+  }
+
+  send(payload);
   closeModals();
 }

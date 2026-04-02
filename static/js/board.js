@@ -22,6 +22,7 @@ var _boardFilterLabels = [];     // active label filters (OR logic)
 var _boardFilterActions = [];    // active action name filters (OR logic)
 var _boardSearchTimer = null;    // debounce timer for search input
 var _boardPreFilterLane = '';    // saved lane before search, restored on clear
+var _boardShowSchedules = false; // true when "Schedules" tab is active
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -216,8 +217,7 @@ function _renderBoardCard(t, childrenOf, depth) {
       else userLbls.push(t.labels[li]);
     }
     for (var li = 0; li < userLbls.length; li++) {
-      var lc = labelColor(userLbls[li]);
-      meta += '<span class="board-card-label" style="color:' + lc + ';background:color-mix(in srgb,' + lc + ' 15%,transparent)">' + esc(userLbls[li]) + '</span>';
+      meta += '<span class="board-card-label">' + esc(userLbls[li]) + '</span>';
     }
     for (var li = 0; li < sysLbls.length; li++) {
       var lb = sysLbls[li];
@@ -350,9 +350,7 @@ function renderBoard() {
       html += '<div class="board-filter-active">';
       for (var fi = 0; fi < _boardFilterLabels.length; fi++) {
         var fl = _boardFilterLabels[fi];
-        var flStyle = isSystemLabel(fl) ? '' : ' style="color:' + labelColor(fl) + ';border-color:' + labelColor(fl) + '"';
         html += '<span class="board-filter-active-chip board-filter-active-label"'
-          + flStyle
           + ' onclick="boardRemoveFilterLabel(\'' + esc(fl).replace(/'/g, "\\'") + '\')">'
           + esc(fl) + ' &times;</span>';
       }
@@ -400,10 +398,25 @@ function renderBoard() {
       + esc(l) + '<span class="lane-count">' + cnt + '</span>'
       + '</button>';
   }
+  // Schedules tab (after lane tabs)
+  var schedCount = _boardScheduleCount();
+  html += '<button class="board-lane-tab board-lane-tab-schedules'
+    + (_boardShowSchedules ? ' active' : '') + '"'
+    + ' onclick="boardToggleSchedules()">'
+    + 'Schedules' + (schedCount ? '<span class="lane-count">' + schedCount + '</span>' : '')
+    + '</button>';
+
   html += '</div>';
   html += '<button class="board-lane-scroll-btn" id="board-scroll-right" onclick="boardScrollLanes(1)" title="Scroll right">&#9654;</button>';
 
   html += '</div>';
+
+  // Schedules view (replaces cards when active)
+  if (_boardShowSchedules) {
+    html += _renderSchedulesView();
+    panel.innerHTML = html;
+    return;
+  }
 
   // Cards — always show tasks in the selected lane
   var tasks = _boardTasksInLane(_boardSelectedLane);
@@ -557,6 +570,7 @@ function renderBoard() {
 /* ---- Lane selection ------------------------------------------------- */
 
 function boardSelectLane(lane) {
+  _boardShowSchedules = false;  // exit schedules view on lane click
   if (lane === _boardSelectedLane) return;
   // Save current scroll so renderBoard can restore + adjust for new active tab
   var tabs = document.getElementById('board-lane-tabs');
@@ -872,19 +886,6 @@ function boardCopyTaskId(taskId) {
 function boardFocusTask(id) {
   _boardFocusedTask = id;
   renderBoard();
-}
-
-/** Navigate to a task: switch to board panel, select its lane, focus it. */
-function boardNavigateToTask(taskId) {
-  var t = (state.board_tasks || {})[taskId];
-  if (!t) return;
-  if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') {
-    togglePanel('board');
-  }
-  if (t.lane && t.lane !== _boardSelectedLane) {
-    _boardSelectedLane = t.lane;
-  }
-  boardFocusTask(taskId);
 }
 
 function boardFocusAgent(agentId) {
@@ -1268,7 +1269,6 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
       var span = document.createElement('span');
       span.className = 'board-filter-dropdown-name';
       span.textContent = (kind === 'label' && isSystemLabel(name)) ? displayLabel(name) : name;
-      if (kind === 'label' && !isSystemLabel(name)) span.style.color = labelColor(name);
       row.appendChild(span);
       var badge = document.createElement('span');
       badge.className = 'board-filter-dropdown-count';
@@ -1418,4 +1418,125 @@ function submitResolve() {
   if (!answer) return;
   send({ cmd: 'resolve_ask', id: taskId, answer: answer });
   closeModals();
+}
+
+/* ---- Schedule helpers ------------------------------------------------ */
+
+function _boardScheduleCount() {
+  var scheds = (state && state.schedules) || {};
+  var count = 0;
+  for (var id in scheds) count++;
+  return count;
+}
+
+function boardToggleSchedules() {
+  _boardShowSchedules = !_boardShowSchedules;
+  if (_boardShowSchedules) _boardSelectedLane = '';
+  renderBoard();
+}
+
+function _renderSchedulesView() {
+  var scheds = (state && state.schedules) || {};
+  var html = '<div class="board-cards" id="board-cards">';
+
+  // Add schedule button
+  html += '<div class="board-add-task">'
+    + '<button class="board-add-btn" onclick="openScheduleModal()">'
+    + '+ Add schedule</button></div>';
+
+  var list = [];
+  for (var id in scheds) list.push(scheds[id]);
+  list.sort(function(a, b) {
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
+  if (!list.length) {
+    html += '<div class="board-empty">No schedules</div>';
+  }
+
+  for (var i = 0; i < list.length; i++) {
+    var s = list[i];
+    var enabled = s.enabled !== false;
+    var cls = 'board-card board-schedule-card' + (enabled ? '' : ' dimmed');
+    var trigger = s.cron_expr || s.scheduled_at || '';
+    var triggerLabel = s.cron_expr ? 'cron' : 'one-shot';
+
+    html += '<div class="' + cls + '" data-schedule-id="' + esc(s.id) + '">';
+
+    // Header
+    html += '<div class="board-card-header">';
+    html += '<span class="board-card-title">' + esc(s.name || '') + '</span>';
+    html += '<span class="board-card-slug">' + esc(s.slug || '') + '</span>';
+    html += '</div>';
+
+    // Trigger info
+    html += '<div class="board-schedule-trigger">';
+    html += '<span class="board-schedule-type">' + esc(triggerLabel) + '</span> ';
+    html += '<code>' + esc(trigger) + '</code>';
+    if (s.timezone) html += ' <span class="board-schedule-tz">(' + esc(s.timezone) + ')</span>';
+    html += '</div>';
+
+    // Task template
+    if (s.task_template) {
+      html += '<div class="board-schedule-template">' + esc(s.task_template) + '</div>';
+    }
+
+    // Action badge
+    if (s.action_name) {
+      html += '<div class="board-card-action">' + esc(s.action_name) + '</div>';
+    }
+
+    // Status row
+    html += '<div class="board-schedule-status">';
+    if (s.next_run_at && enabled) {
+      html += '<span class="board-schedule-next">Next: ' + _schedFormatTime(s.next_run_at) + '</span>';
+    }
+    if (s.run_count) {
+      html += '<span class="board-schedule-runs">' + s.run_count + ' run' + (s.run_count === 1 ? '' : 's') + '</span>';
+    }
+    html += '</div>';
+
+    // Actions row
+    html += '<div class="board-schedule-actions">';
+    html += '<button class="board-schedule-action-btn" onclick="scheduleToggleEnabled(\'' + esc(s.id) + '\')">'
+      + (enabled ? 'Disable' : 'Enable') + '</button>';
+    html += '<button class="board-schedule-action-btn" onclick="scheduleRunNow(\'' + esc(s.id) + '\')">Run now</button>';
+    html += '<button class="board-schedule-action-btn" onclick="openScheduleModal(\'' + esc(s.id) + '\')">Edit</button>';
+    html += '<button class="board-schedule-action-btn board-schedule-delete-btn" onclick="scheduleDelete(\'' + esc(s.id) + '\')">Delete</button>';
+    html += '</div>';
+
+    html += '</div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function _schedFormatTime(iso) {
+  if (!iso) return '';
+  try {
+    var d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  } catch(e) {
+    return iso;
+  }
+}
+
+function scheduleToggleEnabled(sid) {
+  var s = (state.schedules || {})[sid];
+  if (!s) return;
+  send({ cmd: s.enabled !== false ? 'schedule_disable' : 'schedule_enable', id: sid });
+}
+
+function scheduleRunNow(sid) {
+  send({ cmd: 'schedule_run', id: sid });
+}
+
+function scheduleDelete(sid) {
+  showConfirm('Delete this schedule?', function() {
+    send({ cmd: 'schedule_remove', id: sid });
+  });
 }

@@ -34,8 +34,7 @@ _AGENT_PERSISTED_COLS = [
 ]
 
 # GroupSettings fields that store dicts — persisted as JSON text.
-_GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars",
-                    "board_default_labels"}
+_GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars"}
 
 # GroupSettings fields that are booleans — stored as INTEGER 0/1.
 _GS_BOOL_FIELDS = {
@@ -145,10 +144,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     terminal_always_custom_dialog INTEGER NOT NULL DEFAULT 0,
     terminal_close_on_disconnect INTEGER NOT NULL DEFAULT 0,
     dispatch_lane               TEXT NOT NULL DEFAULT 'In Progress',
-    dispatch_auto_terminals     INTEGER NOT NULL DEFAULT 0,
-    board_default_labels        TEXT NOT NULL DEFAULT '[]',
-    board_default_lane          TEXT NOT NULL DEFAULT '',
-    board_default_action        TEXT NOT NULL DEFAULT ''
+    dispatch_auto_terminals     INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS board_tasks (
@@ -173,6 +169,29 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     external_id    TEXT NOT NULL DEFAULT '',
     external_url   TEXT NOT NULL DEFAULT '',
     status         TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS schedules (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    slug            TEXT NOT NULL DEFAULT '',
+    task_template   TEXT NOT NULL DEFAULT '',
+    description     TEXT NOT NULL DEFAULT '',
+    group_name      TEXT NOT NULL DEFAULT '',
+    action_name     TEXT NOT NULL DEFAULT '',
+    action_vars     TEXT NOT NULL DEFAULT '{}',
+    agent_template  TEXT NOT NULL DEFAULT '',
+    labels          TEXT NOT NULL DEFAULT '[]',
+    cron_expr       TEXT NOT NULL DEFAULT '',
+    scheduled_at    TEXT NOT NULL DEFAULT '',
+    timezone        TEXT NOT NULL DEFAULT '',
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    last_run_at     TEXT NOT NULL DEFAULT '',
+    next_run_at     TEXT NOT NULL DEFAULT '',
+    run_count       INTEGER NOT NULL DEFAULT 0,
+    last_task_id    TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT '',
+    updated_at      TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS board_lanes (
@@ -379,18 +398,6 @@ class LoomDB:
                 "ALTER TABLE group_settings ADD COLUMN "
                 "default_agent_template TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
-        # Migrate: add board_default_* columns to group_settings
-        for col, default in [("board_default_labels", "'[]'"),
-                             ("board_default_lane", "''"),
-                             ("board_default_action", "''")]:
-            try:
-                self._conn.execute(
-                    f"SELECT {col} FROM group_settings LIMIT 0")
-            except sqlite3.OperationalError:
-                self._conn.execute(
-                    f"ALTER TABLE group_settings ADD COLUMN "
-                    f"{col} TEXT NOT NULL DEFAULT {default}")
-                self._conn.commit()
         # Migrate: rename system labels with loom: prefix
         rows = self._conn.execute(
             "SELECT id, labels FROM board_tasks "
@@ -567,6 +574,38 @@ class LoomDB:
     def delete_board_task(self, task_id: str):
         self._conn.execute(
             "DELETE FROM board_tasks WHERE id=?", (task_id,))
+        self._conn.commit()
+
+    def save_schedule(self, sched):
+        """Upsert a schedule."""
+        d = asdict(sched)
+        labels = json.dumps(d.pop("labels", []))
+        action_vars = json.dumps(d.pop("action_vars", {}))
+        group_name = d.pop("group", "")
+        self._conn.execute("""
+            INSERT OR REPLACE INTO schedules
+                (id, name, slug, task_template, description, group_name,
+                 action_name, action_vars, agent_template, labels,
+                 cron_expr, scheduled_at, timezone, enabled,
+                 last_run_at, next_run_at, run_count, last_task_id,
+                 created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            d["id"], d["name"], d["slug"],
+            d.get("task_template", ""), d.get("description", ""),
+            group_name,
+            d.get("action_name", ""), action_vars,
+            d.get("agent_template", ""), labels,
+            d.get("cron_expr", ""), d.get("scheduled_at", ""),
+            d.get("timezone", ""), 1 if d.get("enabled", True) else 0,
+            d.get("last_run_at", ""), d.get("next_run_at", ""),
+            d.get("run_count", 0), d.get("last_task_id", ""),
+            d["created_at"], d["updated_at"],
+        ))
+        self._conn.commit()
+
+    def delete_schedule(self, sid: str):
+        self._conn.execute("DELETE FROM schedules WHERE id=?", (sid,))
         self._conn.commit()
 
     def save_board_lanes(self, lanes: list):
@@ -1082,6 +1121,29 @@ class LoomDB:
             except (json.JSONDecodeError, TypeError):
                 global_settings[row[0]] = row[1]
 
+        # Schedules
+        schedules = {}
+        try:
+            rows = c.execute("SELECT * FROM schedules").fetchall()
+            if rows:
+                cols = [d[0] for d in c.description]
+                for row in rows:
+                    d = dict(zip(cols, row))
+                    d["group"] = d.pop("group_name", "")
+                    d["enabled"] = bool(d.get("enabled", 1))
+                    try:
+                        d["labels"] = json.loads(d.get("labels", "[]"))
+                    except (json.JSONDecodeError, TypeError):
+                        d["labels"] = []
+                    try:
+                        d["action_vars"] = json.loads(
+                            d.get("action_vars", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        d["action_vars"] = {}
+                    schedules[d["id"]] = d
+        except Exception:
+            pass  # table may not exist yet on first load
+
         return {
             "agents": agents,
             "groups": groups,
@@ -1089,6 +1151,7 @@ class LoomDB:
             "group_settings": group_settings,
             "board_lanes": board_lanes,
             "board_tasks": board_tasks,
+            "schedules": schedules,
             "panel_active": ui.get("panel_active", "")
                 or ("board" if ui.get("board_panel_open", "False") == "True"
                     else ""),

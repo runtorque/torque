@@ -411,21 +411,7 @@ function renderAgentDetails(a) {
   /* Branch — worktree branch takes priority, then regular git branch */
   if (a.worktree_branch) {
     const branch = a.worktree_branch.replace(/^loom\//, '');
-    let branchExtra = '';
-    if (a.worktree_merged) {
-      branchExtra += ' <span class="detail-wt-tag detail-wt-merged">merged</span>';
-    } else {
-      branchExtra += ' <span class="detail-wt-tag">worktree</span>';
-    }
-    const behind = a.worktree_behind || 0;
-    const ahead = a.worktree_ahead || 0;
-    if (behind || ahead) {
-      let parts = [];
-      if (ahead) parts.push(`<span class="detail-ahead">\u2191${ahead}</span>`);
-      if (behind) parts.push(`<span class="detail-behind">\u2193${behind}</span>`);
-      branchExtra += ' ' + parts.join(' ');
-    }
-    h += `<div class="detail-row"><span class="detail-label">Branch</span><span class="detail-val detail-branch">\u2387 ${esc(branch)}${branchExtra}</span></div>`;
+    h += `<div class="detail-row"><span class="detail-label">Branch</span><span class="detail-val detail-branch">\u2387 ${esc(branch)} <span class="detail-wt-tag">worktree</span></span></div>`;
     const diff = a.worktree_diff || {};
     if (diff.files) {
       h += `<div class="detail-row"><span class="detail-label">Changes</span><span class="detail-val">${diff.files} file${diff.files !== 1 ? 's' : ''} <span class="detail-ins">+${diff.insertions || 0}</span> <span class="detail-del">-${diff.deletions || 0}</span></span></div>`;

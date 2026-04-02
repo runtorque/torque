@@ -50,6 +50,8 @@ function connect() {
     } else if (msg.type === 'actions') {
       if (typeof _boardActDropdownWaiting !== 'undefined' && _boardActDropdownWaiting) {
         _boardShowActionList(msg);
+      } else if (typeof _schedModalWaiting !== 'undefined' && _schedModalWaiting) {
+        _handleScheduleActionList(msg);
       } else if (typeof _taskModalWaiting !== 'undefined' && _taskModalWaiting) {
         _handleTaskActionList(msg);
       } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
@@ -246,6 +248,21 @@ function _applyDelta(ops) {
           state.panel_events = state.panel_events.slice(-500);
         break;
       }
+
+      case 'schedule_upsert': {
+        if (!state.schedules) state.schedules = {};
+        const sid = op.id;
+        if (state.schedules[sid]) {
+          Object.assign(state.schedules[sid], op);
+        } else {
+          state.schedules[sid] = Object.assign({}, op);
+        }
+        delete state.schedules[sid].op;
+        break;
+      }
+      case 'schedule_remove':
+        if (state.schedules) delete state.schedules[op.id];
+        break;
 
       case 'ui_update':
         state[op.key] = op.value;

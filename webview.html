@@ -148,7 +148,6 @@
       <button class="gs-tab active" data-tab="group" onclick="switchGsTab('group')">Group</button>
       <button class="gs-tab" data-tab="agents" onclick="switchGsTab('agents')">Agents</button>
       <button class="gs-tab" data-tab="terminals" onclick="switchGsTab('terminals')">Terminals</button>
-      <button class="gs-tab" data-tab="board" onclick="switchGsTab('board')">Board</button>
     </div>
 
     <!-- Group tab -->
@@ -308,16 +307,6 @@
         <input id="gs-terminal-close-on-disconnect" type="checkbox"> Close on disconnect
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically remove the terminal from Loom when its iTerm2 tab is closed.">?</span>
       </label>
-    </div>
-
-    <!-- Board tab -->
-    <div class="gs-pane" data-pane="board">
-      <label>Default lane <span class="label-hint">for new tasks</span></label>
-      <select id="gs-board-default-lane"></select>
-      <label>Default action <span class="label-hint">for new tasks</span></label>
-      <select id="gs-board-default-action"></select>
-      <label>Default labels <span class="label-hint">comma-separated</span></label>
-      <input id="gs-board-default-labels" placeholder="e.g. feature, frontend" autocomplete="off">
     </div>
 
     <div class="modal-actions">
@@ -512,6 +501,75 @@
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" onclick="submitResolve()">Resolve</button>
+    </div>
+  </div>
+</div>
+
+<!-- Schedule modal -->
+<div class="overlay" id="modal-schedule">
+  <div class="modal modal-tall">
+    <h2 id="schedule-modal-title">New Schedule</h2>
+    <label>Name <span class="label-req">*</span></label>
+    <input id="schedule-name-input" autocomplete="off" placeholder="e.g. Daily standup review"
+           onkeydown="if(event.key==='Escape')closeModals();">
+    <label>Task template
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Task title created each time the schedule fires. Use {date}, {time}, or {datetime} for dynamic values.">?</span>
+    </label>
+    <textarea id="schedule-task-input" rows="1" autocomplete="off"
+              placeholder="e.g. Code review — {date}"
+              oninput="taskAutoResize(this)"
+              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+    <label>Description</label>
+    <textarea id="schedule-desc-input" rows="2" autocomplete="off"
+              placeholder="Optional longer context..."
+              oninput="taskAutoResize(this)"
+              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+    <label>Group <span class="label-req">*</span></label>
+    <select id="schedule-group-select"
+            onkeydown="if(event.key==='Escape')closeModals();"></select>
+    <label>Schedule type</label>
+    <div class="schedule-type-toggle">
+      <button class="schedule-type-btn active" id="schedule-type-recurring"
+              onclick="scheduleSetType('recurring')">Recurring</button>
+      <button class="schedule-type-btn" id="schedule-type-oneshot"
+              onclick="scheduleSetType('oneshot')">One-time</button>
+    </div>
+    <div id="schedule-cron-section">
+      <label>Cron expression <span class="label-req">*</span>
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Standard 5-field cron: minute hour day-of-month month day-of-week. Examples: '0 9 * * 1-5' (weekdays 9am), '*/30 * * * *' (every 30 min).">?</span>
+      </label>
+      <input id="schedule-cron-input" autocomplete="off" placeholder="0 9 * * *"
+             onkeydown="if(event.key==='Escape')closeModals();">
+      <div class="schedule-presets">
+        <button class="schedule-preset" onclick="scheduleSetCron('*/30 * * * *')">Every 30m</button>
+        <button class="schedule-preset" onclick="scheduleSetCron('0 * * * *')">Hourly</button>
+        <button class="schedule-preset" onclick="scheduleSetCron('0 9 * * *')">Daily 9am</button>
+        <button class="schedule-preset" onclick="scheduleSetCron('0 9 * * 1-5')">Weekdays</button>
+        <button class="schedule-preset" onclick="scheduleSetCron('0 9 * * 1')">Weekly</button>
+        <button class="schedule-preset" onclick="scheduleSetCron('0 9 1 * *')">Monthly</button>
+      </div>
+    </div>
+    <div id="schedule-at-section" style="display:none">
+      <label>Date & time <span class="label-req">*</span></label>
+      <input type="datetime-local" id="schedule-at-input"
+             onkeydown="if(event.key==='Escape')closeModals();">
+    </div>
+    <label>Timezone</label>
+    <input id="schedule-tz-input" autocomplete="off" placeholder="e.g. America/New_York (empty = UTC)"
+           onkeydown="if(event.key==='Escape')closeModals();">
+    <label>Action</label>
+    <select id="schedule-action-select" onchange="scheduleActionChanged()"
+            onkeydown="if(event.key==='Escape')closeModals();">
+      <option value="">None</option>
+    </select>
+    <div id="schedule-action-vars"></div>
+    <label>Labels</label>
+    <input id="schedule-labels-input" autocomplete="off" placeholder="Type and press Enter"
+           onkeydown="scheduleLabelsKeydown(event)">
+    <div id="schedule-labels-chips" class="label-chips"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" id="schedule-submit-btn" onclick="submitSchedule()">Create</button>
     </div>
   </div>
 </div>

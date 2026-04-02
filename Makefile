@@ -66,6 +66,7 @@ install:
 	   loom/templates.py \
 	   loom/terminal_adapter.py \
 	   loom/db.py loom/mcp.py \
+	   loom/cron.py \
 	   "$(SCRIPT_DIR)/loom/"
 	cp loom/adapters/__init__.py loom/adapters/base.py \
 	   loom/adapters/claude_code.py loom/adapters/codex.py \

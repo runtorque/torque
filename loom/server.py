@@ -44,24 +44,111 @@ async def _worktree_diff_updater(state: MatrixState,
             diff = await worktree_mgr.diff_summary(cell)
             dirty = await worktree_mgr.has_uncommitted_changes(cell)
             checkpoints = await worktree_mgr.count_commits(cell)
-            ahead = checkpoints
-            behind = await worktree_mgr.count_behind(cell)
-            merged = await worktree_mgr.is_merged(cell)
             if diff != cell.worktree_diff or dirty != cell.worktree_dirty \
-                    or checkpoints != cell.worktree_checkpoints \
-                    or behind != cell.worktree_behind \
-                    or ahead != cell.worktree_ahead \
-                    or merged != cell.worktree_merged:
+                    or checkpoints != cell.worktree_checkpoints:
                 cell.worktree_diff = diff
                 cell.worktree_dirty = dirty
                 cell.worktree_checkpoints = checkpoints
-                cell.worktree_behind = behind
-                cell.worktree_ahead = ahead
-                cell.worktree_merged = merged
                 state._emit_agent(cell)
                 changed = True
         if changed:
             await state.broadcast()
+
+
+async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
+    """Periodically check for due schedules and dispatch tasks.
+
+    Runs every 30 seconds.  For each due schedule:
+    1. Create a BoardTask from the schedule template.
+    2. Dispatch it via the existing dispatch_task command.
+    3. Update schedule state (last_run_at, next_run_at, run_count).
+    """
+    from datetime import datetime, timezone as dt_tz
+    from .cron import next_run as cron_next_run
+
+    while True:
+        await asyncio.sleep(30)
+        now = datetime.now(dt_tz.utc)
+        now_iso = now.isoformat()
+        due = state.schedule_get_due(now_iso)
+        if not due:
+            continue
+
+        for sched in due:
+            try:
+                # Render task title with placeholders
+                title = sched.task_template or sched.name
+                title = (title
+                         .replace("{date}", now.strftime("%Y-%m-%d"))
+                         .replace("{time}", now.strftime("%H:%M"))
+                         .replace("{datetime}",
+                                  now.strftime("%Y-%m-%d %H:%M")))
+
+                # Verify group still exists
+                if sched.group not in state.groups:
+                    log.warning("Schedule '%s': group '%s' no longer exists"
+                                " — skipping", sched.name, sched.group)
+                    continue
+
+                # Create the task
+                task = state.board_add_task(
+                    task=title,
+                    group=sched.group,
+                    lane="Backlog",
+                    description=sched.description,
+                    action_name=sched.action_name,
+                    action_vars=dict(sched.action_vars),
+                    agent_template=sched.agent_template,
+                    labels=list(sched.labels),
+                )
+                if not task:
+                    log.warning("Schedule '%s': failed to create task",
+                                sched.name)
+                    continue
+
+                log.info("Schedule '%s' fired — created task '%s' (%s)",
+                         sched.name, task.task, task.id)
+
+                # Dispatch the task
+                result = await handle_command({
+                    "cmd": "dispatch_task",
+                    "id": task.id,
+                    "create_agent": True,
+                })
+
+                # Update schedule state
+                sched.last_run_at = now_iso
+                sched.run_count += 1
+                sched.last_task_id = task.id
+
+                # Compute next run or disable one-shot
+                if sched.cron_expr:
+                    try:
+                        nxt = cron_next_run(sched.cron_expr, now,
+                                            tz=sched.timezone)
+                        sched.next_run_at = nxt.isoformat()
+                    except ValueError:
+                        log.error("Schedule '%s': invalid cron '%s'"
+                                  " — disabling", sched.name,
+                                  sched.cron_expr)
+                        sched.enabled = False
+                        sched.next_run_at = ""
+                else:
+                    # One-shot: disable after firing
+                    sched.enabled = False
+                    sched.next_run_at = ""
+
+                from dataclasses import asdict
+                state._emit("schedule_upsert", **asdict(sched))
+                state._db_save_schedule(sched)
+
+                _panel_event("schedule_fired", "", sched.name,
+                             sched.group, title, task_id=task.id)
+
+            except Exception:
+                log.exception("Schedule '%s' failed to fire", sched.name)
+
+        await state.broadcast()
 
 
 class _BlockStr(str):
@@ -901,17 +988,16 @@ async def main(connection: iterm2.Connection):
             except Exception:
                 log.exception("Failed to query profiles")
                 pnames = ["Default"]
-            base_dir = await _resolve_base_dir(group)
             return {
                 "type": "group_settings",
                 "group": group,
                 "settings": asdict(gs),
                 "resolved_agent_defaults": template_mgr.resolve_agent_config(
-                    "", gs, {}, base_dir=base_dir),
+                    "", gs, {}, base_dir=await _resolve_base_dir(group)),
                 "profiles": pnames,
                 "providers": get_providers(),
-                "templates": template_mgr.list_templates(base_dir),
-                "actions": action_mgr.list_actions(base_dir),
+                "templates": template_mgr.list_templates(
+                    await _resolve_base_dir(group)),
             }
 
         # get_global_settings: respond directly
@@ -1742,26 +1828,16 @@ async def main(connection: iterm2.Connection):
 
             # -- Board commands (Phase 5) --
             elif cmd == "board_add_task":
-                # Apply per-group board defaults for fields not
-                # explicitly provided by the client
-                group = data.get("group", "")
-                gs = state.get_group_settings(group)
-                lane = data.get("lane", "") or gs.board_default_lane
-                action_name = data.get("action_name", "") or \
-                    gs.board_default_action
-                labels = data.get("labels", [])
-                if not labels and gs.board_default_labels:
-                    labels = list(gs.board_default_labels)
                 bt = state.board_add_task(
                     task=data.get("task", ""),
-                    group=group,
-                    lane=lane,
+                    group=data.get("group", ""),
+                    lane=data.get("lane", ""),
                     description=data.get("description", ""),
-                    action_name=action_name,
+                    action_name=data.get("action_name", ""),
                     action_vars=data.get("action_vars", {}),
                     agent_template=data.get("agent_template", ""),
                     agent_id=data.get("agent_id", ""),
-                    labels=labels,
+                    labels=data.get("labels", []),
                 )
                 if not bt:
                     result = {"type": "error",
@@ -2197,6 +2273,210 @@ async def main(connection: iterm2.Connection):
                                 value=state.board_panel_height)
                     state._db_save_ui("board_panel_height",
                                       state.board_panel_height)
+
+            # -- Schedule commands ------------------------------------------
+
+            elif cmd == "schedule_create":
+                name = data.get("name", "").strip()
+                group = data.get("group", "")
+                if not name:
+                    result = {"type": "error",
+                              "message": "Schedule name is required"}
+                elif not group or group not in state.groups:
+                    result = {"type": "error",
+                              "message": "Valid group is required"}
+                else:
+                    cron_expr = data.get("cron_expr", "")
+                    scheduled_at = data.get("scheduled_at", "")
+                    tz = data.get("timezone", "")
+                    if not cron_expr and not scheduled_at:
+                        result = {"type": "error",
+                                  "message": "Either cron_expr or "
+                                             "scheduled_at is required"}
+                    else:
+                        # Validate cron if provided
+                        if cron_expr:
+                            try:
+                                from .cron import parse_cron, \
+                                    next_run as cron_next
+                                parse_cron(cron_expr)
+                                from datetime import datetime, \
+                                    timezone as dt_tz
+                                nxt = cron_next(
+                                    cron_expr,
+                                    datetime.now(dt_tz.utc), tz=tz)
+                                next_run_at = nxt.isoformat()
+                            except ValueError as e:
+                                result = {
+                                    "type": "error",
+                                    "message": f"Invalid cron: {e}"}
+                                next_run_at = None
+                        else:
+                            next_run_at = scheduled_at
+
+                        if next_run_at is not None:
+                            kwargs = {
+                                "task_template":
+                                    data.get("task_template", ""),
+                                "description":
+                                    data.get("description", ""),
+                                "action_name":
+                                    data.get("action_name", ""),
+                                "action_vars":
+                                    data.get("action_vars", {}),
+                                "agent_template":
+                                    data.get("agent_template", ""),
+                                "labels": data.get("labels", []),
+                                "cron_expr": cron_expr,
+                                "scheduled_at": scheduled_at,
+                                "timezone": tz,
+                                "next_run_at": next_run_at,
+                                "enabled":
+                                    data.get("enabled", True),
+                            }
+                            sched = state.schedule_add(
+                                name, group, **kwargs)
+                            if sched:
+                                result = {"type": "ok",
+                                          "schedule_id": sched.id}
+                            else:
+                                result = {"type": "error",
+                                          "message":
+                                              "Failed to create "
+                                              "schedule"}
+
+            elif cmd == "schedule_update":
+                sid = data.get("id", "")
+                sched = state.schedules.get(sid)
+                if not sched:
+                    result = {"type": "error",
+                              "message": "Schedule not found"}
+                else:
+                    fields = {}
+                    for k in ("name", "task_template", "description",
+                              "group", "action_name", "action_vars",
+                              "agent_template", "labels", "cron_expr",
+                              "scheduled_at", "timezone", "enabled"):
+                        if k in data:
+                            fields[k] = data[k]
+                    # Recompute next_run_at if schedule changed
+                    new_cron = fields.get("cron_expr", sched.cron_expr)
+                    new_at = fields.get("scheduled_at",
+                                        sched.scheduled_at)
+                    new_tz = fields.get("timezone", sched.timezone)
+                    if "cron_expr" in fields or "scheduled_at" in fields \
+                            or "timezone" in fields:
+                        if new_cron:
+                            try:
+                                from .cron import parse_cron, \
+                                    next_run as cron_next
+                                parse_cron(new_cron)
+                                from datetime import datetime, \
+                                    timezone as dt_tz
+                                nxt = cron_next(
+                                    new_cron,
+                                    datetime.now(dt_tz.utc),
+                                    tz=new_tz)
+                                fields["next_run_at"] = nxt.isoformat()
+                            except ValueError as e:
+                                result = {
+                                    "type": "error",
+                                    "message":
+                                        f"Invalid cron: {e}"}
+                                fields = None
+                        elif new_at:
+                            fields["next_run_at"] = new_at
+                    if fields is not None:
+                        state.schedule_update(sid, **fields)
+
+            elif cmd == "schedule_remove":
+                sid = data.get("id", "")
+                if sid in state.schedules:
+                    state.schedule_remove(sid)
+                else:
+                    result = {"type": "error",
+                              "message": "Schedule not found"}
+
+            elif cmd == "schedule_enable":
+                sid = data.get("id", "")
+                sched = state.schedules.get(sid)
+                if not sched:
+                    result = {"type": "error",
+                              "message": "Schedule not found"}
+                else:
+                    fields = {"enabled": True}
+                    # Recompute next_run_at
+                    if sched.cron_expr:
+                        from .cron import next_run as cron_next
+                        from datetime import datetime, timezone as dt_tz
+                        nxt = cron_next(sched.cron_expr,
+                                        datetime.now(dt_tz.utc),
+                                        tz=sched.timezone)
+                        fields["next_run_at"] = nxt.isoformat()
+                    elif sched.scheduled_at:
+                        fields["next_run_at"] = sched.scheduled_at
+                    state.schedule_update(sid, **fields)
+
+            elif cmd == "schedule_disable":
+                sid = data.get("id", "")
+                if sid in state.schedules:
+                    state.schedule_update(sid, enabled=False)
+                else:
+                    result = {"type": "error",
+                              "message": "Schedule not found"}
+
+            elif cmd == "schedule_list":
+                result = {
+                    "type": "schedule_list",
+                    "schedules": [
+                        asdict(s) for s in state.schedules.values()
+                    ],
+                }
+
+            elif cmd == "schedule_run":
+                sid = data.get("id", "")
+                sched = state.schedules.get(sid)
+                if not sched:
+                    result = {"type": "error",
+                              "message": "Schedule not found"}
+                elif sched.group not in state.groups:
+                    result = {"type": "error",
+                              "message": "Schedule group not found"}
+                else:
+                    from datetime import datetime, timezone as dt_tz
+                    now = datetime.now(dt_tz.utc)
+                    title = sched.task_template or sched.name
+                    title = (title
+                             .replace("{date}",
+                                      now.strftime("%Y-%m-%d"))
+                             .replace("{time}",
+                                      now.strftime("%H:%M"))
+                             .replace("{datetime}",
+                                      now.strftime("%Y-%m-%d %H:%M")))
+                    task = state.board_add_task(
+                        task=title, group=sched.group,
+                        lane="Backlog",
+                        description=sched.description,
+                        action_name=sched.action_name,
+                        action_vars=dict(sched.action_vars),
+                        agent_template=sched.agent_template,
+                        labels=list(sched.labels))
+                    if task:
+                        await handle_command({
+                            "cmd": "dispatch_task",
+                            "id": task.id,
+                            "create_agent": True})
+                        sched.last_run_at = now.isoformat()
+                        sched.run_count += 1
+                        sched.last_task_id = task.id
+                        state._emit("schedule_upsert",
+                                    **asdict(sched))
+                        state._db_save_schedule(sched)
+                        _panel_event("schedule_fired", "",
+                                     sched.name, sched.group,
+                                     title, task_id=task.id)
+                        result = {"type": "ok",
+                                  "task_id": task.id}
 
             elif cmd == "ai_report":
                 cell_id = data.get("cell_id", "")
@@ -2918,6 +3198,12 @@ async def main(connection: iterm2.Connection):
             kind=kind, cell_id=cell_id, agent_name=agent_name,
             group=group, message=message, task_id=task_id)
         state._emit("event_append", **pe)
+
+    # -- Scheduler ----------------------------------------------------------
+
+    asyncio.create_task(
+        _scheduler_loop(state, handle_command, _panel_event))
+    log.info("Task scheduler started")
 
     # -- HTTP / WS routes ---------------------------------------------------
 

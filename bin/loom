@@ -170,12 +170,36 @@ def db_read_state():
                     d["action_vars"] = {}
                 tasks[d["id"]] = d
 
+        # Schedules
+        schedules = {}
+        try:
+            rows = c.execute("SELECT * FROM schedules").fetchall()
+            if rows:
+                cols = [d[0] for d in c.description]
+                for row in rows:
+                    d = dict(zip(cols, row))
+                    d["group"] = d.pop("group_name", "")
+                    d["enabled"] = bool(d.get("enabled", 1))
+                    try:
+                        d["labels"] = json.loads(d.get("labels", "[]"))
+                    except (json.JSONDecodeError, TypeError):
+                        d["labels"] = []
+                    try:
+                        d["action_vars"] = json.loads(
+                            d.get("action_vars", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        d["action_vars"] = {}
+                    schedules[d["id"]] = d
+        except Exception:
+            pass  # table may not exist yet
+
         return {
             "agents": agents,
             "groups": groups,
             "group_slugs": group_slugs,
             "board_lanes": lanes,
             "board_tasks": tasks,
+            "schedules": schedules,
         }
     return _db_read(_query)
 
@@ -2569,6 +2593,287 @@ def cmd_pipeline_show(args):
 
 
 # ---------------------------------------------------------------------------
+# Schedule commands
+# ---------------------------------------------------------------------------
+
+
+def resolve_schedule(state_data, identifier):
+    """Resolve a schedule by ID, slug, or name."""
+    schedules = state_data.get("schedules", {})
+
+    # Exact ID
+    if identifier in schedules:
+        return schedules[identifier]
+
+    # Slug match
+    ident_lower = identifier.lower()
+    slug_matches = [s for s in schedules.values()
+                    if s.get("slug") and s["slug"] == ident_lower]
+    if len(slug_matches) == 1:
+        return slug_matches[0]
+
+    # ID prefix
+    prefix_matches = [s for s in schedules.values()
+                      if s["id"].startswith(identifier)]
+    if len(prefix_matches) == 1:
+        return prefix_matches[0]
+
+    # Name match (case-insensitive)
+    name_matches = [s for s in schedules.values()
+                    if s.get("name", "").lower() == ident_lower]
+    if len(name_matches) == 1:
+        return name_matches[0]
+
+    if slug_matches or prefix_matches or name_matches:
+        all_m = slug_matches or prefix_matches or name_matches
+        print(f"Ambiguous identifier \"{identifier}\" matches "
+              f"{len(all_m)} schedules:", file=sys.stderr)
+        for s in all_m:
+            print(f"  {s['id']}  {s.get('name', '')}", file=sys.stderr)
+        die("Use the full ID instead")
+
+    die(f"Schedule not found: {identifier}")
+
+
+def _parse_relative_time(time_str):
+    """Parse relative time like +2h, +30m, 'tomorrow 09:00' into ISO 8601."""
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+
+    s = time_str.strip()
+    if s.startswith("+"):
+        # Relative: +30m, +2h, +1d
+        val = s[1:]
+        if val.endswith("m"):
+            dt = now + timedelta(minutes=int(val[:-1]))
+        elif val.endswith("h"):
+            dt = now + timedelta(hours=int(val[:-1]))
+        elif val.endswith("d"):
+            dt = now + timedelta(days=int(val[:-1]))
+        else:
+            die(f"Invalid relative time: {s} (use +Nm, +Nh, +Nd)")
+            return ""
+        return dt.isoformat()
+
+    if s.lower().startswith("tomorrow"):
+        rest = s[8:].strip()
+        tomorrow = now + timedelta(days=1)
+        if rest:
+            parts = rest.split(":")
+            h = int(parts[0])
+            m = int(parts[1]) if len(parts) > 1 else 0
+            dt = tomorrow.replace(hour=h, minute=m, second=0,
+                                  microsecond=0)
+        else:
+            dt = tomorrow.replace(hour=9, minute=0, second=0,
+                                  microsecond=0)
+        return dt.isoformat()
+
+    # Try ISO 8601 as-is
+    return s
+
+
+def cmd_schedule_create(args):
+    """Create a schedule for recurring or one-shot task dispatch."""
+    state_data = get_state(args.port)
+
+    group = args.group
+    if not group:
+        _cell, _parent, group = detect_context(state_data)
+        if not group:
+            die("--group (-g) is required")
+
+    kwargs = {
+        "name": args.name,
+        "group": group,
+        "task_template": args.task or "",
+    }
+    if args.context:
+        kwargs["description"] = args.context
+    if args.cron:
+        kwargs["cron_expr"] = args.cron
+    elif args.at:
+        kwargs["scheduled_at"] = _parse_relative_time(args.at)
+    else:
+        die("Either --cron or --at is required")
+    if args.action:
+        kwargs["action_name"] = args.action
+    if args.var:
+        tvars = {}
+        for kv in args.var:
+            k, _, v = kv.partition("=")
+            if k:
+                tvars[k] = v
+        if tvars:
+            kwargs["action_vars"] = tvars
+    if args.labels:
+        kwargs["labels"] = [l.strip() for l in args.labels.split(",")
+                            if l.strip()]
+    if getattr(args, "tz", None):
+        kwargs["timezone"] = args.tz
+
+    resp = api_call("schedule_create", port=args.port, **kwargs)
+    data = check_ok(resp)
+    sid = data.get("schedule_id", "")
+    print(f"Schedule created: {sid}")
+
+
+def cmd_schedule_list(args):
+    """List all schedules."""
+    state_data = get_state_local(args.port)
+    schedules = state_data.get("schedules", {})
+
+    if args.json:
+        print(json.dumps(list(schedules.values()), indent=2))
+        return
+
+    if not schedules:
+        print("No schedules")
+        return
+
+    for s in sorted(schedules.values(), key=lambda x: x.get("name", "")):
+        enabled = "on" if s.get("enabled") else "off"
+        trigger = s.get("cron_expr") or s.get("scheduled_at", "one-shot")
+        nxt = s.get("next_run_at", "")
+        runs = s.get("run_count", 0)
+        name = s.get("name", "")
+        sid = s.get("id", "")
+        slug = s.get("slug", "")
+
+        status = f"[{enabled}]"
+        if not s.get("enabled"):
+            status = _dim(status)
+
+        label = slug or sid
+        print(f"  {status} {_bold(name)} ({label})")
+        print(f"       trigger: {trigger}")
+        if nxt:
+            print(f"       next:    {nxt}")
+        if runs:
+            print(f"       runs:    {runs}")
+        print()
+
+
+def cmd_schedule_show(args):
+    """Show full schedule details."""
+    state_data = get_state_local(args.port)
+    sched = resolve_schedule(state_data, args.identifier)
+
+    if args.json:
+        print(json.dumps(sched, indent=2))
+        return
+
+    print(f"{_bold('Schedule')}: {sched.get('name', '')}")
+    print(f"  ID:       {sched.get('id', '')}")
+    print(f"  Slug:     {sched.get('slug', '')}")
+    print(f"  Group:    {sched.get('group', '')}")
+    print(f"  Enabled:  {sched.get('enabled', True)}")
+    print()
+    if sched.get("cron_expr"):
+        print(f"  Cron:     {sched['cron_expr']}")
+    if sched.get("scheduled_at"):
+        print(f"  At:       {sched['scheduled_at']}")
+    if sched.get("timezone"):
+        print(f"  Timezone: {sched['timezone']}")
+    if sched.get("next_run_at"):
+        print(f"  Next run: {sched['next_run_at']}")
+    if sched.get("last_run_at"):
+        print(f"  Last run: {sched['last_run_at']}")
+    print(f"  Runs:     {sched.get('run_count', 0)}")
+    print()
+    if sched.get("task_template"):
+        print(f"  Task:     {sched['task_template']}")
+    if sched.get("description"):
+        print(f"  Desc:     {sched['description']}")
+    if sched.get("action_name"):
+        print(f"  Action:   {sched['action_name']}")
+    if sched.get("action_vars"):
+        for k, v in sched["action_vars"].items():
+            print(f"    {k}={v}")
+    if sched.get("labels"):
+        print(f"  Labels:   {', '.join(sched['labels'])}")
+    if sched.get("last_task_id"):
+        print(f"  Last task: {sched['last_task_id']}")
+
+
+def cmd_schedule_edit(args):
+    """Edit a schedule."""
+    state_data = get_state_local(args.port)
+    sched = resolve_schedule(state_data, args.identifier)
+    sid = sched["id"]
+
+    fields = {}
+    if args.name:
+        fields["name"] = args.name
+    if args.task:
+        fields["task_template"] = args.task
+    if args.cron:
+        fields["cron_expr"] = args.cron
+        fields["scheduled_at"] = ""  # clear one-shot
+    if getattr(args, "at", None):
+        fields["scheduled_at"] = _parse_relative_time(args.at)
+        fields["cron_expr"] = ""  # clear recurring
+    if args.action:
+        fields["action_name"] = args.action
+    if args.var:
+        tvars = {}
+        for kv in args.var:
+            k, _, v = kv.partition("=")
+            if k:
+                tvars[k] = v
+        fields["action_vars"] = tvars
+    if args.labels:
+        fields["labels"] = [l.strip() for l in args.labels.split(",")
+                            if l.strip()]
+    if getattr(args, "tz", None):
+        fields["timezone"] = args.tz
+
+    if not fields:
+        die("No fields to update")
+
+    resp = api_call("schedule_update", port=args.port, id=sid, **fields)
+    check_ok(resp)
+    print(f"Schedule updated: {sid}")
+
+
+def cmd_schedule_delete(args):
+    """Delete a schedule."""
+    state_data = get_state_local(args.port)
+    sched = resolve_schedule(state_data, args.identifier)
+    resp = api_call("schedule_remove", port=args.port, id=sched["id"])
+    check_ok(resp)
+    print(f"Schedule deleted: {sched['id']}")
+
+
+def cmd_schedule_enable(args):
+    """Enable a schedule."""
+    state_data = get_state_local(args.port)
+    sched = resolve_schedule(state_data, args.identifier)
+    resp = api_call("schedule_enable", port=args.port, id=sched["id"])
+    check_ok(resp)
+    print(f"Schedule enabled: {sched.get('name', sched['id'])}")
+
+
+def cmd_schedule_disable(args):
+    """Disable a schedule."""
+    state_data = get_state_local(args.port)
+    sched = resolve_schedule(state_data, args.identifier)
+    resp = api_call("schedule_disable", port=args.port, id=sched["id"])
+    check_ok(resp)
+    print(f"Schedule disabled: {sched.get('name', sched['id'])}")
+
+
+def cmd_schedule_run(args):
+    """Manually trigger a schedule now."""
+    state_data = get_state_local(args.port)
+    sched = resolve_schedule(state_data, args.identifier)
+    resp = api_call("schedule_run", port=args.port, id=sched["id"])
+    data = check_ok(resp)
+    tid = data.get("task_id", "")
+    print(f"Schedule fired — task {tid}")
+
+
+# ---------------------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------------------
 
@@ -2967,6 +3272,67 @@ def build_parser():
     p.add_argument("name", help="Pipeline name")
     p.add_argument("-g", "--group", help="Scope to group")
     p.set_defaults(func=cmd_pipeline_show)
+
+    # -- schedule -----------------------------------------------------------
+    sch = sub.add_parser("schedule", aliases=["sched"],
+                         help="Scheduled task dispatches")
+    sch.set_defaults(func=cmd_schedule_list, _sub_parser=sch)
+    sch_sub = sch.add_subparsers(dest="schedule_cmd")
+
+    p = sch_sub.add_parser("create", aliases=["c"],
+                           help="Create a schedule")
+    p.add_argument("name", help="Schedule name")
+    p.add_argument("--task", help="Task title template ({date}, {time})")
+    p.add_argument("-d", "--context", help="Task description")
+    p.add_argument("-g", "--group",
+                   help="Target group (auto-detected if in Loom session)")
+    p.add_argument("--cron", help="Cron expression (5-field)")
+    p.add_argument("--at", help="One-shot time (ISO 8601, +2h, tomorrow 09:00)")
+    p.add_argument("-t", "--action", help="Action name")
+    p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
+                   help="Action variables")
+    p.add_argument("-l", "--labels", help="Comma-separated labels")
+    p.add_argument("--tz", help="IANA timezone (default: UTC)")
+    p.set_defaults(func=cmd_schedule_create)
+
+    p = sch_sub.add_parser("list", aliases=["ls"],
+                           help="List schedules")
+    p.set_defaults(func=cmd_schedule_list)
+
+    p = sch_sub.add_parser("show", help="Show schedule details")
+    p.add_argument("identifier", help="Schedule ID, slug, or name")
+    p.set_defaults(func=cmd_schedule_show)
+
+    p = sch_sub.add_parser("edit", aliases=["e"],
+                           help="Edit schedule fields")
+    p.add_argument("identifier", help="Schedule ID, slug, or name")
+    p.add_argument("--name", help="New schedule name")
+    p.add_argument("--task", help="New task template")
+    p.add_argument("--cron", help="New cron expression")
+    p.add_argument("--at", help="New one-shot time")
+    p.add_argument("-t", "--action", help="Set action")
+    p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
+                   help="Set action variables")
+    p.add_argument("-l", "--labels", help="Comma-separated labels")
+    p.add_argument("--tz", help="IANA timezone")
+    p.set_defaults(func=cmd_schedule_edit)
+
+    p = sch_sub.add_parser("delete", aliases=["rm"],
+                           help="Delete a schedule")
+    p.add_argument("identifier", help="Schedule ID, slug, or name")
+    p.set_defaults(func=cmd_schedule_delete)
+
+    p = sch_sub.add_parser("enable", help="Enable a schedule")
+    p.add_argument("identifier", help="Schedule ID, slug, or name")
+    p.set_defaults(func=cmd_schedule_enable)
+
+    p = sch_sub.add_parser("disable", help="Disable a schedule")
+    p.add_argument("identifier", help="Schedule ID, slug, or name")
+    p.set_defaults(func=cmd_schedule_disable)
+
+    p = sch_sub.add_parser("run", help="Manually trigger a schedule now")
+    p.add_argument("identifier", help="Schedule ID, slug, or name")
+    p.set_defaults(func=cmd_schedule_run)
 
     # -- logs ---------------------------------------------------------------
     p = sub.add_parser("logs", help="Tail daemon log")

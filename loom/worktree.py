@@ -601,25 +601,6 @@ class WorktreeManager:
             log.debug("count_commits failed for '%s'", cell.name)
         return 0
 
-    async def count_behind(self, cell) -> int:
-        """Count commits on base branch not reachable from the worktree."""
-        if not cell.worktree_path or not cell.worktree_base_branch:
-            return 0
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path,
-                "rev-list", "--count",
-                f"HEAD..{cell.worktree_base_branch}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode == 0:
-                return int(stdout.decode().strip())
-        except Exception:
-            log.debug("count_behind failed for '%s'", cell.name)
-        return 0
-
     async def create_pr(self, cell, title: str = "",
                         body: str = "") -> dict:
         """Push the worktree branch and create a GitHub PR.

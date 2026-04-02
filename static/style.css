@@ -359,12 +359,7 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
   padding: 1px 4px; border-radius: 3px;
   letter-spacing: .03em; vertical-align: middle;
 }
-.detail-wt-merged {
-  color: var(--green); background: rgba(63,185,80,.12);
-}
 .detail-dir { color: var(--text-dim); }
-.detail-ahead { color: var(--green); font-size: 9px; }
-.detail-behind { color: var(--amber); font-size: 9px; }
 .detail-ins { color: var(--green); }
 .detail-del { color: var(--red); }
 .detail-row-task { align-items: baseline; }
@@ -1862,27 +1857,13 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .ah-outcome-blocked { background: #d29922; color: #000; }
 .ah-outcome-error { background: #da3633; color: #fff; }
 .ah-task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ah-task-row.ah-clickable { cursor: pointer; border-radius: 3px; padding: 2px 4px; }
-.ah-task-row.ah-clickable:hover { background: var(--hover); }
-.ah-task-link {
-  flex-shrink: 0; font-size: 9px; color: var(--accent); cursor: pointer; opacity: 0.6;
-}
-.ah-task-link:hover { opacity: 1; }
 
 /* Message rows in detail */
 .ah-messages { display: flex; flex-direction: column; gap: 1px; max-height: 200px; overflow-y: auto; }
 .ah-msg-row { display: flex; align-items: baseline; gap: 4px; padding: 1px 0; font-size: 10px; }
-.ah-msg-row.ah-clickable { cursor: pointer; border-radius: 3px; padding: 1px 4px; }
-.ah-msg-row.ah-clickable:hover { background: var(--hover); }
 .ah-msg-icon { flex-shrink: 0; width: 12px; text-align: center; }
 .ah-msg-action { font-weight: 600; flex-shrink: 0; min-width: 50px; }
 .ah-msg-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
-.ah-msg-expanded {
-  display: none; padding: 3px 8px 3px 28px; font-size: 10px; color: var(--fg-dim);
-  white-space: pre-wrap; word-break: break-word; background: var(--bg); border-radius: 3px;
-  margin: 1px 0 2px;
-}
-.ah-msg-expanded.visible { display: block; }
 
 /* ------------------------------------------------------------------ */
 /* Events panel                                                        */
@@ -2158,3 +2139,28 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 @media (min-width: 900px) {
   .modal { max-width: 520px; }
 }
+
+/* -- Schedule UI ------------------------------------------------------ */
+.board-lane-tab-schedules { border-left: 1px solid var(--border); margin-left: auto; }
+.board-schedule-card { padding: 10px 12px; }
+.board-schedule-card.dimmed { opacity: 0.5; }
+.board-schedule-trigger { font-size: 11px; color: var(--dim); margin: 4px 0; }
+.board-schedule-trigger code { background: var(--bg-hover); padding: 1px 4px; border-radius: 3px; }
+.board-schedule-type { font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
+.board-schedule-tz { color: var(--dim); font-size: 10px; }
+.board-schedule-template { font-size: 11px; color: var(--fg); margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board-schedule-status { display: flex; gap: 12px; font-size: 10px; color: var(--dim); margin: 4px 0; }
+.board-schedule-actions { display: flex; gap: 6px; margin-top: 6px; }
+.board-schedule-action-btn { font-size: 10px; padding: 2px 8px; background: var(--bg-hover); border: 1px solid var(--border); border-radius: 3px; color: var(--fg); cursor: pointer; }
+.board-schedule-action-btn:hover { background: var(--accent); color: #fff; }
+.board-schedule-delete-btn:hover { background: var(--red); }
+
+/* Schedule modal */
+.schedule-type-toggle { display: flex; gap: 0; margin-bottom: 8px; }
+.schedule-type-btn { flex: 1; padding: 6px; background: var(--bg-hover); border: 1px solid var(--border); color: var(--dim); cursor: pointer; font-size: 11px; }
+.schedule-type-btn:first-child { border-radius: 4px 0 0 4px; }
+.schedule-type-btn:last-child { border-radius: 0 4px 4px 0; }
+.schedule-type-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.schedule-presets { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.schedule-preset { font-size: 10px; padding: 2px 8px; background: var(--bg-hover); border: 1px solid var(--border); border-radius: 3px; color: var(--dim); cursor: pointer; }
+.schedule-preset:hover { border-color: var(--accent); color: var(--fg); }

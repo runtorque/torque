@@ -48,6 +48,35 @@ class BoardTask:
 
 
 @dataclass
+class Schedule:
+    """A scheduled task dispatch — one-shot or recurring."""
+    id: str
+    name: str                       # human-readable name (required)
+    slug: str = ""                  # auto-generated from name
+    # Task template fields
+    task_template: str = ""         # task title ({date}, {time}, {datetime} placeholders)
+    description: str = ""           # task description template
+    group: str = ""                 # target group (required)
+    action_name: str = ""           # action to attach
+    action_vars: dict = field(default_factory=dict)
+    agent_template: str = ""        # agent template override
+    labels: list[str] = field(default_factory=list)
+    # Trigger
+    cron_expr: str = ""             # 5-field cron (empty = one-shot)
+    scheduled_at: str = ""          # ISO 8601 for one-shot (empty = recurring)
+    timezone: str = ""              # IANA timezone (empty = UTC)
+    # State
+    enabled: bool = True
+    last_run_at: str = ""           # ISO 8601 of last fire
+    next_run_at: str = ""           # ISO 8601 of next fire (computed)
+    run_count: int = 0              # total times fired
+    last_task_id: str = ""          # ID of most recently created task
+    # Metadata
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
 class AgentCell:
     id: str
     name: str
@@ -96,9 +125,6 @@ class AgentCell:
     worktree_dirty: bool = False  # has uncommitted changes
     worktree_diff: dict = field(default_factory=dict)  # {files, insertions, deletions}
     worktree_checkpoints: int = 0  # number of checkpoint commits
-    worktree_behind: int = 0  # commits on base not in branch (ephemeral)
-    worktree_ahead: int = 0  # commits on branch not in base (ephemeral)
-    worktree_merged: bool = False  # branch merged into base (ephemeral)
     # MCP message log (ephemeral)
     mcp_messages: list = field(default_factory=list)  # [{action, message, timestamp}]
 
@@ -185,9 +211,6 @@ class GroupSettings:
     # Board / Dispatch
     dispatch_lane: str = "In Progress"  # lane for dispatched tasks
     dispatch_auto_terminals: bool = False  # create child terminals on dispatch
-    board_default_labels: list[str] = field(default_factory=list)  # default labels for new tasks
-    board_default_lane: str = ""  # default lane for new tasks (empty = first lane)
-    board_default_action: str = ""  # default action for new tasks
 
 
 @dataclass
@@ -225,6 +248,7 @@ class MatrixState:
         # Board (Phase 5)
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
+        self.schedules: dict[str, Schedule] = {}
         self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
         self.board_panel_height: int = 0  # 0 = use CSS default
         self.panel_log = None  # PanelEventLog, set from server.py
@@ -265,6 +289,9 @@ class MatrixState:
             "board_lanes": self.board_lanes,
             "board_tasks": {
                 tid: asdict(t) for tid, t in self.board_tasks.items()
+            },
+            "schedules": {
+                sid: asdict(s) for sid, s in self.schedules.items()
             },
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
@@ -325,6 +352,20 @@ class MatrixState:
                 self.db.delete_board_task(task_id)
             except Exception:
                 log.exception("Failed to delete task %s", task_id)
+
+    def _db_save_schedule(self, sched: Schedule):
+        if self.db:
+            try:
+                self.db.save_schedule(sched)
+            except Exception:
+                log.exception("Failed to save schedule %s", sched.id)
+
+    def _db_delete_schedule(self, sid: str):
+        if self.db:
+            try:
+                self.db.delete_schedule(sid)
+            except Exception:
+                log.exception("Failed to delete schedule %s", sid)
 
     def _db_save_lanes(self):
         if self.db:
@@ -577,6 +618,18 @@ class MatrixState:
                     task.slug = self._unique_task_slug(task.task,
                                                       exclude_id=tid)
                     self._db_save_task(task)
+                    slug_dirty = True
+            # Schedules
+            sched_fields = set(Schedule.__dataclass_fields__)
+            for sid, raw in data.get("schedules", {}).items():
+                filtered = {k: v for k, v in raw.items()
+                            if k in sched_fields}
+                self.schedules[sid] = Schedule(**filtered)
+            for sid, sched in self.schedules.items():
+                if not sched.slug:
+                    sched.slug = self._unique_schedule_slug(
+                        sched.name, exclude_id=sid)
+                    self._db_save_schedule(sched)
                     slug_dirty = True
             if slug_dirty:
                 self._db_save_groups()
@@ -1195,6 +1248,61 @@ class MatrixState:
                 self._emit("task_upsert", **asdict(t))
                 self._db_save_task(t)
                 changed = True
+
+    # -- Schedule CRUD ------------------------------------------------------
+
+    def _unique_schedule_slug(self, name: str, exclude_id: str = "") -> str:
+        base = _slugify(name)
+        existing = {s.slug for s in self.schedules.values()
+                    if s.id != exclude_id and s.slug}
+        return _unique_slug(base, existing)
+
+    def schedule_add(self, name: str, group: str, **kwargs) -> Optional[Schedule]:
+        if not name or not group:
+            return None
+        if group not in self.groups:
+            return None
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        sid = uuid.uuid4().hex[:8]
+        slug = self._unique_schedule_slug(name)
+        sched = Schedule(
+            id=sid, name=name, slug=slug, group=group,
+            created_at=now, updated_at=now,
+            **{k: v for k, v in kwargs.items()
+               if k in Schedule.__dataclass_fields__ and k not in
+               ("id", "name", "slug", "group", "created_at", "updated_at")},
+        )
+        self.schedules[sid] = sched
+        self._emit("schedule_upsert", **asdict(sched))
+        self._db_save_schedule(sched)
+        return sched
+
+    def schedule_update(self, sid: str, **fields):
+        sched = self.schedules.get(sid)
+        if not sched:
+            return
+        valid = set(Schedule.__dataclass_fields__) - {"id", "slug", "created_at"}
+        for key, value in fields.items():
+            if key in valid:
+                setattr(sched, key, value)
+        if "name" in fields:
+            sched.slug = self._unique_schedule_slug(sched.name, exclude_id=sid)
+        from datetime import datetime, timezone
+        sched.updated_at = datetime.now(timezone.utc).isoformat()
+        self._emit("schedule_upsert", **asdict(sched))
+        self._db_save_schedule(sched)
+
+    def schedule_remove(self, sid: str):
+        sched = self.schedules.pop(sid, None)
+        if sched:
+            self._emit("schedule_remove", id=sid)
+            self._db_delete_schedule(sid)
+
+    def schedule_get_due(self, now_iso: str) -> list[Schedule]:
+        """Return enabled schedules whose next_run_at is <= now."""
+        return [s for s in self.schedules.values()
+                if s.enabled and s.next_run_at and s.next_run_at <= now_iso]
 
     # -- WebSocket broadcast ------------------------------------------------
 
