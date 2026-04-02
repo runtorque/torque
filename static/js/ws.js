@@ -47,6 +47,8 @@ function connect() {
       _showWorktreeHistory(msg);
     } else if (msg.type === 'worktree_pr') {
       _showWorktreePR(msg);
+    } else if (msg.type === 'worktree_diff_full') {
+      if (typeof diffReceiveFull === 'function') diffReceiveFull(msg);
     } else if (msg.type === 'actions') {
       if (typeof _boardActDropdownWaiting !== 'undefined' && _boardActDropdownWaiting) {
         _boardShowActionList(msg);

@@ -17,6 +17,8 @@
   <button class="hdr-btn" onclick="openAddGroup()">+ Group</button>
 </header>
 
+<div id="diff-view-root"></div>
+
 <!-- Main area (rendered by JS) -->
 <main id="main"></main>
 
@@ -218,8 +220,6 @@
           <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When relaunching an agent, resume the previous conversation instead of starting fresh. Currently supported for Claude Code.">?</span>
         </label>
-        <label>Idle timeout <span class="label-hint">minutes, 0 = disable</span></label>
-        <input id="gs-agent-idle-timeout" type="number" min="0" max="60" value="5">
         <label class="gs-checkbox">
           <input id="gs-agent-always-custom" type="checkbox"> Always open custom dialog
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating an agent with default settings.">?</span>
@@ -450,6 +450,16 @@
     <input id="task-labels-input" autocomplete="off" placeholder="Type and press Enter"
            onkeydown="taskLabelsKeydown(event)">
     <div id="task-labels-chips" class="label-chips"></div>
+    <label>Dependencies
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
+            data-hint="Tasks that must be Done before this task can be dispatched. Type to search.">?</span>
+    </label>
+    <div style="position:relative">
+      <input id="task-deps-input" autocomplete="off" placeholder="Search tasks..."
+             oninput="taskDepsSearch(event)" onkeydown="taskDepsKeydown(event)">
+      <div id="task-deps-dropdown" class="deps-dropdown" style="display:none"></div>
+    </div>
+    <div id="task-deps-chips" class="label-chips"></div>
     <div class="modal-actions">
       <button class="btn-secondary" id="task-preview-btn" onclick="previewTaskPrompt()" style="display:none">Preview</button>
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
@@ -527,6 +537,7 @@
 <script src="/static/js/actions.js"></script>
 <script src="/static/js/templates.js"></script>
 <script src="/static/js/events.js"></script>
+<script src="/static/js/diff.js"></script>
 <script src="/static/js/main.js"></script>
 </body>
 </html>

@@ -343,26 +343,6 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
                     state._db_save_agent(cell)
                     changed = True
 
-            timeout_min = cell.idle_timeout
-            if timeout_min <= 0:
-                continue  # idle timeout disabled for this group
-
-            silence = now - cell.last_event_at
-            timeout_sec = timeout_min * 60
-
-            # No events for timeout while running and not waiting
-            if silence > timeout_sec and cell.activity not in ("waiting",):
-                if not cell.needs_attention:
-                    cell.needs_attention = True
-                    cell.error_message = (
-                        f"No activity for {timeout_min} minute"
-                        f"{'s' if timeout_min != 1 else ''}")
-                    state._emit_agent(cell)
-                    changed = True
-                    if notifier:
-                        notifier.on_health_alert(
-                            cell.id, cell.error_message)
-
             # Repeated errors in last 5 minutes
             recent = event_log.get(cell.id, since=now - 300)
             recent_errors = [e for e in recent if e.event_type == "error"]

@@ -21,6 +21,8 @@ var _boardSearchQuery = '';      // text search filter
 var _boardFilterLabels = [];     // active label filters (OR logic)
 var _boardFilterActions = [];    // active action name filters (OR logic)
 var _boardSearchTimer = null;    // debounce timer for search input
+var _boardFilterDropdownType = null;   // 'label' | 'action' | null
+var _boardFilterDropdownCleanup = null;
 var _boardPreFilterLane = '';    // saved lane before search, restored on clear
 
 /* ---- Helpers -------------------------------------------------------- */
@@ -170,6 +172,16 @@ function _boardAgentName(agentId) {
   return a ? a.name : '';
 }
 
+function _boardDepsBlocked(t) {
+  if (!t.depends_on || !t.depends_on.length) return false;
+  var tasks = _boardTasks();
+  for (var i = 0; i < t.depends_on.length; i++) {
+    var dep = tasks[t.depends_on[i]];
+    if (dep && dep.lane !== 'Done') return true;
+  }
+  return false;
+}
+
 /* ---- Card rendering ------------------------------------------------- */
 
 function _renderBoardCard(t, childrenOf, depth) {
@@ -225,6 +237,9 @@ function _renderBoardCard(t, childrenOf, depth) {
       else if (lb === 'loom:error') cls += ' board-label-error';
       meta += '<span class="' + cls + '">' + esc(displayLabel(lb)) + '</span>';
     }
+  }
+  if (!isDone && _boardDepsBlocked(t)) {
+    meta += '<span class="board-card-label board-label-dep-blocked" title="Blocked by dependencies">&#x1F512; deps</span>';
   }
   if (t.external_url) {
     meta += '<a class="board-card-pr-link" href="' + esc(t.external_url)
@@ -816,7 +831,11 @@ function boardCardMenu(evt, taskId) {
 
   // Dispatch (only from Backlog)
   if (task.lane === 'Backlog') {
-    html += '<button onclick="event.stopPropagation();boardDispatchTask(\'' + taskId + '\')">Dispatch...</button>';
+    if (_boardDepsBlocked(task)) {
+      html += '<button disabled title="Blocked by unmet dependencies">Dispatch (blocked)</button>';
+    } else {
+      html += '<button onclick="event.stopPropagation();boardDispatchTask(\'' + taskId + '\')">Dispatch...</button>';
+    }
   }
 
   // Link/Unlink agent

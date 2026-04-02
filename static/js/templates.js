@@ -364,6 +364,12 @@ var _agentHistorySearch = '';
 var _agentHistoryExpanded = '';     // agent ID currently expanded
 var _agentHistoryDetail = null;     // detail data for expanded agent
 
+function _agentHistoryCurrentGroup() {
+  if (typeof selectedAgentId === 'undefined' || !selectedAgentId) return '';
+  if (!state || !state.agents || !state.agents[selectedAgentId]) return '';
+  return state.agents[selectedAgentId].group || '';
+}
+
 function agentHistoryLoad() {
   send({
     cmd: 'get_agent_history',
@@ -469,6 +475,12 @@ function renderAgentHistoryView() {
 
   // Filter records by search
   var records = _agentHistoryRecords;
+  var group = _agentHistoryCurrentGroup();
+  if (group) {
+    records = records.filter(function(r) {
+      return (r.group || '') === group;
+    });
+  }
   if (_agentHistorySearch) {
     records = records.filter(function(r) {
       return r.name.toLowerCase().indexOf(_agentHistorySearch) >= 0
