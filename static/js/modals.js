@@ -811,7 +811,7 @@ function submitAdd() {
     if (command) msg.command = command;
     /* worktree overrides */
     const wtEnabled = document.getElementById('add-wt-enabled').checked;
-    msg.git_worktree = wtEnabled;
+    msg.worktree = wtEnabled;
     if (wtEnabled) {
       const wtDir = document.getElementById('add-wt-base-dir').value.trim();
       const wtBranch = document.getElementById('add-wt-base-branch').value.trim();
