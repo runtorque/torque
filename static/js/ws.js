@@ -49,6 +49,12 @@ function connect() {
       _showWorktreePR(msg);
     } else if (msg.type === 'worktree_diff_full') {
       if (typeof diffReceiveFull === 'function') diffReceiveFull(msg);
+    } else if (msg.type === 'worktree_check_merge') {
+      if (typeof diffReceiveMergeCheck === 'function') diffReceiveMergeCheck(msg);
+    } else if (msg.type === 'worktree_merge') {
+      if (typeof diffReceiveMergeResult === 'function') diffReceiveMergeResult(msg);
+    } else if (msg.type === 'worktree_rebase') {
+      if (typeof diffReceiveRebaseResult === 'function') diffReceiveRebaseResult(msg);
     } else if (msg.type === 'actions') {
       if (typeof _boardActDropdownWaiting !== 'undefined' && _boardActDropdownWaiting) {
         _boardShowActionList(msg);

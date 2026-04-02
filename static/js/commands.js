@@ -362,14 +362,15 @@ function _showWorktreePR(msg) {
     if (ok) window.open(msg.url);
   });
 }
-async function _confirmWorktreeMerge(id) {
+async function _confirmWorktreeMerge(id, message) {
   const cell = state.agents[id];
   if (!cell) return false;
   const base = cell.worktree_base_branch || 'main';
+  const squash = cell.worktree_merge_squash !== false;
   const result = await showConfirm(
-    `Merge "${cell.name}" into ${base}? Claude will perform the merge and resolve any conflicts. You\u2019ll be notified if it fails.`,
+    `${squash ? 'Squash merge' : 'Merge'} "${cell.name}" into ${base}?`,
     {
-      label: 'Proceed', variant: 'btn-green',
+      label: 'Merge', variant: 'btn-green',
       checkboxes: [
         { key: 'close_on_merge', label: 'Close agent after merge', checked: false },
         { key: 'clear_context', label: 'Clear context after merge', checked: false },
@@ -377,9 +378,12 @@ async function _confirmWorktreeMerge(id) {
     }
   );
   if (result) {
-    const close = result.close_on_merge || false;
-    const clear = result.clear_context || false;
-    send({ cmd: 'worktree_merge', id, close_on_merge: close, clear_context: clear });
+    send({
+      cmd: 'worktree_merge', id,
+      message: message || '',
+      close_on_merge: result.close_on_merge || false,
+      clear_context: result.clear_context || false,
+    });
     return true;
   }
   return false;
