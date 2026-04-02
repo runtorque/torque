@@ -697,18 +697,46 @@ class WorktreeManager:
                                  f"{stderr.decode().strip()}"}
             new_sha = stdout.decode().strip()
 
-            # 5. Fast-forward base branch to the new commit
+            # 5. Advance base branch to the new commit.
+            #    If the main repo has the base branch checked out, use
+            #    `merge --ff-only` so the ref, index, AND working tree
+            #    are all updated safely (refuses if local changes
+            #    conflict).  Otherwise just move the ref — the working
+            #    tree belongs to another branch and needs no update.
             proc = await asyncio.create_subprocess_exec(
                 "git", "-C", repo_root,
-                "update-ref", f"refs/heads/{base}", new_sha,
+                "symbolic-ref", "--short", "HEAD",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                return {"ok": False,
-                        "error": f"update-ref failed: "
-                                 f"{stderr.decode().strip()}"}
+            checked_out = stdout.decode().strip() \
+                if proc.returncode == 0 else ""
+
+            if checked_out == base:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "-C", repo_root,
+                    "merge", "--ff-only", new_sha,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    return {"ok": False,
+                            "error": f"merge --ff-only failed: "
+                                     f"{stderr.decode().strip()}"}
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "-C", repo_root,
+                    "update-ref", f"refs/heads/{base}", new_sha,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    return {"ok": False,
+                            "error": f"update-ref failed: "
+                                     f"{stderr.decode().strip()}"}
 
             log.info("Server-side %s of '%s' (%s) into %s: %s",
                      "squash merge" if squash else "merge",
