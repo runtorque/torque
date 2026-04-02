@@ -1441,8 +1441,8 @@ function _renderSchedulesView() {
   var html = '<div class="board-cards" id="board-cards">';
 
   // Add schedule button
-  html += '<div class="board-add-task">'
-    + '<button class="board-add-btn" onclick="openScheduleModal()">'
+  html += '<div class="board-add-task" onclick="openScheduleModal()">'
+    + '<button class="board-add-btn">'
     + '+ Add schedule</button></div>';
 
   var list = [];
