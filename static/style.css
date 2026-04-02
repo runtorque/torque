@@ -2268,6 +2268,7 @@ body.diff-view-open #ctx-menu {
 .board-schedule-card.dimmed { opacity: 0.5; }
 .board-schedule-trigger { font-size: 11px; color: var(--dim); margin: 4px 0; }
 .board-schedule-trigger code { background: var(--bg-hover); padding: 1px 4px; border-radius: 3px; }
+.code-inline { background: var(--bg-hover); padding: 1px 4px; border-radius: 2px; font-size: inherit; color: var(--accent); }
 .board-schedule-type { font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }
 .board-schedule-tz { color: var(--dim); font-size: 10px; }
 .board-schedule-template { font-size: 11px; color: var(--fg); margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

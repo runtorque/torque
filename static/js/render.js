@@ -18,6 +18,10 @@ function esc(s) {
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+function formatCode(s) {
+  return esc(s).replace(/`([^`]+)`/g, '<span class="code-inline">$1</span>');
+}
+
 function renderSplitBtn(quickAction, customAction) {
   return `<div class="split-btn">`
     + `<button class="split-main" onclick="${quickAction}">+ New</button>`
@@ -342,7 +346,7 @@ function renderAgentCell(a) {
   /* Linked task */
   const _ct = _getAgentTask(a.id);
   if (_ct) {
-    h += `<div class="cell-task" title="${esc(_ct.task)}">${esc(_ct.task)}</div>`;
+    h += `<div class="cell-task" title="${esc(_ct.task)}">${formatCode(_ct.task)}</div>`;
   }
   /* Agent type badge */
   if (a.agent_type) {
@@ -382,7 +386,7 @@ function renderAgentDetails(a) {
   /* Linked task */
   const _dt = _getAgentTask(a.id);
   if (_dt) {
-    h += `<div class="detail-row detail-row-task"><span class="detail-label">Task</span><span class="detail-val detail-task" title="${esc(_dt.task)}">${esc(_dt.task)}</span>`;
+    h += `<div class="detail-row detail-row-task"><span class="detail-label">Task</span><span class="detail-val detail-task" title="${esc(_dt.task)}">${formatCode(_dt.task)}</span>`;
     if (_dt.action_name) {
       h += `<span class="detail-task-action">${esc(_dt.action_name)}</span>`;
     }

@@ -176,6 +176,7 @@ class GroupSettings:
     shell: str = ""
     tab_color: str = ""
     env_vars: dict[str, str] = field(default_factory=dict)
+    env_file: str = ""
     auto_terminals: int = 0
     max_agents: int = 0
     collapsed_default: bool = False
@@ -186,6 +187,7 @@ class GroupSettings:
     agent_shell: str = ""
     agent_tab_color: str = ""
     agent_env_vars: dict[str, str] = field(default_factory=dict)
+    agent_env_file: str = ""
     default_agent_template: str = ""
     agent_provider: str = ""  # adapter name ("claude-code", "codex", etc.) — empty = use default
     agent_boot_command: str = ""  # override default boot command (e.g. "codex")
@@ -213,6 +215,7 @@ class GroupSettings:
     terminal_shell: str = ""
     terminal_tab_color: str = ""
     terminal_env_vars: dict[str, str] = field(default_factory=dict)
+    terminal_env_file: str = ""
     terminal_always_custom_dialog: bool = False
     terminal_close_on_disconnect: bool = False  # remove terminal from Loom when tab closed
     # Board / Dispatch

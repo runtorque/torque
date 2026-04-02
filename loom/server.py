@@ -688,6 +688,8 @@ async def main(connection: iterm2.Connection):
         shell = (resolved.get("shell", "")
                  or gs.agent_shell or gs.shell or "")
         env = {**gs.env_vars, **(resolved.get("env_vars") or {})} or None
+        env_file = (resolved.get("env_file", "")
+                    or gs.agent_env_file or gs.env_file)
 
         return {
             "provider": provider,
@@ -699,6 +701,7 @@ async def main(connection: iterm2.Connection):
             "tab_color": tab_color,
             "icon": resolved.get("icon", ""),
             "env_vars": env,
+            "env_file": env_file,
             "system_prompt": resolved.get("system_prompt", ""),
             "initial_prompt": resolved.get("initial_prompt", ""),
             "template": resolved.get("template", ""),
@@ -740,6 +743,7 @@ async def main(connection: iterm2.Connection):
                     await bridge.create_session(
                         t,
                         env_vars={**gs.env_vars, **gs.terminal_env_vars} or None,
+                        env_file=gs.terminal_env_file or gs.env_file,
                         init_script=tterm.get("init_script")
                         or gs.terminal_init_script,
                         shell=gs.terminal_shell or gs.shell or "",
@@ -773,6 +777,7 @@ async def main(connection: iterm2.Connection):
                 await bridge.create_session(
                     t,
                     env_vars=t_env,
+                    env_file=gs.terminal_env_file or gs.env_file,
                     init_script=gs.terminal_init_script,
                     shell=t_shell,
                 )
@@ -828,6 +833,7 @@ async def main(connection: iterm2.Connection):
         await bridge.create_session(
             cell,
             env_vars=launch_cfg.get("env_vars"),
+            env_file=launch_cfg.get("env_file", ""),
             shell=launch_cfg.get("shell", ""),
             system_prompt=launch_cfg.get("system_prompt", ""),
             target_session_id=target_session_id,
@@ -868,6 +874,17 @@ async def main(connection: iterm2.Connection):
             if c.id.startswith(identifier):
                 return c.id
         return None
+
+    def _resolve_task_id(identifier: str) -> str:
+        """Resolve a task by ID or slug, return as-is if not found."""
+        if not identifier:
+            return identifier
+        if identifier in state.board_tasks:
+            return identifier
+        for t in state.board_tasks.values():
+            if t.slug == identifier:
+                return t.id
+        return identifier
 
     async def _send_agent_prompt(cell, prompt: str, *,
                                  delay: float = 0,
@@ -1587,6 +1604,7 @@ async def main(connection: iterm2.Connection):
                 if cmd_args and command:
                     command = (command + " " + cmd_args).strip()
                 init_script = data.get("init_script") or gs.terminal_init_script or ""
+                env_file = data.get("env_file") or gs.terminal_env_file or gs.env_file
 
                 cell = state.add_terminal(
                     name=data["name"], group=group,
@@ -1597,6 +1615,7 @@ async def main(connection: iterm2.Connection):
                 if cell:
                     await bridge.create_session(
                         cell, env_vars=env,
+                        env_file=env_file,
                         init_script=init_script,
                         shell=shell)
 
@@ -1710,10 +1729,12 @@ async def main(connection: iterm2.Connection):
                     state._db_save_agent(cell)
                     if cell.cell_type == "terminal":
                         env = {**gs.env_vars, **gs.terminal_env_vars} or None
+                        ef = gs.terminal_env_file or gs.env_file
                         shell = gs.terminal_shell or gs.shell or ""
                         init = gs.terminal_init_script
                     else:
                         env = launch_cfg.get("env_vars")
+                        ef = launch_cfg.get("env_file", "")
                         shell = launch_cfg.get("shell", "")
                         init = ""
                         # Worktree handling on relaunch
@@ -1751,7 +1772,7 @@ async def main(connection: iterm2.Connection):
                                     state._emit_agent(cell)
                                     state._db_save_agent(cell)
                     await bridge.create_session(
-                        cell, env_vars=env,
+                        cell, env_vars=env, env_file=ef,
                         init_script=init, shell=shell,
                         system_prompt=launch_cfg.get("system_prompt", ""))
 
@@ -1826,6 +1847,7 @@ async def main(connection: iterm2.Connection):
                                 await bridge.create_session(
                                     cell,
                                     env_vars=launch_cfg.get("env_vars"),
+                                    env_file=launch_cfg.get("env_file", ""),
                                     shell=launch_cfg.get("shell", ""),
                                     system_prompt=launch_cfg.get(
                                         "system_prompt", ""),
@@ -1862,6 +1884,7 @@ async def main(connection: iterm2.Connection):
                         await bridge.create_session(
                             cell,
                             env_vars=launch_cfg.get("env_vars"),
+                            env_file=launch_cfg.get("env_file", ""),
                             shell=launch_cfg.get("shell", ""),
                             system_prompt=launch_cfg.get("system_prompt", ""))
 
@@ -2044,16 +2067,16 @@ async def main(connection: iterm2.Connection):
                               "message": "Invalid lane, group, or empty task"}
 
             elif cmd == "board_update_task":
-                tid = data.get("id", "")
+                tid = _resolve_task_id(data.get("id", ""))
                 fields = {k: v for k, v in data.items()
                           if k not in ("cmd", "id")}
                 state.board_update_task(tid, **fields)
 
             elif cmd == "board_remove_task":
-                state.board_remove_task(data.get("id", ""))
+                state.board_remove_task(_resolve_task_id(data.get("id", "")))
 
             elif cmd == "board_move_task":
-                _mv_id = data.get("id", "")
+                _mv_id = _resolve_task_id(data.get("id", ""))
                 _mv_task = state.board_tasks.get(_mv_id)
                 _mv_old = _mv_task.lane if _mv_task else ""
                 _mv_new = data.get("lane", "")
@@ -2077,7 +2100,7 @@ async def main(connection: iterm2.Connection):
                     data.get("position", 0))
 
             elif cmd == "dispatch_task":
-                tid = data.get("id", "")
+                tid = _resolve_task_id(data.get("id", ""))
                 task = state.board_tasks.get(tid)
                 if not task:
                     result = {"type": "error",

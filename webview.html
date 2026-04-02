@@ -168,6 +168,8 @@
       <div class="color-swatches" id="gs-color-swatches"></div>
       <label>Environment <span class="label-hint">KEY=VALUE per line</span></label>
       <textarea id="gs-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+      <label>Env file <span class="label-hint">sourced on session start</span></label>
+      <input id="gs-env-file" placeholder=".env" autocomplete="off">
       <label>Auto-create terminals</label>
       <input id="gs-auto-terminals" type="number" min="0" max="10" value="0">
       <label>Max agents <span class="label-hint">0 = unlimited</span></label>
@@ -215,6 +217,8 @@
         </div>
         <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
         <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+        <label>Env file</label>
+        <input id="gs-agent-env-file" placeholder="Inherits from group" autocomplete="off">
         <label class="gs-checkbox">
           <input id="gs-session-resume" type="checkbox" checked> Resume session on relaunch
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When relaunching an agent, resume the previous conversation instead of starting fresh. Currently supported for Claude Code.">?</span>
@@ -300,6 +304,8 @@
       <div class="color-swatches" id="gs-terminal-color-swatches"></div>
       <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
       <textarea id="gs-terminal-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+      <label>Env file</label>
+      <input id="gs-terminal-env-file" placeholder="Inherits from group" autocomplete="off">
       <label class="gs-checkbox">
         <input id="gs-terminal-always-custom" type="checkbox"> Always open custom dialog
         <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating a terminal with default settings.">?</span>

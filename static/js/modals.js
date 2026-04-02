@@ -625,6 +625,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-collapsed').checked = s.collapsed_default || false;
   document.getElementById('gs-filter-window').checked = s.filter_by_window || false;
   document.getElementById('gs-env-vars').value = _envToText(s.env_vars);
+  document.getElementById('gs-env-file').value = s.env_file || '';
   _populateProfileSelect(document.getElementById('gs-profile'), data.profiles, s.profile, 'System default');
   _gsColor = s.tab_color || '';
   _renderSwatches('gs-color-swatches', _gsColor, 'selectGsColor');
@@ -652,6 +653,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-notify-error').checked = s.notify_on_error !== false;
   document.getElementById('gs-notify-attention').checked = s.notify_on_attention !== false;
   document.getElementById('gs-agent-env-vars').value = _envToText(s.agent_env_vars);
+  document.getElementById('gs-agent-env-file').value = s.agent_env_file || '';
   _populateProfileSelect(document.getElementById('gs-agent-profile'), data.profiles, s.agent_profile, 'Same as group');
   _gsAgentColor = s.agent_tab_color || '';
   _renderSwatches('gs-agent-color-swatches', _gsAgentColor, 'selectGsAgentColor', true);
@@ -666,6 +668,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-terminal-always-custom').checked = s.terminal_always_custom_dialog || false;
   document.getElementById('gs-terminal-close-on-disconnect').checked = s.terminal_close_on_disconnect || false;
   document.getElementById('gs-terminal-env-vars').value = _envToText(s.terminal_env_vars);
+  document.getElementById('gs-terminal-env-file').value = s.terminal_env_file || '';
   _populateProfileSelect(document.getElementById('gs-terminal-profile'), data.profiles, s.terminal_profile, 'Same as group');
   _gsTerminalColor = s.terminal_tab_color || '';
   _renderSwatches('gs-terminal-color-swatches', _gsTerminalColor, 'selectGsTerminalColor', true);
@@ -704,6 +707,7 @@ function submitGroupSettings() {
     shell: document.getElementById('gs-shell').value,
     tab_color: _gsColor,
     env_vars: _textToEnv('gs-env-vars'),
+    env_file: document.getElementById('gs-env-file').value.trim(),
     auto_terminals: parseInt(document.getElementById('gs-auto-terminals').value) || 0,
     max_agents: parseInt(document.getElementById('gs-max-agents').value) || 0,
     collapsed_default: document.getElementById('gs-collapsed').checked,
@@ -717,6 +721,7 @@ function submitGroupSettings() {
     agent_provider: _getProviderValue('gs-agent-provider'),
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
     agent_env_vars: _textToEnv('gs-agent-env-vars'),
+    agent_env_file: document.getElementById('gs-agent-env-file').value.trim(),
     git_worktree: document.getElementById('gs-worktree').checked,
     worktree_base_dir: document.getElementById('gs-wt-base-dir').value.trim() || '.loom/worktrees',
     worktree_base_branch: document.getElementById('gs-wt-base-branch').value.trim(),
@@ -741,6 +746,7 @@ function submitGroupSettings() {
     terminal_shell: document.getElementById('gs-terminal-shell').value,
     terminal_tab_color: _gsTerminalColor,
     terminal_env_vars: _textToEnv('gs-terminal-env-vars'),
+    terminal_env_file: document.getElementById('gs-terminal-env-file').value.trim(),
     terminal_always_custom_dialog: document.getElementById('gs-terminal-always-custom').checked,
     terminal_close_on_disconnect: document.getElementById('gs-terminal-close-on-disconnect').checked,
   };
@@ -1229,6 +1235,7 @@ function openAddTask(lane) {
   var schedInput = document.getElementById('task-scheduled-input');
   if (schedInput) schedInput.value = '';
   _setTaskLabels([]);
+  document.getElementById('task-labels-input').value = '';
   _setTaskDeps([]);
   document.getElementById('task-action-vars').innerHTML = '';
 
@@ -1266,6 +1273,7 @@ function openEditTask(taskId) {
   var descEl = document.getElementById('task-description-input');
   descEl.value = t.description || '';
   _setTaskLabels(t.labels || []);
+  document.getElementById('task-labels-input').value = '';
   _setTaskDeps(t.depends_on || []);
   document.getElementById('task-action-vars').innerHTML = '';
 
@@ -1273,8 +1281,10 @@ function openEditTask(taskId) {
   var schedInput = document.getElementById('task-scheduled-input');
   if (schedInput) {
     if (t.scheduled_at) {
-      try { schedInput.value = new Date(t.scheduled_at).toISOString().slice(0, 16); }
-      catch(e) { schedInput.value = ''; }
+      try {
+        var d = new Date(t.scheduled_at);
+        schedInput.value = (d > new Date()) ? d.toISOString().slice(0, 16) : '';
+      } catch(e) { schedInput.value = ''; }
     } else {
       schedInput.value = '';
     }

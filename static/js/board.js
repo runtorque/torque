@@ -215,7 +215,7 @@ function _renderBoardCard(t, childrenOf, depth) {
   cardHtml += '<div class="board-card-info">';
   // Done checkmark for subordinate cards
   var titlePrefix = (isSubordinate && isDone) ? '&#10003; ' : '';
-  cardHtml += '<div class="board-card-title">' + titlePrefix + esc(t.task || '') + '</div>';
+  cardHtml += '<div class="board-card-title">' + titlePrefix + formatCode(t.task || '') + '</div>';
   var meta = '';
   if (t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
   if (_boardHasActiveFilters() && t.lane) meta += '<span class="board-card-lane-badge">' + esc(t.lane) + '</span>';

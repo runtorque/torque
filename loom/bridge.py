@@ -196,6 +196,7 @@ class ITerm2Adapter:
 
     async def create_session(self, cell: AgentCell, *,
                              env_vars: dict[str, str] | None = None,
+                             env_file: str = "",
                              init_script: str = "",
                              shell: str = "",
                              system_prompt: str = "",
@@ -290,6 +291,12 @@ class ITerm2Adapter:
                 f"{k}={shlex.quote(os.path.expanduser(v))}"
                 for k, v in env_vars.items())
             await session.async_send_text(f"export {exports}\n")
+
+        # Source .env file (after env vars, before init script)
+        if env_file:
+            expanded = os.path.expanduser(env_file)
+            await session.async_send_text(
+                f"[ -f {shlex.quote(expanded)} ] && source {shlex.quote(expanded)}\n")
 
         # Install agent hooks and MCP config (if adapter supports it)
         if cell.agent_type:

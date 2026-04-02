@@ -40,6 +40,7 @@ _TEMPLATE_KEY_ORDER = [
     "worktree_auto_checkpoint",
     "worktree_merge_squash",
     "env_vars",
+    "env_file",
     "terminals",
 ]
 
@@ -56,6 +57,7 @@ _SCALAR_KEYS = {
     "tab_color",
     "icon",
     "worktree_base_branch",
+    "env_file",
 }
 
 _INT_KEYS = {"max_turns", "idle_timeout"}
