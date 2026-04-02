@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     shell                       TEXT NOT NULL DEFAULT '',
     tab_color                   TEXT NOT NULL DEFAULT '',
     env_vars                    TEXT NOT NULL DEFAULT '{}',
+    env_file                    TEXT NOT NULL DEFAULT '',
     auto_terminals              INTEGER NOT NULL DEFAULT 0,
     max_agents                  INTEGER NOT NULL DEFAULT 0,
     collapsed_default           INTEGER NOT NULL DEFAULT 0,
@@ -117,6 +118,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     agent_shell                 TEXT NOT NULL DEFAULT '',
     agent_tab_color             TEXT NOT NULL DEFAULT '',
     agent_env_vars              TEXT NOT NULL DEFAULT '{}',
+    agent_env_file              TEXT NOT NULL DEFAULT '',
     default_agent_template      TEXT NOT NULL DEFAULT '',
     agent_provider              TEXT NOT NULL DEFAULT '',
     agent_boot_command          TEXT NOT NULL DEFAULT '',
@@ -142,6 +144,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     terminal_shell              TEXT NOT NULL DEFAULT '',
     terminal_tab_color          TEXT NOT NULL DEFAULT '',
     terminal_env_vars           TEXT NOT NULL DEFAULT '{}',
+    terminal_env_file           TEXT NOT NULL DEFAULT '',
     terminal_always_custom_dialog INTEGER NOT NULL DEFAULT 0,
     terminal_close_on_disconnect INTEGER NOT NULL DEFAULT 0,
     dispatch_lane               TEXT NOT NULL DEFAULT 'In Progress',
@@ -431,6 +434,16 @@ class LoomDB:
                 self._conn.execute(
                     f"ALTER TABLE group_settings ADD COLUMN "
                     f"{col} TEXT NOT NULL DEFAULT {default}")
+                self._conn.commit()
+        # Migrate: add env_file columns to group_settings
+        for col in ("env_file", "agent_env_file", "terminal_env_file"):
+            try:
+                self._conn.execute(
+                    f"SELECT {col} FROM group_settings LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE group_settings ADD COLUMN "
+                    f"{col} TEXT NOT NULL DEFAULT ''")
                 self._conn.commit()
         # Migrate: rename system labels with loom: prefix
         rows = self._conn.execute(
