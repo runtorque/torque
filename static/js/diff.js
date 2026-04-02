@@ -43,12 +43,16 @@ function diffReceiveMergeCheck(msg) {
   if (!_diffViewOpen || msg.id !== _diffViewAgentId) return;
   _diffMergeCheck = msg;
   if (msg.clean && !_diffCommitMsg) {
-    var cell = state.agents[_diffViewAgentId];
-    if (cell) {
-      var squash = cell.worktree_merge_squash !== false;
-      _diffCommitMsg = squash
-        ? 'Squash merge: ' + (cell.worktree_branch || cell.name)
-        : "Merge branch '" + (cell.worktree_branch || cell.name) + "'";
+    if (msg.default_message) {
+      _diffCommitMsg = msg.default_message;
+    } else {
+      var cell = state.agents[_diffViewAgentId];
+      if (cell) {
+        var squash = cell.worktree_merge_squash !== false;
+        _diffCommitMsg = squash
+          ? 'Squash merge: ' + (cell.worktree_branch || cell.name)
+          : "Merge branch '" + (cell.worktree_branch || cell.name) + "'";
+      }
     }
   }
   renderDiffView();

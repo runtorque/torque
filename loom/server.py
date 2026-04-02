@@ -215,19 +215,53 @@ async def _worktree_full_diff(cell, worktree_mgr: WorktreeManager) -> dict:
         return {"error": "Failed to load worktree diff."}
 
 
-async def _generate_merge_message(cell, worktree_mgr, squash: bool) -> str:
-    """Build a default squash/merge commit message from branch history."""
+async def _generate_merge_message(cell, worktree_mgr, squash: bool,
+                                  state=None) -> str:
+    """Build a default merge commit message from completed tasks and commits.
+
+    Priority: completed board tasks with done messages > git commit history.
+    """
     branch = cell.worktree_branch or cell.name
     if squash:
         header = f"Squash merge: {branch}"
     else:
         header = f"Merge branch '{branch}'"
+
+    # 1. Collect completed tasks assigned to this agent
+    task_lines = []
+    if state:
+        for t in state.board_tasks.values():
+            if t.agent_id != cell.id:
+                continue
+            if t.lane != "Done":
+                continue
+            # Find the done message from task activity log
+            done_msg = ""
+            for m in reversed(t.messages):
+                if m.get("action") == "done" and m.get("message"):
+                    done_msg = m["message"]
+                    break
+            line = f"- {t.task}"
+            if done_msg and done_msg != "Done":
+                line += f"\n  {done_msg}"
+            task_lines.append(line)
+
+    if task_lines:
+        return header + "\n\n" + "\n".join(task_lines)
+
+    # 2. Fallback: git commit messages from the branch
     commits = await worktree_mgr.list_checkpoints(cell)
     if commits:
         lines = [header, ""]
         for c in commits:
-            lines.append(f"- {c['message']}")
-        return "\n".join(lines)
+            msg = c["message"]
+            # Skip generic checkpoint messages
+            if msg.startswith("loom: checkpoint"):
+                continue
+            lines.append(f"- {msg}")
+        if len(lines) > 2:  # has non-checkpoint commits
+            return "\n".join(lines)
+
     return header
 
 
@@ -1877,6 +1911,12 @@ async def main(connection: iterm2.Connection):
                             worktree_mgr.check_merge_conflicts(cell)
                         check["type"] = "worktree_check_merge"
                         check["id"] = aid
+                        if check.get("clean"):
+                            squash = cell.worktree_merge_squash
+                            check["default_message"] = \
+                                await _generate_merge_message(
+                                    cell, worktree_mgr, squash,
+                                    state=state)
                         result = check
                 else:
                     result = {
@@ -1965,7 +2005,8 @@ async def main(connection: iterm2.Connection):
                         msg = data.get("message", "").strip()
                         if not msg:
                             msg = await _generate_merge_message(
-                                cell, worktree_mgr, squash)
+                                cell, worktree_mgr, squash,
+                                state=state)
                         merge_result = \
                             await worktree_mgr.server_merge(
                                 cell, msg, squash=squash)
