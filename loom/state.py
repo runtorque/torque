@@ -1175,6 +1175,10 @@ class MatrixState:
             return
         old_lane = task.lane
         task.lane = lane
+        if lane == "Done":
+            for label in ("loom:blocked", "loom:error"):
+                if label in task.labels:
+                    task.labels.remove(label)
         if position is not None:
             task.position = position
         else:

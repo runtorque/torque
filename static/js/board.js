@@ -1056,6 +1056,12 @@ function boardDispatchTask(taskId) {
   var task = tasks[taskId];
   if (!task) return;
 
+  // If task already has an assigned agent that still exists, dispatch directly
+  if (task.agent_id && state.agents[task.agent_id]) {
+    boardDispatchToExisting(taskId, task.agent_id);
+    return;
+  }
+
   var menu = document.getElementById('ctx-menu');
   var html = '<button class="ctx-label" disabled>Dispatch to</button>';
 
