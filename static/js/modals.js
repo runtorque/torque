@@ -634,7 +634,6 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-agent-directory').value = s.agent_directory || '';
   document.getElementById('gs-agent-shell').value = s.agent_shell || '';
   _populateProviderSelect('gs-agent-provider', s.agent_provider || '', false);
-  _populateTemplateSelect('gs-default-agent-template', s.default_agent_template || '', 'None');
   document.getElementById('gs-agent-boot-cmd').value = s.agent_boot_command || '';
   onGsProviderChange();
   document.getElementById('gs-worktree').checked = s.git_worktree || false;
@@ -717,7 +716,6 @@ function submitGroupSettings() {
     agent_profile: document.getElementById('gs-agent-profile').value,
     agent_shell: document.getElementById('gs-agent-shell').value,
     agent_tab_color: _gsAgentColor,
-    default_agent_template: document.getElementById('gs-default-agent-template').value,
     agent_provider: _getProviderValue('gs-agent-provider'),
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
     agent_env_vars: _textToEnv('gs-agent-env-vars'),
