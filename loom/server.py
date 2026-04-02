@@ -215,6 +215,22 @@ async def _worktree_full_diff(cell, worktree_mgr: WorktreeManager) -> dict:
         return {"error": "Failed to load worktree diff."}
 
 
+async def _generate_merge_message(cell, worktree_mgr, squash: bool) -> str:
+    """Build a default squash/merge commit message from branch history."""
+    branch = cell.worktree_branch or cell.name
+    if squash:
+        header = f"Squash merge: {branch}"
+    else:
+        header = f"Merge branch '{branch}'"
+    commits = await worktree_mgr.list_checkpoints(cell)
+    if commits:
+        lines = [header, ""]
+        for c in commits:
+            lines.append(f"- {c['message']}")
+        return "\n".join(lines)
+    return header
+
+
 async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
     """Periodically check for due schedules and scheduled tasks.
 
@@ -443,8 +459,6 @@ async def main(connection: iterm2.Connection):
     action_mgr = ActionManager()
     template_mgr = TemplateManager()
 
-    # cell ID → (pre-merge base SHA, close_on_merge, clear_context)
-    _pending_merges: dict[str, tuple[str, bool, bool]] = {}
 
     async def _safe_remove_worktree(cell):
         """Remove a worktree only if no other agent shares it."""
@@ -475,80 +489,8 @@ async def main(connection: iterm2.Connection):
         return subject
 
     async def _on_agent_session_end(cell):
-        """Handle agent turn completion: merge verification + auto-checkpoint."""
+        """Handle agent turn completion: auto-checkpoint."""
         state.history_snapshot_tokens(cell)
-        # Check pending merge result
-        if cell.id in _pending_merges:
-            pre_sha, close_on_merge, clear_context = \
-                _pending_merges.pop(cell.id)
-            merged = await worktree_mgr.is_merged(cell)
-            if not merged and pre_sha:
-                merged = await worktree_mgr.check_base_advanced(
-                    cell, pre_sha)
-            if merged:
-                log.info("Merge verified for '%s': branch %s merged into %s",
-                         cell.name, cell.worktree_branch,
-                         cell.worktree_base_branch)
-                cell.worktree_checkpoints = 0
-                state.history_update_agent(cell, status="merged")
-                state._emit_agent(cell)
-                await _broadcast_toast(
-                    f'"{cell.name}" merged to {cell.worktree_base_branch}',
-                    "success")
-                if not close_on_merge and cell.worktree_path:
-                    # Rebase onto base branch so the agent continues
-                    # from a clean state after a successful merge.
-                    valid = await worktree_mgr.validate(cell)
-                    if valid:
-                        ok = await worktree_mgr.rebase_onto_base(cell)
-                        if ok:
-                            cell.worktree_checkpoints = \
-                                await worktree_mgr.count_commits(cell)
-                            cell.worktree_dirty = False
-                            cell.worktree_diff = {}
-                            state._emit_agent(cell)
-                        else:
-                            log.warning(
-                                "Post-merge rebase failed for '%s'"
-                                " — worktree left as-is",
-                                cell.name)
-                if clear_context and not close_on_merge \
-                        and cell.session_id:
-                    # Send /clear to reset the agent's conversation
-                    await bridge.send_text(
-                        cell.session_id, "/clear\r")
-                    cell.tasks_dispatched = 0
-                    state._emit_agent(cell)
-                    state._db_save_agent(cell)
-                    log.info("Cleared context for '%s' after merge",
-                             cell.name)
-                if close_on_merge:
-                    await asyncio.sleep(CLOSE_AFTER_MERGE_DELAY)
-                    removed = state.remove_agent(cell.id)
-                    for c in removed:
-                        if c.session_id:
-                            await bridge.close_session(c.session_id)
-                        if c.agent_type and c.directory:
-                            adapter = get_adapter(c.agent_type)
-                            if hasattr(adapter, "uninstall_hooks"):
-                                adapter.uninstall_hooks(
-                                    os.path.expanduser(c.directory))
-                            if hasattr(adapter, "uninstall_mcp_config"):
-                                adapter.uninstall_mcp_config(
-                                    os.path.expanduser(c.directory))
-                        event_bus.cleanup_cell(c.id)
-                        await _safe_remove_worktree(c)
-            else:
-                log.warning("Merge failed for '%s': branch %s not in %s",
-                            cell.name, cell.worktree_branch,
-                            cell.worktree_base_branch)
-                cell.needs_attention = True
-                cell.error_message = (
-                    "Merge to main failed — merge manually")
-                state._emit_agent(cell)
-                state._db_save_agent(cell)
-            return  # skip auto-checkpoint on merge turn
-
         # Auto-checkpoint
         if cell.worktree_path and cell.cell_type == "agent":
             if cell.worktree_auto_checkpoint:
@@ -1917,6 +1859,56 @@ async def main(connection: iterm2.Connection):
                 result["id"] = data.get("id", "")
                 return result
 
+            elif cmd == "worktree_check_merge":
+                cell = state.agents.get(data.get("id", ""))
+                aid = data.get("id", "")
+                if cell and cell.worktree_path:
+                    dirty = await worktree_mgr.has_uncommitted_changes(
+                        cell)
+                    if dirty:
+                        result = {
+                            "type": "worktree_check_merge",
+                            "id": aid, "clean": False,
+                            "dirty": True, "conflicts": [],
+                        }
+                    else:
+                        check = await \
+                            worktree_mgr.check_merge_conflicts(cell)
+                        check["type"] = "worktree_check_merge"
+                        check["id"] = aid
+                        result = check
+                else:
+                    result = {
+                        "type": "worktree_check_merge",
+                        "id": data.get("id", ""),
+                        "error": "No worktree",
+                    }
+                return result
+
+            elif cmd == "worktree_rebase":
+                cell = state.agents.get(data.get("id", ""))
+                aid = data.get("id", "")
+                if cell and cell.worktree_path:
+                    ok = await worktree_mgr.rebase_onto_base(cell)
+                    if ok:
+                        cell.worktree_checkpoints = \
+                            await worktree_mgr.count_commits(cell)
+                        cell.worktree_dirty = False
+                        cell.worktree_diff = {}
+                        state._emit_agent(cell)
+                        result = {"type": "worktree_rebase",
+                                  "id": aid, "ok": True}
+                    else:
+                        result = {
+                            "type": "worktree_rebase",
+                            "id": aid, "ok": False,
+                            "error": "Rebase failed — conflicts "
+                                     "require manual resolution",
+                        }
+                else:
+                    result = {"type": "worktree_rebase",
+                              "id": aid, "error": "No worktree"}
+
             elif cmd == "worktree_rollback":
                 cell = state.agents.get(data.get("id", ""))
                 sha = data.get("sha", "")
@@ -1955,88 +1947,125 @@ async def main(connection: iterm2.Connection):
 
             elif cmd == "worktree_merge":
                 cell = state.agents.get(data.get("id", ""))
+                aid = data.get("id", "")
                 if cell and cell.worktree_path and cell.worktree_branch:
-                    if not cell.session_id:
+                    # Block merge if worktree has uncommitted changes
+                    dirty = await worktree_mgr.has_uncommitted_changes(
+                        cell)
+                    if dirty:
                         result = {
-                            "type": "error",
-                            "message": "Session not running. Relaunch "
-                                       "the agent first, or merge manually.",
+                            "type": "worktree_merge", "id": aid,
+                            "ok": False,
+                            "error": "Commit or checkpoint changes "
+                                     "before merging.",
                         }
                     else:
-                        gs = state.get_group_settings(cell.group)
-                        base = cell.worktree_base_branch or "main"
-                        branch = cell.worktree_branch
-                        repo = cell.worktree_repo_root or ""
                         squash = cell.worktree_merge_squash
-                        method = ("Squash merge" if squash
-                                  else "Merge")
-                        if squash:
-                            prompt = (
-                                f"Squash merge the current branch "
-                                f"`{branch}` into `{base}`. The "
-                                f"main repo is at `{repo}`.\n\n"
-                                f"IMPORTANT: Do NOT use `git merge "
-                                f"--squash` — its three-way merge "
-                                f"can silently drop branch changes "
-                                f"when main has diverged. Instead:\n"
-                                f"1. `git checkout {base}`\n"
-                                f"2. `git diff HEAD {branch} "
-                                f"--diff-filter=D --name-only | "
-                                f"xargs git rm` (remove deleted "
-                                f"files)\n"
-                                f"3. `git checkout {branch} -- .` "
-                                f"(copy all branch files)\n"
-                                f"4. Verify `git diff {base} "
-                                f"{branch}` shows zero diff\n"
-                                f"5. Commit with a clear message\n\n"
-                                f"Do not delete the worktree branch "
-                                f"after merging. Write a clear, "
-                                f"descriptive commit message that "
-                                f"summarizes everything this branch "
-                                f"accomplished — review the full "
-                                f"diff and commit history to "
-                                f"inform it.")
+                        msg = data.get("message", "").strip()
+                        if not msg:
+                            msg = await _generate_merge_message(
+                                cell, worktree_mgr, squash)
+                        merge_result = \
+                            await worktree_mgr.server_merge(
+                                cell, msg, squash=squash)
+                        if merge_result["ok"]:
+                            cell.worktree_checkpoints = 0
+                            cell.worktree_merged = True
+                            state.history_update_agent(
+                                cell, status="merged")
+                            state._emit_agent(cell)
+                            await _broadcast_toast(
+                                f'"{cell.name}" merged to '
+                                f"{cell.worktree_base_branch}",
+                                "success")
+                            close_flag = bool(
+                                data.get("close_on_merge"))
+                            clear_flag = bool(
+                                data.get("clear_context"))
+                            if clear_flag and not close_flag \
+                                    and cell.session_id:
+                                await bridge.send_text(
+                                    cell.session_id, "/clear\r")
+                                cell.tasks_dispatched = 0
+                                state._emit_agent(cell)
+                                state._db_save_agent(cell)
+                                log.info(
+                                    "Cleared context for '%s' "
+                                    "after merge", cell.name)
+                            if close_flag:
+                                async def _deferred_close(
+                                        _cell=cell):
+                                    await asyncio.sleep(
+                                        CLOSE_AFTER_MERGE_DELAY)
+                                    removed = state.remove_agent(
+                                        _cell.id)
+                                    for c in removed:
+                                        if c.session_id:
+                                            await bridge\
+                                                .close_session(
+                                                    c.session_id)
+                                        if c.agent_type \
+                                                and c.directory:
+                                            adapter = get_adapter(
+                                                c.agent_type)
+                                            if hasattr(adapter,
+                                                       "uninstall_hooks"):
+                                                adapter\
+                                                    .uninstall_hooks(
+                                                        os.path
+                                                        .expanduser(
+                                                            c.directory))
+                                            if hasattr(adapter,
+                                                       "uninstall_mcp_config"):
+                                                adapter\
+                                                    .uninstall_mcp_config(
+                                                        os.path
+                                                        .expanduser(
+                                                            c.directory))
+                                        event_bus.cleanup_cell(
+                                            c.id)
+                                        await _safe_remove_worktree(
+                                            c)
+                                asyncio.create_task(
+                                    _deferred_close())
+                            elif cell.worktree_path:
+                                # Rebase worktree onto updated base
+                                # so the agent continues cleanly
+                                valid = await \
+                                    worktree_mgr.validate(cell)
+                                if valid:
+                                    ok = await worktree_mgr\
+                                        .rebase_onto_base(cell)
+                                    if ok:
+                                        cell.worktree_checkpoints =\
+                                            await worktree_mgr\
+                                            .count_commits(cell)
+                                        cell.worktree_dirty = False
+                                        cell.worktree_diff = {}
+                                        state._emit_agent(cell)
+                                    else:
+                                        log.warning(
+                                            "Post-merge rebase "
+                                            "failed for '%s'",
+                                            cell.name)
+                            result = {
+                                "type": "worktree_merge",
+                                "id": aid, "ok": True,
+                                "sha": merge_result["sha"],
+                            }
                         else:
-                            prompt = (
-                                f"Merge the current branch "
-                                f"`{branch}` into `{base}`. The "
-                                f"main repo is at `{repo}`. If "
-                                f"there are merge conflicts, "
-                                f"resolve them. Do not delete the "
-                                f"worktree branch after merging. "
-                                f"Write a clear, descriptive commit "
-                                f"message that summarizes everything "
-                                f"this branch accomplished — review "
-                                f"the full diff and commit history "
-                                f"to inform it.")
-                        extra = gs.worktree_merge_instructions.strip()
-                        if extra:
-                            prompt += " " + extra
-                        # Record base SHA before merge for fallback
-                        # verification (squash merges with diverged
-                        # base can't be detected from git state alone)
-                        pre_sha = ""
-                        try:
-                            p = await asyncio.create_subprocess_exec(
-                                "git", "-C", repo or ".",
-                                "rev-parse", base,
-                                stdout=asyncio.subprocess.PIPE,
-                                stderr=asyncio.subprocess.DEVNULL,
-                            )
-                            out, _ = await p.communicate()
-                            if p.returncode == 0:
-                                pre_sha = out.decode().strip()
-                        except Exception:
-                            pass
-                        close_flag = bool(data.get("close_on_merge"))
-                        clear_flag = bool(data.get("clear_context"))
-                        await bridge.send_text(
-                            cell.session_id, prompt + "\r")
-                        _pending_merges[cell.id] = (
-                            pre_sha, close_flag, clear_flag)
-                        cell.status = "running"
-                        state._emit_agent(cell)
-                        # Ephemeral status — no DB write needed
+                            result = {
+                                "type": "worktree_merge",
+                                "id": aid, "ok": False,
+                                "error": merge_result.get(
+                                    "error", "Merge failed"),
+                            }
+                else:
+                    result = {
+                        "type": "worktree_merge", "id": aid,
+                        "ok": False,
+                        "error": "Agent has no worktree.",
+                    }
 
             # -- Board commands (Phase 5) --
             elif cmd == "board_add_task":

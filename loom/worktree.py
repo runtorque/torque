@@ -547,6 +547,176 @@ class WorktreeManager:
             log.debug("check_base_advanced failed for '%s'", cell.name)
             return False
 
+    def _parse_merge_tree_conflicts(self, output: str) -> list[dict]:
+        """Parse conflict info from ``git merge-tree`` output."""
+        conflicts: list[dict] = []
+        for line in output.splitlines():
+            line = line.strip()
+            if not line.startswith("CONFLICT"):
+                continue
+            # Format: CONFLICT (type): description
+            reason = ""
+            path = ""
+            paren_start = line.find("(")
+            paren_end = line.find(")")
+            if paren_start != -1 and paren_end != -1:
+                reason = line[paren_start + 1:paren_end]
+            # Extract file path — typically the last space-separated token,
+            # or the path after "Merge conflict in "
+            if "Merge conflict in " in line:
+                path = line.split("Merge conflict in ", 1)[1].strip()
+            elif " deleted in " in line:
+                # "CONFLICT (modify/delete): foo.py deleted in ..."
+                colon_pos = line.find(": ")
+                if colon_pos != -1:
+                    rest = line[colon_pos + 2:]
+                    path = rest.split(" deleted in ")[0].strip()
+            else:
+                # Fallback: last token after ": "
+                colon_pos = line.find(": ")
+                if colon_pos != -1:
+                    rest = line[colon_pos + 2:].strip()
+                    parts = rest.rsplit(" ", 1)
+                    path = parts[-1] if parts else rest
+            conflicts.append({"path": path, "reason": reason})
+        return conflicts
+
+    async def check_merge_conflicts(self, cell) -> dict:
+        """Dry-run merge of worktree branch into base.
+
+        Returns dict with keys:
+            clean (bool), tree_sha (str), conflicts (list[dict])
+        """
+        if not cell.worktree_path or not cell.worktree_base_branch:
+            return {"clean": False, "tree_sha": "",
+                    "conflicts": [], "error": "No worktree or base branch"}
+        repo_root = cell.worktree_repo_root
+        if not repo_root:
+            repo_root = await self.get_repo_root(cell.worktree_path)
+        if not repo_root:
+            return {"clean": False, "tree_sha": "",
+                    "conflicts": [], "error": "Cannot find repo root"}
+        try:
+            base = cell.worktree_base_branch
+            branch = cell.worktree_branch
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root,
+                "merge-tree", "--write-tree", base, branch,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            output = stdout.decode()
+            if proc.returncode == 0:
+                tree_sha = output.strip().split("\n")[0]
+                return {"clean": True, "tree_sha": tree_sha,
+                        "conflicts": []}
+            # Conflicts — parse output
+            conflicts = self._parse_merge_tree_conflicts(output)
+            return {"clean": False, "tree_sha": "",
+                    "conflicts": conflicts}
+        except Exception:
+            log.exception("check_merge_conflicts failed for '%s'",
+                          cell.name)
+            return {"clean": False, "tree_sha": "",
+                    "conflicts": [], "error": "Merge check failed"}
+
+    async def server_merge(self, cell, message: str,
+                           squash: bool = True) -> dict:
+        """Perform server-side merge of worktree branch into base.
+
+        Uses git plumbing (merge-tree + commit-tree + update-ref)
+        for a deterministic, agent-free merge.
+
+        Returns dict with keys: ok (bool), sha (str), error (str)
+        """
+        repo_root = cell.worktree_repo_root
+        if not repo_root:
+            repo_root = await self.get_repo_root(cell.worktree_path)
+        if not repo_root:
+            return {"ok": False, "error": "Cannot find repo root"}
+
+        base = cell.worktree_base_branch
+        branch = cell.worktree_branch
+
+        # 1. Verify clean merge (race-condition guard)
+        check = await self.check_merge_conflicts(cell)
+        if not check["clean"]:
+            return {"ok": False,
+                    "error": check.get("error", "Conflicts detected")}
+
+        tree_sha = check["tree_sha"]
+
+        try:
+            # 2. Get base branch SHA
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root,
+                "rev-parse", base,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                return {"ok": False,
+                        "error": f"Cannot resolve {base}: "
+                                 f"{stderr.decode().strip()}"}
+            base_sha = stdout.decode().strip()
+
+            # 3. Build commit-tree command
+            cmd = ["git", "-C", repo_root,
+                   "commit-tree", tree_sha,
+                   "-p", base_sha]
+            if not squash:
+                # Regular merge: add branch as second parent
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "-C", repo_root,
+                    "rev-parse", branch,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    return {"ok": False,
+                            "error": f"Cannot resolve {branch}: "
+                                     f"{stderr.decode().strip()}"}
+                branch_sha = stdout.decode().strip()
+                cmd.extend(["-p", branch_sha])
+            cmd.extend(["-m", message])
+
+            # 4. Create the commit
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                return {"ok": False,
+                        "error": f"commit-tree failed: "
+                                 f"{stderr.decode().strip()}"}
+            new_sha = stdout.decode().strip()
+
+            # 5. Fast-forward base branch to the new commit
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root,
+                "update-ref", f"refs/heads/{base}", new_sha,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                return {"ok": False,
+                        "error": f"update-ref failed: "
+                                 f"{stderr.decode().strip()}"}
+
+            log.info("Server-side %s of '%s' (%s) into %s: %s",
+                     "squash merge" if squash else "merge",
+                     cell.name, branch, base, new_sha[:8])
+            return {"ok": True, "sha": new_sha}
+        except Exception:
+            log.exception("server_merge failed for '%s'", cell.name)
+            return {"ok": False, "error": "Server merge failed"}
+
     async def rebase_onto_base(self, cell) -> bool:
         """Rebase the worktree branch onto its base branch.
 
