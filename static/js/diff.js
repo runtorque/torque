@@ -180,8 +180,10 @@ function _renderMergeBanner() {
   }
   if (!_diffMergeCheck.clean) {
     var n = (_diffMergeCheck.conflicts || []).length;
-    var html = '<div class="diff-merge-banner conflict">'
-      + n + ' conflict' + (n !== 1 ? 's' : '') + ' \u2014 merge blocked</div>';
+    var label = n > 0
+      ? n + ' conflict' + (n !== 1 ? 's' : '') + ' \u2014 merge blocked'
+      : 'Merge blocked \u2014 branches have diverged';
+    var html = '<div class="diff-merge-banner conflict">' + esc(label) + '</div>';
     if (n > 0) {
       html += '<div class="diff-conflict-list">';
       for (var i = 0; i < _diffMergeCheck.conflicts.length; i++) {
@@ -199,8 +201,8 @@ function _renderMergeBanner() {
 function _renderDiffFooter() {
   var html = '<div class="diff-footer">';
 
-  // Commit message textarea (when merge check loaded and not dirty)
-  if (_diffMergeCheck && !_diffMergeCheck.dirty) {
+  // Commit message textarea (only when merge is clean)
+  if (_diffMergeCheck && _diffMergeCheck.clean) {
     html += '<textarea class="diff-commit-msg" placeholder="Commit message\u2026"'
       + ' oninput="_diffCommitMsg=this.value">' + esc(_diffCommitMsg) + '</textarea>';
   }

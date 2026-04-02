@@ -1862,7 +1862,8 @@ async def main(connection: iterm2.Connection):
             elif cmd == "worktree_check_merge":
                 cell = state.agents.get(data.get("id", ""))
                 aid = data.get("id", "")
-                if cell and cell.worktree_path:
+                if cell and cell.worktree_path \
+                        and cell.worktree_branch:
                     dirty = await worktree_mgr.has_uncommitted_changes(
                         cell)
                     if dirty:

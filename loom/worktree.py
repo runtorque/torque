@@ -587,7 +587,8 @@ class WorktreeManager:
         Returns dict with keys:
             clean (bool), tree_sha (str), conflicts (list[dict])
         """
-        if not cell.worktree_path or not cell.worktree_base_branch:
+        if not cell.worktree_path or not cell.worktree_base_branch \
+                or not cell.worktree_branch:
             return {"clean": False, "tree_sha": "",
                     "conflicts": [], "error": "No worktree or base branch"}
         repo_root = cell.worktree_repo_root
