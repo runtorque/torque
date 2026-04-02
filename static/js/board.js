@@ -21,6 +21,8 @@ var _boardSearchQuery = '';      // text search filter
 var _boardFilterLabels = [];     // active label filters (OR logic)
 var _boardFilterActions = [];    // active action name filters (OR logic)
 var _boardSearchTimer = null;    // debounce timer for search input
+var _boardFilterDropdownType = null;   // 'label' | 'action' | null
+var _boardFilterDropdownCleanup = null;
 var _boardPreFilterLane = '';    // saved lane before search, restored on clear
 var _boardShowSchedules = false; // true when "Schedules" tab is active
 
