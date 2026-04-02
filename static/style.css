@@ -359,7 +359,12 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
   padding: 1px 4px; border-radius: 3px;
   letter-spacing: .03em; vertical-align: middle;
 }
+.detail-wt-merged {
+  color: var(--green); background: rgba(63,185,80,.12);
+}
 .detail-dir { color: var(--text-dim); }
+.detail-ahead { color: var(--green); font-size: 9px; }
+.detail-behind { color: var(--amber); font-size: 9px; }
 .detail-ins { color: var(--green); }
 .detail-del { color: var(--red); }
 .detail-row-task { align-items: baseline; }
@@ -1857,13 +1862,27 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .ah-outcome-blocked { background: #d29922; color: #000; }
 .ah-outcome-error { background: #da3633; color: #fff; }
 .ah-task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ah-task-row.ah-clickable { cursor: pointer; border-radius: 3px; padding: 2px 4px; }
+.ah-task-row.ah-clickable:hover { background: var(--hover); }
+.ah-task-link {
+  flex-shrink: 0; font-size: 9px; color: var(--accent); cursor: pointer; opacity: 0.6;
+}
+.ah-task-link:hover { opacity: 1; }
 
 /* Message rows in detail */
 .ah-messages { display: flex; flex-direction: column; gap: 1px; max-height: 200px; overflow-y: auto; }
 .ah-msg-row { display: flex; align-items: baseline; gap: 4px; padding: 1px 0; font-size: 10px; }
+.ah-msg-row.ah-clickable { cursor: pointer; border-radius: 3px; padding: 1px 4px; }
+.ah-msg-row.ah-clickable:hover { background: var(--hover); }
 .ah-msg-icon { flex-shrink: 0; width: 12px; text-align: center; }
 .ah-msg-action { font-weight: 600; flex-shrink: 0; min-width: 50px; }
 .ah-msg-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.ah-msg-expanded {
+  display: none; padding: 3px 8px 3px 28px; font-size: 10px; color: var(--fg-dim);
+  white-space: pre-wrap; word-break: break-word; background: var(--bg); border-radius: 3px;
+  margin: 1px 0 2px;
+}
+.ah-msg-expanded.visible { display: block; }
 
 /* ------------------------------------------------------------------ */
 /* Events panel                                                        */

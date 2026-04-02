@@ -44,11 +44,20 @@ async def _worktree_diff_updater(state: MatrixState,
             diff = await worktree_mgr.diff_summary(cell)
             dirty = await worktree_mgr.has_uncommitted_changes(cell)
             checkpoints = await worktree_mgr.count_commits(cell)
+            ahead = checkpoints
+            behind = await worktree_mgr.count_behind(cell)
+            merged = await worktree_mgr.is_merged(cell)
             if diff != cell.worktree_diff or dirty != cell.worktree_dirty \
-                    or checkpoints != cell.worktree_checkpoints:
+                    or checkpoints != cell.worktree_checkpoints \
+                    or behind != cell.worktree_behind \
+                    or ahead != cell.worktree_ahead \
+                    or merged != cell.worktree_merged:
                 cell.worktree_diff = diff
                 cell.worktree_dirty = dirty
                 cell.worktree_checkpoints = checkpoints
+                cell.worktree_behind = behind
+                cell.worktree_ahead = ahead
+                cell.worktree_merged = merged
                 state._emit_agent(cell)
                 changed = True
         if changed:
@@ -56,12 +65,9 @@ async def _worktree_diff_updater(state: MatrixState,
 
 
 async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
-    """Periodically check for due schedules and dispatch tasks.
+    """Periodically check for due schedules and scheduled tasks.
 
-    Runs every 30 seconds.  For each due schedule:
-    1. Create a BoardTask from the schedule template.
-    2. Dispatch it via the existing dispatch_task command.
-    3. Update schedule state (last_run_at, next_run_at, run_count).
+    Runs every 30 seconds.
     """
     from datetime import datetime, timezone as dt_tz
     from .cron import next_run as cron_next_run
@@ -77,12 +83,12 @@ async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
             if not task.scheduled_at or task.scheduled_at > now_iso:
                 continue
             if task.agent_id:
-                continue  # already dispatched
+                continue
             if task.lane in ("In Progress", "Done"):
-                continue  # already active or done
+                continue
             log.info("Scheduled task '%s' (%s) is due — dispatching",
                      task.task, task.id)
-            task.scheduled_at = ""  # clear so it doesn't fire again
+            task.scheduled_at = ""
             state._emit("task_upsert", **asdict(task))
             state._db_save_task(task)
             task_changed = True
@@ -101,13 +107,13 @@ async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
         if task_changed:
             await state.broadcast()
 
+        # Check for due recurring/one-shot schedules
         due = state.schedule_get_due(now_iso)
         if not due:
             continue
 
         for sched in due:
             try:
-                # Render task title with placeholders
                 title = sched.task_template or sched.name
                 title = (title
                          .replace("{date}", now.strftime("%Y-%m-%d"))
@@ -115,13 +121,11 @@ async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
                          .replace("{datetime}",
                                   now.strftime("%Y-%m-%d %H:%M")))
 
-                # Verify group still exists
                 if sched.group not in state.groups:
                     log.warning("Schedule '%s': group '%s' no longer exists"
                                 " — skipping", sched.name, sched.group)
                     continue
 
-                # Create the task
                 task = state.board_add_task(
                     task=title,
                     group=sched.group,
@@ -140,19 +144,16 @@ async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
                 log.info("Schedule '%s' fired — created task '%s' (%s)",
                          sched.name, task.task, task.id)
 
-                # Dispatch the task
-                result = await handle_command({
+                await handle_command({
                     "cmd": "dispatch_task",
                     "id": task.id,
                     "create_agent": True,
                 })
 
-                # Update schedule state
                 sched.last_run_at = now_iso
                 sched.run_count += 1
                 sched.last_task_id = task.id
 
-                # Compute next run or disable one-shot
                 if sched.cron_expr:
                     try:
                         nxt = cron_next_run(sched.cron_expr, now,
@@ -165,11 +166,9 @@ async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
                         sched.enabled = False
                         sched.next_run_at = ""
                 else:
-                    # One-shot: disable after firing
                     sched.enabled = False
                     sched.next_run_at = ""
 
-                from dataclasses import asdict
                 state._emit("schedule_upsert", **asdict(sched))
                 state._db_save_schedule(sched)
 
@@ -1019,16 +1018,17 @@ async def main(connection: iterm2.Connection):
             except Exception:
                 log.exception("Failed to query profiles")
                 pnames = ["Default"]
+            base_dir = await _resolve_base_dir(group)
             return {
                 "type": "group_settings",
                 "group": group,
                 "settings": asdict(gs),
                 "resolved_agent_defaults": template_mgr.resolve_agent_config(
-                    "", gs, {}, base_dir=await _resolve_base_dir(group)),
+                    "", gs, {}, base_dir=base_dir),
                 "profiles": pnames,
                 "providers": get_providers(),
-                "templates": template_mgr.list_templates(
-                    await _resolve_base_dir(group)),
+                "templates": template_mgr.list_templates(base_dir),
+                "actions": action_mgr.list_actions(base_dir),
             }
 
         # get_global_settings: respond directly
@@ -1859,16 +1859,26 @@ async def main(connection: iterm2.Connection):
 
             # -- Board commands (Phase 5) --
             elif cmd == "board_add_task":
+                # Apply per-group board defaults for fields not
+                # explicitly provided by the client
+                group = data.get("group", "")
+                gs = state.get_group_settings(group)
+                lane = data.get("lane", "") or gs.board_default_lane
+                action_name = data.get("action_name", "") or \
+                    gs.board_default_action
+                labels = data.get("labels", [])
+                if not labels and gs.board_default_labels:
+                    labels = list(gs.board_default_labels)
                 bt = state.board_add_task(
                     task=data.get("task", ""),
-                    group=data.get("group", ""),
-                    lane=data.get("lane", ""),
+                    group=group,
+                    lane=lane,
                     description=data.get("description", ""),
-                    action_name=data.get("action_name", ""),
+                    action_name=action_name,
                     action_vars=data.get("action_vars", {}),
                     agent_template=data.get("agent_template", ""),
                     agent_id=data.get("agent_id", ""),
-                    labels=data.get("labels", []),
+                    labels=labels,
                 )
                 if not bt:
                     result = {"type": "error",
@@ -2325,7 +2335,6 @@ async def main(connection: iterm2.Connection):
                                   "message": "Either cron_expr or "
                                              "scheduled_at is required"}
                     else:
-                        # Validate cron if provided
                         if cron_expr:
                             try:
                                 from .cron import parse_cron, \
@@ -2390,7 +2399,6 @@ async def main(connection: iterm2.Connection):
                               "scheduled_at", "timezone", "enabled"):
                         if k in data:
                             fields[k] = data[k]
-                    # Recompute next_run_at if schedule changed
                     new_cron = fields.get("cron_expr", sched.cron_expr)
                     new_at = fields.get("scheduled_at",
                                         sched.scheduled_at)
@@ -2436,7 +2444,6 @@ async def main(connection: iterm2.Connection):
                               "message": "Schedule not found"}
                 else:
                     fields = {"enabled": True}
-                    # Recompute next_run_at
                     if sched.cron_expr:
                         from .cron import next_run as cron_next
                         from datetime import datetime, timezone as dt_tz

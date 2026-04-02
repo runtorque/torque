@@ -34,7 +34,8 @@ _AGENT_PERSISTED_COLS = [
 ]
 
 # GroupSettings fields that store dicts — persisted as JSON text.
-_GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars"}
+_GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars",
+                    "board_default_labels"}
 
 # GroupSettings fields that are booleans — stored as INTEGER 0/1.
 _GS_BOOL_FIELDS = {
@@ -144,7 +145,10 @@ CREATE TABLE IF NOT EXISTS group_settings (
     terminal_always_custom_dialog INTEGER NOT NULL DEFAULT 0,
     terminal_close_on_disconnect INTEGER NOT NULL DEFAULT 0,
     dispatch_lane               TEXT NOT NULL DEFAULT 'In Progress',
-    dispatch_auto_terminals     INTEGER NOT NULL DEFAULT 0
+    dispatch_auto_terminals     INTEGER NOT NULL DEFAULT 0,
+    board_default_labels        TEXT NOT NULL DEFAULT '[]',
+    board_default_lane          TEXT NOT NULL DEFAULT '',
+    board_default_action        TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS board_tasks (
@@ -407,6 +411,18 @@ class LoomDB:
                 "ALTER TABLE group_settings ADD COLUMN "
                 "default_agent_template TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
+        # Migrate: add board_default_* columns to group_settings
+        for col, default in [("board_default_labels", "'[]'"),
+                             ("board_default_lane", "''"),
+                             ("board_default_action", "''")]:
+            try:
+                self._conn.execute(
+                    f"SELECT {col} FROM group_settings LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE group_settings ADD COLUMN "
+                    f"{col} TEXT NOT NULL DEFAULT {default}")
+                self._conn.commit()
         # Migrate: rename system labels with loom: prefix
         rows = self._conn.execute(
             "SELECT id, labels FROM board_tasks "

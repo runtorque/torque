@@ -127,6 +127,9 @@ class AgentCell:
     worktree_dirty: bool = False  # has uncommitted changes
     worktree_diff: dict = field(default_factory=dict)  # {files, insertions, deletions}
     worktree_checkpoints: int = 0  # number of checkpoint commits
+    worktree_behind: int = 0  # commits on base not in branch (ephemeral)
+    worktree_ahead: int = 0  # commits on branch not in base (ephemeral)
+    worktree_merged: bool = False  # branch merged into base (ephemeral)
     # MCP message log (ephemeral)
     mcp_messages: list = field(default_factory=list)  # [{action, message, timestamp}]
 
@@ -213,6 +216,9 @@ class GroupSettings:
     # Board / Dispatch
     dispatch_lane: str = "In Progress"  # lane for dispatched tasks
     dispatch_auto_terminals: bool = False  # create child terminals on dispatch
+    board_default_labels: list[str] = field(default_factory=list)  # default labels for new tasks
+    board_default_lane: str = ""  # default lane for new tasks (empty = first lane)
+    board_default_action: str = ""  # default action for new tasks
 
 
 @dataclass

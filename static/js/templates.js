@@ -440,6 +440,11 @@ function agentHistoryToggle(agentId) {
   }
 }
 
+function ahToggleMsg(id) {
+  var el = document.getElementById(id);
+  if (el) el.classList.toggle('visible');
+}
+
 function agentHistoryFocusAgent(agentId) {
   send({ cmd: 'focus_agent', id: agentId });
 }
@@ -562,10 +567,13 @@ function renderAgentHistoryExpanded() {
       var t = tasks[i];
       var outcome = t.outcome || 'in-progress';
       var outClass = 'ah-outcome-' + outcome.replace(/[^a-z]/g, '');
-      html += '<div class="ah-task-row">';
+      var hasTask = t.task_id && (state.board_tasks || {})[t.task_id];
+      html += '<div class="ah-task-row' + (hasTask ? ' ah-clickable' : '') + '"'
+        + (hasTask ? ' onclick="boardNavigateToTask(\'' + esc(t.task_id) + '\')"' : '') + '>';
       html += '<span class="ah-task-outcome ' + outClass + '">' + esc(outcome) + '</span>';
       html += '<span class="ah-task-title">' + esc(t.task_title) + '</span>';
       html += '<span class="ah-meta">' + _ahFmtTs(t.started_at) + '</span>';
+      if (hasTask) html += '<span class="ah-task-link" title="View on board">\u2192</span>';
       html += '</div>';
     }
     html += '</div>';
@@ -578,12 +586,23 @@ function renderAgentHistoryExpanded() {
     html += '<div class="ah-messages">';
     for (var j = 0; j < messages.length; j++) {
       var m = messages[j];
-      html += '<div class="ah-msg-row">';
+      var msgId = 'ah-msg-' + (m.id || j);
+      var hasText = m.message && m.message.length > 0;
+      var hasTaskLink = m.task_id && (state.board_tasks || {})[m.task_id];
+      html += '<div class="ah-msg-row' + (hasText ? ' ah-clickable' : '') + '"'
+        + (hasText ? ' onclick="ahToggleMsg(\'' + msgId + '\')"' : '') + '>';
       html += '<span class="ah-msg-icon">' + _ahActionIcon(m.action) + '</span>';
       html += '<span class="ah-msg-action">' + esc(m.action) + '</span>';
       html += '<span class="ah-msg-text">' + esc(m.message || '') + '</span>';
       html += '<span class="ah-meta">' + _ahFmtTs(m.timestamp) + '</span>';
+      if (hasTaskLink) {
+        html += '<span class="ah-task-link" title="View task on board"'
+          + ' onclick="event.stopPropagation();boardNavigateToTask(\'' + esc(m.task_id) + '\')">\u2192</span>';
+      }
       html += '</div>';
+      if (hasText) {
+        html += '<div class="ah-msg-expanded" id="' + msgId + '">' + esc(m.message) + '</div>';
+      }
     }
     html += '</div>';
   }
