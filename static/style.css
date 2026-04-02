@@ -2240,6 +2240,27 @@ body.diff-view-open #ctx-menu {
 }
 
 .board-card-scheduled { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+.board-label-dep-blocked {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+  cursor: help;
+}
+.deps-dropdown {
+  position: absolute; left: 0; right: 0; z-index: 20;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 200px; overflow-y: auto;
+  margin-top: 2px;
+}
+.deps-option {
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.deps-option:hover {
+  background: var(--bg-hover);
+}
 
 /* -- Schedule UI ------------------------------------------------------ */
 .board-lane-tab-schedules { border-left: 1px solid var(--border); margin-left: auto; }

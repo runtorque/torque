@@ -1571,6 +1571,10 @@ def cmd_task_create(args):
             kwargs["action_vars"] = tvars
     if getattr(args, "at", None):
         kwargs["scheduled_at"] = _parse_relative_time(args.at)
+    if getattr(args, "depends_on", None):
+        dep_ids = _resolve_dep_ids(state_data, args.depends_on)
+        if dep_ids:
+            kwargs["depends_on"] = dep_ids
 
     resp = api_call("board_add_task", port=args.port, **kwargs)
     check_ok(resp)
@@ -1732,6 +1736,19 @@ def cmd_task_show(args):
         for line in t["description"].splitlines():
             print(f"    {line}")
 
+    if t.get("depends_on"):
+        tasks = st.get("board_tasks", {})
+        dep_strs = []
+        for dep_id in t["depends_on"]:
+            dep_t = tasks.get(dep_id)
+            if dep_t:
+                dep_lane = dep_t.get("lane", "?")
+                mark = "\u2713" if dep_lane == "Done" else "\u2717"
+                dep_slug = dep_t.get("slug") or dep_id[:6]
+                dep_strs.append(f"{mark} {dep_slug} ({dep_lane})")
+            else:
+                dep_strs.append(f"? {dep_id[:6]} (deleted)")
+        print(f"  {'Depends on:':<14} {', '.join(dep_strs)}")
     if t.get("scheduled_at"):
         print(f"  {'Scheduled:':<14} {t['scheduled_at']}")
     if t.get("action_name"):
@@ -1951,7 +1968,7 @@ def cmd_task_edit(args):
     # Check if any inline flags were provided
     has_flags = any(
         getattr(args, attr, None) is not None
-        for attr in ("task", "action", "labels", "group", "at")
+        for attr in ("task", "action", "labels", "group", "at", "depends_on")
     ) or getattr(args, "var", None)
 
     if has_flags:
@@ -1975,6 +1992,9 @@ def cmd_task_edit(args):
             fields["group"] = args.group
         if getattr(args, "at", None) is not None:
             fields["scheduled_at"] = _parse_relative_time(args.at)
+        if getattr(args, "depends_on", None) is not None:
+            dep_ids = _resolve_dep_ids(st, args.depends_on)
+            fields["depends_on"] = dep_ids
     else:
         # Interactive editor mode
         original_text = _task_to_yaml(t)
@@ -2604,6 +2624,30 @@ def cmd_pipeline_show(args):
 # ---------------------------------------------------------------------------
 
 
+def _resolve_dep_ids(state_data, depends_on_str):
+    """Resolve comma-separated task slugs/IDs to a list of task IDs."""
+    tasks = state_data.get("board_tasks", {})
+    ids = []
+    for token in depends_on_str.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        # Exact ID
+        if token in tasks:
+            ids.append(token)
+            continue
+        # Slug match
+        slug_m = [t for t in tasks.values()
+                  if t.get("slug") and t["slug"] == token.lower()]
+        if len(slug_m) == 1:
+            ids.append(slug_m[0]["id"])
+        elif len(slug_m) > 1:
+            die(f"Ambiguous dependency slug \"{token}\"")
+        else:
+            die(f"Dependency task not found: \"{token}\"")
+    return ids
+
+
 def resolve_schedule(state_data, identifier):
     """Resolve a schedule by ID, slug, or name."""
     schedules = state_data.get("schedules", {})
@@ -3092,6 +3136,8 @@ def build_parser():
                    help="Action variables (e.g., -v CONTEXT='some info')")
     p.add_argument("-l", "--labels", help="Comma-separated labels")
     p.add_argument("--at", help="Schedule dispatch (ISO 8601, +2h, tomorrow 09:00)")
+    p.add_argument("--depends-on",
+                   help="Comma-separated task slugs/IDs this depends on")
     p.set_defaults(func=cmd_task_create)
 
     p = tsk_sub.add_parser("dispatch", aliases=["d"],
@@ -3133,6 +3179,8 @@ def build_parser():
     p.add_argument("-l", "--labels", help="Comma-separated labels")
     p.add_argument("-g", "--group", help="Move to different group")
     p.add_argument("--at", help="Schedule dispatch (ISO 8601, +2h, tomorrow 09:00)")
+    p.add_argument("--depends-on",
+                   help="Comma-separated task slugs/IDs this depends on")
     p.set_defaults(func=cmd_task_edit)
 
     p = tsk_sub.add_parser("move", aliases=["mv"],

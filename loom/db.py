@@ -376,6 +376,15 @@ class LoomDB:
                 "ALTER TABLE board_tasks ADD COLUMN scheduled_at "
                 "TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
+        # Migrate: add depends_on column to board_tasks
+        try:
+            self._conn.execute(
+                "SELECT depends_on FROM board_tasks LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE board_tasks ADD COLUMN depends_on "
+                "TEXT NOT NULL DEFAULT '[]'")
+            self._conn.commit()
         # Migrate: drop assignee column from board_tasks
         try:
             self._conn.execute(
@@ -568,6 +577,7 @@ class LoomDB:
         labels = json.dumps(d.pop("labels", []))
         action_vars = json.dumps(d.pop("action_vars", {}))
         messages = json.dumps(d.pop("messages", []))
+        depends_on = json.dumps(d.pop("depends_on", []))
         # Map 'group' to 'group_name' for the DB column
         group_name = d.pop("group", "")
         self._conn.execute("""
@@ -578,8 +588,8 @@ class LoomDB:
                  lane, position, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url,
                  parent_task_id, pipeline_depth, pipeline_root_id, status,
-                 scheduled_at, messages)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 scheduled_at, messages, depends_on)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
@@ -593,7 +603,7 @@ class LoomDB:
             d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
             d.get("pipeline_root_id", ""), d.get("status", ""),
             d.get("scheduled_at", ""),
-            messages,
+            messages, depends_on,
         ))
         self._conn.commit()
 
@@ -1132,6 +1142,12 @@ class LoomDB:
                         d.get("messages", "[]"))
                 except (json.JSONDecodeError, TypeError):
                     d["messages"] = []
+                # Decode depends_on JSON
+                try:
+                    d["depends_on"] = json.loads(
+                        d.get("depends_on", "[]"))
+                except (json.JSONDecodeError, TypeError):
+                    d["depends_on"] = []
                 board_tasks[d["id"]] = d
 
         # UI state
