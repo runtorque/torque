@@ -1098,8 +1098,91 @@ let _taskTemplateWaiting = false; // waiting for template list
 let _taskLabels = [];           // user-editable label chips
 let _taskSystemLabels = [];     // loom:* labels (read-only, preserved on save)
 
+var _labelDropdownIdx = -1;
+
+function _getAllLabels() {
+  var labels = {};
+  for (var id in state.board_tasks) {
+    var t = state.board_tasks[id];
+    (t.labels || []).forEach(function(l) {
+      if (!isSystemLabel(l)) labels[l] = (labels[l] || 0) + 1;
+    });
+  }
+  return Object.keys(labels).sort(function(a, b) { return labels[b] - labels[a]; });
+}
+
+function taskLabelsSearch(e) {
+  var val = e.target.value.trim().toLowerCase();
+  var dropdown = document.getElementById('task-labels-dropdown');
+  if (!val) { dropdown.style.display = 'none'; _labelDropdownIdx = -1; return; }
+  var all = _getAllLabels();
+  var html = '';
+  var count = 0;
+  for (var i = 0; i < all.length; i++) {
+    if (_taskLabels.indexOf(all[i]) >= 0) continue;
+    if (all[i].toLowerCase().indexOf(val) < 0) continue;
+    html += '<div class="deps-option" onmousedown="event.preventDefault()" onclick="taskPickLabel(\'' + esc(all[i]).replace(/'/g, "\\'") + '\')">'
+      + esc(all[i]) + '</div>';
+    count++;
+    if (count >= 8) break;
+  }
+  dropdown.innerHTML = html;
+  dropdown.style.display = count ? '' : 'none';
+  _labelDropdownIdx = -1;
+}
+
+function taskPickLabel(label) {
+  if (_taskLabels.indexOf(label) < 0) _taskLabels.push(label);
+  var input = document.getElementById('task-labels-input');
+  input.value = '';
+  document.getElementById('task-labels-dropdown').style.display = 'none';
+  _labelDropdownIdx = -1;
+  _renderTaskLabelChips();
+  input.focus();
+}
+
+function _highlightLabelOption(idx) {
+  var dropdown = document.getElementById('task-labels-dropdown');
+  var opts = dropdown.querySelectorAll('.deps-option');
+  for (var i = 0; i < opts.length; i++) opts[i].classList.toggle('active', i === idx);
+  _labelDropdownIdx = idx;
+}
+
 function taskLabelsKeydown(e) {
-  if (e.key === 'Escape') { closeModals(); return; }
+  var dropdown = document.getElementById('task-labels-dropdown');
+  var visible = dropdown && dropdown.style.display !== 'none';
+  var opts = visible ? dropdown.querySelectorAll('.deps-option') : [];
+
+  if (e.key === 'Escape') {
+    if (visible) { dropdown.style.display = 'none'; _labelDropdownIdx = -1; e.stopPropagation(); return; }
+    closeModals(); return;
+  }
+  if (visible && opts.length) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      _highlightLabelOption((_labelDropdownIdx + 1) % opts.length);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _highlightLabelOption((_labelDropdownIdx - 1 + opts.length) % opts.length);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (_labelDropdownIdx >= 0 && _labelDropdownIdx < opts.length) {
+        opts[_labelDropdownIdx].click();
+      } else {
+        var val = e.target.value.trim();
+        if (val && _taskLabels.indexOf(val) < 0) _taskLabels.push(val);
+        e.target.value = '';
+        dropdown.style.display = 'none';
+        _labelDropdownIdx = -1;
+        _renderTaskLabelChips();
+      }
+      return;
+    }
+  }
   if (e.key === 'Enter') {
     e.preventDefault();
     var val = e.target.value.trim();
