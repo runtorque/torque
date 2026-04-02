@@ -296,8 +296,8 @@ function renderBoard() {
     return;
   }
 
-  // Default to first lane if selected lane is invalid
-  if (!_boardSelectedLane || lanes.indexOf(_boardSelectedLane) === -1) {
+  // Default to first lane if selected lane is invalid (skip when schedules tab is active)
+  if (!_boardShowSchedules && (!_boardSelectedLane || lanes.indexOf(_boardSelectedLane) === -1)) {
     _boardSelectedLane = lanes[0];
   }
 
@@ -386,7 +386,7 @@ function renderBoard() {
   for (var i = 0; i < lanes.length; i++) {
     var l = lanes[i];
     var cnt = _boardLaneCount(l);
-    var cls = l === _boardSelectedLane ? ' active' : '';
+    var cls = (!_boardShowSchedules && l === _boardSelectedLane) ? ' active' : '';
     if (filtersActive && cnt === 0) cls += ' dimmed';
     var escLane = esc(l).replace(/'/g, "\\'");
     html += '<button class="board-lane-tab' + cls + '"'
@@ -415,6 +415,7 @@ function renderBoard() {
   if (_boardShowSchedules) {
     html += _renderSchedulesView();
     panel.innerHTML = html;
+    requestAnimationFrame(function() { boardUpdateScrollArrows(); });
     return;
   }
 
