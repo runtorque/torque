@@ -888,7 +888,8 @@ async def main(connection: iterm2.Connection):
 
     # -- Postscript builder -------------------------------------------------
 
-    def _build_postscript(task, amgr, base_dir="", is_clean=True):
+    def _build_postscript(task, amgr, base_dir="", is_clean=True,
+                          cell=None):
         """Build the loom-ai instruction block appended to dispatch prompts.
 
         Only shows commands relevant to the action's transitions.
@@ -923,6 +924,12 @@ async def main(connection: iterm2.Connection):
             isinstance(tr, dict) and tr.get("ask")
             for tr in transitions)
 
+        commit_hint = ""
+        if (cell and cell.worktree_branch
+                and not cell.worktree_auto_checkpoint):
+            commit_hint = ("\nBefore reporting done, commit all your "
+                           "changes with a descriptive commit message.")
+
         mandate = ""
         if has_transitions or has_ask:
             mandate = (
@@ -949,7 +956,7 @@ async def main(connection: iterm2.Connection):
                 abbrev += ("\nUse `loom ai done` when finished, "
                            "or `loom ai blocked \"reason\"` "
                            "if stuck.")
-            return abbrev
+            return abbrev + commit_hint
 
         lines = [
             mandate,
@@ -993,6 +1000,9 @@ async def main(connection: iterm2.Connection):
             if root and root.id != (parent.id if parent else ""):
                 ctx += f"\nRoot task: \"{root.task[:80]}\""
             lines.append(ctx)
+
+        if commit_hint:
+            lines.append(commit_hint)
 
         return "\n".join(lines)
 
@@ -1512,51 +1522,6 @@ async def main(connection: iterm2.Connection):
                         await _send_agent_prompt(
                             cell, launch_cfg["initial_prompt"],
                             background=True)
-
-            elif cmd == "add_agent_from_action":
-                group = data["group"]
-                act_name = data["action"]
-                variables = data.get("vars", {})
-                base_dir = await _resolve_base_dir(group)
-                raw = action_mgr._load_raw(act_name, base_dir)
-                if not raw:
-                    result = {"type": "error",
-                              "message": f"Action \"{act_name}\" not found"}
-                else:
-                    rendered = action_mgr.render_action(
-                        raw, variables)
-
-                    # Action can override the target group
-                    act_group = rendered.get("group", "")
-                    if act_group and act_group in state.groups:
-                        group = act_group
-
-                    # Use rendered values, falling through to group settings
-                    name = data.get("name") or rendered["name"]
-                    explicit_template = rendered.get("agent_template", "")
-                    launch_cfg = _resolve_agent_launch_config(
-                        group,
-                        base_dir=base_dir,
-                        explicit_template=explicit_template,
-                        overrides=rendered,
-                    )
-                    cell = await _create_agent_with_config(
-                        group, name, launch_cfg,
-                        explicit_template=explicit_template)
-                    if cell:
-                        await _create_child_terminals(
-                            group, cell, terminals=rendered.get("terminals"))
-
-                        # Use the rendered prompt directly
-                        prompt = rendered.get("prompt", "")
-
-                        if launch_cfg.get("initial_prompt") and cell.session_id:
-                            await _send_agent_prompt(
-                                cell, launch_cfg["initial_prompt"])
-                        if prompt and cell.session_id:
-                            await _send_agent_prompt(
-                                cell, prompt, persist=True,
-                                background=True)
 
             elif cmd == "add_terminal":
                 group = data.get("group", "")
@@ -2376,7 +2341,8 @@ async def main(connection: iterm2.Connection):
                                     task, action_mgr,
                                     base_dir if task.action_name
                                     else "",
-                                    is_clean=is_clean)
+                                    is_clean=is_clean,
+                                    cell=cell)
 
                                 # Track dispatch count
                                 cell.tasks_dispatched += 1

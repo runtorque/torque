@@ -226,7 +226,6 @@ function render() {
       html += `  <div class="split-menu">`;
       html += _renderAgentTemplateMenuItems(gname);
       html += `<button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button>`;
-      html += `<button onclick="event.stopPropagation();closeMenus();openAddFromAction('${esc(gname)}')">From Action\u2026</button>`;
       html += `</div>`;
       html += `</div>`;
     }
