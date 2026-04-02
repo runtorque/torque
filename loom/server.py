@@ -1985,6 +1985,19 @@ async def main(connection: iterm2.Connection):
                                 f'"{cell.name}" merged to '
                                 f"{cell.worktree_base_branch}",
                                 "success")
+                            # Unlink Done tasks from this agent so
+                            # they don't re-appear in future merge
+                            # messages.  Tasks stay in Done as a
+                            # historical record.
+                            for t in list(
+                                    state.board_tasks.values()):
+                                if t.agent_id == cell.id \
+                                        and t.lane == "Done":
+                                    t.agent_id = ""
+                                    state._emit(
+                                        "task_upsert", **asdict(t))
+                                    state._db_save_task(t)
+
                             close_flag = bool(
                                 data.get("close_on_merge"))
                             clear_flag = bool(
@@ -2036,13 +2049,14 @@ async def main(connection: iterm2.Connection):
                                 asyncio.create_task(
                                     _deferred_close())
                             elif cell.worktree_path:
-                                # Rebase worktree onto updated base
-                                # so the agent continues cleanly
+                                # Reset worktree branch to base tip
+                                # so new work starts fresh (avoids
+                                # re-merging already-merged commits)
                                 valid = await \
                                     worktree_mgr.validate(cell)
                                 if valid:
                                     ok = await worktree_mgr\
-                                        .rebase_onto_base(cell)
+                                        .reset_to_base(cell)
                                     if ok:
                                         cell.worktree_checkpoints =\
                                             await worktree_mgr\
@@ -2052,7 +2066,7 @@ async def main(connection: iterm2.Connection):
                                         state._emit_agent(cell)
                                     else:
                                         log.warning(
-                                            "Post-merge rebase "
+                                            "Post-merge reset "
                                             "failed for '%s'",
                                             cell.name)
                             result = {

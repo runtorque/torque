@@ -746,6 +746,43 @@ class WorktreeManager:
             log.exception("server_merge failed for '%s'", cell.name)
             return {"ok": False, "error": "Server merge failed"}
 
+    async def reset_to_base(self, cell) -> bool:
+        """Reset the worktree branch to the base branch tip.
+
+        Used after merge: all old commits are already incorporated into
+        base, so the worktree should start fresh.  This avoids the
+        re-merge problem that ``rebase_onto_base`` hits with squash
+        merges (where individual commits can't be cleanly replayed on
+        top of the squashed result).
+
+        Returns True on success, False on failure.
+        """
+        if not cell.worktree_path or not cell.worktree_base_branch:
+            return False
+        base = cell.worktree_base_branch
+        try:
+            # switch -C moves the current branch to <base> and
+            # checks it out — a single porcelain command that
+            # updates ref + index + working tree.
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", cell.worktree_path,
+                "switch", "-C", cell.worktree_branch, base,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                err = stderr.decode().strip()
+                log.warning("reset_to_base failed for '%s': %s",
+                            cell.name, err)
+                return False
+            log.info("Reset '%s' to %s after merge",
+                     cell.name, base)
+            return True
+        except Exception:
+            log.exception("reset_to_base failed for '%s'", cell.name)
+            return False
+
     async def rebase_onto_base(self, cell) -> bool:
         """Rebase the worktree branch onto its base branch.
 
