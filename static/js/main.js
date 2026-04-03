@@ -391,6 +391,10 @@ document.addEventListener('keydown', (e) => {
       switchGroup(e.shiftKey ? -1 : 1);
       break;
     case 'Escape':
+      if (typeof _boardSelectedCount === 'function' && _boardSelectedCount() > 0) {
+        boardClearSelection();
+        break;
+      }
       closeModals();
       closeBroadcast();
       closeMenus();

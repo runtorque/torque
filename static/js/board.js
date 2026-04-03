@@ -27,6 +27,8 @@ var _boardFilterDropdownCleanup = null;
 var _boardPreFilterLane = '';    // saved lane before search, restored on clear
 var _boardShowSchedules = false; // true when "Schedules" tab is active
 var _boardRenderLimit = 50;      // virtual scroll: render this many root tasks initially
+var _boardSelectedTasks = {};    // task_id → true for multi-select
+var _boardLastSelectedTask = ''; // last clicked task for shift-range select
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -225,9 +227,10 @@ function _renderBoardCard(t, childrenOf, depth) {
   var isDone = t.lane === 'Done';
   var dotClass = t.agent_id ? _boardAgentStatus(t.agent_id) : '';
   var focused = t.id === _boardFocusedTask ? ' focused' : '';
+  var selected = _boardSelectedTasks[t.id] ? ' board-card-selected' : '';
   var subClass = isSubordinate ? ' board-card-subordinate' : '';
   var doneClass = (isSubordinate && isDone) ? ' board-card-done' : '';
-  var cardHtml = '<div class="board-card' + focused + subClass + doneClass + '"'
+  var cardHtml = '<div class="board-card' + focused + selected + subClass + doneClass + '"'
     + ' data-task-id="' + t.id + '"'
     + ' draggable="true"'
     + ' ondragstart="boardCardDragStart(event,\'' + t.id + '\')"'
@@ -235,7 +238,7 @@ function _renderBoardCard(t, childrenOf, depth) {
     + ' ondragover="boardCardDragOver(event)"'
     + ' ondragleave="boardCardDragLeave(event)"'
     + ' ondrop="boardCardDrop(event)"'
-    + ' onclick="boardFocusTask(\'' + t.id + '\')"'
+    + ' onclick="boardFocusTask(\'' + t.id + '\', event)"'
     + ' oncontextmenu="boardCardMenu(event,\'' + t.id + '\')"'
     + ' ondblclick="openEditTask(\'' + t.id + '\')">';
   // Collapse toggle for cards with children
@@ -587,6 +590,10 @@ function renderBoard() {
   }
 
   html += '</div>';
+
+  // Selection bar
+  html += _renderBoardSelectionBar();
+
   panel.innerHTML = html;
 
   // Auto-focus inputs
@@ -642,6 +649,12 @@ function renderBoard() {
           boardLoadMore();
         }
       });
+      // Click on empty space clears selection
+      cardsEl.addEventListener('click', function(e) {
+        if (e.target === cardsEl && _boardSelectedCount() > 0) {
+          boardClearSelection();
+        }
+      });
     }
 
   });
@@ -670,6 +683,8 @@ function boardSelectLane(lane) {
   if (tabs) _boardScrollLeft = tabs.scrollLeft;
   _boardSelectedLane = lane;
   _boardFocusedTask = '';
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = '';
   _boardRenderLimit = 50;
   renderBoard();
 }
@@ -981,7 +996,42 @@ function boardCopyTaskId(taskId) {
 
 /* ---- Card actions --------------------------------------------------- */
 
-function boardFocusTask(id) {
+function boardFocusTask(id, evt) {
+  if (evt && (evt.metaKey || evt.ctrlKey)) {
+    // Cmd/Ctrl+Click: toggle in selection
+    if (_boardSelectedTasks[id]) {
+      delete _boardSelectedTasks[id];
+    } else {
+      _boardSelectedTasks[id] = true;
+    }
+    _boardLastSelectedTask = id;
+    _boardFocusedTask = id;
+    renderBoard();
+    return;
+  }
+  if (evt && evt.shiftKey && _boardLastSelectedTask) {
+    // Shift+Click: range select within the same lane
+    var lane = _boardSelectedLane || _boardLanes()[0] || '';
+    var tasks = _boardTasksInLane(lane);
+    var fromIdx = -1, toIdx = -1;
+    for (var i = 0; i < tasks.length; i++) {
+      if (tasks[i].id === _boardLastSelectedTask) fromIdx = i;
+      if (tasks[i].id === id) toIdx = i;
+    }
+    if (fromIdx >= 0 && toIdx >= 0) {
+      var lo = Math.min(fromIdx, toIdx);
+      var hi = Math.max(fromIdx, toIdx);
+      for (var i = lo; i <= hi; i++) {
+        _boardSelectedTasks[tasks[i].id] = true;
+      }
+    }
+    _boardFocusedTask = id;
+    renderBoard();
+    return;
+  }
+  // Plain click: clear selection, set single focus
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = id;
   _boardFocusedTask = id;
   renderBoard();
 }
@@ -993,6 +1043,121 @@ function boardFocusAgent(agentId) {
     selectedAgentId = agentId;
     focusedItemId = agentId;
   }
+}
+
+/* ---- Multi-select / bulk operations --------------------------------- */
+
+function _boardSelectedCount() {
+  var n = 0;
+  for (var k in _boardSelectedTasks) n++;
+  return n;
+}
+
+function boardClearSelection() {
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = '';
+  renderBoard();
+}
+
+function _renderBoardSelectionBar() {
+  var count = _boardSelectedCount();
+  if (count === 0) return '';
+  var lanes = _boardLanes();
+  var html = '<div class="board-selection-bar">';
+  html += '<span class="board-selection-count">' + count + ' selected</span>';
+  // Move to lane dropdown
+  html += '<div class="board-selection-dropdown-wrap">';
+  html += '<button class="board-selection-btn" onclick="boardBulkToggleMove(event)">Move to &#9662;</button>';
+  html += '<div class="board-selection-dropdown" id="board-bulk-move-menu" style="display:none">';
+  for (var i = 0; i < lanes.length; i++) {
+    var escLane = esc(lanes[i]).replace(/'/g, "\\'");
+    html += '<button class="board-selection-dropdown-item" onclick="boardBulkMove(\'' + escLane + '\')">' + esc(lanes[i]) + '</button>';
+  }
+  html += '</div></div>';
+  // Add label
+  html += '<div class="board-selection-dropdown-wrap">';
+  html += '<button class="board-selection-btn" onclick="boardBulkToggleLabel(event)">Add label &#9662;</button>';
+  html += '<div class="board-selection-dropdown" id="board-bulk-label-menu" style="display:none">';
+  html += '<input type="text" class="board-selection-label-input" id="board-bulk-label-input"'
+    + ' placeholder="Label name" onkeydown="boardBulkLabelKeydown(event)">';
+  html += '</div></div>';
+  // Delete
+  html += '<button class="board-selection-btn board-selection-btn-danger" onclick="boardBulkDelete()">Delete</button>';
+  // Clear selection
+  html += '<button class="board-selection-btn" onclick="boardClearSelection()">&#10005;</button>';
+  html += '</div>';
+  return html;
+}
+
+function boardBulkToggleMove(evt) {
+  evt.stopPropagation();
+  var menu = document.getElementById('board-bulk-move-menu');
+  var labelMenu = document.getElementById('board-bulk-label-menu');
+  if (labelMenu) labelMenu.style.display = 'none';
+  if (menu) menu.style.display = menu.style.display === 'none' ? '' : 'none';
+}
+
+function boardBulkToggleLabel(evt) {
+  evt.stopPropagation();
+  var menu = document.getElementById('board-bulk-label-menu');
+  var moveMenu = document.getElementById('board-bulk-move-menu');
+  if (moveMenu) moveMenu.style.display = 'none';
+  if (menu) {
+    menu.style.display = menu.style.display === 'none' ? '' : 'none';
+    if (menu.style.display !== 'none') {
+      var inp = document.getElementById('board-bulk-label-input');
+      if (inp) inp.focus();
+    }
+  }
+}
+
+function boardBulkLabelKeydown(evt) {
+  if (evt.key === 'Enter') {
+    evt.preventDefault();
+    var inp = document.getElementById('board-bulk-label-input');
+    var label = inp ? inp.value.trim() : '';
+    if (label) boardBulkAddLabel(label);
+  }
+  if (evt.key === 'Escape') {
+    var menu = document.getElementById('board-bulk-label-menu');
+    if (menu) menu.style.display = 'none';
+  }
+}
+
+function boardBulkMove(lane) {
+  var tasks = _boardTasks();
+  for (var id in _boardSelectedTasks) {
+    if (tasks[id]) send({ cmd: 'board_move_task', id: id, lane: lane });
+  }
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = '';
+}
+
+function boardBulkAddLabel(label) {
+  var tasks = _boardTasks();
+  for (var id in _boardSelectedTasks) {
+    var t = tasks[id];
+    if (!t) continue;
+    var labels = (t.labels || []).slice();
+    if (labels.indexOf(label) < 0) {
+      labels.push(label);
+      send({ cmd: 'board_update_task', id: id, labels: labels });
+    }
+  }
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = '';
+}
+
+function boardBulkDelete() {
+  var count = _boardSelectedCount();
+  showConfirm('Delete ' + count + ' task' + (count === 1 ? '' : 's') + '?').then(function(ok) {
+    if (!ok) return;
+    for (var id in _boardSelectedTasks) {
+      send({ cmd: 'board_remove_task', id: id });
+    }
+    _boardSelectedTasks = {};
+    _boardLastSelectedTask = '';
+  });
 }
 
 function boardEditTask(taskId) {

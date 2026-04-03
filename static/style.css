@@ -1205,6 +1205,59 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-card-subordinate .board-card-chain { font-size: 8px; }
 .board-card-subordinate .board-card-menu-btn { width: 16px; height: 16px; font-size: 10px; }
 .board-card-done { opacity: 0.5; }
+/* Multi-select */
+.board-card-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-cell));
+}
+.board-card-selected .board-card-dot::before {
+  content: '\2713'; font-size: 7px; color: var(--accent);
+  position: absolute; left: -1px; top: -2px;
+}
+.board-selection-bar {
+  position: sticky; bottom: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-cell);
+  border-top: 1px solid var(--border);
+  z-index: 10;
+}
+.board-selection-count {
+  font-size: 10px; font-weight: 600;
+  color: var(--accent);
+  margin-right: 4px;
+}
+.board-selection-btn {
+  font-size: 9px; padding: 3px 8px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  cursor: pointer;
+}
+.board-selection-btn:hover { background: var(--bg-hover); }
+.board-selection-btn-danger { color: var(--red); border-color: var(--red); }
+.board-selection-btn-danger:hover { background: color-mix(in srgb, var(--red) 12%, var(--bg)); }
+.board-selection-dropdown-wrap { position: relative; }
+.board-selection-dropdown {
+  position: absolute; bottom: 100%; left: 0;
+  margin-bottom: 4px;
+  background: var(--bg-cell); border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 120px; max-height: 200px; overflow-y: auto;
+  z-index: 20;
+}
+.board-selection-dropdown-item {
+  display: block; width: 100%;
+  text-align: left; padding: 4px 10px;
+  font-size: 10px; background: none; border: none;
+  color: var(--text); cursor: pointer;
+}
+.board-selection-dropdown-item:hover { background: var(--bg-hover); }
+.board-selection-label-input {
+  width: calc(100% - 12px); margin: 4px 6px;
+  font-size: 10px; padding: 3px 6px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
 /* Collapse toggle */
 .board-card-collapse-btn {
   width: 14px; height: 14px; font-size: 7px;

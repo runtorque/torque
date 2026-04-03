@@ -1569,6 +1569,15 @@ function _showPromptPreview(msg) {
   document.getElementById('modal-prompt-preview').classList.add('visible');
 }
 
+function copyPromptPreview() {
+  var text = document.getElementById('prompt-preview-content').textContent;
+  navigator.clipboard.writeText(text).then(function() {
+    var btn = document.getElementById('prompt-preview-copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+  });
+}
+
 /* -- Global Settings ---------------------------------------------------- */
 var _glsKeybindings = {};     // current keybinding overrides being edited
 var _glsDefaults = {};        // default keybinding specs from server
