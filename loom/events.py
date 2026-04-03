@@ -3,6 +3,7 @@
 import asyncio
 import time
 from collections import deque
+from dataclasses import asdict
 
 from .adapters.base import AgentEvent
 from .config import log
@@ -200,6 +201,13 @@ class EventBus:
             cell.needs_attention = False
             if cell.activity_detail:
                 cell.last_event_text = cell.activity_detail
+            # Auto-remove blocked label when agent resumes activity
+            if cell.current_task_id and cell.activity not in ("", "waiting"):
+                task = self._state.board_tasks.get(cell.current_task_id)
+                if task and "loom:blocked" in task.labels:
+                    task.labels.remove("loom:blocked")
+                    self._state._db_save_task(task)
+                    self._state._emit("task_upsert", **asdict(task))
 
         elif et == "tool_start":
             cell.activity = "tool_call"

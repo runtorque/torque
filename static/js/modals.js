@@ -1614,6 +1614,8 @@ function _showGlobalSettingsModal(data) {
     s.filter_by_window !== undefined ? s.filter_by_window : true;
   document.getElementById('gls-focus-new-tabs').checked =
     s.focus_new_tabs !== undefined ? s.focus_new_tabs : true;
+  document.getElementById('gls-focus-on-click').checked =
+    s.focus_on_click || false;
   document.getElementById('gls-max-event-log').value =
     s.max_event_log !== undefined ? s.max_event_log : 500;
 
@@ -1771,6 +1773,7 @@ function submitGlobalSettings() {
     default_command: document.getElementById('gls-default-cmd').value.trim(),
     filter_by_window: document.getElementById('gls-filter-window').checked,
     focus_new_tabs: document.getElementById('gls-focus-new-tabs').checked,
+    focus_on_click: document.getElementById('gls-focus-on-click').checked,
     default_lanes: lanes,
     keybindings: _glsKeybindings,
     max_pipeline_depth: parseInt(document.getElementById('gls-max-pipeline-depth').value) || 0,
