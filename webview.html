@@ -356,6 +356,11 @@
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
             data-hint="When enabled, newly created agent/terminal tabs are focused immediately. When disabled, the current tab keeps focus (may cause a brief flicker).">?</span>
         </label>
+        <label class="gs-checkbox">
+          <input id="gls-focus-on-click" type="checkbox"> Focus tab on click
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
+            data-hint="When enabled, clicking an agent or terminal also focuses its iTerm2 tab. When disabled, single click only selects (double click to focus).">?</span>
+        </label>
         <label>Max event log entries
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
             data-hint="Maximum number of panel events persisted to SQLite. Older events are trimmed automatically.">?</span>

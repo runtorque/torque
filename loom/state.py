@@ -233,6 +233,7 @@ class GlobalSettings:
     default_command: str = ""        # empty = use config.DEFAULT_COMMAND (env var fallback)
     filter_by_window: bool = True    # global default for window filtering
     focus_new_tabs: bool = True      # switch focus to newly created tabs
+    focus_on_click: bool = False     # single click also focuses the iTerm2 tab
     # General > Board
     default_lanes: list[str] = field(default_factory=lambda: list(_DEFAULT_LANES))
     # Keybindings — action name → {modifiers, keycode, character} overrides
