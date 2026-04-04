@@ -310,10 +310,6 @@ function _renderBoardCard(t, childrenOf, depth) {
     else if (lastMsg.action === 'error') msgClass += ' board-card-activity-error';
     else if (lastMsg.action === 'blocked') msgClass += ' board-card-activity-blocked';
     cardHtml += '<div class="' + msgClass + ' board-card-activity-clickable" onclick="event.stopPropagation();showTaskMessages(\'' + t.id + '\')">' + esc(msgText) + '</div>';
-    if (t.messages.length > 1) {
-      cardHtml += '<button class="board-card-history-btn" onclick="event.stopPropagation();showTaskMessages(\'' + t.id + '\')">'
-        + t.messages.length + ' messages</button>';
-    }
   }
   cardHtml += '</div>';
   cardHtml += '<button class="board-card-menu-btn" onclick="event.stopPropagation();boardCardMenu(event,\'' + t.id + '\')" title="Actions">&#8942;</button>';
@@ -339,10 +335,11 @@ function showTaskMessages(taskId) {
     var seq = '<span class="task-msg-seq">#' + (i + 1) + '</span>';
     var badge = '<span class="task-msg-badge task-msg-' + esc(m.action) + '">' + esc(m.action) + '</span>';
     var time = m.timestamp ? _relativeTime(m.timestamp) : '';
+    var absTime = m.timestamp ? new Date(m.timestamp * 1000).toLocaleString() : '';
     var agent = m.agent ? ' <span class="task-msg-agent">' + esc(m.agent) + '</span>' : '';
     html += '<div class="task-msg-row">';
     html += '<div class="task-msg-header">' + seq + badge + agent;
-    if (time) html += '<span class="task-msg-time">' + esc(time) + '</span>';
+    if (time) html += '<span class="task-msg-time" title="' + esc(absTime) + '">' + esc(time) + '</span>';
     html += '</div>';
     if (m.message) html += '<div class="task-msg-text">' + esc(m.message) + '</div>';
     html += '</div>';
