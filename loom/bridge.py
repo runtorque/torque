@@ -591,20 +591,48 @@ class ITerm2Adapter:
             return
 
         if policy.hook_event:
-            # Wait for signal_input_ready() from the event bus
+            # Hybrid: wait for hook event OR screen-based detection
             evt = self._input_ready_events.get(cell.id)
             if not evt:
                 evt = asyncio.Event()
                 self._input_ready_events[cell.id] = evt
-            try:
-                await asyncio.wait_for(evt.wait(), policy.timeout_seconds)
-            except asyncio.TimeoutError:
-                log.info("Hook-based input-ready timed out for '%s' "
+
+            detected = False
+            deadline = asyncio.get_running_loop().time() + policy.timeout_seconds
+            stable_polls = 0
+            while asyncio.get_running_loop().time() < deadline:
+                if evt.is_set():
+                    log.info("Input-ready via hook for '%s'", cell.name)
+                    detected = True
+                    break
+                # Screen-poll fallback
+                screen_text = await self._read_screen_text(session)
+                if screen_text and adapter.is_input_ready_screen(
+                        screen_text):
+                    stable_polls += 1
+                    if stable_polls >= max(policy.stable_polls, 1):
+                        log.info("Input-ready via screen for '%s'",
+                                 cell.name)
+                        detected = True
+                        break
+                else:
+                    stable_polls = 0
+                # Short wait — also wakes on hook event
+                try:
+                    await asyncio.wait_for(
+                        evt.wait(), policy.poll_interval_seconds)
+                    log.info("Input-ready via hook for '%s'", cell.name)
+                    detected = True
+                    break
+                except asyncio.TimeoutError:
+                    pass
+
+            if not detected:
+                log.info("Input-ready timed out for '%s' "
                          "(type=%s, session=%s)",
                          cell.name, cell.agent_type, cell.session_id)
-            else:
-                if policy.post_ready_delay > 0:
-                    await asyncio.sleep(policy.post_ready_delay)
+            if detected and policy.post_ready_delay > 0:
+                await asyncio.sleep(policy.post_ready_delay)
             self._input_ready_events.pop(cell.id, None)
             self._input_ready_sessions.add(cell.session_id)
             return
