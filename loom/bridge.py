@@ -23,6 +23,7 @@ class ITerm2Adapter:
         self._prompt_tasks: dict[str, asyncio.Task] = {}
         self._job_tasks: dict[str, asyncio.Task] = {}
         self._input_ready_sessions: set[str] = set()
+        self._input_ready_events: dict[str, asyncio.Event] = {}
         self._term_task: Optional[asyncio.Task] = None
         self._focus_task: Optional[asyncio.Task] = None
         self.on_session_terminated = None  # async callback(cell)
@@ -231,6 +232,7 @@ class ITerm2Adapter:
         session = tab.current_session
         cell.session_id = session.session_id
         self._input_ready_sessions.discard(session.session_id)
+        self._input_ready_events.pop(cell.id, None)
         cell.window_id = window.window_id
         log.info("Tab created: session_id=%s window=%s",
                  session.session_id, window.window_id)
@@ -564,6 +566,17 @@ class ITerm2Adapter:
                       session.session_id)
             return ""
 
+    def signal_input_ready(self, cell_id: str):
+        """Signal that an agent's TUI is ready for input (called on hook event)."""
+        evt = self._input_ready_events.get(cell_id)
+        if evt:
+            evt.set()
+        else:
+            # Hook arrived before _wait_for_input_ready — pre-set the event
+            evt = asyncio.Event()
+            evt.set()
+            self._input_ready_events[cell_id] = evt
+
     async def _wait_for_input_ready(self, session, cell: AgentCell):
         if cell.session_id in self._input_ready_sessions:
             return
@@ -574,6 +587,25 @@ class ITerm2Adapter:
         adapter = get_adapter(cell.agent_type)
         policy = adapter.get_input_ready_policy()
         if not policy.enabled:
+            self._input_ready_sessions.add(cell.session_id)
+            return
+
+        if policy.hook_event:
+            # Wait for signal_input_ready() from the event bus
+            evt = self._input_ready_events.get(cell.id)
+            if not evt:
+                evt = asyncio.Event()
+                self._input_ready_events[cell.id] = evt
+            try:
+                await asyncio.wait_for(evt.wait(), policy.timeout_seconds)
+            except asyncio.TimeoutError:
+                log.info("Hook-based input-ready timed out for '%s' "
+                         "(type=%s, session=%s)",
+                         cell.name, cell.agent_type, cell.session_id)
+            else:
+                if policy.post_ready_delay > 0:
+                    await asyncio.sleep(policy.post_ready_delay)
+            self._input_ready_events.pop(cell.id, None)
             self._input_ready_sessions.add(cell.session_id)
             return
 
@@ -743,6 +775,7 @@ class ITerm2Adapter:
                             log.info("Session terminated: '%s' (session %s)",
                                      cell.name, sid)
                             self._input_ready_sessions.discard(sid)
+                            self._input_ready_events.pop(cell.id, None)
                             cell.status = "stopped"
                             cell.session_id = None
                             cell.current_process = ""

@@ -545,6 +545,8 @@ async def main(connection: iterm2.Connection):
                 dead.add(ws_client)
         state._ws_clients -= dead
 
+    # Signal bridge when agent TUI is ready (hook-based session_start)
+    event_bus.on_session_start = lambda cell: bridge.signal_input_ready(cell.id)
     # Handle agent turn completion (hook-based session_end)
     event_bus.on_session_end = _on_agent_session_end
     # Also checkpoint when the terminal session is actually closed (tab closed)

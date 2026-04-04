@@ -31,9 +31,11 @@ class InputReadyPolicy:
     """Policy for waiting until an interactive TUI can accept submitted input."""
 
     enabled: bool = False
+    hook_event: bool = False
     timeout_seconds: float = 0.0
     poll_interval_seconds: float = 0.25
     stable_polls: int = 1
+    post_ready_delay: float = 0.0
 
 
 class AgentAdapter:

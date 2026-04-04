@@ -6,7 +6,7 @@ from pathlib import Path
 import shlex
 from textwrap import dedent
 
-from .base import AgentAdapter, AgentEvent
+from .base import AgentAdapter, AgentEvent, InputReadyPolicy
 
 # Marker URL used to identify Loom-managed hooks during cleanup
 LOOM_HOOK_URL = "http://localhost:18932/events"
@@ -156,6 +156,15 @@ class ClaudeCodeAdapter(AgentAdapter):
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
         import shlex
         return f"{boot_cmd} --resume {shlex.quote(session_id)}"
+
+    def get_input_ready_policy(self) -> InputReadyPolicy:
+        """Wait for the SessionStart hook instead of polling the screen."""
+        return InputReadyPolicy(
+            enabled=True,
+            hook_event=True,
+            timeout_seconds=30.0,
+            post_ready_delay=0.5,
+        )
 
     def get_hook_config(self, cell) -> dict | None:
         """Return the Claude Code hooks config to write for this cell.

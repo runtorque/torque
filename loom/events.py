@@ -132,6 +132,7 @@ class EventBus:
         self._panel_log = panel_log
         self._timers: dict[str, asyncio.TimerHandle] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
+        self.on_session_start = None  # callback(cell) — agent TUI ready
         self.on_session_end = None  # async callback(cell) — agent finished turn
 
     def start(self):
@@ -183,6 +184,9 @@ class EventBus:
             if agent_sid and agent_sid != cell.agent_session_id:
                 cell.agent_session_id = agent_sid
                 self._state._db_save_agent(cell)
+            # Signal the bridge that this agent's TUI is ready for input
+            if self.on_session_start:
+                self.on_session_start(cell)
 
         elif et == "session_end":
             cell.activity = ""
