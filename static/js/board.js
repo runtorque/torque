@@ -1179,6 +1179,15 @@ function _renderBoardSelectionBar() {
   html += '<input type="text" class="board-selection-label-input" id="board-bulk-label-input"'
     + ' placeholder="Label name" onkeydown="boardBulkLabelKeydown(event)">';
   html += '</div></div>';
+  // Dispatch (only when all selected tasks are in Backlog)
+  var allBacklog = true;
+  for (var id in _boardSelectedTasks) {
+    var _t = (state.board_tasks || {})[id];
+    if (!_t || _t.lane !== 'Backlog') { allBacklog = false; break; }
+  }
+  if (allBacklog) {
+    html += '<button class="board-selection-btn" onclick="boardBulkDispatch()">Dispatch</button>';
+  }
   // Delete
   html += '<button class="board-selection-btn board-selection-btn-danger" onclick="boardBulkDelete()">Delete</button>';
   // Clear selection
@@ -1256,6 +1265,102 @@ function boardBulkDelete() {
     _boardSelectedTasks = {};
     _boardLastSelectedTask = '';
   });
+}
+
+function boardBulkDispatch() {
+  var tasks = [];
+  for (var id in _boardSelectedTasks) {
+    var t = (state.board_tasks || {})[id];
+    if (t) tasks.push(t);
+  }
+  if (!tasks.length) return;
+  var assigned = [];
+  var unassigned = [];
+  for (var i = 0; i < tasks.length; i++) {
+    if (tasks[i].agent_id) assigned.push(tasks[i]);
+    else unassigned.push(tasks[i]);
+  }
+  if (!unassigned.length) {
+    _boardBulkDispatchSend(tasks);
+    return;
+  }
+  _boardShowBulkDispatchDialog(assigned, unassigned);
+}
+
+function _boardBulkDispatchSend(tasks) {
+  for (var i = 0; i < tasks.length; i++) {
+    var msg = { cmd: 'dispatch_task', id: tasks[i].id };
+    if (tasks[i].agent_id) msg.agent_id = tasks[i].agent_id;
+    else msg.create_agent = true;
+    send(msg);
+  }
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = '';
+  renderBoard();
+}
+
+function _boardShowBulkDispatchDialog(assigned, unassigned) {
+  var grp = _currentGroup();
+  var agents = [];
+  if (state && state.groups && state.groups[grp]) {
+    var aids = state.groups[grp];
+    for (var i = 0; i < aids.length; i++) {
+      var a = state.agents[aids[i]];
+      if (a && a.cell_type === 'agent') agents.push(a);
+    }
+  }
+  var total = assigned.length + unassigned.length;
+  var msg = total + ' task' + (total === 1 ? '' : 's') + ' to dispatch';
+  if (assigned.length) msg += ', ' + unassigned.length + ' need an agent';
+  else msg = unassigned.length + ' task' + (unassigned.length === 1 ? '' : 's') + ' need an agent';
+
+  document.getElementById('confirm-message').textContent = msg;
+  var extras = document.getElementById('confirm-extras');
+  extras.innerHTML = '';
+
+  // "New agent for each" button
+  var newBtn = document.createElement('button');
+  newBtn.className = 'btn-primary';
+  newBtn.textContent = 'New agent for each';
+  newBtn.style.cssText = 'width:100%;margin-bottom:4px;';
+  newBtn.onclick = function() {
+    document.getElementById('modal-confirm').classList.remove('visible');
+    _boardBulkDispatchSend(assigned.concat(unassigned));
+  };
+  extras.appendChild(newBtn);
+
+  // Existing agent buttons
+  for (var j = 0; j < agents.length; j++) {
+    (function(ag) {
+      var btn = document.createElement('button');
+      btn.className = 'btn-secondary';
+      btn.textContent = ag.name;
+      btn.style.cssText = 'width:100%;margin-bottom:4px;';
+      btn.onclick = function() {
+        document.getElementById('modal-confirm').classList.remove('visible');
+        for (var k = 0; k < unassigned.length; k++) unassigned[k].agent_id = ag.id;
+        _boardBulkDispatchSend(assigned.concat(unassigned));
+      };
+      extras.appendChild(btn);
+    })(agents[j]);
+  }
+
+  // Wire cancel button
+  _confirmResolve = function() {};
+  var yesBtn = document.getElementById('confirm-yes-btn');
+  yesBtn.style.display = 'none';
+  document.getElementById('modal-confirm').classList.add('visible');
+  // Restore yes button on close
+  var obs = new MutationObserver(function(mutations) {
+    for (var m = 0; m < mutations.length; m++) {
+      if (!document.getElementById('modal-confirm').classList.contains('visible')) {
+        yesBtn.style.display = '';
+        obs.disconnect();
+        break;
+      }
+    }
+  });
+  obs.observe(document.getElementById('modal-confirm'), { attributes: true, attributeFilter: ['class'] });
 }
 
 function boardEditTask(taskId) {
