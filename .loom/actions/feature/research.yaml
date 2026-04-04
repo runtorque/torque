@@ -36,7 +36,7 @@ prompt: |
 
   ## When the plan is ready
 
-  Report yourself as blocked using `loom ai blocked "Plan ready for review"`. This notifies the user so they can review the plan in your output. Do NOT derive to implementation yourself — the user will approve and dispatch the next step.
+  Ask the user to review the plan using the `loom_ask` MCP tool. This notifies the user so they can review the plan in your output. Do NOT derive to implementation before the user approves the plan, only after the task has been approved.
 
   Do NOT write code, deploy anything, or make changes. Only research and plan.
 labels:
@@ -47,4 +47,5 @@ transitions:
   status: Implementing
   target: self
 - ask: true
-  when: you need clarification or additional details from the user before proceeding
+  when: you need clarification or additional details from the user, or you're done
+    planning and ready to present the plan to the user
