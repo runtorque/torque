@@ -1173,6 +1173,8 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   padding-left: 2px; margin-top: 2px;
   font-style: italic;
 }
+.board-card-activity-clickable { cursor: pointer; }
+.board-card-activity-clickable:hover { text-decoration: underline; }
 .board-card-activity-done { color: var(--green, #3fb950); }
 .board-card-activity-error { color: var(--red, #f85149); }
 .board-card-activity-blocked { color: var(--yellow, #d29922); }
@@ -1195,6 +1197,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .task-msg-progress { background: var(--bg-hover); color: var(--text-dim); }
 .task-msg-derive, .task-msg-ask { background: rgba(88,166,255,.12); color: var(--accent); }
 .task-msg-name { background: var(--bg-hover); color: var(--text-dim); }
+.task-msg-seq { font-size: 9px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .task-msg-agent { font-size: 9px; color: var(--text-dim); }
 .task-msg-time { font-size: 9px; color: var(--text-dim); margin-left: auto; }
 .task-msg-text { font-size: 11px; white-space: pre-wrap; word-break: break-word; }
