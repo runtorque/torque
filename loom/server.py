@@ -2123,6 +2123,19 @@ async def main(connection: iterm2.Connection):
                 fields = {k: v for k, v in data.items()
                           if k not in ("cmd", "id")}
                 state.board_update_task(tid, **fields)
+                # Auto-dispatch if agent_id was set and agent is idle
+                _new_aid = fields.get("agent_id", "")
+                if _new_aid:
+                    _tsk = state.board_tasks.get(tid)
+                    _cell = state.agents.get(_new_aid)
+                    if (_tsk and _cell
+                            and _tsk.lane == "To Do"
+                            and not _cell.current_task_id
+                            and _cell.cell_type == "agent"
+                            and state.board_deps_met(_tsk)):
+                        await handle_command({
+                            "cmd": "dispatch_task",
+                            "id": tid, "agent_id": _new_aid})
 
             elif cmd == "board_remove_task":
                 state.board_remove_task(_resolve_task_id(data.get("id", "")))
