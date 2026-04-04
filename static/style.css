@@ -2374,7 +2374,7 @@ body.diff-view-open #ctx-menu {
 }
 .deps-dropdown {
   position: absolute; left: 0; right: 0; z-index: 20;
-  background: var(--bg-secondary);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   max-height: 200px; overflow-y: auto;
