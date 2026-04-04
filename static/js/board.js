@@ -305,12 +305,11 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (t.messages && t.messages.length) {
     var lastMsg = t.messages[t.messages.length - 1];
     var msgText = lastMsg.message || '';
-    if (msgText.length > 60) msgText = msgText.substring(0, 57) + '...';
     var msgClass = 'board-card-activity';
     if (lastMsg.action === 'done' || lastMsg.action === 'ready') msgClass += ' board-card-activity-done';
     else if (lastMsg.action === 'error') msgClass += ' board-card-activity-error';
     else if (lastMsg.action === 'blocked') msgClass += ' board-card-activity-blocked';
-    cardHtml += '<div class="' + msgClass + '">' + esc(msgText) + '</div>';
+    cardHtml += '<div class="' + msgClass + ' board-card-activity-clickable" onclick="event.stopPropagation();showTaskMessages(\'' + t.id + '\')">' + esc(msgText) + '</div>';
   }
   cardHtml += '</div>';
   cardHtml += '<button class="board-card-menu-btn" onclick="event.stopPropagation();boardCardMenu(event,\'' + t.id + '\')" title="Actions">&#8942;</button>';
@@ -324,6 +323,30 @@ function _renderBoardCard(t, childrenOf, depth) {
     }
   }
   return cardHtml;
+}
+
+function showTaskMessages(taskId) {
+  var t = state.board_tasks[taskId];
+  if (!t || !t.messages || !t.messages.length) return;
+  var html = '';
+  var total = t.messages.length;
+  for (var i = total - 1; i >= 0; i--) {
+    var m = t.messages[i];
+    var seq = '<span class="task-msg-seq">#' + (i + 1) + '</span>';
+    var badge = '<span class="task-msg-badge task-msg-' + esc(m.action) + '">' + esc(m.action) + '</span>';
+    var time = m.timestamp ? _relativeTime(m.timestamp) : '';
+    var absTime = m.timestamp ? new Date(m.timestamp * 1000).toLocaleString() : '';
+    var agent = m.agent ? ' <span class="task-msg-agent">' + esc(m.agent) + '</span>' : '';
+    html += '<div class="task-msg-row">';
+    html += '<div class="task-msg-header">' + seq + badge + agent;
+    if (time) html += '<span class="task-msg-time" title="' + esc(absTime) + '">' + esc(time) + '</span>';
+    html += '</div>';
+    if (m.message) html += '<div class="task-msg-text">' + esc(m.message) + '</div>';
+    html += '</div>';
+  }
+  document.getElementById('task-messages-title').textContent = 'Activity \u2014 ' + (t.task || '').substring(0, 50);
+  document.getElementById('task-messages-content').innerHTML = html;
+  document.getElementById('modal-task-messages').classList.add('visible');
 }
 
 function boardToggleTaskCollapse(taskId) {
@@ -498,11 +521,14 @@ function renderBoard() {
   // Add task: inline input or button (at top)
   if (_boardAddingTask) {
     html += '<div class="board-add-task board-add-task-active">';
+    html += '<div style="position:relative">';
     html += '<textarea class="board-add-input" id="board-add-task-input" rows="1"'
       + ' placeholder="Task description..."'
       + ' onkeydown="boardAddTaskKeydown(event)"'
-      + ' oninput="boardAddTaskAutoResize(this)"'
+      + ' oninput="boardAddTaskInput(this)"'
       + ' onblur="boardCancelAddTask()">' + esc(_boardAddingTaskDraft) + '</textarea>';
+    html += '<div id="board-add-label-dropdown" class="deps-dropdown" style="display:none"></div>';
+    html += '</div>';
     html += '<div class="board-add-toolbar">';
     html += '<button class="board-add-toolbar-btn board-add-clear-btn" onmousedown="event.preventDefault();boardClearAddTask()">Clear</button>';
     html += '<div class="board-add-toolbar-right">';
@@ -793,7 +819,73 @@ function boardSubmitAddTask() {
   renderBoard();
 }
 
+var _boardLabelDropdownIdx = -1;
+
+function boardAddTaskInput(el) {
+  boardAddTaskAutoResize(el);
+  var text = el.value.substring(0, el.selectionStart);
+  var match = text.match(/%([\w-]*)$/);
+  var dropdown = document.getElementById('board-add-label-dropdown');
+  if (!dropdown) return;
+  if (!match) { dropdown.style.display = 'none'; _boardLabelDropdownIdx = -1; return; }
+  var prefix = match[1].toLowerCase();
+  var all = _getAllLabels();
+  var filtered = [];
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].toLowerCase().indexOf(prefix) >= 0) filtered.push(all[i]);
+    if (filtered.length >= 8) break;
+  }
+  if (!filtered.length) { dropdown.style.display = 'none'; _boardLabelDropdownIdx = -1; return; }
+  _boardLabelDropdownIdx = -1;
+  var html = '';
+  for (var i = 0; i < filtered.length; i++) {
+    html += '<div class="deps-option" onmousedown="boardPickInlineLabel(\'' + esc(filtered[i]) + '\')">' + esc(filtered[i]) + '</div>';
+  }
+  dropdown.innerHTML = html;
+  dropdown.style.display = '';
+}
+
+function boardPickInlineLabel(label) {
+  var el = document.getElementById('board-add-task-input');
+  if (!el) return;
+  var before = el.value.substring(0, el.selectionStart);
+  var after = el.value.substring(el.selectionStart);
+  el.value = before.replace(/%([\w-]*)$/, '%' + label + ' ') + after;
+  document.getElementById('board-add-label-dropdown').style.display = 'none';
+  _boardLabelDropdownIdx = -1;
+  el.focus();
+}
+
 function boardAddTaskKeydown(e) {
+  var dropdown = document.getElementById('board-add-label-dropdown');
+  var visible = dropdown && dropdown.style.display !== 'none';
+  if (visible) {
+    var opts = dropdown.querySelectorAll('.deps-option');
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      _boardLabelDropdownIdx = Math.min(_boardLabelDropdownIdx + 1, opts.length - 1);
+      _boardHighlightLabelOpt(opts);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _boardLabelDropdownIdx = Math.max(_boardLabelDropdownIdx - 1, 0);
+      _boardHighlightLabelOpt(opts);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      var idx = _boardLabelDropdownIdx >= 0 ? _boardLabelDropdownIdx : 0;
+      if (opts[idx]) opts[idx].onmousedown();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      dropdown.style.display = 'none';
+      _boardLabelDropdownIdx = -1;
+      return;
+    }
+  }
   if (e.key === 'Escape') {
     boardClearAddTask();
     return;
@@ -801,6 +893,12 @@ function boardAddTaskKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     boardSubmitAddTask();
+  }
+}
+
+function _boardHighlightLabelOpt(opts) {
+  for (var i = 0; i < opts.length; i++) {
+    opts[i].classList.toggle('active', i === _boardLabelDropdownIdx);
   }
 }
 
