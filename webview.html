@@ -501,6 +501,17 @@
   </div>
 </div>
 
+<!-- Task messages modal -->
+<div class="overlay" id="modal-task-messages">
+  <div class="modal modal-tall">
+    <h2 id="task-messages-title">Task Activity</h2>
+    <div id="task-messages-content" class="task-messages-list"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('modal-task-messages').classList.remove('visible')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Bottom Panel (collapsible, hosts panel apps) -->
 <div id="bottom-panel" class="collapsed">
   <div class="panel-resize-handle" id="panel-resize-handle"></div>

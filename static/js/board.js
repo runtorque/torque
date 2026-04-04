@@ -305,12 +305,15 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (t.messages && t.messages.length) {
     var lastMsg = t.messages[t.messages.length - 1];
     var msgText = lastMsg.message || '';
-    if (msgText.length > 60) msgText = msgText.substring(0, 57) + '...';
     var msgClass = 'board-card-activity';
     if (lastMsg.action === 'done' || lastMsg.action === 'ready') msgClass += ' board-card-activity-done';
     else if (lastMsg.action === 'error') msgClass += ' board-card-activity-error';
     else if (lastMsg.action === 'blocked') msgClass += ' board-card-activity-blocked';
     cardHtml += '<div class="' + msgClass + '">' + esc(msgText) + '</div>';
+    if (t.messages.length > 1) {
+      cardHtml += '<button class="board-card-history-btn" onclick="event.stopPropagation();showTaskMessages(\'' + t.id + '\')">'
+        + t.messages.length + ' messages</button>';
+    }
   }
   cardHtml += '</div>';
   cardHtml += '<button class="board-card-menu-btn" onclick="event.stopPropagation();boardCardMenu(event,\'' + t.id + '\')" title="Actions">&#8942;</button>';
@@ -324,6 +327,27 @@ function _renderBoardCard(t, childrenOf, depth) {
     }
   }
   return cardHtml;
+}
+
+function showTaskMessages(taskId) {
+  var t = state.board_tasks[taskId];
+  if (!t || !t.messages || !t.messages.length) return;
+  var html = '';
+  for (var i = t.messages.length - 1; i >= 0; i--) {
+    var m = t.messages[i];
+    var badge = '<span class="task-msg-badge task-msg-' + esc(m.action) + '">' + esc(m.action) + '</span>';
+    var time = m.timestamp ? _relativeTime(m.timestamp) : '';
+    var agent = m.agent ? ' <span class="task-msg-agent">' + esc(m.agent) + '</span>' : '';
+    html += '<div class="task-msg-row">';
+    html += '<div class="task-msg-header">' + badge + agent;
+    if (time) html += '<span class="task-msg-time">' + esc(time) + '</span>';
+    html += '</div>';
+    if (m.message) html += '<div class="task-msg-text">' + esc(m.message) + '</div>';
+    html += '</div>';
+  }
+  document.getElementById('task-messages-title').textContent = 'Activity \u2014 ' + (t.task || '').substring(0, 50);
+  document.getElementById('task-messages-content').innerHTML = html;
+  document.getElementById('modal-task-messages').classList.add('visible');
 }
 
 function boardToggleTaskCollapse(taskId) {
