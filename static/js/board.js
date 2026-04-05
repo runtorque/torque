@@ -858,6 +858,7 @@ function boardPickInlineLabel(label) {
   document.getElementById('board-add-label-dropdown').style.display = 'none';
   _boardLabelDropdownIdx = -1;
   el.focus();
+  el.selectionStart = el.selectionEnd = el.value.length;
 }
 
 function boardAddTaskKeydown(e) {
@@ -885,12 +886,15 @@ function boardAddTaskKeydown(e) {
     }
     if (e.key === 'Escape') {
       e.preventDefault();
+      e.stopPropagation();
       dropdown.style.display = 'none';
       _boardLabelDropdownIdx = -1;
       return;
     }
   }
   if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
     boardClearAddTask();
     return;
   }
