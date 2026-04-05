@@ -148,6 +148,8 @@ function selectIcon(icon) {
 }
 
 function closeModals() {
+  // Clean up draft attachments if task modal was open in create mode
+  if (typeof _cleanupDraftAttachments === 'function') _cleanupDraftAttachments();
   document.querySelectorAll('.overlay').forEach(o => o.classList.remove('visible'));
   document.querySelectorAll('.hint-pop').forEach(p => p.remove());
   if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
@@ -1103,6 +1105,8 @@ function _handleActionRendered(msg) {
 /* ------------------------------------------------------------------ */
 
 let _taskEditId = null;  // null = create mode, string = edit mode
+let _taskDraftId = '';          // pre-generated ID for new tasks (for attachments)
+let _taskAttachments = [];      // current attachments [{path, filename, mime_type}]
 let _taskActions = [];          // cached action list for task modal
 let _taskTemplates = [];        // cached templates for task modal
 let _taskSelectedAction = '';   // selected action name
@@ -1320,8 +1324,103 @@ function _currentGroup() {
   return '';
 }
 
+/* -- Task modal: attachment helpers -------------------------------------- */
+
+function _generateDraftId() {
+  var hex = '';
+  for (var i = 0; i < 8; i++) hex += Math.floor(Math.random() * 16).toString(16);
+  return hex;
+}
+
+function _taskAttId() {
+  return _taskEditId || _taskDraftId;
+}
+
+function _uploadFiles(files) {
+  var tid = _taskAttId();
+  if (!tid) return;
+  for (var i = 0; i < files.length; i++) {
+    var file = files[i];
+    if (!file.type.startsWith('image/')) continue;
+    var fd = new FormData();
+    fd.append('task_id', tid);
+    fd.append('file', file);
+    fetch('/api/upload', { method: 'POST', body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.ok && res.data) {
+          for (var j = 0; j < res.data.length; j++) {
+            _taskAttachments.push(res.data[j]);
+          }
+          _renderTaskAttachments();
+        }
+      });
+  }
+}
+
+function taskAttFilePicked(input) {
+  if (input.files && input.files.length) _uploadFiles(input.files);
+  input.value = '';
+}
+
+function taskAttDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+
+function taskAttDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function taskAttDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+    _uploadFiles(e.dataTransfer.files);
+  }
+}
+
+function taskAttRemove(idx) {
+  var att = _taskAttachments[idx];
+  if (!att) return;
+  var tid = _taskAttId();
+  if (tid) {
+    send({ cmd: 'remove_attachment', task_id: tid, filename: att.filename });
+  }
+  _taskAttachments.splice(idx, 1);
+  _renderTaskAttachments();
+}
+
+function _renderTaskAttachments() {
+  var container = document.getElementById('task-attachments-thumbs');
+  if (!container) return;
+  var html = '';
+  var tid = _taskAttId();
+  for (var i = 0; i < _taskAttachments.length; i++) {
+    var a = _taskAttachments[i];
+    var src = '/attachments/' + encodeURIComponent(tid) + '/' + encodeURIComponent(a.filename);
+    html += '<div class="attachment-thumb">'
+      + '<img src="' + src + '" alt="' + esc(a.filename) + '" title="' + esc(a.filename) + '">'
+      + '<button class="attachment-remove" onclick="taskAttRemove(' + i + ')">&times;</button>'
+      + '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function _cleanupDraftAttachments() {
+  if (_taskDraftId && _taskAttachments.length && !_taskEditId) {
+    fetch('/api/upload/cleanup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: _taskDraftId })
+    });
+  }
+}
+
 function openAddTask(lane) {
   _taskEditId = null;
+  _taskDraftId = _generateDraftId();
+  _taskAttachments = [];
   _taskSelectedAction = '';
   _taskSelectedTemplate = '';
   _taskActionVars = [];
@@ -1338,6 +1437,7 @@ function openAddTask(lane) {
   document.getElementById('task-labels-input').value = '';
   _setTaskDeps([]);
   document.getElementById('task-action-vars').innerHTML = '';
+  _renderTaskAttachments();
 
   _populateTaskGroupSelect(_currentGroup());
 
@@ -1360,6 +1460,8 @@ function openEditTask(taskId) {
   if (!t) return;
 
   _taskEditId = taskId;
+  _taskDraftId = '';
+  _taskAttachments = (t.attachments || []).slice();
   _taskSelectedAction = t.action_name || '';
   _taskSelectedTemplate = t.agent_template || '';
   _taskActionVars = [];
@@ -1376,6 +1478,7 @@ function openEditTask(taskId) {
   document.getElementById('task-labels-input').value = '';
   _setTaskDeps(t.depends_on || []);
   document.getElementById('task-action-vars').innerHTML = '';
+  _renderTaskAttachments();
 
   // Scheduled dispatch
   var schedInput = document.getElementById('task-scheduled-input');
@@ -1453,6 +1556,7 @@ function submitTask() {
     // Create mode
     var lane = document.getElementById('modal-task').dataset.lane || '';
     var msg = { cmd: 'board_add_task', task: task, group: group, lane: lane };
+    if (_taskDraftId) msg.id = _taskDraftId;
     if (description) msg.description = description;
     if (_taskSelectedAction) msg.action_name = _taskSelectedAction;
     if (_taskSelectedTemplate) msg.agent_template = _taskSelectedTemplate;
@@ -1463,6 +1567,8 @@ function submitTask() {
     send(msg);
   }
 
+  _taskDraftId = '';
+  _taskAttachments = [];
   _taskEditId = null;
   closeModals();
 }

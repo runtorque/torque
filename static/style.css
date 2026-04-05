@@ -2444,3 +2444,96 @@ body.diff-view-open #ctx-menu {
 .schedule-presets { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
 .schedule-preset { font-size: 10px; padding: 2px 8px; background: var(--bg-hover); border: 1px solid var(--border); border-radius: 3px; color: var(--dim); cursor: pointer; }
 .schedule-preset:hover { border-color: var(--accent); color: var(--fg); }
+
+/* -- Attachments --------------------------------------------------------- */
+.attachments-zone {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  min-height: 40px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.attachments-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.08);
+}
+.attachments-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attachment-thumb {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.attachment-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.attachment-remove {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--status-red);
+  color: #fff;
+  border: none;
+  font-size: 10px;
+  line-height: 14px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+  padding: 0;
+  text-align: center;
+}
+.attachment-thumb:hover .attachment-remove { opacity: 1; }
+.attachments-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+}
+.attachments-add-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* Inline board thumbnails — smaller */
+.attachments-thumbs-inline { margin-top: 4px; }
+.attachment-thumb-inline {
+  width: 24px;
+  height: 24px;
+}
+.attachment-thumb-inline .attachment-remove {
+  width: 12px;
+  height: 12px;
+  font-size: 8px;
+  line-height: 11px;
+}
+/* Board card attachment badge */
+.board-card-attachments {
+  background: rgba(88, 166, 255, 0.12);
+  color: var(--accent);
+}
+/* Drag-over highlight for inline add area */
+.board-add-task-active.drag-over {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.06);
+}

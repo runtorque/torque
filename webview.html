@@ -453,6 +453,19 @@
               placeholder="Optional longer context or details..."
               oninput="taskAutoResize(this)"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+    <label>Attachments
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Drag-and-drop images or click to browse. Attached image paths are included in agent prompts.">?</span>
+    </label>
+    <div id="task-attachments-zone" class="attachments-zone"
+         ondragover="taskAttDragOver(event)" ondragleave="taskAttDragLeave(event)"
+         ondrop="taskAttDrop(event)">
+      <div id="task-attachments-thumbs" class="attachments-thumbs"></div>
+      <label class="attachments-add-btn">
+        + Add images
+        <input type="file" id="task-attachments-input" multiple accept="image/*"
+               onchange="taskAttFilePicked(this)" style="display:none">
+      </label>
+    </div>
     <label>Group <span class="label-req">*</span></label>
     <select id="task-group-select"
             onkeydown="if(event.key==='Escape')closeModals();"></select>
