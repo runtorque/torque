@@ -215,13 +215,13 @@ function _renderDiffFooter() {
   html += '<button class="btn-cancel" onclick="hideDiffView()">Cancel</button>';
 
   if (_diffMergeCheck && _diffMergeCheck.dirty) {
-    html += '<button class="btn-green" onclick="_diffCheckpointAndRecheck()">Checkpoint</button>';
+    html += '<button class="btn-primary" onclick="_diffCheckpointAndRecheck()">Checkpoint</button>';
   } else if (_diffMergeCheck && !_diffMergeCheck.clean && !_diffMergeCheck.error) {
     html += '<button class="btn-rebase" onclick="_diffRebase()">Rebase onto Main</button>';
   }
 
   var canMerge = _diffMergeCheck && _diffMergeCheck.clean && !_diffMerging;
-  html += '<button class="btn-green"' + (canMerge ? '' : ' disabled')
+  html += '<button class="btn-primary"' + (canMerge ? '' : ' disabled')
     + ' onclick="proceedDiffMerge()">'
     + (_diffMerging ? 'Merging\u2026' : 'Proceed to Merge') + '</button>';
   html += '</div></div>';

@@ -2359,9 +2359,9 @@ body.diff-view-open #ctx-menu {
 .diff-conflict-file { padding: 2px 0; color: var(--text); }
 .diff-conflict-reason { color: var(--text-dim); margin-left: 8px; }
 .diff-commit-msg {
-  flex: 1;
-  min-height: 48px;
-  max-height: 120px;
+  width: 100%; box-sizing: border-box;
+  min-height: 80px;
+  max-height: 160px;
   padding: 6px 8px;
   font-family: inherit;
   font-size: 11px;
@@ -2372,13 +2372,13 @@ body.diff-view-open #ctx-menu {
   resize: vertical;
 }
 .diff-footer {
-  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px;
+  display: flex; flex-direction: column; gap: 8px;
   padding: 8px 10px;
   border-top: 1px solid var(--border);
   background: var(--bg-hover);
   flex-shrink: 0;
 }
-.diff-footer-buttons { display: flex; gap: 8px; }
+.diff-footer-buttons { display: flex; gap: 8px; justify-content: flex-end; }
 .btn-rebase {
   padding: 4px 12px;
   border-radius: var(--radius);
@@ -2390,7 +2390,7 @@ body.diff-view-open #ctx-menu {
   cursor: pointer;
 }
 .btn-rebase:hover { background: rgba(210,153,34,.28); }
-.btn-green[disabled] { opacity: 0.4; pointer-events: none; }
+.btn-green[disabled], .btn-primary[disabled] { opacity: 0.4; pointer-events: none; }
 
 .board-card-scheduled { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
 .board-label-dep-blocked {
