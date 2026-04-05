@@ -1107,6 +1107,7 @@ function _handleActionRendered(msg) {
 let _taskEditId = null;  // null = create mode, string = edit mode
 let _taskDraftId = '';          // pre-generated ID for new tasks (for attachments)
 let _taskAttachments = [];      // current attachments [{path, filename, mime_type}]
+let _taskOriginalAttachments = []; // attachments at modal open (for cancel cleanup)
 let _taskActions = [];          // cached action list for task modal
 let _taskTemplates = [];        // cached templates for task modal
 let _taskSelectedAction = '';   // selected action name
@@ -1409,11 +1410,23 @@ function _renderTaskAttachments() {
 
 function _cleanupDraftAttachments() {
   if (_taskDraftId && _taskAttachments.length && !_taskEditId) {
+    // Create mode: wipe the whole draft dir
     fetch('/api/upload/cleanup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task_id: _taskDraftId })
     });
+  } else if (_taskEditId) {
+    // Edit mode: remove newly uploaded files not in original set
+    var origNames = {};
+    for (var i = 0; i < _taskOriginalAttachments.length; i++) {
+      origNames[_taskOriginalAttachments[i].filename] = true;
+    }
+    for (var i = 0; i < _taskAttachments.length; i++) {
+      if (!origNames[_taskAttachments[i].filename]) {
+        send({ cmd: 'remove_attachment', task_id: _taskEditId, filename: _taskAttachments[i].filename });
+      }
+    }
   }
 }
 
@@ -1421,6 +1434,7 @@ function openAddTask(lane) {
   _taskEditId = null;
   _taskDraftId = _generateDraftId();
   _taskAttachments = [];
+  _taskOriginalAttachments = [];
   _taskSelectedAction = '';
   _taskSelectedTemplate = '';
   _taskActionVars = [];
@@ -1462,6 +1476,7 @@ function openEditTask(taskId) {
   _taskEditId = taskId;
   _taskDraftId = '';
   _taskAttachments = (t.attachments || []).slice();
+  _taskOriginalAttachments = (t.attachments || []).slice();
   _taskSelectedAction = t.action_name || '';
   _taskSelectedTemplate = t.agent_template || '';
   _taskActionVars = [];
@@ -1551,6 +1566,7 @@ function submitTask() {
     msg.labels = labels;
     msg.scheduled_at = scheduledAt;
     msg.depends_on = _taskDeps.slice();
+    msg.attachments = _taskAttachments.slice();
     send(msg);
   } else {
     // Create mode

@@ -460,11 +460,7 @@
          ondragover="taskAttDragOver(event)" ondragleave="taskAttDragLeave(event)"
          ondrop="taskAttDrop(event)">
       <div id="task-attachments-thumbs" class="attachments-thumbs"></div>
-      <label class="attachments-add-btn">
-        + Add images
-        <input type="file" id="task-attachments-input" multiple accept="image/*"
-               onchange="taskAttFilePicked(this)" style="display:none">
-      </label>
+      <span class="attachments-hint">Drop images here</span>
     </div>
     <label>Group <span class="label-req">*</span></label>
     <select id="task-group-select"

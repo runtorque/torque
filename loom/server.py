@@ -3712,11 +3712,8 @@ async def main(connection: iterm2.Connection):
         if not task_id:
             return web.json_response(
                 {"ok": False, "error": "missing task_id"}, status=400)
-        # Update task if it exists (may not exist yet for pre-generated IDs)
-        task = state.board_tasks.get(task_id)
-        if task:
-            task.attachments = list(task.attachments or []) + saved
-            state.board_update_task(task_id, attachments=task.attachments)
+        # Don't update the task here — the client sends attachments
+        # on submit (so Cancel discards uploads properly).
         return web.json_response({"ok": True, "data": saved})
 
     async def handle_upload_cleanup(request):

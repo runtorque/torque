@@ -2499,22 +2499,13 @@ body.diff-view-open #ctx-menu {
   text-align: center;
 }
 .attachment-thumb:hover .attachment-remove { opacity: 1; }
-.attachments-add-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border: 1px dashed var(--border);
-  border-radius: 4px;
-  color: var(--dim);
+.attachments-hint {
   font-size: 11px;
-  cursor: pointer;
-  transition: color 0.1s, border-color 0.1s;
+  color: var(--dim);
+  padding: 2px 4px;
 }
-.attachments-add-btn:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-}
+/* Hide hint when thumbnails are present (JS adds children before hint) */
+.attachments-thumbs:not(:empty) ~ .attachments-hint { display: none; }
 /* Inline board thumbnails — smaller */
 .attachments-thumbs-inline { margin-top: 4px; }
 .attachment-thumb-inline {
