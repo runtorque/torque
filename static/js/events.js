@@ -167,10 +167,6 @@ function renderEvents() {
   // Header
   html += '<div class="events-header">';
   html += '<span class="events-header-title">Events</span>';
-  html += '<button class="events-filter-btn' + (_eventsFilterByGroup ? ' active' : '') + '"'
-    + ' onclick="eventsToggleGroupFilter()" title="Filter by current group">'
-    + (_eventsFilterByGroup ? '\u{1F4CC} Group' : '\u{1F30D} All')
-    + '</button>';
   html += '<select class="events-kind-filter" onchange="eventsSetKindFilter(this.value)">';
   html += '<option value="all"' + (_eventsKindFilter === 'all' ? ' selected' : '') + '>All</option>';
   html += '<option value="errors"' + (_eventsKindFilter === 'errors' ? ' selected' : '') + '>Errors</option>';
@@ -342,10 +338,6 @@ function eventsToggleEntry(idx) {
   renderEvents();
 }
 
-function eventsToggleGroupFilter() {
-  _eventsFilterByGroup = !_eventsFilterByGroup;
-  renderEvents();
-}
 
 function eventsSetKindFilter(value) {
   _eventsKindFilter = value;

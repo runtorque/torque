@@ -472,8 +472,12 @@ function renderAgentHistoryView() {
   html += '</div>';
   html += '</div>';
 
-  // Filter records by search
+  // Filter records by active group, then search
+  var grp = (typeof _currentGroup === 'function') ? _currentGroup() : '';
   var records = _agentHistoryRecords;
+  if (grp) {
+    records = records.filter(function(r) { return r.group === grp; });
+  }
   if (_agentHistorySearch) {
     records = records.filter(function(r) {
       return r.name.toLowerCase().indexOf(_agentHistorySearch) >= 0

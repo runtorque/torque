@@ -836,6 +836,10 @@ function boardAddTaskInput(el) {
     if (filtered.length >= 8) break;
   }
   if (!filtered.length) { dropdown.style.display = 'none'; _boardLabelDropdownIdx = -1; return; }
+  if (filtered.length === 1 && prefix === filtered[0].toLowerCase()) {
+    dropdown.style.display = 'none'; _boardLabelDropdownIdx = -1;
+    boardPickInlineLabel(filtered[0]); return;
+  }
   _boardLabelDropdownIdx = -1;
   var html = '';
   for (var i = 0; i < filtered.length; i++) {
