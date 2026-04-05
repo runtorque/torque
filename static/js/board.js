@@ -11,6 +11,7 @@ var _boardAddingTaskAction = '';  // selected action name for inline add
 var _boardAddingTaskAgent = '';   // selected agent ID for inline add
 var _boardInlineDraftId = '';     // pre-generated task ID for inline attachments
 var _boardInlineAttachments = []; // attachments uploaded during inline creation
+var _boardAddTaskFocus = false;   // true only on explicit open, not re-renders
 var _boardActDropdownWaiting = false;  // waiting for action list for dropdown
 var _boardActList = null;              // fetched actions shown inline (null = hidden)
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
@@ -639,8 +640,9 @@ function renderBoard() {
 
   panel.innerHTML = html;
 
-  // Auto-focus inputs
-  if (_boardAddingTask) {
+  // Auto-focus inputs (only when user explicitly opened, not on re-renders)
+  if (_boardAddingTask && _boardAddTaskFocus) {
+    _boardAddTaskFocus = false;
     var tInp = document.getElementById('board-add-task-input');
     if (tInp) {
       boardAddTaskAutoResize(tInp);
@@ -782,6 +784,7 @@ function boardUpdateScrollArrows() {
 
 function boardStartAddTask() {
   _boardAddingTask = true;
+  _boardAddTaskFocus = true;
   _boardFocusedTask = '';
   if (!_boardInlineDraftId) _boardInlineDraftId = _generateDraftId();
   renderBoard();
