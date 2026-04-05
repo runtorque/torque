@@ -197,6 +197,7 @@ class GroupSettings:
     worktree_auto_checkpoint: bool = False  # auto-checkpoint on agent stop
     worktree_merge_squash: bool = True  # squash commits when merging to main
     worktree_merge_instructions: str = ""  # additional instructions appended to merge prompt
+    worktree_symlinks: list[str] = field(default_factory=list)  # paths to symlink from repo root
     agent_session_resume: bool = True  # resume session on relaunch
     agent_idle_timeout: int = 5  # minutes before flagging agent as stuck (0=disable)
     agent_always_custom_dialog: bool = False

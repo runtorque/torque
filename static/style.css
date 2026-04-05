@@ -2095,6 +2095,16 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .btn-sm {
   font-size: 10px; padding: 3px 8px;
 }
+.btn-xs {
+  font-size: 9px; padding: 2px 6px;
+}
+.wt-symlink-row {
+  display: flex; align-items: center; gap: 4px; margin-bottom: 2px;
+}
+.wt-symlink-row code {
+  flex: 1; font-size: 11px; color: var(--fg-dim, #888);
+}
+.wt-symlink-row .btn-xs { flex-shrink: 0; }
 
 /* Log section */
 .events-log {

@@ -35,7 +35,7 @@ _AGENT_PERSISTED_COLS = [
 
 # GroupSettings fields that store dicts — persisted as JSON text.
 _GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars",
-                    "board_default_labels"}
+                    "board_default_labels", "worktree_symlinks"}
 
 # GroupSettings fields that are booleans — stored as INTEGER 0/1.
 _GS_BOOL_FIELDS = {
@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     worktree_auto_checkpoint    INTEGER NOT NULL DEFAULT 0,
     worktree_merge_squash       INTEGER NOT NULL DEFAULT 1,
     worktree_merge_instructions TEXT NOT NULL DEFAULT '',
+    worktree_symlinks           TEXT NOT NULL DEFAULT '[]',
     agent_session_resume        INTEGER NOT NULL DEFAULT 1,
     agent_idle_timeout          INTEGER NOT NULL DEFAULT 5,
     agent_always_custom_dialog  INTEGER NOT NULL DEFAULT 0,
@@ -445,6 +446,15 @@ class LoomDB:
                     f"ALTER TABLE group_settings ADD COLUMN "
                     f"{col} TEXT NOT NULL DEFAULT ''")
                 self._conn.commit()
+        # Migrate: add worktree_symlinks column to group_settings
+        try:
+            self._conn.execute(
+                "SELECT worktree_symlinks FROM group_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE group_settings ADD COLUMN "
+                "worktree_symlinks TEXT NOT NULL DEFAULT '[]'")
+            self._conn.commit()
         # Migrate: rename system labels with loom: prefix
         rows = self._conn.execute(
             "SELECT id, labels FROM board_tasks "
@@ -1118,7 +1128,8 @@ class LoomDB:
                         try:
                             d[k] = json.loads(d[k])
                         except (json.JSONDecodeError, TypeError):
-                            d[k] = {}
+                            d[k] = [] if k in {"board_default_labels",
+                                                "worktree_symlinks"} else {}
                 # Decode booleans
                 for k in _GS_BOOL_FIELDS:
                     if k in d:
