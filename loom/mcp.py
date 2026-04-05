@@ -14,6 +14,8 @@ import logging
 
 from aiohttp import web
 
+from .mcp_weaver import WEAVER_TOOLS, _dispatch_weaver_tool
+
 log = logging.getLogger("loom")
 
 PROTOCOL_VERSION = "2025-03-26"
@@ -207,6 +209,10 @@ TOOLS = [
 
 _TOOL_MAP = {t["name"]: t for t in TOOLS}
 
+# Combined tool list (agent + weaver tools)
+ALL_TOOLS = TOOLS + WEAVER_TOOLS
+_ALL_TOOL_MAP = {t["name"]: t for t in ALL_TOOLS}
+
 
 # ---------------------------------------------------------------------------
 # Tool dispatch
@@ -341,31 +347,38 @@ def create_mcp_handler(handle_command, state):
 
         if method == "tools/list":
             return web.json_response(
-                _jsonrpc_ok(req_id, {"tools": TOOLS}))
+                _jsonrpc_ok(req_id, {"tools": ALL_TOOLS}))
 
         if method == "tools/call":
             tool_name = params.get("name", "")
             arguments = params.get("arguments", {})
 
-            if tool_name not in _TOOL_MAP:
+            if tool_name not in _ALL_TOOL_MAP:
                 return web.json_response(
                     _jsonrpc_error(req_id, -32602,
                                    f"Unknown tool: {tool_name}"))
 
-            if not cell_id:
-                return web.json_response(
-                    _jsonrpc_ok(req_id, {
-                        "content": [{
-                            "type": "text",
-                            "text": "X-Loom-Cell-Id header is required — "
-                                    "this tool only works inside a "
-                                    "Loom-managed agent session",
-                        }],
-                        "isError": True,
-                    }))
+            # Weaver tools don't require X-Loom-Cell-Id
+            if tool_name.startswith("weaver_"):
+                text, is_error = await _dispatch_weaver_tool(
+                    tool_name, arguments, handle_command, state)
+            else:
+                if not cell_id:
+                    return web.json_response(
+                        _jsonrpc_ok(req_id, {
+                            "content": [{
+                                "type": "text",
+                                "text":
+                                    "X-Loom-Cell-Id header is required"
+                                    " — this tool only works inside a"
+                                    " Loom-managed agent session",
+                            }],
+                            "isError": True,
+                        }))
+                text, is_error = await _dispatch_tool(
+                    tool_name, arguments, cell_id,
+                    handle_command, state)
 
-            text, is_error = await _dispatch_tool(
-                tool_name, arguments, cell_id, handle_command, state)
             return web.json_response(
                 _jsonrpc_ok(req_id, {
                     "content": [{"type": "text", "text": text}],
