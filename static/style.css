@@ -2528,7 +2528,7 @@ body.diff-view-open #ctx-menu {
   line-height: 11px;
 }
 /* Inline attachment chips (compact text labels) */
-.inline-att-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.inline-att-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 0 6px; }
 .inline-att-chip {
   display: inline-flex; align-items: center; gap: 2px;
   font-size: 10px; color: var(--dim); background: var(--bg-hover);
