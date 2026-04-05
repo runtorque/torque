@@ -452,6 +452,18 @@ class WorktreeManager:
         if not repo_root:
             return False
         try:
+            # Guard: if branch hasn't diverged from base, nothing to merge
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root, "rev-parse",
+                cell.worktree_branch, cell.worktree_base_branch,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            out, _ = await proc.communicate()
+            shas = out.decode().split()
+            if len(shas) == 2 and shas[0] == shas[1]:
+                return False
+
             # Fast path: check if worktree branch is an ancestor of base
             proc = await asyncio.create_subprocess_exec(
                 "git", "-C", repo_root,
