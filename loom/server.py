@@ -3048,8 +3048,10 @@ async def main(connection: iterm2.Connection):
                                           "Derive requires a description"}
                         else:
                             # Validate transition
-                            base_dir = await _resolve_base_dir(
-                                task.group)
+                            base_dir = cell.worktree_repo_root \
+                                or cell.directory \
+                                or await _resolve_base_dir(
+                                    task.group)
                             cur_transitions = \
                                 action_mgr.get_transitions(
                                     task.action_name, base_dir)
