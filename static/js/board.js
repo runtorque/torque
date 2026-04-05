@@ -793,6 +793,8 @@ function boardStartAddTask() {
 function boardCancelAddTask() {
   var el = document.getElementById('board-add-task-input');
   if (el) _boardAddingTaskDraft = el.value;
+  // Keep open if there's a draft or attachments — user may be dragging files
+  if (_boardAddingTaskDraft || _boardInlineAttachments.length) return;
   setTimeout(function() { _boardAddingTask = false; _boardTplList = null; renderBoard(); }, 150);
 }
 
