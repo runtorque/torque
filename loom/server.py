@@ -3670,8 +3670,10 @@ async def main(connection: iterm2.Connection):
                         {"ok": False, "error": "task_id must come before file parts"},
                         status=400)
                 fname = part.filename or "image"
-                # Sanitize filename
+                # Sanitize filename — no spaces (paths with spaces
+                # get lost during terminal paste to Claude Code)
                 fname = fname.replace("/", "_").replace("\\", "_")
+                fname = fname.replace(" ", "_")
                 att_dir = ATTACHMENTS_DIR / task_id
                 att_dir.mkdir(parents=True, exist_ok=True)
                 # Deduplicate: if name exists, add suffix

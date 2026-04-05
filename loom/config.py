@@ -20,18 +20,17 @@ STATE_FILE: Path = SCRIPT_DIR / "state.json"
 DB_FILE: Path = SCRIPT_DIR / "loom.db"
 WEBVIEW_FILE: Path = SCRIPT_DIR / "webview.html"
 LOG_FILE: Path = SCRIPT_DIR / "loom.log"
-ATTACHMENTS_DIR: Path = SCRIPT_DIR / "attachments"
+ATTACHMENTS_DIR: Path = Path.home() / ".loom" / "attachments"
 
 
 def init_paths(script_dir: Path):
     """Called once from the entry point to anchor paths to the install location."""
-    global SCRIPT_DIR, STATE_FILE, DB_FILE, WEBVIEW_FILE, LOG_FILE, ATTACHMENTS_DIR
+    global SCRIPT_DIR, STATE_FILE, DB_FILE, WEBVIEW_FILE, LOG_FILE
     SCRIPT_DIR = script_dir
     STATE_FILE = script_dir / "state.json"
     DB_FILE = script_dir / "loom.db"
     WEBVIEW_FILE = script_dir / "webview.html"
     LOG_FILE = script_dir / "loom.log"
-    ATTACHMENTS_DIR = script_dir / "attachments"
     _setup_logging()
 
 
