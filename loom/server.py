@@ -2406,14 +2406,8 @@ async def main(connection: iterm2.Connection):
                                 # Append attachment paths
                                 if task.attachments:
                                     att_lines = "\n".join(
-                                        "- " + a["path"]
+                                        "- `" + a["path"] + "`"
                                         for a in task.attachments)
-                                    log.info(
-                                        "Attachments for task %s: %r",
-                                        task.id, task.attachments)
-                                    log.info(
-                                        "Attachment prompt lines: %r",
-                                        att_lines)
                                     prompt += (
                                         "\n\n## Attached images\n"
                                         + att_lines)
