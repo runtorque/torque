@@ -846,6 +846,7 @@ function boardSubmitAddTask() {
   if (parsed.labels.length) msg.labels = parsed.labels;
   if (_boardAddingTaskAction) msg.action_name = _boardAddingTaskAction;
   if (_boardAddingTaskAgent) msg.agent_id = _boardAddingTaskAgent;
+  if (_boardInlineAttachments.length) msg.attachments = _boardInlineAttachments.slice();
   _boardAddingTaskAction = '';
   _boardAddingTaskAgent = '';
   _boardInlineDraftId = '';
