@@ -1182,7 +1182,8 @@ function _renderTaskLabelChips() {
   if (!container) return;
   var html = '';
   for (var i = 0; i < _taskLabels.length; i++) {
-    html += '<span class="label-chip">' + esc(_taskLabels[i])
+    var lc = labelColor(_taskLabels[i]);
+    html += '<span class="label-chip" style="background:' + lc + '22;color:' + lc + '">' + esc(_taskLabels[i])
       + '<button onclick="taskRemoveLabel(' + i + ')">&times;</button></span>';
   }
   if (_taskSystemLabels.length) {
