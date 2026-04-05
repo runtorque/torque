@@ -176,7 +176,8 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     provider       TEXT NOT NULL DEFAULT '',
     external_id    TEXT NOT NULL DEFAULT '',
     external_url   TEXT NOT NULL DEFAULT '',
-    status         TEXT NOT NULL DEFAULT ''
+    status         TEXT NOT NULL DEFAULT '',
+    attachments    TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -387,6 +388,15 @@ class LoomDB:
         except sqlite3.OperationalError:
             self._conn.execute(
                 "ALTER TABLE board_tasks ADD COLUMN depends_on "
+                "TEXT NOT NULL DEFAULT '[]'")
+            self._conn.commit()
+        # Migrate: add attachments column to board_tasks
+        try:
+            self._conn.execute(
+                "SELECT attachments FROM board_tasks LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE board_tasks ADD COLUMN attachments "
                 "TEXT NOT NULL DEFAULT '[]'")
             self._conn.commit()
         # Migrate: drop assignee column from board_tasks
@@ -601,6 +611,7 @@ class LoomDB:
         action_vars = json.dumps(d.pop("action_vars", {}))
         messages = json.dumps(d.pop("messages", []))
         depends_on = json.dumps(d.pop("depends_on", []))
+        attachments = json.dumps(d.pop("attachments", []))
         # Map 'group' to 'group_name' for the DB column
         group_name = d.pop("group", "")
         self._conn.execute("""
@@ -611,8 +622,8 @@ class LoomDB:
                  lane, position, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url,
                  parent_task_id, pipeline_depth, pipeline_root_id, status,
-                 scheduled_at, messages, depends_on)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 scheduled_at, messages, depends_on, attachments)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
@@ -626,7 +637,7 @@ class LoomDB:
             d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
             d.get("pipeline_root_id", ""), d.get("status", ""),
             d.get("scheduled_at", ""),
-            messages, depends_on,
+            messages, depends_on, attachments,
         ))
         self._conn.commit()
 
@@ -1033,6 +1044,7 @@ class LoomDB:
                 labels = json.dumps(d.pop("labels", []))
                 action_vars = json.dumps(d.pop("action_vars", {}))
                 messages = json.dumps(d.pop("messages", []))
+                attachments = json.dumps(d.pop("attachments", []))
                 group_name = d.pop("group", "")
                 c.execute("""
                     INSERT INTO board_tasks
@@ -1042,8 +1054,8 @@ class LoomDB:
                          criteria, lane, position, agent_id, labels,
                          created_at, updated_at, provider, external_id,
                          external_url, parent_task_id, pipeline_depth,
-                         pipeline_root_id, status, messages)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         pipeline_root_id, status, messages, attachments)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""),
                     d.get("description", ""), d.get("slug", ""),
@@ -1058,7 +1070,7 @@ class LoomDB:
                     d.get("external_url", ""),
                     d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
                     d.get("pipeline_root_id", ""), d.get("status", ""),
-                    messages,
+                    messages, attachments,
                 ))
 
             # UI state
@@ -1166,6 +1178,12 @@ class LoomDB:
                         d.get("messages", "[]"))
                 except (json.JSONDecodeError, TypeError):
                     d["messages"] = []
+                # Decode attachments JSON
+                try:
+                    d["attachments"] = json.loads(
+                        d.get("attachments", "[]"))
+                except (json.JSONDecodeError, TypeError):
+                    d["attachments"] = []
                 # Decode depends_on JSON
                 try:
                     d["depends_on"] = json.loads(

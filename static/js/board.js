@@ -9,6 +9,9 @@ var _boardAddingTask = false;   // true when inline task input is shown
 var _boardAddingTaskDraft = '';  // preserved text across blur/reopen
 var _boardAddingTaskAction = '';  // selected action name for inline add
 var _boardAddingTaskAgent = '';   // selected agent ID for inline add
+var _boardInlineDraftId = '';     // pre-generated task ID for inline attachments
+var _boardInlineAttachments = []; // attachments uploaded during inline creation
+var _boardAddTaskFocus = false;   // true only on explicit open, not re-renders
 var _boardActDropdownWaiting = false;  // waiting for action list for dropdown
 var _boardActList = null;              // fetched actions shown inline (null = hidden)
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
@@ -282,6 +285,9 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (t.scheduled_at) {
     meta += '<span class="board-card-label board-card-scheduled">' + _schedFormatTime(t.scheduled_at) + '</span>';
   }
+  if (t.attachments && t.attachments.length) {
+    meta += '<span class="board-card-label board-card-attachments" title="' + t.attachments.length + ' image(s) attached">&#x1F4CE; ' + t.attachments.length + '</span>';
+  }
   if (t.external_url) {
     meta += '<a class="board-card-pr-link" href="' + esc(t.external_url)
       + '" onclick="event.stopPropagation();window.open(this.href);return false"'
@@ -520,7 +526,9 @@ function renderBoard() {
 
   // Add task: inline input or button (at top)
   if (_boardAddingTask) {
-    html += '<div class="board-add-task board-add-task-active">';
+    html += '<div class="board-add-task board-add-task-active"'
+      + ' ondragover="boardInlineDragOver(event)" ondragleave="boardInlineDragLeave(event)"'
+      + ' ondrop="boardInlineDrop(event)">';
     html += '<div style="position:relative">';
     html += '<textarea class="board-add-input" id="board-add-task-input" rows="1"'
       + ' placeholder="Task description..."'
@@ -529,6 +537,16 @@ function renderBoard() {
       + ' onblur="boardCancelAddTask()">' + esc(_boardAddingTaskDraft) + '</textarea>';
     html += '<div id="board-add-label-dropdown" class="deps-dropdown" style="display:none"></div>';
     html += '</div>';
+    // Inline attachment chips (compact — no thumbnails)
+    if (_boardInlineAttachments.length) {
+      html += '<div class="inline-att-chips">';
+      for (var ai = 0; ai < _boardInlineAttachments.length; ai++) {
+        html += '<span class="inline-att-chip">[Image #' + (ai + 1) + ']'
+          + '<button class="inline-att-chip-remove" onmousedown="event.preventDefault();boardInlineRemoveAtt(' + ai + ')">&times;</button>'
+          + '</span>';
+      }
+      html += '</div>';
+    }
     html += '<div class="board-add-toolbar">';
     html += '<button class="board-add-toolbar-btn board-add-clear-btn" onmousedown="event.preventDefault();boardClearAddTask()">Clear</button>';
     html += '<div class="board-add-toolbar-right">';
@@ -622,8 +640,9 @@ function renderBoard() {
 
   panel.innerHTML = html;
 
-  // Auto-focus inputs
-  if (_boardAddingTask) {
+  // Auto-focus inputs (only when user explicitly opened, not on re-renders)
+  if (_boardAddingTask && _boardAddTaskFocus) {
+    _boardAddTaskFocus = false;
     var tInp = document.getElementById('board-add-task-input');
     if (tInp) {
       boardAddTaskAutoResize(tInp);
@@ -765,21 +784,35 @@ function boardUpdateScrollArrows() {
 
 function boardStartAddTask() {
   _boardAddingTask = true;
+  _boardAddTaskFocus = true;
   _boardFocusedTask = '';
+  if (!_boardInlineDraftId) _boardInlineDraftId = _generateDraftId();
   renderBoard();
 }
 
 function boardCancelAddTask() {
   var el = document.getElementById('board-add-task-input');
   if (el) _boardAddingTaskDraft = el.value;
+  // Keep open if there's a draft or attachments — user may be dragging files
+  if (_boardAddingTaskDraft || _boardInlineAttachments.length) return;
   setTimeout(function() { _boardAddingTask = false; _boardTplList = null; renderBoard(); }, 150);
 }
 
 function boardClearAddTask() {
+  // Clean up inline draft attachments
+  if (_boardInlineDraftId && _boardInlineAttachments.length) {
+    fetch('/api/upload/cleanup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: _boardInlineDraftId })
+    });
+  }
   _boardAddingTask = false;
   _boardAddingTaskDraft = '';
   _boardAddingTaskAction = '';
   _boardAddingTaskAgent = '';
+  _boardInlineDraftId = '';
+  _boardInlineAttachments = [];
   _boardTplList = null;
   renderBoard();
 }
@@ -809,13 +842,62 @@ function boardSubmitAddTask() {
   _boardAddingTask = false;
   _boardAddingTaskDraft = '';
   var msg = { cmd: 'board_add_task', task: parsed.title, group: _currentGroup(), lane: _boardSelectedLane };
+  if (_boardInlineDraftId) msg.id = _boardInlineDraftId;
   if (parsed.labels.length) msg.labels = parsed.labels;
   if (_boardAddingTaskAction) msg.action_name = _boardAddingTaskAction;
   if (_boardAddingTaskAgent) msg.agent_id = _boardAddingTaskAgent;
+  if (_boardInlineAttachments.length) msg.attachments = _boardInlineAttachments.slice();
   _boardAddingTaskAction = '';
   _boardAddingTaskAgent = '';
+  _boardInlineDraftId = '';
+  _boardInlineAttachments = [];
   _boardTplList = null;
   send(msg);
+  renderBoard();
+}
+
+/* ---- Inline add: drag-and-drop attachments -------------------------- */
+
+function boardInlineDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+
+function boardInlineDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function boardInlineDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+  if (!_boardInlineDraftId) _boardInlineDraftId = _generateDraftId();
+  var files = e.dataTransfer.files;
+  for (var i = 0; i < files.length; i++) {
+    var file = files[i];
+    if (!file.type.startsWith('image/')) continue;
+    var fd = new FormData();
+    fd.append('task_id', _boardInlineDraftId);
+    fd.append('file', file);
+    fetch('/api/upload', { method: 'POST', body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.ok && res.data) {
+          for (var j = 0; j < res.data.length; j++) {
+            _boardInlineAttachments.push(res.data[j]);
+          }
+          renderBoard();
+        }
+      });
+  }
+}
+
+function boardInlineRemoveAtt(idx) {
+  var att = _boardInlineAttachments[idx];
+  if (att && _boardInlineDraftId) {
+    send({ cmd: 'remove_attachment', task_id: _boardInlineDraftId, filename: att.filename });
+  }
+  _boardInlineAttachments.splice(idx, 1);
   renderBoard();
 }
 

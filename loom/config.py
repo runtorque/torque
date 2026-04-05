@@ -20,6 +20,7 @@ STATE_FILE: Path = SCRIPT_DIR / "state.json"
 DB_FILE: Path = SCRIPT_DIR / "loom.db"
 WEBVIEW_FILE: Path = SCRIPT_DIR / "webview.html"
 LOG_FILE: Path = SCRIPT_DIR / "loom.log"
+ATTACHMENTS_DIR: Path = Path.home() / ".loom" / "attachments"
 
 
 def init_paths(script_dir: Path):

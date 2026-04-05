@@ -2,18 +2,21 @@
 
 import asyncio
 import json
+import mimetypes
 import os
 import shlex
+import shutil
 import sys
 import time
 from collections import deque
+from pathlib import Path
 
 import aiohttp
 from aiohttp import web
 import iterm2
 import yaml
 
-from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, STANDALONE, BIND_HOST, log
+from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, STANDALONE, BIND_HOST, ATTACHMENTS_DIR, log
 from .db import LoomDB
 from dataclasses import asdict
 from .state import MatrixState
@@ -1075,6 +1078,10 @@ async def main(connection: iterm2.Connection):
             "labels": list(task.labels),
             "group": task.group,
             "status": task.status,
+            "attachments": [
+                {"path": a["path"], "filename": a["filename"]}
+                for a in (task.attachments or [])
+            ],
         }
 
         # Child terminals of the target agent
@@ -2108,7 +2115,7 @@ async def main(connection: iterm2.Connection):
                 labels = data.get("labels", [])
                 if not labels and gs.board_default_labels:
                     labels = list(gs.board_default_labels)
-                bt = state.board_add_task(
+                add_kwargs = dict(
                     task=data.get("task", ""),
                     group=group,
                     lane=lane,
@@ -2120,6 +2127,13 @@ async def main(connection: iterm2.Connection):
                     labels=labels,
                     depends_on=data.get("depends_on", []),
                 )
+                # Pass client-provided ID (for pre-uploaded attachments)
+                if data.get("id"):
+                    add_kwargs["id"] = data["id"]
+                # Attachments from client (already uploaded to disk)
+                if data.get("attachments"):
+                    add_kwargs["attachments"] = data["attachments"]
+                bt = state.board_add_task(**add_kwargs)
                 if not bt:
                     result = {"type": "error",
                               "message": "Invalid lane, group, or empty task"}
@@ -2144,7 +2158,26 @@ async def main(connection: iterm2.Connection):
                             "id": tid, "agent_id": _new_aid})
 
             elif cmd == "board_remove_task":
-                state.board_remove_task(_resolve_task_id(data.get("id", "")))
+                tid = _resolve_task_id(data.get("id", ""))
+                state.board_remove_task(tid)
+                # Clean up attachment files
+                att_dir = ATTACHMENTS_DIR / tid
+                if att_dir.is_dir():
+                    shutil.rmtree(att_dir, ignore_errors=True)
+
+            elif cmd == "remove_attachment":
+                tid = _resolve_task_id(data.get("task_id", ""))
+                fname = data.get("filename", "")
+                task = state.board_tasks.get(tid)
+                if task and fname:
+                    fpath = ATTACHMENTS_DIR / tid / fname
+                    if fpath.is_file():
+                        fpath.unlink()
+                    task.attachments = [
+                        a for a in task.attachments
+                        if a.get("filename") != fname]
+                    state.board_update_task(
+                        tid, attachments=task.attachments)
 
             elif cmd == "board_move_task":
                 _mv_id = _resolve_task_id(data.get("id", ""))
@@ -2370,6 +2403,14 @@ async def main(connection: iterm2.Connection):
                                 prompt = task.task
 
                             if prompt:
+                                # Append attachment paths
+                                if task.attachments:
+                                    att_lines = "\n".join(
+                                        "- `" + a["path"] + "`"
+                                        for a in task.attachments)
+                                    prompt += (
+                                        "\n\n## Attached images\n"
+                                        + att_lines)
                                 is_clean = loom_ctx["context"]["is_clean"]
                                 final_prompt = prompt
                                 final_prompt += _build_postscript(
@@ -3610,6 +3651,103 @@ async def main(connection: iterm2.Connection):
                                          **state.to_dict()}
         return web.json_response({"ok": True, "data": payload})
 
+    # -- Attachment upload/serve endpoints -----------------------------------
+
+    async def handle_upload(request):
+        """POST /api/upload — multipart file upload for task attachments."""
+        reader = await request.multipart()
+        task_id = ""
+        saved = []
+        while True:
+            part = await reader.next()
+            if part is None:
+                break
+            if part.name == "task_id":
+                task_id = (await part.text()).strip()
+            elif part.name == "file":
+                if not task_id:
+                    return web.json_response(
+                        {"ok": False, "error": "task_id must come before file parts"},
+                        status=400)
+                fname = part.filename or "image"
+                # Sanitize filename — no spaces (paths with spaces
+                # get lost during terminal paste to Claude Code)
+                fname = fname.replace("/", "_").replace("\\", "_")
+                fname = fname.replace(" ", "_")
+                att_dir = ATTACHMENTS_DIR / task_id
+                att_dir.mkdir(parents=True, exist_ok=True)
+                # Deduplicate: if name exists, add suffix
+                dest = att_dir / fname
+                if dest.exists():
+                    stem = dest.stem
+                    suffix = dest.suffix
+                    i = 1
+                    while dest.exists():
+                        dest = att_dir / f"{stem}_{i}{suffix}"
+                        fname = dest.name
+                        i += 1
+                fdata = await part.read()
+                dest.write_bytes(fdata)
+                mime = part.headers.get(
+                    aiohttp.hdrs.CONTENT_TYPE,
+                    mimetypes.guess_type(fname)[0] or "image/png")
+                entry = {
+                    "path": str(dest),
+                    "filename": fname,
+                    "mime_type": mime,
+                }
+                saved.append(entry)
+        if not task_id:
+            return web.json_response(
+                {"ok": False, "error": "missing task_id"}, status=400)
+        # Don't update the task here — the client sends attachments
+        # on submit (so Cancel discards uploads properly).
+        return web.json_response({"ok": True, "data": saved})
+
+    async def handle_upload_cleanup(request):
+        """POST /api/upload/cleanup — remove attachment dir for cancelled drafts."""
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response(
+                {"ok": False, "error": "invalid JSON"}, status=400)
+        task_id = data.get("task_id", "").strip()
+        if not task_id:
+            return web.json_response(
+                {"ok": False, "error": "missing task_id"}, status=400)
+        # Only clean up if no task with this ID exists
+        if task_id not in state.board_tasks:
+            att_dir = ATTACHMENTS_DIR / task_id
+            if att_dir.is_dir():
+                shutil.rmtree(att_dir, ignore_errors=True)
+        return web.json_response({"ok": True})
+
+    async def handle_serve_attachment(request):
+        """GET /attachments/{task_id}/{filename} — serve attachment file."""
+        task_id = request.match_info["task_id"]
+        filename = request.match_info["filename"]
+        fpath = ATTACHMENTS_DIR / task_id / filename
+        if not fpath.is_file():
+            raise web.HTTPNotFound()
+        mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return web.FileResponse(fpath, headers={
+            "Content-Type": mime,
+            "Cache-Control": "max-age=3600",
+        })
+
+    # -- Orphan attachment cleanup on startup --------------------------------
+
+    def _cleanup_orphan_attachments():
+        if not ATTACHMENTS_DIR.is_dir():
+            return
+        task_ids = set(state.board_tasks.keys())
+        for entry in ATTACHMENTS_DIR.iterdir():
+            if entry.is_dir() and entry.name not in task_ids:
+                shutil.rmtree(entry, ignore_errors=True)
+                log.info("Cleaned up orphan attachments for %s", entry.name)
+
+    _cleanup_orphan_attachments()
+
     # -- Start server -------------------------------------------------------
 
     app_server = web.Application()
@@ -3618,6 +3756,10 @@ async def main(connection: iterm2.Connection):
     app_server.router.add_post("/events", handle_events)
     app_server.router.add_post("/api/cmd", handle_api_cmd)
     app_server.router.add_post("/mcp", create_mcp_handler(handle_command, state))
+    app_server.router.add_post("/api/upload", handle_upload)
+    app_server.router.add_post("/api/upload/cleanup", handle_upload_cleanup)
+    app_server.router.add_get(
+        "/attachments/{task_id}/{filename}", handle_serve_attachment)
     from .config import SCRIPT_DIR
     app_server.router.add_static("/static", SCRIPT_DIR / "static")
 

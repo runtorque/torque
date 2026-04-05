@@ -49,6 +49,8 @@ class BoardTask:
     messages: list = field(default_factory=list)  # [{timestamp, action, message, agent_name}]
     # Explicit dependencies — task IDs that must be Done before dispatch
     depends_on: list = field(default_factory=list)  # [task_id, ...]
+    # Image attachments — [{path, filename, mime_type}]
+    attachments: list = field(default_factory=list)
 
 
 @dataclass
@@ -1098,7 +1100,7 @@ class MatrixState:
             return None
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
-        tid = uuid.uuid4().hex[:8]
+        tid = kwargs.pop("id", None) or uuid.uuid4().hex[:8]
         task_slug = self._unique_task_slug(task)
         # Validate depends_on: strip non-existent IDs
         if "depends_on" in kwargs:
