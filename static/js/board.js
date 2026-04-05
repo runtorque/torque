@@ -127,7 +127,11 @@ function _boardLaneCount(lane) {
   var tasks = _boardVisibleTasks();
   var n = 0;
   for (var id in tasks) {
-    if (tasks[id].lane === lane) n++;
+    var t = tasks[id];
+    if (t.lane !== lane) continue;
+    // Only count root tasks (same filter as lane body)
+    if (t.parent_task_id && tasks[t.parent_task_id]) continue;
+    n++;
   }
   return n;
 }
@@ -1152,6 +1156,11 @@ function boardCardMenu(evt, taskId) {
   // Preview prompt
   html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
 
+  // Detach from pipeline (derived tasks only)
+  if (isDerived) {
+    html += '<button onclick="boardDetachTask(\'' + taskId + '\')">Detach from pipeline</button>';
+  }
+
   // Move to lane — only for non-derived tasks (pipeline manages derived tasks)
   if (!isDerived) {
     html += '<div class="ctx-sep"></div>';
@@ -1471,6 +1480,19 @@ function boardDeleteTask(taskId) {
 function boardUnlinkAgent(taskId) {
   _closeCtxMenu();
   send({ cmd: 'board_update_task', id: taskId, agent_id: '' });
+}
+
+function boardDetachTask(taskId) {
+  _closeCtxMenu();
+  var tasks = _boardTasks();
+  var task = tasks[taskId];
+  if (!task) return;
+  var labels = (task.labels || []).filter(function(l) { return l !== 'loom:derived'; });
+  send({
+    cmd: 'board_update_task', id: taskId,
+    parent_task_id: '', pipeline_depth: 0,
+    pipeline_root_id: taskId, status: '', labels: labels
+  });
 }
 
 function boardLinkAgent(taskId) {

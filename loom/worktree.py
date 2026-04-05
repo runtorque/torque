@@ -113,6 +113,7 @@ class WorktreeManager:
     def _create_symlinks(self, wt_path: str, repo_root: str,
                          symlinks: list[str]) -> None:
         """Create symlinks in worktree pointing to repo root paths."""
+        created = []
         for rel_path in symlinks:
             rel_path = rel_path.strip().strip("/")
             if not rel_path or ".." in rel_path:
@@ -132,9 +133,29 @@ class WorktreeManager:
             try:
                 os.symlink(target, link)
                 log.info("Created symlink %s → %s", link, target)
+                created.append(rel_path)
             except OSError:
                 log.exception("Failed to create symlink %s → %s",
                               link, target)
+        if created:
+            self._add_to_worktree_exclude(wt_path, created)
+
+    def _add_to_worktree_exclude(self, wt_path: str,
+                                 paths: list[str]) -> None:
+        """Add paths to the worktree-local git exclude file."""
+        dot_git = os.path.join(wt_path, ".git")
+        try:
+            with open(dot_git) as f:
+                gitdir = f.read().strip().removeprefix("gitdir: ")
+            exclude = os.path.join(gitdir, "info", "exclude")
+            os.makedirs(os.path.dirname(exclude), exist_ok=True)
+            with open(exclude, "a") as f:
+                for p in paths:
+                    f.write(f"{p}\n")
+            log.debug("Added %d paths to worktree exclude: %s", len(paths),
+                      exclude)
+        except Exception:
+            log.exception("Failed to update worktree exclude file")
 
     async def remove(self, cell, force: bool = True) -> bool:
         """Remove the git worktree and branch associated with a cell.
