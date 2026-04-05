@@ -536,16 +536,13 @@ function renderBoard() {
       + ' onblur="boardCancelAddTask()">' + esc(_boardAddingTaskDraft) + '</textarea>';
     html += '<div id="board-add-label-dropdown" class="deps-dropdown" style="display:none"></div>';
     html += '</div>';
-    // Inline attachment thumbnails
+    // Inline attachment chips (compact — no thumbnails)
     if (_boardInlineAttachments.length) {
-      html += '<div class="attachments-thumbs attachments-thumbs-inline">';
+      html += '<div class="inline-att-chips">';
       for (var ai = 0; ai < _boardInlineAttachments.length; ai++) {
-        var att = _boardInlineAttachments[ai];
-        var attSrc = '/attachments/' + encodeURIComponent(_boardInlineDraftId) + '/' + encodeURIComponent(att.filename);
-        html += '<div class="attachment-thumb attachment-thumb-inline">'
-          + '<img src="' + attSrc + '" alt="' + esc(att.filename) + '">'
-          + '<button class="attachment-remove" onmousedown="event.preventDefault();boardInlineRemoveAtt(' + ai + ')">&times;</button>'
-          + '</div>';
+        html += '<span class="inline-att-chip">[Image #' + (ai + 1) + ']'
+          + '<button class="inline-att-chip-remove" onmousedown="event.preventDefault();boardInlineRemoveAtt(' + ai + ')">&times;</button>'
+          + '</span>';
       }
       html += '</div>';
     }

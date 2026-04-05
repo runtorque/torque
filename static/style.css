@@ -2527,6 +2527,18 @@ body.diff-view-open #ctx-menu {
   font-size: 8px;
   line-height: 11px;
 }
+/* Inline attachment chips (compact text labels) */
+.inline-att-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.inline-att-chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 10px; color: var(--dim); background: var(--bg-hover);
+  border: 1px solid var(--border); border-radius: 3px; padding: 1px 6px;
+}
+.inline-att-chip-remove {
+  background: none; border: none; color: var(--dim); cursor: pointer;
+  font-size: 10px; padding: 0 0 0 2px; line-height: 1;
+}
+.inline-att-chip-remove:hover { color: var(--status-red); }
 /* Board card attachment badge */
 .board-card-attachments {
   background: rgba(88, 166, 255, 0.12);
