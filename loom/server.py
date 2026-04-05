@@ -2130,23 +2130,9 @@ async def main(connection: iterm2.Connection):
                 # Pass client-provided ID (for pre-uploaded attachments)
                 if data.get("id"):
                     add_kwargs["id"] = data["id"]
-                # Pick up pre-uploaded attachments
-                draft_id = data.get("id", "")
-                if draft_id:
-                    att_dir = ATTACHMENTS_DIR / draft_id
-                    if att_dir.is_dir():
-                        atts = []
-                        for f in sorted(att_dir.iterdir()):
-                            if f.is_file():
-                                mime = mimetypes.guess_type(
-                                    f.name)[0] or "image/png"
-                                atts.append({
-                                    "path": str(f),
-                                    "filename": f.name,
-                                    "mime_type": mime,
-                                })
-                        if atts:
-                            add_kwargs["attachments"] = atts
+                # Attachments from client (already uploaded to disk)
+                if data.get("attachments"):
+                    add_kwargs["attachments"] = data["attachments"]
                 bt = state.board_add_task(**add_kwargs)
                 if not bt:
                     result = {"type": "error",

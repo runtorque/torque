@@ -1580,6 +1580,7 @@ function submitTask() {
     if (labels.length) msg.labels = labels;
     if (scheduledAt) msg.scheduled_at = scheduledAt;
     if (_taskDeps.length) msg.depends_on = _taskDeps.slice();
+    if (_taskAttachments.length) msg.attachments = _taskAttachments.slice();
     send(msg);
   }
 
