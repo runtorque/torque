@@ -696,6 +696,8 @@ async def main(connection: iterm2.Connection):
                 "worktree_auto_checkpoint", gs.worktree_auto_checkpoint),
             "worktree_merge_squash": resolved.get(
                 "worktree_merge_squash", gs.worktree_merge_squash),
+            "worktree_symlinks": resolved.get(
+                "worktree_symlinks", gs.worktree_symlinks),
             "terminals": resolved.get("terminals", []),
         }
 
@@ -799,6 +801,7 @@ async def main(connection: iterm2.Connection):
                     cell, repo_root,
                     base_dir=cell.worktree_base_dir or ".loom/worktrees",
                     base_branch=launch_cfg.get("worktree_base_branch", ""),
+                    symlinks=launch_cfg.get("worktree_symlinks", []),
                 )
                 if wt_path:
                     cell.directory = wt_path
@@ -1709,7 +1712,9 @@ async def main(connection: iterm2.Connection):
                                         or ".loom/worktrees",
                                     base_branch=launch_cfg.get(
                                         "worktree_base_branch", "")
-                                        or "")
+                                        or "",
+                                    symlinks=launch_cfg.get(
+                                        "worktree_symlinks", []))
                                 if wt_path:
                                     cell.directory = wt_path
                                     state._emit_agent(cell)
@@ -1763,7 +1768,8 @@ async def main(connection: iterm2.Connection):
                             base_dir=cell.worktree_base_dir
                                 or ".loom/worktrees",
                             base_branch=cell.worktree_base_branch
-                                or gs.worktree_base_branch or "")
+                                or gs.worktree_base_branch or "",
+                            symlinks=gs.worktree_symlinks)
                         if wt_path:
                             cell.directory = wt_path
                             state._emit_agent(cell)

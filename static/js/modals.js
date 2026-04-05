@@ -643,6 +643,8 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-wt-auto-checkpoint').checked = s.worktree_auto_checkpoint || false;
   document.getElementById('gs-wt-merge-squash').checked = s.worktree_merge_squash !== false;
   document.getElementById('gs-wt-merge-instructions').value = s.worktree_merge_instructions || '';
+  _gsWtSymlinks = (s.worktree_symlinks || []).slice();
+  _renderWtSymlinks();
   _toggleWorktreeFields();
   document.getElementById('gs-session-resume').checked = s.agent_session_resume !== false;
   document.getElementById('gs-agent-idle-timeout').value = s.agent_idle_timeout != null ? s.agent_idle_timeout : 5;
@@ -728,6 +730,7 @@ function submitGroupSettings() {
     worktree_auto_checkpoint: document.getElementById('gs-wt-auto-checkpoint').checked,
     worktree_merge_squash: document.getElementById('gs-wt-merge-squash').checked,
     worktree_merge_instructions: document.getElementById('gs-wt-merge-instructions').value.trim(),
+    worktree_symlinks: _gsWtSymlinks.slice(),
     agent_session_resume: document.getElementById('gs-session-resume').checked,
     agent_idle_timeout: parseInt(document.getElementById('gs-agent-idle-timeout').value) || 0,
     agent_always_custom_dialog: document.getElementById('gs-agent-always-custom').checked,
@@ -759,6 +762,43 @@ function submitGroupSettings() {
 function _toggleWorktreeFields() {
   const on = document.getElementById('gs-worktree').checked;
   document.getElementById('gs-wt-fields').style.display = on ? 'block' : 'none';
+}
+
+/* -- Worktree symlinks list ------------------------------------------------ */
+let _gsWtSymlinks = [];
+
+function _renderWtSymlinks() {
+  const container = document.getElementById('gs-wt-symlinks-list');
+  container.innerHTML = '';
+  for (let i = 0; i < _gsWtSymlinks.length; i++) {
+    const row = document.createElement('div');
+    row.className = 'wt-symlink-row';
+    const code = document.createElement('code');
+    code.textContent = _gsWtSymlinks[i];
+    row.appendChild(code);
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-xs btn-danger';
+    btn.textContent = '×';
+    btn.onclick = () => { _gsWtSymlinks.splice(i, 1); _renderWtSymlinks(); };
+    row.appendChild(btn);
+    container.appendChild(row);
+  }
+}
+
+function _addWtSymlink() {
+  const input = document.getElementById('gs-wt-symlink-input');
+  const val = input.value.trim().replace(/^\/+|\/+$/g, '');
+  if (!val || _gsWtSymlinks.includes(val)) return;
+  _gsWtSymlinks.push(val);
+  _renderWtSymlinks();
+  input.value = '';
+}
+
+function _addWtSymlinkPreset(path) {
+  if (!_gsWtSymlinks.includes(path)) {
+    _gsWtSymlinks.push(path);
+    _renderWtSymlinks();
+  }
 }
 
 function _toggleAddWorktreeFields() {

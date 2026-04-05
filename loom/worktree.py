@@ -45,7 +45,8 @@ class WorktreeManager:
 
     async def create(self, cell, repo_root: str,
                      base_dir: str = ".loom/worktrees",
-                     base_branch: str = "") -> Optional[str]:
+                     base_branch: str = "",
+                     symlinks: list[str] | None = None) -> Optional[str]:
         """Create a git worktree for the cell.
 
         Args:
@@ -53,6 +54,7 @@ class WorktreeManager:
             repo_root: Absolute path to the git repo root.
             base_dir: Directory name for worktrees (relative to repo root).
             base_branch: Branch to fork from (empty = current HEAD).
+            symlinks: Relative paths to symlink from repo root into worktree.
 
         Returns:
             Absolute path to the worktree, or None on failure.
@@ -99,10 +101,40 @@ class WorktreeManager:
             # Add .loom/ to .gitignore if not already there
             await self._ensure_gitignore(repo_root)
 
+            # Create configured symlinks
+            if symlinks:
+                self._create_symlinks(wt_path, repo_root, symlinks)
+
             return wt_path
         except Exception:
             log.exception("Failed to create worktree for '%s'", cell.name)
             return None
+
+    def _create_symlinks(self, wt_path: str, repo_root: str,
+                         symlinks: list[str]) -> None:
+        """Create symlinks in worktree pointing to repo root paths."""
+        for rel_path in symlinks:
+            rel_path = rel_path.strip().strip("/")
+            if not rel_path or ".." in rel_path:
+                log.warning("Skipping invalid symlink path: %s", rel_path)
+                continue
+            target = os.path.join(repo_root, rel_path)
+            link = os.path.join(wt_path, rel_path)
+            if not os.path.exists(target):
+                log.warning("Symlink target does not exist, skipping: %s",
+                            target)
+                continue
+            if os.path.exists(link) or os.path.islink(link):
+                log.debug("Path already exists in worktree, skipping "
+                          "symlink: %s", link)
+                continue
+            os.makedirs(os.path.dirname(link), exist_ok=True)
+            try:
+                os.symlink(target, link)
+                log.info("Created symlink %s → %s", link, target)
+            except OSError:
+                log.exception("Failed to create symlink %s → %s",
+                              link, target)
 
     async def remove(self, cell, force: bool = True) -> bool:
         """Remove the git worktree and branch associated with a cell.
