@@ -771,17 +771,14 @@ function _renderWtSymlinks() {
   const container = document.getElementById('gs-wt-symlinks-list');
   container.innerHTML = '';
   for (let i = 0; i < _gsWtSymlinks.length; i++) {
-    const row = document.createElement('div');
-    row.className = 'wt-symlink-row';
-    const code = document.createElement('code');
-    code.textContent = _gsWtSymlinks[i];
-    row.appendChild(code);
+    const chip = document.createElement('span');
+    chip.className = 'wt-symlink-chip';
+    chip.textContent = _gsWtSymlinks[i];
     const btn = document.createElement('button');
-    btn.className = 'btn btn-xs btn-danger';
     btn.textContent = '×';
     btn.onclick = () => { _gsWtSymlinks.splice(i, 1); _renderWtSymlinks(); };
-    row.appendChild(btn);
-    container.appendChild(row);
+    chip.appendChild(btn);
+    container.appendChild(chip);
   }
 }
 

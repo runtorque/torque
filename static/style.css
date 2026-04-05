@@ -2098,13 +2098,33 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .btn-xs {
   font-size: 9px; padding: 2px 6px;
 }
-.wt-symlink-row {
-  display: flex; align-items: center; gap: 4px; margin-bottom: 2px;
+.wt-symlinks-chips {
+  display: flex; flex-wrap: wrap; gap: 4px;
 }
-.wt-symlink-row code {
-  flex: 1; font-size: 11px; color: var(--fg-dim, #888);
+.wt-symlinks-chips:not(:empty) { margin-bottom: 6px; }
+.wt-symlink-chip {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 10px; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-radius: 3px; padding: 1px 6px; line-height: 16px;
+  font-family: var(--mono, monospace);
 }
-.wt-symlink-row .btn-xs { flex-shrink: 0; }
+.wt-symlink-chip button {
+  all: unset; cursor: pointer; margin-left: 2px;
+  font-size: 12px; line-height: 1; color: var(--text-dim);
+}
+.wt-symlink-chip button:hover { color: var(--text); }
+.wt-symlink-presets {
+  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;
+}
+.wt-symlink-presets .btn-xs {
+  color: var(--text-dim); background: var(--bg-hover, rgba(255,255,255,.06));
+  border: 1px solid var(--border, rgba(255,255,255,.1));
+  border-radius: 3px; cursor: pointer; font-family: var(--mono, monospace);
+}
+.wt-symlink-presets .btn-xs:hover {
+  color: var(--text); background: rgba(255,255,255,.1);
+}
 
 /* Log section */
 .events-log {

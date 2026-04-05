@@ -258,17 +258,16 @@
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Extra instructions appended to the merge prompt sent to Claude. Use this to customize merge behavior, e.g. 'Use a conventional commit message' or 'Run tests after merging'.">?</span>
           </label>
           <textarea id="gs-wt-merge-instructions" rows="2" placeholder="e.g. Use a conventional commit message"></textarea>
-          <label>Symlinks <span class="label-hint">paths symlinked from repo root into worktrees</span>
+          <label>Symlinks <span class="label-hint">symlinked from repo root</span>
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Relative paths from the repo root to symlink into each new worktree. Avoids reinstalling dependencies (e.g. node_modules, .venv). The target must exist in the repo root and should be in .gitignore.">?</span>
           </label>
-          <div id="gs-wt-symlinks-list" style="margin-bottom:4px"></div>
+          <div id="gs-wt-symlinks-list" class="wt-symlinks-chips"></div>
           <div style="display:flex;gap:4px;align-items:center">
             <input id="gs-wt-symlink-input" placeholder="e.g. node_modules" autocomplete="off" style="flex:1"
                    onkeydown="if(event.key==='Enter'){event.preventDefault();_addWtSymlink()}">
             <button class="btn btn-sm" onclick="_addWtSymlink()">Add</button>
           </div>
-          <div style="margin-top:4px">
-            <span class="label-hint">Presets:</span>
+          <div class="wt-symlink-presets">
             <button class="btn btn-xs" onclick="_addWtSymlinkPreset('node_modules')">node_modules</button>
             <button class="btn btn-xs" onclick="_addWtSymlinkPreset('.venv')">.venv</button>
             <button class="btn btn-xs" onclick="_addWtSymlinkPreset('vendor/bundle')">vendor/bundle</button>
