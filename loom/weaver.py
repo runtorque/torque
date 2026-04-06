@@ -115,6 +115,7 @@ class WeaverEventBuffer:
         self._buffers: dict[str, list[dict]] = {}   # group → buffered events
         self._last_push: dict[str, float] = {}       # group → timestamp
         self._pending_flush: dict[str, bool] = {}    # group → True if due
+        self._was_idle_with_question: set[str] = set()  # groups where weaver went idle with pending_question
         self._timer_handle: asyncio.TimerHandle | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -156,15 +157,26 @@ class WeaverEventBuffer:
 
     def on_agent_activity_change(self, cell):
         """Called when an agent's activity changes.  Flush if weaver goes idle."""
-        # Auto-clear pending question when weaver starts working
-        # (means the human typed directly into the terminal)
-        if cell.activity and cell.activity not in ("", "waiting"):
-            gs = self._state.group_settings.get(cell.group)
-            if gs and gs.weaver_agent_id == cell.id:
-                ws = self._state.get_weaver_settings(cell.group)
+        gs = self._state.group_settings.get(cell.group)
+        is_weaver = gs and gs.weaver_agent_id == cell.id
+
+        if is_weaver:
+            group = cell.group
+            # Track when the weaver goes idle while a question is pending.
+            # Only auto-clear pending_question when the weaver becomes
+            # active AFTER having been idle — this prevents clearing the
+            # question during the same tool-call turn that set it.
+            if not cell.activity or cell.activity == "waiting":
+                ws = self._state.get_weaver_settings(group)
                 if ws.pending_question:
-                    self._state.update_weaver_settings(
-                        cell.group, pending_question="")
+                    self._was_idle_with_question.add(group)
+            elif cell.activity and cell.activity not in ("", "waiting"):
+                if group in self._was_idle_with_question:
+                    self._was_idle_with_question.discard(group)
+                    ws = self._state.get_weaver_settings(group)
+                    if ws.pending_question:
+                        self._state.update_weaver_settings(
+                            group, pending_question="")
 
         if not cell.activity or cell.activity == "waiting":
             # Agent went idle — check if it's a weaver with pending events
