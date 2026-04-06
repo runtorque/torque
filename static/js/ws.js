@@ -124,6 +124,7 @@ function connect() {
 function _handleFullState(msg) {
   const prevActive = state.active_session_id;
   state = msg;
+  if (msg.providers) _cachedProviders = msg.providers;
   if (!state.panel_events) state.panel_events = [];
   _expectedSeq = (msg.seq || 0) + 1;
   // Reset pagination state on full snapshot
