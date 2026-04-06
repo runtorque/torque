@@ -1,6 +1,7 @@
 /* Weaver panel — Journal / Settings tabs */
 
 var _weaverTab = 'journal';  // 'journal' | 'settings'
+var _weaverGroup = '';  // explicitly selected group (empty = auto)
 var _weaverCustomInstrDirty = false;
 var _weaverCustomInstrDraft = '';
 
@@ -16,10 +17,20 @@ function renderWeaverPanel() {
   var html = '<div class="weaver-panel">';
 
   // Header
+  var groups = Object.keys(state.groups || {});
   html += '<div class="weaver-header">';
-  html += '<span class="weaver-title">Weaver';
-  if (group) html += ' — ' + _esc(group);
-  html += '</span>';
+  if (groups.length > 1) {
+    html += '<select class="weaver-group-select" onchange="_weaverGroup=this.value;renderWeaverPanel()">';
+    groups.forEach(function(g) {
+      var sel = g === group ? ' selected' : '';
+      html += '<option value="' + _esc(g) + '"' + sel + '>' + _esc(g) + '</option>';
+    });
+    html += '</select>';
+  } else {
+    html += '<span class="weaver-title">Weaver';
+    if (group) html += ' — ' + _esc(group);
+    html += '</span>';
+  }
   // Pause/Resume toggle
   if (group) {
     var paused = ws && ws.paused;
@@ -260,13 +271,17 @@ function weaverToggleEvent(evt, enabled) {
 // -- Helpers ---------------------------------------------------------------
 
 function _weaverFindGroup() {
-  // First: find a group that already has a weaver
+  // Explicit user selection
+  if (_weaverGroup && state.groups && _weaverGroup in state.groups) {
+    return _weaverGroup;
+  }
+  // Find a group that already has a weaver
   if (state.group_settings) {
     for (var gn in state.group_settings) {
       if (state.group_settings[gn].weaver_agent_id) return gn;
     }
   }
-  // Fallback: return the first group (for settings/create flow)
+  // Fallback: return the first group
   var groups = Object.keys(state.groups || {});
   return groups.length ? groups[0] : '';
 }
