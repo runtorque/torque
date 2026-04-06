@@ -293,7 +293,9 @@ function showContextMenu(x, y, items) {
   const menu = document.getElementById('ctx-menu');
   let html = '';
   for (const item of items) {
-    if (item.submenu) {
+    if (item.separator) {
+      html += '<div class="ctx-sep"></div>';
+    } else if (item.submenu) {
       html += `<button onclick="event.stopPropagation();${esc(item.submenu)}">${esc(item.label)} \u25B8</button>`;
     } else {
       const cls = item.danger ? ' class="danger"' : '';
@@ -319,6 +321,7 @@ function _showWorktreeSubmenu(id) {
   if (!cell) return;
   let html = `<button class="ctx-label" disabled>Worktree</button>`;
   html += `<div class="ctx-sep"></div>`;
+  html += `<button onclick="closeContextMenu();showDiffView('${id}',true)">View Diff</button>`;
   html += `<button onclick="closeContextMenu();worktreeCheckpoint('${id}')">Checkpoint</button>`;
   html += `<button onclick="closeContextMenu();worktreeHistory('${id}')">History\u2026</button>`;
   html += `<button onclick="closeContextMenu();worktreeCreatePR('${id}')">Create PR</button>`;
@@ -419,6 +422,10 @@ async function worktreeRemove(id) {
   }
 }
 
+function copyAgentId(id) {
+  navigator.clipboard.writeText(id).then(function() { closeContextMenu(); });
+}
+
 function onCellContextMenu(e, id) {
   e.preventDefault();
   e.stopPropagation();
@@ -447,6 +454,8 @@ function onCellContextMenu(e, id) {
       && (cell.agent_type === 'claude-code' || cell.agent_type === 'codex')) {
     items.push({ label: 'Clear context', action: `clearAgentContext('${id}')` });
   }
+  items.push({ separator: true });
+  items.push({ label: `Copy ID: ${id.slice(0, 8)}\u2026`, action: `copyAgentId('${id}')` });
   items.push({ label: 'Remove', action: `removeAgent('${id}')`, danger: true });
   showContextMenu(e.clientX, e.clientY, items);
 }
