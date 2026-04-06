@@ -584,7 +584,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
             if lane_name not in ordered:
                 ordered[lane_name] = tasks
 
-        return json.dumps({"lanes": ordered}, indent=2), False
+        return json.dumps({"lanes": ordered}), False
 
     if name == "weaver_task_show":
         tid = _resolve_task(state, args.get("task", ""))
@@ -593,7 +593,26 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
         task = state.board_tasks.get(tid)
         if not task:
             return "Task not found", True
-        d = asdict(task)
+        d = {
+            "id": task.id,
+            "slug": task.slug,
+            "title": task.task,
+            "description": task.description,
+            "group": task.group,
+            "lane": task.lane,
+            "status": task.status,
+            "labels": task.labels or [],
+            "action": task.action_name,
+            "action_vars": task.action_vars or {},
+            "agent_id": task.agent_id,
+            "parent_task_id": task.parent_task_id,
+            "pipeline_depth": task.pipeline_depth,
+            "depends_on": task.depends_on or [],
+            "created_at": task.created_at,
+        }
+        # Include recent messages (last 10 only)
+        if task.messages:
+            d["messages"] = task.messages[-10:]
         # Enrich with agent info
         if task.agent_id:
             agent = state.agents.get(task.agent_id)
@@ -618,7 +637,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
                     "depth": ct.pipeline_depth,
                     "agent": agent_slug,
                 })
-        return json.dumps(d, indent=2), False
+        return json.dumps(d), False
 
     if name == "weaver_agents_list":
         agents = []
@@ -641,7 +660,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
                 "activity": c.activity,
                 "activity_detail": c.activity_detail,
             })
-        return json.dumps({"agents": agents}, indent=2), False
+        return json.dumps({"agents": agents}), False
 
     if name == "weaver_actions_list":
         result = await handle_command({
@@ -650,7 +669,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
-        return json.dumps(result, indent=2), False
+        return json.dumps(result), False
 
     if name == "weaver_action_show":
         result = await handle_command({
@@ -660,7 +679,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
-        return json.dumps(result, indent=2), False
+        return json.dumps(result), False
 
     # -- Write tools --------------------------------------------------------
 
@@ -762,7 +781,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
 
         cursor = events[-1]["id"] if events else since_id
         return json.dumps({"events": events, "cursor": cursor},
-                          indent=2), False
+                          ), False
 
     if name == "weaver_notifications":
         # Build update payload for weaver settings
@@ -839,7 +858,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
-        return json.dumps(result, indent=2), False
+        return json.dumps(result), False
 
     # -- Interaction tools --------------------------------------------------
 

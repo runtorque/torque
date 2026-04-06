@@ -1,8 +1,8 @@
 # Implementation Plan: Weaver (Phase 5)
 
-**Roadmap phase**: 5 — Autonomous Orchestration
-**Status**: Planning
-**Goal**: A dedicated orchestrator agent per group that manages tasks, dispatches agents, reacts to events, and maintains a persistent decision journal. The weaver is a first-class concept in Loom — a special agent unique to each group with its own UI panel, event subscription system, and context management strategy.
+**Roadmap phase**: 5 — Semi-Autonomous Orchestration
+**Status**: Implemented (core: data model, event buffer, MCP tools, CLI, weaver panel, human interaction)
+**Goal**: A dedicated semi-autonomous orchestrator agent per group that manages tasks, dispatches agents, reacts to events, consults with the human at key decision points, and maintains a persistent decision journal. The weaver is a first-class concept in Loom — a special agent unique to each group with its own UI panel, event subscription system, human interaction flow, and context management strategy.
 
 ---
 
@@ -10,14 +10,15 @@
 
 Loom can dispatch tasks to agents and agents can self-organize via pipelines (`derive`, `ask`). But there is no entity that looks at the whole board, decides what to do next, responds to events, and drives the project forward. Today that role falls to the human — manually dispatching tasks, monitoring agent progress, resolving questions, and reacting to errors.
 
-The weaver fills this gap. It's an AI agent (Claude Code, Codex, etc.) that acts as a project manager for a group:
+The weaver fills this gap. It's an AI agent (Claude Code, Codex, etc.) that acts as a semi-autonomous project manager for a group:
 
+- **Consults the human** — asks questions at key decision points (priorities, design decisions, approvals) and waits for answers before proceeding
 - **Dispatches work** — creates tasks, assigns actions, launches agents
 - **Reacts to events** — when an agent finishes, errors, or asks a question, the weaver decides the next step
 - **Maintains memory** — keeps a persistent decision journal that survives context cleanup
 - **Communicates with agents** — sends messages to agents and receives replies
 
-The weaver is NOT a pipeline definition (that's actions + transitions). It's a live, thinking agent that makes runtime decisions about the project. Pipelines define *what can happen*; the weaver decides *what should happen now*.
+The weaver is NOT fully autonomous — it's a semi-independent orchestrator that analyzes tasks, talks to the human about what needs to be done, and orchestrates work around those decisions. It decides when it needs human input and when it can operate on its own. Pipelines define *what can happen*; the weaver decides *what should happen now*, with human guidance.
 
 ---
 
@@ -29,6 +30,8 @@ The weaver is NOT a pipeline definition (that's actions + transitions). It's a l
 4. **Mandatory + optional events** — Some events always appear in digests (task completed, agent error, agent reply). Others are configurable (agent started, progress updates). A max interval (default 5 minutes) ensures the weaver gets periodic heartbeats even when nothing critical happened.
 5. **Journal as persistent brain** — The weaver writes structured journal entries (decisions, observations, checkpoints, plans). On context cleanup, the journal + current board state is enough to resume orchestration. The journal is per-group and stored in SQLite.
 6. **Pausable by the user** — A pause/resume button in the UI suspends event pushes so the human can interact with the weaver directly without competing with automated digests.
+7. **Human-in-the-loop** — The weaver is semi-autonomous: it uses `weaver_ask` to post questions to the human, which auto-pauses event delivery and shows the question in the Weaver panel. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the weaver's Claude Code terminal. When the weaver becomes active again, the pending question auto-clears.
+8. **Weaver creation via UI** — The weaver is created through the Weaver panel's Settings tab ("+ Create Weaver" button), not by designating an existing agent. This ensures the `--append-system-prompt-file` flag is set on boot.
 
 ---
 
@@ -116,6 +119,43 @@ Weaver → weaver_agent_message(agent="fix-auth", message="Rebase on main")
                 • agent_reply: fix-auth → "Rebased successfully"
 ```
 
+### Human interaction flow
+
+The weaver operates in two modes: **autonomous** (processing events, dispatching tasks) and **awaiting input** (question posted, events paused, waiting for human).
+
+```
+Weaver needs human guidance
+  │
+  ├── weaver_ask("Which tasks should I prioritize?")
+  │     │
+  │     ├── WeaverSettings.pending_question = "Which tasks..."
+  │     ├── WeaverSettings.paused = True (events auto-pause)
+  │     ├── Journal: "Asked human: Which tasks..."
+  │     ├── Weaver panel shows amber banner with question + reply textarea
+  │     │
+  │     └── Tool response to weaver:
+  │           "Events paused. Call weaver_resume after the human responds."
+  │
+  ├── Path A: Human replies via Weaver panel
+  │     │
+  │     ├── Types answer in textarea, clicks "Send Reply"
+  │     ├── weaver_reply command:
+  │     │     ├── Sends formatted "── Human Reply ──" block to weaver terminal
+  │     │     ├── Clears pending_question
+  │     │     ├── Sets paused = False (events resume)
+  │     │     └── Journal: "Human replied: ..."
+  │     │
+  │     └── Weaver processes answer, calls weaver_resume (no-op, already unpaused)
+  │
+  └── Path B: Human types directly into Claude Code terminal
+        │
+        ├── Weaver receives input, starts thinking
+        ├── on_agent_activity_change detects weaver became active
+        │     └── Auto-clears pending_question (panel updates)
+        ├── Weaver processes answer
+        └── Weaver calls weaver_resume to unpause event delivery
+```
+
 ### Context management
 
 ```
@@ -166,6 +206,7 @@ class WeaverSettings:
     max_interval: int = 300               # max seconds between pushes (heartbeat)
     paused: bool = False                   # user paused event pushes
     custom_instructions: str = ""          # user-defined instructions appended to weaver prompt
+    pending_question: str = ""            # question awaiting human reply (non-empty = awaiting input)
     enabled_events: list[str] = field(     # optional events (mandatory always on)
         default_factory=lambda: [
             "agent_started",
@@ -235,6 +276,7 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     max_interval INTEGER NOT NULL DEFAULT 300,
     paused INTEGER NOT NULL DEFAULT 0,
     custom_instructions TEXT NOT NULL DEFAULT '',
+    pending_question TEXT NOT NULL DEFAULT '',
     enabled_events TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived"]'
 );
 
@@ -635,7 +677,7 @@ Read recent journal entries. Use after context cleanup or startup to recover the
 }
 ```
 
-#### Interaction tool
+#### Interaction tools
 
 ##### `weaver_agent_message` (new)
 
@@ -666,6 +708,42 @@ Reply with: loom_reply("your response")
 ────────────────────────────────────────────────
 ```
 
+##### `weaver_ask` (new)
+
+Ask the human a question. Posts the question to the Weaver panel and auto-pauses event delivery. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the weaver's Claude Code terminal.
+
+```json
+{
+    "properties": {
+        "question": {
+            "type": "string",
+            "description": "The question for the human."
+        }
+    },
+    "required": ["question"]
+}
+```
+
+**Tool response:**
+```
+Question posted to the Weaver panel. Event pushes have been paused.
+The human will see your question and reply via the panel or directly
+in this terminal.
+
+After the human responds, call weaver_resume to unpause event delivery.
+```
+
+**Behavior:**
+1. Sets `WeaverSettings.pending_question` to the question text
+2. Sets `WeaverSettings.paused = True` (auto-pause events)
+3. Logs to journal: "Asked human: {question}"
+4. Weaver panel shows amber banner with the question + reply textarea
+5. The weaver goes idle and waits
+
+**Human reply paths:**
+- **Via panel**: Human types answer, clicks "Send Reply" → `weaver_reply` command sends formatted answer to terminal, clears `pending_question`, unpauses events, logs to journal
+- **Via terminal**: Human types directly into Claude Code → weaver starts thinking → `on_agent_activity_change` auto-clears `pending_question` → weaver calls `weaver_resume` to unpause
+
 ### Tools removed
 
 | Tool | Reason |
@@ -682,8 +760,8 @@ Reply with: loom_reply("your response")
 | Write | `task_create`, `task_edit`, `task_move`, `task_dispatch`, `task_resolve` | 5 |
 | Events | `events`, `notifications` | 2 |
 | Context | `journal`, `journal_read` | 2 |
-| Interaction | `agent_message` | 1 |
-| **Total** | | **15** |
+| Interaction | `agent_message`, `ask` | 2 |
+| **Total** | | **16** |
 
 Plus 1 new agent-side tool: `loom_reply`.
 
@@ -1002,9 +1080,50 @@ Update weaver settings. Supports partial updates — only the fields provided ar
 }
 ```
 
+#### `weaver_ask`
+
+Post a question from the weaver to the human. Auto-pauses events.
+
+**Payload:**
+```json
+{
+    "cmd": "weaver_ask",
+    "group": "my-project",
+    "question": "Which tasks should I prioritize?"
+}
+```
+
+**Behavior:**
+1. Set `WeaverSettings.pending_question = question`
+2. Set `WeaverSettings.paused = True`
+3. Append journal entry: "Asked human: {question}"
+4. Emit delta (`weaver_settings_update`) so the panel shows the question
+5. Return `{"type": "ok"}`
+
+#### `weaver_reply`
+
+Human replies to the weaver's pending question.
+
+**Payload:**
+```json
+{
+    "cmd": "weaver_reply",
+    "group": "my-project",
+    "answer": "Focus on the auth module first."
+}
+```
+
+**Behavior:**
+1. Validate weaver exists and is running
+2. Format answer as `── Human Reply ──` block
+3. Send to weaver's terminal via `bridge.send_text()`
+4. Clear `pending_question`, set `paused = False`
+5. Append journal entry: "Human replied: {answer}"
+6. Return `{"type": "ok"}`
+
 #### `weaver_pause` / `weaver_resume`
 
-Toggle event push delivery.
+Toggle event push delivery. `weaver_resume` also clears `pending_question`.
 
 **Payload:**
 ```json
@@ -1016,9 +1135,17 @@ Toggle event push delivery.
 
 ### Modified commands
 
-#### `add_agent` — weaver enforcement
+#### `add_agent` — weaver creation
 
-When adding an agent to a group that already has a weaver, the agent is created normally (it's not a weaver). The UI prevents creating a second weaver — but the server also validates: if the request includes `is_weaver: true` and the group already has a `weaver_agent_id`, return an error.
+When `add_agent` receives `is_weaver: true`:
+1. Validates one-per-group (returns error if group already has a weaver)
+2. Builds weaver system prompt (base + action system_prompt + custom instructions)
+3. Writes to `.loom/weaver-system-prompt-{group}.md`
+4. Appends `--append-system-prompt-file <path>` to the boot command
+5. Creates agent, sets `GroupSettings.weaver_agent_id`
+6. Default name: "Weaver" (user can override)
+
+The weaver must be created as a weaver from the start — designating an existing agent is not supported because the `--append-system-prompt-file` flag must be set on boot.
 
 #### `remove_agent` — weaver cleanup
 
@@ -1028,104 +1155,112 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 
 ## Implementation Steps
 
-### Step 1: Data model (`loom/state.py`, `loom/db.py`)
+### Step 1: Data model (`loom/state.py`, `loom/db.py`) ✅
 
 - Add `weaver_agent_id` to `GroupSettings` dataclass
-- Add `WeaverJournalEntry` dataclass
+- Add `WeaverSettings` dataclass with `pending_question` field
 - Add `pending_weaver_message` ephemeral field to `AgentCell`
 - DB: add `weaver_agent_id` column to `group_settings` via ALTER TABLE migration
-- DB: create `weaver_settings` table
+- DB: create `weaver_settings` table (with `pending_question` column)
 - DB: create `weaver_journal` table with index
-- DB: `save_weaver_settings()`, `load_weaver_settings()`, `save_journal_entry()`, `load_journal_entries(group, limit, entry_type)` methods
-- `MatrixState`: `get_weaver_for_group(group)` helper, `journal_append()`, `journal_read()` methods
-- Delta op: `journal_append` (new type for Weaver panel live updates)
+- DB: CRUD methods for both tables, `pending_question` migration for existing DBs
+- `MatrixState`: `get_weaver_for_group(group)` helper, `journal_append()`, `journal_read()`, `update_weaver_settings()` methods
+- Delta ops: `journal_append`, `weaver_settings_update`
+- Weaver cleanup on agent/group removal
 
-### Step 2: Event buffer (`loom/weaver.py`)
+### Step 2: Event buffer (`loom/weaver.py`) ✅
 
 - New file: `loom/weaver.py` — `WeaverEventBuffer` class
 - `on_panel_event(event)` — check if event's group has a weaver, check event type filter, buffer if yes
-- `on_agent_idle(cell)` — if cell is a weaver and has buffered events (or max_interval exceeded), flush
-- `_flush(group)` — format digest, send to weaver terminal via `bridge.send_text()`, update `_last_push` and `_last_cursor`
-- `_format_digest(events, board_summary)` — render digest text block
-- `_format_heartbeat(board_summary)` — render heartbeat text block
-- `_board_summary(group)` — count tasks per lane for the group
-- Integrate into `EventBus`: after emitting a panel event, call `weaver_buffer.on_panel_event()`
-- Integrate into `EventBus._apply()`: when activity transitions to idle, call `weaver_buffer.on_agent_idle(cell)`
-- Periodic timer: every 10 seconds, check if any weaver is due for a heartbeat (max_interval exceeded) and mark it pending for next idle flush
+- `on_agent_activity_change(cell)` — if weaver goes idle → flush; if weaver becomes active → auto-clear `pending_question`
+- `_flush(group)` — format digest, send to weaver terminal via `bridge.send_text()`
+- `_format_digest()` / `_format_heartbeat()` — render text blocks
+- `_context_warning()` — advisory message when token count exceeds threshold
+- Periodic timer: every 10 seconds, check heartbeat due
+- `build_weaver_system_prompt(group, settings, action_sp)` — assembles base identity + action system_prompt + custom instructions
+- Integrated into `EventBus` via `_weaver_buffer` attribute and `PanelEventLog.on_event` callback
 
-### Step 3: Server commands (`loom/server.py`)
+### Step 3: Server commands (`loom/server.py`) ✅
 
-- `weaver_message` command handler: resolve agent, format message, send via bridge, set pending flag, emit panel event
-- `ai_report(action="reply")` handler: validate pending message, emit `agent_reply` panel event, buffer for weaver
-- `weaver_journal_append` command handler: validate, insert, emit delta
-- `weaver_journal_read` command handler: query, return
-- `weaver_update_settings` command handler: validate, save (including `custom_instructions`), reconfigure buffer timers. When `custom_instructions` changes, regenerate the system prompt file (`.loom/weaver-system-prompt-{group}.md`) so the next session restart picks it up.
-- Modify `_create_agent_with_config`: when creating a weaver agent, build the system prompt (base identity + action system_prompt + custom instructions), write to `.loom/weaver-system-prompt-{group}.md`, append `--append-system-prompt-file <path>` to the boot command
-- `weaver_pause` / `weaver_resume` command handlers: toggle `WeaverSettings.paused`, emit delta
-- Modify `add_agent`: support `is_weaver` flag, enforce one-per-group
-- Modify `remove_agent`: clear `weaver_agent_id` when weaver is removed
+- `weaver_message` command: resolve agent, format message, send via bridge, set `pending_weaver_message`, emit panel event
+- `ai_report(action="reply")` handler: validate pending message, emit `agent_reply` panel event
+- `weaver_journal_append` / `weaver_journal_read` command handlers
+- `weaver_update_settings` command handler (including `custom_instructions`, `pending_question`)
+- `weaver_ask` command: set `pending_question`, auto-pause, log to journal
+- `weaver_reply` command: send formatted answer to weaver terminal, clear question, unpause, log to journal
+- `weaver_pause` / `weaver_resume` commands (`resume` also clears `pending_question`)
+- `add_agent` with `is_weaver: true`: enforce one-per-group, build system prompt file, append `--append-system-prompt-file` to boot command, set `weaver_agent_id`
+- `remove_agent`: clear `weaver_agent_id` when weaver is removed
+- `WeaverEventBuffer` initialization and wiring at startup
 
-### Step 4: MCP tools — agent side (`loom/mcp.py`)
+### Step 4: MCP tools — agent side (`loom/mcp.py`) ✅
 
 - Add `loom_reply` tool definition to `TOOLS` list
 - Add `reply` to `action_map` in `_dispatch_tool()`
-- CLI: add `loom ai reply` subcommand to `bin/loom`
+- CLI: `loom ai reply` subcommand in `bin/loom`
 
-### Step 5: MCP tools — weaver side (`loom/mcp_weaver.py`)
+### Step 5: MCP tools — weaver side (`loom/mcp_weaver.py`) ✅
 
 - Remove `weaver_lanes_list`, `weaver_pipelines_list`, `weaver_task_chain` tool definitions
-- Enrich `weaver_task_show` response: when task has `pipeline_root_id`, include `pipeline_chain` summary
-- Add `weaver_events` tool: delegate to `panel_log.get_page()` with group filter and type filter
-- Add `weaver_notifications` tool: delegate to `weaver_update_settings` command
-- Add `weaver_journal` tool: delegate to `weaver_journal_append` command
-- Add `weaver_journal_read` tool: delegate to `weaver_journal_read` command
-- Add `weaver_agent_message` tool: delegate to `weaver_message` command
+- Enrich `weaver_task_show` response with auto-included `pipeline_chain`
+- Add `weaver_events`, `weaver_notifications`, `weaver_journal`, `weaver_journal_read`, `weaver_agent_message` tools
+- Add `weaver_ask` tool: delegates to `weaver_ask` command, returns instructional response telling weaver to call `weaver_resume` after human responds
 
-### Step 6: UI — Weaver panel (`static/js/weaver.js`, `static/style.css`)
+### Step 6: UI — Weaver panel (`static/js/weaver.js`, `static/style.css`) ✅
 
-- New file: `static/js/weaver.js` — loaded between `board.js` and `main.js`
-- Tabbed layout: `Journal` | `Settings` tabs (same pattern as Agents panel's Templates/History)
-- Panel header: group name, weaver agent status, pause/resume toggle (always visible across tabs)
-- **Journal tab** (default): `renderWeaverJournal(group)` — scrollable feed, type badges (color-coded: decision=blue, observation=gray, checkpoint=green, plan=yellow), relative timestamps, "Load more" pagination from SQLite
-- **Settings tab**: `renderWeaverSettings(group)` — three sections:
-  - Agent: weaver agent designation (dropdown + remove button, in group settings modal)
-  - Custom Instructions: auto-growing textarea, dirty-state Save button, content appended to weaver prompt on dispatch
-  - Notifications: push/max interval dropdowns, event type checkboxes (mandatory ones disabled), changes apply immediately via WS
-- Delta handling: `journal_append` delta op updates the Journal tab in real-time
-- Wire into `static/js/main.js` panel toggle (B for board, W for weaver, A for actions)
+- New file: `static/js/weaver.js` — loaded between `events.js` and `main.js`
+- Tabbed layout: `Journal` | `Settings` tabs
+- Panel header: group name (follows `_currentGroup()` — the currently selected group), pause/resume toggle
+- **Journal tab** (default):
+  - Pending question banner (amber): shown when `pending_question` is set, with reply textarea and "Send Reply" button
+  - Journal entries: scrollable feed, type badges (decision=blue, observation=gray, checkpoint=green, plan=yellow), relative timestamps
+- **Settings tab**: three sections:
+  - Agent: shows weaver name + status, or "+ Create Weaver" button (sends `add_agent` with `is_weaver: true`)
+  - Custom Instructions: auto-growing textarea, dirty-state Save button
+  - Notifications: push/max interval dropdowns, event type checkboxes (mandatory ones disabled)
+- Delta handling: `journal_append` and `weaver_settings_update` ops in `ws.js`
+- Wired into `main.js` panel toggle and `render.js` re-render cycle
 
 ### Step 7: UI — Weaver agent indicators (`static/js/render.js`, `static/js/commands.js`)
 
-- Weaver agents get a distinct badge in the Agents panel (e.g., a small "W" icon or crown icon)
-- "Designate as weaver" option in agent right-click context menu (only if group has no weaver)
-- "Remove as weaver" option in weaver agent's context menu
+- Weaver agents get a distinct badge in the Agents panel (e.g., a small "W" icon)
 - Paused indicator: small pause icon on the weaver cell when digests are paused
-- Disable "Add weaver" / "Designate as weaver" when the group already has one
+- Context menu: "Remove as weaver" option on weaver agent
 
-### Step 8: UI — Pause/resume controls
+### Step 8: UI — Pause/resume controls ✅
 
-- Pause/Resume button in Weaver panel settings section
-- Small pause/play toggle icon on the weaver's agent cell
-- Both update `WeaverSettings.paused` via WS command
-- Visual feedback: when paused, the weaver cell shows a muted "paused" badge; the Weaver panel shows "Event pushes paused" banner
+- Pause/Resume button in Weaver panel header (always visible across tabs)
+- Updates `WeaverSettings.paused` via WS command
+- Visual feedback: button text toggles between "Pause" and "Resume", styled differently when paused
 
-### Step 9: Context warning integration
+### Step 9: Context warning integration ✅
 
-- In `WeaverEventBuffer._flush()`: check weaver agent's `session_tokens_in + session_tokens_out` against a configurable threshold (default: 80% of model context)
-- If exceeded, append context warning line to the digest
-- The threshold is approximate — based on token counts from cost_update events
-- No auto-cleanup: the weaver decides when to checkpoint. The warning is advisory.
+- In `WeaverEventBuffer._context_warning()`: check weaver agent's `session_tokens_in + session_tokens_out` against threshold (~800K tokens)
+- If exceeded, append warning line to the digest
+- No auto-cleanup: the weaver decides when to checkpoint
 
-### Step 10: Weaver action template and base system prompt
+### Step 10: Weaver action template and base system prompt ✅ (base prompt only)
 
-- **Base system prompt** (built into `loom/weaver.py`): hardcoded text that defines the weaver role, available tools, behavioral guidelines (journal usage, checkpoint cadence, event response patterns). This is the first section of the assembled `--append-system-prompt`. Not user-editable — it's the weaver's "firmware."
-- **Default weaver action**: `.loom/actions/weaver/orchestrate.yaml`
-  - `system_prompt` field (optional): project-level system instructions that extend the base. Included in the assembled `--append-system-prompt` between the base and custom instructions.
-  - `prompt` field: the user message sent on dispatch. Uses `{{ loom.context.is_clean }}` to branch:
-    - Clean (first dispatch): "Check the board and begin managing tasks."
-    - Not clean (re-dispatch after `/clear`): "Read your journal, check the board and recent events, then resume."
-  - No `transitions` — the weaver doesn't participate in pipelines, it manages them
-- This is a starting point — users customize the action and write custom instructions in the Settings tab
+- **Base system prompt** (built into `loom/weaver.py`): hardcoded text defining the weaver role, available tools, behavioral guidelines (journal usage, checkpoint cadence, event response, human interaction via `weaver_ask`). Assembled via `build_weaver_system_prompt()` and written to `.loom/weaver-system-prompt-{group}.md`, passed via `--append-system-prompt-file`.
+- **Default weaver action** (`.loom/actions/weaver/orchestrate.yaml`): not yet created — users can create their own action or rely on the base system prompt alone.
+
+### Step 11: Human interaction flow ✅
+
+- `weaver_ask` MCP tool: posts question to panel, auto-pauses events, returns instructions to call `weaver_resume` after human responds
+- `weaver_reply` server command: sends formatted answer to weaver terminal, clears question, unpauses events, logs exchange to journal
+- `weaver_ask` server command: sets `pending_question` + `paused`, logs to journal
+- Auto-clear `pending_question` on weaver activity change (human typed directly into terminal)
+- Panel UI: amber banner with question + reply textarea + "Send Reply" button
+- Two reply paths: panel (Loom-mediated) or direct terminal input (weaver self-resumes)
+
+---
+
+## Remaining Work
+
+- **Step 7: Weaver agent indicators** — visual badge on weaver agent cell, context menu options
+- **Default weaver action template** — `.loom/actions/weaver/orchestrate.yaml` with `is_clean` branching
+- **CLAUDE.md documentation** — document weaver concept, MCP tools, event push system, journal
+- **Journal pagination** — "Load more" button in journal tab (SQLite pagination exists, UI not wired)
 
 ---
 
@@ -1138,6 +1273,7 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 - **Structured decision format** — The journal is free-text. Structured fields (e.g., `{"action": "dispatch", "task": "...", "rationale": "..."}`) would enable analytics but add complexity. Free-text is sufficient for context recovery.
 - **Token-based auto-checkpoint** — Beyond the advisory warning, we don't force checkpoints. The weaver action template should instruct periodic checkpointing.
 - **Event replay** — `weaver_events` returns raw events but doesn't support replaying them as if they were new pushes. Replay would require re-triggering the weaver's decision loop, which is the weaver's job, not Loom's.
+- **Designating existing agents as weaver** — The weaver must be created as a weaver (via "+ Create Weaver" or `add_agent` with `is_weaver: true`) because `--append-system-prompt-file` must be set on boot. Existing agents can't be retroactively designated.
 
 ---
 
@@ -1145,21 +1281,18 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 
 | File | Change |
 |---|---|
-| `loom/state.py` | Add `weaver_agent_id` to `GroupSettings`, `pending_weaver_message` to `AgentCell`, `WeaverJournalEntry` dataclass, `get_weaver_for_group()`, `journal_append()`, `journal_read()` methods, `journal_append` delta op |
-| `loom/db.py` | Add `weaver_agent_id` migration, `weaver_settings` table, `weaver_journal` table + index, CRUD methods for both |
-| `loom/weaver.py` | **New file.** `WeaverEventBuffer` class — event buffering, idle-gated delivery, digest formatting, heartbeat timer, pause/resume. Base weaver system prompt text. `build_weaver_system_prompt(group, settings)` assembler. |
-| `loom/events.py` | Hook `WeaverEventBuffer.on_panel_event()` into `EventBus` panel event emission, hook `on_agent_idle()` into activity transition |
-| `loom/server.py` | New commands: `weaver_message`, `weaver_journal_append`, `weaver_journal_read`, `weaver_update_settings`, `weaver_pause`, `weaver_resume`. Extend `ai_report` with `action="reply"`. Modify `add_agent`/`remove_agent` for weaver lifecycle. Modify `_create_agent_with_config` to assemble and write weaver system prompt file, append `--append-system-prompt-file` to boot command. Initialize `WeaverEventBuffer` at startup. |
-| `loom/mcp.py` | Add `loom_reply` tool definition, `reply` action mapping |
-| `loom/mcp_weaver.py` | Remove 3 tools (`lanes_list`, `pipelines_list`, `task_chain`), enrich `task_show` with chain data, add 5 new tools (`events`, `notifications`, `journal`, `journal_read`, `agent_message`) |
-| `bin/loom` | Add `loom ai reply` subcommand, `loom weaver journal` subcommand |
-| `static/js/weaver.js` | **New file.** Weaver panel renderer — tabbed layout (Journal/Settings), journal feed with pagination, settings with custom instructions textarea + notification config, pause/resume |
-| `static/js/render.js` | Weaver badge on agent cells, paused indicator |
-| `static/js/commands.js` | "Designate as weaver" / "Remove as weaver" context menu items |
-| `static/js/modals.js` | Weaver section in group settings modal |
-| `static/js/ws.js` | Handle `journal_append` delta op, route weaver settings updates |
-| `static/js/main.js` | Weaver panel toggle (W key), load `weaver.js` |
-| `static/style.css` | Weaver panel styles, journal entry cards, type badges, pause indicator, weaver agent badge |
-| `webview.html` | Include `weaver.js` script tag, weaver panel container div |
-| `.loom/actions/weaver/orchestrate.yaml` | Default weaver action template |
-| `CLAUDE.md` | Document weaver concept, MCP tools, event push system, journal |
+| `loom/state.py` | `WeaverSettings` dataclass (with `pending_question`), `WEAVER_MANDATORY_EVENTS`, `weaver_agent_id` on `GroupSettings`, `pending_weaver_message` on `AgentCell`, weaver helpers on `MatrixState`, weaver settings in snapshot, cleanup on removal |
+| `loom/db.py` | `weaver_settings` table (with `pending_question`), `weaver_journal` table + index, `weaver_agent_id` migration, `pending_question` migration, CRUD methods |
+| `loom/weaver.py` | **New file.** `WeaverEventBuffer` (event buffering, idle-gated delivery, digest/heartbeat formatting, auto-clear `pending_question` on activity, periodic timer). Base system prompt text. `build_weaver_system_prompt()` assembler. |
+| `loom/events.py` | `on_event` callback on `PanelEventLog`, `_weaver_buffer` on `EventBus` with activity-change hook |
+| `loom/server.py` | New commands: `weaver_message`, `weaver_ask`, `weaver_reply`, `weaver_journal_append/read`, `weaver_update_settings`, `weaver_pause/resume`. `ai_report(action="reply")`. `add_agent` with `is_weaver` (system prompt file + `--append-system-prompt-file`). `remove_agent` weaver cleanup. `WeaverEventBuffer` init. |
+| `loom/mcp.py` | `loom_reply` tool definition + action mapping |
+| `loom/mcp_weaver.py` | Remove 3 tools, enrich `task_show` with chain, add 6 tools (`events`, `notifications`, `journal`, `journal_read`, `agent_message`, `ask`) |
+| `bin/loom` | `loom ai reply` subcommand, `loom weaver journal` subcommand |
+| `static/js/weaver.js` | **New file.** Tabbed panel (Journal/Settings), pending question banner with reply box, journal feed, settings with create button + custom instructions + notifications, `weaverCreate()` / `weaverReply()` / `weaverTogglePause()` |
+| `static/js/render.js` | Weaver panel re-render on delta |
+| `static/js/ws.js` | `journal_append` + `weaver_settings_update` delta op handlers |
+| `static/js/main.js` | `panel-weaver` in panel IDs, render hooks |
+| `static/style.css` | Weaver panel styles: header, tabs, journal entries with type badges, ask banner (amber), reply textarea/button, settings sections, create button, event checkboxes |
+| `webview.html` | `panel-weaver` div, taskbar button (⚖ Weaver), `weaver.js` script tag |
+| `Makefile` | Add `loom/mcp_weaver.py` and `loom/weaver.py` to install target |
