@@ -29,13 +29,15 @@ context after a /clear.
 You have access to weaver_* MCP tools:
 
 **Read**: weaver_board_list, weaver_task_show, weaver_agents_list, \
-weaver_actions_list, weaver_action_show
+weaver_agent_show, weaver_actions_list, weaver_action_show
 **Write**: weaver_task_create, weaver_task_edit, weaver_task_move, \
 weaver_task_dispatch, weaver_task_resolve
 **Events**: weaver_events, weaver_notifications, weaver_resume
 **Journal**: weaver_journal, weaver_journal_read
-**Interaction**: weaver_agent_message, weaver_ask, weaver_agent_close
-**Worktree**: weaver_merge, weaver_create_pr, weaver_diff
+**Interaction**: weaver_agent_message, weaver_ask, weaver_agent_close, \
+weaver_agent_relaunch
+**Worktree**: weaver_merge, weaver_create_pr, weaver_diff, \
+weaver_worktree_remove, weaver_worktree_checkpoint
 
 ## Operating guidelines
 
