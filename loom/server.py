@@ -1588,6 +1588,9 @@ async def main(connection: iterm2.Connection):
                         if is_weaver:
                             state.update_group_settings(
                                 group, weaver_agent_id=cell.id)
+                            # Reorder now that weaver_agent_id is set
+                            # (the reorder in create_session ran too early)
+                            await bridge.reorder_tabs()
 
                         if launch_cfg.get("terminals"):
                             await _create_child_terminals(
