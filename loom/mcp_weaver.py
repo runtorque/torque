@@ -537,21 +537,30 @@ _WEAVER_TOOL_MAP = {t["name"]: t for t in WEAVER_TOOLS}
 async def _dispatch_weaver_tool(name, args, handle_command, state):
     """Execute a weaver tool call and return (content_text, is_error)."""
 
+    # Resolve the weaver's group — all tools are scoped to this group
+    _weaver_group = ""
+    for gn, gs in state.group_settings.items():
+        if gs.weaver_agent_id:
+            _weaver_group = gn
+            break
+    if not _weaver_group:
+        return "No weaver configured for any group", True
+
     # -- Read tools ---------------------------------------------------------
 
     if name == "weaver_board_list":
         lane_filter = args.get("lane", "")
         label_filter = args.get("label", "")
-        group_filter = args.get("group", "")
         search = args.get("search", "").lower()
 
         lanes = {}
         for t in state.board_tasks.values():
+            # Always scope to weaver's group
+            if t.group != _weaver_group:
+                continue
             if lane_filter and t.lane != lane_filter:
                 continue
             if label_filter and label_filter not in (t.labels or []):
-                continue
-            if group_filter and t.group != group_filter:
                 continue
             if search and search not in t.task.lower() \
                     and search not in (t.description or "").lower():
@@ -644,6 +653,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
         for c in state.agents.values():
             if c.cell_type != "agent":
                 continue
+            if c.group != _weaver_group:
+                continue
             task_title = ""
             if c.current_task_id:
                 t = state.board_tasks.get(c.current_task_id)
@@ -665,7 +676,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
     if name == "weaver_actions_list":
         result = await handle_command({
             "cmd": "list_actions",
-            "group": args.get("group", ""),
+            "group": args.get("group", "") or _weaver_group,
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
@@ -675,7 +686,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
         result = await handle_command({
             "cmd": "get_action",
             "name": args.get("name", ""),
-            "group": args.get("group", ""),
+            "group": args.get("group", "") or _weaver_group,
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
@@ -688,7 +699,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
             "cmd": "board_add_task",
             "task": args.get("title", ""),
             "description": args.get("description", ""),
-            "group": args.get("group", ""),
+            "group": args.get("group", "") or _weaver_group,
             "lane": args.get("lane", ""),
             "action_name": args.get("action", ""),
             "action_vars": args.get("action_vars", {}),
@@ -776,6 +787,9 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
         else:
             events = []
 
+        # Scope to weaver's group
+        events = [e for e in events
+                  if e.get("group", "") == _weaver_group]
         if type_filter:
             events = [e for e in events if e.get("kind") in type_filter]
 
@@ -784,18 +798,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
                           ), False
 
     if name == "weaver_notifications":
-        # Build update payload for weaver settings
-        # Resolve the weaver's group from the cell_id header if available,
-        # or use the first group with a weaver
-        group = ""
-        for gn, gs in state.group_settings.items():
-            if gs.weaver_agent_id:
-                group = gn
-                break
-        if not group:
-            return "No weaver configured for any group", True
-
-        ws = state.get_weaver_settings(group)
+        ws = state.get_weaver_settings(_weaver_group)
         fields = {}
         if "push_interval" in args:
             fields["push_interval"] = max(10, args["push_interval"])
@@ -811,29 +814,20 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
 
         result = await handle_command({
             "cmd": "weaver_update_settings",
-            "group": group,
+            "group": _weaver_group,
             **fields,
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return json.dumps({"type": "ok", "settings": asdict(
-            state.get_weaver_settings(group))}), False
+            state.get_weaver_settings(_weaver_group))}), False
 
     # -- Context tools ------------------------------------------------------
 
     if name == "weaver_journal":
-        # Find the weaver's group
-        group = ""
-        for gn, gs in state.group_settings.items():
-            if gs.weaver_agent_id:
-                group = gn
-                break
-        if not group:
-            return "No weaver configured for any group", True
-
         result = await handle_command({
             "cmd": "weaver_journal_append",
-            "group": group,
+            "group": _weaver_group,
             "entry_type": args.get("type", "observation"),
             "entry": args.get("entry", ""),
         })
@@ -842,17 +836,9 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
         return json.dumps(result), False
 
     if name == "weaver_journal_read":
-        group = ""
-        for gn, gs in state.group_settings.items():
-            if gs.weaver_agent_id:
-                group = gn
-                break
-        if not group:
-            return "No weaver configured for any group", True
-
         result = await handle_command({
             "cmd": "weaver_journal_read",
-            "group": group,
+            "group": _weaver_group,
             "tail": args.get("tail", 20),
             "entry_type": args.get("type", ""),
         })
@@ -882,17 +868,9 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
         if not question:
             return "Question is required", True
 
-        group = ""
-        for gn, gs in state.group_settings.items():
-            if gs.weaver_agent_id:
-                group = gn
-                break
-        if not group:
-            return "No weaver configured for any group", True
-
         result = await handle_command({
             "cmd": "weaver_ask",
-            "group": group,
+            "group": _weaver_group,
             "question": question,
         })
         if result and result.get("type") == "error":
