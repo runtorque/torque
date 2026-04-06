@@ -10,6 +10,7 @@ import shutil
 import sys
 import time
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 
 import aiohttp
@@ -1023,6 +1024,60 @@ async def main(connection: iterm2.Connection):
         return _build_dispatch_persistent_prompt(
             launch_cfg.get("system_prompt", ""))
 
+    def _record_task_dispatch(cell, task, lane: str) -> None:
+        """Link a task to an agent and persist dispatch history."""
+        state.board_update_task(task.id, agent_id=cell.id, lane=lane)
+        cell.current_task_id = task.id
+        state.history_record_dispatch(cell, task)
+
+    def _iso_to_unix(ts: str) -> float | None:
+        if not ts:
+            return None
+        try:
+            return datetime.fromisoformat(ts).timestamp()
+        except (TypeError, ValueError):
+            return None
+
+    def _current_board_tasks_for_agent(agent_id: str) -> list[dict]:
+        """Best-effort fallback for active agents missing persisted task rows."""
+        tasks = []
+        for task in state.board_tasks.values():
+            if task.agent_id != agent_id:
+                continue
+            outcome = ""
+            if task.lane == "Done":
+                outcome = "done"
+            elif "loom:error" in (task.labels or []):
+                outcome = "error"
+            elif "loom:blocked" in (task.labels or []):
+                outcome = "blocked"
+            tasks.append({
+                "agent_id": agent_id,
+                "task_id": task.id,
+                "task_title": task.task,
+                "started_at": (_iso_to_unix(task.updated_at)
+                                or _iso_to_unix(task.created_at)),
+                "completed_at": (_iso_to_unix(task.updated_at)
+                                  if task.lane == "Done" else None),
+                "outcome": outcome,
+            })
+        tasks.sort(key=lambda t: t.get("started_at") or 0, reverse=True)
+        return tasks
+
+    def _enrich_history_record(record: dict) -> dict:
+        """Overlay live task counts for active agents."""
+        if not record:
+            return record
+        cell = state.agents.get(record.get("id", ""))
+        if cell and cell.cell_type == "agent":
+            live_count = max(
+                int(cell.tasks_dispatched or 0),
+                len(_current_board_tasks_for_agent(cell.id)),
+            )
+            record["total_tasks"] = max(
+                int(record.get("total_tasks") or 0), live_count)
+        return record
+
     # -- Postscript builder -------------------------------------------------
 
     def _build_postscript(task, amgr, base_dir="", is_clean=True,
@@ -1349,6 +1404,7 @@ async def main(connection: iterm2.Connection):
             offset = int(data.get("offset", 0))
             records = db.load_agent_history(
                 status_filter=status_filter, limit=limit, offset=offset)
+            records = [_enrich_history_record(r) for r in records]
             return {"type": "agent_history_list",
                     "records": records}
 
@@ -1361,7 +1417,10 @@ async def main(connection: iterm2.Connection):
             if not record:
                 return {"type": "error",
                         "message": "Agent not found in history"}
+            record = _enrich_history_record(record)
             tasks = db.load_agent_tasks(agent_id)
+            if not tasks:
+                tasks = _current_board_tasks_for_agent(agent_id)
             messages = db.load_agent_messages(
                 agent_id,
                 limit=int(data.get("message_limit", 100)))
@@ -2646,11 +2705,8 @@ async def main(connection: iterm2.Connection):
                             dispatch_lane = \
                                 state.get_group_settings(group) \
                                     .dispatch_lane or "In Progress"
-                            state.board_update_task(
-                                tid, agent_id=cell.id,
-                                lane=dispatch_lane)
-                            cell.current_task_id = tid
-                            state.history_record_dispatch(cell, task)
+                            _record_task_dispatch(
+                                cell, task, dispatch_lane)
 
                             # Build loom context for template rendering
                             loom_ctx = _build_loom_context(cell, task)
@@ -3588,12 +3644,8 @@ async def main(connection: iterm2.Connection):
                                                 new_task.group
                                             ).dispatch_lane \
                                                 or "In Progress"
-                                            state.board_update_task(
-                                                new_task.id,
-                                                agent_id=cell.id,
-                                                lane=dl)
-                                            cell.current_task_id = \
-                                                new_task.id
+                                            _record_task_dispatch(
+                                                cell, new_task, dl)
                                             cell.tasks_dispatched += 1
                                             state._emit_agent(cell)
                                             state._db_save_agent(cell)
