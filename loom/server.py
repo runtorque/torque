@@ -2006,6 +2006,50 @@ async def main(connection: iterm2.Connection):
                     state._emit_agent(cell)
                     state._db_save_agent(cell)
 
+            elif cmd == "worktree_diff":
+                cell = state.agents.get(data.get("id", ""))
+                if not cell or not cell.worktree_path:
+                    result = {"type": "error",
+                              "message": "Agent has no worktree."}
+                elif not cell.worktree_base_branch:
+                    result = {"type": "error",
+                              "message": "No base branch configured."}
+                else:
+                    import asyncio as _aio
+                    stat_only = data.get("stat_only", False)
+                    paths = data.get("paths", [])
+                    diff_args = [
+                        "git", "-C", cell.worktree_path,
+                        "diff",
+                    ]
+                    if stat_only:
+                        diff_args.append("--stat")
+                    diff_args.append(
+                        f"{cell.worktree_base_branch}...HEAD")
+                    if paths:
+                        diff_args.append("--")
+                        diff_args.extend(paths)
+                    proc = await _aio.create_subprocess_exec(
+                        *diff_args,
+                        stdout=_aio.subprocess.PIPE,
+                        stderr=_aio.subprocess.PIPE,
+                    )
+                    stdout, stderr = await proc.communicate()
+                    if proc.returncode != 0:
+                        result = {"type": "error",
+                                  "message": stderr.decode().strip()
+                                  or "git diff failed"}
+                    else:
+                        diff_text = stdout.decode()
+                        # Truncate if too large (100K chars)
+                        if len(diff_text) > 100_000:
+                            diff_text = (
+                                diff_text[:100_000]
+                                + "\n\n... truncated (too large) ..."
+                            )
+                        result = {"type": "ok",
+                                  "diff": diff_text}
+
             elif cmd == "worktree_check_conflicts":
                 cell = state.agents.get(data.get("id", ""))
                 if not cell or not cell.worktree_path:

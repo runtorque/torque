@@ -598,6 +598,41 @@ WEAVER_TOOLS = [
             "required": ["agent"],
         },
     },
+    {
+        "name": "weaver_diff",
+        "description": (
+            "Get the diff of an agent's worktree branch against "
+            "its base branch. Returns the full diff output, "
+            "optionally limited to specific files. Useful for "
+            "reviewing changes before merge or PR."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Agent slug or ID with a worktree.",
+                },
+                "stat_only": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, return only the diffstat summary "
+                        "(files changed, insertions, deletions) "
+                        "instead of the full diff. Default: false."
+                    ),
+                },
+                "paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Limit diff to specific file paths. "
+                        "If omitted, shows all changes."
+                    ),
+                },
+            },
+            "required": ["agent"],
+        },
+    },
 ]
 
 _WEAVER_TOOL_MAP = {t["name"]: t for t in WEAVER_TOOLS}
@@ -1042,5 +1077,26 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
             "url": result.get("url", ""),
             "message": result.get("message", "PR created"),
         }), False
+
+    if name == "weaver_diff":
+        agent_ident = args.get("agent", "")
+        agent_id = _resolve_agent(state, agent_ident)
+        if not agent_id:
+            return f"Agent not found: {agent_ident}", True
+        cell = state.agents.get(agent_id)
+        if not cell or not cell.worktree_path:
+            return "Agent has no worktree", True
+        if not cell.worktree_base_branch:
+            return "Agent has no base branch configured", True
+
+        result = await handle_command({
+            "cmd": "worktree_diff",
+            "id": agent_id,
+            "stat_only": args.get("stat_only", False),
+            "paths": args.get("paths", []),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return result.get("diff", "No changes"), False
 
     return f"Unknown weaver tool: {name}", True
