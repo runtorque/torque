@@ -168,6 +168,27 @@ function _weaverRenderSettings(group, ws, weaver) {
   }
   html += '</div>';
 
+  // Backend section
+  html += '<div class="weaver-section">';
+  html += '<div class="weaver-section-title">Backend</div>';
+  var wprov = (ws && ws.weaver_provider) || '';
+  html += '<div class="weaver-field"><label>Provider</label>';
+  html += '<select onchange="weaverUpdateSetting(\'weaver_provider\', this.value)">';
+  html += '<option value=""' + (wprov === '' ? ' selected' : '') + '>Group default</option>';
+  for (var i = 0; i < _cachedProviders.length; i++) {
+    var p = _cachedProviders[i];
+    var sel = wprov === p.name ? ' selected' : '';
+    html += '<option value="' + _esc(p.name) + '"' + sel + '>' + _esc(p.display_name) + '</option>';
+  }
+  html += '</select></div>';
+  var wbootcmd = (ws && ws.weaver_boot_command) || '';
+  html += '<div class="weaver-field"><label>Command override</label>';
+  html += '<input type="text" value="' + _esc(wbootcmd) + '" '
+       + 'placeholder="Use provider default" '
+       + 'onchange="weaverUpdateSetting(\'weaver_boot_command\', this.value.trim())">';
+  html += '</div>';
+  html += '</div>';
+
   // Custom Instructions section
   html += '<div class="weaver-section">';
   html += '<div class="weaver-section-title">Custom Instructions</div>';

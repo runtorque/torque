@@ -248,6 +248,8 @@ class WeaverSettings:
     paused: bool = False                 # user paused event pushes
     custom_instructions: str = ""        # user-defined instructions appended to weaver system prompt
     pending_question: str = ""           # question awaiting human reply (non-empty = awaiting input)
+    weaver_provider: str = ""            # adapter name override (empty = use group default)
+    weaver_boot_command: str = ""        # boot command override (empty = use provider default)
     enabled_events: list[str] = field(   # optional events (mandatory always on)
         default_factory=lambda: [
             "agent_started",

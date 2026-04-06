@@ -16,6 +16,7 @@ LOOM_EXCLUDE_ENTRIES = [
     ".claude/skills/loom-*/",
     ".codex/config.toml",
     ".codex/hooks.json",
+    ".codex/AGENTS.md",
 ]
 
 

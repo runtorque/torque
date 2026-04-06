@@ -148,6 +148,35 @@ class ClaudeCodeAdapter(AgentAdapter):
             return ""
         return ""
 
+    def inject_persistent_prompt(self, working_dir: str,
+                                 filename: str, text: str) -> str:
+        if not text or not working_dir:
+            return ""
+        try:
+            sp_dir = Path(working_dir) / ".loom"
+            sp_dir.mkdir(parents=True, exist_ok=True)
+            sp_path = sp_dir / filename
+            sp_path.write_text(text.rstrip() + "\n")
+            return f" --append-system-prompt-file {shlex.quote(str(sp_path))}"
+        except Exception:
+            return ""
+
+    def uninstall_persistent_prompt(self, working_dir: str,
+                                    filename: str = "") -> None:
+        if not working_dir:
+            return
+        try:
+            sp_dir = Path(working_dir) / ".loom"
+            if filename:
+                (sp_dir / filename).unlink(missing_ok=True)
+            else:
+                # Remove all Loom system prompt files
+                if sp_dir.is_dir():
+                    for f in sp_dir.glob("*-system-prompt*.md"):
+                        f.unlink(missing_ok=True)
+        except Exception:
+            pass
+
     def resolve_model_flags(self, model: str) -> str:
         if not model:
             return ""
