@@ -27,20 +27,38 @@ nav:
   - Start Here:
       - Getting Started: getting-started.md
       - Concepts: concepts.md
+      - Sessions: sessions.md
       - Agents & Sessions: agents-and-sessions.md
+      - Group Settings: group-settings.md
+      - Keyboard Shortcuts: keyboard-shortcuts.md
   - Workflows:
       - Workflow Guide: workflow-guide.md
       - Task Board: board.md
       - Task Lifecycle: task-lifecycle.md
       - Actions & Templates: actions.md
       - Agent Templates: agent-templates.md
-      - Weaver: weaver.md
       - Worktrees: worktrees.md
+      - Schedules: schedules.md
+      - Weaver: weaver.md
+  - Operate Loom:
+      - Operations: operations.md
+      - Troubleshooting: troubleshooting.md
   - Reference:
       - Reference Guide: reference-guide.md
-      - Group Settings: group-settings.md
-      - Keyboard Shortcuts: keyboard-shortcuts.md
       - CLI Reference: cli.md
-      - Troubleshooting: troubleshooting.md
   - Project:
+      - Architecture: architecture.md
       - Roadmap: roadmap.md
+  - Internals:
+      - Plans Archive:
+          - Overview: plans/index.md
+          - Agent Awareness: plans/agent-awareness.md
+          - Agent Context Preservation: plans/agent-context.md
+          - CLI & REST API: plans/cli.md
+          - CLI AI Commands: plans/cli_ai_commands.md
+          - Git Worktree Lifecycle: plans/git-worktree-lifecycle.md
+          - Pipelines: plans/pipelines.md
+          - Standalone Application: plans/standalone_application.md
+          - Task Board Plan: plans/task-board.md
+          - Weaver Plan: plans/weaver.md
+          - Workflow Automation: plans/workflow-automation.md

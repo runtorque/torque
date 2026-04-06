@@ -137,9 +137,9 @@ When agents hand off work through [pipelines](actions.md#pipelines), worktrees a
 
 This inheritance is automatic --- the `inherit_worktree_from` field is set during derive dispatch. No configuration needed.
 
-### Derive-to-agent with worktrees
+### Transition-targeted reuse with worktrees
 
-When using `--agent` or `--self` to dispatch to an existing agent (see [Derive-to-agent](actions.md#derive-to-agent)), the target agent keeps its existing worktree. The new task runs in whatever directory the agent is already working in.
+When an action transition routes follow-up work to an existing agent (for example `target: self`, `target: parent`, or `target: root`), that agent keeps its existing worktree. The new task runs in whatever directory the target agent is already working in.
 
 ## Relaunch and recovery
 

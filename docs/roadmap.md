@@ -159,14 +159,14 @@ Two commands for task lifecycle:
 loom task dispatch "Fix the login bug" -t fix --wait
 
 # Create a ticket in Backlog (no agent launched)
-loom task create "Update error handling in auth module" -a frontend
+loom task create "Update error handling in auth module" -g frontend
 ```
 
-`task dispatch` creates a board ticket in the "In Progress" lane, creates an agent from the action, links them via `agent_id`, and sends the task. `task create` parks a ticket in "Backlog" for later pickup. Both support `--assign PREFIX` for pool-based agent assignment and `--labels` for orchestration tagging.
+`task dispatch` creates a board ticket in the "In Progress" lane, creates an agent from the action, links them via `agent_id`, and sends the task. `task create` parks a ticket in "Backlog" for later pickup. Both support labels; `task create` also supports scheduling and dependencies.
 
 ### Pipelines ✅
 
-Multi-step agent workflows through task derivation. Actions declare valid transitions via a `transitions` field — each entry names a target action and a `when` description. Agents drive the pipeline forward by calling `loom ai derive -t <action> "description"`, which marks the current task as Done, creates a derived task linked via `parent_task_id`, and dispatches a new agent. The server enforces that only declared transitions are allowed. The entire task chain shares one worktree.
+Multi-step agent workflows through task derivation. Actions declare valid transitions via a `transitions` field — each entry names a target action and a `when` description. Agents drive the pipeline forward by calling `loom ai derive -t <action> "description"`, which keeps the current task in progress, updates its status, creates a derived task linked via `parent_task_id`, and dispatches the next stage. The server enforces that only declared transitions are allowed. The entire task chain shares one worktree.
 
 `loom ai ask "question"` creates a human-in-the-loop gate — a derived task in Backlog that a human reviews and dispatches manually. Depth limits (`max_pipeline_depth` global setting, `max_depth` per action) prevent runaway chains.
 
@@ -185,7 +185,7 @@ Start agents or pipelines based on events rather than manual invocation:
 - File changed on a branch → re-run validation
 - Webhook received → configurable handler
 
-Since `loom dispatch` is scriptable, simple triggers work today via cron or CI calling the CLI. A built-in trigger system is deferred.
+Since `loom task dispatch` is scriptable, simple triggers work today via cron or CI calling the CLI. A built-in trigger system is deferred.
 
 ### Remaining Work
 
@@ -214,7 +214,7 @@ Tasks are structured tickets with fields designed for agent orchestration:
 - **Instructions**, **Context**, **Criteria** — structured fields that map to action fields
 - **Labels** — for orchestration tagging
 
-Cards show group badge, assignee badge (amber), label badges, and linked agent name. Double-click opens the edit modal.
+Cards show group badge, label badges, attachment counts, and linked agent name. Double-click opens the edit modal.
 
 - Create tasks via modal (New task or From action dropdown), edit, move, delete
 - "+ Add task" is a dropdown: **New task** opens the task modal, **From action** renders an action's fields and pre-fills the modal

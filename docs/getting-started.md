@@ -2,142 +2,104 @@
 
 ## Prerequisites
 
-- **iTerm2** with the Python API enabled (Preferences > General > Magic > Enable Python API)
-- **macOS** (iTerm2 is macOS-only)
+- macOS
+- iTerm2 with the Python API enabled: **Preferences -> General -> Magic -> Enable Python API**
 
-## Installation
-
-Clone the repository:
+## Install
 
 ```bash
 git clone https://github.com/aleksanderarruda/iterm2-agent-orchestration.git
 cd iterm2-agent-orchestration
-```
-
-Install dependencies into iTerm2's bundled Python:
-
-```bash
 make deps
-```
-
-Install the plugin files:
-
-```bash
 make install
-```
-
-## Running
-
-1. Open iTerm2
-2. Go to **Scripts** menu and click **loom**
-3. Open the Toolbelt: **View > Show Toolbelt** (++cmd+shift+b++)
-4. In the Toolbelt gear menu, check **Loom**
-
-The Loom panel appears in the Toolbelt sidebar.
-
-### Standalone mode
-
-Loom can also run as a standalone browser window instead of the Toolbelt. This mode exists to support terminal emulators other than iTerm2 in the future, but you can also use it alongside the Toolbelt for a wider view.
-
-```bash
-# Run without Toolbelt registration
-make standalone
-make open
-
-# Or just open a browser alongside the running Toolbelt
-make open
-```
-
-## CLI
-
-Install the `loom` command-line tool:
-
-```bash
 make cli
 ```
 
-This symlinks `bin/loom` to `~/.local/bin/loom`. Make sure `~/.local/bin` is in your `PATH`.
+`make cli` installs `bin/loom` into `~/.local/bin/loom`. Make sure that directory is in your `PATH`.
 
-The CLI lets you control Loom from any terminal (see [CLI Reference](cli.md) for all commands):
+## Start Loom
 
-```bash
-loom status              # show agents in the current window
-loom status --all        # show all agents across all windows
-loom agent add my-agent  # create an agent (group auto-detected)
-loom send "fix the bug"  # send text to the parent agent
-loom send "fix it" --wait # send and wait for the agent to finish
-loom logs -f             # tail the daemon log
-```
+1. Open iTerm2.
+2. Run **Scripts -> loom**.
+3. Open **View -> Show Toolbelt**.
+4. Enable **Loom** from the Toolbelt gear menu.
 
-### Dispatch
+The Loom panel should now appear in the Toolbelt sidebar.
 
-Create an agent from an action and send it a task in one command:
+## Open a Wider Browser View
+
+You can open the same UI in a browser while the Toolbelt is running:
 
 ```bash
-loom dispatch "Fix the login bug" --action bugfix --wait
-loom dispatch "Fix it" -t bugfix -v TEST_COMMAND=pytest --wait
+make open
 ```
 
-Actions are Jinja2+YAML files. Loom looks in two locations (project-local takes precedence):
+For standalone-only mode, where Loom skips Toolbelt registration but still controls iTerm2 externally:
 
-- **Project**: `.loom/actions/` in your repo root
-- **Global**: `~/.loom/actions/` for actions shared across projects
+```bash
+make standalone
+make open
+```
 
-Variables work anywhere in the file and are auto-discovered — no declaration needed. Defaults come from `| default()` filters. Copy the starters into your repo:
+See [Operations](operations.md) for the differences between Toolbelt, dual-mode, and standalone-only setups.
+
+## First Working Session
+
+1. Create a group with **+ Group**.
+2. Add an agent with **+ New**.
+3. Select that agent and add a companion terminal from the drawer below.
+4. Click a cell to focus its iTerm2 tab.
+5. Use the group broadcast button to send the same command to every session in the group.
+
+See [Sessions](sessions.md) for the full session model and [Keyboard Shortcuts](keyboard-shortcuts.md) for navigation.
+
+## First Task Workflow
+
+Create a task to park work in Backlog:
+
+```bash
+loom task create "Investigate the flaky auth test" -g backend
+```
+
+Or create and dispatch a new task directly from the CLI:
+
+```bash
+loom task dispatch "Investigate the flaky auth test" -g backend -t oneshot/fix
+```
+
+If you want the agent to report back into Loom as it works, the prompt postscript will tell it which `loom ai ...` commands are available for that action.
+
+See:
+
+- [Task Board](board.md)
+- [Task Lifecycle](task-lifecycle.md)
+- [Actions & Templates](actions.md)
+
+## First Action Workflow
+
+Starter actions live in the repository's `actions/` directory. Copy them into your project-local action directory:
 
 ```bash
 mkdir -p .loom/actions
 cp actions/*.yaml .loom/actions/
 ```
 
-Or install them globally:
+Inspect them from the CLI:
 
 ```bash
-mkdir -p ~/.loom/actions
-cp actions/*.yaml ~/.loom/actions/
+loom action list
+loom action show feature/implement
 ```
 
-Manage actions with `loom action list`, `loom action show <name>`, and `loom action create <name>`. The toolbelt also has a "From Action" option in the New Agent dropdown. See [Actions & Templates](actions.md) for the full guide on writing prompts, using variables, and building pipelines.
-
-Run `loom --help` or `loom <command> --help` for the full reference. See also the [Task Board](board.md) and [Worktrees](worktrees.md) guides.
-
-## Auto-launch
-
-To start Loom automatically when iTerm2 opens:
+Then dispatch through an action:
 
 ```bash
-make autolaunch
+loom task dispatch "Add retry handling to the webhook client" \
+  -g backend \
+  -t feature/implement
 ```
 
-## First steps
-
-### Create a group
-
-Click **+ Group** in the header bar, or press ++g++. Give it a name that represents your task or project.
-
-### Add an agent
-
-Click the **+ New** button inside the group grid. This creates a new iTerm2 tab running the default boot command (`claude`). The agent appears as a cell in the grid.
-
-For more control, click the dropdown arrow next to **+ New** and select **Custom...** to choose a name, directory, profile, and more.
-
-### Add a terminal
-
-Select an agent by clicking it, then click **New terminal** in the drawer that appears below. The terminal opens as a child of that agent --- removing the agent later will also remove its terminals.
-
-### Navigate
-
-Click any agent or terminal to focus its iTerm2 tab. You can also use [keyboard shortcuts](keyboard-shortcuts.md) to navigate without leaving the terminal.
-
-### Broadcast
-
-Click the broadcast button (++cmd++) on a group header, or press ++b++, to send a command to all sessions in the group at once.
-
-### Clean up
-
-When you're done with a task, click the ++x++ button on an agent to remove it and all its child terminals. Remove an empty group the same way.
-
-## Updating
+## Update Loom
 
 After pulling new changes:
 
@@ -145,16 +107,12 @@ After pulling new changes:
 make deploy
 ```
 
-Then restart from the **Scripts** menu.
+Then restart Loom from the **Scripts** menu.
 
-## Troubleshooting
+## Logs and Troubleshooting
 
-**Port conflict on startup**: Another instance may be running. Run `make stop` first.
+- Daemon log: `~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log`
+- Stop a stale daemon: `make stop`
+- Check install/runtime status: `make check`
 
-**Plugin doesn't appear in Toolbelt**: Make sure you ran the script from the Scripts menu and checked "Loom" in the Toolbelt gear menu.
-
-**Check logs**: Errors are logged to:
-
-```
-~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log
-```
+Common issues and runtime guidance are in [Operations](operations.md).
