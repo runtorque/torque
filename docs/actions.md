@@ -2,6 +2,8 @@
 
 Loom now separates reusable agent configuration from reusable task prompts:
 
+For the day-to-day "how do I use these together?" view, see the [Workflow Guide](workflow-guide.md).
+
 - **Agent templates** define who does the work: provider, model, permissions, system prompt, worktree behavior, environment, and child terminals.
 - **Actions** define what work to do: the rendered prompt, labels, and pipeline transitions.
 
@@ -15,6 +17,34 @@ Without actions, you'd type the same instructions every time you dispatch a task
 - **Parameterize work** --- use variables so one action handles many variations
 - **Build pipelines** --- chain actions together so agents can hand off work automatically
 - **Adapt to context** --- write prompts that change based on whether the agent is fresh or continuing prior work
+
+## How actions fit into the workflow
+
+In normal use, a task becomes dispatchable when you combine:
+
+- a **task** on the board
+- an **action** for the prompt
+- optionally an **agent template** for launch settings
+
+Example:
+
+1. Create a task:
+
+   ```bash
+   loom task create "Add auth middleware" -g backend -t feature/implement
+   ```
+
+2. Dispatch it from the board UI, or create and dispatch in one CLI step:
+
+   ```bash
+   loom dispatch "Add auth middleware" -g backend -t feature/implement
+   ```
+
+3. Loom launches the agent, renders the action prompt, and sends the result.
+
+4. If the action declares transitions, the agent can hand off the next step with `loom ai derive`.
+
+The same action can be used in manual work, pipeline handoffs, or schedules. A schedule that fires a task with `-t feature/implement` goes through the same prompt-rendering path as a task you dispatched by hand.
 
 ## File format
 
@@ -374,10 +404,6 @@ Loom creates a new agent, renders the prompt, and sends it after the agent boots
 ### From the CLI
 
 ```bash
-# Basic dispatch
-loom task create "Add dark mode" -a feature/implement
-loom task dispatch <task-slug>
-
 # One-liner: create + dispatch
 loom dispatch "Add dark mode" -t feature/implement
 

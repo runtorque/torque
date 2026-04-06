@@ -1,48 +1,68 @@
-# Loom
+# Loom Docs
 
-Loom is an iTerm2 Toolbelt plugin that lets you manage AI agents and terminal sessions in a visual grid, directly inside your terminal.
+Loom is an iTerm2 Toolbelt plugin for organizing AI agents and terminal sessions in a visual grid. This page is the front door to the docs: start with setup if you're new, then jump to the area that matches what you want to do.
 
-## Why Loom?
+## Start here
 
-If you spend most of your day in the terminal, you know how productive that environment can be. But as AI coding agents become part of the workflow, managing them gets messy fast. Each agent needs its own tab. Each agent might need companion terminals for running tests, watching logs, or checking git status. Multiply that by a few tasks running in parallel and you're drowning in tabs with no easy way to tell them apart.
+- [Getting Started](getting-started.md) — install Loom, launch it, and create your first group, agent, and terminal
+- [Concepts](concepts.md) — learn the basic vocabulary in plain language: groups, agents, terminals, broadcasts, and actions
+- [CLI Reference](cli.md) — use Loom from the command line once the UI basics are familiar
 
-Loom solves this by giving you a structured way to organize agents and terminals:
+## Common paths
 
-- **Groups** collect related work. A group might represent a feature branch, a project, or a bug investigation.
-- **Agents** are AI coding sessions (Claude Code, or any CLI tool). Each agent gets its own iTerm2 tab with a boot command, working directory, and environment.
-- **Terminals** attach to agents as companion shells. Need a terminal to run tests while your agent codes? Add one as a child of that agent.
+### I want to set up Loom and start using it
 
-When you're done with a task, remove the agent and its terminals are cleaned up with it. No orphaned tabs, no confusion about which terminal belongs to which task.
+- [Getting Started](getting-started.md)
+- [Concepts](concepts.md)
+- [Agents & Sessions](agents-and-sessions.md)
+- [Group Settings](group-settings.md)
+- [Keyboard Shortcuts](keyboard-shortcuts.md)
 
-## How it works
+### I want to manage work across agents
 
-Loom runs as a Python daemon inside iTerm2's scripting infrastructure. It serves a webview UI in the Toolbelt sidebar panel, communicating over a local WebSocket. The webview shows your groups, agents, and terminals in a compact grid. Clicking an agent focuses its iTerm2 tab. Creating an agent opens a new tab with your configured settings. Everything stays in sync.
+- [Workflow Guide](workflow-guide.md) — follow the normal path from task creation to dispatch, handoffs, schedules, and completion
+- [Task Board](board.md) — create tasks, organize lanes, and dispatch work
+- [Task Lifecycle](task-lifecycle.md) — see how tasks move through Loom
+- [Worktrees](worktrees.md) — isolate changes per agent in separate git worktrees
 
-Loom also supports a standalone mode where the UI runs in a browser window instead of the Toolbelt. This decouples the UI from iTerm2 and is the foundation for future support of other terminal emulators.
+### I want reusable prompts, templates, or pipelines
 
-## Quick start
+- [Actions & Templates](actions.md) — define action prompts, variables, and transitions
+- [Agent Templates](agent-templates.md) — save reusable agent launch presets
 
-See [Getting Started](getting-started.md) to install and run Loom.
+### I want Loom to coordinate the work for me
 
-## Core concepts
+- [Weaver](weaver.md) — Loom's orchestrator agent for dispatching work, tracking progress, and asking for human input when needed
 
-- [Agent templates](agent-templates.md) for reusable agent configuration used by creation and dispatch
-- [Actions & templates](actions.md) for reusable action prompts, variables, and pipelines
+### I need commands, settings, or help fixing Loom
 
-## Features
+- [Reference Guide](reference-guide.md) — grouped operator reference for commands, shortcuts, settings, logs, and runtime paths
+- [CLI Reference](cli.md) — full command reference
+- [Troubleshooting](troubleshooting.md) — symptom-first recovery steps for startup, sessions, worktrees, merge issues, and stale state
 
-- Visual grid of agents and terminals in the iTerm2 Toolbelt (or standalone browser window)
-- Groups with configurable defaults for directory, profile, shell, environment, and more
-- Per-agent and per-terminal setting overrides
-- [Git worktree isolation](worktrees.md) per agent (checkpoints, rollback, merge)
-- Auto-create companion terminals alongside new agents
-- Drag-and-drop reordering of groups, agents, and terminals
-- Broadcast commands to all sessions in a group
-- Global keyboard shortcuts for navigating between agents from any tab
-- Tab color coding for visual organization
-- Automatic tab reordering to keep managed sessions grouped
-- Per-group window filtering to keep unrelated work out of sight
-- [Task board](board.md) with Kanban lanes, pipeline chains, and agent dispatch
-- [`loom` CLI](cli.md) for scripting and automation (`make cli` to install)
-- [Actions & templates](actions.md) for reusable action prompts plus reusable agent templates
-- `loom dispatch` to create agents from YAML actions with one command
+## Documentation map
+
+### Basics
+
+- [Getting Started](getting-started.md)
+- [Concepts](concepts.md)
+- [Agents & Sessions](agents-and-sessions.md)
+- [Group Settings](group-settings.md)
+- [Keyboard Shortcuts](keyboard-shortcuts.md)
+
+### Workflows
+
+- [Workflow Guide](workflow-guide.md)
+- [Task Board](board.md)
+- [Task Lifecycle](task-lifecycle.md)
+- [Actions & Templates](actions.md)
+- [Agent Templates](agent-templates.md)
+- [Weaver](weaver.md)
+- [Worktrees](worktrees.md)
+
+### Reference
+
+- [CLI Reference](cli.md)
+- [Reference Guide](reference-guide.md)
+- [Troubleshooting](troubleshooting.md)
+- [Roadmap](roadmap.md)

@@ -2,6 +2,8 @@
 
 The task board is a Kanban-style interface for organizing work. Tasks move through lanes as agents work on them. The board integrates with [actions](actions.md) and [pipelines](actions.md#pipelines) so agents can report progress, derive follow-up tasks, and hand off work automatically.
 
+For the day-to-day narrative from task creation through completion, start with the [Workflow Guide](workflow-guide.md).
+
 ## Lanes
 
 Lanes are columns on the board. Tasks move between lanes as their status changes. Loom ships with four default lanes:
@@ -63,6 +65,8 @@ loom task create "Fix auth tests" -t oneshot/fix -v MODULE=auth -v TEST_CMD=pyte
 | **Assignee** | Optional assignee name. |
 | **Labels** | Tags for filtering and categorization. |
 | **Agent** | The concrete agent working on this task (set on dispatch). |
+| **Dependencies** | Other tasks that must be in **Done** before this task can be dispatched. |
+| **Scheduled time** | Optional future time when Loom should auto-dispatch this task. |
 
 ### Editing tasks
 
@@ -87,6 +91,31 @@ loom task move add-validation -l "In Progress"
 loom task move add-validation -l Done
 ```
 
+## Dependencies
+
+Dependencies let you model "not yet" without losing the task. A task with dependencies can live in **Backlog** or **To Do**, but Loom will not dispatch it until every dependency is in **Done**.
+
+This is useful for cases like:
+
+- deploy only after review is complete
+- start QA only after implementation is complete
+- run migration only after backup is verified
+
+### Adding dependencies
+
+Use the task editor in the UI, or create/edit the task from the CLI:
+
+```bash
+loom task create "Deploy auth middleware" -g backend --depends-on review-auth
+loom task edit deploy-auth-middleware --depends-on review-auth,run-auth-tests
+```
+
+### How blocked tasks appear
+
+- In the board UI, blocked tasks show a lock badge.
+- The context-menu dispatch action is disabled until the dependency chain is clear.
+- If a completed dependency is moved back out of **Done**, Loom re-blocks dependent tasks that are not yet finished.
+
 ## Dispatching
 
 Dispatching connects a task to an agent. Loom creates (or reuses) an agent, links the task, moves it to the dispatch lane (default: **In Progress**), renders the prompt, and sends it.
@@ -100,10 +129,6 @@ Right-click a task card and select **Dispatch**. Loom creates a new agent in the
 ```bash
 # Create and dispatch in one step
 loom dispatch "Add dark mode" -t feature/implement -g frontend
-
-# Create first, dispatch later
-loom task create "Add dark mode" -t feature/implement -g frontend
-loom task dispatch add-dark-mode
 
 # Dispatch and wait for completion
 loom dispatch "Fix the bug" -t oneshot/fix -g backend -w
@@ -121,7 +146,51 @@ loom dispatch "Fix the bug" -t oneshot/fix -g backend -w
 
 You can dispatch a task to an agent that's already running instead of creating a new one. Select the agent in the dispatch dialog (UI), or use `loom ai derive --agent` / `--self` from within a pipeline.
 
-When dispatching to an existing agent, `loom.context.is_clean` is `False` in the template, so action prompts can send an abbreviated version (see [Actions & Templates](actions.md#loomcontext----dispatch-history)).
+When dispatching to an existing agent, `loom.context.is_clean` is `False` in the template, so action prompts can send an abbreviated version (see [Actions & Templates](actions.md#the-loom-context-namespace)).
+
+## Scheduled work
+
+Loom supports two ways to start work later:
+
+### Scheduled tasks
+
+A scheduled task is a normal board task with a future `scheduled_at` time. The task stays on the board until that time arrives, then Loom dispatches that same task automatically.
+
+Use this when you already know the exact task you want to run:
+
+```bash
+loom task create "Kick off release checklist" -g ops --at "tomorrow 09:00"
+```
+
+The task keeps all of its normal metadata:
+
+- action
+- action variables
+- labels
+- dependencies
+
+### Schedules
+
+A schedule is a reusable trigger that creates a fresh task each time it fires and dispatches it immediately. Schedules can be:
+
+- **one-shot** with `--at`
+- **recurring** with `--cron`
+
+Example:
+
+```bash
+loom schedule create weekly-deps \
+  -g backend \
+  --cron "0 9 * * 1" \
+  --task "Weekly dependency update {date}" \
+  -t maintenance/deps
+```
+
+Useful placeholders for `--task` are `{date}`, `{time}`, and `{datetime}`.
+
+In the board UI, schedules live in the **Schedules** view. From there you can inspect them, enable or disable them, edit them, or trigger them manually with **Run now**.
+
+See [CLI Reference](cli.md#schedule) for the full command set.
 
 ## Agent reporting
 
