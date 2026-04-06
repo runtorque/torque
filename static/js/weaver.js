@@ -26,13 +26,34 @@ function renderWeaverPanel() {
   html += '<span class="weaver-title">Weaver';
   if (group) html += ' — ' + _esc(group);
   html += '</span>';
-  // Pause/Resume toggle
+  // Buffer stats + Pause/Resume toggle
   if (group) {
     var paused = ws && ws.paused;
+    var bstats = state.weaver_buffer_stats && state.weaver_buffer_stats[group];
+    html += '<div class="weaver-header-right">';
+    if (bstats && bstats.buffered_events > 0) {
+      var evtCount = bstats.buffered_events;
+      var nextIn = bstats.next_push_in;
+      var timeStr = '';
+      if (nextIn <= 0) {
+        timeStr = 'now';
+      } else if (nextIn < 60) {
+        timeStr = nextIn + 's';
+      } else {
+        var m = Math.floor(nextIn / 60);
+        var s = nextIn % 60;
+        timeStr = m + 'm' + (s > 0 ? String(s).padStart(2, '0') + 's' : '');
+      }
+      html += '<span class="weaver-buffer-stats">'
+           + evtCount + ' event' + (evtCount !== 1 ? 's' : '')
+           + (paused ? ' paused' : ' in ' + timeStr)
+           + '</span>';
+    }
     html += '<button class="weaver-pause-btn' + (paused ? ' paused' : '') + '" '
          + 'onclick="weaverTogglePause()">'
-         + (paused ? '&#x25B6; Resume' : '&#x23F8; Pause')
+         + (paused ? '&#x25B6;' : '&#x23F8;')
          + '</button>';
+    html += '</div>';
   }
   html += '</div>';
 

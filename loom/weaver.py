@@ -129,6 +129,30 @@ class WeaverEventBuffer:
             self._timer_handle.cancel()
             self._timer_handle = None
 
+    def get_buffer_stats(self, group: str) -> dict:
+        """Return buffer stats for the UI: event count + seconds until next push."""
+        buf = self._buffers.get(group, [])
+        ws = self._state.get_weaver_settings(group)
+        last = self._last_push.get(group, 0)
+        now = time.time()
+
+        if not last:
+            next_in = ws.push_interval
+        else:
+            elapsed = now - last
+            next_in = max(0, ws.push_interval - elapsed)
+
+        # If the weaver is idle and events are buffered, next push is imminent
+        weaver = self._state.get_weaver_for_group(group)
+        if weaver and (not weaver.activity or weaver.activity == "waiting"):
+            if buf:
+                next_in = 0
+
+        return {
+            "buffered_events": len(buf),
+            "next_push_in": int(next_in),
+        }
+
     # -- Public hooks ---------------------------------------------------------
 
     def on_panel_event(self, event: dict):
@@ -318,9 +342,10 @@ class WeaverEventBuffer:
                 10.0, self._timer_tick)
 
     def _timer_tick(self):
-        """Check if any weaver needs a heartbeat."""
+        """Check if any weaver needs a heartbeat and emit buffer stats."""
         self._timer_handle = None
         now = time.time()
+        stats_changed = False
 
         for group, gs_obj in self._state.group_settings.items():
             if not gs_obj.weaver_agent_id:
@@ -328,6 +353,13 @@ class WeaverEventBuffer:
             weaver = self._state.agents.get(gs_obj.weaver_agent_id)
             if not weaver or weaver.status != "running":
                 continue
+
+            # Emit buffer stats for the UI
+            stats = self.get_buffer_stats(group)
+            self._state._emit("weaver_buffer_stats",
+                              group=group, **stats)
+            stats_changed = True
+
             ws = self._state.get_weaver_settings(group)
             if ws.paused:
                 continue
@@ -339,5 +371,8 @@ class WeaverEventBuffer:
                 if not weaver.activity or weaver.activity == "waiting":
                     if self._loop:
                         self._loop.create_task(self._flush(group))
+
+        if stats_changed and self._loop:
+            self._loop.create_task(self._state.broadcast())
 
         self._schedule_timer()

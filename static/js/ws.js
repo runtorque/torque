@@ -300,6 +300,18 @@ function _applyDelta(ops) {
         break;
       }
 
+      case 'weaver_buffer_stats': {
+        if (!state.weaver_buffer_stats) state.weaver_buffer_stats = {};
+        var bsg = op.group || '';
+        if (bsg) {
+          state.weaver_buffer_stats[bsg] = {
+            buffered_events: op.buffered_events || 0,
+            next_push_in: op.next_push_in || 0,
+          };
+        }
+        break;
+      }
+
       case 'weaver_settings_update': {
         if (!state.weaver_settings) state.weaver_settings = {};
         var wg = op.group || '';
