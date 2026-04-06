@@ -1568,6 +1568,8 @@ async def main(connection: iterm2.Connection):
                         # Clear system_prompt so it doesn't also
                         # write to .claude/instructions.md
                         launch_cfg["system_prompt"] = ""
+                        # Weaver runs from main — skip worktree
+                        launch_cfg["worktree"] = False
 
                     name = (data.get("name", "") or "").strip()
                     if not name:
