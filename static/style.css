@@ -232,6 +232,21 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
   border-color: var(--accent);
   border-left: 3px solid var(--amber);
 }
+.cell.weaver-asking {
+  border-left-color: var(--amber);
+  animation: weaver-pulse 2s ease-in-out infinite;
+}
+@keyframes weaver-pulse {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: 0 0 8px rgba(210, 153, 34, 0.3); }
+}
+.cell-weaver-ask {
+  font-size: 8px;
+  color: var(--amber);
+  font-weight: 600;
+  text-align: center;
+  margin-top: 2px;
+}
 .cell-name {
   font-size: 9px; text-align: center;
   max-width: 100%; overflow: hidden;
@@ -992,7 +1007,8 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 }
 .taskbar-app:hover { color: var(--text); background: var(--bg-hover); }
 .taskbar-app.active { color: var(--accent); background: rgba(88,166,255,.1); }
-.taskbar-app.panel-attention {
+.taskbar-app.panel-attention,
+.taskbar-app.has-badge {
   box-shadow: inset 0 0 0 1px var(--amber);
   animation: panel-attention-pulse 2s ease-in-out infinite;
 }

@@ -92,10 +92,11 @@ function _weaverRenderJournal(group) {
   }
 
   if (entries.length) {
+    // Sort by id descending (newest first)
+    var sorted = entries.slice().sort(function(a, b) { return b.id - a.id; });
     html += '<div class="weaver-journal">';
-    // Show newest first
-    for (var i = entries.length - 1; i >= 0; i--) {
-      var e = entries[i];
+    for (var i = 0; i < sorted.length; i++) {
+      var e = sorted[i];
       var typeClass = 'weaver-badge-' + (e.type || 'observation');
       var ago = _weaverTimeAgo(e.timestamp);
       html += '<div class="weaver-entry" oncontextmenu="weaverEntryCtx(event,' + e.id + ')">';
