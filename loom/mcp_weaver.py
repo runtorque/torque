@@ -541,6 +541,25 @@ WEAVER_TOOLS = [
             "required": ["question"],
         },
     },
+    {
+        "name": "weaver_agent_close",
+        "description": (
+            "Close an agent — ends its terminal session and removes "
+            "it from the group. The agent's worktree (if any) is "
+            "preserved on disk. Use after merging or when the agent "
+            "is no longer needed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Agent slug or ID to close.",
+                },
+            },
+            "required": ["agent"],
+        },
+    },
     # -- Worktree tools -----------------------------------------------------
     {
         "name": "weaver_merge",
@@ -1002,6 +1021,20 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
             "After the human responds, call weaver_resume to unpause "
             "event delivery."
         ), False
+
+    if name == "weaver_agent_close":
+        agent_ident = args.get("agent", "")
+        agent_id = _resolve_agent(state, agent_ident)
+        if not agent_id:
+            return f"Agent not found: {agent_ident}", True
+        result = await handle_command({
+            "cmd": "remove_agent",
+            "id": agent_id,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps({"type": "ok",
+                          "message": "Agent closed"}), False
 
     # -- Worktree tools -----------------------------------------------------
 
