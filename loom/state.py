@@ -749,7 +749,9 @@ class MatrixState:
         for key, value in fields.items():
             if key in valid:
                 setattr(ws, key, value)
-        self._emit("weaver_settings_update", group=group, **asdict(ws))
+        d = asdict(ws)
+        d.pop("group", None)
+        self._emit("weaver_settings_update", group=group, **d)
         if self.db:
             self.db.save_weaver_settings(group, asdict(ws))
 
