@@ -258,7 +258,10 @@ class CodexAdapter(AgentAdapter):
             "hooks": {
                 "SessionStart": _cmd_hook(),
                 "PreToolUse": _cmd_hook(".*"),
-                "PostToolUse": _cmd_hook(".*"),
+                # PostToolUse omitted — Codex command hooks print a noisy
+                # "Running PostToolUse hook" message for every tool call.
+                # The tool_end state reset is cosmetic and happens naturally
+                # when the next PreToolUse or Stop event arrives.
                 "Stop": _cmd_hook(),
             }
         }
