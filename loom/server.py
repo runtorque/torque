@@ -546,6 +546,30 @@ async def main(connection: iterm2.Connection):
                 if sha:
                     state._db_save_agent(cell)
 
+    # Minimum seconds between progress-triggered checkpoints per agent.
+    _CHECKPOINT_INTERVAL = 300  # 5 minutes
+
+    async def _checkpoint_on_report(cell, message: str = ""):
+        """Checkpoint worktree on ai progress/done if enabled and throttled."""
+        if not cell.worktree_path or cell.cell_type != "agent":
+            return
+        if not cell.checkpoint_on_progress:
+            return
+        now = time.time()
+        if (cell.last_checkpoint_at
+                and now - cell.last_checkpoint_at < _CHECKPOINT_INTERVAL):
+            return
+        n = cell.worktree_checkpoints + 1
+        subject = f"loom: checkpoint {n} — {cell.name}"
+        if message:
+            msg = f"{subject}\n\n{message}"
+        else:
+            msg = subject
+        sha = await worktree_mgr.checkpoint(cell, message=msg)
+        if sha:
+            cell.last_checkpoint_at = now
+            state._db_save_agent(cell)
+
     async def _broadcast_toast(message, level="info"):
         """Send a toast notification to all WS clients."""
         msg = json.dumps({"type": "toast", "message": message,
@@ -707,6 +731,8 @@ async def main(connection: iterm2.Connection):
                 "worktree_base_branch", gs.worktree_base_branch),
             "worktree_auto_checkpoint": resolved.get(
                 "worktree_auto_checkpoint", gs.worktree_auto_checkpoint),
+            "checkpoint_on_progress": resolved.get(
+                "checkpoint_on_progress", gs.checkpoint_on_progress),
             "worktree_merge_squash": resolved.get(
                 "worktree_merge_squash", gs.worktree_merge_squash),
             "worktree_symlinks": resolved.get(
@@ -798,6 +824,8 @@ async def main(connection: iterm2.Connection):
             launch_cfg.get("worktree_base_dir") or ".loom/worktrees")
         cell.worktree_auto_checkpoint = bool(
             launch_cfg.get("worktree_auto_checkpoint", False))
+        cell.checkpoint_on_progress = bool(
+            launch_cfg.get("checkpoint_on_progress", False))
         cell.worktree_merge_squash = bool(
             launch_cfg.get("worktree_merge_squash", True))
         cell.template = explicit_template or launch_cfg.get("template", "")
@@ -944,7 +972,8 @@ async def main(connection: iterm2.Connection):
 
         commit_hint = ""
         if (cell and cell.worktree_branch
-                and not cell.worktree_auto_checkpoint):
+                and not cell.worktree_auto_checkpoint
+                and not cell.checkpoint_on_progress):
             commit_hint = ("\nBefore reporting done, commit all your "
                            "changes with a descriptive commit message.")
 
@@ -1747,6 +1776,10 @@ async def main(connection: iterm2.Connection):
                         launch_cfg.get(
                             "worktree_auto_checkpoint",
                             cell.worktree_auto_checkpoint))
+                    cell.checkpoint_on_progress = bool(
+                        launch_cfg.get(
+                            "checkpoint_on_progress",
+                            cell.checkpoint_on_progress))
                     cell.worktree_merge_squash = bool(
                         launch_cfg.get(
                             "worktree_merge_squash",
@@ -3097,6 +3130,9 @@ async def main(connection: iterm2.Connection):
                         if task:
                             state.history_complete_task(
                                 cell.id, task.id, "done")
+                        # Checkpoint before moving task to Done
+                        await _checkpoint_on_report(
+                            cell, message or "Done")
                         state._emit_agent(cell)
                         if task and task.lane != "Done":
                             state.board_move_task(task.id, "Done")
@@ -3163,6 +3199,8 @@ async def main(connection: iterm2.Connection):
                         state._emit_agent(cell)
                         if task:
                             _save_task(task)
+                        # Auto-checkpoint on progress (throttled)
+                        await _checkpoint_on_report(cell, message)
                         # Panel event — replace last progress
                         # for this agent to avoid flooding
                         pe = panel_log.replace_last(

@@ -373,6 +373,7 @@ function _showAddModal(mode, group, config) {
     document.getElementById('add-wt-base-dir').value = resolved.worktree_base_dir || gs.worktree_base_dir || '';
     document.getElementById('add-wt-base-branch').value = resolved.worktree_base_branch || gs.worktree_base_branch || '';
     document.getElementById('add-wt-auto-checkpoint').checked = resolved.worktree_auto_checkpoint || false;
+    document.getElementById('add-wt-checkpoint-on-progress').checked = resolved.checkpoint_on_progress || false;
     document.getElementById('add-wt-squash').checked = resolved.worktree_merge_squash !== false;
     if (resolved.icon) selectIcon(resolved.icon);
     _toggleAddWorktreeFields();
@@ -396,6 +397,7 @@ function _applyRenderedAddTemplate(config, templateName) {
   document.getElementById('add-wt-base-dir').value = config.worktree_base_dir || '';
   document.getElementById('add-wt-base-branch').value = config.worktree_base_branch || '';
   document.getElementById('add-wt-auto-checkpoint').checked = !!config.worktree_auto_checkpoint;
+  document.getElementById('add-wt-checkpoint-on-progress').checked = !!config.checkpoint_on_progress;
   document.getElementById('add-wt-squash').checked = config.worktree_merge_squash !== false;
   if (config.profile) document.getElementById('add-profile-select').value = config.profile;
   if (config.tab_color) selectColor(config.tab_color);
@@ -643,6 +645,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-wt-base-dir').value = s.worktree_base_dir || '.loom/worktrees';
   document.getElementById('gs-wt-base-branch').value = s.worktree_base_branch || '';
   document.getElementById('gs-wt-auto-checkpoint').checked = s.worktree_auto_checkpoint || false;
+  document.getElementById('gs-wt-checkpoint-on-progress').checked = s.checkpoint_on_progress || false;
   document.getElementById('gs-wt-merge-squash').checked = s.worktree_merge_squash !== false;
   document.getElementById('gs-wt-merge-instructions').value = s.worktree_merge_instructions || '';
   _gsWtSymlinks = (s.worktree_symlinks || []).slice();
@@ -730,6 +733,7 @@ function submitGroupSettings() {
     worktree_base_dir: document.getElementById('gs-wt-base-dir').value.trim() || '.loom/worktrees',
     worktree_base_branch: document.getElementById('gs-wt-base-branch').value.trim(),
     worktree_auto_checkpoint: document.getElementById('gs-wt-auto-checkpoint').checked,
+    checkpoint_on_progress: document.getElementById('gs-wt-checkpoint-on-progress').checked,
     worktree_merge_squash: document.getElementById('gs-wt-merge-squash').checked,
     worktree_merge_instructions: document.getElementById('gs-wt-merge-instructions').value.trim(),
     worktree_symlinks: _gsWtSymlinks.slice(),
@@ -857,6 +861,7 @@ function submitAdd() {
       if (wtDir) msg.worktree_base_dir = wtDir;
       if (wtBranch) msg.worktree_base_branch = wtBranch;
       msg.worktree_auto_checkpoint = document.getElementById('add-wt-auto-checkpoint').checked;
+      msg.checkpoint_on_progress = document.getElementById('add-wt-checkpoint-on-progress').checked;
       msg.worktree_merge_squash = document.getElementById('add-wt-squash').checked;
     }
   }
