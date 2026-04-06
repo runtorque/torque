@@ -66,6 +66,7 @@ install:
 	   loom/templates.py \
 	   loom/terminal_adapter.py \
 	   loom/db.py loom/mcp.py \
+	   loom/mcp_weaver.py loom/weaver.py \
 	   loom/cron.py \
 	   "$(SCRIPT_DIR)/loom/"
 	cp loom/adapters/__init__.py loom/adapters/base.py \
