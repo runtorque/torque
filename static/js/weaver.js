@@ -1,7 +1,6 @@
 /* Weaver panel — Journal / Settings tabs */
 
 var _weaverTab = 'journal';  // 'journal' | 'settings'
-var _weaverGroup = '';  // explicitly selected group (empty = auto)
 var _weaverCustomInstrDirty = false;
 var _weaverCustomInstrDraft = '';
 
@@ -9,29 +8,17 @@ function renderWeaverPanel() {
   var el = document.getElementById('panel-weaver');
   if (!el) return;
 
-  // Resolve the active group and lock it so create/settings use the same one
-  var group = _weaverFindGroup();
-  _weaverGroup = group;
+  var group = _currentGroup();
   var ws = _weaverGetSettings(group);
   var weaver = group ? _weaverGetAgent(group) : null;
 
   var html = '<div class="weaver-panel">';
 
   // Header
-  var groups = Object.keys(state.groups || {});
   html += '<div class="weaver-header">';
-  if (groups.length > 1) {
-    html += '<select class="weaver-group-select" onchange="_weaverGroup=this.value;renderWeaverPanel()">';
-    groups.forEach(function(g) {
-      var sel = g === group ? ' selected' : '';
-      html += '<option value="' + _esc(g) + '"' + sel + '>' + _esc(g) + '</option>';
-    });
-    html += '</select>';
-  } else {
-    html += '<span class="weaver-title">Weaver';
-    if (group) html += ' — ' + _esc(group);
-    html += '</span>';
-  }
+  html += '<span class="weaver-title">Weaver';
+  if (group) html += ' — ' + _esc(group);
+  html += '</span>';
   // Pause/Resume toggle
   if (group) {
     var paused = ws && ws.paused;
@@ -68,7 +55,7 @@ function weaverSwitchTab(tab) {
 }
 
 function weaverTogglePause() {
-  var group = _weaverFindGroup();
+  var group = _currentGroup();
   if (!group) return;
   var ws = _weaverGetSettings(group);
   var cmd = (ws && ws.paused) ? 'weaver_resume' : 'weaver_pause';
@@ -196,7 +183,7 @@ function _weaverRenderSettings(group, ws, weaver) {
 // -- Create weaver ---------------------------------------------------------
 
 function weaverCreate() {
-  var group = _weaverFindGroup();
+  var group = _currentGroup();
   // If no group has settings yet, use the first group
   if (!group) {
     var groups = Object.keys(state.groups || {});
@@ -233,7 +220,7 @@ function weaverInstrInput(textarea) {
 }
 
 function weaverSaveInstructions() {
-  var group = _weaverFindGroup();
+  var group = _currentGroup();
   if (!group) return;
   send({
     cmd: 'weaver_update_settings',
@@ -245,7 +232,7 @@ function weaverSaveInstructions() {
 }
 
 function weaverUpdateSetting(key, value) {
-  var group = _weaverFindGroup();
+  var group = _currentGroup();
   if (!group) return;
   var payload = { cmd: 'weaver_update_settings', group: group };
   payload[key] = value;
@@ -253,7 +240,7 @@ function weaverUpdateSetting(key, value) {
 }
 
 function weaverToggleEvent(evt, enabled) {
-  var group = _weaverFindGroup();
+  var group = _currentGroup();
   if (!group) return;
   var ws = _weaverGetSettings(group);
   var current = (ws && ws.enabled_events) ? ws.enabled_events.slice() : [];
@@ -270,23 +257,6 @@ function weaverToggleEvent(evt, enabled) {
 }
 
 // -- Helpers ---------------------------------------------------------------
-
-function _weaverFindGroup() {
-  var groups = Object.keys(state.groups || {});
-  // Explicit user selection (from dropdown)
-  if (_weaverGroup && groups.indexOf(_weaverGroup) >= 0) {
-    return _weaverGroup;
-  }
-  // Find a group that already has a weaver
-  if (state.group_settings) {
-    for (var i = 0; i < groups.length; i++) {
-      var gs = state.group_settings[groups[i]];
-      if (gs && gs.weaver_agent_id) return groups[i];
-    }
-  }
-  // Fallback: return the first group
-  return groups.length ? groups[0] : '';
-}
 
 function _weaverGetSettings(group) {
   if (!group || !state.weaver_settings) return null;

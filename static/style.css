@@ -2563,15 +2563,6 @@ body.diff-view-open #ctx-menu {
   font-size: 11px;
   color: var(--text);
 }
-.weaver-group-select {
-  background: var(--bg-cell);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text);
-  font: 11px var(--font);
-  font-weight: 600;
-  padding: 2px 6px;
-}
 .weaver-pause-btn {
   background: none;
   border: 1px solid var(--border);
