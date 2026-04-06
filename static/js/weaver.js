@@ -204,23 +204,12 @@ function _weaverRenderSettings(group, ws, weaver) {
 function weaverEntryCtx(e, entryId) {
   e.preventDefault();
   e.stopPropagation();
-  var menu = document.getElementById('ctx-menu');
-  menu.innerHTML = '<div class="ctx-item ctx-danger" onclick="weaverDeleteEntry(' + entryId + ')">Delete entry</div>';
-  menu.style.left = e.clientX + 'px';
-  menu.style.top = e.clientY + 'px';
-  menu.classList.add('visible');
-  setTimeout(function() {
-    document.addEventListener('click', _weaverCloseCtx, { once: true });
-  }, 0);
-}
-
-function _weaverCloseCtx() {
-  var menu = document.getElementById('ctx-menu');
-  if (menu) menu.classList.remove('visible');
+  showContextMenu(e.clientX, e.clientY, [
+    { label: 'Delete entry', danger: true, action: 'weaverDeleteEntry(' + entryId + ')' },
+  ]);
 }
 
 function weaverDeleteEntry(entryId) {
-  _weaverCloseCtx();
   var group = _currentGroup();
   if (!group) return;
   send({ cmd: 'weaver_journal_delete', group: group, entry_id: entryId });
