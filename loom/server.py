@@ -3634,6 +3634,10 @@ async def main(connection: iterm2.Connection):
                             "────────────────────────────────────────"
                             "────────\n"
                         )
+                        # Pre-mark as input-ready (agent is
+                        # likely idle/waiting for this message)
+                        bridge._input_ready_sessions.add(
+                            target.session_id)
                         await bridge.send_text(
                             target.session_id, formatted)
                         target.pending_weaver_message = True
@@ -3730,6 +3734,10 @@ async def main(connection: iterm2.Connection):
                             "────────────────────────────────────────"
                             "────────\n"
                         )
+                        # Pre-mark as input-ready so send_text
+                        # skips the wait (weaver is already idle)
+                        bridge._input_ready_sessions.add(
+                            weaver.session_id)
                         await bridge.send_text(
                             weaver.session_id, formatted)
                         # Clear question, unpause events

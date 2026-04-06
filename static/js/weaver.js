@@ -237,6 +237,8 @@ function weaverReply() {
   if (!answer) return;
   var group = _currentGroup();
   if (!group) return;
+  // Blur so the re-render skip guard doesn't block the banner clearing
+  input.blur();
   send({ cmd: 'weaver_reply', group: group, answer: answer });
 }
 
