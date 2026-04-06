@@ -115,6 +115,15 @@ def _blocked_dependency_titles(state, task) -> list[str]:
 WEAVER_TOOLS = [
     # -- Read tools ---------------------------------------------------------
     {
+        "name": "weaver_board_summary",
+        "description": (
+            "Return a compact board overview for the weaver's group. "
+            "Includes lane counts, active agent status, pending asks, "
+            "and key label counts without embedding full task lists."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "weaver_board_list",
         "description": (
             "List all tasks on the board grouped by lane. "
@@ -369,6 +378,20 @@ WEAVER_TOOLS = [
                     "type": "string",
                     "description": (
                         "Name for the new agent (e.g. 'worker'). "
+                        "Only used when creating a new agent."
+                    ),
+                },
+                "agent_type": {
+                    "type": "string",
+                    "description": (
+                        "Agent backend for a new agent "
+                        "(e.g. 'claude-code', 'codex')."
+                    ),
+                },
+                "command": {
+                    "type": "string",
+                    "description": (
+                        "Boot command override for a new agent. "
                         "Only used when creating a new agent."
                     ),
                 },
@@ -709,6 +732,18 @@ WEAVER_TOOLS = [
                         "auto-generated from completed tasks."
                     ),
                 },
+                "close_agent_on_merge": {
+                    "type": "boolean",
+                    "description": (
+                        "Close the agent after a successful merge."
+                    ),
+                },
+                "remove_worktree_on_merge": {
+                    "type": "boolean",
+                    "description": (
+                        "Remove the worktree after a successful merge."
+                    ),
+                },
             },
             "required": ["agent"],
         },
@@ -830,19 +865,125 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
     # Resolve the weaver's group — all tools are scoped to this group.
     # Prefer the caller's group (from X-Loom-Cell-Id) for multi-group setups.
     _weaver_group = ""
+    _weaver_cell = None
     if cell_id:
-        cell = state.agents.get(cell_id)
-        if cell:
-            _weaver_group = cell.group
+        _weaver_cell = state.agents.get(cell_id)
+        if _weaver_cell:
+            _weaver_group = _weaver_cell.group
     if not _weaver_group:
         for gn, gs in state.group_settings.items():
             if gs.weaver_agent_id:
                 _weaver_group = gn
+                if not _weaver_cell:
+                    _weaver_cell = state.agents.get(gs.weaver_agent_id)
                 break
     if not _weaver_group:
         return "No weaver configured for any group", True
 
     # -- Read tools ---------------------------------------------------------
+
+    if name == "weaver_board_summary":
+        tasks = [
+            t for t in state.board_tasks.values()
+            if t.group == _weaver_group
+        ]
+
+        lane_counts = {lane_name: 0 for lane_name in state.board_lanes}
+        extra_lanes = {}
+        label_counts = {"ready": 0, "deferred": 0}
+        pending_asks = []
+
+        for task in tasks:
+            if task.lane in lane_counts:
+                lane_counts[task.lane] += 1
+            else:
+                extra_lanes[task.lane] = extra_lanes.get(task.lane, 0) + 1
+
+            labels = set(task.labels or [])
+            for label_name in label_counts:
+                if label_name in labels:
+                    label_counts[label_name] += 1
+
+            if "loom:human" in labels and task.lane != "Done":
+                pending_asks.append({
+                    "id": task.id,
+                    "title": task.task,
+                    "parent_task_id": task.parent_task_id,
+                })
+
+        ordered_lanes = dict(lane_counts)
+        for lane_name in sorted(extra_lanes):
+            ordered_lanes[lane_name] = extra_lanes[lane_name]
+
+        gs = state.get_group_settings(_weaver_group)
+        weaver_id = gs.weaver_agent_id or (
+            _weaver_cell.id if _weaver_cell and _weaver_cell.group == _weaver_group
+            else ""
+        )
+        agent_status_counts = {
+            "idle": 0,
+            "running": 0,
+            "error": 0,
+            "stopped": 0,
+        }
+        active_agents = []
+        total_agents = 0
+        needs_attention = 0
+
+        agents = [
+            c for c in state.agents.values()
+            if c.cell_type == "agent"
+            and c.group == _weaver_group
+            and c.id != weaver_id
+        ]
+        agents.sort(key=lambda c: ((c.slug or c.name or c.id).lower(), c.id))
+
+        for cell in agents:
+            total_agents += 1
+            if cell.needs_attention:
+                needs_attention += 1
+            status = cell.status or "stopped"
+            agent_status_counts[status] = agent_status_counts.get(status, 0) + 1
+            if status == "stopped":
+                continue
+            task_title = ""
+            if cell.current_task_id:
+                task = state.board_tasks.get(cell.current_task_id)
+                if task:
+                    task_title = task.task
+            active_agents.append({
+                "id": cell.id,
+                "name": cell.name,
+                "slug": cell.slug,
+                "type": cell.agent_type,
+                "status": status,
+                "current_task_id": cell.current_task_id,
+                "current_task": task_title,
+                "needs_attention": cell.needs_attention,
+            })
+
+        pending_asks.sort(key=lambda item: (item["title"].lower(), item["id"]))
+
+        summary = {
+            "group": _weaver_group,
+            "tasks_total": len(tasks),
+            "lanes": ordered_lanes,
+            "labels": label_counts,
+            "asks": {
+                "count": len(pending_asks),
+                "items": pending_asks[:10],
+                "truncated": len(pending_asks) > 10,
+            },
+            "agents": {
+                "total": total_agents,
+                "active_count": len(active_agents),
+                "needs_attention": needs_attention,
+                "by_status": agent_status_counts,
+                "active": active_agents[:10],
+                "truncated": len(active_agents) > 10,
+            },
+        }
+        return json.dumps(summary), False
 
     if name == "weaver_board_list":
         lane_filter = args.get("lane", "")
@@ -1136,6 +1277,17 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             payload["agent_id"] = agent_id
         else:
             payload["create_agent"] = True
+            if _weaver_cell:
+                if _weaver_cell.session_id:
+                    payload["target_session_id"] = _weaver_cell.session_id
+                if _weaver_cell.window_id:
+                    payload["target_window_id"] = _weaver_cell.window_id
+            agent_type = args.get("agent_type", "")
+            if agent_type:
+                payload["agent_type"] = agent_type
+            command = args.get("command", "")
+            if command:
+                payload["command"] = command
         agent_name = args.get("name", "")
         if agent_name:
             payload["name"] = agent_name
@@ -1519,6 +1671,10 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         msg = args.get("message", "")
         if msg:
             payload["message"] = msg
+        if args.get("close_agent_on_merge"):
+            payload["close_agent_on_merge"] = True
+        if args.get("remove_worktree_on_merge"):
+            payload["remove_worktree_on_merge"] = True
         result = await handle_command(payload)
         if result and result.get("ok") is False:
             error = result.get("error", "Merge failed")
@@ -1529,11 +1685,20 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                     "resolve conflicts. Use weaver_ask."
                 ), True
             return error, True
+        cleanup = result.get("cleanup", {}) if result else {}
+        cleanup_errors = cleanup.get("errors", [])
+        if cleanup_errors:
+            return (
+                f"Merged {cell.worktree_branch} into "
+                f"{cell.worktree_base_branch}, but cleanup failed:\n"
+                + "\n".join(f"  - {err}" for err in cleanup_errors)
+            ), True
         return json.dumps({
             "type": "ok",
             "message": f"Merged {cell.worktree_branch} into "
                        f"{cell.worktree_base_branch}",
             "sha": result.get("sha", ""),
+            "cleanup": cleanup,
         }), False
 
     if name == "weaver_create_pr":

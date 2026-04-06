@@ -52,8 +52,10 @@ The journal is visible in the Weaver panel's **Journal** tab, with entries shown
 After a `/clear` or restart, the weaver reads its journal to reconstruct context:
 
 ```
-weaver_journal_read  -->  weaver_board_list  -->  weaver_events
+weaver_journal_read  -->  weaver_board_summary  -->  weaver_events
 ```
+
+Use `weaver_board_list` only when the compact summary is not enough.
 
 ### Human interaction
 
@@ -107,6 +109,7 @@ The weaver has access to these tools via MCP:
 
 | Tool | Description |
 |------|-------------|
+| `weaver_board_summary` | Compact board overview with lane counts, active agent status, pending asks, and key label counts. |
 | `weaver_board_list` | List tasks grouped by lane, with optional filters (lane, label, search). Scoped to the weaver's group. |
 | `weaver_task_show` | Full task details by slug or ID. Auto-includes pipeline chain for pipeline tasks. |
 | `weaver_agents_list` | All agents in the group with status, current task, and activity. |
@@ -120,7 +123,8 @@ The weaver has access to these tools via MCP:
 | `weaver_task_create` | Create a task with title, description, action, labels, and lane. |
 | `weaver_task_edit` | Update fields on an existing task (partial update). |
 | `weaver_task_move` | Move a task to a different lane. |
-| `weaver_task_dispatch` | Dispatch a task to a new or existing agent. Supports custom agent naming via `name` parameter. |
+<<<<<<< HEAD
+| `weaver_task_dispatch` | Dispatch a task to a new or existing agent. Supports custom naming via `name`, backend selection via `agent_type`, and boot-command override via `command` for new agents. |
 | `weaver_batch_dispatch` | Dispatch an ordered batch with `max_concurrent`. Tasks may share an `agent_group` so later tasks queue on the same agent instead of consuming another worker slot. |
 | `weaver_task_resolve` | Resolve an ask task by sending an answer to the waiting agent. |
 
@@ -151,7 +155,7 @@ The weaver has access to these tools via MCP:
 
 | Tool | Description |
 |------|-------------|
-| `weaver_merge` | Merge an agent's worktree branch into the base branch. Checks for conflicts first --- if found, instructs the weaver to ask the human for permission to rebase. |
+| `weaver_merge` | Merge an agent's worktree branch into the base branch. Checks for conflicts first --- if found, instructs the weaver to ask the human for permission to rebase. Optional `close_agent_on_merge` and `remove_worktree_on_merge` flags enable explicit post-merge cleanup. |
 | `weaver_create_pr` | Push branch and create a GitHub PR via `gh`. Accepts custom title and body. |
 | `weaver_diff` | Get the diff of an agent's worktree vs base branch. Supports `stat_only` mode and path filtering. |
 
