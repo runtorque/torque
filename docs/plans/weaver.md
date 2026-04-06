@@ -160,6 +160,7 @@ class WeaverSettings:
     push_interval: int = 60               # seconds between digest pushes (min: 10)
     max_interval: int = 300               # max seconds between pushes (heartbeat)
     paused: bool = False                   # user paused event pushes
+    custom_instructions: str = ""          # user-defined instructions appended to weaver prompt
     enabled_events: list[str] = field(     # optional events (mandatory always on)
         default_factory=lambda: [
             "agent_started",
@@ -168,6 +169,18 @@ class WeaverSettings:
         ]
     )
 ```
+
+**`custom_instructions`**: Free-text instructions appended to the weaver's system prompt on dispatch. The user writes these in the Weaver panel's Settings tab. They are injected after the action's rendered prompt as a clearly delimited block:
+
+```
+── Custom Instructions ────────────────────────
+Focus on the auth and payments modules first.
+Never dispatch more than 3 agents concurrently.
+Always create a review task after implementation.
+────────────────────────────────────────────────
+```
+
+This gives the user a lightweight way to steer the weaver without editing the action YAML. The instructions persist across weaver restarts — they're part of `WeaverSettings` in SQLite, not the agent's ephemeral state.
 
 **Mandatory events** (always included in digests, cannot be disabled):
 - `task_completed` — agent finished a task
@@ -206,6 +219,7 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     push_interval INTEGER NOT NULL DEFAULT 60,
     max_interval INTEGER NOT NULL DEFAULT 300,
     paused INTEGER NOT NULL DEFAULT 0,
+    custom_instructions TEXT NOT NULL DEFAULT '',
     enabled_events TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived"]'
 );
 
@@ -710,16 +724,26 @@ Active: fix-auth-bug (thinking) · add-logging (tool_call)
 
 ### Weaver Panel
 
-A new panel in the taskbar, between Agents and Events. Contains two sections:
+A new panel in the taskbar, between Agents and Events. Uses a tab bar at the top — same pattern as the Agents panel's `Templates` / `History` tabs.
 
-#### Journal section
+**Tabs**: `Journal` | `Settings`
 
-Scrollable feed of journal entries, most recent at top. Each entry shows:
+The panel header shows the group name and the weaver agent's status. A small pause/resume toggle sits in the header bar, always visible regardless of active tab.
 
 ```
 ┌─────────────────────────────────────────────┐
-│  Weaver — my-project                        │
-│                                             │
+│  Weaver — my-project        [⏸ Pause]       │
+│  [Journal]  [Settings]                      │
+│─────────────────────────────────────────────│
+│  ...tab content...                          │
+└─────────────────────────────────────────────┘
+```
+
+#### Journal tab (default)
+
+Scrollable feed of journal entries, most recent at top:
+
+```
 │  ┌─ checkpoint · 2m ago ──────────────────┐ │
 │  │ Board: 2 IP, 4 TD, 8 BL, 3 Done.     │ │
 │  │ Active: fix-auth (thinking), add-      │ │
@@ -737,13 +761,36 @@ Scrollable feed of journal entries, most recent at top. Each entry shows:
 │  │ Agent fix-auth-bug completed. Tests    │ │
 │  │ passing. Branch ready for review.      │ │
 │  └────────────────────────────────────────┘ │
-│                                             │
-│  ─── Settings ────────────────────────────  │
+```
+
+- Entry type shown as a colored badge: `decision` (blue), `observation` (gray), `checkpoint` (green), `plan` (yellow)
+- Timestamps shown as relative ("2m ago", "1h ago")
+- Entries are scrollable with "Load more" at the bottom (paginated from SQLite)
+
+#### Settings tab
+
+All weaver configuration in one place. Sections separated by subtle dividers.
+
+```
+│  ─── Agent ───────────────────────────────  │
 │                                             │
 │  Weaver agent: fix-auth-bug  [Designate]    │
+│                                             │
+│  ─── Custom Instructions ─────────────────  │
+│                                             │
+│  ┌────────────────────────────────────────┐ │
+│  │ Focus on auth and payments modules     │ │
+│  │ first. Never dispatch more than 3      │ │
+│  │ agents concurrently. Always create a   │ │
+│  │ review task after implementation.      │ │
+│  │                                        │ │
+│  └────────────────────────────────────────┘ │
+│                              [Save]         │
+│                                             │
+│  ─── Notifications ───────────────────────  │
+│                                             │
 │  Push interval: [60s ▾]                     │
 │  Max interval:  [300s ▾]                    │
-│  Paused: [ ] ← checkbox                    │
 │                                             │
 │  Events:                                    │
 │  [x] task_completed (mandatory)             │
@@ -756,15 +803,10 @@ Scrollable feed of journal entries, most recent at top. Each entry shows:
 │  [x] task_derived                           │
 │  [ ] agent_progress                         │
 │                                             │
-│                        [⏸ Pause] / [▶ Resume] │
-└─────────────────────────────────────────────┘
 ```
 
-- Entry type shown as a colored badge: `decision` (blue), `observation` (gray), `checkpoint` (green), `plan` (yellow)
-- Timestamps shown as relative ("2m ago", "1h ago")
-- Settings section is collapsible
-- Mandatory event checkboxes are checked and disabled (grayed out)
-- Pause/Resume button toggles `WeaverSettings.paused` — prominent, always visible
+- **Custom Instructions**: Auto-growing textarea. Content is appended to the weaver's prompt on dispatch (and on re-dispatch after context cleanup). Saved to `WeaverSettings.custom_instructions`. The Save button only appears when the content has changed (dirty state).
+- **Notifications**: Push interval and max interval dropdowns, event type checkboxes. Mandatory events are checked and disabled (grayed out). Changes apply immediately (no save button — sent via WS on change).
 
 #### Weaver designation
 
@@ -873,7 +915,7 @@ Read recent journal entries.
 
 #### `weaver_update_settings`
 
-Update weaver notification settings.
+Update weaver settings. Supports partial updates — only the fields provided are changed.
 
 **Payload:**
 ```json
@@ -882,6 +924,7 @@ Update weaver notification settings.
     "group": "my-project",
     "push_interval": 60,
     "max_interval": 300,
+    "custom_instructions": "Focus on auth and payments modules first.",
     "enabled_events": ["agent_started", "task_dispatched", "task_derived"]
 }
 ```
@@ -943,7 +986,8 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 - `ai_report(action="reply")` handler: validate pending message, emit `agent_reply` panel event, buffer for weaver
 - `weaver_journal_append` command handler: validate, insert, emit delta
 - `weaver_journal_read` command handler: query, return
-- `weaver_update_settings` command handler: validate, save, reconfigure buffer timers
+- `weaver_update_settings` command handler: validate, save (including `custom_instructions`), reconfigure buffer timers
+- Modify `dispatch_task`: when dispatching to the weaver agent, append `WeaverSettings.custom_instructions` to the rendered prompt (delimited block after action prompt)
 - `weaver_pause` / `weaver_resume` command handlers: toggle `WeaverSettings.paused`, emit delta
 - Modify `add_agent`: support `is_weaver` flag, enforce one-per-group
 - Modify `remove_agent`: clear `weaver_agent_id` when weaver is removed
@@ -967,11 +1011,14 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 ### Step 6: UI — Weaver panel (`static/js/weaver.js`, `static/style.css`)
 
 - New file: `static/js/weaver.js` — loaded between `board.js` and `main.js`
-- `renderWeaverPanel(group)` — render journal entries + settings section
-- Journal entries: scrollable feed, type badges (color-coded), relative timestamps
-- Settings section: collapsible, push interval dropdown, event checkboxes (mandatory ones disabled), pause/resume button
-- Weaver designation: in group settings modal, agent dropdown + remove button
-- Delta handling: `journal_append` delta op updates the panel in real-time
+- Tabbed layout: `Journal` | `Settings` tabs (same pattern as Agents panel's Templates/History)
+- Panel header: group name, weaver agent status, pause/resume toggle (always visible across tabs)
+- **Journal tab** (default): `renderWeaverJournal(group)` — scrollable feed, type badges (color-coded: decision=blue, observation=gray, checkpoint=green, plan=yellow), relative timestamps, "Load more" pagination from SQLite
+- **Settings tab**: `renderWeaverSettings(group)` — three sections:
+  - Agent: weaver agent designation (dropdown + remove button, in group settings modal)
+  - Custom Instructions: auto-growing textarea, dirty-state Save button, content appended to weaver prompt on dispatch
+  - Notifications: push/max interval dropdowns, event type checkboxes (mandatory ones disabled), changes apply immediately via WS
+- Delta handling: `journal_append` delta op updates the Journal tab in real-time
 - Wire into `static/js/main.js` panel toggle (B for board, W for weaver, A for actions)
 
 ### Step 7: UI — Weaver agent indicators (`static/js/render.js`, `static/js/commands.js`)
@@ -1035,7 +1082,7 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 | `loom/mcp.py` | Add `loom_reply` tool definition, `reply` action mapping |
 | `loom/mcp_weaver.py` | Remove 3 tools (`lanes_list`, `pipelines_list`, `task_chain`), enrich `task_show` with chain data, add 5 new tools (`events`, `notifications`, `journal`, `journal_read`, `agent_message`) |
 | `bin/loom` | Add `loom ai reply` subcommand, `loom weaver journal` subcommand |
-| `static/js/weaver.js` | **New file.** Weaver panel renderer — journal feed, settings section, pause/resume |
+| `static/js/weaver.js` | **New file.** Weaver panel renderer — tabbed layout (Journal/Settings), journal feed with pagination, settings with custom instructions textarea + notification config, pause/resume |
 | `static/js/render.js` | Weaver badge on agent cells, paused indicator |
 | `static/js/commands.js` | "Designate as weaver" / "Remove as weaver" context menu items |
 | `static/js/modals.js` | Weaver section in group settings modal |
