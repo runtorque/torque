@@ -134,31 +134,15 @@ class CodexAdapter(AgentAdapter):
 
     def inject_persistent_prompt(self, working_dir: str,
                                  filename: str, text: str) -> str:
-        """Write persistent prompt to .codex/AGENTS.md with managed markers.
+        """Inject persistent prompt explicitly via CLI flags.
 
-        Codex auto-discovers AGENTS.md from `{cwd}/.codex/`, so no CLI
-        flags are needed.  Uses markers for safe merge with user content.
+        Loom must not rely on `.codex/AGENTS.md` discovery for correctness.
+        Older Loom versions wrote managed prompt blocks there; clean them up
+        if present so the prompt is sourced only from explicit launch flags.
         """
-        if not text or not working_dir:
-            return ""
-        try:
-            codex_dir = Path(working_dir) / ".codex"
-            codex_dir.mkdir(parents=True, exist_ok=True)
-            agents_file = codex_dir / "AGENTS.md"
-            content = agents_file.read_text() if agents_file.exists() else ""
-            marker = _agents_marker(filename or "loom-system-prompt")
-            content = _remove_agents_section(
-                content, filename or "loom-system-prompt")
-            loom_block = (
-                f"{marker}\n{text.rstrip()}\n{marker}\n")
-            if content.strip():
-                content = content.rstrip("\n") + "\n\n" + loom_block
-            else:
-                content = loom_block
-            agents_file.write_text(content)
-            return ""  # Codex auto-discovers AGENTS.md
-        except Exception:
-            return ""
+        if working_dir and filename:
+            self.uninstall_persistent_prompt(working_dir, filename)
+        return self.inject_system_prompt(working_dir, text)
 
     def uninstall_persistent_prompt(self, working_dir: str,
                                     filename: str = "") -> None:
@@ -181,8 +165,11 @@ class CodexAdapter(AgentAdapter):
         return f" --model {shlex.quote(model)}"
 
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
-        base = boot_cmd.strip().split()[0]
-        return f"{base} resume {shlex.quote(session_id)}"
+        parts = shlex.split(boot_cmd)
+        if not parts:
+            return None
+        cmd = [parts[0], "resume", session_id, *parts[1:]]
+        return " ".join(shlex.quote(p) for p in cmd)
 
     def get_input_ready_policy(self) -> InputReadyPolicy:
         """Wait for the Codex composer to fully initialize before first send."""
