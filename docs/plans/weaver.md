@@ -43,7 +43,9 @@ User designates agent as weaver (UI or API)
   ├── Weaver gets weaver_* MCP tools exposed
   ├── Event buffer + timer created for this group
   │
-  └── Weaver action prompt boots the agent
+  └── Weaver agent boots with:
+        │   • --append-system-prompt: weaver role identity + custom instructions
+        │   • Action prompt (user message): initial task / "check journal and resume"
         │
         ├── weaver_journal_read → recover context
         ├── weaver_board_list → current board state
@@ -129,7 +131,10 @@ Weaver running, context growing
   │
   └── On context cleanup (/clear or session restart):
         │
-        └── Weaver action prompt instructs:
+        ├── System prompt persists (--append-system-prompt): weaver identity
+        │   + custom instructions survive /clear automatically
+        │
+        └── Action prompt (user message) instructs:
               1. weaver_journal_read(tail=20) → recover decisions
               2. weaver_board_list → current state
               3. weaver_events(since=last_checkpoint) → missed events
@@ -170,15 +175,25 @@ class WeaverSettings:
     )
 ```
 
-**`custom_instructions`**: Free-text instructions appended to the weaver's system prompt on dispatch. The user writes these in the Weaver panel's Settings tab. They are injected after the action's rendered prompt as a clearly delimited block:
+**`custom_instructions`**: Free-text instructions injected into the weaver's system prompt via `--append-system-prompt`. The user writes these in the Weaver panel's Settings tab. They are concatenated with the weaver's base system prompt (from the action's `system_prompt` field or a built-in default) and passed as a single `--append-system-prompt` flag on boot.
+
+**System prompt structure** (assembled by Loom, passed via `--append-system-prompt`):
 
 ```
+You are the Weaver — the orchestrator agent for the "{group}" group in Loom.
+Your role is to manage the task board, dispatch work to agents, react to events,
+and maintain a decision journal for context continuity.
+
+{action system_prompt field, if any}
+
 ── Custom Instructions ────────────────────────
 Focus on the auth and payments modules first.
 Never dispatch more than 3 agents concurrently.
 Always create a review task after implementation.
 ────────────────────────────────────────────────
 ```
+
+**Why system prompt, not user message**: The system prompt survives `/clear` — when the weaver's context is cleaned, it retains its identity and custom instructions without needing them re-sent. The action's rendered `prompt` field is sent as the initial user message (the task), which is the part that changes between dispatches.
 
 This gives the user a lightweight way to steer the weaver without editing the action YAML. The instructions persist across weaver restarts — they're part of `WeaverSettings` in SQLite, not the agent's ephemeral state.
 
@@ -247,6 +262,64 @@ class AgentCell:
 ```
 
 This is ephemeral (not persisted) — used to validate that `loom_reply` is only available when the agent has received a weaver message.
+
+---
+
+## Prompt Architecture
+
+The weaver's prompt is split into two layers, using Claude Code's `--append-system-prompt` flag:
+
+### System prompt (persistent across `/clear`)
+
+Assembled by Loom from three parts:
+
+1. **Base weaver identity** — built-in text that defines the weaver role, available tools, and behavioral guidelines (e.g. "write journal entries at decision points", "write checkpoints periodically")
+2. **Action `system_prompt` field** (optional) — if the weaver action YAML has a `system_prompt` field, it's included. This lets the action template contribute project-level system instructions.
+3. **Custom instructions** — user-written text from `WeaverSettings.custom_instructions`
+
+These are concatenated and passed as `--append-system-prompt` on boot. Because `--append-system-prompt` appends to Claude Code's built-in system prompt, the weaver retains all standard capabilities (file editing, bash, tools) while gaining its orchestrator identity.
+
+**Key benefit**: The system prompt survives `/clear`. When the weaver's context fills up and the user (or weaver) clears it, the weaver still knows *who it is* and *what the custom rules are*. Only the conversation history (tool call results, event digests) is lost — recoverable via journal + board state.
+
+### User prompt (the initial task message)
+
+The action's rendered `prompt` field is sent as text to the weaver's terminal — a regular user message. This is the *task*: what the weaver should do right now.
+
+**First dispatch** (fresh weaver):
+```
+You are starting a new orchestration session.
+Check the board and begin managing tasks for this group.
+```
+
+**Re-dispatch** (after context cleanup or restart):
+```
+You are resuming an orchestration session.
+Read your journal to recover context, then check the board and recent events.
+```
+
+The action template controls this via `{{ loom.context.is_clean }}` — the same mechanism regular actions use.
+
+### Implementation: `inject_system_prompt` for weaver agents
+
+The current `ClaudeCodeAdapter.inject_system_prompt()` writes to `.claude/instructions.md`, which is loaded as user context, not as a true system prompt. For the weaver, we need the actual `--append-system-prompt` flag.
+
+**Approach**: When dispatching a weaver agent, Loom appends `--append-system-prompt-file <path>` to the boot command instead of using `inject_system_prompt()`. The file is written to a stable path (e.g. `.loom/weaver-system-prompt-{group}.md`) so it persists across restarts.
+
+```python
+# In _create_agent_with_config() for weaver agents:
+if is_weaver:
+    system_prompt_text = _build_weaver_system_prompt(group, weaver_settings)
+    prompt_path = os.path.join(git_root, ".loom", f"weaver-system-prompt-{group_slug}.md")
+    Path(prompt_path).write_text(system_prompt_text)
+    cell.command += f" --append-system-prompt-file {shlex.quote(prompt_path)}"
+```
+
+This is cleaner than the `instructions.md` approach because:
+- It uses the actual system prompt mechanism (survives `/clear`)
+- The file is scoped to the weaver (doesn't pollute `.claude/instructions.md` which other agents may use)
+- It's in `.loom/` which is already gitignored
+
+For **Codex**, the adapter would use its equivalent mechanism (if available), or fall back to the instructions-file approach.
 
 ---
 
@@ -986,8 +1059,8 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 - `ai_report(action="reply")` handler: validate pending message, emit `agent_reply` panel event, buffer for weaver
 - `weaver_journal_append` command handler: validate, insert, emit delta
 - `weaver_journal_read` command handler: query, return
-- `weaver_update_settings` command handler: validate, save (including `custom_instructions`), reconfigure buffer timers
-- Modify `dispatch_task`: when dispatching to the weaver agent, append `WeaverSettings.custom_instructions` to the rendered prompt (delimited block after action prompt)
+- `weaver_update_settings` command handler: validate, save (including `custom_instructions`), reconfigure buffer timers. When `custom_instructions` changes, regenerate the system prompt file (`.loom/weaver-system-prompt-{group}.md`) so the next session restart picks it up.
+- Modify `_create_agent_with_config`: when creating a weaver agent, build the system prompt (base identity + action system_prompt + custom instructions), write to `.loom/weaver-system-prompt-{group}.md`, append `--append-system-prompt-file <path>` to the boot command
 - `weaver_pause` / `weaver_resume` command handlers: toggle `WeaverSettings.paused`, emit delta
 - Modify `add_agent`: support `is_weaver` flag, enforce one-per-group
 - Modify `remove_agent`: clear `weaver_agent_id` when weaver is removed
@@ -1043,18 +1116,16 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 - The threshold is approximate — based on token counts from cost_update events
 - No auto-cleanup: the weaver decides when to checkpoint. The warning is advisory.
 
-### Step 10: Weaver action template
+### Step 10: Weaver action template and base system prompt
 
-- Create a default weaver action: `.loom/actions/weaver/orchestrate.yaml`
-- Prompt template instructs the weaver on:
-  - Reading its journal on startup
-  - Checking the board for current state
-  - Making dispatch decisions based on priorities
-  - Writing journal entries at key decision points
-  - Writing checkpoints periodically
-  - Responding to events in digests
-- This is a starting point — users customize it for their project
-- The action has no `transitions` (the weaver doesn't participate in pipelines — it manages them)
+- **Base system prompt** (built into `loom/weaver.py`): hardcoded text that defines the weaver role, available tools, behavioral guidelines (journal usage, checkpoint cadence, event response patterns). This is the first section of the assembled `--append-system-prompt`. Not user-editable — it's the weaver's "firmware."
+- **Default weaver action**: `.loom/actions/weaver/orchestrate.yaml`
+  - `system_prompt` field (optional): project-level system instructions that extend the base. Included in the assembled `--append-system-prompt` between the base and custom instructions.
+  - `prompt` field: the user message sent on dispatch. Uses `{{ loom.context.is_clean }}` to branch:
+    - Clean (first dispatch): "Check the board and begin managing tasks."
+    - Not clean (re-dispatch after `/clear`): "Read your journal, check the board and recent events, then resume."
+  - No `transitions` — the weaver doesn't participate in pipelines, it manages them
+- This is a starting point — users customize the action and write custom instructions in the Settings tab
 
 ---
 
@@ -1076,9 +1147,9 @@ When the weaver agent is removed, clear `GroupSettings.weaver_agent_id`. The jou
 |---|---|
 | `loom/state.py` | Add `weaver_agent_id` to `GroupSettings`, `pending_weaver_message` to `AgentCell`, `WeaverJournalEntry` dataclass, `get_weaver_for_group()`, `journal_append()`, `journal_read()` methods, `journal_append` delta op |
 | `loom/db.py` | Add `weaver_agent_id` migration, `weaver_settings` table, `weaver_journal` table + index, CRUD methods for both |
-| `loom/weaver.py` | **New file.** `WeaverEventBuffer` class — event buffering, idle-gated delivery, digest formatting, heartbeat timer, pause/resume |
+| `loom/weaver.py` | **New file.** `WeaverEventBuffer` class — event buffering, idle-gated delivery, digest formatting, heartbeat timer, pause/resume. Base weaver system prompt text. `build_weaver_system_prompt(group, settings)` assembler. |
 | `loom/events.py` | Hook `WeaverEventBuffer.on_panel_event()` into `EventBus` panel event emission, hook `on_agent_idle()` into activity transition |
-| `loom/server.py` | New commands: `weaver_message`, `weaver_journal_append`, `weaver_journal_read`, `weaver_update_settings`, `weaver_pause`, `weaver_resume`. Extend `ai_report` with `action="reply"`. Modify `add_agent`/`remove_agent` for weaver lifecycle. Initialize `WeaverEventBuffer` at startup. |
+| `loom/server.py` | New commands: `weaver_message`, `weaver_journal_append`, `weaver_journal_read`, `weaver_update_settings`, `weaver_pause`, `weaver_resume`. Extend `ai_report` with `action="reply"`. Modify `add_agent`/`remove_agent` for weaver lifecycle. Modify `_create_agent_with_config` to assemble and write weaver system prompt file, append `--append-system-prompt-file` to boot command. Initialize `WeaverEventBuffer` at startup. |
 | `loom/mcp.py` | Add `loom_reply` tool definition, `reply` action mapping |
 | `loom/mcp_weaver.py` | Remove 3 tools (`lanes_list`, `pipelines_list`, `task_chain`), enrich `task_show` with chain data, add 5 new tools (`events`, `notifications`, `journal`, `journal_read`, `agent_message`) |
 | `bin/loom` | Add `loom ai reply` subcommand, `loom weaver journal` subcommand |
