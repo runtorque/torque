@@ -112,6 +112,7 @@ function connect() {
       if (typeof agentHistoryReceiveList === 'function') agentHistoryReceiveList(msg);
     } else if (msg.type === 'agent_history_detail') {
       if (typeof agentHistoryReceiveDetail === 'function') agentHistoryReceiveDetail(msg);
+      if (typeof taskHistoryReceiveDetail === 'function') taskHistoryReceiveDetail(msg);
     } else if (msg.type === 'action') {
       handleAction(msg);
     }

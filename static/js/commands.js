@@ -450,6 +450,9 @@ function onCellContextMenu(e, id) {
       }
     }
   }
+  if (cell.cell_type === 'agent') {
+    items.push({ label: 'View Tasks', action: `showTaskHistory('${id}')` });
+  }
   if (cell.cell_type === 'agent' && cell.session_id
       && (cell.agent_type === 'claude-code' || cell.agent_type === 'codex')) {
     items.push({ label: 'Clear context', action: `clearAgentContext('${id}')` });
