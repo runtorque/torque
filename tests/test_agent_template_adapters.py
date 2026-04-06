@@ -51,7 +51,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         adapter = CodexAdapter()
         self.assertEqual(
             adapter.inject_system_prompt("/tmp", "Be precise."),
-            " --instructions 'Be precise.'",
+            " 'Be precise.'",
         )
         self.assertEqual(adapter.resolve_model_flags("gpt-5"), " --model gpt-5")
 
@@ -63,7 +63,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             )
             self.assertEqual(
                 result,
-                " --instructions 'First prompt.'",
+                " 'First prompt.'",
             )
             self.assertFalse(
                 (Path(tmp) / ".codex" / "AGENTS.md").exists()
@@ -72,12 +72,12 @@ class AgentTemplateAdapterTests(unittest.TestCase):
     def test_codex_resume_command_preserves_flags(self):
         adapter = CodexAdapter()
         resumed = adapter.get_resume_command(
-            "codex --model gpt-5 --instructions 'Follow the spec.'",
+            "codex --model gpt-5 'Follow the spec.'",
             "session-123",
         )
         self.assertEqual(
             resumed,
-            "codex resume session-123 --model gpt-5 --instructions 'Follow the spec.'",
+            "codex resume --model gpt-5 session-123 'Follow the spec.'",
         )
 
     def test_generic_adapter_is_noop_for_template_specific_flags(self):

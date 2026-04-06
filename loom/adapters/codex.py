@@ -71,6 +71,47 @@ def _truncate(s: str, n: int) -> str:
     return s[:n] + "..." if len(s) > n else s
 
 
+_VALUE_OPTS = {
+    "-c", "--config",
+    "--enable", "--disable",
+    "--remote", "--remote-auth-token-env",
+    "-i", "--image",
+    "-m", "--model",
+    "--local-provider",
+    "-p", "--profile",
+    "-s", "--sandbox",
+    "-a", "--ask-for-approval",
+    "-C", "--cd",
+    "--add-dir",
+}
+
+
+def _split_boot_args(boot_cmd: str) -> tuple[list[str], str]:
+    """Split a Codex boot command into option args and trailing prompt."""
+    parts = shlex.split(boot_cmd)
+    if len(parts) <= 1:
+        return ([], "")
+    args = parts[1:]
+    opts: list[str] = []
+    prompt = ""
+    i = 0
+    while i < len(args):
+        part = args[i]
+        if part == "--":
+            prompt = " ".join(args[i + 1:])
+            break
+        if part.startswith("-"):
+            opts.append(part)
+            if "=" not in part and part in _VALUE_OPTS and i + 1 < len(args):
+                i += 1
+                opts.append(args[i])
+            i += 1
+            continue
+        prompt = " ".join(args[i:])
+        break
+    return (opts, prompt)
+
+
 def _is_loom_hook(hook: dict) -> bool:
     """Check if a single hook entry was installed by Loom (by URL marker)."""
     cmd = hook.get("command", "")
@@ -130,7 +171,7 @@ class CodexAdapter(AgentAdapter):
         del working_dir
         if not text:
             return ""
-        return f" --instructions {shlex.quote(text)}"
+        return f" {shlex.quote(text)}"
 
     def inject_persistent_prompt(self, working_dir: str,
                                  filename: str, text: str) -> str:
@@ -168,7 +209,10 @@ class CodexAdapter(AgentAdapter):
         parts = shlex.split(boot_cmd)
         if not parts:
             return None
-        cmd = [parts[0], "resume", session_id, *parts[1:]]
+        opts, prompt = _split_boot_args(boot_cmd)
+        cmd = [parts[0], "resume", *opts, session_id]
+        if prompt:
+            cmd.append(prompt)
         return " ".join(shlex.quote(p) for p in cmd)
 
     def get_input_ready_policy(self) -> InputReadyPolicy:
