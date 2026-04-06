@@ -503,7 +503,8 @@ function renderAgentHistoryView() {
     html += '<span class="ah-expand-arrow">' + (expanded ? '\u25BC' : '\u25B6') + '</span>';
     html += '<span class="ah-name">' + esc(r.name) + '</span>';
     if (r.agent_type) {
-      var typeLabel = (typeof AGENT_TYPE_LABELS !== 'undefined' && AGENT_TYPE_LABELS[r.agent_type]) || r.agent_type;
+      var typeInfo = (typeof AGENT_TYPE_LABELS !== 'undefined' && AGENT_TYPE_LABELS[r.agent_type]) || null;
+      var typeLabel = (typeInfo && typeInfo.label) || r.agent_type;
       html += '<span class="ah-type-badge">' + esc(typeLabel) + '</span>';
     }
     if (r.group) html += '<span class="ah-group">' + esc(r.group) + '</span>';
