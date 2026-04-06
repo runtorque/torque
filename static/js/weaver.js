@@ -9,8 +9,9 @@ function renderWeaverPanel() {
   var el = document.getElementById('panel-weaver');
   if (!el) return;
 
-  // Find the first group with a weaver
+  // Resolve the active group and lock it so create/settings use the same one
   var group = _weaverFindGroup();
+  _weaverGroup = group;
   var ws = _weaverGetSettings(group);
   var weaver = group ? _weaverGetAgent(group) : null;
 
@@ -271,18 +272,19 @@ function weaverToggleEvent(evt, enabled) {
 // -- Helpers ---------------------------------------------------------------
 
 function _weaverFindGroup() {
-  // Explicit user selection
-  if (_weaverGroup && state.groups && _weaverGroup in state.groups) {
+  var groups = Object.keys(state.groups || {});
+  // Explicit user selection (from dropdown)
+  if (_weaverGroup && groups.indexOf(_weaverGroup) >= 0) {
     return _weaverGroup;
   }
   // Find a group that already has a weaver
   if (state.group_settings) {
-    for (var gn in state.group_settings) {
-      if (state.group_settings[gn].weaver_agent_id) return gn;
+    for (var i = 0; i < groups.length; i++) {
+      var gs = state.group_settings[groups[i]];
+      if (gs && gs.weaver_agent_id) return groups[i];
     }
   }
   // Fallback: return the first group
-  var groups = Object.keys(state.groups || {});
   return groups.length ? groups[0] : '';
 }
 
