@@ -2503,6 +2503,79 @@ def cmd_ai_ask(args):
     print("  A human will review and dispatch this task.")
 
 
+def cmd_ai_reply(args):
+    cell, task = _resolve_self_and_task(args)
+    resp = api_call("ai_report", port=args.port,
+                    cell_id=cell["id"], action="reply",
+                    message=args.message)
+    check_ok(resp)
+    print("Reply sent to weaver.")
+
+
+def cmd_weaver_journal(args):
+    """Read weaver journal entries from SQLite."""
+    st = get_state_local(args.port)
+    group = getattr(args, "group", "")
+    # Auto-detect group: find one with a weaver_agent_id
+    if not group:
+        for gn, gs in st.get("group_settings", {}).items():
+            if isinstance(gs, dict) and gs.get("weaver_agent_id"):
+                group = gn
+                break
+    if not group:
+        _die("No weaver found. Use -g to specify a group.")
+
+    # Try reading from daemon API first, fallback to SQLite
+    tail = getattr(args, "tail", 20) or 20
+    entry_type = getattr(args, "type", "") or ""
+    def _read_journal(conn):
+        sql = ("SELECT id, group_name, timestamp, entry_type, entry "
+               "FROM weaver_journal WHERE group_name=?")
+        params = [group]
+        if entry_type:
+            sql += " AND entry_type=?"
+            params.append(entry_type)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(tail)
+        rows = conn.execute(sql, params).fetchall()
+        return [{"id": r[0], "group": r[1], "timestamp": r[2],
+                 "type": r[3], "entry": r[4]} for r in rows]
+
+    if _db_available():
+        try:
+            entries = _db_read(_read_journal)
+        except Exception:
+            entries = []
+    else:
+        try:
+            resp = api_call("weaver_journal_read", port=args.port,
+                            group=group, tail=tail, entry_type=entry_type)
+            data = check_ok(resp)
+            entries = data.get("entries", [])
+        except Exception:
+            _die("Cannot read journal: daemon not running and "
+                 "loom.db not found")
+
+    if not entries:
+        print("No journal entries found.")
+        return
+
+    if getattr(args, "json", False):
+        print(json.dumps(entries, indent=2))
+        return
+
+    import time as _time
+    # Print newest-last for terminal readability
+    for e in reversed(entries):
+        ts = _time.strftime("%Y-%m-%d %H:%M",
+                            _time.localtime(e["timestamp"]))
+        etype = e.get("type", "?")
+        entry_text = e.get("entry", "")
+        print(f"\n  [{etype}] {ts}")
+        for line in entry_text.split("\n"):
+            print(f"    {line}")
+
+
 def cmd_task_resolve(args):
     st = get_state_local(args.port)
     task = resolve_task(st, args.identifier)
@@ -3330,6 +3403,13 @@ def build_parser():
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_ask)
 
+    p = ai_sub.add_parser("reply",
+                          help="Reply to a message from the weaver")
+    p.add_argument("message", help="Reply text to send back to the weaver")
+    p.add_argument("task_ref", nargs="?",
+                   help="Task slug/ID (auto-detected)")
+    p.set_defaults(func=cmd_ai_reply)
+
     # -- task chain ---------------------------------------------------------
     # (added to task subcommand group)
 
@@ -3409,6 +3489,24 @@ def build_parser():
     p = sch_sub.add_parser("run", help="Manually trigger a schedule now")
     p.add_argument("identifier", help="Schedule ID, slug, or name")
     p.set_defaults(func=cmd_schedule_run)
+
+    # -- weaver -------------------------------------------------------------
+    weav = sub.add_parser("weaver", aliases=["w"],
+                          help="Weaver orchestrator commands")
+    weav.set_defaults(func=cmd_weaver_journal, _sub_parser=weav)
+    weav_sub = weav.add_subparsers(dest="weaver_cmd")
+
+    p = weav_sub.add_parser("journal", aliases=["j"],
+                            help="Read weaver decision journal")
+    p.add_argument("-g", "--group", help="Group name")
+    p.add_argument("-n", "--tail", type=int, default=20,
+                   help="Number of entries (default: 20)")
+    p.add_argument("-t", "--type",
+                   choices=["decision", "observation", "checkpoint", "plan"],
+                   help="Filter by entry type")
+    p.add_argument("--json", action="store_true",
+                   help="JSON output")
+    p.set_defaults(func=cmd_weaver_journal)
 
     # -- logs ---------------------------------------------------------------
     p = sub.add_parser("logs", help="Tail daemon log")

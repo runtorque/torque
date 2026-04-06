@@ -191,7 +191,11 @@ function render() {
 
     html += `<div class="group-body"><div class="group-body-inner">`;
 
-    /* Agent grid (+ New cell is part of the grid) */
+    /* Agent grid (+ New cell is part of the grid) — weaver pinned first */
+    const weaverId = gsLocal.weaver_agent_id || '';
+    if (weaverId) {
+      agents.sort((a, b) => (a.id === weaverId ? -1 : b.id === weaverId ? 1 : 0));
+    }
     html += `<div class="agent-grid" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
     for (const a of agents) {
       if (!collapsed) {
@@ -288,6 +292,16 @@ function render() {
     if (_activePanelApp === 'board') renderBoard();
     if (_activePanelApp === 'events' && typeof renderEvents === 'function') renderEvents();
     if (_activePanelApp === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
+    if (_activePanelApp === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
+    // Update weaver taskbar badge
+    const _weaverBtn = document.querySelector('.taskbar-app[data-app="weaver"]');
+    if (_weaverBtn) {
+      let _hasAsk = false;
+      for (const gn in (state.weaver_settings || {})) {
+        if (state.weaver_settings[gn].pending_question) { _hasAsk = true; break; }
+      }
+      _weaverBtn.classList.toggle('has-badge', _hasAsk);
+    }
   }
 
   // Update events attention badge regardless of panel state
@@ -332,6 +346,15 @@ function renderAgentCell(a) {
   if (selected) cls.push('selected');
   if (a.id === focusedItemId) cls.push('focused');
   if (a.status === 'stopped') cls.push('stopped');
+  // Check if this agent is the weaver for its group
+  const _gs = (state.group_settings || {})[a.group];
+  const _isWeaver = _gs && _gs.weaver_agent_id === a.id;
+  if (_isWeaver) cls.push('weaver');
+  // Check if weaver is awaiting human input
+  const _weaverWs = _isWeaver && state.weaver_settings
+    ? state.weaver_settings[a.group] : null;
+  const _weaverAsking = _weaverWs && _weaverWs.pending_question;
+  if (_weaverAsking) cls.push('weaver-asking');
 
   const statusCls = agentStatusClass(a);
   const titleParts = [a.name, `(${a.status})`];
@@ -343,6 +366,9 @@ function renderAgentCell(a) {
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
+  if (_weaverAsking) {
+    h += `<div class="cell-weaver-ask" title="${esc(_weaverWs.pending_question)}">? awaiting input</div>`;
+  }
   /* Linked task */
   const _ct = _getAgentTask(a.id);
   if (_ct) {

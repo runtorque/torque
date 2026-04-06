@@ -6,7 +6,7 @@ var _activePanelApp = '';   // '' = collapsed, 'board' = board open
 var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
 var _panelStateRestored = false;  // true after first state message restores panel
 
-var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-events'];
+var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-events', 'panel-weaver'];
 
 function togglePanel(appName) {
   var panel = document.getElementById('bottom-panel');
@@ -43,6 +43,7 @@ function togglePanel(appName) {
       }
     }
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
+    if (appName === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
   }
   // Persist panel state to server
   send({ cmd: 'board_set_panel', active: _activePanelApp || '' });
@@ -78,6 +79,7 @@ function _restorePanelState() {
     if (active === 'actions') tplEditorLoad();
     if (active === 'templates' && typeof agentTemplateEditorLoad === 'function') agentTemplateEditorLoad();
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
+    if (active === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
   }
 }
 

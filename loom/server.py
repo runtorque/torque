@@ -499,6 +499,13 @@ async def main(connection: iterm2.Connection):
     action_mgr = ActionManager()
     template_mgr = TemplateManager()
 
+    from .weaver import WeaverEventBuffer
+    weaver_buffer = WeaverEventBuffer(state, bridge)
+    weaver_buffer.start()
+    event_bus._weaver_buffer = weaver_buffer
+    panel_log.on_event = weaver_buffer.on_panel_event
+    log.info("Weaver event buffer started")
+
 
     async def _safe_remove_worktree(cell):
         """Remove a worktree only if no other agent shares it."""
@@ -1506,37 +1513,95 @@ async def main(connection: iterm2.Connection):
 
             elif cmd == "add_agent":
                 group = data["group"]
-                base_dir = await _resolve_base_dir(group)
-                explicit_template = data.get("template", "").strip()
-                launch_cfg = _resolve_agent_launch_config(
-                    group,
-                    base_dir=base_dir,
-                    explicit_template=explicit_template,
-                    overrides=data,
-                )
-                name = (data.get("name", "") or "").strip()
-                if not name:
-                    if explicit_template:
-                        name = _suggest_template_agent_name(
-                            group, explicit_template, base_dir)
-                    else:
-                        name = state.next_cell_name(group, "agent")
-                cell = await _create_agent_with_config(
-                    group, name, launch_cfg,
-                    explicit_template=explicit_template)
-                if cell:
-                    if launch_cfg.get("terminals"):
-                        await _create_child_terminals(
-                            group, cell, terminals=launch_cfg["terminals"])
-                    else:
-                        gs = state.get_group_settings(group)
-                        if gs.auto_terminals > 0:
+                is_weaver = data.get("is_weaver", False)
+
+                # Enforce one weaver per group
+                if is_weaver:
+                    gs_check = state.get_group_settings(group)
+                    if gs_check.weaver_agent_id:
+                        existing = state.agents.get(
+                            gs_check.weaver_agent_id)
+                        ename = existing.name if existing else "unknown"
+                        result = {
+                            "type": "error",
+                            "message": (
+                                f"Group '{group}' already has a "
+                                f"weaver: {ename}")}
+                        # Skip agent creation — jump to broadcast
+                        is_weaver = False
+                        data = {}  # prevent fallthrough
+
+                if data:
+                    base_dir = await _resolve_base_dir(group)
+                    explicit_template = data.get("template", "").strip()
+                    launch_cfg = _resolve_agent_launch_config(
+                        group,
+                        base_dir=base_dir,
+                        explicit_template=explicit_template,
+                        overrides=data,
+                    )
+
+                    # Weaver: build system prompt and inject flag
+                    if is_weaver:
+                        from .weaver import build_weaver_system_prompt
+                        ws = state.get_weaver_settings(group)
+                        action_sp = launch_cfg.get("system_prompt", "")
+                        sp_text = build_weaver_system_prompt(
+                            group, ws, action_sp)
+                        # Write to a file in .loom/
+                        sp_dir = os.path.join(
+                            base_dir or os.getcwd(), ".loom")
+                        os.makedirs(sp_dir, exist_ok=True)
+                        gs_slug = state.group_slugs.get(
+                            group, group.replace(" ", "-").lower())
+                        sp_path = os.path.join(
+                            sp_dir,
+                            f"weaver-system-prompt-{gs_slug}.md")
+                        with open(sp_path, "w") as f:
+                            f.write(sp_text)
+                        # Append flag to boot command
+                        cmd_str = launch_cfg.get("command", "")
+                        cmd_str += (
+                            f" --append-system-prompt-file"
+                            f" {shlex.quote(sp_path)}")
+                        launch_cfg["command"] = cmd_str.strip()
+                        # Clear system_prompt so it doesn't also
+                        # write to .claude/instructions.md
+                        launch_cfg["system_prompt"] = ""
+
+                    name = (data.get("name", "") or "").strip()
+                    if not name:
+                        if is_weaver:
+                            name = "Weaver"
+                        elif explicit_template:
+                            name = _suggest_template_agent_name(
+                                group, explicit_template, base_dir)
+                        else:
+                            name = state.next_cell_name(group, "agent")
+                    cell = await _create_agent_with_config(
+                        group, name, launch_cfg,
+                        explicit_template=explicit_template)
+                    if cell:
+                        # Designate as weaver
+                        if is_weaver:
+                            state.update_group_settings(
+                                group, weaver_agent_id=cell.id)
+
+                        if launch_cfg.get("terminals"):
                             await _create_child_terminals(
-                                group, cell, count=gs.auto_terminals)
-                    if launch_cfg.get("initial_prompt") and cell.session_id:
-                        await _send_agent_prompt(
-                            cell, launch_cfg["initial_prompt"],
-                            background=True)
+                                group, cell,
+                                terminals=launch_cfg["terminals"])
+                        else:
+                            gs = state.get_group_settings(group)
+                            if gs.auto_terminals > 0:
+                                await _create_child_terminals(
+                                    group, cell,
+                                    count=gs.auto_terminals)
+                        if launch_cfg.get("initial_prompt") \
+                                and cell.session_id:
+                            await _send_agent_prompt(
+                                cell, launch_cfg["initial_prompt"],
+                                background=True)
 
             elif cmd == "add_terminal":
                 group = data.get("group", "")
@@ -1941,6 +2006,65 @@ async def main(connection: iterm2.Connection):
                     state._emit_agent(cell)
                     state._db_save_agent(cell)
 
+            elif cmd == "worktree_diff":
+                cell = state.agents.get(data.get("id", ""))
+                if not cell or not cell.worktree_path:
+                    result = {"type": "error",
+                              "message": "Agent has no worktree."}
+                elif not cell.worktree_base_branch:
+                    result = {"type": "error",
+                              "message": "No base branch configured."}
+                else:
+                    import asyncio as _aio
+                    stat_only = data.get("stat_only", False)
+                    paths = data.get("paths", [])
+                    diff_args = [
+                        "git", "-C", cell.worktree_path,
+                        "diff",
+                    ]
+                    if stat_only:
+                        diff_args.append("--stat")
+                    diff_args.append(
+                        f"{cell.worktree_base_branch}...HEAD")
+                    if paths:
+                        diff_args.append("--")
+                        diff_args.extend(paths)
+                    proc = await _aio.create_subprocess_exec(
+                        *diff_args,
+                        stdout=_aio.subprocess.PIPE,
+                        stderr=_aio.subprocess.PIPE,
+                    )
+                    stdout, stderr = await proc.communicate()
+                    if proc.returncode != 0:
+                        result = {"type": "error",
+                                  "message": stderr.decode().strip()
+                                  or "git diff failed"}
+                    else:
+                        diff_text = stdout.decode()
+                        # Truncate if too large (100K chars)
+                        if len(diff_text) > 100_000:
+                            diff_text = (
+                                diff_text[:100_000]
+                                + "\n\n... truncated (too large) ..."
+                            )
+                        result = {"type": "ok",
+                                  "diff": diff_text}
+
+            elif cmd == "worktree_check_conflicts":
+                cell = state.agents.get(data.get("id", ""))
+                if not cell or not cell.worktree_path:
+                    result = {"type": "error",
+                              "message": "Agent has no worktree."}
+                else:
+                    conflict_info = \
+                        await worktree_mgr.check_merge_conflicts(cell)
+                    result = {
+                        "type": "ok",
+                        "clean": conflict_info.get("clean", True),
+                        "conflicts": conflict_info.get(
+                            "conflicts", []),
+                    }
+
             elif cmd == "worktree_create_pr":
                 cell = state.agents.get(data.get("id", ""))
                 if not cell or not cell.worktree_path:
@@ -1956,8 +2080,9 @@ async def main(connection: iterm2.Connection):
                                 break
                     if not title:
                         title = cell.name
+                    body = data.get("body", "")
                     pr_result = await worktree_mgr.create_pr(
-                        cell, title=title)
+                        cell, title=title, body=body)
                     if "error" in pr_result:
                         result = {"type": "worktree_pr",
                                   "error": pr_result["error"]}
@@ -2272,8 +2397,10 @@ async def main(connection: iterm2.Connection):
                         elif data.get("create_agent"):
                             # Create a new agent
                             from loom.state import _slugify
-                            slug = _slugify(task.task)
-                            agent_name = slug or "agent"
+                            agent_name = data.get("name", "")
+                            if not agent_name:
+                                slug = _slugify(task.task)
+                                agent_name = slug or "agent"
                             launch_cfg = _resolve_agent_launch_config(
                                 group,
                                 base_dir=base_dir,
@@ -3487,6 +3614,26 @@ async def main(connection: iterm2.Connection):
                             result = {"type": "ok",
                                       "slug": cell.slug}
 
+                    elif action == "reply":
+                        if not message:
+                            result = {"type": "error",
+                                      "message":
+                                          "Reply message is required"}
+                        elif not cell.pending_weaver_message:
+                            result = {"type": "error",
+                                      "message":
+                                          "No pending weaver message "
+                                          "to reply to"}
+                        else:
+                            cell.pending_weaver_message = False
+                            _append_mcp(cell, "reply", message)
+                            _record_history_msg(cell, "reply", message)
+                            _panel_event(
+                                "agent_reply", cell.id,
+                                cell.name, cell.group,
+                                message[:200])
+                            result = {"type": "ok"}
+
                     else:
                         result = {"type": "error",
                                   "message":
@@ -3521,6 +3668,161 @@ async def main(connection: iterm2.Connection):
                     data.get("group", ""))
                 pipelines = action_mgr.discover_pipelines(base_dir)
                 result = {"type": "pipelines", "pipelines": pipelines}
+
+            # -- Weaver commands ------------------------------------------
+
+            elif cmd == "weaver_message":
+                agent_ident = data.get("agent_id", "")
+                msg_text = data.get("message", "")
+                agent_id = _resolve_agent_id(agent_ident)
+                if not agent_id:
+                    result = {"type": "error",
+                              "message": f"Agent not found: {agent_ident}"}
+                elif not msg_text:
+                    result = {"type": "error",
+                              "message": "Message is required"}
+                else:
+                    target = state.agents.get(agent_id)
+                    if not target or not target.session_id:
+                        result = {"type": "error",
+                                  "message": "Agent is not running"}
+                    else:
+                        formatted = (
+                            "\n"
+                            "── Message from Weaver "
+                            "────────────────────────\n"
+                            f"{msg_text}\n\n"
+                            'Reply with: loom_reply("your response")\n'
+                            "────────────────────────────────────────"
+                            "────────\n"
+                        )
+                        # Pre-mark as input-ready (agent is
+                        # likely idle/waiting for this message)
+                        bridge._input_ready_sessions.add(
+                            target.session_id)
+                        await bridge.send_text(
+                            target.session_id, formatted)
+                        target.pending_weaver_message = True
+                        state._emit_agent(target)
+                        _panel_event(
+                            "weaver_message", target.id,
+                            target.name, target.group,
+                            msg_text[:200])
+                        result = {"type": "ok"}
+
+            elif cmd == "weaver_journal_append":
+                group = data.get("group", "")
+                entry_type = data.get("entry_type", "")
+                entry_text = data.get("entry", "")
+                if entry_type not in (
+                        "decision", "observation", "checkpoint", "plan"):
+                    result = {"type": "error",
+                              "message":
+                                  "entry_type must be one of: decision, "
+                                  "observation, checkpoint, plan"}
+                elif not entry_text:
+                    result = {"type": "error",
+                              "message": "Entry text is required"}
+                else:
+                    evt = state.journal_append(
+                        group, entry_type, entry_text)
+                    result = {"type": "ok", "id": evt["id"]}
+
+            elif cmd == "weaver_journal_read":
+                group = data.get("group", "")
+                tail = data.get("tail", 20)
+                entry_type = data.get("entry_type", "")
+                entries = state.journal_read(group, tail, entry_type)
+                result = {"type": "journal", "entries": entries}
+
+            elif cmd == "weaver_journal_delete":
+                group = data.get("group", "")
+                entry_id = data.get("entry_id", 0)
+                if entry_id and db:
+                    db._conn.execute(
+                        "DELETE FROM weaver_journal WHERE id=? "
+                        "AND group_name=?", (entry_id, group))
+                    db._conn.commit()
+                    state._emit("journal_delete",
+                                group=group, id=entry_id)
+                result = {"type": "ok"}
+
+            elif cmd == "weaver_update_settings":
+                group = data.get("group", "")
+                fields = {}
+                for k in ("push_interval", "max_interval",
+                          "custom_instructions", "enabled_events",
+                          "paused"):
+                    if k in data:
+                        fields[k] = data[k]
+                state.update_weaver_settings(group, **fields)
+                result = {"type": "ok"}
+
+            elif cmd == "weaver_ask":
+                group = data.get("group", "")
+                question = data.get("question", "")
+                if not question:
+                    result = {"type": "error",
+                              "message": "Question is required"}
+                else:
+                    state.update_weaver_settings(
+                        group,
+                        pending_question=question,
+                        paused=True)
+                    # Also log to journal
+                    state.journal_append(
+                        group, "observation",
+                        f"Asked human: {question}")
+                    result = {"type": "ok"}
+
+            elif cmd == "weaver_reply":
+                group = data.get("group", "")
+                answer = data.get("answer", "")
+                if not answer:
+                    result = {"type": "error",
+                              "message": "Answer is required"}
+                else:
+                    weaver = state.get_weaver_for_group(group)
+                    if not weaver or not weaver.session_id:
+                        result = {"type": "error",
+                                  "message": "Weaver is not running"}
+                    else:
+                        # Send answer to weaver's terminal
+                        formatted = (
+                            "\n"
+                            "── Human Reply "
+                            "──────────────────────────────\n"
+                            f"{answer}\n"
+                            "────────────────────────────────────────"
+                            "────────\n"
+                        )
+                        # Pre-mark as input-ready so send_text
+                        # skips the wait (weaver is already idle)
+                        bridge._input_ready_sessions.add(
+                            weaver.session_id)
+                        await bridge.send_text(
+                            weaver.session_id, formatted)
+                        # Clear question, unpause events
+                        state.update_weaver_settings(
+                            group,
+                            pending_question="",
+                            paused=False)
+                        # Log to journal
+                        state.journal_append(
+                            group, "observation",
+                            f"Human replied: {answer}")
+                        result = {"type": "ok"}
+
+            elif cmd == "weaver_pause":
+                group = data.get("group", "")
+                state.update_weaver_settings(group, paused=True)
+                result = {"type": "ok"}
+
+            elif cmd == "weaver_resume":
+                group = data.get("group", "")
+                state.update_weaver_settings(
+                    group, paused=False, pending_question="")
+                result = {"type": "ok"}
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")

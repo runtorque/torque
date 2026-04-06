@@ -205,6 +205,24 @@ TOOLS = [
             "required": ["question"],
         },
     },
+    {
+        "name": "loom_reply",
+        "description": (
+            "Reply to a message from the weaver (orchestrator agent). "
+            "The reply is delivered to the weaver in its next event "
+            "digest. Only works when you have a pending weaver message."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Your reply to the weaver.",
+                },
+            },
+            "required": ["message"],
+        },
+    },
 ]
 
 _TOOL_MAP = {t["name"]: t for t in TOOLS}
@@ -241,6 +259,7 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
         "loom_name":     "name",
         "loom_derive":   "derive",
         "loom_ask":      "ask",
+        "loom_reply":    "reply",
     }
     action = action_map.get(name)
     if not action:
@@ -276,6 +295,8 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
         payload["message"] = args.get("question", "")
         if args.get("description"):
             payload["description"] = args["description"]
+    elif action == "reply":
+        payload["message"] = args.get("message", "")
 
     result = await handle_command(payload)
     if result and result.get("type") == "error":
@@ -358,10 +379,12 @@ def create_mcp_handler(handle_command, state):
                     _jsonrpc_error(req_id, -32602,
                                    f"Unknown tool: {tool_name}"))
 
-            # Weaver tools don't require X-Loom-Cell-Id
+            # Weaver tools don't require X-Loom-Cell-Id but use it
+            # to resolve the caller's group in multi-group setups
             if tool_name.startswith("weaver_"):
                 text, is_error = await _dispatch_weaver_tool(
-                    tool_name, arguments, handle_command, state)
+                    tool_name, arguments, handle_command, state,
+                    cell_id=cell_id)
             else:
                 if not cell_id:
                     return web.json_response(

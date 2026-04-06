@@ -152,7 +152,8 @@ CREATE TABLE IF NOT EXISTS group_settings (
     dispatch_auto_terminals     INTEGER NOT NULL DEFAULT 0,
     board_default_labels        TEXT NOT NULL DEFAULT '[]',
     board_default_lane          TEXT NOT NULL DEFAULT '',
-    board_default_action        TEXT NOT NULL DEFAULT ''
+    board_default_action        TEXT NOT NULL DEFAULT '',
+    weaver_agent_id             TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS board_tasks (
@@ -269,6 +270,26 @@ CREATE TABLE IF NOT EXISTS agent_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_messages_agent ON agent_messages (agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_messages_task ON agent_messages (task_id);
+
+CREATE TABLE IF NOT EXISTS weaver_settings (
+    group_name         TEXT PRIMARY KEY,
+    push_interval      INTEGER NOT NULL DEFAULT 60,
+    max_interval       INTEGER NOT NULL DEFAULT 300,
+    paused             INTEGER NOT NULL DEFAULT 0,
+    custom_instructions TEXT NOT NULL DEFAULT '',
+    pending_question   TEXT NOT NULL DEFAULT '',
+    enabled_events     TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived"]'
+);
+
+CREATE TABLE IF NOT EXISTS weaver_journal (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_name  TEXT NOT NULL,
+    timestamp   REAL NOT NULL,
+    entry_type  TEXT NOT NULL,
+    entry       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_weaver_journal_group
+    ON weaver_journal(group_name, id DESC);
 """
 
 
@@ -465,6 +486,27 @@ class LoomDB:
                 "ALTER TABLE group_settings ADD COLUMN "
                 "worktree_symlinks TEXT NOT NULL DEFAULT '[]'")
             self._conn.commit()
+        # Migrate: add weaver_agent_id column to group_settings
+        try:
+            self._conn.execute(
+                "SELECT weaver_agent_id FROM group_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE group_settings ADD COLUMN "
+                "weaver_agent_id TEXT NOT NULL DEFAULT ''")
+            self._conn.commit()
+        # Migrate: add pending_question column to weaver_settings
+        try:
+            self._conn.execute(
+                "SELECT pending_question FROM weaver_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            try:
+                self._conn.execute(
+                    "ALTER TABLE weaver_settings ADD COLUMN "
+                    "pending_question TEXT NOT NULL DEFAULT ''")
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass  # table may not exist yet
         # Migrate: rename system labels with loom: prefix
         rows = self._conn.execute(
             "SELECT id, labels FROM board_tasks "
@@ -771,6 +813,110 @@ class LoomDB:
         row = self._conn.execute(
             "SELECT MAX(id) FROM panel_events").fetchone()
         return row[0] if row and row[0] is not None else 0
+
+    # -- Weaver settings & journal -------------------------------------------
+
+    def save_weaver_settings(self, group_name: str, settings: dict):
+        """Upsert weaver settings for a group."""
+        enabled_events = json.dumps(
+            settings.get("enabled_events",
+                         ["agent_started", "task_dispatched", "task_derived"]))
+        self._conn.execute("""
+            INSERT OR REPLACE INTO weaver_settings
+                (group_name, push_interval, max_interval, paused,
+                 custom_instructions, pending_question, enabled_events)
+            VALUES (?,?,?,?,?,?,?)
+        """, (
+            group_name,
+            settings.get("push_interval", 60),
+            settings.get("max_interval", 300),
+            1 if settings.get("paused", False) else 0,
+            settings.get("custom_instructions", ""),
+            settings.get("pending_question", ""),
+            enabled_events,
+        ))
+        self._conn.commit()
+
+    def load_weaver_settings(self, group_name: str) -> dict | None:
+        """Load weaver settings for a group. Returns None if not set."""
+        row = self._conn.execute(
+            "SELECT group_name, push_interval, max_interval, paused, "
+            "custom_instructions, pending_question, enabled_events "
+            "FROM weaver_settings "
+            "WHERE group_name=?", (group_name,)).fetchone()
+        if not row:
+            return None
+        try:
+            enabled = json.loads(row[6])
+        except (json.JSONDecodeError, TypeError):
+            enabled = ["agent_started", "task_dispatched", "task_derived"]
+        return {
+            "group": row[0],
+            "push_interval": row[1],
+            "max_interval": row[2],
+            "paused": bool(row[3]),
+            "custom_instructions": row[4],
+            "pending_question": row[5],
+            "enabled_events": enabled,
+        }
+
+    def delete_weaver_settings(self, group_name: str):
+        self._conn.execute(
+            "DELETE FROM weaver_settings WHERE group_name=?", (group_name,))
+        self._conn.commit()
+
+    def load_all_weaver_settings(self) -> dict[str, dict]:
+        """Load weaver settings for all groups. Returns {group: settings}."""
+        rows = self._conn.execute(
+            "SELECT group_name, push_interval, max_interval, paused, "
+            "custom_instructions, pending_question, enabled_events "
+            "FROM weaver_settings"
+        ).fetchall()
+        result = {}
+        for row in rows:
+            try:
+                enabled = json.loads(row[6])
+            except (json.JSONDecodeError, TypeError):
+                enabled = ["agent_started", "task_dispatched", "task_derived"]
+            result[row[0]] = {
+                "group": row[0],
+                "push_interval": row[1],
+                "max_interval": row[2],
+                "paused": bool(row[3]),
+                "custom_instructions": row[4],
+                "pending_question": row[5],
+                "enabled_events": enabled,
+            }
+        return result
+
+    def save_journal_entry(self, group_name: str, timestamp: float,
+                           entry_type: str, entry: str) -> int:
+        """Insert a weaver journal entry. Returns the new row ID."""
+        c = self._conn.execute(
+            "INSERT INTO weaver_journal "
+            "(group_name, timestamp, entry_type, entry) "
+            "VALUES (?,?,?,?)",
+            (group_name, timestamp, entry_type, entry))
+        self._conn.commit()
+        return c.lastrowid
+
+    def load_journal_entries(self, group_name: str, limit: int = 20,
+                             entry_type: str = "") -> list[dict]:
+        """Load recent journal entries for a group, newest first."""
+        if entry_type:
+            rows = self._conn.execute(
+                "SELECT id, group_name, timestamp, entry_type, entry "
+                "FROM weaver_journal WHERE group_name=? AND entry_type=? "
+                "ORDER BY id DESC LIMIT ?",
+                (group_name, entry_type, limit)).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, group_name, timestamp, entry_type, entry "
+                "FROM weaver_journal WHERE group_name=? "
+                "ORDER BY id DESC LIMIT ?",
+                (group_name, limit)).fetchall()
+        return [{"id": r[0], "group": r[1], "timestamp": r[2],
+                 "type": r[3], "entry": r[4]} for r in rows]
 
     # -- Agent history -------------------------------------------------------
 
