@@ -703,6 +703,13 @@ class MatrixState:
                 for gname, raw in self.db.load_all_weaver_settings().items():
                     filtered = {k: v for k, v in raw.items() if k in ws_fields}
                     self.weaver_settings[gname] = WeaverSettings(**filtered)
+            cleaned = self.cleanup_orphaned_attention(emit=False)
+            if cleaned["asks"] or cleaned["weaver_questions"]:
+                log.info(
+                    "Expired %d orphaned ask(s) and cleared %d stale weaver question(s)",
+                    cleaned["asks"],
+                    cleaned["weaver_questions"],
+                )
         except (TypeError, KeyError):
             log.exception("Failed to load state from SQLite")
 
@@ -765,6 +772,140 @@ class MatrixState:
         self._emit("weaver_settings_update", group=group, **d)
         if self.db:
             self.db.save_weaver_settings(group, asdict(ws))
+
+    def _save_weaver_settings(self, group: str, emit: bool = True):
+        ws = self.weaver_settings.get(group)
+        if not ws:
+            return
+        d = asdict(ws)
+        d.pop("group", None)
+        if emit:
+            self._emit("weaver_settings_update", group=group, **d)
+        if self.db:
+            self.db.save_weaver_settings(group, asdict(ws))
+
+    def _open_human_asks_for_parent(self, parent_task_id: str,
+                                    exclude_task_id: str = "") -> list[BoardTask]:
+        asks: list[BoardTask] = []
+        if not parent_task_id:
+            return asks
+        for task in self.board_tasks.values():
+            if task.id == exclude_task_id:
+                continue
+            if task.parent_task_id != parent_task_id:
+                continue
+            if task.lane == "Done":
+                continue
+            if "loom:human" not in (task.labels or []):
+                continue
+            asks.append(task)
+        return asks
+
+    def _clear_parent_awaiting_input(self, parent: Optional[BoardTask],
+                                     exclude_task_id: str = "",
+                                     emit: bool = True):
+        if not parent:
+            return
+        if self._open_human_asks_for_parent(parent.id, exclude_task_id):
+            return
+
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        if parent.status:
+            parent.status = ""
+            parent.updated_at = now_iso
+            if emit:
+                self._emit("task_upsert", **asdict(parent))
+            self._db_save_task(parent)
+
+        root_id = parent.pipeline_root_id or parent.id
+        if root_id == parent.id:
+            return
+        root = self.board_tasks.get(root_id)
+        if root and root.status:
+            root.status = ""
+            root.updated_at = now_iso
+            if emit:
+                self._emit("task_upsert", **asdict(root))
+            self._db_save_task(root)
+
+    def _expire_orphaned_ask(self, task: BoardTask, reason: str,
+                             emit: bool = True) -> bool:
+        if "loom:human" not in (task.labels or []) or task.lane == "Done":
+            return False
+
+        from datetime import datetime, timezone
+        parent = self.board_tasks.get(task.parent_task_id)
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        changed = False
+
+        if task.agent_id:
+            task.agent_id = ""
+            changed = True
+        if task.status:
+            task.status = ""
+            changed = True
+        if task.lane != "Done":
+            task.lane = "Done"
+            max_pos = max(
+                (t.position for t in self.board_tasks.values()
+                 if t.lane == "Done" and t.id != task.id),
+                default=-1,
+            )
+            task.position = max_pos + 1
+            for label in ("loom:blocked", "loom:error"):
+                if label in task.labels:
+                    task.labels.remove(label)
+            changed = True
+        if reason and not any(
+                m.get("action") == "system"
+                and m.get("message") == reason
+                for m in (task.messages or [])):
+            task.messages.append({
+                "timestamp": now.timestamp(),
+                "action": "system",
+                "message": reason,
+                "agent_name": "Loom",
+            })
+            changed = True
+
+        if changed:
+            task.updated_at = now_iso
+            if emit:
+                self._emit("task_upsert", **asdict(task))
+            self._db_save_task(task)
+
+        self._clear_parent_awaiting_input(
+            parent, exclude_task_id=task.id, emit=emit)
+        return changed
+
+    def cleanup_orphaned_attention(self, emit: bool = True) -> dict[str, int]:
+        """Expire asks and pending weaver questions whose source agent is gone."""
+        cleaned = {"asks": 0, "weaver_questions": 0}
+        live_agents = set(self.agents)
+
+        for group, ws in self.weaver_settings.items():
+            gs = self.group_settings.get(group)
+            weaver_id = gs.weaver_agent_id if gs else ""
+            if ws.pending_question and (not weaver_id or weaver_id not in live_agents):
+                ws.pending_question = ""
+                ws.paused = False
+                self._save_weaver_settings(group, emit=emit)
+                cleaned["weaver_questions"] += 1
+
+        reason = "Ask expired because the source agent is no longer available."
+        for task in list(self.board_tasks.values()):
+            if "loom:human" not in (task.labels or []) or task.lane == "Done":
+                continue
+            parent = self.board_tasks.get(task.parent_task_id)
+            parent_agent_id = parent.agent_id if parent else ""
+            if not parent or not parent_agent_id or parent_agent_id not in live_agents:
+                if self._expire_orphaned_ask(task, reason, emit=emit):
+                    cleaned["asks"] += 1
+
+        return cleaned
 
     def journal_append(self, group: str, entry_type: str,
                        entry: str) -> dict:
@@ -1050,6 +1191,7 @@ class MatrixState:
             if child:
                 removed.append(child)
                 self._emit("agent_remove", id=child_id)
+        self.cleanup_orphaned_attention()
         # Unlink from board tasks
         for t in self.board_tasks.values():
             if t.agent_id == aid:
