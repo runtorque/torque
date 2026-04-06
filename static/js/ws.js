@@ -291,6 +291,15 @@ function _applyDelta(ops) {
         break;
       }
 
+      case 'journal_delete': {
+        var grpd = op.group || '';
+        if (grpd && state.weaver_journal && state.weaver_journal[grpd]) {
+          state.weaver_journal[grpd] = state.weaver_journal[grpd].filter(
+            function(e) { return e.id !== op.id; });
+        }
+        break;
+      }
+
       case 'weaver_settings_update': {
         if (!state.weaver_settings) state.weaver_settings = {};
         var wg = op.group || '';

@@ -98,7 +98,7 @@ function _weaverRenderJournal(group) {
       var e = entries[i];
       var typeClass = 'weaver-badge-' + (e.type || 'observation');
       var ago = _weaverTimeAgo(e.timestamp);
-      html += '<div class="weaver-entry">';
+      html += '<div class="weaver-entry" oncontextmenu="weaverEntryCtx(event,' + e.id + ')">';
       html += '<div class="weaver-entry-header">';
       html += '<span class="weaver-badge ' + typeClass + '">' + _esc(e.type || '?') + '</span>';
       html += '<span class="weaver-entry-time">' + ago + '</span>';
@@ -196,6 +196,39 @@ function _weaverRenderSettings(group, ws, weaver) {
   html += '</div>';
 
   return html;
+}
+
+// -- Journal context menu --------------------------------------------------
+
+function weaverEntryCtx(e, entryId) {
+  e.preventDefault();
+  e.stopPropagation();
+  var menu = document.getElementById('ctx-menu');
+  menu.innerHTML = '<div class="ctx-item ctx-danger" onclick="weaverDeleteEntry(' + entryId + ')">Delete entry</div>';
+  menu.style.left = e.clientX + 'px';
+  menu.style.top = e.clientY + 'px';
+  menu.classList.add('visible');
+  setTimeout(function() {
+    document.addEventListener('click', _weaverCloseCtx, { once: true });
+  }, 0);
+}
+
+function _weaverCloseCtx() {
+  var menu = document.getElementById('ctx-menu');
+  if (menu) menu.classList.remove('visible');
+}
+
+function weaverDeleteEntry(entryId) {
+  _weaverCloseCtx();
+  var group = _currentGroup();
+  if (!group) return;
+  send({ cmd: 'weaver_journal_delete', group: group, entry_id: entryId });
+  // Optimistic removal from local state
+  if (state.weaver_journal && state.weaver_journal[group]) {
+    state.weaver_journal[group] = state.weaver_journal[group].filter(
+      function(e) { return e.id !== entryId; });
+  }
+  renderWeaverPanel();
 }
 
 // -- Human reply -----------------------------------------------------------

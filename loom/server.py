@@ -3669,6 +3669,18 @@ async def main(connection: iterm2.Connection):
                 entries = state.journal_read(group, tail, entry_type)
                 result = {"type": "journal", "entries": entries}
 
+            elif cmd == "weaver_journal_delete":
+                group = data.get("group", "")
+                entry_id = data.get("entry_id", 0)
+                if entry_id and db:
+                    db._conn.execute(
+                        "DELETE FROM weaver_journal WHERE id=? "
+                        "AND group_name=?", (entry_id, group))
+                    db._conn.commit()
+                    state._emit("journal_delete",
+                                group=group, id=entry_id)
+                result = {"type": "ok"}
+
             elif cmd == "weaver_update_settings":
                 group = data.get("group", "")
                 fields = {}
