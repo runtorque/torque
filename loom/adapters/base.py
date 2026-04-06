@@ -80,6 +80,21 @@ class AgentAdapter:
             return ""
         return f" --instructions {shlex.quote(text)}"
 
+    def inject_persistent_prompt(self, working_dir: str,
+                                 filename: str, text: str) -> str:
+        """Install a persistent prompt that survives /clear and resume.
+
+        Like ``inject_system_prompt`` but uses a delivery mechanism that
+        persists across session resets (file-based for both Claude Code and
+        Codex).  Returns CLI flags to append, or ``""`` for file-only.
+        """
+        return self.inject_system_prompt(working_dir, text)
+
+    def uninstall_persistent_prompt(self, working_dir: str,
+                                    filename: str = "") -> None:
+        """Remove persistent prompts installed by inject_persistent_prompt."""
+        pass
+
     def resolve_model_flags(self, model: str) -> str:
         """Return provider-specific CLI flags for the selected model."""
         if not model:

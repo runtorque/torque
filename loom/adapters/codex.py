@@ -15,6 +15,9 @@ LOOM_HOOK_URL = "http://localhost:18932/events"
 _MCP_MARKER = "# -- Loom MCP server (managed by Loom, do not edit) --"
 _FEATURE_MARKER = "# -- Loom Codex hooks feature (managed by Loom, do not edit) --"
 
+# Marker for Loom-managed AGENTS.md section (persistent system prompt)
+_AGENTS_MARKER = "<!-- Loom system prompt (managed by Loom, do not edit) -->"
+
 # Regex to match the Loom MCP section in config.toml (marker through next
 # section header or EOF)
 _MCP_SECTION_RE = re.compile(
@@ -32,6 +35,19 @@ _MANAGED_FEATURE_BLOCK_RE = re.compile(
 _MANAGED_FEATURE_SECTION_RE = re.compile(
     r"\n?" + re.escape(_FEATURE_MARKER) + r"\n\[features\]\ncodex_hooks = true\n?"
 )
+
+
+# Regex to match the Loom managed section in AGENTS.md
+_AGENTS_SECTION_RE = re.compile(
+    re.escape(_AGENTS_MARKER) + r"\n"
+    r"(?:(?!" + re.escape(_AGENTS_MARKER) + r")[\s\S])*?"
+    + re.escape(_AGENTS_MARKER) + r"\n?"
+)
+
+
+def _remove_agents_section(content: str) -> str:
+    """Remove the Loom-managed section from AGENTS.md content."""
+    return _AGENTS_SECTION_RE.sub("", content)
 
 
 def _truncate(s: str, n: int) -> str:
@@ -98,6 +114,47 @@ class CodexAdapter(AgentAdapter):
         if not text:
             return ""
         return f" --instructions {shlex.quote(text)}"
+
+    def inject_persistent_prompt(self, working_dir: str,
+                                 filename: str, text: str) -> str:
+        """Write persistent prompt to .codex/AGENTS.md with managed markers.
+
+        Codex auto-discovers AGENTS.md from `{cwd}/.codex/`, so no CLI
+        flags are needed.  Uses markers for safe merge with user content.
+        """
+        if not text or not working_dir:
+            return ""
+        try:
+            codex_dir = Path(working_dir) / ".codex"
+            codex_dir.mkdir(parents=True, exist_ok=True)
+            agents_file = codex_dir / "AGENTS.md"
+            content = agents_file.read_text() if agents_file.exists() else ""
+            content = _remove_agents_section(content)
+            loom_block = (
+                f"{_AGENTS_MARKER}\n{text.rstrip()}\n{_AGENTS_MARKER}\n")
+            if content.strip():
+                content = content.rstrip("\n") + "\n\n" + loom_block
+            else:
+                content = loom_block
+            agents_file.write_text(content)
+            return ""  # Codex auto-discovers AGENTS.md
+        except Exception:
+            return ""
+
+    def uninstall_persistent_prompt(self, working_dir: str,
+                                    filename: str = "") -> None:
+        """Remove Loom-managed section from .codex/AGENTS.md."""
+        try:
+            agents_file = Path(working_dir) / ".codex" / "AGENTS.md"
+            if not agents_file.exists():
+                return
+            content = _remove_agents_section(agents_file.read_text())
+            if content.strip():
+                agents_file.write_text(content.strip() + "\n")
+            else:
+                agents_file.unlink(missing_ok=True)
+        except Exception:
+            pass
 
     def resolve_model_flags(self, model: str) -> str:
         if not model:

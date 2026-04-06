@@ -1572,6 +1572,8 @@ async def main(connection: iterm2.Connection):
                         if hasattr(adapter, "uninstall_mcp_config"):
                             adapter.uninstall_mcp_config(
                                 os.path.expanduser(c.directory))
+                        adapter.uninstall_persistent_prompt(
+                            os.path.expanduser(c.directory))
                     event_bus.cleanup_cell(c.id)
                     await _safe_remove_worktree(c)
 
@@ -1601,39 +1603,43 @@ async def main(connection: iterm2.Connection):
                 if data:
                     base_dir = await _resolve_base_dir(group)
                     explicit_template = data.get("template", "").strip()
+                    # Weaver: apply provider override from WeaverSettings
+                    _overrides = dict(data)
+                    if is_weaver:
+                        _ws_pre = state.get_weaver_settings(group)
+                        if _ws_pre.weaver_provider:
+                            _overrides["provider"] = _ws_pre.weaver_provider
+                        if _ws_pre.weaver_boot_command:
+                            _overrides["command"] = \
+                                _ws_pre.weaver_boot_command
                     launch_cfg = _resolve_agent_launch_config(
                         group,
                         base_dir=base_dir,
                         explicit_template=explicit_template,
-                        overrides=data,
+                        overrides=_overrides,
                     )
 
-                    # Weaver: build system prompt and inject flag
+                    # Weaver: build system prompt and inject via adapter
                     if is_weaver:
                         from .weaver import build_weaver_system_prompt
                         ws = state.get_weaver_settings(group)
                         action_sp = launch_cfg.get("system_prompt", "")
                         sp_text = build_weaver_system_prompt(
                             group, ws, action_sp)
-                        # Write to a file in .loom/
-                        sp_dir = os.path.join(
-                            base_dir or os.getcwd(), ".loom")
-                        os.makedirs(sp_dir, exist_ok=True)
                         gs_slug = state.group_slugs.get(
                             group, group.replace(" ", "-").lower())
-                        sp_path = os.path.join(
-                            sp_dir,
+                        sp_filename = (
                             f"weaver-system-prompt-{gs_slug}.md")
-                        with open(sp_path, "w") as f:
-                            f.write(sp_text)
-                        # Append flag to boot command
-                        cmd_str = launch_cfg.get("command", "")
-                        cmd_str += (
-                            f" --append-system-prompt-file"
-                            f" {shlex.quote(sp_path)}")
-                        launch_cfg["command"] = cmd_str.strip()
-                        # Clear system_prompt so it doesn't also
-                        # write to .claude/instructions.md
+                        _at = launch_cfg.get("agent_type", "")
+                        _adp = get_adapter(_at) if _at else None
+                        if _adp:
+                            _sp_flags = _adp.inject_persistent_prompt(
+                                base_dir or os.getcwd(),
+                                sp_filename, sp_text)
+                            if _sp_flags:
+                                cmd_str = launch_cfg.get("command", "")
+                                launch_cfg["command"] = (
+                                    cmd_str + _sp_flags).strip()
                         launch_cfg["system_prompt"] = ""
                         # Weaver runs from main — skip worktree
                         launch_cfg["worktree"] = False
@@ -1719,7 +1725,7 @@ async def main(connection: iterm2.Connection):
                         state.history_remove_agent(c)
                     if c.session_id:
                         await bridge.close_session(c.session_id)
-                    # Clean up hooks and MCP config
+                    # Clean up hooks, MCP config, persistent prompt
                     if c.agent_type and c.directory:
                         adapter = get_adapter(c.agent_type)
                         if hasattr(adapter, "uninstall_hooks"):
@@ -1728,6 +1734,8 @@ async def main(connection: iterm2.Connection):
                         if hasattr(adapter, "uninstall_mcp_config"):
                             adapter.uninstall_mcp_config(
                                 os.path.expanduser(c.directory))
+                        adapter.uninstall_persistent_prompt(
+                            os.path.expanduser(c.directory))
                     # Clean up event bus state
                     event_bus.cleanup_cell(c.id)
                     await _safe_remove_worktree(c)
@@ -2261,6 +2269,11 @@ async def main(connection: iterm2.Connection):
                                                         os.path
                                                         .expanduser(
                                                             c.directory))
+                                            adapter\
+                                                .uninstall_persistent_prompt(
+                                                    os.path
+                                                    .expanduser(
+                                                        c.directory))
                                         event_bus.cleanup_cell(
                                             c.id)
                                         await _safe_remove_worktree(
@@ -2484,7 +2497,9 @@ async def main(connection: iterm2.Connection):
                                 overrides={},
                             )
                             # Inject persistent Loom system prompt
-                            if launch_cfg.get("agent_type") == "claude-code":
+                            _at = launch_cfg.get("agent_type", "")
+                            _adp = get_adapter(_at) if _at else None
+                            if _adp:
                                 sp_parts = []
                                 _tmpl_sp = launch_cfg.get(
                                     "system_prompt", "")
@@ -2493,18 +2508,13 @@ async def main(connection: iterm2.Connection):
                                 sp_parts.append(
                                     _build_loom_system_prompt().rstrip())
                                 sp_text = "\n\n".join(sp_parts) + "\n"
-                                _sp_dir = os.path.join(
-                                    base_dir or os.getcwd(), ".loom")
-                                os.makedirs(_sp_dir, exist_ok=True)
-                                _sp_path = os.path.join(
-                                    _sp_dir, "loom-system-prompt.md")
-                                with open(_sp_path, "w") as _f:
-                                    _f.write(sp_text)
-                                _cmd = launch_cfg.get("command", "")
-                                _cmd += (
-                                    f" --append-system-prompt-file"
-                                    f" {shlex.quote(_sp_path)}")
-                                launch_cfg["command"] = _cmd.strip()
+                                _sp_flags = _adp.inject_persistent_prompt(
+                                    base_dir or os.getcwd(),
+                                    "loom-system-prompt.md", sp_text)
+                                if _sp_flags:
+                                    _cmd = launch_cfg.get("command", "")
+                                    launch_cfg["command"] = (
+                                        _cmd + _sp_flags).strip()
                                 launch_cfg["system_prompt"] = ""
                             cell = await _create_agent_with_config(
                                 group, agent_name, launch_cfg,
@@ -3856,7 +3866,8 @@ async def main(connection: iterm2.Connection):
                 fields = {}
                 for k in ("push_interval", "max_interval",
                           "custom_instructions", "enabled_events",
-                          "paused"):
+                          "paused", "weaver_provider",
+                          "weaver_boot_command"):
                     if k in data:
                         fields[k] = data[k]
                 state.update_weaver_settings(group, **fields)
