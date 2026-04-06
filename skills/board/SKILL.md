@@ -1,5 +1,4 @@
 ---
-name: loom-board
 description: Show the Loom task board with all lanes and tasks
 allowed-tools: Bash
 ---

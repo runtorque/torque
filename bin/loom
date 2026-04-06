@@ -2179,6 +2179,20 @@ def cmd_board_list(args):
     tasks = st.get("board_tasks", {})
     lane_filter = args.lane if hasattr(args, "lane") and args.lane else None
 
+    # Auto-detect group from LOOM_CELL_ID / ITERM_SESSION_ID unless --all
+    show_all = getattr(args, "all", False)
+    group_filter = getattr(args, "group", None)
+    if not show_all and not group_filter:
+        cell_id = os.environ.get("LOOM_CELL_ID", "")
+        if cell_id:
+            cell = st.get("agents", {}).get(cell_id)
+            if cell:
+                group_filter = cell.get("group", "")
+        else:
+            cell, _parent, grp = detect_context(st)
+            if grp:
+                group_filter = grp
+
     if args.json:
         import json as _j
         print(_j.dumps({"lanes": lanes, "tasks": tasks}, indent=2))
@@ -2188,7 +2202,9 @@ def cmd_board_list(args):
         if lane_filter and lane.lower() != lane_filter.lower():
             continue
         lane_tasks = sorted(
-            [t for t in tasks.values() if t["lane"] == lane],
+            [t for t in tasks.values()
+             if t["lane"] == lane
+             and (not group_filter or t.get("group") == group_filter)],
             key=lambda t: t.get("position", 0),
             reverse=True,
         )
@@ -3225,6 +3241,9 @@ def build_parser():
     p = brd_sub.add_parser("list", aliases=["ls"],
                             help="List tasks by lane")
     p.add_argument("-l", "--lane", help="Filter by lane name")
+    p.add_argument("-g", "--group", help="Filter by group name")
+    p.add_argument("-a", "--all", action="store_true",
+                   help="Show all tasks (skip group auto-detection)")
     p.set_defaults(func=cmd_board_list)
 
     p = brd_sub.add_parser("add", help="Add a task")
