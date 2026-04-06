@@ -225,6 +225,13 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
   outline-offset: -1px;
 }
 .cell.stopped { opacity: .55; }
+.cell.weaver {
+  border-left: 3px solid var(--amber);
+}
+.cell.weaver.selected {
+  border-color: var(--accent);
+  border-left: 3px solid var(--amber);
+}
 .cell-name {
   font-size: 9px; text-align: center;
   max-width: 100%; overflow: hidden;

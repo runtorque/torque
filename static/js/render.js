@@ -191,7 +191,11 @@ function render() {
 
     html += `<div class="group-body"><div class="group-body-inner">`;
 
-    /* Agent grid (+ New cell is part of the grid) */
+    /* Agent grid (+ New cell is part of the grid) — weaver pinned first */
+    const weaverId = gsLocal.weaver_agent_id || '';
+    if (weaverId) {
+      agents.sort((a, b) => (a.id === weaverId ? -1 : b.id === weaverId ? 1 : 0));
+    }
     html += `<div class="agent-grid" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
     for (const a of agents) {
       if (!collapsed) {
@@ -333,6 +337,9 @@ function renderAgentCell(a) {
   if (selected) cls.push('selected');
   if (a.id === focusedItemId) cls.push('focused');
   if (a.status === 'stopped') cls.push('stopped');
+  // Check if this agent is the weaver for its group
+  const _gs = (state.group_settings || {})[a.group];
+  if (_gs && _gs.weaver_agent_id === a.id) cls.push('weaver');
 
   const statusCls = agentStatusClass(a);
   const titleParts = [a.name, `(${a.status})`];
