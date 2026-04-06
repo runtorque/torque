@@ -394,10 +394,14 @@ class ITerm2Adapter:
             # This clusters child terminals right after their parent agent.
             managed_sids: dict[str, tuple] = {}
             for gi, gname in enumerate(self.state.groups):
+                gs = self.state.group_settings.get(gname)
+                weaver_id = gs.weaver_agent_id if gs else ""
                 for pos, aid in enumerate(self.state.groups[gname]):
                     cell = self.state.agents.get(aid)
                     if cell and cell.session_id:
-                        managed_sids[cell.session_id] = (gi, pos, 0, 0)
+                        # Weaver gets position -1 so it sorts first
+                        p = -1 if aid == weaver_id else pos
+                        managed_sids[cell.session_id] = (gi, p, 0, 0)
                     # Add child terminals after parent
                     for ci, child_id in enumerate(
                             self.state._children.get(aid, [])):

@@ -348,6 +348,10 @@ class MatrixState:
             "weaver_settings": {
                 n: asdict(ws) for n, ws in self.weaver_settings.items()
             },
+            "weaver_journal": {
+                g: self.journal_read(g, limit=50)
+                for g in self.weaver_settings
+            },
         }
 
     # -- Targeted persistence helpers ----------------------------------------

@@ -61,6 +61,15 @@ weaver_task_dispatch, weaver_task_resolve
 5. **Idle waiting** — When there's nothing to dispatch and you're waiting
    for agents to finish, do nothing.  Loom will push event digests to you
    when something happens.
+
+6. **Human interaction** — Use `weaver_ask` to ask the human questions.
+   This pauses event delivery and shows your question in the Weaver panel.
+   The human will reply via the panel or directly in your terminal.
+   After receiving their answer, call `weaver_resume` to unpause events.
+
+7. **First session** — When starting a new session (no journal history),
+   call `weaver_ask` to introduce yourself and ask the human what to
+   focus on.  Don't start dispatching tasks without human guidance.
 """
 
 
