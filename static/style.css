@@ -2544,10 +2544,16 @@ body.diff-view-open #ctx-menu {
 /* ------------------------------------------------------------------ */
 /* Weaver panel                                                        */
 /* ------------------------------------------------------------------ */
+#panel-weaver {
+  display: flex; flex-direction: column;
+  height: calc(100% - 5px);
+  min-height: 0;
+}
 .weaver-panel {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
 .weaver-header {
@@ -2600,6 +2606,7 @@ body.diff-view-open #ctx-menu {
 
 .weaver-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 8px;
 }
