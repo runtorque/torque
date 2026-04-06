@@ -359,7 +359,7 @@ function agentTemplateDuplicate() {
 /* ------------------------------------------------------------------ */
 
 var _agentHistoryRecords = [];
-var _agentHistoryFilter = '';       // '', 'active', 'removed', 'merged'
+var _agentHistoryFilter = 'active'; // '', 'active', 'removed', 'merged'
 var _agentHistorySearch = '';
 var _agentHistoryExpanded = '';     // agent ID currently expanded
 var _agentHistoryDetail = null;     // detail data for expanded agent

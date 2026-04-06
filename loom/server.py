@@ -258,8 +258,11 @@ async def _generate_merge_message(cell, worktree_mgr, squash: bool,
         lines = [header, ""]
         for c in commits:
             msg = c["message"]
-            # Skip generic checkpoint messages
+            # Skip generic checkpoint messages, but keep their body
             if msg.startswith("loom: checkpoint"):
+                body = c.get("body", "").strip()
+                if body:
+                    lines.append(f"- {body.splitlines()[0]}")
                 continue
             lines.append(f"- {msg}")
         if len(lines) > 2:  # has non-checkpoint commits
