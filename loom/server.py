@@ -2337,8 +2337,10 @@ async def main(connection: iterm2.Connection):
                         elif data.get("create_agent"):
                             # Create a new agent
                             from loom.state import _slugify
-                            slug = _slugify(task.task)
-                            agent_name = slug or "agent"
+                            agent_name = data.get("name", "")
+                            if not agent_name:
+                                slug = _slugify(task.task)
+                                agent_name = slug or "agent"
                             launch_cfg = _resolve_agent_launch_config(
                                 group,
                                 base_dir=base_dir,

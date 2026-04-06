@@ -308,6 +308,13 @@ WEAVER_TOOLS = [
                         "If omitted, a new agent is created."
                     ),
                 },
+                "name": {
+                    "type": "string",
+                    "description": (
+                        "Name for the new agent (e.g. 'worker'). "
+                        "Only used when creating a new agent."
+                    ),
+                },
             },
             "required": ["task"],
         },
@@ -411,6 +418,15 @@ WEAVER_TOOLS = [
                 },
             },
         },
+    },
+    {
+        "name": "weaver_resume",
+        "description": (
+            "Resume event delivery after a weaver_ask. Call this "
+            "after the human has responded (via the panel or "
+            "directly in your terminal) to unpause event pushes."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
     },
     # -- Context tools ------------------------------------------------------
     {
@@ -756,6 +772,9 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
             payload["agent_id"] = agent_id
         else:
             payload["create_agent"] = True
+        agent_name = args.get("name", "")
+        if agent_name:
+            payload["name"] = agent_name
         result = await handle_command(payload)
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
@@ -821,6 +840,15 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
             return result.get("message", "Unknown error"), True
         return json.dumps({"type": "ok", "settings": asdict(
             state.get_weaver_settings(_weaver_group))}), False
+
+    if name == "weaver_resume":
+        result = await handle_command({
+            "cmd": "weaver_resume",
+            "group": _weaver_group,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return "Event delivery resumed.", False
 
     # -- Context tools ------------------------------------------------------
 
