@@ -512,7 +512,7 @@ async def main(connection: iterm2.Connection):
     async def _safe_remove_worktree(cell):
         """Remove a worktree only if no other agent shares it."""
         if not cell.worktree_path:
-            return
+            return True
         other_users = [a for a in state.agents.values()
                        if a.id != cell.id
                        and a.worktree_path == cell.worktree_path]
@@ -525,8 +525,80 @@ async def main(connection: iterm2.Connection):
             cell.worktree_base_branch = ""
             cell.worktree_repo_root = ""
             cell.worktree_checkpoints = 0
+            return True
         else:
-            await worktree_mgr.remove(cell)
+            return await worktree_mgr.remove(cell)
+
+    async def _cleanup_after_merge(cell, *,
+                                   close_agent: bool = False,
+                                   remove_worktree: bool = False) -> dict:
+        """Apply optional post-merge cleanup and return a status summary."""
+        cleanup = {
+            "close_agent": close_agent,
+            "remove_worktree": remove_worktree,
+            "agent_closed": False,
+            "worktree_removed": False,
+            "errors": [],
+        }
+        if not close_agent and not remove_worktree:
+            return cleanup
+
+        if close_agent:
+            removed = state.remove_agent(cell.id)
+            cleanup["agent_closed"] = True
+            for c in removed:
+                if c.session_id:
+                    try:
+                        await bridge.close_session(c.session_id)
+                    except Exception as exc:
+                        cleanup["errors"].append(
+                            f"Failed to close session for '{c.name}': {exc}"
+                        )
+                if c.agent_type and c.directory:
+                    adapter = get_adapter(c.agent_type)
+                    try:
+                        if hasattr(adapter, "uninstall_hooks"):
+                            adapter.uninstall_hooks(
+                                os.path.expanduser(c.directory))
+                        if hasattr(adapter, "uninstall_mcp_config"):
+                            adapter.uninstall_mcp_config(
+                                os.path.expanduser(c.directory))
+                        adapter.uninstall_persistent_prompt(
+                            os.path.expanduser(c.directory),
+                            _persistent_prompt_filename(c))
+                    except Exception:
+                        log.exception(
+                            "Failed post-merge adapter cleanup for '%s'",
+                            c.name)
+                event_bus.cleanup_cell(c.id)
+            if remove_worktree:
+                removed_worktree = False
+                for c in removed:
+                    if not c.worktree_path:
+                        continue
+                    ok = await _safe_remove_worktree(c)
+                    if ok:
+                        removed_worktree = True
+                    else:
+                        cleanup["errors"].append(
+                            f"Failed to remove worktree for '{c.name}'."
+                        )
+                cleanup["worktree_removed"] = removed_worktree
+            return cleanup
+
+        repo_root = cell.worktree_repo_root
+        ok = await _safe_remove_worktree(cell)
+        if ok:
+            cleanup["worktree_removed"] = True
+        else:
+            cleanup["errors"].append(
+                f"Failed to remove worktree for '{cell.name}'."
+            )
+        if repo_root:
+            cell.directory = repo_root
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+        return cleanup
 
     def _checkpoint_message(cell) -> str:
         """Build a checkpoint commit message from the agent's last summary."""
@@ -2352,11 +2424,27 @@ async def main(connection: iterm2.Connection):
                                         "task_upsert", **asdict(t))
                                     state._db_save_task(t)
 
-                            close_flag = bool(
+                            legacy_close_flag = bool(
                                 data.get("close_on_merge"))
+                            close_flag = bool(
+                                data.get("close_agent_on_merge"))
+                            remove_flag = bool(
+                                data.get("remove_worktree_on_merge"))
+                            if legacy_close_flag and not close_flag \
+                                    and not remove_flag:
+                                close_flag = True
+                                remove_flag = True
                             clear_flag = bool(
                                 data.get("clear_context"))
+                            cleanup = {
+                                "close_agent": close_flag,
+                                "remove_worktree": remove_flag,
+                                "agent_closed": False,
+                                "worktree_removed": False,
+                                "errors": [],
+                            }
                             if clear_flag and not close_flag \
+                                    and not remove_flag \
                                     and cell.session_id:
                                 await bridge.send_text(
                                     cell.session_id, "/clear\r")
@@ -2366,7 +2454,15 @@ async def main(connection: iterm2.Connection):
                                 log.info(
                                     "Cleared context for '%s' "
                                     "after merge", cell.name)
-                            if close_flag:
+                            if data.get("close_agent_on_merge") \
+                                    or data.get(
+                                        "remove_worktree_on_merge"):
+                                cleanup = await _cleanup_after_merge(
+                                    cell,
+                                    close_agent=close_flag,
+                                    remove_worktree=remove_flag,
+                                )
+                            elif legacy_close_flag:
                                 async def _deferred_close(
                                         _cell=cell):
                                     await asyncio.sleep(
@@ -2433,6 +2529,7 @@ async def main(connection: iterm2.Connection):
                                 "type": "worktree_merge",
                                 "id": aid, "ok": True,
                                 "sha": merge_result["sha"],
+                                "cleanup": cleanup,
                             }
                         else:
                             result = {
@@ -2618,11 +2715,21 @@ async def main(connection: iterm2.Connection):
                             if not agent_name:
                                 slug = _slugify(task.task)
                                 agent_name = slug or "agent"
+                            launch_overrides = {}
+                            agent_type = (data.get("agent_type", "")
+                                          or "").strip()
+                            if agent_type:
+                                launch_overrides["provider"] = agent_type
+                            command_override = (data.get("command", "")
+                                                or "").strip()
+                            if command_override:
+                                launch_overrides["command"] = (
+                                    command_override)
                             launch_cfg = _resolve_agent_launch_config(
                                 group,
                                 base_dir=base_dir,
                                 explicit_template=explicit_template,
-                                overrides={},
+                                overrides=launch_overrides,
                             )
                             persistent_prompt_text = ""
                             if launch_cfg.get("agent_type"):
