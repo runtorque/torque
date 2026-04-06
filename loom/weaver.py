@@ -181,6 +181,13 @@ class WeaverEventBuffer:
         buf = self._buffers.setdefault(group, [])
         buf.append(event)
 
+        # If the weaver is already idle, schedule a flush now.
+        # Without this, buffered events sit until the weaver's next
+        # activity change or the heartbeat timer (up to max_interval).
+        if not weaver.activity or weaver.activity == "waiting":
+            if self._loop:
+                self._loop.create_task(self._flush(group))
+
     def on_agent_activity_change(self, cell):
         """Called when an agent's activity changes.  Flush if weaver goes idle."""
         gs = self._state.group_settings.get(cell.group)
@@ -366,13 +373,15 @@ class WeaverEventBuffer:
             if ws.paused:
                 continue
 
-            # Check if heartbeat is overdue
+            # Flush if weaver is idle and has buffered events,
+            # or if heartbeat is overdue
+            is_idle = not weaver.activity or weaver.activity == "waiting"
+            has_events = bool(self._buffers.get(group))
             last = self._last_push.get(group, 0)
-            if last and (now - last) >= ws.max_interval:
-                # Only flush if weaver is idle
-                if not weaver.activity or weaver.activity == "waiting":
-                    if self._loop:
-                        self._loop.create_task(self._flush(group))
+            heartbeat_due = last and (now - last) >= ws.max_interval
+            if is_idle and (has_events or heartbeat_due):
+                if self._loop:
+                    self._loop.create_task(self._flush(group))
 
         if stats_changed and self._loop:
             self._loop.create_task(self._state.broadcast())
