@@ -499,6 +499,13 @@ async def main(connection: iterm2.Connection):
     action_mgr = ActionManager()
     template_mgr = TemplateManager()
 
+    from .weaver import WeaverEventBuffer
+    weaver_buffer = WeaverEventBuffer(state, bridge)
+    weaver_buffer.start()
+    event_bus._weaver_buffer = weaver_buffer
+    panel_log.on_event = weaver_buffer.on_panel_event
+    log.info("Weaver event buffer started")
+
 
     async def _safe_remove_worktree(cell):
         """Remove a worktree only if no other agent shares it."""
@@ -3487,6 +3494,26 @@ async def main(connection: iterm2.Connection):
                             result = {"type": "ok",
                                       "slug": cell.slug}
 
+                    elif action == "reply":
+                        if not message:
+                            result = {"type": "error",
+                                      "message":
+                                          "Reply message is required"}
+                        elif not cell.pending_weaver_message:
+                            result = {"type": "error",
+                                      "message":
+                                          "No pending weaver message "
+                                          "to reply to"}
+                        else:
+                            cell.pending_weaver_message = False
+                            _append_mcp(cell, "reply", message)
+                            _record_history_msg(cell, "reply", message)
+                            _panel_event(
+                                "agent_reply", cell.id,
+                                cell.name, cell.group,
+                                message[:200])
+                            result = {"type": "ok"}
+
                     else:
                         result = {"type": "error",
                                   "message":
@@ -3521,6 +3548,89 @@ async def main(connection: iterm2.Connection):
                     data.get("group", ""))
                 pipelines = action_mgr.discover_pipelines(base_dir)
                 result = {"type": "pipelines", "pipelines": pipelines}
+
+            # -- Weaver commands ------------------------------------------
+
+            elif cmd == "weaver_message":
+                agent_ident = data.get("agent_id", "")
+                msg_text = data.get("message", "")
+                agent_id = _resolve_agent_id(agent_ident)
+                if not agent_id:
+                    result = {"type": "error",
+                              "message": f"Agent not found: {agent_ident}"}
+                elif not msg_text:
+                    result = {"type": "error",
+                              "message": "Message is required"}
+                else:
+                    target = state.agents.get(agent_id)
+                    if not target or not target.session_id:
+                        result = {"type": "error",
+                                  "message": "Agent is not running"}
+                    else:
+                        formatted = (
+                            "\n"
+                            "── Message from Weaver "
+                            "────────────────────────\n"
+                            f"{msg_text}\n\n"
+                            'Reply with: loom_reply("your response")\n'
+                            "────────────────────────────────────────"
+                            "────────\n"
+                        )
+                        await bridge.send_text(
+                            target.session_id, formatted)
+                        target.pending_weaver_message = True
+                        state._emit_agent(target)
+                        _panel_event(
+                            "weaver_message", target.id,
+                            target.name, target.group,
+                            msg_text[:200])
+                        result = {"type": "ok"}
+
+            elif cmd == "weaver_journal_append":
+                group = data.get("group", "")
+                entry_type = data.get("entry_type", "")
+                entry_text = data.get("entry", "")
+                if entry_type not in (
+                        "decision", "observation", "checkpoint", "plan"):
+                    result = {"type": "error",
+                              "message":
+                                  "entry_type must be one of: decision, "
+                                  "observation, checkpoint, plan"}
+                elif not entry_text:
+                    result = {"type": "error",
+                              "message": "Entry text is required"}
+                else:
+                    evt = state.journal_append(
+                        group, entry_type, entry_text)
+                    result = {"type": "ok", "id": evt["id"]}
+
+            elif cmd == "weaver_journal_read":
+                group = data.get("group", "")
+                tail = data.get("tail", 20)
+                entry_type = data.get("entry_type", "")
+                entries = state.journal_read(group, tail, entry_type)
+                result = {"type": "journal", "entries": entries}
+
+            elif cmd == "weaver_update_settings":
+                group = data.get("group", "")
+                fields = {}
+                for k in ("push_interval", "max_interval",
+                          "custom_instructions", "enabled_events",
+                          "paused"):
+                    if k in data:
+                        fields[k] = data[k]
+                state.update_weaver_settings(group, **fields)
+                result = {"type": "ok"}
+
+            elif cmd == "weaver_pause":
+                group = data.get("group", "")
+                state.update_weaver_settings(group, paused=True)
+                result = {"type": "ok"}
+
+            elif cmd == "weaver_resume":
+                group = data.get("group", "")
+                state.update_weaver_settings(group, paused=False)
+                result = {"type": "ok"}
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")

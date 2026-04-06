@@ -136,6 +136,8 @@ class AgentCell:
     worktree_merged: bool = False  # branch merged into base (ephemeral)
     # MCP message log (ephemeral)
     mcp_messages: list = field(default_factory=list)  # [{action, message, timestamp}]
+    # Weaver message tracking (ephemeral)
+    pending_weaver_message: bool = False  # agent has unread message from weaver
 
 
 # Fields that are ephemeral (not meaningful across restarts)
@@ -147,7 +149,8 @@ _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "error_message", "needs_attention", "last_summary",
                      "current_task_id",
                      "worktree_dirty", "worktree_diff",
-                     "worktree_checkpoints", "mcp_messages")
+                     "worktree_checkpoints", "mcp_messages",
+                     "pending_weaver_message")
 
 
 def _slugify(name: str, max_len: int = 40) -> str:
@@ -227,6 +230,32 @@ class GroupSettings:
     board_default_labels: list[str] = field(default_factory=list)  # default labels for new tasks
     board_default_lane: str = ""  # default lane for new tasks (empty = first lane)
     board_default_action: str = ""  # default action for new tasks
+    # Weaver
+    weaver_agent_id: str = ""  # designated weaver agent for this group
+
+
+@dataclass
+class WeaverSettings:
+    """Per-group weaver configuration."""
+    group: str = ""
+    push_interval: int = 60              # seconds between digest pushes (min: 10)
+    max_interval: int = 300              # max seconds between pushes (heartbeat)
+    paused: bool = False                 # user paused event pushes
+    custom_instructions: str = ""        # user-defined instructions appended to weaver system prompt
+    enabled_events: list[str] = field(   # optional events (mandatory always on)
+        default_factory=lambda: [
+            "agent_started",
+            "task_dispatched",
+            "task_derived",
+        ]
+    )
+
+
+# Mandatory events — always included in weaver digests regardless of enabled_events.
+WEAVER_MANDATORY_EVENTS = frozenset({
+    "task_completed", "agent_reply", "agent_error",
+    "agent_blocked", "ask_created",
+})
 
 
 @dataclass
@@ -269,6 +298,8 @@ class MatrixState:
         self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
         self.board_panel_height: int = 0  # 0 = use CSS default
         self.panel_log = None  # PanelEventLog, set from server.py
+        # Weaver settings (per-group)
+        self.weaver_settings: dict[str, WeaverSettings] = {}
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
         self._seq: int = 0
@@ -313,6 +344,9 @@ class MatrixState:
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
             "panel_events": self.panel_log.get_recent(50) if self.panel_log else [],
+            "weaver_settings": {
+                n: asdict(ws) for n, ws in self.weaver_settings.items()
+            },
         }
 
     # -- Targeted persistence helpers ----------------------------------------
@@ -651,6 +685,12 @@ class MatrixState:
             if slug_dirty:
                 self._db_save_groups()
                 log.info("Generated slugs for existing resources")
+            # Weaver settings
+            if self.db:
+                ws_fields = set(WeaverSettings.__dataclass_fields__)
+                for gname, raw in self.db.load_all_weaver_settings().items():
+                    filtered = {k: v for k, v in raw.items() if k in ws_fields}
+                    self.weaver_settings[gname] = WeaverSettings(**filtered)
         except (TypeError, KeyError):
             log.exception("Failed to load state from SQLite")
 
@@ -684,6 +724,53 @@ class MatrixState:
                 setattr(gs, key, value)
         self._emit("group_settings_update", name=name, **asdict(gs))
         self._db_save_group_settings(name)
+
+    # -- Weaver settings & journal ------------------------------------------
+
+    def get_weaver_for_group(self, group: str) -> Optional[AgentCell]:
+        """Return the weaver agent for a group, or None."""
+        gs = self.group_settings.get(group)
+        if not gs or not gs.weaver_agent_id:
+            return None
+        return self.agents.get(gs.weaver_agent_id)
+
+    def get_weaver_settings(self, group: str) -> WeaverSettings:
+        """Return weaver settings for a group, creating defaults if needed."""
+        return self.weaver_settings.get(group, WeaverSettings(group=group))
+
+    def update_weaver_settings(self, group: str, **fields):
+        """Update weaver settings for a group."""
+        ws = self.weaver_settings.get(group)
+        if ws is None:
+            ws = WeaverSettings(group=group)
+            self.weaver_settings[group] = ws
+        valid = set(WeaverSettings.__dataclass_fields__)
+        for key, value in fields.items():
+            if key in valid:
+                setattr(ws, key, value)
+        self._emit("weaver_settings_update", group=group, **asdict(ws))
+        if self.db:
+            self.db.save_weaver_settings(group, asdict(ws))
+
+    def journal_append(self, group: str, entry_type: str,
+                       entry: str) -> dict:
+        """Append an entry to the weaver journal. Returns the entry dict."""
+        import time
+        ts = time.time()
+        entry_id = 0
+        if self.db:
+            entry_id = self.db.save_journal_entry(group, ts, entry_type, entry)
+        evt = {"id": entry_id, "group": group, "timestamp": ts,
+               "type": entry_type, "entry": entry}
+        self._emit("journal_append", **evt)
+        return evt
+
+    def journal_read(self, group: str, limit: int = 20,
+                     entry_type: str = "") -> list[dict]:
+        """Read recent journal entries for a group."""
+        if self.db:
+            return self.db.load_journal_entries(group, limit, entry_type)
+        return []
 
     # -- Global settings ----------------------------------------------------
 
@@ -782,6 +869,9 @@ class MatrixState:
             del self.groups[name]
             self.group_slugs.pop(name, None)
             self.group_settings.pop(name, None)
+            self.weaver_settings.pop(name, None)
+            if self.db:
+                self.db.delete_weaver_settings(name)
             self._emit("group_remove", name=name)
             self._emit("groups_reorder", groups=list(self.groups.keys()))
             for r in removed:
@@ -952,6 +1042,12 @@ class MatrixState:
                 t.agent_id = ""
                 self._emit("task_upsert", **asdict(t))
                 self._db_save_task(t)
+        # Clear weaver designation if this agent was the weaver
+        gs = self.group_settings.get(cell.group)
+        if gs and gs.weaver_agent_id == aid:
+            gs.weaver_agent_id = ""
+            self._emit("group_settings_update", name=cell.group, **asdict(gs))
+            self._db_save_group_settings(cell.group)
         for r in removed:
             self._db_delete_agent(r.id)
         self._db_save_groups()

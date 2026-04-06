@@ -288,6 +288,7 @@ function render() {
     if (_activePanelApp === 'board') renderBoard();
     if (_activePanelApp === 'events' && typeof renderEvents === 'function') renderEvents();
     if (_activePanelApp === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
+    if (_activePanelApp === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
   }
 
   // Update events attention badge regardless of panel state

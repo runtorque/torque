@@ -114,7 +114,8 @@ WEAVER_TOOLS = [
         "description": (
             "Show full details for a task by slug or ID. "
             "Returns title, description, labels, action, action variables, "
-            "pipeline info, assigned agent, and activity messages."
+            "pipeline info, assigned agent, and activity messages. "
+            "For pipeline tasks, automatically includes the chain summary."
         ),
         "inputSchema": {
             "type": "object",
@@ -128,26 +129,11 @@ WEAVER_TOOLS = [
         },
     },
     {
-        "name": "weaver_task_chain",
+        "name": "weaver_agents_list",
         "description": (
-            "Show the full derivation chain for a pipeline task. "
-            "Returns all tasks in the chain from root to leaves "
-            "with their status, lane, depth, and assigned agent."
+            "List all active agents with their name, slug, status, "
+            "group, current task, and activity detail."
         ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": "Task slug or ID (any task in the chain).",
-                },
-            },
-            "required": ["task"],
-        },
-    },
-    {
-        "name": "weaver_lanes_list",
-        "description": "List all available lanes on the board in order.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -194,33 +180,6 @@ WEAVER_TOOLS = [
             "required": ["name"],
         },
     },
-    {
-        "name": "weaver_agents_list",
-        "description": (
-            "List all active agents with their name, slug, status, "
-            "group, current task, and activity detail."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "weaver_pipelines_list",
-        "description": (
-            "Discover pipelines from action transitions. Returns "
-            "connected components in the action transition graph "
-            "with nodes, edges, and entry points."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "group": {
-                    "type": "string",
-                    "description": (
-                        "Group name to resolve project-scoped actions."
-                    ),
-                },
-            },
-        },
-    },
     # -- Write tools --------------------------------------------------------
     {
         "name": "weaver_task_create",
@@ -257,7 +216,8 @@ WEAVER_TOOLS = [
                 },
                 "action_vars": {
                     "type": "object",
-                    "description": "Action variable values as key-value pairs.",
+                    "description":
+                        "Action variable values as key-value pairs.",
                     "additionalProperties": {"type": "string"},
                 },
                 "labels": {
@@ -376,6 +336,173 @@ WEAVER_TOOLS = [
             "required": ["task", "answer"],
         },
     },
+    # -- Event tools --------------------------------------------------------
+    {
+        "name": "weaver_events",
+        "description": (
+            "Poll for recent events. Use after context cleanup to "
+            "catch up on what happened. Returns panel events filtered "
+            "by group."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "since_id": {
+                    "type": "integer",
+                    "description": (
+                        "Return events after this event ID (cursor). "
+                        "Omit for latest events."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "description":
+                        "Max events to return (default: 50).",
+                },
+                "types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Filter to specific event types. "
+                        "Omit for all types."
+                    ),
+                },
+            },
+        },
+    },
+    {
+        "name": "weaver_notifications",
+        "description": (
+            "Configure event push settings. Sets which optional events "
+            "appear in digests and the push interval. Mandatory events "
+            "(task_completed, agent_error, agent_reply, agent_blocked, "
+            "ask_created) are always included."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "push_interval": {
+                    "type": "integer",
+                    "description": (
+                        "Seconds between digest pushes "
+                        "(min: 10, default: 60)."
+                    ),
+                },
+                "max_interval": {
+                    "type": "integer",
+                    "description": (
+                        "Max seconds between pushes including "
+                        "heartbeats (default: 300)."
+                    ),
+                },
+                "enable": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional event types to enable: "
+                        "agent_started, task_dispatched, "
+                        "task_derived, agent_progress."
+                    ),
+                },
+                "disable": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional event types to disable.",
+                },
+            },
+        },
+    },
+    # -- Context tools ------------------------------------------------------
+    {
+        "name": "weaver_journal",
+        "description": (
+            "Append an entry to the weaver's persistent decision "
+            "journal. Use this to record decisions, observations, and "
+            "periodic checkpoints. The journal survives context "
+            "cleanup — read it back with weaver_journal_read to "
+            "resume orchestration."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "decision", "observation",
+                        "checkpoint", "plan",
+                    ],
+                    "description": (
+                        "Entry type: decision (action taken + "
+                        "rationale), observation (something noted), "
+                        "checkpoint (board state summary for context "
+                        "recovery), plan (intended next steps)."
+                    ),
+                },
+                "entry": {
+                    "type": "string",
+                    "description": (
+                        "Journal entry content. Be concise but "
+                        "include rationale for decisions."
+                    ),
+                },
+            },
+            "required": ["type", "entry"],
+        },
+    },
+    {
+        "name": "weaver_journal_read",
+        "description": (
+            "Read recent journal entries. Use after context cleanup "
+            "or startup to recover the weaver's decision history "
+            "and resume orchestration."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tail": {
+                    "type": "integer",
+                    "description": (
+                        "Number of most recent entries to return "
+                        "(default: 20)."
+                    ),
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "decision", "observation",
+                        "checkpoint", "plan",
+                    ],
+                    "description":
+                        "Filter to a specific entry type.",
+                },
+            },
+        },
+    },
+    # -- Interaction tools --------------------------------------------------
+    {
+        "name": "weaver_agent_message",
+        "description": (
+            "Send a message to any agent's terminal. The agent can "
+            "reply via loom_reply, which appears in the weaver's "
+            "next event digest. Use for: redirecting agents, "
+            "providing context, answering questions."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Agent slug or ID.",
+                },
+                "message": {
+                    "type": "string",
+                    "description":
+                        "Message to send to the agent.",
+                },
+            },
+            "required": ["agent", "message"],
+        },
+    },
 ]
 
 _WEAVER_TOOL_MAP = {t["name"]: t for t in WEAVER_TOOLS}
@@ -451,38 +578,25 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
             if agent:
                 d["agent_name"] = agent.slug or agent.name
                 d["agent_status"] = agent.status
+        # Auto-include pipeline chain for pipeline tasks
+        if task.pipeline_root_id or task.parent_task_id:
+            chain = state.board_get_chain(tid)
+            d["pipeline_chain"] = []
+            for ct in chain:
+                agent_slug = ""
+                if ct.agent_id:
+                    a = state.agents.get(ct.agent_id)
+                    if a:
+                        agent_slug = a.slug or a.name
+                d["pipeline_chain"].append({
+                    "id": ct.id,
+                    "title": ct.task,
+                    "lane": ct.lane,
+                    "status": ct.status,
+                    "depth": ct.pipeline_depth,
+                    "agent": agent_slug,
+                })
         return json.dumps(d, indent=2), False
-
-    if name == "weaver_task_chain":
-        tid = _resolve_task(state, args.get("task", ""))
-        if not tid:
-            return "Task not found", True
-        result = await handle_command({"cmd": "task_chain", "task_id": tid})
-        if result and result.get("type") == "error":
-            return result.get("message", "Unknown error"), True
-        return json.dumps(result, indent=2), False
-
-    if name == "weaver_lanes_list":
-        return json.dumps({"lanes": list(state.board_lanes)}, indent=2), False
-
-    if name == "weaver_actions_list":
-        result = await handle_command({
-            "cmd": "list_actions",
-            "group": args.get("group", ""),
-        })
-        if result and result.get("type") == "error":
-            return result.get("message", "Unknown error"), True
-        return json.dumps(result, indent=2), False
-
-    if name == "weaver_action_show":
-        result = await handle_command({
-            "cmd": "get_action",
-            "name": args.get("name", ""),
-            "group": args.get("group", ""),
-        })
-        if result and result.get("type") == "error":
-            return result.get("message", "Unknown error"), True
-        return json.dumps(result, indent=2), False
 
     if name == "weaver_agents_list":
         agents = []
@@ -507,9 +621,19 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
             })
         return json.dumps({"agents": agents}, indent=2), False
 
-    if name == "weaver_pipelines_list":
+    if name == "weaver_actions_list":
         result = await handle_command({
-            "cmd": "discover_pipelines",
+            "cmd": "list_actions",
+            "group": args.get("group", ""),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result, indent=2), False
+
+    if name == "weaver_action_show":
+        result = await handle_command({
+            "cmd": "get_action",
+            "name": args.get("name", ""),
             "group": args.get("group", ""),
         })
         if result and result.get("type") == "error":
@@ -593,6 +717,120 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
             "cmd": "resolve_ask",
             "id": tid,
             "answer": args.get("answer", ""),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
+    # -- Event tools --------------------------------------------------------
+
+    if name == "weaver_events":
+        # Pull events from panel_log with optional filters
+        since_id = args.get("since_id", 0)
+        limit = args.get("limit", 50)
+        type_filter = set(args.get("types", []))
+
+        if state.panel_log:
+            events = state.panel_log.get_page(limit, since_id)
+        else:
+            events = []
+
+        if type_filter:
+            events = [e for e in events if e.get("kind") in type_filter]
+
+        cursor = events[-1]["id"] if events else since_id
+        return json.dumps({"events": events, "cursor": cursor},
+                          indent=2), False
+
+    if name == "weaver_notifications":
+        # Build update payload for weaver settings
+        # Resolve the weaver's group from the cell_id header if available,
+        # or use the first group with a weaver
+        group = ""
+        for gn, gs in state.group_settings.items():
+            if gs.weaver_agent_id:
+                group = gn
+                break
+        if not group:
+            return "No weaver configured for any group", True
+
+        ws = state.get_weaver_settings(group)
+        fields = {}
+        if "push_interval" in args:
+            fields["push_interval"] = max(10, args["push_interval"])
+        if "max_interval" in args:
+            fields["max_interval"] = max(30, args["max_interval"])
+        if "enable" in args or "disable" in args:
+            current = set(ws.enabled_events)
+            for e in args.get("enable", []):
+                current.add(e)
+            for e in args.get("disable", []):
+                current.discard(e)
+            fields["enabled_events"] = sorted(current)
+
+        result = await handle_command({
+            "cmd": "weaver_update_settings",
+            "group": group,
+            **fields,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps({"type": "ok", "settings": asdict(
+            state.get_weaver_settings(group))}), False
+
+    # -- Context tools ------------------------------------------------------
+
+    if name == "weaver_journal":
+        # Find the weaver's group
+        group = ""
+        for gn, gs in state.group_settings.items():
+            if gs.weaver_agent_id:
+                group = gn
+                break
+        if not group:
+            return "No weaver configured for any group", True
+
+        result = await handle_command({
+            "cmd": "weaver_journal_append",
+            "group": group,
+            "entry_type": args.get("type", "observation"),
+            "entry": args.get("entry", ""),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result), False
+
+    if name == "weaver_journal_read":
+        group = ""
+        for gn, gs in state.group_settings.items():
+            if gs.weaver_agent_id:
+                group = gn
+                break
+        if not group:
+            return "No weaver configured for any group", True
+
+        result = await handle_command({
+            "cmd": "weaver_journal_read",
+            "group": group,
+            "tail": args.get("tail", 20),
+            "entry_type": args.get("type", ""),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result, indent=2), False
+
+    # -- Interaction tools --------------------------------------------------
+
+    if name == "weaver_agent_message":
+        agent_ident = args.get("agent", "")
+        agent_id = _resolve_agent(state, agent_ident)
+        if not agent_id:
+            return f"Agent not found: {agent_ident}", True
+
+        result = await handle_command({
+            "cmd": "weaver_message",
+            "agent_id": agent_id,
+            "message": args.get("message", ""),
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True

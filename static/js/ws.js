@@ -276,6 +276,32 @@ function _applyDelta(ops) {
         state[op.key] = op.value;
         break;
 
+      case 'journal_append': {
+        if (!state.weaver_journal) state.weaver_journal = {};
+        var grp = op.group || '';
+        if (grp) {
+          if (!state.weaver_journal[grp]) state.weaver_journal[grp] = [];
+          var je = Object.assign({}, op);
+          delete je.op;
+          state.weaver_journal[grp].push(je);
+          // Cap at 200 entries per group
+          if (state.weaver_journal[grp].length > 200)
+            state.weaver_journal[grp] = state.weaver_journal[grp].slice(-200);
+        }
+        break;
+      }
+
+      case 'weaver_settings_update': {
+        if (!state.weaver_settings) state.weaver_settings = {};
+        var wg = op.group || '';
+        if (wg) {
+          var ws = Object.assign({}, op);
+          delete ws.op;
+          state.weaver_settings[wg] = ws;
+        }
+        break;
+      }
+
       case 'focus_update':
         if ('active_session_id' in op) {
           const prevActive = state.active_session_id;

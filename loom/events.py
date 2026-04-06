@@ -23,6 +23,7 @@ class PanelEventLog:
         self._max_size = max_size
         self._db = db
         self._events: deque[dict] = deque(maxlen=max_size)
+        self.on_event = None  # callback(event_dict) — called on append/replace
         # Seed id counter and hydrate deque from DB after restart
         if db:
             self._id_counter = db.get_panel_event_max_id()
@@ -51,6 +52,11 @@ class PanelEventLog:
                 self._db.trim_panel_events(self._max_size)
             except Exception:
                 log.exception("Failed to persist panel event %s", evt["id"])
+        if self.on_event:
+            try:
+                self.on_event(evt)
+            except Exception:
+                log.exception("PanelEventLog.on_event callback failed")
         return evt
 
     def replace_last(self, kind: str, cell_id: str, **kwargs) -> dict:
@@ -130,6 +136,7 @@ class EventBus:
         self._log = event_log
         self._notifier = notifier
         self._panel_log = panel_log
+        self._weaver_buffer = None  # WeaverEventBuffer, set from server.py
         self._timers: dict[str, asyncio.TimerHandle] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self.on_session_start = None  # callback(cell) — agent TUI ready
@@ -155,6 +162,9 @@ class EventBus:
                  cell.activity_detail[:50] if cell.activity_detail else "")
         if self._notifier:
             self._notifier.on_event(event)
+        # Notify weaver buffer of activity change (for idle-gated delivery)
+        if self._weaver_buffer:
+            self._weaver_buffer.on_agent_activity_change(cell)
         # Auto-unlink agent from parent task when idle after derive
         if prev_activity and not cell.activity and cell.current_task_id:
             self._maybe_unlink_post_derive(cell)
