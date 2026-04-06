@@ -1513,37 +1513,95 @@ async def main(connection: iterm2.Connection):
 
             elif cmd == "add_agent":
                 group = data["group"]
-                base_dir = await _resolve_base_dir(group)
-                explicit_template = data.get("template", "").strip()
-                launch_cfg = _resolve_agent_launch_config(
-                    group,
-                    base_dir=base_dir,
-                    explicit_template=explicit_template,
-                    overrides=data,
-                )
-                name = (data.get("name", "") or "").strip()
-                if not name:
-                    if explicit_template:
-                        name = _suggest_template_agent_name(
-                            group, explicit_template, base_dir)
-                    else:
-                        name = state.next_cell_name(group, "agent")
-                cell = await _create_agent_with_config(
-                    group, name, launch_cfg,
-                    explicit_template=explicit_template)
-                if cell:
-                    if launch_cfg.get("terminals"):
-                        await _create_child_terminals(
-                            group, cell, terminals=launch_cfg["terminals"])
-                    else:
-                        gs = state.get_group_settings(group)
-                        if gs.auto_terminals > 0:
+                is_weaver = data.get("is_weaver", False)
+
+                # Enforce one weaver per group
+                if is_weaver:
+                    gs_check = state.get_group_settings(group)
+                    if gs_check.weaver_agent_id:
+                        existing = state.agents.get(
+                            gs_check.weaver_agent_id)
+                        ename = existing.name if existing else "unknown"
+                        result = {
+                            "type": "error",
+                            "message": (
+                                f"Group '{group}' already has a "
+                                f"weaver: {ename}")}
+                        # Skip agent creation — jump to broadcast
+                        is_weaver = False
+                        data = {}  # prevent fallthrough
+
+                if data:
+                    base_dir = await _resolve_base_dir(group)
+                    explicit_template = data.get("template", "").strip()
+                    launch_cfg = _resolve_agent_launch_config(
+                        group,
+                        base_dir=base_dir,
+                        explicit_template=explicit_template,
+                        overrides=data,
+                    )
+
+                    # Weaver: build system prompt and inject flag
+                    if is_weaver:
+                        from .weaver import build_weaver_system_prompt
+                        ws = state.get_weaver_settings(group)
+                        action_sp = launch_cfg.get("system_prompt", "")
+                        sp_text = build_weaver_system_prompt(
+                            group, ws, action_sp)
+                        # Write to a file in .loom/
+                        sp_dir = os.path.join(
+                            base_dir or os.getcwd(), ".loom")
+                        os.makedirs(sp_dir, exist_ok=True)
+                        gs_slug = state.group_slugs.get(
+                            group, group.replace(" ", "-").lower())
+                        sp_path = os.path.join(
+                            sp_dir,
+                            f"weaver-system-prompt-{gs_slug}.md")
+                        with open(sp_path, "w") as f:
+                            f.write(sp_text)
+                        # Append flag to boot command
+                        cmd_str = launch_cfg.get("command", "")
+                        cmd_str += (
+                            f" --append-system-prompt-file"
+                            f" {shlex.quote(sp_path)}")
+                        launch_cfg["command"] = cmd_str.strip()
+                        # Clear system_prompt so it doesn't also
+                        # write to .claude/instructions.md
+                        launch_cfg["system_prompt"] = ""
+
+                    name = (data.get("name", "") or "").strip()
+                    if not name:
+                        if is_weaver:
+                            name = "Weaver"
+                        elif explicit_template:
+                            name = _suggest_template_agent_name(
+                                group, explicit_template, base_dir)
+                        else:
+                            name = state.next_cell_name(group, "agent")
+                    cell = await _create_agent_with_config(
+                        group, name, launch_cfg,
+                        explicit_template=explicit_template)
+                    if cell:
+                        # Designate as weaver
+                        if is_weaver:
+                            state.update_group_settings(
+                                group, weaver_agent_id=cell.id)
+
+                        if launch_cfg.get("terminals"):
                             await _create_child_terminals(
-                                group, cell, count=gs.auto_terminals)
-                    if launch_cfg.get("initial_prompt") and cell.session_id:
-                        await _send_agent_prompt(
-                            cell, launch_cfg["initial_prompt"],
-                            background=True)
+                                group, cell,
+                                terminals=launch_cfg["terminals"])
+                        else:
+                            gs = state.get_group_settings(group)
+                            if gs.auto_terminals > 0:
+                                await _create_child_terminals(
+                                    group, cell,
+                                    count=gs.auto_terminals)
+                        if launch_cfg.get("initial_prompt") \
+                                and cell.session_id:
+                            await _send_agent_prompt(
+                                cell, launch_cfg["initial_prompt"],
+                                background=True)
 
             elif cmd == "add_terminal":
                 group = data.get("group", "")

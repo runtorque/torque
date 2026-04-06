@@ -2737,3 +2737,25 @@ body.diff-view-open #ctx-menu {
   text-align: center;
   padding: 20px;
 }
+.weaver-create-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.weaver-empty-inline {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.weaver-create-btn {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  padding: 4px 12px;
+  border-radius: var(--radius);
+  font: 10px var(--font);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.weaver-create-btn:hover { opacity: 0.9; }

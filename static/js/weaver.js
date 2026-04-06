@@ -108,8 +108,14 @@ function _weaverRenderSettings(group, ws, weaver) {
     html += '<span class="weaver-agent-status status-' + (weaver.status || 'stopped') + '">'
          + _esc(weaver.status || 'stopped') + '</span>';
     html += '</div>';
+  } else if (group) {
+    html += '<div class="weaver-create-row">';
+    html += '<span class="weaver-empty-inline">No weaver agent.</span>';
+    html += '<button class="weaver-create-btn" onclick="weaverCreate()">'
+         + '+ Create Weaver</button>';
+    html += '</div>';
   } else {
-    html += '<div class="weaver-empty">No weaver designated.</div>';
+    html += '<div class="weaver-empty">Create a group first.</div>';
   }
   html += '</div>';
 
@@ -175,6 +181,28 @@ function _weaverRenderSettings(group, ws, weaver) {
   return html;
 }
 
+// -- Create weaver ---------------------------------------------------------
+
+function weaverCreate() {
+  var group = _weaverFindGroup();
+  // If no group has settings yet, use the first group
+  if (!group) {
+    var groups = Object.keys(state.groups || {});
+    if (!groups.length) return;
+    group = groups[0];
+  }
+  // Check if group already has a weaver
+  var gs = state.group_settings && state.group_settings[group];
+  if (gs && gs.weaver_agent_id) return;
+
+  send({
+    cmd: 'add_agent',
+    name: 'Weaver',
+    group: group,
+    is_weaver: true,
+  });
+}
+
 // -- Event handlers --------------------------------------------------------
 
 function weaverInstrInput(textarea) {
@@ -232,11 +260,15 @@ function weaverToggleEvent(evt, enabled) {
 // -- Helpers ---------------------------------------------------------------
 
 function _weaverFindGroup() {
-  if (!state.group_settings) return '';
-  for (var gn in state.group_settings) {
-    if (state.group_settings[gn].weaver_agent_id) return gn;
+  // First: find a group that already has a weaver
+  if (state.group_settings) {
+    for (var gn in state.group_settings) {
+      if (state.group_settings[gn].weaver_agent_id) return gn;
+    }
   }
-  return '';
+  // Fallback: return the first group (for settings/create flow)
+  var groups = Object.keys(state.groups || {});
+  return groups.length ? groups[0] : '';
 }
 
 function _weaverGetSettings(group) {
