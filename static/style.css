@@ -2864,3 +2864,141 @@ body.diff-view-open #ctx-menu {
   white-space: nowrap;
 }
 .weaver-create-btn:hover { opacity: 0.9; }
+
+/* -- Task history overlay ------------------------------------------------ */
+#task-history-root {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-surface);
+}
+body.task-history-open #task-history-root { display: flex; }
+body.task-history-open main,
+body.task-history-open #bottom-panel,
+body.task-history-open #taskbar,
+body.task-history-open #broadcast,
+body.task-history-open #ctx-menu {
+  display: none !important;
+}
+.th-view {
+  display: flex; flex-direction: column;
+  flex: 1; min-height: 0;
+}
+.th-header {
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+  flex-shrink: 0;
+  position: relative;
+}
+.th-title {
+  font-size: 12px; font-weight: 700;
+  color: var(--text);
+  word-break: break-word;
+}
+.th-subtitle {
+  font-size: 10px; color: var(--text-dim);
+  margin-top: 3px;
+}
+.th-close {
+  position: absolute; top: 8px; right: 10px;
+  background: none; border: none;
+  color: var(--text-dim); cursor: pointer;
+  font-size: 14px; padding: 2px 6px;
+}
+.th-close:hover { color: var(--text); }
+.th-content {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 0;
+}
+.th-empty {
+  padding: 24px 12px;
+  color: var(--text-dim);
+  text-align: center;
+  font-size: 11px;
+}
+.th-task { border-bottom: 1px solid var(--border); }
+.th-task-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.th-task-row:hover { background: var(--bg-hover); }
+.th-expand {
+  color: var(--text-dim); flex-shrink: 0;
+  width: 12px; font-size: 9px;
+}
+.th-outcome {
+  flex-shrink: 0;
+  font-size: 9px; font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.th-outcome-done,
+.th-outcome-ready {
+  background: rgba(35,134,54,.2);
+  color: var(--green);
+}
+.th-outcome-inprogress {
+  background: rgba(88,166,255,.15);
+  color: var(--accent);
+}
+.th-task-title {
+  flex: 1; min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.th-task-time {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.th-task-expanded {
+  padding: 4px 10px 8px 28px;
+  background: rgba(0,0,0,.15);
+  border-top: 1px solid rgba(255,255,255,.04);
+}
+.th-no-msgs {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-style: italic;
+  padding: 4px 0;
+}
+.th-msg-row {
+  display: flex; align-items: flex-start; gap: 6px;
+  padding: 3px 0;
+  font-size: 10px;
+}
+.th-msg-icon { flex-shrink: 0; width: 14px; text-align: center; }
+.th-msg-action {
+  flex-shrink: 0; width: 52px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.th-msg-text {
+  flex: 1; min-width: 0;
+  color: var(--text);
+  word-break: break-word;
+}
+.th-msg-time {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+.th-msg-done .th-msg-icon,
+.th-msg-ready .th-msg-icon { color: var(--green); }
+.th-msg-error .th-msg-icon { color: var(--red); }
+.th-msg-blocked .th-msg-icon { color: var(--amber, #d29922); }
+.th-msg-progress .th-msg-icon { color: var(--accent); }
+.th-footer {
+  display: flex; justify-content: flex-end;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-hover);
+  flex-shrink: 0;
+}
