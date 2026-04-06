@@ -1,201 +1,377 @@
 # Weaver
 
-The weaver is a semi-autonomous orchestrator agent that manages the task board, dispatches work to other agents, and consults with the human at key decision points. Each group can have one weaver. It acts as a project manager --- analyzing priorities, creating and dispatching tasks, reacting to events, and maintaining a persistent decision journal.
+The Weaver is Loom's per-group orchestrator agent. It watches the board, receives event digests, dispatches work to agents, keeps a persistent journal, and asks the human for guidance when needed.
 
-The weaver is not fully autonomous. It asks the human for guidance when needed (priorities, design decisions, approvals) and operates independently between those checkpoints. It decides when it needs input and when it can proceed on its own.
+The Weaver is deliberately semi-autonomous:
 
-## Creating a weaver
+- it can plan, dispatch, review, merge, and clean up on its own
+- it should use `weaver_ask` when priorities, approvals, or design choices need human input
+- it should recover from `/clear` or restart by reading the journal and current board state instead of relying on chat history
 
-Open the **Weaver** panel from the taskbar, switch to the **Settings** tab, and click **+ Create Weaver**. This creates a special agent with a system prompt that defines the weaver role and available tools.
+## What the Weaver does
 
-The weaver must be created through this flow --- you cannot designate an existing agent as a weaver, because the system prompt (`--append-system-prompt-file`) must be set at boot time.
+Each group can have at most one Weaver. It acts as the control loop for that group's work:
 
-Each group can have at most one weaver. The create button is hidden when a weaver already exists. Removing the weaver agent clears the designation; the journal persists and is inherited by a new weaver.
+1. Read the board and decide what should happen next.
+2. Dispatch tasks to agents in waves.
+3. React to digests and replies from running agents.
+4. Keep a journal of decisions, observations, checkpoints, and plans.
+5. Review diffs, merge worktrees, open PRs, and clean up sessions.
+6. Pause and ask the human when the next step should not be guessed.
 
-## How it works
+The journal belongs to the group, not the individual agent. If you recreate the Weaver later, it inherits the same journal history.
 
-### System prompt
+## Creating and configuring the Weaver
 
-The weaver boots with a system prompt appended via Claude Code's `--append-system-prompt-file` flag. This prompt defines:
+Open the **Weaver** panel, switch to **Settings**, and click **+ Create Weaver**.
 
-- The weaver's role and available MCP tools
-- Operating guidelines (journal discipline, event response, context recovery)
-- Instructions to call `weaver_ask` on first start to get human guidance
-
-The system prompt survives `/clear` --- when context is cleaned, the weaver retains its identity and instructions. Only the conversation history is lost.
-
-### Custom instructions
-
-In the Weaver panel's **Settings** tab, you can write custom instructions that are appended to the system prompt. These steer the weaver without editing action YAML:
-
-```
-Focus on the auth and payments modules first.
-Never dispatch more than 3 agents concurrently.
-Always create a review task after implementation.
-```
-
-Custom instructions persist in SQLite and apply on every weaver boot or restart.
-
-### Decision journal
-
-The weaver maintains a persistent journal in SQLite. It writes structured entries:
-
-| Type | Purpose |
-|------|---------|
-| **decision** | An action taken with rationale ("Dispatched auth task because it's highest priority") |
-| **observation** | Something noted ("Agent fix-auth completed, tests passing") |
-| **checkpoint** | Board state summary for context recovery |
-| **plan** | Intended next steps |
-
-The journal is visible in the Weaver panel's **Journal** tab, with entries shown newest-first and color-coded by type. Right-click an entry to delete it.
-
-After a `/clear` or restart, the weaver reads its journal to reconstruct context:
-
-```
-weaver_journal_read  -->  weaver_board_summary  -->  weaver_events
-```
-
-Use `weaver_board_list` only when the compact summary is not enough.
-
-### Human interaction
-
-The weaver uses `weaver_ask` to post questions to the human. When it calls this tool:
-
-1. The question appears as an amber banner in the Weaver panel's Journal tab
-2. Event delivery is automatically paused
-3. The weaver's agent cell shows a pulsing "? awaiting input" indicator
-4. The Weaver taskbar button gets an attention badge
-
-The human can reply two ways:
-
-- **Via the panel**: type in the reply textarea and click "Send Reply". Loom sends the answer to the weaver's terminal and unpauses events.
-- **Directly in the terminal**: type into the weaver's Claude Code session. The weaver processes the input and calls `weaver_resume` to unpause events.
-
-### Event digests
-
-The weaver receives event notifications as formatted text pushed to its terminal. Events are:
-
-- **Idle-gated**: only delivered when the weaver is idle, never mid-thought
-- **Batched**: accumulated over a configurable interval (default 60 seconds)
-- **Filtered**: mandatory events always appear; optional events are configurable
-
-**Mandatory events** (always included):
-
-- `task_completed` --- agent finished a task
-- `agent_error` --- unrecoverable error
-- `agent_blocked` --- agent needs help
-- `agent_reply` --- agent replied to a weaver message
-- `ask_created` --- agent needs human/weaver input
-
-**Optional events** (configurable in Settings tab):
-
-- `agent_started`, `task_dispatched`, `task_derived`, `agent_progress`
-
-A **heartbeat** is sent if no events occur within the max interval (default 5 minutes), showing current board status and active agents.
-
-The Weaver panel header shows the number of buffered events and time until the next push.
-
-### Pause / resume
-
-The pause button in the Weaver panel header suspends event delivery. Events still buffer but aren't sent until resumed. Use this when you want to interact with the weaver directly without competing with automated digests.
-
-`weaver_ask` auto-pauses events. `weaver_resume` (or a panel reply) unpauses them.
-
-## MCP tools
-
-The weaver has access to these tools via MCP:
-
-### Read tools
-
-| Tool | Description |
-|------|-------------|
-| `weaver_board_summary` | Compact board overview with lane counts, active agent status, pending asks, and key label counts. |
-| `weaver_board_list` | List tasks grouped by lane, with optional filters (lane, label, search). Scoped to the weaver's group. |
-| `weaver_task_show` | Full task details by slug or ID. Auto-includes pipeline chain for pipeline tasks. |
-| `weaver_agents_list` | All agents in the group with status, current task, and activity. |
-| `weaver_actions_list` | Available actions (project + user scope) with variables and descriptions. |
-| `weaver_action_show` | Full action details including prompt template, transitions, and variables. |
-
-### Write tools
-
-| Tool | Description |
-|------|-------------|
-| `weaver_task_create` | Create a task with title, description, action, labels, and lane. |
-| `weaver_task_edit` | Update fields on an existing task (partial update). |
-| `weaver_task_move` | Move a task to a different lane. |
-<<<<<<< HEAD
-| `weaver_task_dispatch` | Dispatch a task to a new or existing agent. Supports custom naming via `name`, backend selection via `agent_type`, and boot-command override via `command` for new agents. |
-| `weaver_batch_dispatch` | Dispatch an ordered batch with `max_concurrent`. Tasks may share an `agent_group` so later tasks queue on the same agent instead of consuming another worker slot. |
-| `weaver_task_resolve` | Resolve an ask task by sending an answer to the waiting agent. |
-
-### Event tools
-
-| Tool | Description |
-|------|-------------|
-| `weaver_events` | Poll for recent events (for catching up after `/clear`). |
-| `weaver_notifications` | Configure push interval and enable/disable optional event types. |
-| `weaver_resume` | Unpause event delivery after a `weaver_ask` exchange. |
-
-### Journal tools
-
-| Tool | Description |
-|------|-------------|
-| `weaver_journal` | Append a decision, observation, checkpoint, or plan entry. |
-| `weaver_journal_read` | Read recent entries, optionally filtered by type. |
-
-### Interaction tools
-
-| Tool | Description |
-|------|-------------|
-| `weaver_agent_message` | Send a message to any agent's terminal. The agent can reply via `loom_reply`. |
-| `weaver_ask` | Ask the human a question. Auto-pauses events and shows the question in the panel. |
-| `weaver_agent_close` | Close an agent (end session, remove from group). Worktree is preserved. |
-
-### Worktree tools
-
-| Tool | Description |
-|------|-------------|
-| `weaver_merge` | Merge an agent's worktree branch into the base branch. Checks for conflicts first --- if found, instructs the weaver to ask the human for permission to rebase. Optional `close_agent_on_merge` and `remove_worktree_on_merge` flags enable explicit post-merge cleanup. |
-| `weaver_create_pr` | Push branch and create a GitHub PR via `gh`. Accepts custom title and body. |
-| `weaver_diff` | Get the diff of an agent's worktree vs base branch. Supports `stat_only` mode and path filtering. |
-
-## CLI
-
-```bash
-loom weaver journal                        # show recent journal entries
-loom weaver journal -n 50                  # show last 50 entries
-loom weaver journal -t checkpoint          # filter by type
-loom weaver journal --json                 # machine-readable output
-
-loom ai reply "your response"              # reply to a weaver message (from agent terminal)
-```
-
-## UI
+The Weaver must be created through this flow because Loom needs to boot it with a persistent system prompt. You cannot turn an existing agent into a Weaver after the fact.
 
 ### Weaver panel
 
-The Weaver panel sits in the taskbar between Events and other panels. It has two tabs:
+The panel has two tabs:
 
-**Journal tab** (default):
-- Pending question banner (amber) with reply textarea when the weaver is waiting for input
-- Journal entries newest-first, with colored type badges and relative timestamps
-- Right-click entries to delete them
+- **Journal** shows the persistent journal and the pending-question banner when the Weaver is waiting on a human reply.
+- **Settings** controls the Weaver agent, backend override, custom instructions, and notification settings.
 
-**Settings tab**:
-- **Agent**: shows the weaver's name and status, or a create button
-- **Custom Instructions**: textarea for instructions appended to the system prompt
-- **Notifications**: push/max interval dropdowns and event type checkboxes
+The panel header also shows:
 
-### Agent cell indicators
+- buffered event count
+- time until the next digest push
+- a pause/resume toggle for event delivery
 
-- The weaver agent has an **amber left border** to distinguish it from regular agents
-- It is always **pinned first** in the group's agent grid and iTerm2 tab order
-- When awaiting human input: **pulsing glow** and "? awaiting input" text
-- The Weaver **taskbar button** gets a pulsing amber border when a question is pending
+### Settings tab
 
-## Design notes
+The current product behavior is:
 
-- **One per group**: enforced at creation time. The journal belongs to the group, not the agent --- a new weaver inherits the previous journal.
-- **System prompt vs user prompt**: the weaver's identity (system prompt) survives `/clear`; the task (user prompt) is what changes between dispatches.
-- **Semi-autonomous**: the weaver is not a pipeline or a script. It makes runtime decisions, but checks in with the human via `weaver_ask` at key decision points.
-- **Context management**: the journal is the weaver's persistent brain. Periodic checkpoint entries compress the weaver's mental model so context cleanup doesn't mean starting over.
+- **Agent** section shows the current Weaver agent or the create button.
+- **Backend** lets you override the provider and boot command just for the Weaver. If empty, the Weaver uses the group's defaults.
+- **Custom Instructions** appends extra operating rules to the Weaver system prompt.
+- **Notifications** configures push interval, max interval, and which optional event types appear in digests.
+
+### Agent cell behavior
+
+The Weaver agent is visually distinct:
+
+- pinned first in the group's agent grid and tab order
+- amber left border
+- `? awaiting input` state when a human reply is pending
+- taskbar attention state when the Weaver has asked a question
+
+## Operating model
+
+The Weaver is most effective when it works in short control loops instead of trying to solve everything in one huge plan.
+
+### A practical day-to-day loop
+
+1. Read the current state with `weaver_board_summary`.
+2. Use `weaver_task_show`, `weaver_agent_show`, or `weaver_action_show` only for the tasks that need deeper inspection.
+3. Dispatch a wave of work with `weaver_task_dispatch` or `weaver_batch_dispatch`.
+4. Wait for Loom digests instead of polling constantly.
+5. When a digest arrives, react to the changed tasks and agents only.
+6. Journal significant decisions and write periodic checkpoints.
+7. Review diffs, merge, or ask the human when approval is needed.
+
+### Dispatch philosophy
+
+The Weaver system prompt steers it toward a few practical habits:
+
+- dispatch in waves, not all at once
+- reuse the same agent when context matters
+- separate work across agents when tasks are independent
+- inspect diff stats before deep review
+- clean up worktrees and sessions intentionally after merge
+
+## Event digests and delivery
+
+The Weaver does not need to poll constantly. Loom pushes event digests into the Weaver's terminal when appropriate.
+
+### How digests work
+
+Digests are:
+
+- **idle-gated**: Loom only pushes them when the Weaver is idle or waiting
+- **buffered**: events accumulate between pushes
+- **periodic**: an idle digest still arrives if `max_interval` elapses
+- **scoped**: each Weaver only sees events for its own group
+
+If there are no new events, Loom still sends a heartbeat-style digest with a board summary and active-agent summary when the max interval is reached.
+
+### Mandatory events
+
+These always appear regardless of notification settings:
+
+- `task_completed`
+- `agent_reply`
+- `agent_error`
+- `agent_blocked`
+- `ask_created`
+
+### Optional events
+
+These can be enabled or disabled in the Weaver settings:
+
+- `agent_started`
+- `task_dispatched`
+- `task_derived`
+- `agent_progress`
+
+### What a digest contains
+
+A digest includes:
+
+- the buffered events
+- a compact board summary
+- active-agent summary when there are no new events
+- a context-usage warning if the Weaver's token usage is getting large
+
+## Journal and recovery
+
+The journal is the Weaver's persistent memory. It is what lets the Weaver recover after `/clear`, a restart, or a long pause without needing the old conversation history.
+
+### Journal entry types
+
+| Type | Use it for |
+|------|------------|
+| **`decision`** | A choice the Weaver made and why |
+| **`observation`** | Something learned from events, agents, or the human |
+| **`checkpoint`** | A compact snapshot of board state and next steps |
+| **`plan`** | Intended next actions |
+
+### Recovery sequence
+
+After `/clear` or restart, the current product behavior is to recover in this order:
+
+```text
+weaver_journal_read -> weaver_board_summary -> weaver_events
+```
+
+Use `weaver_board_list` only when the compact summary is not enough. That keeps recovery fast and avoids blowing context on the full board when the summary already tells you what changed.
+
+### Journal discipline
+
+The Weaver should write journal entries for:
+
+- dispatch decisions
+- priority changes
+- notable failures or blocked states
+- merge and PR decisions
+- human answers that change the plan
+
+It should also write periodic **checkpoint** entries so recovery does not require replaying dozens of smaller decisions.
+
+The Journal tab in the UI shows entries newest-first, and entries can be deleted with a right-click.
+
+## Asking the human
+
+`weaver_ask` is the Weaver's human-in-the-loop mechanism.
+
+When the Weaver asks a question:
+
+1. the question appears in the Journal tab as an amber banner
+2. event pushes are automatically paused
+3. the Weaver agent shows an awaiting-input state
+4. the question is recorded in the journal as an observation
+
+### Reply paths
+
+The human can answer in two ways:
+
+- **Via the panel**: Loom sends the reply to the Weaver terminal and automatically unpauses events.
+- **Directly in the terminal**: the Weaver receives the reply in its own session and should call `weaver_resume` after handling it.
+
+If the Weaver becomes active again after being idle with a pending question, Loom clears the pending-question state and unpauses delivery. The safest explicit pattern is still:
+
+1. receive the answer
+2. incorporate it into the plan
+3. call `weaver_resume`
+
+## MCP tool surface
+
+All Weaver tools are available through the same `/mcp` endpoint as agent tools, using the `weaver_` prefix. They are scoped to the Weaver's group.
+
+### Board and planning
+
+| Tool | What it is for |
+|------|-----------------|
+| `weaver_board_summary` | Compact overview of lanes, asks, labels, and agent state |
+| `weaver_board_list` | Full lane-grouped task list with optional filters |
+| `weaver_task_show` | Full details for one task, including pipeline chain when relevant |
+| `weaver_agents_list` | Quick view of all agents in the group |
+| `weaver_agent_show` | Deep inspection of one agent: session, worktree, tasks, terminals |
+| `weaver_actions_list` | Discover available actions and their variables |
+| `weaver_action_show` | Inspect one action's YAML, variables, and transitions |
+
+### Task editing and dispatch
+
+| Tool | What it is for |
+|------|-----------------|
+| `weaver_task_create` | Create a board task |
+| `weaver_task_edit` | Change task title, description, labels, action, or action vars |
+| `weaver_task_move` | Move a task between lanes |
+| `weaver_task_dispatch` | Dispatch one task to a new or existing agent |
+| `weaver_batch_dispatch` | Dispatch a planned batch with concurrency control |
+| `weaver_task_resolve` | Resolve an ask task and send the answer back to the waiting agent |
+
+### Events and recovery
+
+| Tool | What it is for |
+|------|-----------------|
+| `weaver_events` | Poll recent panel events, especially after recovery |
+| `weaver_notifications` | Configure digest timing and optional event types |
+| `weaver_resume` | Unpause event delivery after a `weaver_ask` exchange |
+| `weaver_journal` | Append a journal entry |
+| `weaver_journal_read` | Read recent journal entries |
+
+### Communication and agent control
+
+| Tool | What it is for |
+|------|-----------------|
+| `weaver_agent_message` | Send a message into another agent's terminal |
+| `weaver_ask` | Ask the human a question and pause event pushes |
+| `weaver_agent_close` | Close an agent session while leaving its worktree on disk |
+| `weaver_agent_relaunch` | Relaunch a stopped agent, reusing worktree and provider resume when available |
+
+### Review, merge, and worktree operations
+
+| Tool | What it is for |
+|------|-----------------|
+| `weaver_diff` | Review diff stats or full diffs before merge |
+| `weaver_merge` | Merge a worktree branch into its base branch |
+| `weaver_create_pr` | Push and open a GitHub PR with `gh` |
+| `weaver_worktree_checkpoint` | Snapshot the worktree before a risky operation |
+| `weaver_worktree_remove` | Remove the worktree after merge or cleanup |
+
+## Batch dispatch and orchestration patterns
+
+`weaver_batch_dispatch` is the Weaver's main tool for deliberate orchestration instead of ad-hoc dispatching.
+
+### How batch dispatch works
+
+Batch dispatch:
+
+- processes tasks in the order you pass them
+- enforces `max_concurrent` against active non-Weaver agents in the group
+- can keep related tasks on the same agent with `agent_group`
+- refuses tasks that are already assigned, already done, already in progress, or blocked by dependencies
+
+### Result states
+
+Batch results can come back as:
+
+- **`dispatched`** when the task was launched immediately
+- **`queued`** when Loom routed the work to an existing busy agent
+- **`deferred`** when dispatch would exceed `max_concurrent`
+- **`failed`** when the task was invalid for dispatch
+
+### When to use `agent_group`
+
+Use `agent_group` when several ordered tasks should stay on the same worker agent. This is useful for:
+
+- a small implementation sequence that benefits from shared context
+- follow-up cleanup after a first task on the same area
+- keeping related tasks from consuming multiple worker slots
+
+## Review, merge, and cleanup flows
+
+The Weaver is expected to handle the operational end of agent work, not just the initial dispatch.
+
+### Review flow
+
+A practical review sequence is:
+
+1. inspect the agent with `weaver_agent_show`
+2. start with `weaver_diff(..., stat_only=true)` to size the change
+3. inspect specific risky paths with `weaver_diff(..., paths=[...])` if needed
+4. ask the agent for clarification with `weaver_agent_message` if the diff is unclear
+
+### Merge flow
+
+`weaver_merge` is a server-side merge operation. If Loom detects conflicts, it returns an error and the Weaver should ask the human for permission before attempting a manual recovery plan.
+
+Typical flow:
+
+1. review diff
+2. merge with `weaver_merge`
+3. optionally create a PR with `weaver_create_pr`
+4. close the agent and/or remove the worktree
+
+`weaver_merge` also supports:
+
+- `close_agent_on_merge`
+- `remove_worktree_on_merge`
+
+### Cleanup flow
+
+After merge, the Weaver can use:
+
+- `weaver_agent_close` to remove the live session
+- `weaver_worktree_remove` to clean the branch checkout from disk
+- `weaver_agent_relaunch` when a stopped agent should continue working instead of being retired
+
+## Practical usage patterns
+
+### Starting a new orchestration session
+
+When there is no useful journal history yet, the Weaver should introduce itself and ask the human what to focus on before dispatching anything substantial.
+
+### Running a wave
+
+Use a compact pattern:
+
+1. `weaver_board_summary`
+2. `weaver_actions_list` or `weaver_action_show` if action choice matters
+3. `weaver_batch_dispatch` for the next wave
+4. wait for Loom digests
+
+### Recovering after `/clear`
+
+Use the recovery sequence, then make one decision at a time:
+
+1. read journal
+2. read board summary
+3. read recent events
+4. inspect only the tasks or agents that changed
+5. write a checkpoint if the recovered state is non-trivial
+
+### Handling blocked work
+
+When an agent is blocked or errors:
+
+- inspect the task and agent state
+- message the agent if more context can unblock it
+- use `weaver_task_resolve` if the blocker is a human-answer task
+- use `weaver_ask` if the next decision belongs to the human
+
+## CLI
+
+The main Weaver-facing CLI surface today is journal inspection plus reply flow from agent sessions:
+
+```bash
+loom weaver journal
+loom weaver journal -n 50
+loom weaver journal -t checkpoint
+loom weaver journal --json
+
+loom ai reply "your response"
+```
+
+Most orchestration control happens through the Weaver's MCP tools rather than separate CLI commands.
+
+## Practical summary
+
+The best way to think about the Weaver is:
+
+- a board-scoped orchestrator, not a generic autonomous agent
+- driven by digests and recovery, not by constant polling
+- stateful because of the journal, not because chat history is permanent
+- safest when dispatching in waves and escalating ambiguous decisions to the human
+
+If you want the Weaver to work well, give it:
+
+- clear actions and transitions
+- bounded concurrency
+- explicit review and merge habits
+- regular journal checkpoints
+
+That combination matches how Loom's current product behavior is designed to operate.

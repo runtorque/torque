@@ -35,9 +35,14 @@ These settings override the group defaults when creating agents specifically. Le
 | **Directory** | Working directory for agents. Overrides the group default. |
 | **Profile** | iTerm2 profile for agents. |
 | **Shell** | Shell for agents. |
+| **Provider** | Preferred agent backend (`claude-code`, `codex`, `gemini-cli`, or empty to auto-detect from the boot command). |
+| **Boot command** | Command Loom runs when the agent tab opens. Leave empty to use the provider default or global default command. |
 | **Tab color** | Tab color for agents. Select the arrow (++up++) to inherit from the group, or ++x++ for no color. |
 | **Additional environment** | Extra environment variables for agents, merged with (and can override) the group environment. |
+| **Environment file** | Optional shell file sourced before the boot command runs. |
 | **Default agent template** | Optional base template applied to new agents in this group before group-specific `agent_*` overrides. |
+| **Session resume** | When supported by the provider, relaunch resumes the provider conversation instead of starting from scratch. |
+| **Idle timeout** | Minutes Loom waits before it may flag a quiet agent for attention. Set to `0` to disable. |
 
 ### Git worktree per agent
 
@@ -47,6 +52,28 @@ See [Worktrees](worktrees.md) for the full guide on checkpoints, rollback, and m
 
 !!! note
     The directory must be inside a git repository for this to work. If it's not, the setting is silently ignored.
+
+### Worktree options
+
+When worktrees are enabled, these settings control the execution environment:
+
+| Setting | Description |
+|---------|-------------|
+| **Worktree base directory** | Repo-relative directory where Loom stores worktrees. |
+| **Worktree base branch** | Branch to fork from. Leave empty to use the repo's current HEAD. |
+| **Auto-checkpoint on stop** | Create a checkpoint commit when the agent session ends. |
+| **Checkpoint on progress / done** | Create throttled checkpoints when the agent reports progress or completion. |
+| **Squash on merge** | Prefer squash merge when merging worktree branches back to the base branch. |
+| **Merge instructions** | Extra text Loom appends to merge prompts. |
+| **Symlink paths** | Repo-relative paths that should be mirrored into every worktree as symlinks. |
+
+### Provider and resume notes
+
+- If you set **Provider**, Loom treats that adapter as authoritative even if you also override the boot command.
+- If Provider is empty, Loom tries to infer the adapter from the boot command or running process name.
+- Session resume only works for adapters that expose a provider session ID. Claude Code and Codex support it; generic terminals do not.
+
+See [Agents & Sessions](agents-and-sessions.md) for the end-to-end runtime model.
 
 ### Always open custom dialog
 

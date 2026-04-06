@@ -224,6 +224,8 @@ Create a task in the Backlog without launching an agent.
 loom task create "Add dark mode support" -g frontend
 loom task create "Fix login bug" -t oneshot/fix -v MODULE=auth
 loom task create "Review PR" -l review,urgent
+loom task create "Deploy auth changes" --depends-on review-auth
+loom task create "Kick off release checklist" --at "tomorrow 09:00"
 ```
 
 | Flag | Description |
@@ -231,8 +233,9 @@ loom task create "Review PR" -l review,urgent
 | `-g, --group` | Target group |
 | `-t, --action` | Action to attach |
 | `-v, --var` | Action variables (`KEY=VALUE`, repeatable) |
-| `-a, --assign` | Assignee |
 | `-l, --labels` | Comma-separated labels |
+| `--at` | Schedule dispatch for a future time |
+| `--depends-on` | Comma-separated task slugs or IDs that must finish first |
 
 Alias: `c`
 
@@ -299,6 +302,8 @@ loom task edit add-dark-mode                                # opens $EDITOR
 loom task edit add-dark-mode -t "Updated description"       # inline edit
 loom task edit add-dark-mode --action feature/implement     # change action
 loom task edit add-dark-mode -l feature,priority            # update labels
+loom task edit deploy-auth-middleware --depends-on review-auth,run-auth-tests
+loom task edit release-checklist --at "2026-04-07T12:00:00Z"
 ```
 
 | Flag | Description |
@@ -306,9 +311,10 @@ loom task edit add-dark-mode -l feature,priority            # update labels
 | `-t, --task` | New task description |
 | `--action` | Set or change action |
 | `-v, --var` | Set action variables (`KEY=VALUE`, repeatable) |
-| `-a, --assign` | Assignee |
 | `-l, --labels` | Comma-separated labels |
 | `-g, --group` | Move to different group |
+| `--at` | Set or replace a scheduled dispatch time |
+| `--depends-on` | Replace the task's dependency list |
 
 Alias: `e`
 
@@ -322,15 +328,6 @@ loom task move add-dark-mode -l Done
 
 Alias: `mv`
 
-### task assign
-
-Assign a task to an agent, or clear the assignment.
-
-```bash
-loom task assign add-dark-mode impl-add-auth    # assign
-loom task assign add-dark-mode --clear           # unassign
-```
-
 ### task chain
 
 Show the full pipeline derivation chain for a task.
@@ -340,6 +337,14 @@ loom task chain add-dark-mode
 ```
 
 Displays the chain with depth, status, lane, and linked agent for each task.
+
+### task resolve
+
+Resolve a human-in-the-loop ask task by sending an answer back to the waiting agent.
+
+```bash
+loom task resolve review-auth "Approved. Merge after CI passes."
+```
 
 ---
 
@@ -576,6 +581,80 @@ loom pipeline show feature/implement
 Shows the pipeline structure with actions and transition conditions.
 
 Alias: `pl`
+
+---
+
+## schedule
+
+Recurring and one-shot task creation plus automatic dispatch.
+
+### schedule create
+
+```bash
+loom schedule create weekly-deps \
+  -g backend \
+  --cron "0 9 * * 1" \
+  --task "Weekly dependency update {date}" \
+  -t maintenance/deps
+
+loom schedule create release-checklist \
+  -g ops \
+  --at "tomorrow 09:00" \
+  --task "Release checklist {datetime}"
+```
+
+| Flag | Description |
+|------|-------------|
+| `-g, --group` | Target group |
+| `--task` | Task title template; supports `{date}`, `{time}`, and `{datetime}` |
+| `-d, --context` | Longer task description |
+| `--cron` | Recurring 5-field cron expression |
+| `--at` | One-shot run time |
+| `-t, --action` | Action attached to each created task |
+| `-v, --var` | Action variables (`KEY=VALUE`, repeatable) |
+| `-l, --labels` | Comma-separated labels |
+| `--tz` | IANA timezone for cron evaluation |
+
+### schedule list
+
+```bash
+loom schedule list
+```
+
+Alias: `ls`
+
+### schedule show
+
+```bash
+loom schedule show weekly-deps
+```
+
+### schedule edit
+
+```bash
+loom schedule edit weekly-deps --cron "0 8 * * 1"
+loom schedule edit weekly-deps -t maintenance/deps -v MODULE=auth
+```
+
+### schedule enable
+
+```bash
+loom schedule enable weekly-deps
+```
+
+### schedule disable
+
+```bash
+loom schedule disable weekly-deps
+```
+
+### schedule run
+
+Trigger the schedule immediately and create a fresh task now.
+
+```bash
+loom schedule run weekly-deps
+```
 
 ---
 

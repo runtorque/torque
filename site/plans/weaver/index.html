@@ -1,0 +1,3269 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="iTerm2 agent and terminal orchestration">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Implementation Plan: Weaver (Phase 5) - Loom</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#implementation-plan-weaver-phase-5" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Loom" class="md-header__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Loom
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Implementation Plan: Weaver (Phase 5)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Loom" class="md-nav__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Loom
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start Here
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Start Here
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agents-and-sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents & Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Workflows
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../workflow-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../board/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../task-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions & Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../worktrees/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worktrees
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../group-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Group Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../keyboard-shortcuts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard Shortcuts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Problem
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#weaver-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Weaver lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-push-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event push flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-reply-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent reply flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#human-interaction-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Human interaction flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#context-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context management
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#groupsettings-additions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GroupSettings additions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#new-weaversettings-per-group-stored-in-db" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New: WeaverSettings (per-group, stored in DB)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#new-weaverjournalentry-sqlite-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New: WeaverJournalEntry (SQLite table)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#db-schema-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DB schema changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agentcell-additions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AgentCell additions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Prompt Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#system-prompt-persistent-across-clear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        System prompt (persistent across /clear)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#user-prompt-the-initial-task-message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User prompt (the initial task message)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation-inject_system_prompt-for-weaver-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation: inject_system_prompt for weaver agents
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP Tools
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="MCP Tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agent-side-new-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent-side: new tool
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Agent-side: new tool">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#loom_reply" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom_reply
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver-side-final-tool-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Weaver-side: final tool list
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Weaver-side: final tool list">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#read-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read tools
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Read tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#weaver_board_list-keep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_board_list (keep)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_task_show-enriched-absorbs-task_chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_task_show (enriched — absorbs task_chain)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_agents_list-keep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_agents_list (keep)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_actions_list-keep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_actions_list (keep)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_action_show-keep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_action_show (keep)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#write-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write tools
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Write tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#weaver_task_create-keep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_task_create (keep)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_task_edit-keep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_task_edit (keep)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_task_move-keep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_task_move (keep)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_task_dispatch-keep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_task_dispatch (keep)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_task_resolve-keep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_task_resolve (keep)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event tools
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Event tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#weaver_events-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_events (new)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_notifications-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_notifications (new)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#context-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context tools
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Context tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#weaver_journal-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_journal (new)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_journal_read-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_journal_read (new)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interaction-tools" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interaction tools
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Interaction tools">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#weaver_agent_message-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_agent_message (new)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_ask-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_ask (new)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tools-removed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tools removed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tool-count-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool count summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cli-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI Commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CLI Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-reply" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai reply
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loom-weaver-journal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom weaver journal
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-push-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event Push System
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Event Push System">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#weavereventbuffer-new-class-in-loomweaverpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WeaverEventBuffer (new class in loom/weaver.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#delivery-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#digest-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Digest format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#heartbeat-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Heartbeat format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#context-warning-appended-to-digest-when-threshold-exceeded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context warning (appended to digest when threshold exceeded)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ui-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="UI Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#weaver-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Weaver Panel
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Weaver Panel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#journal-tab-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journal tab (default)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#settings-tab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings tab
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver-designation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Weaver designation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pauseresume-button" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pause/Resume button
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server Commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Server Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="New commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#weaver_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_message
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai_report-new-action-reply" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai_report — new action: reply
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_journal_append" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_journal_append
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_journal_read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_journal_read
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_update_settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_update_settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_ask" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_ask
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_reply" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_reply
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#weaver_pause-weaver_resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        weaver_pause / weaver_resume
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#modified-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modified commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Modified commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#add_agent-weaver-creation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        add_agent — weaver creation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#remove_agent-weaver-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        remove_agent — weaver cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation Steps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implementation Steps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-data-model-loomstatepy-loomdbpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Data model (loom/state.py, loom/db.py) ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-event-buffer-loomweaverpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Event buffer (loom/weaver.py) ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-server-commands-loomserverpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Server commands (loom/server.py) ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-4-mcp-tools-agent-side-loommcppy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: MCP tools — agent side (loom/mcp.py) ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-5-mcp-tools-weaver-side-loommcp_weaverpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5: MCP tools — weaver side (loom/mcp_weaver.py) ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-6-ui-weaver-panel-staticjsweaverjs-staticstylecss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6: UI — Weaver panel (static/js/weaver.js, static/style.css) ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-7-ui-weaver-agent-indicators-staticjsrenderjs-staticjscommandsjs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 7: UI — Weaver agent indicators (static/js/render.js, static/js/commands.js)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-8-ui-pauseresume-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8: UI — Pause/resume controls ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-9-context-warning-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 9: Context warning integration ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-10-weaver-action-template-and-base-system-prompt-base-prompt-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 10: Weaver action template and base system prompt ✅ (base prompt only)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-11-human-interaction-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 11: Human interaction flow ✅
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remaining-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remaining Work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-were-not-building-yet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What We're NOT Building (Yet)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#file-changes-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Changes Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="implementation-plan-weaver-phase-5">Implementation Plan: Weaver (Phase 5)<a class="headerlink" href="#implementation-plan-weaver-phase-5" title="Permanent link">&para;</a></h1>
+<p><strong>Roadmap phase</strong>: 5 — Semi-Autonomous Orchestration
+<strong>Status</strong>: Implemented (core: data model, event buffer, MCP tools, CLI, weaver panel, human interaction)
+<strong>Goal</strong>: A dedicated semi-autonomous orchestrator agent per group that manages tasks, dispatches agents, reacts to events, consults with the human at key decision points, and maintains a persistent decision journal. The weaver is a first-class concept in Loom — a special agent unique to each group with its own UI panel, event subscription system, human interaction flow, and context management strategy.</p>
+<hr />
+<h2 id="the-problem">The Problem<a class="headerlink" href="#the-problem" title="Permanent link">&para;</a></h2>
+<p>Loom can dispatch tasks to agents and agents can self-organize via pipelines (<code>derive</code>, <code>ask</code>). But there is no entity that looks at the whole board, decides what to do next, responds to events, and drives the project forward. Today that role falls to the human — manually dispatching tasks, monitoring agent progress, resolving questions, and reacting to errors.</p>
+<p>The weaver fills this gap. It's an AI agent (Claude Code, Codex, etc.) that acts as a semi-autonomous project manager for a group:</p>
+<ul>
+<li><strong>Consults the human</strong> — asks questions at key decision points (priorities, design decisions, approvals) and waits for answers before proceeding</li>
+<li><strong>Dispatches work</strong> — creates tasks, assigns actions, launches agents</li>
+<li><strong>Reacts to events</strong> — when an agent finishes, errors, or asks a question, the weaver decides the next step</li>
+<li><strong>Maintains memory</strong> — keeps a persistent decision journal that survives context cleanup</li>
+<li><strong>Communicates with agents</strong> — sends messages to agents and receives replies</li>
+</ul>
+<p>The weaver is NOT fully autonomous — it's a semi-independent orchestrator that analyzes tasks, talks to the human about what needs to be done, and orchestrates work around those decisions. It decides when it needs human input and when it can operate on its own. Pipelines define <em>what can happen</em>; the weaver decides <em>what should happen now</em>, with human guidance.</p>
+<hr />
+<h2 id="design-principles">Design Principles<a class="headerlink" href="#design-principles" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>One weaver per group</strong> — Each group can have at most one designated weaver agent. Multiple weavers in the same group would conflict on decisions. The UI enforces this: once a weaver exists, the create button is disabled.</li>
+<li><strong>Push-primary events</strong> — The weaver receives event digests via text pushed to its terminal (same mechanism as <code>resolve_ask</code>). Polling via <code>weaver_events</code> is secondary — for catching up after context cleanup or manual checks.</li>
+<li><strong>Idle-gated delivery</strong> — Event digests are only sent when the weaver agent is idle (activity is empty / waiting). Never interrupt a weaver mid-thought or mid-tool-call. Events buffer until the weaver goes idle.</li>
+<li><strong>Mandatory + optional events</strong> — Some events always appear in digests (task completed, agent error, agent reply). Others are configurable (agent started, progress updates). A max interval (default 5 minutes) ensures the weaver gets periodic heartbeats even when nothing critical happened.</li>
+<li><strong>Journal as persistent brain</strong> — The weaver writes structured journal entries (decisions, observations, checkpoints, plans). On context cleanup, the journal + current board state is enough to resume orchestration. The journal is per-group and stored in SQLite.</li>
+<li><strong>Pausable by the user</strong> — A pause/resume button in the UI suspends event pushes so the human can interact with the weaver directly without competing with automated digests.</li>
+<li><strong>Human-in-the-loop</strong> — The weaver is semi-autonomous: it uses <code>weaver_ask</code> to post questions to the human, which auto-pauses event delivery and shows the question in the Weaver panel. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the weaver's Claude Code terminal. When the weaver becomes active again, the pending question auto-clears.</li>
+<li><strong>Weaver creation via UI</strong> — The weaver is created through the Weaver panel's Settings tab ("+ Create Weaver" button), not by designating an existing agent. This ensures the <code>--append-system-prompt-file</code> flag is set on boot.</li>
+</ol>
+<hr />
+<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
+<h3 id="weaver-lifecycle">Weaver lifecycle<a class="headerlink" href="#weaver-lifecycle" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>User designates agent as weaver (UI or API)
+  │
+  ├── GroupSettings.weaver_agent_id = cell.id
+  ├── Weaver gets weaver_* MCP tools exposed
+  ├── Event buffer + timer created for this group
+  │
+  └── Weaver agent boots with:
+        │   • --append-system-prompt: weaver role identity + custom instructions
+        │   • Action prompt (user message): initial task / &quot;check journal and resume&quot;
+        │
+        ├── weaver_journal_read → recover context
+        ├── weaver_board_list → current board state
+        ├── weaver_events → catch up on missed events
+        │
+        └── Orchestration loop:
+              │
+              ├── Weaver dispatches tasks, makes decisions
+              ├── Weaver writes journal entries
+              ├── Weaver goes idle
+              │     │
+              │     └── Loom pushes event digest
+              │           │
+              │           └── Weaver wakes up, processes events
+              │                 ├── Dispatch next task
+              │                 ├── Resolve ask
+              │                 ├── Send message to agent
+              │                 └── Write journal entry
+              │
+              └── (repeat until paused or context exhausted)
+</code></pre></div>
+<h3 id="event-push-flow">Event push flow<a class="headerlink" href="#event-push-flow" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>Agent calls loom_done (or error, blocked, reply, etc.)
+  │
+  ├── Panel event emitted (existing)
+  │
+  ├── Weaver event buffer check:
+  │     │
+  │     ├── Is there a weaver for this group?
+  │     ├── Is the weaver paused? → skip
+  │     ├── Is this event type enabled? (mandatory events always pass)
+  │     │
+  │     └── Buffer the event
+  │
+  └── Delivery timer check:
+        │
+        ├── Is the weaver idle? (activity == &quot;&quot; or &quot;waiting&quot;)
+        │     ├── Yes → flush buffer, send digest to terminal
+        │     └── No → wait, check again on next activity change
+        │
+        └── Has max_interval elapsed since last digest?
+              ├── Yes → mark as due, deliver on next idle
+              └── No → wait for timer or next event
+</code></pre></div>
+<h3 id="agent-reply-flow">Agent reply flow<a class="headerlink" href="#agent-reply-flow" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>Weaver → weaver_agent_message(agent=&quot;fix-auth&quot;, message=&quot;Rebase on main&quot;)
+  │
+  ├── Loom sends formatted message to agent&#39;s terminal:
+  │     ── Message from Weaver ────────────────────
+  │     Rebase on main, the auth PR was merged.
+  │     Reply with: loom_reply(&quot;your response&quot;)
+  │     ────────────────────────────────────────────
+  │
+  └── Agent reads message, does work, then:
+        │
+        Agent → loom_reply(message=&quot;Rebased successfully&quot;)
+          │
+          ├── Panel event: kind=&quot;agent_reply&quot;, message=&quot;Rebased successfully&quot;
+          ├── Buffered for weaver digest (mandatory event)
+          │
+          └── Next digest to weaver includes:
+                • agent_reply: fix-auth → &quot;Rebased successfully&quot;
+</code></pre></div>
+<h3 id="human-interaction-flow">Human interaction flow<a class="headerlink" href="#human-interaction-flow" title="Permanent link">&para;</a></h3>
+<p>The weaver operates in two modes: <strong>autonomous</strong> (processing events, dispatching tasks) and <strong>awaiting input</strong> (question posted, events paused, waiting for human).</p>
+<div class="highlight"><pre><span></span><code>Weaver needs human guidance
+  │
+  ├── weaver_ask(&quot;Which tasks should I prioritize?&quot;)
+  │     │
+  │     ├── WeaverSettings.pending_question = &quot;Which tasks...&quot;
+  │     ├── WeaverSettings.paused = True (events auto-pause)
+  │     ├── Journal: &quot;Asked human: Which tasks...&quot;
+  │     ├── Weaver panel shows amber banner with question + reply textarea
+  │     │
+  │     └── Tool response to weaver:
+  │           &quot;Events paused. Call weaver_resume after the human responds.&quot;
+  │
+  ├── Path A: Human replies via Weaver panel
+  │     │
+  │     ├── Types answer in textarea, clicks &quot;Send Reply&quot;
+  │     ├── weaver_reply command:
+  │     │     ├── Sends formatted &quot;── Human Reply ──&quot; block to weaver terminal
+  │     │     ├── Clears pending_question
+  │     │     ├── Sets paused = False (events resume)
+  │     │     └── Journal: &quot;Human replied: ...&quot;
+  │     │
+  │     └── Weaver processes answer, calls weaver_resume (no-op, already unpaused)
+  │
+  └── Path B: Human types directly into Claude Code terminal
+        │
+        ├── Weaver receives input, starts thinking
+        ├── on_agent_activity_change detects weaver became active
+        │     └── Auto-clears pending_question (panel updates)
+        ├── Weaver processes answer
+        └── Weaver calls weaver_resume to unpause event delivery
+</code></pre></div>
+<h3 id="context-management">Context management<a class="headerlink" href="#context-management" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>Weaver running, context growing
+  │
+  ├── Token tracking (existing session_tokens_in/out)
+  │
+  ├── When context &gt; 80% threshold:
+  │     Digest includes: &quot;⚠ Context usage: 82%. Consider writing a checkpoint.&quot;
+  │
+  ├── Weaver writes checkpoint:
+  │     weaver_journal(type=&quot;checkpoint&quot;, entry=&quot;Board: 2 IP, 4 TD...&quot;)
+  │
+  └── On context cleanup (/clear or session restart):
+        │
+        ├── System prompt persists (--append-system-prompt): weaver identity
+        │   + custom instructions survive /clear automatically
+        │
+        └── Action prompt (user message) instructs:
+              1. weaver_journal_read(tail=20) → recover decisions
+              2. weaver_board_list → current state
+              3. weaver_events(since=last_checkpoint) → missed events
+              4. Resume orchestration
+</code></pre></div>
+<hr />
+<h2 id="data-model">Data Model<a class="headerlink" href="#data-model" title="Permanent link">&para;</a></h2>
+<h3 id="groupsettings-additions">GroupSettings additions<a class="headerlink" href="#groupsettings-additions" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">GroupSettings</span><span class="p">:</span>
+    <span class="c1"># ... existing fields ...</span>
+
+    <span class="c1"># Weaver</span>
+    <span class="n">weaver_agent_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>              <span class="c1"># the designated weaver agent for this group</span>
+</code></pre></div>
+<h3 id="new-weaversettings-per-group-stored-in-db">New: WeaverSettings (per-group, stored in DB)<a class="headerlink" href="#new-weaversettings-per-group-stored-in-db" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">WeaverSettings</span><span class="p">:</span>
+    <span class="n">group</span><span class="p">:</span> <span class="nb">str</span>                             <span class="c1"># group name (key)</span>
+    <span class="n">push_interval</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">60</span>               <span class="c1"># seconds between digest pushes (min: 10)</span>
+    <span class="n">max_interval</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">300</span>               <span class="c1"># max seconds between pushes (heartbeat)</span>
+    <span class="n">paused</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>                   <span class="c1"># user paused event pushes</span>
+    <span class="n">custom_instructions</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>          <span class="c1"># user-defined instructions appended to weaver prompt</span>
+    <span class="n">pending_question</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>            <span class="c1"># question awaiting human reply (non-empty = awaiting input)</span>
+    <span class="n">enabled_events</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span>     <span class="c1"># optional events (mandatory always on)</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="p">[</span>
+            <span class="s2">&quot;agent_started&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;task_dispatched&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;task_derived&quot;</span><span class="p">,</span>
+        <span class="p">]</span>
+    <span class="p">)</span>
+</code></pre></div>
+<p><strong><code>custom_instructions</code></strong>: Free-text instructions injected into the weaver's system prompt via <code>--append-system-prompt</code>. The user writes these in the Weaver panel's Settings tab. They are concatenated with the weaver's base system prompt (from the action's <code>system_prompt</code> field or a built-in default) and passed as a single <code>--append-system-prompt</code> flag on boot.</p>
+<p><strong>System prompt structure</strong> (assembled by Loom, passed via <code>--append-system-prompt</code>):</p>
+<div class="highlight"><pre><span></span><code>You are the Weaver — the orchestrator agent for the &quot;{group}&quot; group in Loom.
+Your role is to manage the task board, dispatch work to agents, react to events,
+and maintain a decision journal for context continuity.
+
+{action system_prompt field, if any}
+
+── Custom Instructions ────────────────────────
+Focus on the auth and payments modules first.
+Never dispatch more than 3 agents concurrently.
+Always create a review task after implementation.
+────────────────────────────────────────────────
+</code></pre></div>
+<p><strong>Why system prompt, not user message</strong>: The system prompt survives <code>/clear</code> — when the weaver's context is cleaned, it retains its identity and custom instructions without needing them re-sent. The action's rendered <code>prompt</code> field is sent as the initial user message (the task), which is the part that changes between dispatches.</p>
+<p>This gives the user a lightweight way to steer the weaver without editing the action YAML. The instructions persist across weaver restarts — they're part of <code>WeaverSettings</code> in SQLite, not the agent's ephemeral state.</p>
+<p><strong>Mandatory events</strong> (always included in digests, cannot be disabled):
+- <code>task_completed</code> — agent finished a task
+- <code>agent_reply</code> — agent replied to weaver message
+- <code>agent_error</code> — unrecoverable error
+- <code>agent_blocked</code> — agent needs help
+- <code>ask_created</code> — agent needs human/weaver input</p>
+<p><strong>Optional events</strong> (on by default, weaver can toggle):
+- <code>agent_started</code> — new agent session started
+- <code>task_dispatched</code> — task was dispatched to an agent
+- <code>task_derived</code> — subtask was created via derive
+- <code>agent_progress</code> — agent progress update (off by default — too noisy)</p>
+<h3 id="new-weaverjournalentry-sqlite-table">New: WeaverJournalEntry (SQLite table)<a class="headerlink" href="#new-weaverjournalentry-sqlite-table" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">WeaverJournalEntry</span><span class="p">:</span>
+    <span class="nb">id</span><span class="p">:</span> <span class="nb">int</span>                                <span class="c1"># auto-increment</span>
+    <span class="n">group</span><span class="p">:</span> <span class="nb">str</span>                             <span class="c1"># group name</span>
+    <span class="n">timestamp</span><span class="p">:</span> <span class="nb">float</span>                       <span class="c1"># time.time()</span>
+    <span class="n">entry_type</span><span class="p">:</span> <span class="nb">str</span>                        <span class="c1"># &quot;decision&quot; | &quot;observation&quot; | &quot;checkpoint&quot; | &quot;plan&quot;</span>
+    <span class="n">entry</span><span class="p">:</span> <span class="nb">str</span>                             <span class="c1"># free-text content</span>
+</code></pre></div>
+<h3 id="db-schema-changes">DB schema changes<a class="headerlink" href="#db-schema-changes" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1">-- New columns on group_settings</span>
+<span class="n">weaver_agent_id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;&#39;</span>
+
+<span class="c1">-- New table: weaver_settings</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">weaver_settings</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="n">group_name</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+<span class="w">    </span><span class="n">push_interval</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">    </span><span class="n">max_interval</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="mi">300</span><span class="p">,</span>
+<span class="w">    </span><span class="n">paused</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="n">custom_instructions</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">pending_question</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">,</span>
+<span class="w">    </span><span class="n">enabled_events</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="s1">&#39;[&quot;agent_started&quot;,&quot;task_dispatched&quot;,&quot;task_derived&quot;]&#39;</span>
+<span class="p">);</span>
+
+<span class="c1">-- New table: weaver_journal</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">weaver_journal</span><span class="w"> </span><span class="p">(</span>
+<span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="w"> </span><span class="n">AUTOINCREMENT</span><span class="p">,</span>
+<span class="w">    </span><span class="n">group_name</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">    </span><span class="k">timestamp</span><span class="w"> </span><span class="nb">REAL</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">    </span><span class="n">entry_type</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<span class="w">    </span><span class="n">entry</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span>
+<span class="p">);</span>
+<span class="k">CREATE</span><span class="w"> </span><span class="k">INDEX</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">idx_weaver_journal_group</span>
+<span class="w">    </span><span class="k">ON</span><span class="w"> </span><span class="n">weaver_journal</span><span class="p">(</span><span class="n">group_name</span><span class="p">,</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="k">DESC</span><span class="p">);</span>
+</code></pre></div>
+<h3 id="agentcell-additions">AgentCell additions<a class="headerlink" href="#agentcell-additions" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">AgentCell</span><span class="p">:</span>
+    <span class="c1"># ... existing fields ...</span>
+
+    <span class="c1"># Weaver message tracking</span>
+    <span class="n">pending_weaver_message</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>   <span class="c1"># agent has an unread message from weaver</span>
+</code></pre></div>
+<p>This is ephemeral (not persisted) — used to validate that <code>loom_reply</code> is only available when the agent has received a weaver message.</p>
+<hr />
+<h2 id="prompt-architecture">Prompt Architecture<a class="headerlink" href="#prompt-architecture" title="Permanent link">&para;</a></h2>
+<p>The weaver's prompt is split into two layers, using Claude Code's <code>--append-system-prompt</code> flag:</p>
+<h3 id="system-prompt-persistent-across-clear">System prompt (persistent across <code>/clear</code>)<a class="headerlink" href="#system-prompt-persistent-across-clear" title="Permanent link">&para;</a></h3>
+<p>Assembled by Loom from three parts:</p>
+<ol>
+<li><strong>Base weaver identity</strong> — built-in text that defines the weaver role, available tools, and behavioral guidelines (e.g. "write journal entries at decision points", "write checkpoints periodically")</li>
+<li><strong>Action <code>system_prompt</code> field</strong> (optional) — if the weaver action YAML has a <code>system_prompt</code> field, it's included. This lets the action template contribute project-level system instructions.</li>
+<li><strong>Custom instructions</strong> — user-written text from <code>WeaverSettings.custom_instructions</code></li>
+</ol>
+<p>These are concatenated and passed as <code>--append-system-prompt</code> on boot. Because <code>--append-system-prompt</code> appends to Claude Code's built-in system prompt, the weaver retains all standard capabilities (file editing, bash, tools) while gaining its orchestrator identity.</p>
+<p><strong>Key benefit</strong>: The system prompt survives <code>/clear</code>. When the weaver's context fills up and the user (or weaver) clears it, the weaver still knows <em>who it is</em> and <em>what the custom rules are</em>. Only the conversation history (tool call results, event digests) is lost — recoverable via journal + board state.</p>
+<h3 id="user-prompt-the-initial-task-message">User prompt (the initial task message)<a class="headerlink" href="#user-prompt-the-initial-task-message" title="Permanent link">&para;</a></h3>
+<p>The action's rendered <code>prompt</code> field is sent as text to the weaver's terminal — a regular user message. This is the <em>task</em>: what the weaver should do right now.</p>
+<p><strong>First dispatch</strong> (fresh weaver):
+<div class="highlight"><pre><span></span><code>You are starting a new orchestration session.
+Check the board and begin managing tasks for this group.
+</code></pre></div></p>
+<p><strong>Re-dispatch</strong> (after context cleanup or restart):
+<div class="highlight"><pre><span></span><code>You are resuming an orchestration session.
+Read your journal to recover context, then check the board and recent events.
+</code></pre></div></p>
+<p>The action template controls this via <code>{{ loom.context.is_clean }}</code> — the same mechanism regular actions use.</p>
+<h3 id="implementation-inject_system_prompt-for-weaver-agents">Implementation: <code>inject_system_prompt</code> for weaver agents<a class="headerlink" href="#implementation-inject_system_prompt-for-weaver-agents" title="Permanent link">&para;</a></h3>
+<p>The current <code>ClaudeCodeAdapter.inject_system_prompt()</code> writes to <code>.claude/instructions.md</code>, which is loaded as user context, not as a true system prompt. For the weaver, we need the actual <code>--append-system-prompt</code> flag.</p>
+<p><strong>Approach</strong>: When dispatching a weaver agent, Loom appends <code>--append-system-prompt-file &lt;path&gt;</code> to the boot command instead of using <code>inject_system_prompt()</code>. The file is written to a stable path (e.g. <code>.loom/weaver-system-prompt-{group}.md</code>) so it persists across restarts.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># In _create_agent_with_config() for weaver agents:</span>
+<span class="k">if</span> <span class="n">is_weaver</span><span class="p">:</span>
+    <span class="n">system_prompt_text</span> <span class="o">=</span> <span class="n">_build_weaver_system_prompt</span><span class="p">(</span><span class="n">group</span><span class="p">,</span> <span class="n">weaver_settings</span><span class="p">)</span>
+    <span class="n">prompt_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">git_root</span><span class="p">,</span> <span class="s2">&quot;.loom&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;weaver-system-prompt-</span><span class="si">{</span><span class="n">group_slug</span><span class="si">}</span><span class="s2">.md&quot;</span><span class="p">)</span>
+    <span class="n">Path</span><span class="p">(</span><span class="n">prompt_path</span><span class="p">)</span><span class="o">.</span><span class="n">write_text</span><span class="p">(</span><span class="n">system_prompt_text</span><span class="p">)</span>
+    <span class="n">cell</span><span class="o">.</span><span class="n">command</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot; --append-system-prompt-file </span><span class="si">{</span><span class="n">shlex</span><span class="o">.</span><span class="n">quote</span><span class="p">(</span><span class="n">prompt_path</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+</code></pre></div>
+<p>This is cleaner than the <code>instructions.md</code> approach because:
+- It uses the actual system prompt mechanism (survives <code>/clear</code>)
+- The file is scoped to the weaver (doesn't pollute <code>.claude/instructions.md</code> which other agents may use)
+- It's in <code>.loom/</code> which is already gitignored</p>
+<p>For <strong>Codex</strong>, the adapter would use its equivalent mechanism (if available), or fall back to the instructions-file approach.</p>
+<hr />
+<h2 id="mcp-tools">MCP Tools<a class="headerlink" href="#mcp-tools" title="Permanent link">&para;</a></h2>
+<h3 id="agent-side-new-tool">Agent-side: new tool<a class="headerlink" href="#agent-side-new-tool" title="Permanent link">&para;</a></h3>
+<h4 id="loom_reply"><code>loom_reply</code><a class="headerlink" href="#loom_reply" title="Permanent link">&para;</a></h4>
+<p>Reply to a message from the weaver. Only works when the agent has a pending weaver message.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;loom_reply&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Reply to a message from the weaver (orchestrator agent). The reply is delivered to the weaver in its next event digest.&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;inputSchema&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;object&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span>
+<span class="w">                </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Your reply to the weaver.&quot;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;message&quot;</span><span class="p">]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Server handling</strong>: <code>ai_report(action="reply")</code> — creates panel event with kind <code>agent_reply</code>, clears <code>cell.pending_weaver_message</code>.</p>
+<h3 id="weaver-side-final-tool-list">Weaver-side: final tool list<a class="headerlink" href="#weaver-side-final-tool-list" title="Permanent link">&para;</a></h3>
+<p>Tools are served from the same <code>/mcp</code> endpoint. The <code>weaver_</code> prefix provides namespace separation. Weaver tools don't require <code>X-Loom-Cell-Id</code> (though they accept it for audit logging).</p>
+<h4 id="read-tools">Read tools<a class="headerlink" href="#read-tools" title="Permanent link">&para;</a></h4>
+<h5 id="weaver_board_list-keep"><code>weaver_board_list</code> (keep)<a class="headerlink" href="#weaver_board_list-keep" title="Permanent link">&para;</a></h5>
+<p>List all tasks on the board grouped by lane. Supports optional filters by lane, label, group, or text search.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;lane&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Filter to a specific lane.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;label&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Filter to tasks with this label.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;group&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Filter to tasks in this group.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;search&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Text search across task title and description.&quot;</span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h5 id="weaver_task_show-enriched-absorbs-task_chain"><code>weaver_task_show</code> (enriched — absorbs <code>task_chain</code>)<a class="headerlink" href="#weaver_task_show-enriched-absorbs-task_chain" title="Permanent link">&para;</a></h5>
+<p>Show full details for a task by slug or ID. When the task is part of a pipeline, the response automatically includes the pipeline chain summary (task titles, lanes, depths, agents) — no need to call <code>task_chain</code> separately.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;task&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Task slug or ID.&quot;</span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;task&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Response includes</strong> (when pipeline task):
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="s2">&quot;...task fields...&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;pipeline_chain&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;lane&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Done&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;depth&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;agent&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;impl-login&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="p">{</span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;lane&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;In Progress&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;depth&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;agent&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;review-login&quot;</span><span class="p">}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<h5 id="weaver_agents_list-keep"><code>weaver_agents_list</code> (keep)<a class="headerlink" href="#weaver_agents_list-keep" title="Permanent link">&para;</a></h5>
+<p>List all active agents with their name, slug, status, group, current task, and activity detail.</p>
+<h5 id="weaver_actions_list-keep"><code>weaver_actions_list</code> (keep)<a class="headerlink" href="#weaver_actions_list-keep" title="Permanent link">&para;</a></h5>
+<p>List available actions (project and user scope) with name, description, variables, and scope.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;group&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Group name to resolve project-scoped actions.&quot;</span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h5 id="weaver_action_show-keep"><code>weaver_action_show</code> (keep)<a class="headerlink" href="#weaver_action_show-keep" title="Permanent link">&para;</a></h5>
+<p>Show full details of an action including its YAML contents, prompt template, transitions, and discovered variables.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Action name (e.g. &#39;feature/implement&#39;).&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;group&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Group name to resolve project-scoped actions.&quot;</span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h4 id="write-tools">Write tools<a class="headerlink" href="#write-tools" title="Permanent link">&para;</a></h4>
+<h5 id="weaver_task_create-keep"><code>weaver_task_create</code> (keep)<a class="headerlink" href="#weaver_task_create-keep" title="Permanent link">&para;</a></h5>
+<p>Create a new task on the board. Specify a title and optionally attach an action, group, lane, and labels.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Short task title.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Longer description or context.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;group&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Target group for the task.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;lane&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Lane to place the task in (default: Backlog).&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Action name to attach (e.g. &#39;feature/implement&#39;).&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;action_vars&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;object&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Action variable values as key-value pairs.&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;additionalProperties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">}},</span>
+<span class="w">        </span><span class="nt">&quot;labels&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;array&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;items&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">},</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Labels to attach to the task.&quot;</span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;title&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h5 id="weaver_task_edit-keep"><code>weaver_task_edit</code> (keep)<a class="headerlink" href="#weaver_task_edit-keep" title="Permanent link">&para;</a></h5>
+<p>Edit fields on an existing task. Only the fields provided are updated — omitted fields are unchanged.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;task&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Task slug or ID to edit.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;New task title.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;New description.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;labels&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;array&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;items&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">},</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;New label list (replaces existing).&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;New action name.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;action_vars&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;object&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;New action variable values.&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;additionalProperties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">}}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;task&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h5 id="weaver_task_move-keep"><code>weaver_task_move</code> (keep)<a class="headerlink" href="#weaver_task_move-keep" title="Permanent link">&para;</a></h5>
+<p>Move a task to a different lane on the board.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;task&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Task slug or ID.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;lane&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Target lane name.&quot;</span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;task&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;lane&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h5 id="weaver_task_dispatch-keep"><code>weaver_task_dispatch</code> (keep)<a class="headerlink" href="#weaver_task_dispatch-keep" title="Permanent link">&para;</a></h5>
+<p>Dispatch a task to an agent. Creates a new agent by default, or dispatches to an existing agent if specified. The task moves to In Progress and the agent receives the rendered prompt.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;task&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Task slug or ID to dispatch.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;agent&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Existing agent slug or ID to dispatch to. If omitted, a new agent is created.&quot;</span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;task&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h5 id="weaver_task_resolve-keep"><code>weaver_task_resolve</code> (keep)<a class="headerlink" href="#weaver_task_resolve-keep" title="Permanent link">&para;</a></h5>
+<p>Resolve an ask task by providing an answer. The answer is sent to the parent task's agent and the ask task moves to Done.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;task&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Slug or ID of the ask task to resolve.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;answer&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;The answer to send to the agent.&quot;</span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;task&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;answer&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h4 id="event-tools">Event tools<a class="headerlink" href="#event-tools" title="Permanent link">&para;</a></h4>
+<h5 id="weaver_events-new"><code>weaver_events</code> (new)<a class="headerlink" href="#weaver_events-new" title="Permanent link">&para;</a></h5>
+<p>Poll for recent events. Primary use: catching up after context cleanup. Secondary use: manually checking what happened. Returns events from <code>PanelEventLog</code> filtered by the weaver's group.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;since_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;integer&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Return events after this event ID (cursor). Omit for latest events.&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;limit&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;integer&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Max events to return (default: 50).&quot;</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;types&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;array&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;items&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">},</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Filter to specific event types. Omit for all types.&quot;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Response:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;events&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">142</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;timestamp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1712419200.0</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;task_completed&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;agent_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fix-auth-bug&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Task &#39;Fix authentication race condition&#39; completed&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;task_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;abc123&quot;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;cursor&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">142</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<h5 id="weaver_notifications-new"><code>weaver_notifications</code> (new)<a class="headerlink" href="#weaver_notifications-new" title="Permanent link">&para;</a></h5>
+<p>Configure event push settings. Sets which optional events the weaver wants in its digests and the push interval. Mandatory events are always included.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;push_interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;integer&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Seconds between digest pushes (min: 10, default: 60).&quot;</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;max_interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;integer&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Max seconds between pushes including heartbeats (default: 300).&quot;</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;enable&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;array&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;items&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">},</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Optional event types to enable: agent_started, task_dispatched, task_derived, agent_progress.&quot;</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;disable&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;array&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;items&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">},</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Optional event types to disable.&quot;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h4 id="context-tools">Context tools<a class="headerlink" href="#context-tools" title="Permanent link">&para;</a></h4>
+<h5 id="weaver_journal-new"><code>weaver_journal</code> (new)<a class="headerlink" href="#weaver_journal-new" title="Permanent link">&para;</a></h5>
+<p>Append an entry to the weaver's persistent decision journal. Use this to record decisions, observations, and periodic checkpoints. The journal survives context cleanup — read it back with <code>weaver_journal_read</code> to resume orchestration.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;enum&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;decision&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;observation&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;checkpoint&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;plan&quot;</span><span class="p">],</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Entry type: decision (action taken + rationale), observation (something noted), checkpoint (board state summary for context recovery), plan (intended next steps).&quot;</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;entry&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Journal entry content. Be concise but include rationale for decisions.&quot;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;type&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;entry&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h5 id="weaver_journal_read-new"><code>weaver_journal_read</code> (new)<a class="headerlink" href="#weaver_journal_read-new" title="Permanent link">&para;</a></h5>
+<p>Read recent journal entries. Use after context cleanup or startup to recover the weaver's decision history and resume orchestration.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;tail&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;integer&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Number of most recent entries to return (default: 20).&quot;</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;enum&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;decision&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;observation&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;checkpoint&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;plan&quot;</span><span class="p">],</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Filter to a specific entry type.&quot;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Response:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;entries&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;timestamp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1712419200.0</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;checkpoint&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;entry&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Board: 2 In Progress, 4 To Do, 8 Backlog, 3 Done. Active: fix-auth (thinking), add-logging (tool_call). Next: dispatch caching task when IP count &lt; 3.&quot;</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">        </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">14</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;timestamp&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1712418900.0</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;decision&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;entry&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Dispatched &#39;Implement auth flow&#39; → new agent. Action: feature/implement. Rationale: highest priority, no blockers, auth on critical path.&quot;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<h4 id="interaction-tools">Interaction tools<a class="headerlink" href="#interaction-tools" title="Permanent link">&para;</a></h4>
+<h5 id="weaver_agent_message-new"><code>weaver_agent_message</code> (new)<a class="headerlink" href="#weaver_agent_message-new" title="Permanent link">&para;</a></h5>
+<p>Send a message to any agent's terminal. The agent can reply via <code>loom_reply</code>, which appears in the weaver's next event digest. Use for: redirecting agents, providing context, answering questions without the full ask/resolve flow.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;agent&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Agent slug or ID.&quot;</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Message to send to the agent.&quot;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;agent&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;message&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Message format sent to agent's terminal:</strong>
+<div class="highlight"><pre><span></span><code>── Message from Weaver ────────────────────────
+Rebase on main, the auth PR was merged.
+
+Reply with: loom_reply(&quot;your response&quot;)
+────────────────────────────────────────────────
+</code></pre></div></p>
+<h5 id="weaver_ask-new"><code>weaver_ask</code> (new)<a class="headerlink" href="#weaver_ask-new" title="Permanent link">&para;</a></h5>
+<p>Ask the human a question. Posts the question to the Weaver panel and auto-pauses event delivery. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the weaver's Claude Code terminal.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;properties&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;question&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;string&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;The question for the human.&quot;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;required&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;question&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Tool response:</strong>
+<div class="highlight"><pre><span></span><code>Question posted to the Weaver panel. Event pushes have been paused.
+The human will see your question and reply via the panel or directly
+in this terminal.
+
+After the human responds, call weaver_resume to unpause event delivery.
+</code></pre></div></p>
+<p><strong>Behavior:</strong>
+1. Sets <code>WeaverSettings.pending_question</code> to the question text
+2. Sets <code>WeaverSettings.paused = True</code> (auto-pause events)
+3. Logs to journal: "Asked human: {question}"
+4. Weaver panel shows amber banner with the question + reply textarea
+5. The weaver goes idle and waits</p>
+<p><strong>Human reply paths:</strong>
+- <strong>Via panel</strong>: Human types answer, clicks "Send Reply" → <code>weaver_reply</code> command sends formatted answer to terminal, clears <code>pending_question</code>, unpauses events, logs to journal
+- <strong>Via terminal</strong>: Human types directly into Claude Code → weaver starts thinking → <code>on_agent_activity_change</code> auto-clears <code>pending_question</code> → weaver calls <code>weaver_resume</code> to unpause</p>
+<h3 id="tools-removed">Tools removed<a class="headerlink" href="#tools-removed" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>weaver_lanes_list</code></td>
+<td>Lanes are near-static (Backlog/To Do/In Progress/Done). Already visible in <code>board_list</code> output.</td>
+</tr>
+<tr>
+<td><code>weaver_pipelines_list</code></td>
+<td>Static analysis of action transitions. Useful for humans designing pipelines, not for active orchestration. Derivable from <code>actions_list</code>.</td>
+</tr>
+<tr>
+<td><code>weaver_task_chain</code></td>
+<td>Merged into <code>weaver_task_show</code> — pipeline chain is auto-included when the task has a <code>pipeline_root_id</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="tool-count-summary">Tool count summary<a class="headerlink" href="#tool-count-summary" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Tools</th>
+<th>Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Read</td>
+<td><code>board_list</code>, <code>task_show</code>, <code>agents_list</code>, <code>actions_list</code>, <code>action_show</code></td>
+<td>5</td>
+</tr>
+<tr>
+<td>Write</td>
+<td><code>task_create</code>, <code>task_edit</code>, <code>task_move</code>, <code>task_dispatch</code>, <code>task_resolve</code></td>
+<td>5</td>
+</tr>
+<tr>
+<td>Events</td>
+<td><code>events</code>, <code>notifications</code></td>
+<td>2</td>
+</tr>
+<tr>
+<td>Context</td>
+<td><code>journal</code>, <code>journal_read</code></td>
+<td>2</td>
+</tr>
+<tr>
+<td>Interaction</td>
+<td><code>agent_message</code>, <code>ask</code></td>
+<td>2</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td></td>
+<td><strong>16</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Plus 1 new agent-side tool: <code>loom_reply</code>.</p>
+<hr />
+<h2 id="cli-commands">CLI Commands<a class="headerlink" href="#cli-commands" title="Permanent link">&para;</a></h2>
+<h3 id="loom-ai-reply"><code>loom ai reply</code><a class="headerlink" href="#loom-ai-reply" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom ai reply &lt;message&gt;
+
+Arguments:
+  message              Reply text to send back to the weaver
+</code></pre></div>
+<p><strong>Behavior:</strong>
+- Auto-detects calling agent via <code>$LOOM_CELL_ID</code>
+- Calls <code>ai_report(action="reply", message=...)</code>
+- Errors if agent has no pending weaver message</p>
+<h3 id="loom-weaver-journal"><code>loom weaver journal</code><a class="headerlink" href="#loom-weaver-journal" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom weaver journal [--group GROUP] [--tail N] [--type TYPE]
+
+Flags:
+  -g, --group GROUP    Group name (default: auto-detect from agent)
+  -n, --tail N         Number of entries to show (default: 20)
+  -t, --type TYPE      Filter by entry type (decision/observation/checkpoint/plan)
+</code></pre></div>
+<p>Reads the weaver journal directly from SQLite (works offline like other <code>loom</code> read commands).</p>
+<hr />
+<h2 id="event-push-system">Event Push System<a class="headerlink" href="#event-push-system" title="Permanent link">&para;</a></h2>
+<h3 id="weavereventbuffer-new-class-in-loomweaverpy">WeaverEventBuffer (new class in <code>loom/weaver.py</code>)<a class="headerlink" href="#weavereventbuffer-new-class-in-loomweaverpy" title="Permanent link">&para;</a></h3>
+<p>Manages per-group event buffering and digest delivery.</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">WeaverEventBuffer</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">,</span> <span class="n">bridge</span><span class="p">,</span> <span class="n">panel_log</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_state</span> <span class="o">=</span> <span class="n">state</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_bridge</span> <span class="o">=</span> <span class="n">bridge</span>        <span class="c1"># for send_text to weaver terminal</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_panel_log</span> <span class="o">=</span> <span class="n">panel_log</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_buffers</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>   <span class="c1"># group → buffered events</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_push</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>       <span class="c1"># group → timestamp of last digest</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_last_cursor</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>        <span class="c1"># group → last event ID sent</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timer</span><span class="p">:</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">TimerHandle</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_panel_event</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">event</span><span class="p">:</span> <span class="nb">dict</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Called when a panel event is emitted. Buffer if a weaver cares.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">on_agent_idle</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cell</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Called when an agent goes idle. Check if it&#39;s a weaver and flush.&quot;&quot;&quot;</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_flush</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">group</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Format and send buffered events as a digest to the weaver&#39;s terminal.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_format_digest</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">events</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="n">board_summary</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Format events into a readable digest string.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_format_heartbeat</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">board_summary</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Format a no-events heartbeat with board status.&quot;&quot;&quot;</span>
+</code></pre></div>
+<h3 id="delivery-rules">Delivery rules<a class="headerlink" href="#delivery-rules" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Idle-gated</strong>: Digests are only sent when the weaver's <code>activity</code> is <code>""</code> (empty) or <code>"waiting"</code>. The <code>on_agent_idle</code> hook fires when <code>EventBus._apply()</code> transitions a cell to idle.</li>
+<li><strong>Interval-batched</strong>: Events accumulate in the buffer. A timer fires every <code>push_interval</code> seconds. If the weaver is idle and events are buffered, flush. If not idle, the flush defers to the next <code>on_agent_idle</code> call.</li>
+<li><strong>Max interval heartbeat</strong>: If <code>max_interval</code> seconds pass since the last digest (even with no events), a heartbeat is sent on the next idle transition. The heartbeat includes board status but no events.</li>
+<li><strong>Pause/resume</strong>: When <code>WeaverSettings.paused</code> is <code>True</code>, events still buffer but no digests are sent. On resume, buffered events flush on next idle.</li>
+<li><strong>Mandatory events</strong>: <code>task_completed</code>, <code>agent_reply</code>, <code>agent_error</code>, <code>agent_blocked</code>, <code>ask_created</code> — always buffered regardless of <code>enabled_events</code> filter.</li>
+<li><strong>Optional events</strong>: <code>agent_started</code>, <code>task_dispatched</code>, <code>task_derived</code>, <code>agent_progress</code> — only buffered if in <code>enabled_events</code>.</li>
+<li><strong>Group scoping</strong>: Events are matched to the weaver's group via the agent's group field. Cross-group events are not delivered.</li>
+</ol>
+<h3 id="digest-format">Digest format<a class="headerlink" href="#digest-format" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>── Loom Digest (3 events) ─────────────────────
+• task_completed: &quot;fix-auth-race&quot; done by agent fix-auth-bug
+• agent_reply: fix-auth-bug → &quot;Rebased, continuing with implementation&quot;
+• agent_blocked: refactor-db → &quot;Need migration schema clarification&quot;
+
+Board: 3 In Progress · 2 To Do · 5 Backlog · 4 Done
+────────────────────────────────────────────────
+</code></pre></div>
+<h3 id="heartbeat-format">Heartbeat format<a class="headerlink" href="#heartbeat-format" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>── Loom Heartbeat ─────────────────────────────
+No new events in last 5m.
+Board: 3 In Progress · 2 To Do · 5 Backlog · 4 Done
+Active: fix-auth-bug (thinking) · add-logging (tool_call)
+────────────────────────────────────────────────
+</code></pre></div>
+<h3 id="context-warning-appended-to-digest-when-threshold-exceeded">Context warning (appended to digest when threshold exceeded)<a class="headerlink" href="#context-warning-appended-to-digest-when-threshold-exceeded" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>⚠ Context usage: 82% (~820K/1M tokens). Consider writing a checkpoint.
+</code></pre></div>
+<hr />
+<h2 id="ui-design">UI Design<a class="headerlink" href="#ui-design" title="Permanent link">&para;</a></h2>
+<h3 id="weaver-panel">Weaver Panel<a class="headerlink" href="#weaver-panel" title="Permanent link">&para;</a></h3>
+<p>A new panel in the taskbar, between Agents and Events. Uses a tab bar at the top — same pattern as the Agents panel's <code>Templates</code> / <code>History</code> tabs.</p>
+<p><strong>Tabs</strong>: <code>Journal</code> | <code>Settings</code></p>
+<p>The panel header shows the group name and the weaver agent's status. A small pause/resume toggle sits in the header bar, always visible regardless of active tab.</p>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────┐
+│  Weaver — my-project        [⏸ Pause]       │
+│  [Journal]  [Settings]                      │
+│─────────────────────────────────────────────│
+│  ...tab content...                          │
+└─────────────────────────────────────────────┘
+</code></pre></div>
+<h4 id="journal-tab-default">Journal tab (default)<a class="headerlink" href="#journal-tab-default" title="Permanent link">&para;</a></h4>
+<p>Scrollable feed of journal entries, most recent at top:</p>
+<div class="highlight"><pre><span></span><code>│  ┌─ checkpoint · 2m ago ──────────────────┐ │
+│  │ Board: 2 IP, 4 TD, 8 BL, 3 Done.     │ │
+│  │ Active: fix-auth (thinking), add-      │ │
+│  │ logging (tool_call). Next: dispatch    │ │
+│  │ caching task when IP &lt; 3.             │ │
+│  └────────────────────────────────────────┘ │
+│                                             │
+│  ┌─ decision · 5m ago ────────────────────┐ │
+│  │ Dispatched &quot;Implement auth flow&quot; →     │ │
+│  │ new agent. Action: feature/implement.  │ │
+│  │ Rationale: highest priority, no deps.  │ │
+│  └────────────────────────────────────────┘ │
+│                                             │
+│  ┌─ observation · 12m ago ────────────────┐ │
+│  │ Agent fix-auth-bug completed. Tests    │ │
+│  │ passing. Branch ready for review.      │ │
+│  └────────────────────────────────────────┘ │
+</code></pre></div>
+<ul>
+<li>Entry type shown as a colored badge: <code>decision</code> (blue), <code>observation</code> (gray), <code>checkpoint</code> (green), <code>plan</code> (yellow)</li>
+<li>Timestamps shown as relative ("2m ago", "1h ago")</li>
+<li>Entries are scrollable with "Load more" at the bottom (paginated from SQLite)</li>
+</ul>
+<h4 id="settings-tab">Settings tab<a class="headerlink" href="#settings-tab" title="Permanent link">&para;</a></h4>
+<p>All weaver configuration in one place. Sections separated by subtle dividers.</p>
+<div class="highlight"><pre><span></span><code>│  ─── Agent ───────────────────────────────  │
+│                                             │
+│  Weaver agent: fix-auth-bug  [Designate]    │
+│                                             │
+│  ─── Custom Instructions ─────────────────  │
+│                                             │
+│  ┌────────────────────────────────────────┐ │
+│  │ Focus on auth and payments modules     │ │
+│  │ first. Never dispatch more than 3      │ │
+│  │ agents concurrently. Always create a   │ │
+│  │ review task after implementation.      │ │
+│  │                                        │ │
+│  └────────────────────────────────────────┘ │
+│                              [Save]         │
+│                                             │
+│  ─── Notifications ───────────────────────  │
+│                                             │
+│  Push interval: [60s ▾]                     │
+│  Max interval:  [300s ▾]                    │
+│                                             │
+│  Events:                                    │
+│  [x] task_completed (mandatory)             │
+│  [x] agent_error (mandatory)               │
+│  [x] agent_reply (mandatory)               │
+│  [x] agent_blocked (mandatory)             │
+│  [x] ask_created (mandatory)               │
+│  [x] agent_started                          │
+│  [x] task_dispatched                        │
+│  [x] task_derived                           │
+│  [ ] agent_progress                         │
+│                                             │
+</code></pre></div>
+<ul>
+<li><strong>Custom Instructions</strong>: Auto-growing textarea. Content is appended to the weaver's prompt on dispatch (and on re-dispatch after context cleanup). Saved to <code>WeaverSettings.custom_instructions</code>. The Save button only appears when the content has changed (dirty state).</li>
+<li><strong>Notifications</strong>: Push interval and max interval dropdowns, event type checkboxes. Mandatory events are checked and disabled (grayed out). Changes apply immediately (no save button — sent via WS on change).</li>
+</ul>
+<h4 id="weaver-designation">Weaver designation<a class="headerlink" href="#weaver-designation" title="Permanent link">&para;</a></h4>
+<ul>
+<li>In the group settings modal (existing), a new "Weaver" section</li>
+<li>"Designate weaver" dropdown lists agents in the group (only agents, not terminals)</li>
+<li>Once designated, the dropdown is replaced with the agent name + "Remove weaver" button</li>
+<li>If a weaver already exists for the group, the "Add weaver" option in the main UI is disabled</li>
+</ul>
+<h4 id="pauseresume-button">Pause/Resume button<a class="headerlink" href="#pauseresume-button" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Shown in the Weaver panel settings section</li>
+<li>Also shown as a small toggle icon on the weaver's agent cell in the Agents panel</li>
+<li>When paused: event buffer still accumulates, but no digests are sent</li>
+<li>When resumed: if events are buffered, they flush on next idle check</li>
+<li>Visual indicator: the weaver agent cell shows a "paused" badge when paused</li>
+</ul>
+<hr />
+<h2 id="server-commands">Server Commands<a class="headerlink" href="#server-commands" title="Permanent link">&para;</a></h2>
+<h3 id="new-commands">New commands<a class="headerlink" href="#new-commands" title="Permanent link">&para;</a></h3>
+<h4 id="weaver_message"><code>weaver_message</code><a class="headerlink" href="#weaver_message" title="Permanent link">&para;</a></h4>
+<p>Send a message from the weaver to an agent's terminal.</p>
+<p><strong>Payload:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;cmd&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;weaver_message&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;agent_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;abc123&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Rebase on main, the auth PR was merged.&quot;</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<p><strong>Behavior:</strong>
+1. Resolve agent by ID/slug
+2. Validate agent exists and is running
+3. Format message with weaver header/footer
+4. Send to agent's terminal via <code>bridge.send_text()</code>
+5. Set <code>cell.pending_weaver_message = True</code>
+6. Emit panel event: kind <code>weaver_message</code>, message preview
+7. Return <code>{"type": "ok"}</code></p>
+<h4 id="ai_report-new-action-reply"><code>ai_report</code> — new action: <code>reply</code><a class="headerlink" href="#ai_report-new-action-reply" title="Permanent link">&para;</a></h4>
+<p>Reply from an agent to the weaver.</p>
+<p><strong>Payload:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;cmd&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ai_report&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;reply&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;cell_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;abc123&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Rebased successfully, continuing with implementation&quot;</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<p><strong>Behavior:</strong>
+1. Resolve calling agent
+2. Validate <code>cell.pending_weaver_message</code> is True (else error: "No pending weaver message")
+3. Clear <code>cell.pending_weaver_message</code>
+4. Find the weaver for this agent's group
+5. Emit panel event: kind <code>agent_reply</code>, with agent name and message
+6. Buffer event for weaver digest delivery
+7. Return <code>{"type": "ok"}</code></p>
+<h4 id="weaver_journal_append"><code>weaver_journal_append</code><a class="headerlink" href="#weaver_journal_append" title="Permanent link">&para;</a></h4>
+<p>Append an entry to the weaver's journal.</p>
+<p><strong>Payload:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;cmd&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;weaver_journal_append&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-project&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;entry_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;decision&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;entry&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Dispatched auth flow task...&quot;</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<p><strong>Behavior:</strong>
+1. Validate entry_type is one of: decision, observation, checkpoint, plan
+2. Insert into <code>weaver_journal</code> table
+3. Emit delta: <code>journal_append</code> (new delta op type for the Weaver panel)
+4. Return <code>{"type": "ok", "id": entry_id}</code></p>
+<h4 id="weaver_journal_read"><code>weaver_journal_read</code><a class="headerlink" href="#weaver_journal_read" title="Permanent link">&para;</a></h4>
+<p>Read recent journal entries.</p>
+<p><strong>Payload:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;cmd&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;weaver_journal_read&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-project&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;tail&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">20</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;entry_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<p><strong>Behavior:</strong>
+1. Query <code>weaver_journal</code> table: <code>WHERE group_name = ? ORDER BY id DESC LIMIT ?</code>
+2. Optional type filter: <code>AND entry_type = ?</code>
+3. Return <code>{"type": "journal", "entries": [...]}</code></p>
+<h4 id="weaver_update_settings"><code>weaver_update_settings</code><a class="headerlink" href="#weaver_update_settings" title="Permanent link">&para;</a></h4>
+<p>Update weaver settings. Supports partial updates — only the fields provided are changed.</p>
+<p><strong>Payload:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;cmd&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;weaver_update_settings&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-project&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;push_interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;max_interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">300</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;custom_instructions&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Focus on auth and payments modules first.&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;enabled_events&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;agent_started&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;task_dispatched&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;task_derived&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<h4 id="weaver_ask"><code>weaver_ask</code><a class="headerlink" href="#weaver_ask" title="Permanent link">&para;</a></h4>
+<p>Post a question from the weaver to the human. Auto-pauses events.</p>
+<p><strong>Payload:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;cmd&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;weaver_ask&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-project&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;question&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Which tasks should I prioritize?&quot;</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<p><strong>Behavior:</strong>
+1. Set <code>WeaverSettings.pending_question = question</code>
+2. Set <code>WeaverSettings.paused = True</code>
+3. Append journal entry: "Asked human: {question}"
+4. Emit delta (<code>weaver_settings_update</code>) so the panel shows the question
+5. Return <code>{"type": "ok"}</code></p>
+<h4 id="weaver_reply"><code>weaver_reply</code><a class="headerlink" href="#weaver_reply" title="Permanent link">&para;</a></h4>
+<p>Human replies to the weaver's pending question.</p>
+<p><strong>Payload:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;cmd&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;weaver_reply&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-project&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;answer&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Focus on the auth module first.&quot;</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<p><strong>Behavior:</strong>
+1. Validate weaver exists and is running
+2. Format answer as <code>── Human Reply ──</code> block
+3. Send to weaver's terminal via <code>bridge.send_text()</code>
+4. Clear <code>pending_question</code>, set <code>paused = False</code>
+5. Append journal entry: "Human replied: {answer}"
+6. Return <code>{"type": "ok"}</code></p>
+<h4 id="weaver_pause-weaver_resume"><code>weaver_pause</code> / <code>weaver_resume</code><a class="headerlink" href="#weaver_pause-weaver_resume" title="Permanent link">&para;</a></h4>
+<p>Toggle event push delivery. <code>weaver_resume</code> also clears <code>pending_question</code>.</p>
+<p><strong>Payload:</strong>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;cmd&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;weaver_pause&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-project&quot;</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<h3 id="modified-commands">Modified commands<a class="headerlink" href="#modified-commands" title="Permanent link">&para;</a></h3>
+<h4 id="add_agent-weaver-creation"><code>add_agent</code> — weaver creation<a class="headerlink" href="#add_agent-weaver-creation" title="Permanent link">&para;</a></h4>
+<p>When <code>add_agent</code> receives <code>is_weaver: true</code>:
+1. Validates one-per-group (returns error if group already has a weaver)
+2. Builds weaver system prompt (base + action system_prompt + custom instructions)
+3. Writes to <code>.loom/weaver-system-prompt-{group}.md</code>
+4. Appends <code>--append-system-prompt-file &lt;path&gt;</code> to the boot command
+5. Creates agent, sets <code>GroupSettings.weaver_agent_id</code>
+6. Default name: "Weaver" (user can override)</p>
+<p>The weaver must be created as a weaver from the start — designating an existing agent is not supported because the <code>--append-system-prompt-file</code> flag must be set on boot.</p>
+<h4 id="remove_agent-weaver-cleanup"><code>remove_agent</code> — weaver cleanup<a class="headerlink" href="#remove_agent-weaver-cleanup" title="Permanent link">&para;</a></h4>
+<p>When the weaver agent is removed, clear <code>GroupSettings.weaver_agent_id</code>. The journal persists (it belongs to the group, not the agent). A new weaver can be designated and will inherit the journal.</p>
+<hr />
+<h2 id="implementation-steps">Implementation Steps<a class="headerlink" href="#implementation-steps" title="Permanent link">&para;</a></h2>
+<h3 id="step-1-data-model-loomstatepy-loomdbpy">Step 1: Data model (<code>loom/state.py</code>, <code>loom/db.py</code>) ✅<a class="headerlink" href="#step-1-data-model-loomstatepy-loomdbpy" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Add <code>weaver_agent_id</code> to <code>GroupSettings</code> dataclass</li>
+<li>Add <code>WeaverSettings</code> dataclass with <code>pending_question</code> field</li>
+<li>Add <code>pending_weaver_message</code> ephemeral field to <code>AgentCell</code></li>
+<li>DB: add <code>weaver_agent_id</code> column to <code>group_settings</code> via ALTER TABLE migration</li>
+<li>DB: create <code>weaver_settings</code> table (with <code>pending_question</code> column)</li>
+<li>DB: create <code>weaver_journal</code> table with index</li>
+<li>DB: CRUD methods for both tables, <code>pending_question</code> migration for existing DBs</li>
+<li><code>MatrixState</code>: <code>get_weaver_for_group(group)</code> helper, <code>journal_append()</code>, <code>journal_read()</code>, <code>update_weaver_settings()</code> methods</li>
+<li>Delta ops: <code>journal_append</code>, <code>weaver_settings_update</code></li>
+<li>Weaver cleanup on agent/group removal</li>
+</ul>
+<h3 id="step-2-event-buffer-loomweaverpy">Step 2: Event buffer (<code>loom/weaver.py</code>) ✅<a class="headerlink" href="#step-2-event-buffer-loomweaverpy" title="Permanent link">&para;</a></h3>
+<ul>
+<li>New file: <code>loom/weaver.py</code> — <code>WeaverEventBuffer</code> class</li>
+<li><code>on_panel_event(event)</code> — check if event's group has a weaver, check event type filter, buffer if yes</li>
+<li><code>on_agent_activity_change(cell)</code> — if weaver goes idle → flush; if weaver becomes active → auto-clear <code>pending_question</code></li>
+<li><code>_flush(group)</code> — format digest, send to weaver terminal via <code>bridge.send_text()</code></li>
+<li><code>_format_digest()</code> / <code>_format_heartbeat()</code> — render text blocks</li>
+<li><code>_context_warning()</code> — advisory message when token count exceeds threshold</li>
+<li>Periodic timer: every 10 seconds, check heartbeat due</li>
+<li><code>build_weaver_system_prompt(group, settings, action_sp)</code> — assembles base identity + action system_prompt + custom instructions</li>
+<li>Integrated into <code>EventBus</code> via <code>_weaver_buffer</code> attribute and <code>PanelEventLog.on_event</code> callback</li>
+</ul>
+<h3 id="step-3-server-commands-loomserverpy">Step 3: Server commands (<code>loom/server.py</code>) ✅<a class="headerlink" href="#step-3-server-commands-loomserverpy" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>weaver_message</code> command: resolve agent, format message, send via bridge, set <code>pending_weaver_message</code>, emit panel event</li>
+<li><code>ai_report(action="reply")</code> handler: validate pending message, emit <code>agent_reply</code> panel event</li>
+<li><code>weaver_journal_append</code> / <code>weaver_journal_read</code> command handlers</li>
+<li><code>weaver_update_settings</code> command handler (including <code>custom_instructions</code>, <code>pending_question</code>)</li>
+<li><code>weaver_ask</code> command: set <code>pending_question</code>, auto-pause, log to journal</li>
+<li><code>weaver_reply</code> command: send formatted answer to weaver terminal, clear question, unpause, log to journal</li>
+<li><code>weaver_pause</code> / <code>weaver_resume</code> commands (<code>resume</code> also clears <code>pending_question</code>)</li>
+<li><code>add_agent</code> with <code>is_weaver: true</code>: enforce one-per-group, build system prompt file, append <code>--append-system-prompt-file</code> to boot command, set <code>weaver_agent_id</code></li>
+<li><code>remove_agent</code>: clear <code>weaver_agent_id</code> when weaver is removed</li>
+<li><code>WeaverEventBuffer</code> initialization and wiring at startup</li>
+</ul>
+<h3 id="step-4-mcp-tools-agent-side-loommcppy">Step 4: MCP tools — agent side (<code>loom/mcp.py</code>) ✅<a class="headerlink" href="#step-4-mcp-tools-agent-side-loommcppy" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Add <code>loom_reply</code> tool definition to <code>TOOLS</code> list</li>
+<li>Add <code>reply</code> to <code>action_map</code> in <code>_dispatch_tool()</code></li>
+<li>CLI: <code>loom ai reply</code> subcommand in <code>bin/loom</code></li>
+</ul>
+<h3 id="step-5-mcp-tools-weaver-side-loommcp_weaverpy">Step 5: MCP tools — weaver side (<code>loom/mcp_weaver.py</code>) ✅<a class="headerlink" href="#step-5-mcp-tools-weaver-side-loommcp_weaverpy" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Remove <code>weaver_lanes_list</code>, <code>weaver_pipelines_list</code>, <code>weaver_task_chain</code> tool definitions</li>
+<li>Enrich <code>weaver_task_show</code> response with auto-included <code>pipeline_chain</code></li>
+<li>Add <code>weaver_events</code>, <code>weaver_notifications</code>, <code>weaver_journal</code>, <code>weaver_journal_read</code>, <code>weaver_agent_message</code> tools</li>
+<li>Add <code>weaver_ask</code> tool: delegates to <code>weaver_ask</code> command, returns instructional response telling weaver to call <code>weaver_resume</code> after human responds</li>
+</ul>
+<h3 id="step-6-ui-weaver-panel-staticjsweaverjs-staticstylecss">Step 6: UI — Weaver panel (<code>static/js/weaver.js</code>, <code>static/style.css</code>) ✅<a class="headerlink" href="#step-6-ui-weaver-panel-staticjsweaverjs-staticstylecss" title="Permanent link">&para;</a></h3>
+<ul>
+<li>New file: <code>static/js/weaver.js</code> — loaded between <code>events.js</code> and <code>main.js</code></li>
+<li>Tabbed layout: <code>Journal</code> | <code>Settings</code> tabs</li>
+<li>Panel header: group name (follows <code>_currentGroup()</code> — the currently selected group), pause/resume toggle</li>
+<li><strong>Journal tab</strong> (default):</li>
+<li>Pending question banner (amber): shown when <code>pending_question</code> is set, with reply textarea and "Send Reply" button</li>
+<li>Journal entries: scrollable feed, type badges (decision=blue, observation=gray, checkpoint=green, plan=yellow), relative timestamps</li>
+<li><strong>Settings tab</strong>: three sections:</li>
+<li>Agent: shows weaver name + status, or "+ Create Weaver" button (sends <code>add_agent</code> with <code>is_weaver: true</code>)</li>
+<li>Custom Instructions: auto-growing textarea, dirty-state Save button</li>
+<li>Notifications: push/max interval dropdowns, event type checkboxes (mandatory ones disabled)</li>
+<li>Delta handling: <code>journal_append</code> and <code>weaver_settings_update</code> ops in <code>ws.js</code></li>
+<li>Wired into <code>main.js</code> panel toggle and <code>render.js</code> re-render cycle</li>
+</ul>
+<h3 id="step-7-ui-weaver-agent-indicators-staticjsrenderjs-staticjscommandsjs">Step 7: UI — Weaver agent indicators (<code>static/js/render.js</code>, <code>static/js/commands.js</code>)<a class="headerlink" href="#step-7-ui-weaver-agent-indicators-staticjsrenderjs-staticjscommandsjs" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Weaver agents get a distinct badge in the Agents panel (e.g., a small "W" icon)</li>
+<li>Paused indicator: small pause icon on the weaver cell when digests are paused</li>
+<li>Context menu: "Remove as weaver" option on weaver agent</li>
+</ul>
+<h3 id="step-8-ui-pauseresume-controls">Step 8: UI — Pause/resume controls ✅<a class="headerlink" href="#step-8-ui-pauseresume-controls" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Pause/Resume button in Weaver panel header (always visible across tabs)</li>
+<li>Updates <code>WeaverSettings.paused</code> via WS command</li>
+<li>Visual feedback: button text toggles between "Pause" and "Resume", styled differently when paused</li>
+</ul>
+<h3 id="step-9-context-warning-integration">Step 9: Context warning integration ✅<a class="headerlink" href="#step-9-context-warning-integration" title="Permanent link">&para;</a></h3>
+<ul>
+<li>In <code>WeaverEventBuffer._context_warning()</code>: check weaver agent's <code>session_tokens_in + session_tokens_out</code> against threshold (~800K tokens)</li>
+<li>If exceeded, append warning line to the digest</li>
+<li>No auto-cleanup: the weaver decides when to checkpoint</li>
+</ul>
+<h3 id="step-10-weaver-action-template-and-base-system-prompt-base-prompt-only">Step 10: Weaver action template and base system prompt ✅ (base prompt only)<a class="headerlink" href="#step-10-weaver-action-template-and-base-system-prompt-base-prompt-only" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Base system prompt</strong> (built into <code>loom/weaver.py</code>): hardcoded text defining the weaver role, available tools, behavioral guidelines (journal usage, checkpoint cadence, event response, human interaction via <code>weaver_ask</code>). Assembled via <code>build_weaver_system_prompt()</code> and written to <code>.loom/weaver-system-prompt-{group}.md</code>, passed via <code>--append-system-prompt-file</code>.</li>
+<li><strong>Default weaver action</strong> (<code>.loom/actions/weaver/orchestrate.yaml</code>): not yet created — users can create their own action or rely on the base system prompt alone.</li>
+</ul>
+<h3 id="step-11-human-interaction-flow">Step 11: Human interaction flow ✅<a class="headerlink" href="#step-11-human-interaction-flow" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>weaver_ask</code> MCP tool: posts question to panel, auto-pauses events, returns instructions to call <code>weaver_resume</code> after human responds</li>
+<li><code>weaver_reply</code> server command: sends formatted answer to weaver terminal, clears question, unpauses events, logs exchange to journal</li>
+<li><code>weaver_ask</code> server command: sets <code>pending_question</code> + <code>paused</code>, logs to journal</li>
+<li>Auto-clear <code>pending_question</code> on weaver activity change (human typed directly into terminal)</li>
+<li>Panel UI: amber banner with question + reply textarea + "Send Reply" button</li>
+<li>Two reply paths: panel (Loom-mediated) or direct terminal input (weaver self-resumes)</li>
+</ul>
+<hr />
+<h2 id="remaining-work">Remaining Work<a class="headerlink" href="#remaining-work" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Step 7: Weaver agent indicators</strong> — visual badge on weaver agent cell, context menu options</li>
+<li><strong>Default weaver action template</strong> — <code>.loom/actions/weaver/orchestrate.yaml</code> with <code>is_clean</code> branching</li>
+<li><strong>CLAUDE.md documentation</strong> — document weaver concept, MCP tools, event push system, journal</li>
+<li><strong>Journal pagination</strong> — "Load more" button in journal tab (SQLite pagination exists, UI not wired)</li>
+</ul>
+<hr />
+<h2 id="what-were-not-building-yet">What We're NOT Building (Yet)<a class="headerlink" href="#what-were-not-building-yet" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Multi-group weavers</strong> — A weaver is scoped to one group. Cross-group orchestration (e.g., a "super-weaver" that manages multiple groups) is a future consideration.</li>
+<li><strong>Automatic context cleanup</strong> — The weaver gets warnings but decides when to checkpoint. Auto-<code>/clear</code> or auto-restart is too risky — the weaver might be mid-decision.</li>
+<li><strong>Weaver-to-weaver communication</strong> — If two groups each have a weaver, they don't talk to each other. The human coordinates cross-group work.</li>
+<li><strong>Agent stop/kill tool</strong> — The weaver can message agents but can't forcefully stop them. This prevents accidental work loss. The human handles stuck agents.</li>
+<li><strong>Structured decision format</strong> — The journal is free-text. Structured fields (e.g., <code>{"action": "dispatch", "task": "...", "rationale": "..."}</code>) would enable analytics but add complexity. Free-text is sufficient for context recovery.</li>
+<li><strong>Token-based auto-checkpoint</strong> — Beyond the advisory warning, we don't force checkpoints. The weaver action template should instruct periodic checkpointing.</li>
+<li><strong>Event replay</strong> — <code>weaver_events</code> returns raw events but doesn't support replaying them as if they were new pushes. Replay would require re-triggering the weaver's decision loop, which is the weaver's job, not Loom's.</li>
+<li><strong>Designating existing agents as weaver</strong> — The weaver must be created as a weaver (via "+ Create Weaver" or <code>add_agent</code> with <code>is_weaver: true</code>) because <code>--append-system-prompt-file</code> must be set on boot. Existing agents can't be retroactively designated.</li>
+</ul>
+<hr />
+<h2 id="file-changes-summary">File Changes Summary<a class="headerlink" href="#file-changes-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>loom/state.py</code></td>
+<td><code>WeaverSettings</code> dataclass (with <code>pending_question</code>), <code>WEAVER_MANDATORY_EVENTS</code>, <code>weaver_agent_id</code> on <code>GroupSettings</code>, <code>pending_weaver_message</code> on <code>AgentCell</code>, weaver helpers on <code>MatrixState</code>, weaver settings in snapshot, cleanup on removal</td>
+</tr>
+<tr>
+<td><code>loom/db.py</code></td>
+<td><code>weaver_settings</code> table (with <code>pending_question</code>), <code>weaver_journal</code> table + index, <code>weaver_agent_id</code> migration, <code>pending_question</code> migration, CRUD methods</td>
+</tr>
+<tr>
+<td><code>loom/weaver.py</code></td>
+<td><strong>New file.</strong> <code>WeaverEventBuffer</code> (event buffering, idle-gated delivery, digest/heartbeat formatting, auto-clear <code>pending_question</code> on activity, periodic timer). Base system prompt text. <code>build_weaver_system_prompt()</code> assembler.</td>
+</tr>
+<tr>
+<td><code>loom/events.py</code></td>
+<td><code>on_event</code> callback on <code>PanelEventLog</code>, <code>_weaver_buffer</code> on <code>EventBus</code> with activity-change hook</td>
+</tr>
+<tr>
+<td><code>loom/server.py</code></td>
+<td>New commands: <code>weaver_message</code>, <code>weaver_ask</code>, <code>weaver_reply</code>, <code>weaver_journal_append/read</code>, <code>weaver_update_settings</code>, <code>weaver_pause/resume</code>. <code>ai_report(action="reply")</code>. <code>add_agent</code> with <code>is_weaver</code> (system prompt file + <code>--append-system-prompt-file</code>). <code>remove_agent</code> weaver cleanup. <code>WeaverEventBuffer</code> init.</td>
+</tr>
+<tr>
+<td><code>loom/mcp.py</code></td>
+<td><code>loom_reply</code> tool definition + action mapping</td>
+</tr>
+<tr>
+<td><code>loom/mcp_weaver.py</code></td>
+<td>Remove 3 tools, enrich <code>task_show</code> with chain, add 6 tools (<code>events</code>, <code>notifications</code>, <code>journal</code>, <code>journal_read</code>, <code>agent_message</code>, <code>ask</code>)</td>
+</tr>
+<tr>
+<td><code>bin/loom</code></td>
+<td><code>loom ai reply</code> subcommand, <code>loom weaver journal</code> subcommand</td>
+</tr>
+<tr>
+<td><code>static/js/weaver.js</code></td>
+<td><strong>New file.</strong> Tabbed panel (Journal/Settings), pending question banner with reply box, journal feed, settings with create button + custom instructions + notifications, <code>weaverCreate()</code> / <code>weaverReply()</code> / <code>weaverTogglePause()</code></td>
+</tr>
+<tr>
+<td><code>static/js/render.js</code></td>
+<td>Weaver panel re-render on delta</td>
+</tr>
+<tr>
+<td><code>static/js/ws.js</code></td>
+<td><code>journal_append</code> + <code>weaver_settings_update</code> delta op handlers</td>
+</tr>
+<tr>
+<td><code>static/js/main.js</code></td>
+<td><code>panel-weaver</code> in panel IDs, render hooks</td>
+</tr>
+<tr>
+<td><code>static/style.css</code></td>
+<td>Weaver panel styles: header, tabs, journal entries with type badges, ask banner (amber), reply textarea/button, settings sections, create button, event checkboxes</td>
+</tr>
+<tr>
+<td><code>webview.html</code></td>
+<td><code>panel-weaver</code> div, taskbar button (⚖ Weaver), <code>weaver.js</code> script tag</td>
+</tr>
+<tr>
+<td><code>Makefile</code></td>
+<td>Add <code>loom/mcp_weaver.py</code> and <code>loom/weaver.py</code> to install target</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

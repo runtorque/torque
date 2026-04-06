@@ -1,0 +1,1645 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="iTerm2 agent and terminal orchestration">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Implementation Plan: Agent Awareness - Loom</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#implementation-plan-agent-awareness" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Loom" class="md-header__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Loom
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Implementation Plan: Agent Awareness
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Loom" class="md-nav__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Loom
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start Here
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Start Here
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agents-and-sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents & Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Workflows
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../workflow-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../board/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../task-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions & Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../worktrees/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worktrees
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../group-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Group Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../keyboard-shortcuts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard Shortcuts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Problem
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-was-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Was Built
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What Was Built">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#adapter-framework" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adapter Framework
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#claude-code-adapter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code Adapter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-bus-and-throttling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event Bus and Throttling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#http-endpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        HTTP Endpoint
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#auto-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reconnection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reconnection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#health-monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health Monitoring
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#macos-notifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        macOS Notifications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ui-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#file-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future Work
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="implementation-plan-agent-awareness">Implementation Plan: Agent Awareness<a class="headerlink" href="#implementation-plan-agent-awareness" title="Permanent link">&para;</a></h1>
+<p><strong>Roadmap phase</strong>: 1 — Agent Awareness
+<strong>Status</strong>: Implemented
+<strong>Goal</strong>: Give Loom real-time visibility into what its managed agents are doing, using a provider-agnostic architecture that works across Claude Code, Codex, Gemini CLI, and future agents.</p>
+<hr />
+<h2 id="the-problem">The Problem<a class="headerlink" href="#the-problem" title="Permanent link">&para;</a></h2>
+<p>Loom currently knows three things about an agent: whether its terminal session exists, whether the shell prompt has fired (via PromptMonitor), and what the foreground process name is (via jobName). It has no idea what the agent is <em>thinking</em>, <em>doing</em>, or <em>producing</em>. A cell that says "running" tells you nothing about whether the agent is reading files, writing code, stuck in a retry loop, or waiting for input.</p>
+<h2 id="design-principles">Design Principles<a class="headerlink" href="#design-principles" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Provider-agnostic core</strong> — Loom's internal event model and UI are decoupled from any specific agent. Agent-specific translation happens in adapters.</li>
+<li><strong>Graceful degradation</strong> — Agents with rich hook systems (Claude Code, Gemini CLI) get deep integration. Agents with nothing (OpenCode) still get basic process-level monitoring. The UI adapts to what's available.</li>
+<li><strong>Push over poll</strong> — Agents push events to Loom via HTTP hooks or stdout parsing. Loom never polls agent internals.</li>
+<li><strong>Non-blocking</strong> — Hooks and adapters must never slow down the agent. All Loom-bound hooks are fire-and-forget (async, short timeouts, no blocking decisions).</li>
+<li><strong>Opt-in</strong> — Agent awareness is enabled per group or per agent. Users who just want tab management are unaffected.</li>
+</ol>
+<hr />
+<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────────┐
+│                  Agent Process                   │
+│              (Claude Code, Codex, etc.)          │
+└──────────┬──────────────────────┬───────────────┘
+           │ HTTP POST /events    │ stdout (JSONL)
+           │ (hooks)              │ (parsed by adapter)
+           ▼                     ▼
+┌─────────────────────────────────────────────────┐
+│               Agent Adapter                      │
+│         (one per agent type)                     │
+│                                                  │
+│  Translates agent-specific signals into          │
+│  normalized AgentEvent objects                   │
+└──────────────────────┬──────────────────────────┘
+                       │ AgentEvent
+                       ▼
+┌─────────────────────────────────────────────────┐
+│                 Event Bus                        │
+│           (in-process, asyncio)                  │
+│                                                  │
+│  • Updates AgentCell state                       │
+│  • Appends to event log                          │
+│  • Triggers notifications                        │
+│  • Broadcasts to WebSocket clients               │
+└──────────┬──────────────┬───────────────────────┘
+           │              │
+           ▼              ▼
+┌──────────────┐  ┌──────────────────┐
+│  Toolbelt UI │  │ macOS Notifs     │
+│  (WebSocket) │  │ (osascript)      │
+└──────────────┘  └──────────────────┘
+</code></pre></div>
+<hr />
+<h2 id="what-was-built">What Was Built<a class="headerlink" href="#what-was-built" title="Permanent link">&para;</a></h2>
+<h3 id="data-model">Data Model<a class="headerlink" href="#data-model" title="Permanent link">&para;</a></h3>
+<p><strong>AgentEvent</strong> — normalized event produced by all adapters:</p>
+<div class="highlight"><pre><span></span><code><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">AgentEvent</span><span class="p">:</span>
+    <span class="n">cell_id</span><span class="p">:</span> <span class="nb">str</span>        <span class="c1"># Which AgentCell this belongs to</span>
+    <span class="n">timestamp</span><span class="p">:</span> <span class="nb">float</span>    <span class="c1"># Unix timestamp</span>
+    <span class="n">event_type</span><span class="p">:</span> <span class="nb">str</span>     <span class="c1"># session_start, tool_start, error, waiting, etc.</span>
+    <span class="n">data</span><span class="p">:</span> <span class="nb">dict</span>          <span class="c1"># Event-type-specific payload</span>
+</code></pre></div>
+<p>10 event types: <code>session_start</code>, <code>session_end</code>, <code>activity_change</code>, <code>tool_start</code>, <code>tool_end</code>, <code>message</code>, <code>error</code>, <code>waiting</code>, <code>progress</code>, <code>cost_update</code>.</p>
+<p><strong>AgentCell extensions</strong> (new fields):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Persisted</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent_type</code></td>
+<td>str</td>
+<td>Yes</td>
+<td><code>"claude-code"</code>, <code>"codex"</code>, <code>"gemini-cli"</code>, <code>""</code></td>
+</tr>
+<tr>
+<td><code>agent_session_id</code></td>
+<td>str</td>
+<td>Yes</td>
+<td>Agent's own session ID (for resume on relaunch)</td>
+</tr>
+<tr>
+<td><code>activity</code></td>
+<td>str</td>
+<td>No</td>
+<td><code>""</code>, <code>"thinking"</code>, <code>"tool_call"</code>, <code>"waiting"</code>, <code>"subagent"</code></td>
+</tr>
+<tr>
+<td><code>activity_detail</code></td>
+<td>str</td>
+<td>No</td>
+<td>Human-readable: <code>"Editing server.py"</code></td>
+</tr>
+<tr>
+<td><code>last_event_at</code></td>
+<td>float</td>
+<td>No</td>
+<td>Timestamp of last hook event</td>
+</tr>
+<tr>
+<td><code>session_tokens_in</code></td>
+<td>int</td>
+<td>No</td>
+<td>Cumulative input tokens</td>
+</tr>
+<tr>
+<td><code>session_tokens_out</code></td>
+<td>int</td>
+<td>No</td>
+<td>Cumulative output tokens</td>
+</tr>
+<tr>
+<td><code>error_message</code></td>
+<td>str</td>
+<td>No</td>
+<td>Last error message</td>
+</tr>
+<tr>
+<td><code>needs_attention</code></td>
+<td>bool</td>
+<td>No</td>
+<td>Agent stuck, errored, or needs permission</td>
+</tr>
+</tbody>
+</table>
+<p><strong>GroupSettings extensions</strong> (in Agents tab):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agent_boot_command</code></td>
+<td>str</td>
+<td>""</td>
+<td>Override default boot command (e.g. "codex")</td>
+</tr>
+<tr>
+<td><code>agent_session_resume</code></td>
+<td>bool</td>
+<td>True</td>
+<td>Resume session on relaunch (<code>claude --resume</code>)</td>
+</tr>
+<tr>
+<td><code>agent_idle_timeout</code></td>
+<td>int</td>
+<td>5</td>
+<td>Minutes before flagging as stuck (0 = disable)</td>
+</tr>
+<tr>
+<td><code>notifications</code></td>
+<td>bool</td>
+<td>False</td>
+<td>Master toggle for macOS notifications</td>
+</tr>
+<tr>
+<td><code>notify_on_finish</code></td>
+<td>bool</td>
+<td>True</td>
+<td>Notify when agent finishes</td>
+</tr>
+<tr>
+<td><code>notify_on_error</code></td>
+<td>bool</td>
+<td>True</td>
+<td>Notify on errors</td>
+</tr>
+<tr>
+<td><code>notify_on_attention</code></td>
+<td>bool</td>
+<td>True</td>
+<td>Notify when agent needs attention</td>
+</tr>
+</tbody>
+</table>
+<h3 id="adapter-framework">Adapter Framework<a class="headerlink" href="#adapter-framework" title="Permanent link">&para;</a></h3>
+<p>Base class in <code>loom/adapters/base.py</code> with methods: <code>match_process()</code>, <code>match_command()</code>, <code>get_hook_config()</code>, <code>get_env_vars()</code>, <code>parse_event()</code>.</p>
+<p>Registry in <code>loom/adapters/__init__.py</code> with <code>detect_agent_type()</code> (by process name), <code>detect_by_command()</code> (by boot command), <code>get_adapter()</code> (by name).</p>
+<p><strong>Implemented adapters:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Adapter</th>
+<th>File</th>
+<th>Status</th>
+<th>Integration</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Claude Code</td>
+<td><code>claude_code.py</code></td>
+<td>Full</td>
+<td>HTTP hooks (command hook for SessionStart), event parsing, activity inference, session resume</td>
+</tr>
+<tr>
+<td>Codex</td>
+<td><code>codex.py</code></td>
+<td>Stub</td>
+<td>Process matching only</td>
+</tr>
+<tr>
+<td>Gemini CLI</td>
+<td><code>gemini_cli.py</code></td>
+<td>Stub</td>
+<td>Process matching only</td>
+</tr>
+<tr>
+<td>Generic</td>
+<td><code>generic.py</code></td>
+<td>Full</td>
+<td>Fallback, process monitoring only</td>
+</tr>
+</tbody>
+</table>
+<h3 id="claude-code-adapter">Claude Code Adapter<a class="headerlink" href="#claude-code-adapter" title="Permanent link">&para;</a></h3>
+<p><strong>Hook installation</strong>: Loom writes hooks to <code>.claude/settings.local.json</code> in the agent's working directory using a merge strategy. Loom hooks are identified by their URL (<code>http://localhost:18932/events</code>) and can be cleanly added/removed without affecting user hooks. HTTP hooks include <code>allowedEnvVars: ["LOOM_CELL_ID"]</code> for header interpolation.</p>
+<p><strong>Hooks subscribed</strong>: <code>SessionStart</code> (command hook — HTTP not supported), <code>PreToolUse</code>, <code>PostToolUse</code>, <code>PostToolUseFailure</code>, <code>Notification</code>, <code>Stop</code>, <code>SubagentStart</code>, <code>SubagentStop</code>, <code>StopFailure</code> (all HTTP hooks).</p>
+<p><strong>Event mapping</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Claude Code Hook</th>
+<th>→ AgentEvent</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SessionStart</code></td>
+<td><code>session_start</code></td>
+<td>Captures <code>session_id</code> for resume support</td>
+</tr>
+<tr>
+<td><code>Stop</code></td>
+<td><code>session_end</code></td>
+<td>Agent's turn completed</td>
+</tr>
+<tr>
+<td><code>PreToolUse</code></td>
+<td><code>tool_start</code></td>
+<td>Activity detail from tool name + input</td>
+</tr>
+<tr>
+<td><code>PostToolUse</code></td>
+<td><code>tool_end</code> (success)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>PostToolUseFailure</code></td>
+<td><code>tool_end</code> (failure)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>Notification</code> (<code>permission_prompt</code>)</td>
+<td><code>waiting</code></td>
+<td>Sets <code>needs_attention = true</code></td>
+</tr>
+<tr>
+<td><code>Notification</code> (<code>idle_prompt</code>)</td>
+<td><code>session_end</code></td>
+<td>Agent done, waiting for next prompt</td>
+</tr>
+<tr>
+<td><code>StopFailure</code></td>
+<td><code>error</code></td>
+<td>Rate limits, auth failures, etc.</td>
+</tr>
+<tr>
+<td><code>SubagentStart</code></td>
+<td><code>activity_change</code></td>
+<td>Activity = "subagent"</td>
+</tr>
+<tr>
+<td><code>SubagentStop</code></td>
+<td><code>activity_change</code></td>
+<td>Clears subagent activity</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Activity inference</strong> (tool name → human-readable detail):
+- <code>Bash</code> → "Running: {command preview}"
+- <code>Edit</code> / <code>Write</code> → "Editing {filename}"
+- <code>Read</code> → "Reading {filename}"
+- <code>Grep</code> / <code>Glob</code> → "Searching codebase" / "Searching files"
+- <code>Agent</code> → "Subagent: {description}"
+- <code>WebFetch</code> / <code>WebSearch</code> → "Fetching web page" / "Searching web"</p>
+<p><strong>Session resume</strong>: When <code>SessionStart</code> fires, the adapter captures Claude Code's <code>session_id</code> and stores it in <code>cell.agent_session_id</code> (persisted to <code>state.json</code> immediately). On relaunch, Loom runs <code>claude --resume &lt;session_id&gt;</code> instead of plain <code>claude</code>, continuing the conversation where it left off. Controlled by the <code>agent_session_resume</code> group setting (default: on). A <code>/clear</code> in Claude Code generates a new session ID, so resume after clear starts from a blank conversation.</p>
+<h3 id="event-bus-and-throttling">Event Bus and Throttling<a class="headerlink" href="#event-bus-and-throttling" title="Permanent link">&para;</a></h3>
+<p><code>EventBus</code> in <code>loom/events.py</code>:
+- Receives events via <code>emit()</code>, updates cell fields, appends to <code>EventLog</code>, notifies <code>NotificationManager</code>
+- Trailing-edge broadcast throttle: at most one WebSocket broadcast per second globally
+- Activity-resuming events (<code>tool_start</code>, <code>tool_end</code>, <code>activity_change</code>, <code>message</code>) clear <code>needs_attention</code> — agents recover automatically from stuck/error state</p>
+<p><code>EventLog</code>: Per-cell ring buffer (200 events max), in-memory only.</p>
+<h3 id="http-endpoint">HTTP Endpoint<a class="headerlink" href="#http-endpoint" title="Permanent link">&para;</a></h3>
+<p><code>POST /events</code> on the existing aiohttp server (port 18932). Correlation: <code>X-Loom-Cell-Id</code> header (primary) → <code>cwd</code> directory match (fallback). Always returns <code>200 {}</code>.</p>
+<h3 id="auto-detection">Auto-Detection<a class="headerlink" href="#auto-detection" title="Permanent link">&para;</a></h3>
+<p>Two detection points:
+1. <strong>On create_session</strong>: Boot command is matched against adapters (e.g., <code>claude</code> → <code>claude-code</code>)
+2. <strong>On jobName change</strong>: Process name is matched for terminal cells</p>
+<p><code>agent_type</code> is persisted — survives restarts.</p>
+<h3 id="reconnection">Reconnection<a class="headerlink" href="#reconnection" title="Permanent link">&para;</a></h3>
+<p>On daemon restart, <code>reconnect_orphans</code>:
+- Sets status to <code>"running"</code> (not <code>"idle"</code>) for cells with a boot command
+- Re-installs hooks for cells with <code>agent_type</code>
+- <code>LOOM_CELL_ID</code> env var persists in the terminal session, so hook correlation continues working</p>
+<h3 id="health-monitoring">Health Monitoring<a class="headerlink" href="#health-monitoring" title="Permanent link">&para;</a></h3>
+<p><code>health_check</code> coroutine runs every 30 seconds:
+- Flags agents with no events for 5+ minutes as <code>needs_attention</code>
+- Flags agents with 3+ errors in 5 minutes
+- Sends notifications via <code>NotificationManager</code></p>
+<h3 id="macos-notifications">macOS Notifications<a class="headerlink" href="#macos-notifications" title="Permanent link">&para;</a></h3>
+<p><code>NotificationManager</code> in <code>loom/notifications.py</code>:
+- 5-second batching window per group
+- Combined messages: "2 agents finished, 1 needs attention in group 'Backend'"
+- Sent via <code>osascript</code> (<code>display notification</code>)
+- Opt-in per group via <code>GroupSettings.notifications</code></p>
+<h3 id="ui-changes">UI Changes<a class="headerlink" href="#ui-changes" title="Permanent link">&para;</a></h3>
+<p><strong>Agent cell</strong> (<code>render.js</code>):
+- Three-state status dot: gray (idle), green pulsing (working), red (disconnected)
+- Attention state: status dot becomes larger amber <code>!</code> when <code>needs_attention</code> is true
+- Activity detail line below name: "Editing server.py", "Running: npm test"
+- Agent type label: "CC", "CX", "GM" in bottom-left corner
+- For awareness agents, <code>activity</code> field is the source of truth for working vs idle (not <code>status</code>, since PromptMonitor doesn't fire for TUI apps)</p>
+<p><strong>Group header</strong>: Agent count badge only (no running/attention counts — the cells themselves communicate status).</p>
+<p><strong>Group settings modal</strong> (<code>webview.html</code>, <code>modals.js</code>): Agents tab includes boot command, session resume toggle, idle timeout, and notification settings (4 checkboxes).</p>
+<p>Agents without awareness (<code>agent_type</code> empty) render exactly as before — fully backward compatible.</p>
+<hr />
+<h2 id="file-structure">File Structure<a class="headerlink" href="#file-structure" title="Permanent link">&para;</a></h2>
+<p>New files:</p>
+<div class="highlight"><pre><span></span><code>loom/
+  adapters/
+    __init__.py          # Registry: detect_agent_type(), detect_by_command(), get_adapter()
+    base.py              # AgentAdapter base class, AgentEvent dataclass, EVENT_TYPES
+    claude_code.py       # Full: hooks, event parsing, activity inference, install/uninstall
+    codex.py             # Stub: process/command matching only
+    gemini_cli.py        # Stub: process/command matching only
+    generic.py           # Fallback: always matches, process monitoring only
+  events.py              # EventBus (throttled broadcast), EventLog (ring buffer), health_check
+  notifications.py       # NotificationManager (5s batching, osascript)
+</code></pre></div>
+<p>Modified files:</p>
+<div class="highlight"><pre><span></span><code>loom/state.py            # AgentCell +8 fields, GroupSettings +4 fields, _EPHEMERAL_FIELDS, cells_with_awareness()
+loom/server.py           # POST /events route, event bus + notifier wiring, hook cleanup on remove
+loom/bridge.py           # Auto-detection, LOOM_CELL_ID injection, hook install, session resume, reconnect fixes
+static/js/constants.js   # AGENT_TYPE_LABELS
+static/js/render.js      # agentStatusClass() (gray/green/red), activity detail, type label
+static/js/modals.js      # Agent settings (boot cmd, resume, idle timeout, notifications) in group settings modal
+static/style.css         # Three-state status dot, attention indicator, type label
+webview.html             # Agent settings and notification checkboxes in Agents tab of group settings
+Makefile                 # Copy adapters/, events.py, notifications.py
+</code></pre></div>
+<hr />
+<h2 id="decisions">Decisions<a class="headerlink" href="#decisions" title="Permanent link">&para;</a></h2>
+<p>Resolved during implementation:</p>
+<ol>
+<li>
+<p><strong>Hook config scope</strong> — Loom writes to <code>.claude/settings.local.json</code> using a merge strategy. Loom hooks are identified by URL (<code>localhost:18932/events</code>) and cleanly added/removed without affecting user hooks. <code>allowedEnvVars</code> is required for header interpolation.</p>
+</li>
+<li>
+<p><strong>Multi-window correlation</strong> — <code>LOOM_CELL_ID</code> is the mandatory primary key, injected as env var and interpolated into HTTP hook headers. <code>cwd</code> matching is a debug fallback.</p>
+</li>
+<li>
+<p><strong>Adapter scope</strong> — Claude Code is fully implemented. Gemini CLI and Codex are stubs (process matching only). Generic is the fallback.</p>
+</li>
+<li>
+<p><strong>Event volume / UI throttling</strong> — Events update internal state immediately. WebSocket broadcasts are throttled to at most once per second (trailing-edge global timer).</p>
+</li>
+<li>
+<p><strong>Notification batching</strong> — 5-second window, grouped by group name. Combined messages for multiple agents.</p>
+</li>
+<li>
+<p><strong>Endpoint security</strong> — No authentication. Localhost-only. Will be secured in Phase 3 (remote server mode).</p>
+</li>
+<li>
+<p><strong>Notification delivery</strong> — Uses <code>osascript</code> (macOS <code>display notification</code>) rather than iTerm2's Python API, which doesn't expose a notification method.</p>
+</li>
+<li>
+<p><strong>Session resume</strong> — Claude Code's <code>session_id</code> is captured from <code>SessionStart</code> hooks (command type, not HTTP) and persisted to <code>state.json</code>. Relaunch uses <code>claude --resume &lt;id&gt;</code>. Controlled by <code>agent_session_resume</code> group setting (default: on).</p>
+</li>
+<li>
+<p><strong>Idle vs. waiting</strong> — <code>idle_prompt</code> (agent finished, waiting for next task) maps to <code>session_end</code>, not <code>waiting</code>. Only <code>permission_prompt</code> (agent blocked, needs approval) sets <code>needs_attention</code>.</p>
+</li>
+<li>
+<p><strong>SessionStart hook type</strong> — Claude Code only supports <code>type: "command"</code> for <code>SessionStart</code> events. HTTP hooks are silently ignored. Uses <code>curl</code> to POST to Loom instead.</p>
+</li>
+<li>
+<p><strong>Status dot simplification</strong> — Three states: gray (idle), green (working), red (disconnected). For awareness agents, <code>activity</code> field is the source of truth — <code>status</code> field stays "running" while a TUI app is active (PromptMonitor limitation). Awareness agents start as idle on boot; hooks flip to working.</p>
+</li>
+<li>
+<p><strong>Agent settings in Agents tab</strong> — Boot command, session resume, idle timeout, and notifications are all in the Agents tab of group settings (not the Group tab).</p>
+</li>
+</ol>
+<hr />
+<h2 id="future-work">Future Work<a class="headerlink" href="#future-work" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Session recording</strong> — Persist the EventLog to disk for replay and auditing (Phase 1 item, deferred).</li>
+<li><strong>Gemini CLI adapter</strong> — Fill in hook config generation and event parsing.</li>
+<li><strong>Codex adapter</strong> — Investigate <code>CODEX_HOME</code> per-agent scoping, implement hook config.</li>
+<li><strong>Token cost display</strong> — Show <code>session_tokens_in/out</code> in the UI (data is collected but not rendered yet).</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

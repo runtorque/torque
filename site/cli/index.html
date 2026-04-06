@@ -1,0 +1,3314 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="iTerm2 agent and terminal orchestration">
+      
+      
+      
+      
+        <link rel="prev" href="../keyboard-shortcuts/">
+      
+      
+        <link rel="next" href="../troubleshooting/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>CLI Reference - Loom</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#cli-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Loom" class="md-header__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Loom
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CLI Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Loom" class="md-nav__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Loom
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start Here
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Start Here
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents-and-sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents & Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Workflows
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../board/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../task-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions & Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../worktrees/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worktrees
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../group-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Group Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../keyboard-shortcuts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard Shortcuts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#global-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global flags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        status
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        group
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="group">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#group-add" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        group add
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#group-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        group remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#group-rename" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        group rename
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#group-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        group settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agent-add" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent add
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-focus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent focus
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-relaunch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent relaunch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent move
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-edit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent edit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        terminal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="terminal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#terminal-add" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        terminal add
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#terminal-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        terminal remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#terminal-reparent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        terminal reparent
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#send" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#broadcast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        broadcast
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="task">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-create" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task create
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task dispatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-edit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task edit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task move
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task chain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#board" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="board">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#board-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#board-add" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board add
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#board-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board move
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#board-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#board-lanes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board lanes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#action" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        action
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="action">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#action-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        action list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#action-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        action show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#action-create" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        action create
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worktree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="worktree">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#worktree-create" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree create
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree rollback
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ai" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ai">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ai-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai done
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-blocked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai blocked
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai error
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai progress
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-ready" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai ready
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-derive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai derive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-ask" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai ask
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pipeline list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pipeline show
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#schedule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="schedule">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#schedule-create" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule create
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-edit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule edit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-enable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule enable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-disable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule disable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule run
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        logs
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#global-flags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global flags
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        status
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#group" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        group
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="group">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#group-add" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        group add
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#group-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        group remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#group-rename" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        group rename
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#group-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        group settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agent-add" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent add
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-focus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent focus
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-relaunch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent relaunch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent move
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-edit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent edit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        terminal
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="terminal">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#terminal-add" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        terminal add
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#terminal-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        terminal remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#terminal-reparent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        terminal reparent
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#send" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        send
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#broadcast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        broadcast
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="task">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-create" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task create
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task dispatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-edit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task edit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task move
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-chain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task chain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        task resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#board" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="board">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#board-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#board-add" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board add
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#board-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board move
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#board-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#board-lanes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        board lanes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#action" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        action
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="action">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#action-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        action list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#action-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        action show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#action-create" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        action create
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worktree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="worktree">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#worktree-create" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree create
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree remove
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-checkpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree checkpoint
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-rollback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        worktree rollback
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ai" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ai">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ai-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai done
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-blocked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai blocked
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai error
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai progress
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-ready" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai ready
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai context
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-derive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai derive
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ai-ask" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ai ask
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pipeline
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="pipeline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pipeline list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        pipeline show
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#schedule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="schedule">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#schedule-create" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule create
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-edit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule edit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-enable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule enable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-disable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule disable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schedule-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        schedule run
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        logs
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="cli-reference">CLI Reference<a class="headerlink" href="#cli-reference" title="Permanent link">&para;</a></h1>
+<p>The <code>loom</code> CLI lets you manage agents, terminals, tasks, and worktrees from the command line. Install it with:</p>
+<div class="highlight"><pre><span></span><code>make<span class="w"> </span>cli
+</code></pre></div>
+<p>This creates a symlink so <code>loom</code> is available in your shell. The CLI talks to the running daemon over HTTP for write operations and reads SQLite directly for read-only queries (so commands like <code>loom task list</code> work even when the daemon is stopped).</p>
+<h2 id="global-flags">Global flags<a class="headerlink" href="#global-flags" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--port PORT</code></td>
+<td>Daemon port (default: 18932)</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Output raw JSON</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="status">status<a class="headerlink" href="#status" title="Permanent link">&para;</a></h2>
+<p>Show groups and agents, or details for a specific agent.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>status<span class="w">                       </span><span class="c1"># show all groups and agents</span>
+loom<span class="w"> </span>status<span class="w"> </span>-g<span class="w"> </span>backend<span class="w">            </span><span class="c1"># filter by group</span>
+loom<span class="w"> </span>status<span class="w"> </span>-a<span class="w">                    </span><span class="c1"># show all windows</span>
+loom<span class="w"> </span>status<span class="w"> </span>impl-add-auth<span class="w">         </span><span class="c1"># show details for a specific agent</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-g, --group</code></td>
+<td>Filter by group name</td>
+</tr>
+<tr>
+<td><code>-a, --all</code></td>
+<td>Show all windows (default: current window only)</td>
+</tr>
+</tbody>
+</table>
+<p>Aliases: <code>st</code>, <code>ls</code></p>
+<hr />
+<h2 id="group">group<a class="headerlink" href="#group" title="Permanent link">&para;</a></h2>
+<p>Manage groups.</p>
+<h3 id="group-add">group add<a class="headerlink" href="#group-add" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>group<span class="w"> </span>add<span class="w"> </span>backend
+</code></pre></div>
+<h3 id="group-remove">group remove<a class="headerlink" href="#group-remove" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>group<span class="w"> </span>remove<span class="w"> </span>backend
+</code></pre></div>
+<p>Alias: <code>rm</code></p>
+<h3 id="group-rename">group rename<a class="headerlink" href="#group-rename" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>group<span class="w"> </span>rename<span class="w"> </span>backend<span class="w"> </span>api
+</code></pre></div>
+<p>Alias: <code>mv</code></p>
+<h3 id="group-settings">group settings<a class="headerlink" href="#group-settings" title="Permanent link">&para;</a></h3>
+<p>Show or update group settings.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>group<span class="w"> </span>settings<span class="w"> </span>backend<span class="w">                              </span><span class="c1"># show settings</span>
+loom<span class="w"> </span>group<span class="w"> </span>settings<span class="w"> </span>backend<span class="w"> </span>-s<span class="w"> </span><span class="nv">git_worktree</span><span class="o">=</span><span class="nb">true</span><span class="w">         </span><span class="c1"># enable worktrees</span>
+loom<span class="w"> </span>group<span class="w"> </span>settings<span class="w"> </span>backend<span class="w"> </span>-s<span class="w"> </span><span class="nv">agent_boot_command</span><span class="o">=</span>claude<span class="w">  </span><span class="c1"># set boot command</span>
+</code></pre></div>
+<p>Pass <code>-s KEY=VALUE</code> to update. Multiple <code>-s</code> flags are supported. Boolean values use <code>true</code>/<code>false</code>.</p>
+<p>Alias: <code>g</code></p>
+<hr />
+<h2 id="agent">agent<a class="headerlink" href="#agent" title="Permanent link">&para;</a></h2>
+<p>Manage agents.</p>
+<h3 id="agent-add">agent add<a class="headerlink" href="#agent-add" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>agent<span class="w"> </span>add<span class="w"> </span>my-agent<span class="w"> </span>-g<span class="w"> </span>backend
+loom<span class="w"> </span>agent<span class="w"> </span>add<span class="w"> </span>my-agent<span class="w"> </span>-g<span class="w"> </span>backend<span class="w"> </span>-c<span class="w"> </span>claude<span class="w"> </span>-d<span class="w"> </span>~/project<span class="w"> </span>--color<span class="w"> </span><span class="s2">&quot;#3fb950&quot;</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-g, --group</code></td>
+<td>Target group (auto-detected if in a Loom session)</td>
+</tr>
+<tr>
+<td><code>-c, --command</code></td>
+<td>Boot command</td>
+</tr>
+<tr>
+<td><code>-d, --directory</code></td>
+<td>Working directory</td>
+</tr>
+<tr>
+<td><code>--profile</code></td>
+<td>iTerm2 profile</td>
+</tr>
+<tr>
+<td><code>--color</code></td>
+<td>Tab color (hex)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="agent-remove">agent remove<a class="headerlink" href="#agent-remove" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>agent<span class="w"> </span>remove<span class="w"> </span>impl-add-auth
+</code></pre></div>
+<p>Accepts ID, slug, or name. Alias: <code>rm</code></p>
+<h3 id="agent-focus">agent focus<a class="headerlink" href="#agent-focus" title="Permanent link">&para;</a></h3>
+<p>Focus the agent's iTerm2 tab.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>agent<span class="w"> </span>focus<span class="w"> </span>impl-add-auth
+</code></pre></div>
+<h3 id="agent-relaunch">agent relaunch<a class="headerlink" href="#agent-relaunch" title="Permanent link">&para;</a></h3>
+<p>Restart a stopped agent.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>agent<span class="w"> </span>relaunch<span class="w"> </span>impl-add-auth
+</code></pre></div>
+<h3 id="agent-move">agent move<a class="headerlink" href="#agent-move" title="Permanent link">&para;</a></h3>
+<p>Move an agent to a different group.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>agent<span class="w"> </span>move<span class="w"> </span>impl-add-auth<span class="w"> </span>-g<span class="w"> </span>frontend
+</code></pre></div>
+<h3 id="agent-edit">agent edit<a class="headerlink" href="#agent-edit" title="Permanent link">&para;</a></h3>
+<p>Update an agent's name or tab color.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>agent<span class="w"> </span>edit<span class="w"> </span>impl-add-auth<span class="w"> </span>--name<span class="w"> </span>review-auth<span class="w"> </span>--color<span class="w"> </span><span class="s2">&quot;#a371f7&quot;</span>
+</code></pre></div>
+<p>Alias: <code>a</code></p>
+<hr />
+<h2 id="terminal">terminal<a class="headerlink" href="#terminal" title="Permanent link">&para;</a></h2>
+<p>Manage terminals.</p>
+<h3 id="terminal-add">terminal add<a class="headerlink" href="#terminal-add" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>terminal<span class="w"> </span>add<span class="w"> </span>logs<span class="w"> </span>-p<span class="w"> </span>impl-add-auth<span class="w">                   </span><span class="c1"># child of an agent</span>
+loom<span class="w"> </span>terminal<span class="w"> </span>add<span class="w"> </span>shell<span class="w"> </span>-g<span class="w"> </span>backend<span class="w">                        </span><span class="c1"># standalone in group</span>
+loom<span class="w"> </span>terminal<span class="w"> </span>add<span class="w"> </span>tests<span class="w"> </span>-p<span class="w"> </span>impl-add-auth<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;npm test&quot;</span><span class="w">    </span><span class="c1"># with boot command</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-p, --parent</code></td>
+<td>Parent agent (creates a child terminal)</td>
+</tr>
+<tr>
+<td><code>-g, --group</code></td>
+<td>Group (for standalone terminals)</td>
+</tr>
+<tr>
+<td><code>-c, --command</code></td>
+<td>Boot command</td>
+</tr>
+<tr>
+<td><code>-d, --directory</code></td>
+<td>Working directory</td>
+</tr>
+<tr>
+<td><code>--profile</code></td>
+<td>iTerm2 profile</td>
+</tr>
+<tr>
+<td><code>--color</code></td>
+<td>Tab color (hex)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="terminal-remove">terminal remove<a class="headerlink" href="#terminal-remove" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>terminal<span class="w"> </span>remove<span class="w"> </span>impl-add-auth:logs
+</code></pre></div>
+<p>Alias: <code>rm</code></p>
+<h3 id="terminal-reparent">terminal reparent<a class="headerlink" href="#terminal-reparent" title="Permanent link">&para;</a></h3>
+<p>Move a terminal to a different parent agent, or detach it.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>terminal<span class="w"> </span>reparent<span class="w"> </span>impl-add-auth:logs<span class="w"> </span>-p<span class="w"> </span>review-auth<span class="w">   </span><span class="c1"># new parent</span>
+loom<span class="w"> </span>terminal<span class="w"> </span>reparent<span class="w"> </span>impl-add-auth:logs<span class="w"> </span>--detach<span class="w">          </span><span class="c1"># standalone</span>
+</code></pre></div>
+<p>Aliases: <code>t</code>, <code>term</code></p>
+<hr />
+<h2 id="send">send<a class="headerlink" href="#send" title="Permanent link">&para;</a></h2>
+<p>Send text to an agent or terminal session.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>send<span class="w"> </span><span class="s2">&quot;git status&quot;</span><span class="w"> </span>-t<span class="w"> </span>impl-add-auth
+loom<span class="w"> </span>send<span class="w"> </span><span class="s2">&quot;fix the auth bug&quot;</span><span class="w"> </span>-t<span class="w"> </span>impl-add-auth<span class="w"> </span>-w<span class="w">    </span><span class="c1"># send and wait for completion</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-t, --to</code></td>
+<td>Target agent or terminal (auto-detected if in a Loom session)</td>
+</tr>
+<tr>
+<td><code>-w, --wait</code></td>
+<td>Wait until the agent finishes (polls every 2s)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="broadcast">broadcast<a class="headerlink" href="#broadcast" title="Permanent link">&para;</a></h2>
+<p>Send a command to all agents in a group.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>broadcast<span class="w"> </span>backend<span class="w"> </span><span class="s2">&quot;git pull&quot;</span>
+</code></pre></div>
+<p>Alias: <code>bc</code></p>
+<hr />
+<h2 id="task">task<a class="headerlink" href="#task" title="Permanent link">&para;</a></h2>
+<p>Task and ticket management.</p>
+<h3 id="task-create">task create<a class="headerlink" href="#task-create" title="Permanent link">&para;</a></h3>
+<p>Create a task in the Backlog without launching an agent.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Add dark mode support&quot;</span><span class="w"> </span>-g<span class="w"> </span>frontend
+loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Fix login bug&quot;</span><span class="w"> </span>-t<span class="w"> </span>oneshot/fix<span class="w"> </span>-v<span class="w"> </span><span class="nv">MODULE</span><span class="o">=</span>auth
+loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Review PR&quot;</span><span class="w"> </span>-l<span class="w"> </span>review,urgent
+loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Deploy auth changes&quot;</span><span class="w"> </span>--depends-on<span class="w"> </span>review-auth
+loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Kick off release checklist&quot;</span><span class="w"> </span>--at<span class="w"> </span><span class="s2">&quot;tomorrow 09:00&quot;</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-g, --group</code></td>
+<td>Target group</td>
+</tr>
+<tr>
+<td><code>-t, --action</code></td>
+<td>Action to attach</td>
+</tr>
+<tr>
+<td><code>-v, --var</code></td>
+<td>Action variables (<code>KEY=VALUE</code>, repeatable)</td>
+</tr>
+<tr>
+<td><code>-l, --labels</code></td>
+<td>Comma-separated labels</td>
+</tr>
+<tr>
+<td><code>--at</code></td>
+<td>Schedule dispatch for a future time</td>
+</tr>
+<tr>
+<td><code>--depends-on</code></td>
+<td>Comma-separated task slugs or IDs that must finish first</td>
+</tr>
+</tbody>
+</table>
+<p>Alias: <code>c</code></p>
+<h3 id="task-dispatch">task dispatch<a class="headerlink" href="#task-dispatch" title="Permanent link">&para;</a></h3>
+<p>Create a task, launch an agent, and send the prompt --- all in one command.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>dispatch<span class="w"> </span><span class="s2">&quot;Add dark mode&quot;</span><span class="w"> </span>-t<span class="w"> </span>feature/implement<span class="w"> </span>-g<span class="w"> </span>frontend
+loom<span class="w"> </span>dispatch<span class="w"> </span><span class="s2">&quot;Fix flaky test&quot;</span><span class="w"> </span>-t<span class="w"> </span>oneshot/fix<span class="w"> </span>-v<span class="w"> </span><span class="nv">MODULE</span><span class="o">=</span>auth<span class="w"> </span>-w
+loom<span class="w"> </span>dispatch<span class="w"> </span><span class="s2">&quot;Quick fix&quot;</span><span class="w"> </span>-g<span class="w"> </span>backend<span class="w">                          </span><span class="c1"># no action, raw task text</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-t, --action</code></td>
+<td>Action for prompt rendering</td>
+</tr>
+<tr>
+<td><code>-g, --group</code></td>
+<td>Target group</td>
+</tr>
+<tr>
+<td><code>-v, --var</code></td>
+<td>Action variables (<code>KEY=VALUE</code>, repeatable)</td>
+</tr>
+<tr>
+<td><code>-n, --name</code></td>
+<td>Agent name override</td>
+</tr>
+<tr>
+<td><code>-c, --command</code></td>
+<td>Boot command override</td>
+</tr>
+<tr>
+<td><code>-d, --directory</code></td>
+<td>Working directory override</td>
+</tr>
+<tr>
+<td><code>-l, --labels</code></td>
+<td>Comma-separated labels</td>
+</tr>
+<tr>
+<td><code>-w, --wait</code></td>
+<td>Wait for the agent to finish</td>
+</tr>
+<tr>
+<td><code>--no-task</code></td>
+<td>Create the agent but don't send the task text</td>
+</tr>
+</tbody>
+</table>
+<p>Alias: <code>d</code></p>
+<h3 id="task-show">task show<a class="headerlink" href="#task-show" title="Permanent link">&para;</a></h3>
+<p>Show full details for a task.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>show<span class="w"> </span>add-dark-mode
+</code></pre></div>
+<p>Accepts ID, slug, or title.</p>
+<h3 id="task-list">task list<a class="headerlink" href="#task-list" title="Permanent link">&para;</a></h3>
+<p>List tasks with optional filters.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>list<span class="w">                          </span><span class="c1"># all tasks by lane</span>
+loom<span class="w"> </span>task<span class="w"> </span>list<span class="w"> </span>-l<span class="w"> </span><span class="s2">&quot;In Progress&quot;</span><span class="w">         </span><span class="c1"># only in-progress tasks</span>
+loom<span class="w"> </span>task<span class="w"> </span>list<span class="w"> </span>-g<span class="w"> </span>backend<span class="w">               </span><span class="c1"># filter by group</span>
+loom<span class="w"> </span>task<span class="w"> </span>list<span class="w"> </span>--label<span class="w"> </span>review<span class="w">           </span><span class="c1"># filter by label</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-l, --lane</code></td>
+<td>Filter by lane</td>
+</tr>
+<tr>
+<td><code>-g, --group</code></td>
+<td>Filter by group</td>
+</tr>
+<tr>
+<td><code>-a, --assignee</code></td>
+<td>Filter by assignee</td>
+</tr>
+<tr>
+<td><code>--label</code></td>
+<td>Filter by label</td>
+</tr>
+</tbody>
+</table>
+<p>Alias: <code>ls</code></p>
+<h3 id="task-edit">task edit<a class="headerlink" href="#task-edit" title="Permanent link">&para;</a></h3>
+<p>Edit a task's fields. Opens <code>$EDITOR</code> with the task as YAML, or use inline flags.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>edit<span class="w"> </span>add-dark-mode<span class="w">                                </span><span class="c1"># opens $EDITOR</span>
+loom<span class="w"> </span>task<span class="w"> </span>edit<span class="w"> </span>add-dark-mode<span class="w"> </span>-t<span class="w"> </span><span class="s2">&quot;Updated description&quot;</span><span class="w">       </span><span class="c1"># inline edit</span>
+loom<span class="w"> </span>task<span class="w"> </span>edit<span class="w"> </span>add-dark-mode<span class="w"> </span>--action<span class="w"> </span>feature/implement<span class="w">     </span><span class="c1"># change action</span>
+loom<span class="w"> </span>task<span class="w"> </span>edit<span class="w"> </span>add-dark-mode<span class="w"> </span>-l<span class="w"> </span>feature,priority<span class="w">            </span><span class="c1"># update labels</span>
+loom<span class="w"> </span>task<span class="w"> </span>edit<span class="w"> </span>deploy-auth-middleware<span class="w"> </span>--depends-on<span class="w"> </span>review-auth,run-auth-tests
+loom<span class="w"> </span>task<span class="w"> </span>edit<span class="w"> </span>release-checklist<span class="w"> </span>--at<span class="w"> </span><span class="s2">&quot;2026-04-07T12:00:00Z&quot;</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-t, --task</code></td>
+<td>New task description</td>
+</tr>
+<tr>
+<td><code>--action</code></td>
+<td>Set or change action</td>
+</tr>
+<tr>
+<td><code>-v, --var</code></td>
+<td>Set action variables (<code>KEY=VALUE</code>, repeatable)</td>
+</tr>
+<tr>
+<td><code>-l, --labels</code></td>
+<td>Comma-separated labels</td>
+</tr>
+<tr>
+<td><code>-g, --group</code></td>
+<td>Move to different group</td>
+</tr>
+<tr>
+<td><code>--at</code></td>
+<td>Set or replace a scheduled dispatch time</td>
+</tr>
+<tr>
+<td><code>--depends-on</code></td>
+<td>Replace the task's dependency list</td>
+</tr>
+</tbody>
+</table>
+<p>Alias: <code>e</code></p>
+<h3 id="task-move">task move<a class="headerlink" href="#task-move" title="Permanent link">&para;</a></h3>
+<p>Move a task to a different lane.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>move<span class="w"> </span>add-dark-mode<span class="w"> </span>-l<span class="w"> </span>Done
+</code></pre></div>
+<p>Alias: <code>mv</code></p>
+<h3 id="task-chain">task chain<a class="headerlink" href="#task-chain" title="Permanent link">&para;</a></h3>
+<p>Show the full pipeline derivation chain for a task.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>chain<span class="w"> </span>add-dark-mode
+</code></pre></div>
+<p>Displays the chain with depth, status, lane, and linked agent for each task.</p>
+<h3 id="task-resolve">task resolve<a class="headerlink" href="#task-resolve" title="Permanent link">&para;</a></h3>
+<p>Resolve a human-in-the-loop ask task by sending an answer back to the waiting agent.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>resolve<span class="w"> </span>review-auth<span class="w"> </span><span class="s2">&quot;Approved. Merge after CI passes.&quot;</span>
+</code></pre></div>
+<hr />
+<h2 id="board">board<a class="headerlink" href="#board" title="Permanent link">&para;</a></h2>
+<p>Board management (aliases for common task operations).</p>
+<h3 id="board-list">board list<a class="headerlink" href="#board-list" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>board<span class="w"> </span>list<span class="w">                 </span><span class="c1"># all tasks by lane</span>
+loom<span class="w"> </span>board<span class="w"> </span>list<span class="w"> </span>-l<span class="w"> </span>Backlog<span class="w">      </span><span class="c1"># filter by lane</span>
+</code></pre></div>
+<p>Alias: <code>ls</code></p>
+<h3 id="board-add">board add<a class="headerlink" href="#board-add" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>board<span class="w"> </span>add<span class="w"> </span><span class="s2">&quot;Quick fix needed&quot;</span><span class="w"> </span>-g<span class="w"> </span>backend<span class="w"> </span>-l<span class="w"> </span><span class="s2">&quot;In Progress&quot;</span>
+</code></pre></div>
+<h3 id="board-move">board move<a class="headerlink" href="#board-move" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>board<span class="w"> </span>move<span class="w"> </span>fix-login<span class="w"> </span>-l<span class="w"> </span>Done
+</code></pre></div>
+<h3 id="board-remove">board remove<a class="headerlink" href="#board-remove" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>board<span class="w"> </span>remove<span class="w"> </span>fix-login
+</code></pre></div>
+<p>Alias: <code>rm</code></p>
+<h3 id="board-lanes">board lanes<a class="headerlink" href="#board-lanes" title="Permanent link">&para;</a></h3>
+<p>List all lanes with task counts.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>board<span class="w"> </span>lanes
+</code></pre></div>
+<p>Alias: <code>bd</code></p>
+<hr />
+<h2 id="action">action<a class="headerlink" href="#action" title="Permanent link">&para;</a></h2>
+<p>Action management.</p>
+<h3 id="action-list">action list<a class="headerlink" href="#action-list" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>action<span class="w"> </span>list
+</code></pre></div>
+<p>Shows all actions from project (<code>.loom/actions/</code>) and global (<code>~/.loom/actions/</code>) directories, with scope and variable info.</p>
+<p>Alias: <code>ls</code></p>
+<h3 id="action-show">action show<a class="headerlink" href="#action-show" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>action<span class="w"> </span>show<span class="w"> </span>feature/review
+</code></pre></div>
+<p>Displays the action YAML and auto-discovered variables.</p>
+<h3 id="action-create">action create<a class="headerlink" href="#action-create" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>action<span class="w"> </span>create<span class="w"> </span>my-action
+</code></pre></div>
+<p>Creates a starter action file in <code>.loom/actions/</code>.</p>
+<p>Alias: <code>act</code></p>
+<hr />
+<h2 id="worktree">worktree<a class="headerlink" href="#worktree" title="Permanent link">&para;</a></h2>
+<p>Git worktree management. See <a href="../worktrees/">Worktrees</a> for the full guide.</p>
+<h3 id="worktree-create">worktree create<a class="headerlink" href="#worktree-create" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>worktree<span class="w"> </span>create<span class="w"> </span>impl-add-auth
+loom<span class="w"> </span>worktree<span class="w"> </span>create<span class="w"> </span>impl-add-auth<span class="w"> </span>--relaunch<span class="w">    </span><span class="c1"># relaunch agent in the worktree</span>
+</code></pre></div>
+<h3 id="worktree-remove">worktree remove<a class="headerlink" href="#worktree-remove" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>worktree<span class="w"> </span>remove<span class="w"> </span>impl-add-auth
+loom<span class="w"> </span>worktree<span class="w"> </span>remove<span class="w"> </span>impl-add-auth<span class="w"> </span>--relaunch<span class="w">    </span><span class="c1"># relaunch agent in the original repo</span>
+</code></pre></div>
+<p>Alias: <code>rm</code></p>
+<h3 id="worktree-checkpoint">worktree checkpoint<a class="headerlink" href="#worktree-checkpoint" title="Permanent link">&para;</a></h3>
+<p>Create a checkpoint commit (snapshot of current changes).</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>worktree<span class="w"> </span>checkpoint<span class="w"> </span>impl-add-auth
+</code></pre></div>
+<p>Alias: <code>cp</code></p>
+<h3 id="worktree-history">worktree history<a class="headerlink" href="#worktree-history" title="Permanent link">&para;</a></h3>
+<p>Show checkpoint history for an agent's worktree.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>worktree<span class="w"> </span><span class="nb">history</span><span class="w"> </span>impl-add-auth
+</code></pre></div>
+<p>Alias: <code>log</code></p>
+<h3 id="worktree-rollback">worktree rollback<a class="headerlink" href="#worktree-rollback" title="Permanent link">&para;</a></h3>
+<p>Reset the worktree to a previous checkpoint.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>worktree<span class="w"> </span>rollback<span class="w"> </span>impl-add-auth<span class="w"> </span>abc1234
+</code></pre></div>
+<p>Alias: <code>wt</code></p>
+<hr />
+<h2 id="ai">ai<a class="headerlink" href="#ai" title="Permanent link">&para;</a></h2>
+<p>Agent reporting commands. These are designed to be called <strong>by AI agents</strong> (e.g., Claude Code) from within a Loom-managed session. The calling agent is auto-detected via the <code>LOOM_CELL_ID</code> environment variable.</p>
+<h3 id="ai-done">ai done<a class="headerlink" href="#ai-done" title="Permanent link">&para;</a></h3>
+<p>Mark the current task as complete.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span><span class="k">done</span>
+loom<span class="w"> </span>ai<span class="w"> </span><span class="k">done</span><span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;Implemented auth with JWT tokens&quot;</span><span class="w">    </span><span class="c1"># with summary</span>
+</code></pre></div>
+<h3 id="ai-blocked">ai blocked<a class="headerlink" href="#ai-blocked" title="Permanent link">&para;</a></h3>
+<p>Signal that the agent is blocked and needs user input.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>blocked<span class="w"> </span><span class="s2">&quot;Need credentials for the staging database&quot;</span>
+</code></pre></div>
+<h3 id="ai-error">ai error<a class="headerlink" href="#ai-error" title="Permanent link">&para;</a></h3>
+<p>Report an unrecoverable error.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>error<span class="w"> </span><span class="s2">&quot;Build fails due to missing dependency&quot;</span>
+</code></pre></div>
+<h3 id="ai-progress">ai progress<a class="headerlink" href="#ai-progress" title="Permanent link">&para;</a></h3>
+<p>Report progress on the current task (updates the activity detail in the UI).</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>progress<span class="w"> </span><span class="s2">&quot;Running test suite (3/5 passing)&quot;</span>
+</code></pre></div>
+<h3 id="ai-ready">ai ready<a class="headerlink" href="#ai-ready" title="Permanent link">&para;</a></h3>
+<p>Signal that the agent is done and ready for a new task. Unlike <code>done</code>, this also unlinks the agent from the task.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>ready
+</code></pre></div>
+<h3 id="ai-context">ai context<a class="headerlink" href="#ai-context" title="Permanent link">&para;</a></h3>
+<p>Show the current agent's context (name, group, directory, worktree, linked tasks). Works offline --- reads from the local database.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>context
+</code></pre></div>
+<h3 id="ai-derive">ai derive<a class="headerlink" href="#ai-derive" title="Permanent link">&para;</a></h3>
+<p>Create a derived task and dispatch it. See <a href="../actions/#derive-to-agent">Actions &amp; Templates</a> for details on <code>--agent</code> and <code>--self</code>.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>derive<span class="w"> </span><span class="s2">&quot;Review the implementation&quot;</span><span class="w"> </span>-t<span class="w"> </span>feature/review
+loom<span class="w"> </span>ai<span class="w"> </span>derive<span class="w"> </span><span class="s2">&quot;Fix the issues found&quot;</span><span class="w"> </span>-t<span class="w"> </span>feature/fix-review<span class="w"> </span>--agent<span class="w"> </span>impl-add-auth
+loom<span class="w"> </span>ai<span class="w"> </span>derive<span class="w"> </span><span class="s2">&quot;Now add tests&quot;</span><span class="w"> </span>-t<span class="w"> </span>feature/implement<span class="w"> </span>--self
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-t, --action</code></td>
+<td>Action for the derived task</td>
+</tr>
+<tr>
+<td><code>-v, --var</code></td>
+<td>Action variables (<code>KEY=VALUE</code>, repeatable)</td>
+</tr>
+<tr>
+<td><code>-g, --group</code></td>
+<td>Target group (defaults to current task's group)</td>
+</tr>
+<tr>
+<td><code>--agent</code></td>
+<td>Dispatch to an existing agent by slug, name, or ID</td>
+</tr>
+<tr>
+<td><code>--self</code></td>
+<td>Dispatch to the calling agent (same session)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ai-ask">ai ask<a class="headerlink" href="#ai-ask" title="Permanent link">&para;</a></h3>
+<p>Create a task in Backlog for human review (human-in-the-loop gate).</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>ask<span class="w"> </span><span class="s2">&quot;Implementation is done. Should we deploy or add more tests?&quot;</span>
+</code></pre></div>
+<hr />
+<h2 id="pipeline">pipeline<a class="headerlink" href="#pipeline" title="Permanent link">&para;</a></h2>
+<p>Pipeline discovery from action transitions.</p>
+<h3 id="pipeline-list">pipeline list<a class="headerlink" href="#pipeline-list" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>pipeline<span class="w"> </span>list
+</code></pre></div>
+<p>Lists all pipelines discovered by scanning action <code>transitions</code> fields.</p>
+<h3 id="pipeline-show">pipeline show<a class="headerlink" href="#pipeline-show" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>pipeline<span class="w"> </span>show<span class="w"> </span>feature/implement
+</code></pre></div>
+<p>Shows the pipeline structure with actions and transition conditions.</p>
+<p>Alias: <code>pl</code></p>
+<hr />
+<h2 id="schedule">schedule<a class="headerlink" href="#schedule" title="Permanent link">&para;</a></h2>
+<p>Recurring and one-shot task creation plus automatic dispatch.</p>
+<h3 id="schedule-create">schedule create<a class="headerlink" href="#schedule-create" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>schedule<span class="w"> </span>create<span class="w"> </span>weekly-deps<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-g<span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--cron<span class="w"> </span><span class="s2">&quot;0 9 * * 1&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--task<span class="w"> </span><span class="s2">&quot;Weekly dependency update {date}&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-t<span class="w"> </span>maintenance/deps
+
+loom<span class="w"> </span>schedule<span class="w"> </span>create<span class="w"> </span>release-checklist<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-g<span class="w"> </span>ops<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--at<span class="w"> </span><span class="s2">&quot;tomorrow 09:00&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--task<span class="w"> </span><span class="s2">&quot;Release checklist {datetime}&quot;</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-g, --group</code></td>
+<td>Target group</td>
+</tr>
+<tr>
+<td><code>--task</code></td>
+<td>Task title template; supports <code>{date}</code>, <code>{time}</code>, and <code>{datetime}</code></td>
+</tr>
+<tr>
+<td><code>-d, --context</code></td>
+<td>Longer task description</td>
+</tr>
+<tr>
+<td><code>--cron</code></td>
+<td>Recurring 5-field cron expression</td>
+</tr>
+<tr>
+<td><code>--at</code></td>
+<td>One-shot run time</td>
+</tr>
+<tr>
+<td><code>-t, --action</code></td>
+<td>Action attached to each created task</td>
+</tr>
+<tr>
+<td><code>-v, --var</code></td>
+<td>Action variables (<code>KEY=VALUE</code>, repeatable)</td>
+</tr>
+<tr>
+<td><code>-l, --labels</code></td>
+<td>Comma-separated labels</td>
+</tr>
+<tr>
+<td><code>--tz</code></td>
+<td>IANA timezone for cron evaluation</td>
+</tr>
+</tbody>
+</table>
+<h3 id="schedule-list">schedule list<a class="headerlink" href="#schedule-list" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>schedule<span class="w"> </span>list
+</code></pre></div>
+<p>Alias: <code>ls</code></p>
+<h3 id="schedule-show">schedule show<a class="headerlink" href="#schedule-show" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>schedule<span class="w"> </span>show<span class="w"> </span>weekly-deps
+</code></pre></div>
+<h3 id="schedule-edit">schedule edit<a class="headerlink" href="#schedule-edit" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>schedule<span class="w"> </span>edit<span class="w"> </span>weekly-deps<span class="w"> </span>--cron<span class="w"> </span><span class="s2">&quot;0 8 * * 1&quot;</span>
+loom<span class="w"> </span>schedule<span class="w"> </span>edit<span class="w"> </span>weekly-deps<span class="w"> </span>-t<span class="w"> </span>maintenance/deps<span class="w"> </span>-v<span class="w"> </span><span class="nv">MODULE</span><span class="o">=</span>auth
+</code></pre></div>
+<h3 id="schedule-enable">schedule enable<a class="headerlink" href="#schedule-enable" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>schedule<span class="w"> </span><span class="nb">enable</span><span class="w"> </span>weekly-deps
+</code></pre></div>
+<h3 id="schedule-disable">schedule disable<a class="headerlink" href="#schedule-disable" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>schedule<span class="w"> </span>disable<span class="w"> </span>weekly-deps
+</code></pre></div>
+<h3 id="schedule-run">schedule run<a class="headerlink" href="#schedule-run" title="Permanent link">&para;</a></h3>
+<p>Trigger the schedule immediately and create a fresh task now.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>schedule<span class="w"> </span>run<span class="w"> </span>weekly-deps
+</code></pre></div>
+<hr />
+<h2 id="logs">logs<a class="headerlink" href="#logs" title="Permanent link">&para;</a></h2>
+<p>Tail the daemon log.</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>logs<span class="w">              </span><span class="c1"># show last 50 lines</span>
+loom<span class="w"> </span>logs<span class="w"> </span>-f<span class="w">           </span><span class="c1"># follow (like tail -f)</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -2,6 +2,8 @@
 
 Git worktrees let multiple agents work on the same repository in parallel, each on its own branch. Loom manages the worktree lifecycle: creation, checkpointing, rollback, and cleanup.
 
+For how worktrees fit into agent launch, prompts, MCP, and relaunch behavior, see [Agents & Sessions](agents-and-sessions.md).
+
 ## Why worktrees?
 
 Without worktrees, two agents working on the same repo would conflict --- one agent's uncommitted changes would interfere with the other's. Worktrees solve this by giving each agent its own working copy of the repository on a separate branch.
@@ -30,7 +32,9 @@ Once enabled, every new agent created in that group gets its own worktree. The a
 | **Base directory** | Where worktrees are stored, relative to the repo root. Default: `.loom/worktrees`. |
 | **Base branch** | Branch to fork from. Default: current HEAD. |
 | **Auto-checkpoint on stop** | Automatically commit changes when an agent's session ends. |
+| **Checkpoint on progress / done** | Throttled automatic checkpoints when the agent reports progress or completion. |
 | **Squash on merge** | Use squash merge when merging worktree branches back to the base branch. Default: on. |
+| **Symlink paths** | Optional repo-relative paths to mirror into each worktree as symlinks. Useful for shared caches or large generated assets. |
 
 Or from the CLI:
 
@@ -48,8 +52,19 @@ When an agent is created with worktrees enabled:
 2. A worktree is checked out at `{repo-root}/.loom/worktrees/{agent-id}/`
 3. The agent's working directory is set to the worktree path
 4. The agent's terminal opens in the worktree
+5. Loom installs adapter files such as hooks, MCP config, and persistent prompt files into that worktree
 
 The `.loom/worktrees/` directory is automatically added to `.gitignore` so worktree directories don't pollute your repository.
+
+Loom also adds its own injected runtime files to the repo's git exclude list so worktree-backed agent sessions do not pollute `git status`. This includes files such as:
+
+- `.mcp.json`
+- `.claude/settings.local.json`
+- `.claude/instructions.md`
+- `.claude/skills/loom-*/`
+- `.codex/config.toml`
+- `.codex/hooks.json`
+- `.codex/AGENTS.md`
 
 !!! note
     The group's working directory must be inside a git repository for worktrees to work. If it's not, the setting is silently ignored.
@@ -77,6 +92,10 @@ This stages all changes (`git add -A`) and creates a commit with the message `lo
 When **Auto-checkpoint on stop** is enabled in group settings, Loom automatically creates a checkpoint whenever an agent's session ends. This catches work in progress if an agent crashes or is stopped unexpectedly.
 
 The auto-checkpoint uses the agent's last summary (if available) as the commit body, giving you context about what the agent was working on.
+
+### Progress checkpoints
+
+When **Checkpoint on progress / done** is enabled, Loom can also create checkpoints when the agent reports progress or completion through `loom ai progress` and `loom ai done`. These checkpoints are throttled so progress spam does not create a commit every few seconds.
 
 ### Viewing checkpoint history
 
@@ -122,6 +141,16 @@ This inheritance is automatic --- the `inherit_worktree_from` field is set durin
 
 When using `--agent` or `--self` to dispatch to an existing agent (see [Derive-to-agent](actions.md#derive-to-agent)), the target agent keeps its existing worktree. The new task runs in whatever directory the agent is already working in.
 
+## Relaunch and recovery
+
+Worktrees persist independently of a live terminal session. On relaunch, Loom:
+
+- reuses the existing worktree if it is still valid
+- clears stale worktree metadata if the path is gone
+- recreates a new worktree if the configuration still says the agent should have one
+
+This is why a stopped agent can often be relaunched back into the same isolated branch without manual setup.
+
 ## Merging
 
 When an agent's work is complete and ready to merge back to the base branch, use the merge worktree option:
@@ -162,6 +191,10 @@ Removing a worktree deletes the worktree directory and its branch. The agent's w
 !!! note
     When an agent is removed from Loom, its worktree is cleaned up automatically.
 
+If you remove the worktree and relaunch the agent, Loom launches it from the repo root unless worktree settings tell it to create a new one.
+
 ## Closing agents with worktrees
 
 When you remove an agent that has an active worktree with uncommitted changes, Loom warns you about the state of the worktree (dirty files, number of commits) so you can checkpoint or merge before closing.
+
+Removing the agent also removes Loom-managed runtime files associated with that session, such as adapter hooks, MCP config, and persistent prompt files in the worktree directory.

@@ -6,7 +6,39 @@ If you work primarily in the terminal, you know how productive that environment 
 
 Loom also supports a **standalone mode** where the UI runs in a browser window instead of the Toolbelt. This is the foundation for supporting other terminal emulators (e.g. Ghostty) in the future.
 
-For full documentation, see the [docs site](docs/).
+## Start Here
+
+- New to Loom? Start with the [Getting Started guide](docs/getting-started.md).
+- Want the full docs map? Open the [documentation home](docs/index.md).
+- Need a quick mental model? Read [Concepts](docs/concepts.md).
+
+## Documentation Map
+
+### Set up and learn the basics
+
+- [Getting Started](docs/getting-started.md) — install Loom, run it, and create your first group, agent, and terminal
+- [Concepts](docs/concepts.md) — plain-language overview of groups, agents, terminals, broadcasts, and actions
+- [Agents & Sessions](docs/agents-and-sessions.md) — understand providers, boot commands, prompts, worktrees, resume, and runtime integration
+- [Group Settings](docs/group-settings.md) — configure defaults, overrides, windows, and session behavior
+- [Keyboard Shortcuts](docs/keyboard-shortcuts.md) — navigate Loom quickly from the terminal
+
+### Run agent workflows
+
+- [Workflow Guide](docs/workflow-guide.md) — follow the normal path from task creation to dispatch, pipelines, schedules, and completion
+- [Task Board](docs/board.md) — manage work in lanes and dispatch tasks to agents
+- [Task Lifecycle](docs/task-lifecycle.md) — understand how tasks move from backlog to completion
+- [Actions & Templates](docs/actions.md) — define reusable prompts, variables, and pipelines
+- [Agent Templates](docs/agent-templates.md) — save reusable agent launch presets
+- [Weaver](docs/weaver.md) — use Loom's orchestrator agent for semi-autonomous task management
+- [Worktrees](docs/worktrees.md) — isolate agent changes in separate git worktrees
+
+### Reference and project docs
+
+- [CLI Reference](docs/cli.md) — script Loom from the command line
+- [Reference Guide](docs/reference-guide.md) — grouped operator reference for commands, shortcuts, settings, logs, and runtime paths
+- [Troubleshooting](docs/troubleshooting.md) — symptom-first recovery steps for startup, sessions, worktrees, merge issues, and stale state
+- [Roadmap](docs/roadmap.md) — planned work and direction
+- [Docs site](docs/) — browse the full documentation in MkDocs
 
 ## Features
 
@@ -162,21 +194,14 @@ Auto-generated at runtime (in the install directory, not in the repo):
 
 ## Troubleshooting
 
-**Nothing happens when I click buttons:**
-An old daemon instance may be running. Run `make deploy` to kill it and install fresh, then restart from the Scripts menu.
+Use the dedicated [Troubleshooting guide](docs/troubleshooting.md) for startup issues, stale sessions, worktree recovery, merge conflicts, and provider/session problems.
 
-**Log location:**
-```
-~/Library/Application\ Support/iTerm2/Scripts/loom/loom/loom.log
-```
+Quick checks:
 
-**Tab colors not visible:**
-With the Minimal theme, tab colors appear as a thin colored line at the very top of the tab. Switch to the Regular theme for more prominent color badges.
-
-**Port already in use:**
-```bash
-make stop    # kills whatever is on port 18932
-```
+- `make check` verifies the install and iTerm2 Python environment.
+- `loom logs -f` tails the daemon log.
+- `make stop` clears a stuck daemon or port conflict on `18932`.
+- If tab colors look missing, check whether iTerm2 is using the Minimal tab theme, which shows them as a thin line.
 
 ## Dependencies
 

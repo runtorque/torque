@@ -1,0 +1,1552 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="iTerm2 agent and terminal orchestration">
+      
+      
+      
+      
+        <link rel="prev" href="../agents-and-sessions/">
+      
+      
+        <link rel="next" href="../board/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Workflow Guide - Loom</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#workflow-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Loom" class="md-header__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Loom
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Workflow Guide
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Loom" class="md-nav__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Loom
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start Here
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Start Here
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents-and-sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents & Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Workflows
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Guide
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-workflow-at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The workflow at a glance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-capture-work-on-the-board" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Capture work on the board
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-decide-how-the-work-should-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Decide how the work should run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-plan-the-board-before-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Plan the board before dispatch
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Plan the board before dispatch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scheduling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-dispatch-the-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Dispatch the task
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-work-in-progress-updates-blockers-and-human-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Work in progress: updates, blockers, and human input
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-hand-work-off-with-pipelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Hand work off with pipelines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-complete-the-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Complete the work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#end-to-end-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        End-to-end example
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../board/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../task-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions & Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../worktrees/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worktrees
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../group-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Group Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../keyboard-shortcuts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard Shortcuts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-workflow-at-a-glance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The workflow at a glance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-capture-work-on-the-board" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Capture work on the board
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-decide-how-the-work-should-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Decide how the work should run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-plan-the-board-before-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Plan the board before dispatch
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Plan the board before dispatch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scheduling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduling
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-dispatch-the-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Dispatch the task
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-work-in-progress-updates-blockers-and-human-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Work in progress: updates, blockers, and human input
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-hand-work-off-with-pipelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Hand work off with pipelines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-complete-the-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Complete the work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#end-to-end-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        End-to-end example
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="workflow-guide">Workflow Guide<a class="headerlink" href="#workflow-guide" title="Permanent link">&para;</a></h1>
+<p>This guide explains how work moves through Loom from the moment you capture a task to the moment the work is complete. It is the best place to start if you want to understand the day-to-day workflow without reading source code.</p>
+<p>For deeper reference, see <a href="../board/">Task Board</a>, <a href="../task-lifecycle/">Task Lifecycle</a>, <a href="../actions/">Actions &amp; Templates</a>, <a href="../agent-templates/">Agent Templates</a>, <a href="../worktrees/">Worktrees</a>, and the <a href="../cli/">CLI Reference</a>.</p>
+<h2 id="the-workflow-at-a-glance">The workflow at a glance<a class="headerlink" href="#the-workflow-at-a-glance" title="Permanent link">&para;</a></h2>
+<p>Loom's workflow has seven moving parts:</p>
+<ul>
+<li><strong>Tasks</strong> are the units of work that appear on the board.</li>
+<li><strong>Lanes</strong> show where each task is in its lifecycle.</li>
+<li><strong>Actions</strong> define the prompt an agent receives when a task is dispatched.</li>
+<li><strong>Agent templates</strong> define how the agent is launched.</li>
+<li><strong>Dispatch</strong> links a task to an agent and sends the work.</li>
+<li><strong>Pipelines</strong> let agents hand follow-up work to other agents.</li>
+<li><strong>Schedules</strong> create or dispatch work automatically at a future time.</li>
+</ul>
+<p>If you only remember one rule, remember this: Loom keeps the board as the source of truth. Whether work is created by a human, an agent, or a schedule, it still appears as tasks moving through the same lanes.</p>
+<h2 id="1-capture-work-on-the-board">1. Capture work on the board<a class="headerlink" href="#1-capture-work-on-the-board" title="Permanent link">&para;</a></h2>
+<p>Most work starts as a task in <strong>Backlog</strong>. A task should describe one concrete piece of work:</p>
+<ul>
+<li>"Fix the login redirect bug"</li>
+<li>"Review the auth middleware changes"</li>
+<li>"Run the weekly dependency update"</li>
+</ul>
+<p>You can create tasks from the board UI or from the CLI:</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Fix the login redirect bug&quot;</span><span class="w"> </span>-g<span class="w"> </span>backend
+loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Review the auth middleware changes&quot;</span><span class="w"> </span>-g<span class="w"> </span>backend
+</code></pre></div>
+<p>At creation time, you can also add workflow structure:</p>
+<ul>
+<li><strong>Action</strong> if the task should use a reusable prompt</li>
+<li><strong>Variables</strong> if the action needs inputs like <code>MODULE=auth</code></li>
+<li><strong>Labels</strong> for filtering</li>
+<li><strong>Dependencies</strong> if this task must wait for another task to finish</li>
+<li><strong>Scheduled time</strong> if the task should dispatch later</li>
+</ul>
+<p>Example:</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Review auth middleware&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-g<span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-t<span class="w"> </span>feature/review<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--depends-on<span class="w"> </span>add-auth-middleware
+</code></pre></div>
+<p>For board mechanics and task fields, see <a href="../board/">Task Board</a>.</p>
+<h2 id="2-decide-how-the-work-should-run">2. Decide how the work should run<a class="headerlink" href="#2-decide-how-the-work-should-run" title="Permanent link">&para;</a></h2>
+<p>Before dispatching, decide two separate things:</p>
+<ul>
+<li><strong>What should the agent do?</strong> Use an <a href="../actions/">action</a>.</li>
+<li><strong>Who should do it, and with what runtime setup?</strong> Use an <a href="../agent-templates/">agent template</a>.</li>
+</ul>
+<p>This split matters in daily use:</p>
+<ul>
+<li>An <strong>action</strong> can describe an implementation step, review step, fix step, or research step.</li>
+<li>An <strong>agent template</strong> can choose the provider, model, permissions, tab color, worktree behavior, environment variables, and companion terminals.</li>
+</ul>
+<p>Example action + template pairing:</p>
+<ul>
+<li><code>feature/implement</code> tells the agent how to implement the work.</li>
+<li><code>researcher</code> or <code>reviewer</code> tells Loom how to launch that agent.</li>
+</ul>
+<p>If a task has no action, Loom can still dispatch it. In that case the task text is sent as raw text instead of a rendered prompt.</p>
+<p>For the full action format, examples, and variable system, see <a href="../actions/">Actions &amp; Templates</a>. For launch presets, see <a href="../agent-templates/">Agent Templates</a>.</p>
+<h2 id="3-plan-the-board-before-dispatch">3. Plan the board before dispatch<a class="headerlink" href="#3-plan-the-board-before-dispatch" title="Permanent link">&para;</a></h2>
+<p>Lanes are the planning surface. The built-in lanes are:</p>
+<ul>
+<li><strong>Backlog</strong> for unstarted work</li>
+<li><strong>To Do</strong> for work that is ready and prioritized</li>
+<li><strong>In Progress</strong> for active work</li>
+<li><strong>Done</strong> for completed work</li>
+</ul>
+<p>Many teams use Loom like this:</p>
+<ol>
+<li>Capture everything in <strong>Backlog</strong>.</li>
+<li>Move the next set of tasks into <strong>To Do</strong>.</li>
+<li>Dispatch tasks when they are ready.</li>
+<li>Let Loom move active work into <strong>In Progress</strong>.</li>
+<li>Let agents complete tasks into <strong>Done</strong>.</li>
+</ol>
+<p>Two common board controls matter before dispatch:</p>
+<h3 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h3>
+<p>Dependencies block dispatch until other tasks are done. Use them when the task is valid, but the timing is not.</p>
+<p>Example:</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Deploy auth changes&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-g<span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--depends-on<span class="w"> </span>review-auth,run-auth-tests
+</code></pre></div>
+<p>In the UI, dependency-blocked tasks show a lock badge and the dispatch action is disabled until every dependency is in <strong>Done</strong>.</p>
+<h3 id="scheduling">Scheduling<a class="headerlink" href="#scheduling" title="Permanent link">&para;</a></h3>
+<p>Use scheduling when the task should not start yet, or when the same work should be created repeatedly.</p>
+<p>There are two scheduling modes:</p>
+<ul>
+<li><strong>Scheduled task</strong>: one existing task waits until a future time, then Loom dispatches that task.</li>
+<li><strong>Schedule</strong>: a recurring or one-shot rule creates a fresh task when it fires, then dispatches it.</li>
+</ul>
+<p>Use a scheduled task when you already know the exact work item:</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Kick off release checklist&quot;</span><span class="w"> </span>-g<span class="w"> </span>ops<span class="w"> </span>--at<span class="w"> </span><span class="s2">&quot;tomorrow 09:00&quot;</span>
+</code></pre></div>
+<p>Use a schedule when the work repeats:</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>schedule<span class="w"> </span>create<span class="w"> </span>weekly-deps<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-g<span class="w"> </span>backend<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--cron<span class="w"> </span><span class="s2">&quot;0 9 * * 1&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--task<span class="w"> </span><span class="s2">&quot;Weekly dependency update {date}&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-t<span class="w"> </span>maintenance/deps
+</code></pre></div>
+<p>For schedule behavior and board UI details, see <a href="../board/#scheduled-work">Task Board</a>. For command syntax, see <a href="../cli/#schedule">CLI Reference</a>.</p>
+<h2 id="4-dispatch-the-task">4. Dispatch the task<a class="headerlink" href="#4-dispatch-the-task" title="Permanent link">&para;</a></h2>
+<p>Dispatch is the moment a task becomes active. Loom:</p>
+<ol>
+<li>Creates or selects an agent</li>
+<li>Applies the group defaults and any agent template</li>
+<li>Creates a worktree if configured</li>
+<li>Renders the action prompt if the task has an action</li>
+<li>Links the task to the agent</li>
+<li>Moves the task into <strong>In Progress</strong></li>
+</ol>
+<p>You can dispatch from the board UI or with the CLI:</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>dispatch<span class="w"> </span><span class="s2">&quot;Add dark mode&quot;</span><span class="w"> </span>-t<span class="w"> </span>feature/implement<span class="w"> </span>-g<span class="w"> </span>frontend
+</code></pre></div>
+<p>If the task depends on unfinished tasks, dispatch is blocked. If the task is scheduled, Loom performs the same dispatch automatically when the scheduled time arrives.</p>
+<p>For the full dispatch reference, see <a href="../board/#dispatching">Task Board</a>.</p>
+<h2 id="5-work-in-progress-updates-blockers-and-human-input">5. Work in progress: updates, blockers, and human input<a class="headerlink" href="#5-work-in-progress-updates-blockers-and-human-input" title="Permanent link">&para;</a></h2>
+<p>Once an agent is working on a task, the agent can report back to Loom:</p>
+<ul>
+<li><code>loom ai progress "message"</code> updates the activity detail</li>
+<li><code>loom ai blocked "reason"</code> marks the task as blocked</li>
+<li><code>loom ai error "message"</code> marks the task as failed and needing attention</li>
+<li><code>loom ai done</code> completes the current task</li>
+<li><code>loom ai ready</code> completes the task and releases the agent for future work</li>
+<li><code>loom ai ask "question"</code> creates a human-in-the-loop follow-up task in <strong>Backlog</strong></li>
+</ul>
+<p>These updates make the board readable without opening each agent session. A person scanning the board can see which tasks are moving, which are blocked, and which are waiting on a human decision.</p>
+<p>For the lane and completion model, see <a href="../task-lifecycle/">Task Lifecycle</a>.</p>
+<h2 id="6-hand-work-off-with-pipelines">6. Hand work off with pipelines<a class="headerlink" href="#6-hand-work-off-with-pipelines" title="Permanent link">&para;</a></h2>
+<p>Pipelines are Loom's way of turning one task into a multi-step workflow. They are built from action transitions.</p>
+<p>Example:</p>
+<ul>
+<li><code>feature/implement</code> can derive to <code>feature/review</code></li>
+<li><code>feature/review</code> can derive to <code>feature/fix-review</code></li>
+<li><code>feature/fix-review</code> can derive back to <code>feature/review</code></li>
+</ul>
+<p>That creates a workflow such as:</p>
+<ol>
+<li>Implement the feature</li>
+<li>Review the result</li>
+<li>Fix issues if needed</li>
+<li>Review again</li>
+<li>Mark the work done</li>
+</ol>
+<p>From the agent's perspective, this is usually one command:</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>derive<span class="w"> </span><span class="s2">&quot;Review the auth middleware implementation&quot;</span><span class="w"> </span>-t<span class="w"> </span>feature/review
+</code></pre></div>
+<p>What Loom does next:</p>
+<ul>
+<li>The current task stays visible on the board</li>
+<li>A new derived task is created beneath it</li>
+<li>The parent task's status badge changes to show the current stage</li>
+<li>The new task is dispatched according to the selected transition</li>
+</ul>
+<p>This is how Loom keeps the board forward-moving without reopening old tasks. The original task remains the top-level story; the derived tasks show the detailed handoff chain.</p>
+<p>For transition syntax and pipeline examples, see <a href="../actions/#pipelines">Actions &amp; Templates</a>. For how completion cascades back up the chain, see <a href="../task-lifecycle/#cascade-completion">Task Lifecycle</a>.</p>
+<h2 id="7-complete-the-work">7. Complete the work<a class="headerlink" href="#7-complete-the-work" title="Permanent link">&para;</a></h2>
+<p>Work is complete when the active task reaches <strong>Done</strong> and any required follow-up tasks are resolved.</p>
+<p>There are two common endings:</p>
+<ul>
+<li>A single task finishes directly with <code>loom ai done</code>.</li>
+<li>A pipeline finishes when its last derived task is marked done and Loom cascades completion back up the chain.</li>
+</ul>
+<p>If you use worktrees, completion is often followed by a git step such as review, merge, checkpoint cleanup, or worktree removal. That git flow is separate from the board flow, which is why the board can remain clean even when code review takes longer.</p>
+<p>See <a href="../worktrees/">Worktrees</a> for the isolated-branch workflow.</p>
+<h2 id="end-to-end-example">End-to-end example<a class="headerlink" href="#end-to-end-example" title="Permanent link">&para;</a></h2>
+<p>Here is a typical day-to-day flow:</p>
+<ol>
+<li>Create the main task:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Add auth middleware&quot;</span><span class="w"> </span>-g<span class="w"> </span>backend<span class="w"> </span>-t<span class="w"> </span>feature/implement
+</code></pre></div>
+<ol>
+<li>Create a dependent follow-up task:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>task<span class="w"> </span>create<span class="w"> </span><span class="s2">&quot;Deploy auth middleware&quot;</span><span class="w"> </span>-g<span class="w"> </span>backend<span class="w"> </span>--depends-on<span class="w"> </span>add-auth-middleware
+</code></pre></div>
+<ol>
+<li>
+<p>Dispatch the implementation task from the board UI.</p>
+</li>
+<li>
+<p>The implementation agent finishes and derives a review task:</p>
+</li>
+</ol>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>derive<span class="w"> </span><span class="s2">&quot;Review auth middleware&quot;</span><span class="w"> </span>-t<span class="w"> </span>feature/review
+</code></pre></div>
+<ol>
+<li>
+<p>The reviewer either:</p>
+</li>
+<li>
+<p>calls <code>loom ai done</code> if the work is good</p>
+</li>
+<li>calls <code>loom ai derive ... -t feature/fix-review</code> if fixes are needed</li>
+<li>
+<p>calls <code>loom ai ask "..."</code> if a human decision is required</p>
+</li>
+<li>
+<p>Once the implementation chain reaches <strong>Done</strong>, the dependent deployment task can be dispatched.</p>
+</li>
+</ol>
+<p>This is the core Loom workflow: capture work, structure it with actions and templates, dispatch it, let agents report progress and hand off follow-up work, then finish cleanly with the board as the shared source of truth.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
