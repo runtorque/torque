@@ -159,14 +159,15 @@ function _weaverRenderSettings(group, ws, weaver) {
   html += '<div class="weaver-events-list">';
   mandatory.forEach(function(evt) {
     html += '<label class="weaver-event-check mandatory">'
-         + '<input type="checkbox" checked disabled> ' + evt + ' (mandatory)</label>';
+         + '<input type="checkbox" checked disabled>'
+         + '<span>' + evt + ' (mandatory)</span></label>';
   });
   optional.forEach(function(evt) {
     var checked = enabled.indexOf(evt) >= 0 ? ' checked' : '';
     html += '<label class="weaver-event-check">'
          + '<input type="checkbox"' + checked
-         + ' onchange="weaverToggleEvent(\'' + evt + '\', this.checked)"> '
-         + evt + '</label>';
+         + ' onchange="weaverToggleEvent(\'' + evt + '\', this.checked)">'
+         + '<span>' + evt + '</span></label>';
   });
   html += '</div>';
   html += '</div>';

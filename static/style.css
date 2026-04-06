@@ -2698,6 +2698,8 @@ body.diff-view-open #ctx-menu {
   min-width: 80px;
 }
 .weaver-field select {
+  flex: 1;
+  min-width: 0;
   background: var(--bg-cell);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -2709,7 +2711,7 @@ body.diff-view-open #ctx-menu {
 .weaver-events-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   margin-top: 6px;
 }
 .weaver-event-check {
@@ -2717,11 +2719,16 @@ body.diff-view-open #ctx-menu {
   color: var(--text);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  cursor: pointer;
+  line-height: 1.4;
 }
 .weaver-event-check.mandatory { color: var(--text-dim); }
 .weaver-event-check input[type="checkbox"] {
   accent-color: var(--accent);
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
 }
 
 .weaver-empty {
