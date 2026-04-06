@@ -71,6 +71,47 @@ def _truncate(s: str, n: int) -> str:
     return s[:n] + "..." if len(s) > n else s
 
 
+_VALUE_OPTS = {
+    "-c", "--config",
+    "--enable", "--disable",
+    "--remote", "--remote-auth-token-env",
+    "-i", "--image",
+    "-m", "--model",
+    "--local-provider",
+    "-p", "--profile",
+    "-s", "--sandbox",
+    "-a", "--ask-for-approval",
+    "-C", "--cd",
+    "--add-dir",
+}
+
+
+def _split_boot_args(boot_cmd: str) -> tuple[list[str], str]:
+    """Split a Codex boot command into option args and trailing prompt."""
+    parts = shlex.split(boot_cmd)
+    if len(parts) <= 1:
+        return ([], "")
+    args = parts[1:]
+    opts: list[str] = []
+    prompt = ""
+    i = 0
+    while i < len(args):
+        part = args[i]
+        if part == "--":
+            prompt = " ".join(args[i + 1:])
+            break
+        if part.startswith("-"):
+            opts.append(part)
+            if "=" not in part and part in _VALUE_OPTS and i + 1 < len(args):
+                i += 1
+                opts.append(args[i])
+            i += 1
+            continue
+        prompt = " ".join(args[i:])
+        break
+    return (opts, prompt)
+
+
 def _is_loom_hook(hook: dict) -> bool:
     """Check if a single hook entry was installed by Loom (by URL marker)."""
     cmd = hook.get("command", "")
@@ -130,35 +171,19 @@ class CodexAdapter(AgentAdapter):
         del working_dir
         if not text:
             return ""
-        return f" --instructions {shlex.quote(text)}"
+        return f" {shlex.quote(text)}"
 
     def inject_persistent_prompt(self, working_dir: str,
                                  filename: str, text: str) -> str:
-        """Write persistent prompt to .codex/AGENTS.md with managed markers.
+        """Inject persistent prompt explicitly via CLI flags.
 
-        Codex auto-discovers AGENTS.md from `{cwd}/.codex/`, so no CLI
-        flags are needed.  Uses markers for safe merge with user content.
+        Loom must not rely on `.codex/AGENTS.md` discovery for correctness.
+        Older Loom versions wrote managed prompt blocks there; clean them up
+        if present so the prompt is sourced only from explicit launch flags.
         """
-        if not text or not working_dir:
-            return ""
-        try:
-            codex_dir = Path(working_dir) / ".codex"
-            codex_dir.mkdir(parents=True, exist_ok=True)
-            agents_file = codex_dir / "AGENTS.md"
-            content = agents_file.read_text() if agents_file.exists() else ""
-            marker = _agents_marker(filename or "loom-system-prompt")
-            content = _remove_agents_section(
-                content, filename or "loom-system-prompt")
-            loom_block = (
-                f"{marker}\n{text.rstrip()}\n{marker}\n")
-            if content.strip():
-                content = content.rstrip("\n") + "\n\n" + loom_block
-            else:
-                content = loom_block
-            agents_file.write_text(content)
-            return ""  # Codex auto-discovers AGENTS.md
-        except Exception:
-            return ""
+        if working_dir and filename:
+            self.uninstall_persistent_prompt(working_dir, filename)
+        return self.inject_system_prompt(working_dir, text)
 
     def uninstall_persistent_prompt(self, working_dir: str,
                                     filename: str = "") -> None:
@@ -181,8 +206,14 @@ class CodexAdapter(AgentAdapter):
         return f" --model {shlex.quote(model)}"
 
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
-        base = boot_cmd.strip().split()[0]
-        return f"{base} resume {shlex.quote(session_id)}"
+        parts = shlex.split(boot_cmd)
+        if not parts:
+            return None
+        opts, prompt = _split_boot_args(boot_cmd)
+        cmd = [parts[0], "resume", *opts, session_id]
+        if prompt:
+            cmd.append(prompt)
+        return " ".join(shlex.quote(p) for p in cmd)
 
     def get_input_ready_policy(self) -> InputReadyPolicy:
         """Wait for the Codex composer to fully initialize before first send."""

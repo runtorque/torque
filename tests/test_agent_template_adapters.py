@@ -51,30 +51,34 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         adapter = CodexAdapter()
         self.assertEqual(
             adapter.inject_system_prompt("/tmp", "Be precise."),
-            " --instructions 'Be precise.'",
+            " 'Be precise.'",
         )
         self.assertEqual(adapter.resolve_model_flags("gpt-5"), " --model gpt-5")
 
-    def test_codex_persistent_prompts_are_scoped_by_filename(self):
+    def test_codex_persistent_prompts_use_cli_args(self):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = CodexAdapter()
-            adapter.inject_persistent_prompt(
+            result = adapter.inject_persistent_prompt(
                 tmp, "loom-system-prompt-agent-1.md", "First prompt."
             )
-            adapter.inject_persistent_prompt(
-                tmp, "loom-system-prompt-agent-2.md", "Second prompt."
+            self.assertEqual(
+                result,
+                " 'First prompt.'",
             )
-            agents_file = Path(tmp) / ".codex" / "AGENTS.md"
-            content = agents_file.read_text()
-            self.assertIn("First prompt.", content)
-            self.assertIn("Second prompt.", content)
+            self.assertFalse(
+                (Path(tmp) / ".codex" / "AGENTS.md").exists()
+            )
 
-            adapter.uninstall_persistent_prompt(
-                tmp, "loom-system-prompt-agent-1.md"
-            )
-            content = agents_file.read_text()
-            self.assertNotIn("First prompt.", content)
-            self.assertIn("Second prompt.", content)
+    def test_codex_resume_command_preserves_flags(self):
+        adapter = CodexAdapter()
+        resumed = adapter.get_resume_command(
+            "codex --model gpt-5 'Follow the spec.'",
+            "session-123",
+        )
+        self.assertEqual(
+            resumed,
+            "codex resume --model gpt-5 session-123 'Follow the spec.'",
+        )
 
     def test_generic_adapter_is_noop_for_template_specific_flags(self):
         adapter = GenericAdapter()
