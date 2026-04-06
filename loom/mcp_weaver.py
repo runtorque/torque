@@ -137,6 +137,26 @@ WEAVER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "weaver_agent_show",
+        "description": (
+            "Show detailed information about a specific agent. "
+            "Returns agent metadata, worktree state (path, branch, "
+            "diff stats, checkpoints), task history with messages, "
+            "session info, and child terminals. Use for post-completion "
+            "review before merging."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Agent slug, name, or ID.",
+                },
+            },
+            "required": ["agent"],
+        },
+    },
+    {
         "name": "weaver_actions_list",
         "description": (
             "List available actions (project and user scope) with "
@@ -560,6 +580,25 @@ WEAVER_TOOLS = [
             "required": ["agent"],
         },
     },
+    {
+        "name": "weaver_agent_relaunch",
+        "description": (
+            "Relaunch a stopped agent — re-creates the terminal "
+            "session. If the agent has a worktree, it is reused. "
+            "If session_resume is enabled, the previous Claude Code "
+            "session is resumed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Agent slug or ID to relaunch.",
+                },
+            },
+            "required": ["agent"],
+        },
+    },
     # -- Worktree tools -----------------------------------------------------
     {
         "name": "weaver_merge",
@@ -647,6 +686,43 @@ WEAVER_TOOLS = [
                         "Limit diff to specific file paths. "
                         "If omitted, shows all changes."
                     ),
+                },
+            },
+            "required": ["agent"],
+        },
+    },
+    {
+        "name": "weaver_worktree_remove",
+        "description": (
+            "Remove an agent's worktree from disk. Use after merging "
+            "to clean up. The agent's directory reverts to the "
+            "original repo root."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Agent slug or ID with a worktree.",
+                },
+            },
+            "required": ["agent"],
+        },
+    },
+    {
+        "name": "weaver_worktree_checkpoint",
+        "description": (
+            "Create a checkpoint commit on an agent's worktree. "
+            "Commits all current changes with an auto-generated "
+            "message. Useful for saving progress before risky "
+            "operations."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Agent slug or ID with a worktree.",
                 },
             },
             "required": ["agent"],
@@ -806,6 +882,90 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "activity_detail": c.activity_detail,
             })
         return json.dumps({"agents": agents}), False
+
+    if name == "weaver_agent_show":
+        agent_ident = args.get("agent", "")
+        agent_id = _resolve_agent(state, agent_ident)
+        if not agent_id:
+            return f"Agent not found: {agent_ident}", True
+        cell = state.agents[agent_id]
+
+        d = {
+            "id": cell.id,
+            "name": cell.name,
+            "slug": cell.slug,
+            "agent_type": cell.agent_type,
+            "status": cell.status,
+            "group": cell.group,
+            "directory": cell.directory,
+            "git_root": cell.git_root,
+            "activity": cell.activity,
+            "activity_detail": cell.activity_detail,
+            "error_message": cell.error_message,
+            "needs_attention": cell.needs_attention,
+            "tasks_dispatched": cell.tasks_dispatched,
+            "session": {
+                "session_id": cell.agent_session_id,
+                "tokens_in": cell.session_tokens_in,
+                "tokens_out": cell.session_tokens_out,
+            },
+        }
+
+        # Worktree state
+        if cell.worktree_path:
+            d["worktree"] = {
+                "path": cell.worktree_path,
+                "branch": cell.worktree_branch,
+                "base_branch": cell.worktree_base_branch,
+                "dirty": cell.worktree_dirty,
+                "diff": cell.worktree_diff or {},
+                "checkpoints": cell.worktree_checkpoints,
+                "ahead": cell.worktree_ahead,
+                "behind": cell.worktree_behind,
+                "merged": cell.worktree_merged,
+            }
+
+        # Child terminals
+        children_ids = state._children.get(agent_id, [])
+        if children_ids:
+            terminals = []
+            for cid in children_ids:
+                tc = state.agents.get(cid)
+                if tc:
+                    terminals.append({
+                        "name": tc.name,
+                        "slug": tc.slug,
+                        "status": tc.status,
+                        "current_process": tc.current_process,
+                        "current_path": tc.current_path,
+                    })
+            d["terminals"] = terminals
+
+        # Task history — all tasks ever assigned to this agent
+        tasks = []
+        for t in state.board_tasks.values():
+            if t.agent_id != agent_id:
+                continue
+            task_info = {
+                "id": t.id,
+                "slug": t.slug,
+                "title": t.task,
+                "lane": t.lane,
+                "status": t.status,
+                "labels": t.labels or [],
+                "action": t.action_name,
+            }
+            if t.messages:
+                task_info["messages"] = t.messages
+            tasks.append(task_info)
+        if tasks:
+            d["tasks"] = tasks
+
+        # Current task (may differ from tasks list if unlinked)
+        if cell.current_task_id:
+            d["current_task_id"] = cell.current_task_id
+
+        return json.dumps(d), False
 
     if name == "weaver_actions_list":
         result = await handle_command({
@@ -1043,6 +1203,25 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         return json.dumps({"type": "ok",
                           "message": "Agent closed"}), False
 
+    if name == "weaver_agent_relaunch":
+        agent_ident = args.get("agent", "")
+        agent_id = _resolve_agent(state, agent_ident)
+        if not agent_id:
+            return f"Agent not found: {agent_ident}", True
+        cell = state.agents.get(agent_id)
+        if not cell:
+            return f"Agent not found: {agent_ident}", True
+        if cell.status != "stopped":
+            return f"Agent is not stopped (status: {cell.status})", True
+        result = await handle_command({
+            "cmd": "relaunch_agent",
+            "id": agent_id,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps({"type": "ok",
+                          "message": f"Agent {cell.slug} relaunched"}), False
+
     # -- Worktree tools -----------------------------------------------------
 
     if name == "weaver_merge":
@@ -1138,5 +1317,39 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return result.get("diff", "No changes"), False
+
+    if name == "weaver_worktree_remove":
+        agent_ident = args.get("agent", "")
+        agent_id = _resolve_agent(state, agent_ident)
+        if not agent_id:
+            return f"Agent not found: {agent_ident}", True
+        cell = state.agents.get(agent_id)
+        if not cell or not cell.worktree_path:
+            return "Agent has no worktree", True
+        result = await handle_command({
+            "cmd": "worktree_remove",
+            "id": agent_id,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps({"type": "ok",
+                          "message": "Worktree removed"}), False
+
+    if name == "weaver_worktree_checkpoint":
+        agent_ident = args.get("agent", "")
+        agent_id = _resolve_agent(state, agent_ident)
+        if not agent_id:
+            return f"Agent not found: {agent_ident}", True
+        cell = state.agents.get(agent_id)
+        if not cell or not cell.worktree_path:
+            return "Agent has no worktree", True
+        result = await handle_command({
+            "cmd": "worktree_checkpoint",
+            "id": agent_id,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps({"type": "ok",
+                          "message": "Checkpoint created"}), False
 
     return f"Unknown weaver tool: {name}", True
