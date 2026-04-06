@@ -419,7 +419,7 @@ WEAVER_TOOLS = [
                     "type": "integer",
                     "description": (
                         "Max seconds between pushes including "
-                        "heartbeats (default: 300)."
+                        "idle digests (default: 300)."
                     ),
                 },
                 "enable": {

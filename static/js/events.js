@@ -13,6 +13,7 @@ var _eventsKindFilter = 'all';
 var _eventsDismissedIds = new Set();
 var _eventsSearchDebounce = null;
 var _eventsSearchHadFocus = false;
+var _eventsResolveDrafts = {};
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -107,14 +108,20 @@ function _eventsGetAttentionItems() {
     if (!t.labels || t.labels.indexOf('loom:human') < 0) continue;
     if (t.lane === 'Done') continue;
     if (grp && t.group !== grp) continue;
+    var parent = _eventsAskParentTask(t);
+    var agent = _eventsAskAgent(t);
     items.push({
       type: 'ask',
       id: t.id,
-      agent_name: t.agent_id ? _eventsAgentName(t.agent_id) : '',
+      agent_name: agent ? (agent.name || '') : '',
+      agent_slug: agent ? (agent.slug || '') : '',
       group: t.group,
       message: t.task || '',
+      description: t.description || '',
       timestamp: t.created_at ? new Date(t.created_at).getTime() / 1000 : 0,
-      parent_agent_id: _eventsAskParentAgentId(t),
+      parent_agent_id: parent ? (parent.agent_id || '') : '',
+      parent_task_title: parent ? (parent.task || '') : '',
+      parent_task_description: parent ? (parent.description || '') : '',
     });
   }
 
@@ -141,15 +148,15 @@ function _eventsGetAttentionItems() {
   return items;
 }
 
-function _eventsAgentName(agentId) {
-  if (!state || !state.agents || !state.agents[agentId]) return '';
-  return state.agents[agentId].name;
+function _eventsAskParentTask(task) {
+  if (!task.parent_task_id || !state || !state.board_tasks) return null;
+  return state.board_tasks[task.parent_task_id] || null;
 }
 
-function _eventsAskParentAgentId(task) {
-  if (!task.parent_task_id || !state || !state.board_tasks) return '';
-  var parent = state.board_tasks[task.parent_task_id];
-  return parent ? (parent.agent_id || '') : '';
+function _eventsAskAgent(task) {
+  var parent = _eventsAskParentTask(task);
+  if (!parent || !parent.agent_id || !state || !state.agents) return null;
+  return state.agents[parent.agent_id] || null;
 }
 
 /* ---- Render --------------------------------------------------------- */
@@ -158,9 +165,13 @@ function renderEvents() {
   var panel = document.getElementById('panel-events');
   if (!panel) return;
 
-  // Preserve scroll position
+  // Preserve scroll position and inline ask drafts before DOM rebuild
   var logEl = panel.querySelector('.events-log');
   if (logEl) _eventsScrollTop = logEl.scrollTop;
+  panel.querySelectorAll('.events-resolve-textarea').forEach(function(ta) {
+    var taskId = ta.id.replace('events-resolve-', '');
+    _eventsResolveDrafts[taskId] = ta.value;
+  });
 
   var html = '';
 
@@ -261,15 +272,33 @@ function _renderAttentionCard(item) {
   html += '<button class="events-dismiss-btn" onclick="event.stopPropagation();eventsDismiss(\'' + item.id + '\')" title="Dismiss">\u00D7</button>';
 
   if (item.type === 'ask') {
-    html += '<div class="events-attention-label">&#x2753; Question'
-      + (item.agent_name ? ' from <strong>' + esc(item.agent_name) + '</strong>' : '')
-      + '</div>';
+    var draft = _eventsResolveDrafts[item.id] || '';
+    html += '<div class="events-attention-label">&#x2753; Question</div>';
+    if (item.agent_name) {
+      html += '<div class="events-attention-agent"><strong>' + esc(item.agent_name) + '</strong>';
+      if (item.agent_slug) {
+        html += '<span class="events-attention-agent-slug">@' + esc(item.agent_slug) + '</span>';
+      }
+      html += '</div>';
+    }
+    if (item.parent_task_title) {
+      html += '<div class="events-attention-context-label">Current task</div>';
+      html += '<div class="events-attention-message">' + esc(item.parent_task_title) + '</div>';
+    }
+    if (item.parent_task_description) {
+      html += '<div class="events-attention-context">' + esc(item.parent_task_description) + '</div>';
+    }
+    html += '<div class="events-attention-context-label">Question</div>';
     html += '<div class="events-attention-message">' + esc(item.message) + '</div>';
+    if (item.description) {
+      html += '<div class="events-attention-context-label">Additional details</div>';
+      html += '<div class="events-attention-context">' + esc(item.description) + '</div>';
+    }
     html += '<textarea class="events-resolve-textarea" id="events-resolve-' + item.id + '"'
       + ' placeholder="Type your answer..."'
-      + ' oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'"'
+      + ' oninput="eventsResolveInput(\'' + item.id + '\', this)"'
       + ' onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();eventsResolveInline(\'' + item.id + '\')}"'
-      + '></textarea>';
+      + '>' + esc(draft) + '</textarea>';
     html += '<div class="events-attention-actions">';
     html += '<button class="btn-primary btn-sm" onclick="eventsResolveInline(\'' + item.id + '\')">Resolve</button>';
     if (item.parent_agent_id) {
@@ -319,12 +348,19 @@ function _renderEventEntry(evt, idx) {
 
 /* ---- Actions -------------------------------------------------------- */
 
+function eventsResolveInput(taskId, textarea) {
+  _eventsResolveDrafts[taskId] = textarea.value;
+  textarea.style.height = 'auto';
+  textarea.style.height = textarea.scrollHeight + 'px';
+}
+
 function eventsResolveInline(taskId) {
   var textarea = document.getElementById('events-resolve-' + taskId);
   if (!textarea) return;
   var answer = textarea.value.trim();
   if (!answer) { textarea.focus(); return; }
   send({ cmd: 'resolve_ask', id: taskId, answer: answer });
+  delete _eventsResolveDrafts[taskId];
   textarea.value = '';
 }
 
@@ -354,6 +390,7 @@ function eventsOnSearchInput(value) {
 }
 
 function eventsDismiss(id) {
+  delete _eventsResolveDrafts[id];
   _eventsDismissedIds.add(id);
   renderEvents();
   updateEventsAttentionBadge();
