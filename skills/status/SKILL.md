@@ -1,5 +1,4 @@
 ---
-name: loom-status
 description: Show current Loom agent context, linked task, and pipeline state
 allowed-tools: mcp__loom__loom_context
 ---

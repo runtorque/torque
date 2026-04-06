@@ -1,5 +1,4 @@
 ---
-name: loom-done
 description: Mark the current Loom task as complete
 allowed-tools: mcp__loom__loom_done
 argument-hint: [completion message]
