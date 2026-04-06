@@ -8,6 +8,13 @@ function renderWeaverPanel() {
   var el = document.getElementById('panel-weaver');
   if (!el) return;
 
+  // Don't re-render while user is typing in the reply box or instructions
+  var active = document.activeElement;
+  if (active && (active.id === 'weaver-reply-input' ||
+                 active.classList.contains('weaver-instructions'))) {
+    return;
+  }
+
   var group = _currentGroup();
   var ws = _weaverGetSettings(group);
   var weaver = group ? _weaverGetAgent(group) : null;
