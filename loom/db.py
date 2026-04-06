@@ -28,7 +28,8 @@ _AGENT_PERSISTED_COLS = [
     "command", "directory", "tab_color", "icon", "template", "window_id",
     "parent_id", "status", "worktree_path", "worktree_branch",
     "worktree_repo_root", "worktree_base_dir", "worktree_base_branch",
-    "worktree_auto_checkpoint", "worktree_merge_squash", "agent_type",
+    "worktree_auto_checkpoint", "checkpoint_on_progress",
+    "worktree_merge_squash", "agent_type",
     "agent_session_id", "session_resume", "idle_timeout",
     "tasks_dispatched",
 ]
@@ -40,7 +41,8 @@ _GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars",
 # GroupSettings fields that are booleans — stored as INTEGER 0/1.
 _GS_BOOL_FIELDS = {
     "collapsed_default", "filter_by_window", "git_worktree",
-    "worktree_auto_checkpoint", "worktree_merge_squash",
+    "worktree_auto_checkpoint", "checkpoint_on_progress",
+    "worktree_merge_squash",
     "agent_session_resume", "agent_always_custom_dialog",
     "dispatch_auto_terminals",
     "notifications", "notify_on_finish", "notify_on_error",
@@ -81,6 +83,7 @@ CREATE TABLE IF NOT EXISTS agents (
     worktree_base_dir     TEXT NOT NULL DEFAULT '.loom/worktrees',
     worktree_base_branch  TEXT NOT NULL DEFAULT '',
     worktree_auto_checkpoint INTEGER NOT NULL DEFAULT 0,
+    checkpoint_on_progress   INTEGER NOT NULL DEFAULT 0,
     worktree_merge_squash INTEGER NOT NULL DEFAULT 1,
     agent_type            TEXT NOT NULL DEFAULT '',
     agent_session_id      TEXT NOT NULL DEFAULT '',
@@ -126,6 +129,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     worktree_base_dir           TEXT NOT NULL DEFAULT '.loom/worktrees',
     worktree_base_branch        TEXT NOT NULL DEFAULT '',
     worktree_auto_checkpoint    INTEGER NOT NULL DEFAULT 0,
+    checkpoint_on_progress      INTEGER NOT NULL DEFAULT 0,
     worktree_merge_squash       INTEGER NOT NULL DEFAULT 1,
     worktree_merge_instructions TEXT NOT NULL DEFAULT '',
     worktree_symlinks           TEXT NOT NULL DEFAULT '[]',
@@ -435,6 +439,7 @@ class LoomDB:
             ("template", "TEXT", "''"),
             ("worktree_base_dir", "TEXT", "'.loom/worktrees'"),
             ("worktree_auto_checkpoint", "INTEGER", "0"),
+            ("checkpoint_on_progress", "INTEGER", "0"),
             ("worktree_merge_squash", "INTEGER", "1"),
             ("session_resume", "INTEGER", "1"),
             ("idle_timeout", "INTEGER", "5"),
@@ -495,6 +500,16 @@ class LoomDB:
                 "ALTER TABLE group_settings ADD COLUMN "
                 "weaver_agent_id TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
+        # Migrate: add checkpoint_on_progress to group_settings + agents
+        for table in ("group_settings", "agents"):
+            try:
+                self._conn.execute(
+                    f"SELECT checkpoint_on_progress FROM {table} LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN "
+                    "checkpoint_on_progress INTEGER NOT NULL DEFAULT 0")
+                self._conn.commit()
         # Migrate: add pending_question column to weaver_settings
         try:
             self._conn.execute(
@@ -562,10 +577,11 @@ class LoomDB:
                  command, directory, tab_color, icon, template, window_id,
                  parent_id, status, worktree_path, worktree_branch,
                  worktree_repo_root, worktree_base_dir, worktree_base_branch,
-                 worktree_auto_checkpoint, worktree_merge_squash,
+                 worktree_auto_checkpoint, checkpoint_on_progress,
+                 worktree_merge_squash,
                  agent_type, agent_session_id, session_resume, idle_timeout,
                  tasks_dispatched)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             cell.id, cell.name, cell.slug, cell.group, cell.cell_type,
             cell.session_id, cell.profile, cell.command, cell.directory,
@@ -574,6 +590,7 @@ class LoomDB:
             cell.worktree_branch, cell.worktree_repo_root,
             cell.worktree_base_dir, cell.worktree_base_branch,
             int(cell.worktree_auto_checkpoint),
+            int(cell.checkpoint_on_progress),
             int(cell.worktree_merge_squash), cell.agent_type,
             cell.agent_session_id, int(cell.session_resume),
             cell.idle_timeout,
@@ -1108,10 +1125,11 @@ class LoomDB:
                          template, window_id, parent_id, status,
                          worktree_path, worktree_branch, worktree_repo_root,
                          worktree_base_dir, worktree_base_branch,
-                         worktree_auto_checkpoint, worktree_merge_squash,
+                         worktree_auto_checkpoint, checkpoint_on_progress,
+                         worktree_merge_squash,
                          agent_type, agent_session_id, session_resume,
                          idle_timeout, tasks_dispatched)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     a.get("id", aid),
                     a.get("name", ""),
@@ -1134,6 +1152,7 @@ class LoomDB:
                     a.get("worktree_base_dir", ".loom/worktrees"),
                     a.get("worktree_base_branch", ""),
                     int(a.get("worktree_auto_checkpoint", False)),
+                    int(a.get("checkpoint_on_progress", False)),
                     int(a.get("worktree_merge_squash", True)),
                     a.get("agent_type", ""),
                     a.get("agent_session_id", ""),
@@ -1250,6 +1269,8 @@ class LoomDB:
             d["group"] = d.pop("group_name")
             d["worktree_auto_checkpoint"] = bool(
                 d.get("worktree_auto_checkpoint", 0))
+            d["checkpoint_on_progress"] = bool(
+                d.get("checkpoint_on_progress", 0))
             d["worktree_merge_squash"] = bool(
                 d.get("worktree_merge_squash", 1))
             d["session_resume"] = bool(d.get("session_resume", 1))

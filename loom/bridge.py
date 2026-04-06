@@ -11,6 +11,7 @@ import iterm2
 from .config import log
 from .state import AgentCell, MatrixState
 from .adapters import detect_agent_type, detect_by_command, get_adapter
+from .worktree import ensure_git_exclude
 
 _TITLE_RE = re.compile(r"^\[(.+?)\]\s+(.+)$")
 
@@ -140,6 +141,7 @@ class ITerm2Adapter:
                         if adapter.install_skills(hook_dir):
                             log.info("Re-installed skills for '%s' in %s",
                                      cell.name, hook_dir)
+                    ensure_git_exclude(hook_dir)
 
                 self._start_prompt_monitor(cell)
 
@@ -324,6 +326,9 @@ class ITerm2Adapter:
                 if adapter.install_skills(hook_dir):
                     log.info("Installed skills for '%s' in %s",
                              cell.name, hook_dir)
+            # Exclude Loom-injected files from git status
+            if hook_dir:
+                ensure_git_exclude(hook_dir)
 
         # Init script
         if init_script:

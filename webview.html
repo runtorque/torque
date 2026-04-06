@@ -109,6 +109,9 @@
             <input id="add-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
           </label>
           <label class="gs-checkbox">
+            <input id="add-wt-checkpoint-on-progress" type="checkbox"> Checkpoint on progress
+          </label>
+          <label class="gs-checkbox">
             <input id="add-wt-squash" type="checkbox"> Squash on merge
           </label>
         </div>
@@ -249,6 +252,10 @@
           <label class="gs-checkbox">
             <input id="gs-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically commit all changes when an agent stops. Creates a checkpoint commit on the worktree branch.">?</span>
+          </label>
+          <label class="gs-checkbox">
+            <input id="gs-wt-checkpoint-on-progress" type="checkbox"> Checkpoint on progress
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically checkpoint when an agent reports progress or completes a task. Throttled to at most once per 5 minutes. Creates finer-grained save points for rollback.">?</span>
           </label>
           <label class="gs-checkbox">
             <input id="gs-wt-merge-squash" type="checkbox" checked> Squash commits on merge

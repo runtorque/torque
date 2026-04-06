@@ -109,6 +109,7 @@ class AgentCell:
     worktree_base_dir: str = ".loom/worktrees"  # worktree dir relative to repo root
     worktree_base_branch: str = ""  # branch the worktree forked from (e.g. main)
     worktree_auto_checkpoint: bool = False  # auto-checkpoint on session end
+    checkpoint_on_progress: bool = False  # auto-checkpoint on loom ai progress/done
     worktree_merge_squash: bool = True  # squash when merging back to base
     # Agent awareness (Phase 1)
     agent_type: str = ""  # "claude-code", "codex", "gemini-cli", ""
@@ -136,6 +137,8 @@ class AgentCell:
     worktree_merged: bool = False  # branch merged into base (ephemeral)
     # MCP message log (ephemeral)
     mcp_messages: list = field(default_factory=list)  # [{action, message, timestamp}]
+    # Checkpoint throttle (ephemeral)
+    last_checkpoint_at: float = 0.0  # timestamp of last progress checkpoint
     # Weaver message tracking (ephemeral)
     pending_weaver_message: bool = False  # agent has unread message from weaver
 
@@ -149,7 +152,8 @@ _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "error_message", "needs_attention", "last_summary",
                      "current_task_id",
                      "worktree_dirty", "worktree_diff",
-                     "worktree_checkpoints", "mcp_messages",
+                     "worktree_checkpoints", "last_checkpoint_at",
+                     "mcp_messages",
                      "pending_weaver_message")
 
 
@@ -200,6 +204,7 @@ class GroupSettings:
     worktree_base_dir: str = ".loom/worktrees"  # directory for worktrees (relative to repo)
     worktree_base_branch: str = ""  # branch to fork from (empty = current HEAD)
     worktree_auto_checkpoint: bool = False  # auto-checkpoint on agent stop
+    checkpoint_on_progress: bool = False  # auto-checkpoint on loom ai progress/done
     worktree_merge_squash: bool = True  # squash commits when merging to main
     worktree_merge_instructions: str = ""  # additional instructions appended to merge prompt
     worktree_symlinks: list[str] = field(default_factory=list)  # paths to symlink from repo root

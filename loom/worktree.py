@@ -7,6 +7,57 @@ from typing import Optional
 
 from .config import log
 
+# Files Loom injects into user repos (adapters, MCP, hooks, skills).
+# These must be excluded from git so they don't pollute `git status`.
+LOOM_EXCLUDE_ENTRIES = [
+    ".mcp.json",
+    ".claude/settings.local.json",
+    ".claude/instructions.md",
+    ".claude/skills/loom-*/",
+    ".codex/config.toml",
+    ".codex/hooks.json",
+]
+
+
+def ensure_git_exclude(directory: str) -> None:
+    """Add Loom-injected filenames to .git/info/exclude if not present.
+
+    Works for both normal repos (.git is a directory) and worktrees
+    (.git is a file pointing to the real gitdir).
+    """
+    directory = os.path.expanduser(directory)
+    dot_git = os.path.join(directory, ".git")
+    try:
+        if os.path.isfile(dot_git):
+            # Worktree — .git is a file with "gitdir: <path>"
+            with open(dot_git) as f:
+                gitdir = f.read().strip().removeprefix("gitdir: ")
+                if not os.path.isabs(gitdir):
+                    gitdir = os.path.normpath(
+                        os.path.join(directory, gitdir))
+        elif os.path.isdir(dot_git):
+            gitdir = dot_git
+        else:
+            return
+
+        exclude = os.path.join(gitdir, "info", "exclude")
+        os.makedirs(os.path.dirname(exclude), exist_ok=True)
+
+        existing = set()
+        if os.path.exists(exclude):
+            with open(exclude) as f:
+                existing = set(f.read().splitlines())
+
+        to_add = [e for e in LOOM_EXCLUDE_ENTRIES if e not in existing]
+        if to_add:
+            with open(exclude, "a") as f:
+                for entry in to_add:
+                    f.write(f"{entry}\n")
+            log.debug("Added %d entries to git exclude: %s",
+                      len(to_add), exclude)
+    except Exception:
+        log.debug("Could not update git exclude in %s", directory)
+
 
 class WorktreeManager:
     """Manages git worktrees for agent isolation."""
@@ -1010,34 +1061,26 @@ class WorktreeManager:
         return {"url": url}
 
     async def _ensure_gitignore(self, repo_root: str):
-        """Add Loom-managed paths to .gitignore if not already present."""
+        """Add .loom/worktrees/ to .gitignore if not already present.
+
+        Only the worktree directory belongs in .gitignore (shared across
+        clones).  All other Loom-injected files are excluded via
+        .git/info/exclude (per-checkout, not version-controlled).
+        """
         gitignore = os.path.join(repo_root, ".gitignore")
-        entries = [
-            ".loom/worktrees/",
-            ".claude/settings.local.json",
-            ".claude/instructions.md",
-            ".mcp.json",
-            ".claude/skills/loom-*/",
-            ".codex/config.toml",
-            ".codex/hooks.json",
-        ]
+        entry = ".loom/worktrees/"
         try:
             content = ""
             if os.path.exists(gitignore):
                 with open(gitignore) as f:
                     content = f.read()
-            lines = content.splitlines()
-            added = []
-            for entry in entries:
-                if entry not in lines:
-                    added.append(entry)
-            if added:
+            if entry not in content.splitlines():
                 with open(gitignore, "a") as f:
                     if content and not content.endswith("\n"):
                         f.write("\n")
-                    for entry in added:
-                        f.write(f"{entry}\n")
-                log.info("Added %s to .gitignore in %s",
-                         ", ".join(added), repo_root)
+                    f.write(f"{entry}\n")
+                log.info("Added %s to .gitignore in %s", entry, repo_root)
+            # Exclude Loom-injected files via .git/info/exclude
+            ensure_git_exclude(repo_root)
         except Exception:
             log.debug("Could not update .gitignore in %s", repo_root)

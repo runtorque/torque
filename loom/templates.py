@@ -38,6 +38,7 @@ _TEMPLATE_KEY_ORDER = [
     "worktree",
     "worktree_base_branch",
     "worktree_auto_checkpoint",
+    "checkpoint_on_progress",
     "worktree_merge_squash",
     "env_vars",
     "env_file",
@@ -65,6 +66,7 @@ _BOOL_KEYS = {
     "session_resume",
     "worktree",
     "worktree_auto_checkpoint",
+    "checkpoint_on_progress",
     "worktree_merge_squash",
 }
 
@@ -353,6 +355,9 @@ class TemplateManager:
             ),
             "worktree_auto_checkpoint": getattr(
                 group_settings, "worktree_auto_checkpoint", False
+            ),
+            "checkpoint_on_progress": getattr(
+                group_settings, "checkpoint_on_progress", False
             ),
             "worktree_merge_squash": getattr(
                 group_settings, "worktree_merge_squash", True
