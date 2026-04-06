@@ -7,8 +7,9 @@ var _diffCollapsedFiles = {};
 var _diffMergeCheck = null;   // null = loading, {clean, dirty, conflicts}
 var _diffCommitMsg = '';       // editable commit message
 var _diffMerging = false;      // true while merge request in flight
+var _diffReadOnly = false;     // true when opened from "View Diff" (no merge controls)
 
-function showDiffView(agentId) {
+function showDiffView(agentId, readOnly) {
   if (!agentId) return;
   _diffViewOpen = true;
   _diffViewAgentId = agentId;
@@ -17,9 +18,10 @@ function showDiffView(agentId) {
   _diffMergeCheck = null;
   _diffCommitMsg = '';
   _diffMerging = false;
+  _diffReadOnly = !!readOnly;
   renderDiffView();
   send({ cmd: 'worktree_diff_full', id: agentId });
-  send({ cmd: 'worktree_check_merge', id: agentId });
+  if (!_diffReadOnly) send({ cmd: 'worktree_check_merge', id: agentId });
 }
 
 function hideDiffView() {
@@ -30,6 +32,7 @@ function hideDiffView() {
   _diffMergeCheck = null;
   _diffCommitMsg = '';
   _diffMerging = false;
+  _diffReadOnly = false;
   renderDiffView();
 }
 
@@ -299,8 +302,14 @@ function renderDiffView() {
     }
   }
   html += '</div>';
-  html += _renderMergeBanner();
-  html += _renderDiffFooter();
+  if (_diffReadOnly) {
+    html += '<div class="diff-footer"><div class="diff-footer-buttons">';
+    html += '<button class="btn-cancel" onclick="hideDiffView()">Close</button>';
+    html += '</div></div>';
+  } else {
+    html += _renderMergeBanner();
+    html += _renderDiffFooter();
+  }
   html += '</div>';
 
   root.innerHTML = html;
