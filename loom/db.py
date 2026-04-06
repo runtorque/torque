@@ -277,6 +277,7 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     max_interval       INTEGER NOT NULL DEFAULT 300,
     paused             INTEGER NOT NULL DEFAULT 0,
     custom_instructions TEXT NOT NULL DEFAULT '',
+    pending_question   TEXT NOT NULL DEFAULT '',
     enabled_events     TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived"]'
 );
 
@@ -494,6 +495,18 @@ class LoomDB:
                 "ALTER TABLE group_settings ADD COLUMN "
                 "weaver_agent_id TEXT NOT NULL DEFAULT ''")
             self._conn.commit()
+        # Migrate: add pending_question column to weaver_settings
+        try:
+            self._conn.execute(
+                "SELECT pending_question FROM weaver_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            try:
+                self._conn.execute(
+                    "ALTER TABLE weaver_settings ADD COLUMN "
+                    "pending_question TEXT NOT NULL DEFAULT ''")
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass  # table may not exist yet
         # Migrate: rename system labels with loom: prefix
         rows = self._conn.execute(
             "SELECT id, labels FROM board_tasks "
@@ -811,14 +824,15 @@ class LoomDB:
         self._conn.execute("""
             INSERT OR REPLACE INTO weaver_settings
                 (group_name, push_interval, max_interval, paused,
-                 custom_instructions, enabled_events)
-            VALUES (?,?,?,?,?,?)
+                 custom_instructions, pending_question, enabled_events)
+            VALUES (?,?,?,?,?,?,?)
         """, (
             group_name,
             settings.get("push_interval", 60),
             settings.get("max_interval", 300),
             1 if settings.get("paused", False) else 0,
             settings.get("custom_instructions", ""),
+            settings.get("pending_question", ""),
             enabled_events,
         ))
         self._conn.commit()
@@ -827,12 +841,13 @@ class LoomDB:
         """Load weaver settings for a group. Returns None if not set."""
         row = self._conn.execute(
             "SELECT group_name, push_interval, max_interval, paused, "
-            "custom_instructions, enabled_events FROM weaver_settings "
+            "custom_instructions, pending_question, enabled_events "
+            "FROM weaver_settings "
             "WHERE group_name=?", (group_name,)).fetchone()
         if not row:
             return None
         try:
-            enabled = json.loads(row[5])
+            enabled = json.loads(row[6])
         except (json.JSONDecodeError, TypeError):
             enabled = ["agent_started", "task_dispatched", "task_derived"]
         return {
@@ -841,6 +856,7 @@ class LoomDB:
             "max_interval": row[2],
             "paused": bool(row[3]),
             "custom_instructions": row[4],
+            "pending_question": row[5],
             "enabled_events": enabled,
         }
 
@@ -853,12 +869,13 @@ class LoomDB:
         """Load weaver settings for all groups. Returns {group: settings}."""
         rows = self._conn.execute(
             "SELECT group_name, push_interval, max_interval, paused, "
-            "custom_instructions, enabled_events FROM weaver_settings"
+            "custom_instructions, pending_question, enabled_events "
+            "FROM weaver_settings"
         ).fetchall()
         result = {}
         for row in rows:
             try:
-                enabled = json.loads(row[5])
+                enabled = json.loads(row[6])
             except (json.JSONDecodeError, TypeError):
                 enabled = ["agent_started", "task_dispatched", "task_derived"]
             result[row[0]] = {
@@ -867,6 +884,7 @@ class LoomDB:
                 "max_interval": row[2],
                 "paused": bool(row[3]),
                 "custom_instructions": row[4],
+                "pending_question": row[5],
                 "enabled_events": enabled,
             }
         return result

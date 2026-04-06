@@ -69,27 +69,45 @@ function _weaverRenderJournal(group) {
     return '<div class="weaver-empty">No weaver configured for any group.</div>';
   }
 
+  var html = '';
+
+  // Pending question banner
+  var ws = _weaverGetSettings(group);
+  if (ws && ws.pending_question) {
+    html += '<div class="weaver-ask-banner">';
+    html += '<div class="weaver-ask-label">Weaver is asking:</div>';
+    html += '<div class="weaver-ask-question">' + _esc(ws.pending_question) + '</div>';
+    html += '<textarea class="weaver-ask-reply" id="weaver-reply-input" '
+         + 'placeholder="Type your reply..." rows="2"></textarea>';
+    html += '<div class="weaver-ask-actions">';
+    html += '<button class="weaver-reply-btn" onclick="weaverReply()">Send Reply</button>';
+    html += '</div>';
+    html += '</div>';
+  }
+
   // Journal entries come from state.weaver_journal (populated by delta ops)
   var entries = (state.weaver_journal && state.weaver_journal[group]) || [];
-  if (!entries.length) {
+  if (!entries.length && !html) {
     return '<div class="weaver-empty">No journal entries yet.</div>';
   }
 
-  var html = '<div class="weaver-journal">';
-  // Show newest first
-  for (var i = entries.length - 1; i >= 0; i--) {
-    var e = entries[i];
-    var typeClass = 'weaver-badge-' + (e.type || 'observation');
-    var ago = _weaverTimeAgo(e.timestamp);
-    html += '<div class="weaver-entry">';
-    html += '<div class="weaver-entry-header">';
-    html += '<span class="weaver-badge ' + typeClass + '">' + _esc(e.type || '?') + '</span>';
-    html += '<span class="weaver-entry-time">' + ago + '</span>';
-    html += '</div>';
-    html += '<div class="weaver-entry-text">' + _esc(e.entry || '') + '</div>';
+  if (entries.length) {
+    html += '<div class="weaver-journal">';
+    // Show newest first
+    for (var i = entries.length - 1; i >= 0; i--) {
+      var e = entries[i];
+      var typeClass = 'weaver-badge-' + (e.type || 'observation');
+      var ago = _weaverTimeAgo(e.timestamp);
+      html += '<div class="weaver-entry">';
+      html += '<div class="weaver-entry-header">';
+      html += '<span class="weaver-badge ' + typeClass + '">' + _esc(e.type || '?') + '</span>';
+      html += '<span class="weaver-entry-time">' + ago + '</span>';
+      html += '</div>';
+      html += '<div class="weaver-entry-text">' + _esc(e.entry || '') + '</div>';
+      html += '</div>';
+    }
     html += '</div>';
   }
-  html += '</div>';
   return html;
 }
 
@@ -178,6 +196,18 @@ function _weaverRenderSettings(group, ws, weaver) {
   html += '</div>';
 
   return html;
+}
+
+// -- Human reply -----------------------------------------------------------
+
+function weaverReply() {
+  var input = document.getElementById('weaver-reply-input');
+  if (!input) return;
+  var answer = input.value.trim();
+  if (!answer) return;
+  var group = _currentGroup();
+  if (!group) return;
+  send({ cmd: 'weaver_reply', group: group, answer: answer });
 }
 
 // -- Create weaver ---------------------------------------------------------

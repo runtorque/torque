@@ -242,6 +242,7 @@ class WeaverSettings:
     max_interval: int = 300              # max seconds between pushes (heartbeat)
     paused: bool = False                 # user paused event pushes
     custom_instructions: str = ""        # user-defined instructions appended to weaver system prompt
+    pending_question: str = ""           # question awaiting human reply (non-empty = awaiting input)
     enabled_events: list[str] = field(   # optional events (mandatory always on)
         default_factory=lambda: [
             "agent_started",

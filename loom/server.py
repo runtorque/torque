@@ -3680,6 +3680,57 @@ async def main(connection: iterm2.Connection):
                 state.update_weaver_settings(group, **fields)
                 result = {"type": "ok"}
 
+            elif cmd == "weaver_ask":
+                group = data.get("group", "")
+                question = data.get("question", "")
+                if not question:
+                    result = {"type": "error",
+                              "message": "Question is required"}
+                else:
+                    state.update_weaver_settings(
+                        group,
+                        pending_question=question,
+                        paused=True)
+                    # Also log to journal
+                    state.journal_append(
+                        group, "observation",
+                        f"Asked human: {question}")
+                    result = {"type": "ok"}
+
+            elif cmd == "weaver_reply":
+                group = data.get("group", "")
+                answer = data.get("answer", "")
+                if not answer:
+                    result = {"type": "error",
+                              "message": "Answer is required"}
+                else:
+                    weaver = state.get_weaver_for_group(group)
+                    if not weaver or not weaver.session_id:
+                        result = {"type": "error",
+                                  "message": "Weaver is not running"}
+                    else:
+                        # Send answer to weaver's terminal
+                        formatted = (
+                            "\n"
+                            "── Human Reply "
+                            "──────────────────────────────\n"
+                            f"{answer}\n"
+                            "────────────────────────────────────────"
+                            "────────\n"
+                        )
+                        await bridge.send_text(
+                            weaver.session_id, formatted)
+                        # Clear question, unpause events
+                        state.update_weaver_settings(
+                            group,
+                            pending_question="",
+                            paused=False)
+                        # Log to journal
+                        state.journal_append(
+                            group, "observation",
+                            f"Human replied: {answer}")
+                        result = {"type": "ok"}
+
             elif cmd == "weaver_pause":
                 group = data.get("group", "")
                 state.update_weaver_settings(group, paused=True)
@@ -3687,7 +3738,8 @@ async def main(connection: iterm2.Connection):
 
             elif cmd == "weaver_resume":
                 group = data.get("group", "")
-                state.update_weaver_settings(group, paused=False)
+                state.update_weaver_settings(
+                    group, paused=False, pending_question="")
                 result = {"type": "ok"}
 
             elif cmd == "restart":

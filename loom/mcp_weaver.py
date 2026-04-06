@@ -503,6 +503,28 @@ WEAVER_TOOLS = [
             "required": ["agent", "message"],
         },
     },
+    {
+        "name": "weaver_ask",
+        "description": (
+            "Ask the human a question. The question is displayed in "
+            "the Weaver panel and event pushes are automatically "
+            "paused until the human replies. Use this when you need "
+            "human guidance — prioritization, design decisions, "
+            "approval, or clarification. After the human responds "
+            "(via the panel or directly in your terminal), call "
+            "weaver_resume to unpause event delivery."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The question for the human.",
+                },
+            },
+            "required": ["question"],
+        },
+    },
 ]
 
 _WEAVER_TOOL_MAP = {t["name"]: t for t in WEAVER_TOOLS}
@@ -835,5 +857,33 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if name == "weaver_ask":
+        question = args.get("question", "").strip()
+        if not question:
+            return "Question is required", True
+
+        group = ""
+        for gn, gs in state.group_settings.items():
+            if gs.weaver_agent_id:
+                group = gn
+                break
+        if not group:
+            return "No weaver configured for any group", True
+
+        result = await handle_command({
+            "cmd": "weaver_ask",
+            "group": group,
+            "question": question,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return (
+            "Question posted to the Weaver panel. Event pushes have "
+            "been paused. The human will see your question and reply "
+            "via the panel or directly in this terminal.\n\n"
+            "After the human responds, call weaver_resume to unpause "
+            "event delivery."
+        ), False
 
     return f"Unknown weaver tool: {name}", True

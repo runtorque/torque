@@ -2731,6 +2731,59 @@ body.diff-view-open #ctx-menu {
   flex-shrink: 0;
 }
 
+/* Weaver ask banner */
+.weaver-ask-banner {
+  background: rgba(210, 153, 34, 0.08);
+  border: 1px solid var(--amber);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.weaver-ask-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--amber);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+.weaver-ask-question {
+  font-size: 11px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.weaver-ask-reply {
+  width: 100%;
+  min-height: 40px;
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: 10px var(--font);
+  padding: 6px;
+  resize: vertical;
+}
+.weaver-ask-reply:focus { border-color: var(--amber); outline: none; }
+.weaver-ask-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+.weaver-reply-btn {
+  background: var(--amber);
+  color: #000;
+  border: none;
+  padding: 4px 14px;
+  border-radius: var(--radius);
+  font: 10px var(--font);
+  font-weight: 600;
+  cursor: pointer;
+}
+.weaver-reply-btn:hover { opacity: 0.9; }
+
 .weaver-empty {
   font-size: 10px;
   color: var(--text-dim);

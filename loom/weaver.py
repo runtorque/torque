@@ -147,6 +147,16 @@ class WeaverEventBuffer:
 
     def on_agent_activity_change(self, cell):
         """Called when an agent's activity changes.  Flush if weaver goes idle."""
+        # Auto-clear pending question when weaver starts working
+        # (means the human typed directly into the terminal)
+        if cell.activity and cell.activity not in ("", "waiting"):
+            gs = self._state.group_settings.get(cell.group)
+            if gs and gs.weaver_agent_id == cell.id:
+                ws = self._state.get_weaver_settings(cell.group)
+                if ws.pending_question:
+                    self._state.update_weaver_settings(
+                        cell.group, pending_question="")
+
         if not cell.activity or cell.activity == "waiting":
             # Agent went idle — check if it's a weaver with pending events
             self._check_weaver_flush(cell)
