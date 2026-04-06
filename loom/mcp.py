@@ -379,10 +379,12 @@ def create_mcp_handler(handle_command, state):
                     _jsonrpc_error(req_id, -32602,
                                    f"Unknown tool: {tool_name}"))
 
-            # Weaver tools don't require X-Loom-Cell-Id
+            # Weaver tools don't require X-Loom-Cell-Id but use it
+            # to resolve the caller's group in multi-group setups
             if tool_name.startswith("weaver_"):
                 text, is_error = await _dispatch_weaver_tool(
-                    tool_name, arguments, handle_command, state)
+                    tool_name, arguments, handle_command, state,
+                    cell_id=cell_id)
             else:
                 if not cell_id:
                     return web.json_response(

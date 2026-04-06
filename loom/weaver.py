@@ -8,7 +8,6 @@ system prompt assembly for ``--append-system-prompt-file``.
 import asyncio
 import logging
 import time
-from dataclasses import asdict
 
 from .state import WEAVER_MANDATORY_EVENTS
 
@@ -33,9 +32,10 @@ You have access to weaver_* MCP tools:
 weaver_actions_list, weaver_action_show
 **Write**: weaver_task_create, weaver_task_edit, weaver_task_move, \
 weaver_task_dispatch, weaver_task_resolve
-**Events**: weaver_events, weaver_notifications
+**Events**: weaver_events, weaver_notifications, weaver_resume
 **Journal**: weaver_journal, weaver_journal_read
-**Interaction**: weaver_agent_message
+**Interaction**: weaver_agent_message, weaver_ask, weaver_agent_close
+**Worktree**: weaver_merge, weaver_create_pr, weaver_diff
 
 ## Operating guidelines
 

@@ -661,15 +661,22 @@ _WEAVER_TOOL_MAP = {t["name"]: t for t in WEAVER_TOOLS}
 # Tool dispatch
 # ---------------------------------------------------------------------------
 
-async def _dispatch_weaver_tool(name, args, handle_command, state):
+async def _dispatch_weaver_tool(name, args, handle_command, state,
+                                cell_id=""):
     """Execute a weaver tool call and return (content_text, is_error)."""
 
-    # Resolve the weaver's group — all tools are scoped to this group
+    # Resolve the weaver's group — all tools are scoped to this group.
+    # Prefer the caller's group (from X-Loom-Cell-Id) for multi-group setups.
     _weaver_group = ""
-    for gn, gs in state.group_settings.items():
-        if gs.weaver_agent_id:
-            _weaver_group = gn
-            break
+    if cell_id:
+        cell = state.agents.get(cell_id)
+        if cell:
+            _weaver_group = cell.group
+    if not _weaver_group:
+        for gn, gs in state.group_settings.items():
+            if gs.weaver_agent_id:
+                _weaver_group = gn
+                break
     if not _weaver_group:
         return "No weaver configured for any group", True
 
