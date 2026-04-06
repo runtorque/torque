@@ -408,7 +408,7 @@ class ITerm2Adapter:
                         child = self.state.agents.get(child_id)
                         if child and child.session_id:
                             managed_sids[child.session_id] = (
-                                gi, pos, 1, ci)
+                                gi, p, 1, ci)
 
             if not managed_sids:
                 return

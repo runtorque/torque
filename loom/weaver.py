@@ -209,7 +209,8 @@ class WeaverEventBuffer:
                     ws = self._state.get_weaver_settings(group)
                     if ws.pending_question:
                         self._state.update_weaver_settings(
-                            group, pending_question="")
+                            group, pending_question="",
+                            paused=False)
 
         if not cell.activity or cell.activity == "waiting":
             # Agent went idle — check if it's a weaver with pending events

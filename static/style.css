@@ -2823,6 +2823,18 @@ body.diff-view-open #ctx-menu {
   cursor: pointer;
 }
 .weaver-reply-btn:hover { opacity: 0.9; }
+.weaver-dismiss-btn {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  padding: 4px 14px;
+  border-radius: var(--radius);
+  font: 10px var(--font);
+  font-weight: 600;
+  cursor: pointer;
+  margin-right: 6px;
+}
+.weaver-dismiss-btn:hover { color: var(--text); border-color: var(--text-dim); }
 
 .weaver-empty {
   font-size: 10px;

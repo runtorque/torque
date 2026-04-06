@@ -3,6 +3,7 @@
 var _weaverTab = 'journal';  // 'journal' | 'settings'
 var _weaverCustomInstrDirty = false;
 var _weaverCustomInstrDraft = '';
+var _weaverReplyDraft = '';
 
 function renderWeaverPanel() {
   var el = document.getElementById('panel-weaver');
@@ -106,8 +107,10 @@ function _weaverRenderJournal(group) {
     html += '<div class="weaver-ask-label">Weaver is asking:</div>';
     html += '<div class="weaver-ask-question">' + _esc(ws.pending_question) + '</div>';
     html += '<textarea class="weaver-ask-reply" id="weaver-reply-input" '
-         + 'placeholder="Type your reply..." rows="2"></textarea>';
+         + 'placeholder="Type your reply..." rows="2" '
+         + 'oninput="_weaverReplyDraft=this.value">' + _esc(_weaverReplyDraft) + '</textarea>';
     html += '<div class="weaver-ask-actions">';
+    html += '<button class="weaver-dismiss-btn" onclick="weaverDismissQuestion()">Dismiss</button>';
     html += '<button class="weaver-reply-btn" onclick="weaverReply()">Send Reply</button>';
     html += '</div>';
     html += '</div>';
@@ -258,9 +261,17 @@ function weaverReply() {
   if (!answer) return;
   var group = _currentGroup();
   if (!group) return;
+  _weaverReplyDraft = '';
   // Blur so the re-render skip guard doesn't block the banner clearing
   input.blur();
   send({ cmd: 'weaver_reply', group: group, answer: answer });
+}
+
+function weaverDismissQuestion() {
+  var group = _currentGroup();
+  if (!group) return;
+  _weaverReplyDraft = '';
+  send({ cmd: 'weaver_resume', group: group });
 }
 
 // -- Create weaver ---------------------------------------------------------
