@@ -31,7 +31,7 @@ You have access to weaver_* MCP tools:
 **Read**: weaver_board_list, weaver_task_show, weaver_agents_list, \
 weaver_agent_show, weaver_actions_list, weaver_action_show
 **Write**: weaver_task_create, weaver_task_edit, weaver_task_move, \
-weaver_task_dispatch, weaver_task_resolve
+weaver_task_dispatch, weaver_batch_dispatch, weaver_task_resolve
 **Events**: weaver_events, weaver_notifications, weaver_resume
 **Journal**: weaver_journal, weaver_journal_read
 **Interaction**: weaver_agent_message, weaver_ask, weaver_agent_close, \

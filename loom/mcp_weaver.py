@@ -71,6 +71,43 @@ def _resolve_agent(state, identifier: str) -> str | None:
     return None
 
 
+def _is_busy_agent(state, agent_id: str) -> bool:
+    """Return True when the agent has a live current task."""
+    cell = state.agents.get(agent_id)
+    if not cell or cell.cell_type != "agent":
+        return False
+    if cell.current_task_id:
+        task = state.board_tasks.get(cell.current_task_id)
+        if task and task.lane != "Done":
+            return True
+    return False
+
+
+def _active_worker_ids(state, group: str) -> set[str]:
+    """Count active non-weaver agents for a group."""
+    active = set()
+    weaver_id = state.get_group_settings(group).weaver_agent_id
+    for cell in state.agents.values():
+        if cell.cell_type != "agent":
+            continue
+        if cell.group != group:
+            continue
+        if cell.id == weaver_id:
+            continue
+        if _is_busy_agent(state, cell.id):
+            active.add(cell.id)
+    return active
+
+
+def _blocked_dependency_titles(state, task) -> list[str]:
+    return [
+        state.board_tasks[d].task[:40]
+        for d in task.depends_on
+        if d in state.board_tasks
+        and state.board_tasks[d].lane != "Done"
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Tool definitions
 # ---------------------------------------------------------------------------
@@ -337,6 +374,55 @@ WEAVER_TOOLS = [
                 },
             },
             "required": ["task"],
+        },
+    },
+    {
+        "name": "weaver_batch_dispatch",
+        "description": (
+            "Dispatch a planned batch of tasks with an explicit "
+            "concurrency cap. Tasks are processed in request order. "
+            "Tasks that share an agent_group are routed to the same "
+            "agent so later tasks can queue behind earlier ones."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "description": (
+                        "Ordered task entries. Each item must include "
+                        "a task slug or ID and may include an "
+                        "agent_group string to keep related tasks on "
+                        "the same agent."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "task": {
+                                "type": "string",
+                                "description": "Task slug or ID.",
+                            },
+                            "agent_group": {
+                                "type": "string",
+                                "description": (
+                                    "Optional grouping key. Entries "
+                                    "with the same value share a "
+                                    "single agent within this batch."
+                                ),
+                            },
+                        },
+                        "required": ["task"],
+                    },
+                },
+                "max_concurrent": {
+                    "type": "integer",
+                    "description": (
+                        "Maximum number of active worker agents "
+                        "allowed in the group after this call."
+                    ),
+                },
+            },
+            "required": ["tasks", "max_concurrent"],
         },
     },
     {
@@ -1057,6 +1143,184 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if name == "weaver_batch_dispatch":
+        raw_tasks = args.get("tasks", [])
+        max_concurrent = args.get("max_concurrent", 0)
+        if not isinstance(raw_tasks, list) or not raw_tasks:
+            return "tasks must be a non-empty array", True
+        if not isinstance(max_concurrent, int) or max_concurrent < 1:
+            return "max_concurrent must be an integer >= 1", True
+
+        dispatch_lane = (
+            state.get_group_settings(_weaver_group).dispatch_lane
+            or "In Progress"
+        )
+        active_agents = _active_worker_ids(state, _weaver_group)
+        active_before = len(active_agents)
+        group_agents = {}
+        seen_task_ids = set()
+        results = []
+
+        def _fail(entry_idx: int, task_ident: str, reason: str,
+                  message: str, task_id: str = "") -> None:
+            item = {
+                "index": entry_idx,
+                "task": task_ident,
+                "status": "failed",
+                "reason": reason,
+                "message": message,
+            }
+            if task_id:
+                item["task_id"] = task_id
+            results.append(item)
+
+        for idx, raw_entry in enumerate(raw_tasks):
+            if not isinstance(raw_entry, dict):
+                _fail(idx, "", "invalid_entry",
+                      "Each tasks entry must be an object.")
+                continue
+
+            task_ident = raw_entry.get("task", "")
+            if not isinstance(task_ident, str) or not task_ident.strip():
+                _fail(idx, "", "invalid_entry",
+                      "Each tasks entry must include a task string.")
+                continue
+            agent_group = raw_entry.get("agent_group", "")
+            if agent_group and not isinstance(agent_group, str):
+                _fail(idx, task_ident, "invalid_entry",
+                      "agent_group must be a string when provided.")
+                continue
+
+            tid = _resolve_task(state, task_ident)
+            if not tid:
+                _fail(idx, task_ident, "task_not_found", "Task not found.")
+                continue
+            if tid in seen_task_ids:
+                _fail(idx, task_ident, "duplicate_task",
+                      "Task appears more than once in this batch.", tid)
+                continue
+            seen_task_ids.add(tid)
+
+            task = state.board_tasks.get(tid)
+            if not task:
+                _fail(idx, task_ident, "task_not_found", "Task not found.")
+                continue
+            if task.group != _weaver_group:
+                _fail(idx, task_ident, "wrong_group",
+                      "Task is outside the weaver's group.", tid)
+                continue
+            if task.agent_id:
+                _fail(idx, task_ident, "already_assigned",
+                      "Task is already linked to an agent.", tid)
+                continue
+            if task.lane == "Done":
+                _fail(idx, task_ident, "already_done",
+                      "Task is already Done.", tid)
+                continue
+            if task.lane in ("In Progress", dispatch_lane):
+                _fail(idx, task_ident, "already_in_progress",
+                      "Task is already in the dispatch lane.", tid)
+                continue
+            if not state.board_deps_met(task):
+                unmet = _blocked_dependency_titles(state, task)
+                _fail(
+                    idx,
+                    task_ident,
+                    "blocked_by_dependencies",
+                    "Blocked by dependencies: " + ", ".join(unmet),
+                    tid,
+                )
+                continue
+
+            target_agent_id = ""
+            mode = "new_agent"
+            if agent_group:
+                mode = "agent_group"
+                target_agent_id = group_agents.get(agent_group, "")
+
+            needs_capacity = not target_agent_id
+            if target_agent_id:
+                needs_capacity = not _is_busy_agent(state, target_agent_id)
+            if needs_capacity and len(active_agents) >= max_concurrent:
+                item = {
+                    "index": idx,
+                    "task": task_ident,
+                    "task_id": tid,
+                    "status": "deferred",
+                    "reason": "max_concurrent_reached",
+                    "message": (
+                        "Dispatch would exceed max_concurrent for the group."
+                    ),
+                }
+                if agent_group:
+                    item["agent_group"] = agent_group
+                results.append(item)
+                continue
+
+            payload = {"cmd": "dispatch_task", "id": tid}
+            if target_agent_id:
+                payload["agent_id"] = target_agent_id
+            else:
+                payload["create_agent"] = True
+
+            result = await handle_command(payload)
+            task_after = state.board_tasks.get(tid)
+            resolved_agent_id = task_after.agent_id if task_after else ""
+            if resolved_agent_id and (
+                _is_busy_agent(state, resolved_agent_id)
+                or resolved_agent_id in active_agents
+            ):
+                active_agents.add(resolved_agent_id)
+
+            if result and result.get("type") == "error":
+                _fail(
+                    idx,
+                    task_ident,
+                    "dispatch_error",
+                    result.get("message", "Unknown error"),
+                    tid,
+                )
+                continue
+            if result and result.get("type") == "dispatch_action_missing":
+                _fail(
+                    idx,
+                    task_ident,
+                    "dispatch_action_missing",
+                    f"Action not found: {result.get('action_name', '')}",
+                    tid,
+                )
+                continue
+
+            if agent_group and not target_agent_id and resolved_agent_id:
+                group_agents[agent_group] = resolved_agent_id
+
+            item = {
+                "index": idx,
+                "task": task_ident,
+                "task_id": tid,
+                "status": "queued"
+                if result and result.get("type") == "queued"
+                else "dispatched",
+                "mode": mode,
+            }
+            if agent_group:
+                item["agent_group"] = agent_group
+            if resolved_agent_id:
+                item["agent_id"] = resolved_agent_id
+                agent = state.agents.get(resolved_agent_id)
+                if agent:
+                    item["agent_name"] = agent.slug or agent.name
+            results.append(item)
+
+        payload = {
+            "type": "ok",
+            "max_concurrent": max_concurrent,
+            "active_before": active_before,
+            "active_after": len(active_agents),
+            "results": results,
+        }
+        return json.dumps(payload), False
 
     if name == "weaver_task_resolve":
         tid = _resolve_task(state, args.get("task", ""))

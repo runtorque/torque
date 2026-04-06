@@ -121,6 +121,7 @@ The weaver has access to these tools via MCP:
 | `weaver_task_edit` | Update fields on an existing task (partial update). |
 | `weaver_task_move` | Move a task to a different lane. |
 | `weaver_task_dispatch` | Dispatch a task to a new or existing agent. Supports custom agent naming via `name` parameter. |
+| `weaver_batch_dispatch` | Dispatch an ordered batch with `max_concurrent`. Tasks may share an `agent_group` so later tasks queue on the same agent instead of consuming another worker slot. |
 | `weaver_task_resolve` | Resolve an ask task by sending an answer to the waiting agent. |
 
 ### Event tools
