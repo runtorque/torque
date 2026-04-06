@@ -244,7 +244,7 @@ class WeaverSettings:
     """Per-group weaver configuration."""
     group: str = ""
     push_interval: int = 60              # seconds between digest pushes (min: 10)
-    max_interval: int = 300              # max seconds between pushes (heartbeat)
+    max_interval: int = 300              # max seconds between pushes, including idle digests
     paused: bool = False                 # user paused event pushes
     custom_instructions: str = ""        # user-defined instructions appended to weaver system prompt
     pending_question: str = ""           # question awaiting human reply (non-empty = awaiting input)

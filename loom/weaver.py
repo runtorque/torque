@@ -107,8 +107,8 @@ class WeaverEventBuffer:
 
     Events are buffered per group.  When the weaver goes idle (activity
     becomes empty) and events are pending, the buffer flushes a formatted
-    digest to the weaver's terminal.  A periodic timer ensures heartbeat
-    delivery even when nothing critical happens.
+    digest to the weaver's terminal.  A periodic timer ensures an idle
+    digest still arrives even when nothing critical happens.
     """
 
     def __init__(self, state, bridge):
@@ -116,7 +116,7 @@ class WeaverEventBuffer:
         self._bridge = bridge          # ITerm2Adapter — for send_text()
         self._buffers: dict[str, list[dict]] = {}   # group → buffered events
         self._last_push: dict[str, float] = {}       # group → timestamp
-        self._pending_flush: dict[str, bool] = {}    # group → True if due
+        self._pending_flush: dict[str, bool] = {}    # group → flush task scheduled/running
         self._was_idle_with_question: set[str] = set()  # groups where weaver went idle with pending_question
         self._timer_handle: asyncio.TimerHandle | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -185,8 +185,7 @@ class WeaverEventBuffer:
         # Without this, buffered events sit until the weaver's next
         # activity change or the heartbeat timer (up to max_interval).
         if not weaver.activity or weaver.activity == "waiting":
-            if self._loop:
-                self._loop.create_task(self._flush(group))
+            self._schedule_flush(group)
 
     def on_agent_activity_change(self, cell):
         """Called when an agent's activity changes.  Flush if weaver goes idle."""
@@ -230,14 +229,19 @@ class WeaverEventBuffer:
             return
 
         has_events = bool(self._buffers.get(group))
-        is_overdue = self._is_heartbeat_due(group, ws)
+        is_overdue = self._is_digest_due(group, ws)
 
         if has_events or is_overdue:
-            self._pending_flush[group] = True
-            if self._loop:
-                self._loop.create_task(self._flush(group))
+            self._schedule_flush(group)
 
-    def _is_heartbeat_due(self, group: str, ws) -> bool:
+    def _schedule_flush(self, group: str):
+        """Schedule one flush task per group at a time."""
+        if not self._loop or self._pending_flush.get(group):
+            return
+        self._pending_flush[group] = True
+        self._loop.create_task(self._flush(group))
+
+    def _is_digest_due(self, group: str, ws) -> bool:
         """Check if max_interval has elapsed since last push."""
         last = self._last_push.get(group, 0)
         if last == 0:
@@ -246,55 +250,71 @@ class WeaverEventBuffer:
 
     async def _flush(self, group: str):
         """Format and send buffered events as a digest to the weaver."""
-        self._pending_flush.pop(group, None)
-
-        weaver = self._state.get_weaver_for_group(group)
-        if not weaver or not weaver.session_id:
-            return
-
-        ws = self._state.get_weaver_settings(group)
-        if ws.paused:
-            return
-
-        # Check weaver is actually idle
-        if weaver.activity and weaver.activity != "waiting":
-            return
-
-        events = self._buffers.pop(group, [])
-        board_summary = self._board_summary(group)
-
-        if events:
-            text = self._format_digest(events, board_summary, weaver)
-        else:
-            text = self._format_heartbeat(board_summary)
-
-        self._last_push[group] = time.time()
-
         try:
-            await self._bridge.send_text(weaver.session_id, text + "\n")
-            log.info("Weaver digest sent to '%s' (%d events)",
-                     weaver.name, len(events))
-        except Exception:
-            log.exception("Failed to send weaver digest to '%s'", weaver.name)
+            weaver = self._state.get_weaver_for_group(group)
+            if not weaver or not weaver.session_id:
+                return
+
+            ws = self._state.get_weaver_settings(group)
+            if ws.paused:
+                return
+
+            # Check weaver is actually idle
+            if weaver.activity and weaver.activity != "waiting":
+                return
+
+            events = self._buffers.pop(group, [])
+            board_summary = self._board_summary(group)
+            text = self._format_digest(events, board_summary, weaver)
+
+            self._last_push[group] = time.time()
+
+            try:
+                await self._bridge.send_text(weaver.session_id, text + "\n")
+                log.info("Weaver digest sent to '%s' (%d events)",
+                         weaver.name, len(events))
+            except Exception:
+                log.exception("Failed to send weaver digest to '%s'",
+                              weaver.name)
+        finally:
+            self._pending_flush.pop(group, None)
+
+            # If new events arrived during the send, or the idle digest is
+            # already overdue again, queue the next flush.
+            weaver = self._state.get_weaver_for_group(group)
+            if weaver:
+                is_idle = not weaver.activity or weaver.activity == "waiting"
+                ws = self._state.get_weaver_settings(group)
+                if is_idle and not ws.paused and (
+                        self._buffers.get(group)
+                        or self._is_digest_due(group, ws)):
+                    self._schedule_flush(group)
 
     def _format_digest(self, events: list[dict], board_summary: str,
                        weaver=None) -> str:
         lines = [f"── Loom Digest ({len(events)} event"
                  f"{'s' if len(events) != 1 else ''}) "
                  f"──────────────────────────"]
-        for evt in events:
-            kind = evt.get("kind", "")
-            agent = evt.get("agent_name", "")
-            msg = evt.get("message", "")
-            if agent and msg:
-                lines.append(f"  {kind}: {agent} — {msg}")
-            elif msg:
-                lines.append(f"  {kind}: {msg}")
-            else:
-                lines.append(f"  {kind}: {agent}")
+        if events:
+            for evt in events:
+                kind = evt.get("kind", "")
+                agent = evt.get("agent_name", "")
+                msg = evt.get("message", "")
+                if agent and msg:
+                    lines.append(f"  {kind}: {agent} — {msg}")
+                elif msg:
+                    lines.append(f"  {kind}: {msg}")
+                else:
+                    lines.append(f"  {kind}: {agent}")
+        else:
+            lines.append("  No new events since last digest.")
 
         lines.append("")
         lines.append(f"Board: {board_summary}")
+        if not events:
+            active_summary = self._active_agents_summary()
+            if active_summary:
+                lines.append(f"Active: {active_summary}")
 
         # Context warning
         if weaver:
@@ -305,24 +325,12 @@ class WeaverEventBuffer:
         lines.append("────────────────────────────────────────────────")
         return "\n".join(lines)
 
-    def _format_heartbeat(self, board_summary: str) -> str:
-        lines = [
-            "── Loom Heartbeat ─────────────────────────────",
-            "No new events since last digest.",
-            "",
-            f"Board: {board_summary}",
-        ]
-
-        # Include active agents
+    def _active_agents_summary(self) -> str:
         actives = []
         for c in self._state.agents.values():
             if c.cell_type == "agent" and c.activity:
                 actives.append(f"{c.slug or c.name} ({c.activity})")
-        if actives:
-            lines.append(f"Active: {' · '.join(actives)}")
-
-        lines.append("────────────────────────────────────────────────")
-        return "\n".join(lines)
+        return " · ".join(actives)
 
     def _board_summary(self, group: str) -> str:
         """Count tasks per lane for a group."""
@@ -352,7 +360,7 @@ class WeaverEventBuffer:
                 10.0, self._timer_tick)
 
     def _timer_tick(self):
-        """Check if any weaver needs a heartbeat and emit buffer stats."""
+        """Check if any weaver needs a digest and emit buffer stats."""
         self._timer_handle = None
         now = time.time()
         stats_changed = False
@@ -375,14 +383,13 @@ class WeaverEventBuffer:
                 continue
 
             # Flush if weaver is idle and has buffered events,
-            # or if heartbeat is overdue
+            # or if an idle digest is overdue.
             is_idle = not weaver.activity or weaver.activity == "waiting"
             has_events = bool(self._buffers.get(group))
             last = self._last_push.get(group, 0)
-            heartbeat_due = last and (now - last) >= ws.max_interval
-            if is_idle and (has_events or heartbeat_due):
-                if self._loop:
-                    self._loop.create_task(self._flush(group))
+            digest_due = last and (now - last) >= ws.max_interval
+            if is_idle and (has_events or digest_due):
+                self._schedule_flush(group)
 
         if stats_changed and self._loop:
             self._loop.create_task(self._state.broadcast())
