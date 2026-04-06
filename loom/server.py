@@ -5,6 +5,7 @@ import json
 import mimetypes
 import os
 import shlex
+from textwrap import dedent
 import shutil
 import sys
 import time
@@ -903,6 +904,43 @@ async def main(connection: iterm2.Connection):
             asyncio.create_task(_run())
         else:
             await _run()
+
+    # -- Persistent system prompt ---------------------------------------------
+
+    def _build_loom_system_prompt() -> str:
+        """Build the persistent Loom system prompt for dispatched agents.
+
+        Written to a file and injected via ``--append-system-prompt-file``.
+        Survives ``/clear``.  Task-specific details (transitions, pipeline
+        context) are in the dispatch postscript instead.
+        """
+        return dedent("""\
+            # Loom Agent
+
+            You are running inside Loom, an AI agent orchestration system.
+            Loom tracks your task, manages your worktree, and coordinates
+            you with other agents in a pipeline.
+
+            ## Reporting commands
+
+            Signal progress and completion with these CLI commands
+            (or use the equivalent loom_* MCP tools if available):
+
+            - `loom ai done` — task complete, no follow-up needed
+            - `loom ai progress "message"` — update your activity status
+            - `loom ai blocked "reason"` — signal that you need help
+            - `loom ai error "message"` — report an unrecoverable error
+            - `loom ai derive "title" -d "details" -t action` — create a subtask and dispatch a new agent
+            - `loom ai ask "question" -d "details"` — pause for human input
+            - `loom ai context` — view your current task, agent info, and pipeline state
+
+            ## Important
+
+            Always signal completion via one of the commands above.
+            Your dispatch prompt specifies which transitions are available —
+            use those to determine valid `derive` targets.
+            When in doubt, run `loom ai context` to see your current state.
+        """)
 
     # -- Postscript builder -------------------------------------------------
 
@@ -2409,6 +2447,29 @@ async def main(connection: iterm2.Connection):
                                 explicit_template=explicit_template,
                                 overrides={},
                             )
+                            # Inject persistent Loom system prompt
+                            if launch_cfg.get("agent_type") == "claude-code":
+                                sp_parts = []
+                                _tmpl_sp = launch_cfg.get(
+                                    "system_prompt", "")
+                                if _tmpl_sp:
+                                    sp_parts.append(_tmpl_sp.rstrip())
+                                sp_parts.append(
+                                    _build_loom_system_prompt().rstrip())
+                                sp_text = "\n\n".join(sp_parts) + "\n"
+                                _sp_dir = os.path.join(
+                                    base_dir or os.getcwd(), ".loom")
+                                os.makedirs(_sp_dir, exist_ok=True)
+                                _sp_path = os.path.join(
+                                    _sp_dir, "loom-system-prompt.md")
+                                with open(_sp_path, "w") as _f:
+                                    _f.write(sp_text)
+                                _cmd = launch_cfg.get("command", "")
+                                _cmd += (
+                                    f" --append-system-prompt-file"
+                                    f" {shlex.quote(_sp_path)}")
+                                launch_cfg["command"] = _cmd.strip()
+                                launch_cfg["system_prompt"] = ""
                             cell = await _create_agent_with_config(
                                 group, agent_name, launch_cfg,
                                 explicit_template=explicit_template,
