@@ -2006,6 +2006,21 @@ async def main(connection: iterm2.Connection):
                     state._emit_agent(cell)
                     state._db_save_agent(cell)
 
+            elif cmd == "worktree_check_conflicts":
+                cell = state.agents.get(data.get("id", ""))
+                if not cell or not cell.worktree_path:
+                    result = {"type": "error",
+                              "message": "Agent has no worktree."}
+                else:
+                    conflict_info = \
+                        await worktree_mgr.check_merge_conflicts(cell)
+                    result = {
+                        "type": "ok",
+                        "clean": conflict_info.get("clean", True),
+                        "conflicts": conflict_info.get(
+                            "conflicts", []),
+                    }
+
             elif cmd == "worktree_create_pr":
                 cell = state.agents.get(data.get("id", ""))
                 if not cell or not cell.worktree_path:
@@ -2021,8 +2036,9 @@ async def main(connection: iterm2.Connection):
                                 break
                     if not title:
                         title = cell.name
+                    body = data.get("body", "")
                     pr_result = await worktree_mgr.create_pr(
-                        cell, title=title)
+                        cell, title=title, body=body)
                     if "error" in pr_result:
                         result = {"type": "worktree_pr",
                                   "error": pr_result["error"]}

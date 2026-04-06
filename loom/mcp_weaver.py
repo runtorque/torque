@@ -541,6 +541,63 @@ WEAVER_TOOLS = [
             "required": ["question"],
         },
     },
+    # -- Worktree tools -----------------------------------------------------
+    {
+        "name": "weaver_merge",
+        "description": (
+            "Merge an agent's worktree branch into the base branch "
+            "(usually main). Uses server-side merge — no interactive "
+            "resolution. If there are conflicts, the merge will fail "
+            "and you should ask the human for permission to rebase "
+            "and resolve conflicts before retrying."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Agent slug or ID with a worktree.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": (
+                        "Custom merge commit message. If omitted, "
+                        "auto-generated from completed tasks."
+                    ),
+                },
+            },
+            "required": ["agent"],
+        },
+    },
+    {
+        "name": "weaver_create_pr",
+        "description": (
+            "Create a GitHub pull request for an agent's worktree "
+            "branch. Pushes the branch to origin and creates a PR "
+            "via the GitHub CLI (gh). Returns the PR URL."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Agent slug or ID with a worktree.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": (
+                        "PR title. If omitted, uses the agent's "
+                        "linked task title or agent name."
+                    ),
+                },
+                "body": {
+                    "type": "string",
+                    "description": "PR description body (markdown).",
+                },
+            },
+            "required": ["agent"],
+        },
+    },
 ]
 
 _WEAVER_TOOL_MAP = {t["name"]: t for t in WEAVER_TOOLS}
@@ -910,5 +967,80 @@ async def _dispatch_weaver_tool(name, args, handle_command, state):
             "After the human responds, call weaver_resume to unpause "
             "event delivery."
         ), False
+
+    # -- Worktree tools -----------------------------------------------------
+
+    if name == "weaver_merge":
+        agent_ident = args.get("agent", "")
+        agent_id = _resolve_agent(state, agent_ident)
+        if not agent_id:
+            return f"Agent not found: {agent_ident}", True
+        cell = state.agents.get(agent_id)
+        if not cell or not cell.worktree_path:
+            return "Agent has no worktree", True
+
+        # First check for conflicts
+        result = await handle_command({
+            "cmd": "worktree_check_conflicts",
+            "id": agent_id,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        if result and not result.get("clean", True):
+            conflicts = result.get("conflicts", [])
+            conflict_list = "\n".join(f"  - {c}" for c in conflicts)
+            return (
+                f"Merge has conflicts:\n{conflict_list}\n\n"
+                "Ask the human for permission to rebase and resolve "
+                "conflicts before retrying the merge. Use weaver_ask "
+                "to request permission."
+            ), True
+
+        # Proceed with merge
+        payload = {"cmd": "worktree_merge", "id": agent_id}
+        msg = args.get("message", "")
+        if msg:
+            payload["message"] = msg
+        result = await handle_command(payload)
+        if result and result.get("ok") is False:
+            error = result.get("error", "Merge failed")
+            if "conflict" in error.lower():
+                return (
+                    f"Merge failed: {error}\n\n"
+                    "Ask the human for permission to rebase and "
+                    "resolve conflicts. Use weaver_ask."
+                ), True
+            return error, True
+        return json.dumps({
+            "type": "ok",
+            "message": f"Merged {cell.worktree_branch} into "
+                       f"{cell.worktree_base_branch}",
+            "sha": result.get("sha", ""),
+        }), False
+
+    if name == "weaver_create_pr":
+        agent_ident = args.get("agent", "")
+        agent_id = _resolve_agent(state, agent_ident)
+        if not agent_id:
+            return f"Agent not found: {agent_ident}", True
+        cell = state.agents.get(agent_id)
+        if not cell or not cell.worktree_path:
+            return "Agent has no worktree", True
+
+        payload = {"cmd": "worktree_create_pr", "id": agent_id}
+        title = args.get("title", "")
+        if title:
+            payload["title"] = title
+        body = args.get("body", "")
+        if body:
+            payload["body"] = body
+        result = await handle_command(payload)
+        if result and result.get("error"):
+            return result["error"], True
+        return json.dumps({
+            "type": "ok",
+            "url": result.get("url", ""),
+            "message": result.get("message", "PR created"),
+        }), False
 
     return f"Unknown weaver tool: {name}", True
