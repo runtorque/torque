@@ -16,7 +16,15 @@ _MCP_MARKER = "# -- Loom MCP server (managed by Loom, do not edit) --"
 _FEATURE_MARKER = "# -- Loom Codex hooks feature (managed by Loom, do not edit) --"
 
 # Marker for Loom-managed AGENTS.md section (persistent system prompt)
-_AGENTS_MARKER = "<!-- Loom system prompt (managed by Loom, do not edit) -->"
+_LEGACY_AGENTS_MARKER = "<!-- Loom system prompt (managed by Loom, do not edit) -->"
+_ANY_AGENTS_SECTION_RE = re.compile(
+    r"<!-- Loom system prompt(?:: [^\n]+)? "
+    r"\(managed by Loom, do not edit\) -->\n"
+    r"(?:(?!<!-- Loom system prompt(?:: [^\n]+)? "
+    r"\(managed by Loom, do not edit\) -->)[\s\S])*?"
+    r"<!-- Loom system prompt(?:: [^\n]+)? "
+    r"\(managed by Loom, do not edit\) -->\n?"
+)
 
 # Regex to match the Loom MCP section in config.toml (marker through next
 # section header or EOF)
@@ -37,17 +45,26 @@ _MANAGED_FEATURE_SECTION_RE = re.compile(
 )
 
 
-# Regex to match the Loom managed section in AGENTS.md
-_AGENTS_SECTION_RE = re.compile(
-    re.escape(_AGENTS_MARKER) + r"\n"
-    r"(?:(?!" + re.escape(_AGENTS_MARKER) + r")[\s\S])*?"
-    + re.escape(_AGENTS_MARKER) + r"\n?"
-)
+def _agents_marker(filename: str) -> str:
+    """Return a stable marker for a specific Loom-managed prompt block."""
+    return (
+        f"<!-- Loom system prompt: {filename} "
+        f"(managed by Loom, do not edit) -->"
+    )
 
 
-def _remove_agents_section(content: str) -> str:
-    """Remove the Loom-managed section from AGENTS.md content."""
-    return _AGENTS_SECTION_RE.sub("", content)
+def _remove_agents_section(content: str, filename: str = "") -> str:
+    """Remove a Loom-managed section from AGENTS.md content."""
+    if not filename:
+        return _ANY_AGENTS_SECTION_RE.sub("", content)
+    for marker in (_agents_marker(filename), _LEGACY_AGENTS_MARKER):
+        section_re = re.compile(
+            re.escape(marker) + r"\n"
+            r"(?:(?!" + re.escape(marker) + r")[\s\S])*?"
+            + re.escape(marker) + r"\n?"
+        )
+        content = section_re.sub("", content)
+    return content
 
 
 def _truncate(s: str, n: int) -> str:
@@ -129,9 +146,11 @@ class CodexAdapter(AgentAdapter):
             codex_dir.mkdir(parents=True, exist_ok=True)
             agents_file = codex_dir / "AGENTS.md"
             content = agents_file.read_text() if agents_file.exists() else ""
-            content = _remove_agents_section(content)
+            marker = _agents_marker(filename or "loom-system-prompt")
+            content = _remove_agents_section(
+                content, filename or "loom-system-prompt")
             loom_block = (
-                f"{_AGENTS_MARKER}\n{text.rstrip()}\n{_AGENTS_MARKER}\n")
+                f"{marker}\n{text.rstrip()}\n{marker}\n")
             if content.strip():
                 content = content.rstrip("\n") + "\n\n" + loom_block
             else:
@@ -148,7 +167,7 @@ class CodexAdapter(AgentAdapter):
             agents_file = Path(working_dir) / ".codex" / "AGENTS.md"
             if not agents_file.exists():
                 return
-            content = _remove_agents_section(agents_file.read_text())
+            content = _remove_agents_section(agents_file.read_text(), filename)
             if content.strip():
                 agents_file.write_text(content.strip() + "\n")
             else:

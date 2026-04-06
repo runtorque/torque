@@ -590,6 +590,14 @@ async def main(connection: iterm2.Connection):
     # Also checkpoint when the terminal session is actually closed (tab closed)
     bridge.on_session_terminated = _on_agent_session_end
 
+    def _state_payload() -> dict:
+        return {
+            "type": "state",
+            "seq": state._seq,
+            **state.to_dict(),
+            "providers": get_providers(),
+        }
+
     async def _on_terminal_disconnected(cell):
         """Auto-remove a terminal when its tab is closed (close_on_disconnect)."""
         log.info("Auto-removing terminal '%s' (close_on_disconnect)", cell.name)
@@ -804,11 +812,33 @@ async def main(connection: iterm2.Connection):
                 created.append(t)
         return created
 
+    def _persistent_prompt_filename(cell) -> str:
+        return f"loom-system-prompt-{cell.id}.md"
+
+    def _apply_persistent_prompt(cell, launch_cfg: dict,
+                                 prompt_text: str = "") -> None:
+        agent_type = launch_cfg.get("agent_type", "") or cell.agent_type
+        if not prompt_text or not agent_type:
+            return
+        adapter = get_adapter(agent_type)
+        if not adapter or adapter.name == "generic":
+            return
+        working_dir = os.path.expanduser(
+            cell.directory or launch_cfg.get("directory", "") or os.getcwd())
+        prompt_flags = adapter.inject_persistent_prompt(
+            working_dir, _persistent_prompt_filename(cell), prompt_text)
+        if prompt_flags:
+            launch_cfg["command"] = (
+                launch_cfg.get("command", "") + prompt_flags).strip()
+        launch_cfg["system_prompt"] = ""
+        cell.command = launch_cfg.get("command", cell.command)
+
     async def _create_agent_with_config(group: str, name: str,
                                         launch_cfg: dict, *,
                                         explicit_template: str = "",
                                         target_session_id: str = "",
-                                        target_window_id: str = ""):
+                                        target_window_id: str = "",
+                                        persistent_prompt_text: str = ""):
         cell = state.add_agent(
             name=name, group=group,
             profile=launch_cfg["profile"],
@@ -852,6 +882,10 @@ async def main(connection: iterm2.Connection):
                     state.history_update_agent(
                         cell,
                         worktree_branch=cell.worktree_branch)
+
+        _apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
 
         await bridge.create_session(
             cell,
@@ -969,6 +1003,25 @@ async def main(connection: iterm2.Connection):
             use those to determine valid `derive` targets.
             When in doubt, run `loom ai context` to see your current state.
         """)
+
+    def _build_dispatch_persistent_prompt(system_prompt: str = "") -> str:
+        parts = []
+        if system_prompt:
+            parts.append(system_prompt.rstrip())
+        parts.append(_build_loom_system_prompt().rstrip())
+        return "\n\n".join(parts) + "\n"
+
+    def _build_cell_persistent_prompt(cell, launch_cfg: dict) -> str:
+        if cell.cell_type != "agent" or not launch_cfg.get("agent_type"):
+            return ""
+        gs = state.get_group_settings(cell.group)
+        if gs.weaver_agent_id == cell.id:
+            from .weaver import build_weaver_system_prompt
+            ws = state.get_weaver_settings(cell.group)
+            return build_weaver_system_prompt(
+                cell.group, ws, launch_cfg.get("system_prompt", ""))
+        return _build_dispatch_persistent_prompt(
+            launch_cfg.get("system_prompt", ""))
 
     # -- Postscript builder -------------------------------------------------
 
@@ -1521,8 +1574,7 @@ async def main(connection: iterm2.Connection):
 
             elif cmd == "resync":
                 # Client detected a sequence gap — send full snapshot
-                return {"type": "state", "seq": state._seq,
-                        **state.to_dict()}
+                return _state_payload()
 
             elif cmd == "add_group":
                 state.add_group(data["group"])
@@ -1573,7 +1625,8 @@ async def main(connection: iterm2.Connection):
                             adapter.uninstall_mcp_config(
                                 os.path.expanduser(c.directory))
                         adapter.uninstall_persistent_prompt(
-                            os.path.expanduser(c.directory))
+                            os.path.expanduser(c.directory),
+                            _persistent_prompt_filename(c))
                     event_bus.cleanup_cell(c.id)
                     await _safe_remove_worktree(c)
 
@@ -1619,29 +1672,14 @@ async def main(connection: iterm2.Connection):
                         overrides=_overrides,
                     )
 
-                    # Weaver: build system prompt and inject via adapter
+                    persistent_prompt_text = ""
+                    # Weaver: build persistent prompt and skip worktree
                     if is_weaver:
                         from .weaver import build_weaver_system_prompt
                         ws = state.get_weaver_settings(group)
                         action_sp = launch_cfg.get("system_prompt", "")
-                        sp_text = build_weaver_system_prompt(
+                        persistent_prompt_text = build_weaver_system_prompt(
                             group, ws, action_sp)
-                        gs_slug = state.group_slugs.get(
-                            group, group.replace(" ", "-").lower())
-                        sp_filename = (
-                            f"weaver-system-prompt-{gs_slug}.md")
-                        _at = launch_cfg.get("agent_type", "")
-                        _adp = get_adapter(_at) if _at else None
-                        if _adp:
-                            _sp_flags = _adp.inject_persistent_prompt(
-                                base_dir or os.getcwd(),
-                                sp_filename, sp_text)
-                            if _sp_flags:
-                                cmd_str = launch_cfg.get("command", "")
-                                launch_cfg["command"] = (
-                                    cmd_str + _sp_flags).strip()
-                        launch_cfg["system_prompt"] = ""
-                        # Weaver runs from main — skip worktree
                         launch_cfg["worktree"] = False
 
                     name = (data.get("name", "") or "").strip()
@@ -1655,7 +1693,8 @@ async def main(connection: iterm2.Connection):
                             name = state.next_cell_name(group, "agent")
                     cell = await _create_agent_with_config(
                         group, name, launch_cfg,
-                        explicit_template=explicit_template)
+                        explicit_template=explicit_template,
+                        persistent_prompt_text=persistent_prompt_text)
                     if cell:
                         # Designate as weaver
                         if is_weaver:
@@ -1735,7 +1774,8 @@ async def main(connection: iterm2.Connection):
                             adapter.uninstall_mcp_config(
                                 os.path.expanduser(c.directory))
                         adapter.uninstall_persistent_prompt(
-                            os.path.expanduser(c.directory))
+                            os.path.expanduser(c.directory),
+                            _persistent_prompt_filename(c))
                     # Clean up event bus state
                     event_bus.cleanup_cell(c.id)
                     await _safe_remove_worktree(c)
@@ -1842,6 +1882,7 @@ async def main(connection: iterm2.Connection):
                         ef = launch_cfg.get("env_file", "")
                         shell = launch_cfg.get("shell", "")
                         init = ""
+                        prev_directory = cell.directory
                         # Worktree handling on relaunch
                         if cell.worktree_path:
                             if await worktree_mgr.validate(cell):
@@ -1878,6 +1919,17 @@ async def main(connection: iterm2.Connection):
                                     cell.directory = wt_path
                                     state._emit_agent(cell)
                                     state._db_save_agent(cell)
+                        if (cell.agent_type and prev_directory
+                                and prev_directory != cell.directory):
+                            get_adapter(cell.agent_type) \
+                                .uninstall_persistent_prompt(
+                                    os.path.expanduser(prev_directory),
+                                    _persistent_prompt_filename(cell))
+                    _apply_persistent_prompt(
+                        cell, launch_cfg,
+                        _build_cell_persistent_prompt(cell, launch_cfg))
+                    state._emit_agent(cell)
+                    state._db_save_agent(cell)
                     await bridge.create_session(
                         cell, env_vars=env, env_file=ef,
                         init_script=init, shell=shell,
@@ -1952,6 +2004,17 @@ async def main(connection: iterm2.Connection):
                                     explicit_template=cell.template,
                                     overrides={},
                                 )
+                                if cell.agent_type:
+                                    get_adapter(cell.agent_type) \
+                                        .uninstall_persistent_prompt(
+                                            os.path.expanduser(repo_root),
+                                            _persistent_prompt_filename(cell))
+                                _apply_persistent_prompt(
+                                    cell, launch_cfg,
+                                    _build_cell_persistent_prompt(
+                                        cell, launch_cfg))
+                                state._emit_agent(cell)
+                                state._db_save_agent(cell)
                                 await bridge.create_session(
                                     cell,
                                     env_vars=launch_cfg.get("env_vars"),
@@ -1989,6 +2052,11 @@ async def main(connection: iterm2.Connection):
                             explicit_template=cell.template,
                             overrides={},
                         )
+                        _apply_persistent_prompt(
+                            cell, launch_cfg,
+                            _build_cell_persistent_prompt(cell, launch_cfg))
+                        state._emit_agent(cell)
+                        state._db_save_agent(cell)
                         await bridge.create_session(
                             cell,
                             env_vars=launch_cfg.get("env_vars"),
@@ -2273,7 +2341,8 @@ async def main(connection: iterm2.Connection):
                                                 .uninstall_persistent_prompt(
                                                     os.path
                                                     .expanduser(
-                                                        c.directory))
+                                                        c.directory),
+                                                    _persistent_prompt_filename(c))
                                         event_bus.cleanup_cell(
                                             c.id)
                                         await _safe_remove_worktree(
@@ -2496,26 +2565,11 @@ async def main(connection: iterm2.Connection):
                                 explicit_template=explicit_template,
                                 overrides={},
                             )
-                            # Inject persistent Loom system prompt
-                            _at = launch_cfg.get("agent_type", "")
-                            _adp = get_adapter(_at) if _at else None
-                            if _adp:
-                                sp_parts = []
-                                _tmpl_sp = launch_cfg.get(
-                                    "system_prompt", "")
-                                if _tmpl_sp:
-                                    sp_parts.append(_tmpl_sp.rstrip())
-                                sp_parts.append(
-                                    _build_loom_system_prompt().rstrip())
-                                sp_text = "\n\n".join(sp_parts) + "\n"
-                                _sp_flags = _adp.inject_persistent_prompt(
-                                    base_dir or os.getcwd(),
-                                    "loom-system-prompt.md", sp_text)
-                                if _sp_flags:
-                                    _cmd = launch_cfg.get("command", "")
-                                    launch_cfg["command"] = (
-                                        _cmd + _sp_flags).strip()
-                                launch_cfg["system_prompt"] = ""
+                            persistent_prompt_text = ""
+                            if launch_cfg.get("agent_type"):
+                                persistent_prompt_text = \
+                                    _build_dispatch_persistent_prompt(
+                                        launch_cfg.get("system_prompt", ""))
                             cell = await _create_agent_with_config(
                                 group, agent_name, launch_cfg,
                                 explicit_template=explicit_template,
@@ -2523,6 +2577,7 @@ async def main(connection: iterm2.Connection):
                                     "target_session_id", ""),
                                 target_window_id=data.get(
                                     "target_window_id", ""),
+                                persistent_prompt_text=persistent_prompt_text,
                             )
                             if cell:
                                 # Worktree inheritance (pipeline)
@@ -4017,7 +4072,7 @@ async def main(connection: iterm2.Connection):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         state._ws_clients.add(ws)
-        await ws.send_str(state.snapshot_msg())
+        await ws.send_str(json.dumps(_state_payload()))
         try:
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
@@ -4067,8 +4122,7 @@ async def main(connection: iterm2.Connection):
             return web.json_response(
                 {"ok": False, "error": result.get("message", "")})
 
-        payload = result if result else {"type": "state",
-                                         **state.to_dict()}
+        payload = result if result else _state_payload()
         return web.json_response({"ok": True, "data": payload})
 
     # -- Attachment upload/serve endpoints -----------------------------------
