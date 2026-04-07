@@ -731,6 +731,87 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         summary = json.loads(text)
         self.assertNotIn("dispatch_overlap", summary)
 
+    async def test_board_summary_includes_branch_boundary_overview(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker One",
+            group="g",
+            slug="worker-one",
+            cell_type="agent",
+            status="running",
+            worktree_path="/repo/.loom/worktrees/worker",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker",
+            current_task_id="task-current",
+        )
+        state.agents[weaver.id] = weaver
+        state.agents[worker.id] = worker
+        state.groups["g"] = [weaver.id, worker.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        state.board_add_task(
+            "Boundary task",
+            "g",
+            lane="Done",
+            id="task-boundary",
+            agent_id=worker.id,
+            worktree_boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "commit_sha": "abc123",
+            },
+        )
+        state.board_add_task(
+            "Queued follow-up",
+            "g",
+            lane="To Do",
+            id="task-queued",
+            agent_id=worker.id,
+            resume_after_boundary_task_id="task-boundary",
+        )
+        state.board_add_task(
+            "Current implementation",
+            "g",
+            lane="In Progress",
+            id="task-current",
+            agent_id=worker.id,
+            resume_after_boundary_task_id="task-boundary",
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        summary = json.loads(text)
+        self.assertEqual(summary["branch_boundaries"]["count"], 1)
+        item = summary["branch_boundaries"]["items"][0]
+        self.assertEqual(item["latest_boundary_task_id"], "task-boundary")
+        self.assertEqual(item["current_task_id"], "task-current")
+        self.assertEqual(item["queued_followups"][0]["id"], "task-queued")
+        self.assertEqual(item["started_followups"][0]["id"], "task-current")
+        self.assertFalse(item["partial_review_safe"])
+
     async def test_task_show_includes_health_snapshot(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(
@@ -1501,6 +1582,13 @@ class WeaverRecoveryToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             data["worktree"]["task_boundaries"][0]["boundary"]["commit_sha"],
             "abc123",
+        )
+        self.assertEqual(
+            data["worktree"]["boundary_overview"]["latest_boundary_task_id"],
+            "task-1",
+        )
+        self.assertTrue(
+            data["worktree"]["boundary_overview"]["partial_review_safe"]
         )
         self.assertEqual(
             data["terminals"],

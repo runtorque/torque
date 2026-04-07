@@ -1810,6 +1810,41 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (verificationPreview) {
     cardHtml += '<div class="board-card-verification-note">' + esc(verificationPreview) + '</div>';
   }
+  var boundaryNote = '';
+  if (typeof _branchBoundaryOverviewForContext === 'function') {
+    var boundary = t.worktree_boundary || {};
+    if (boundary && boundary.status === 'open'
+        && boundary.repo_root && boundary.branch) {
+      var overview = _branchBoundaryOverviewForContext(
+        boundary.repo_root,
+        boundary.branch
+      );
+      if (overview && overview.latest_boundary_task
+          && overview.latest_boundary_task.id === t.id) {
+        if (overview.branch_advanced) {
+          boundaryNote = 'Branch advanced beyond this review point';
+        } else if (overview.queued_followers.length) {
+          boundaryNote = 'Safe review point · '
+            + overview.queued_followers.length + ' queued follow-up'
+            + (overview.queued_followers.length === 1 ? '' : 's');
+        } else {
+          boundaryNote = 'Latest clean review point for this branch';
+        }
+      }
+    } else if (t.resume_after_boundary_task_id) {
+      var boundaryTask = state.board_tasks
+        ? state.board_tasks[t.resume_after_boundary_task_id]
+        : null;
+      if (boundaryTask) {
+        boundaryNote = (t.lane === 'Backlog' || t.lane === 'To Do')
+          ? 'Queued after "' + boundaryTask.task + '"'
+          : 'Started after "' + boundaryTask.task + '"';
+      }
+    }
+  }
+  if (boundaryNote) {
+    cardHtml += '<div class="board-card-verification-note">' + esc(boundaryNote) + '</div>';
+  }
   // Last activity message
   if (t.messages && t.messages.length) {
     var lastMsg = t.messages[t.messages.length - 1];

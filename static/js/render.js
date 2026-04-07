@@ -435,14 +435,81 @@ function agentStatusClass(a) {
 
 function _getAgentTask(agentId) {
   if (!state.board_tasks) return null;
+  let openTask = null;
+  let doneTask = null;
   for (const t of Object.values(state.board_tasks)) {
-    if (t.agent_id === agentId && t.lane !== 'Done') return t;
+    if (t.agent_id !== agentId) continue;
+    if (t.lane === 'In Progress') return t;
+    if (t.lane !== 'Done' && !openTask) openTask = t;
+    if (!doneTask) doneTask = t;
   }
-  // Fall back to any linked task (including Done)
-  for (const t of Object.values(state.board_tasks)) {
-    if (t.agent_id === agentId) return t;
+  return openTask || doneTask || null;
+}
+
+function _taskBoundaryMeta(task) {
+  if (!task || !task.worktree_boundary || typeof task.worktree_boundary !== 'object') {
+    return {};
   }
-  return null;
+  return task.worktree_boundary;
+}
+
+function _taskBoundaryBranchKey(task) {
+  const boundary = _taskBoundaryMeta(task);
+  const repoRoot = boundary.repo_root || '';
+  const branch = boundary.branch || '';
+  if (!repoRoot || !branch) return '';
+  return repoRoot + '::' + branch;
+}
+
+function _taskBoundarySortValue(task) {
+  const boundary = _taskBoundaryMeta(task);
+  return String(boundary.recorded_at || task.updated_at || task.created_at || '');
+}
+
+function _branchBoundaryOverviewForContext(repoRoot, branch) {
+  if (!repoRoot || !branch || !state || !state.board_tasks) return null;
+  const branchKey = repoRoot + '::' + branch;
+  let latest = null;
+  for (const task of Object.values(state.board_tasks)) {
+    if (_taskBoundaryBranchKey(task) !== branchKey) continue;
+    if ((_taskBoundaryMeta(task).status || '') !== 'open') continue;
+    if (!latest || _taskBoundarySortValue(task) > _taskBoundarySortValue(latest)) {
+      latest = task;
+    }
+  }
+  if (!latest) return null;
+  const queued = [];
+  const started = [];
+  for (const task of Object.values(state.board_tasks)) {
+    if ((task.resume_after_boundary_task_id || '') !== latest.id) continue;
+    if (task.lane === 'Backlog' || task.lane === 'To Do') queued.push(task);
+    else started.push(task);
+  }
+  const sortFollowers = function(a, b) {
+    return String(a.created_at || a.updated_at || a.id || '')
+      .localeCompare(String(b.created_at || b.updated_at || b.id || ''));
+  };
+  queued.sort(sortFollowers);
+  started.sort(sortFollowers);
+  return {
+    repo_root: repoRoot,
+    branch: branch,
+    latest_boundary_task: latest,
+    queued_followers: queued,
+    started_followers: started,
+    branch_advanced: started.length > 0,
+    partial_review_safe: started.length === 0,
+  };
+}
+
+function _branchBoundaryOverviewForAgent(agent) {
+  if (!agent) return null;
+  const repoRoot = agent.worktree_repo_root || agent.git_root || '';
+  const branch = agent.worktree_branch || '';
+  const overview = _branchBoundaryOverviewForContext(repoRoot, branch);
+  if (!overview) return null;
+  overview.current_task = _getAgentTask(agent.id);
+  return overview;
 }
 
 function renderAgentCell(a) {
@@ -530,6 +597,22 @@ function renderAgentDetails(a) {
       h += `<span class="detail-task-lane">${esc(_dt.lane)}</span>`;
     }
     h += `</span></div>`;
+  }
+
+  const boundaryOverview = _branchBoundaryOverviewForAgent(a);
+  if (boundaryOverview && boundaryOverview.latest_boundary_task) {
+    const boundaryTask = boundaryOverview.latest_boundary_task;
+    const boundaryState = boundaryOverview.branch_advanced ? 'advanced' : 'safe';
+    const boundaryBadge = boundaryOverview.branch_advanced
+      ? 'Branch advanced'
+      : 'Safe review point';
+    h += `<div class="detail-row"><span class="detail-label">Review point</span><span class="detail-val detail-task" title="${esc(boundaryTask.task)}">${formatCode(boundaryTask.task)}<span class="detail-task-status">${esc(boundaryBadge)}</span></span></div>`;
+    if (boundaryOverview.queued_followers.length) {
+      h += `<div class="detail-row"><span class="detail-label">Queued next</span><span class="detail-val">${esc(boundaryOverview.queued_followers.map(function(task) { return task.task; }).join(', '))}</span></div>`;
+    }
+    if (boundaryOverview.started_followers.length) {
+      h += `<div class="detail-row"><span class="detail-label">Beyond boundary</span><span class="detail-val">${esc(boundaryOverview.started_followers.map(function(task) { return task.task; }).join(', '))}</span></div>`;
+    }
   }
 
   /* MCP Messages */
