@@ -454,12 +454,12 @@
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="An actionable task description, e.g. 'Create a summary of last week's deploys' instead of 'Weekly deploy report'.">?</span>
     </label>
     <textarea id="task-task-input" rows="1" autocomplete="off"
-              oninput="taskAutoResize(this)"
+              oninput="taskAutoResize(this);taskPersistDraft()"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
     <label>Description</label>
     <textarea id="task-description-input" rows="2" autocomplete="off"
               placeholder="Optional longer context or details..."
-              oninput="taskAutoResize(this)"
+              oninput="taskAutoResize(this);taskPersistDraft()"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
     <label>Attachments
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Drag-and-drop images or click to browse. Attached image paths are included in agent prompts.">?</span>
@@ -472,6 +472,7 @@
     </div>
     <label>Group <span class="label-req">*</span></label>
     <select id="task-group-select"
+            onchange="taskPersistDraft()"
             onkeydown="if(event.key==='Escape')closeModals();"></select>
     <label>Action
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optionally attach an action. The action's prompt wraps the task text with instructions and context.">?</span>
@@ -484,26 +485,31 @@
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optional agent template used when this task creates a new agent during dispatch.">?</span>
     </label>
     <select id="task-template-select"
+            onchange="taskPersistDraft()"
             onkeydown="if(event.key==='Escape')closeModals();">
       <option value="">None</option>
     </select>
     <label>External provider</label>
     <input id="task-external-provider-input" autocomplete="off"
            placeholder="e.g. github, jira, linear"
+           oninput="taskPersistDraft()"
            onkeydown="if(event.key==='Escape')closeModals();">
     <label>External ID</label>
     <input id="task-external-id-input" autocomplete="off"
            placeholder="e.g. owner/repo#123 or PROJ-123"
+           oninput="taskPersistDraft()"
            onkeydown="if(event.key==='Escape')closeModals();">
     <label>External URL</label>
     <input id="task-external-url-input" autocomplete="off"
            placeholder="https://…"
+           oninput="taskPersistDraft()"
            onkeydown="if(event.key==='Escape')closeModals();">
     <div id="task-action-vars"></div>
     <label>Schedule dispatch
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Set a date/time to auto-dispatch this task. Leave empty to dispatch manually.">?</span>
     </label>
     <input type="datetime-local" id="task-scheduled-input"
+           oninput="taskPersistDraft()"
            onkeydown="if(event.key==='Escape')closeModals();">
     <label>Labels
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Type a label and press Enter to add it.">?</span>

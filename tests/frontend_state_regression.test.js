@@ -1273,6 +1273,552 @@ test('renderBoard distinguishes empty, blocked, and no-ready backlog states', ()
   assert.match(panel.innerHTML, /scheduled for later/);
 });
 
+test('board visible tasks hide archived items until archived view is enabled', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    active: {
+      id: 'active',
+      group: 'alpha',
+      task: 'Visible task',
+      lane: 'Done',
+      labels: ['bug'],
+      position: 1,
+    },
+    archived: {
+      id: 'archived',
+      group: 'alpha',
+      task: 'Hidden task',
+      lane: 'Done',
+      labels: ['loom:archived'],
+      position: 0,
+    },
+  };
+
+  assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks()).sort()'), ['active']);
+
+  runInContext(context, `_boardShowArchived = true;`);
+
+  assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks()).sort()'), ['active', 'archived']);
+});
+
+test('boardAddTaskInput mirrors the current inline editor text into draft state', () => {
+  const { context, document } = createBoardHarness();
+  const input = document.register('board-add-task-input');
+  document.register('board-add-label-dropdown');
+  input.value = 'Follow up with design review';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+
+  context.boardAddTaskInput(input);
+
+  assert.equal(runInContext(context, '_boardAddingTaskDraft'), 'Follow up with design review');
+});
+
+test('boardDuplicateTask creates a fresh task from reusable fields only', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      task: 'Ship release',
+      description: 'Reuse the task details, not the workflow state',
+      group: 'alpha',
+      lane: 'Done',
+      action_name: 'triage',
+      action_vars: { OWNER: 'frontend' },
+      agent_template: 'worker',
+      agent_id: 'agent-1',
+      labels: ['bug', 'loom:error'],
+      depends_on: ['dep-1'],
+      scheduled_at: '2099-01-01T12:00:00.000Z',
+      parent_task_id: 'parent-1',
+      pipeline_root_id: 'parent-1',
+      pipeline_depth: 1,
+      status: 'Blocked',
+      attachments: [{ filename: 'evidence.png' }],
+      artifacts: [{ type: 'log', title: 'build.log' }],
+      external_id: 'EXT-123',
+      external_url: 'https://example.test/task/EXT-123',
+    },
+  };
+
+  context.boardDuplicateTask('task-1');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_add_task',
+    task: 'Ship release',
+    group: 'alpha',
+    description: 'Reuse the task details, not the workflow state',
+    action_name: 'triage',
+    action_vars: { OWNER: 'frontend' },
+    agent_template: 'worker',
+    labels: ['bug'],
+  }]);
+});
+
+test('boardCloneTask opens a fresh create modal with sanitized copied fields', () => {
+  const { context } = createBoardHarness();
+  runInContext(context, `
+    _cloneModalConfig = null;
+    _taskOpenModal = function(config) { _cloneModalConfig = config; };
+  `);
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      task: 'Ship release',
+      description: 'Reuse the task details, not the workflow state',
+      group: 'alpha',
+      lane: 'Done',
+      action_name: 'triage',
+      action_vars: { OWNER: 'frontend' },
+      agent_template: 'worker',
+      agent_id: 'agent-1',
+      labels: ['bug', 'loom:error'],
+      depends_on: ['dep-1'],
+      scheduled_at: '2099-01-01T12:00:00.000Z',
+      parent_task_id: 'parent-1',
+      pipeline_root_id: 'parent-1',
+      pipeline_depth: 1,
+      status: 'Blocked',
+    },
+  };
+
+  context.boardCloneTask('task-1');
+
+  assert.deepEqual(jsonValue(context, '_cloneModalConfig'), {
+    draftScope: 'clone:task-1',
+    editId: null,
+    title: 'Clone Task',
+    submitLabel: 'Create',
+    task: 'Ship release',
+    description: 'Reuse the task details, not the workflow state',
+    labels: ['bug'],
+    dependsOn: [],
+    attachments: [],
+    originalAttachments: [],
+    actionName: 'triage',
+    agentTemplate: 'worker',
+    actionVars: { OWNER: 'frontend' },
+    group: 'alpha',
+    lane: '',
+    scheduledInput: '',
+    selectTask: false,
+  });
+});
+
+test('boardQuickSetPriority replaces only the priority label', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      labels: ['bug', 'loom:error', 'priority:low'],
+    },
+  };
+
+  context.boardQuickSetPriority('task-1', 'high');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_update_task',
+    id: 'task-1',
+    labels: ['bug', 'loom:error', 'priority:high'],
+  }]);
+});
+
+test('boardQuickAssignAgent updates the assigned agent directly from the card', () => {
+  const { context } = createBoardHarness();
+
+  context.boardQuickAssignAgent('task-1', 'agent-7');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_update_task',
+    id: 'task-1',
+    agent_id: 'agent-7',
+  }]);
+});
+
+test('boardQuickSaveDue stores the inline due editor value as ISO time', () => {
+  const { context } = createBoardHarness();
+  runInContext(context, `_boardQuickDueDraft = '2099-01-08T09:45';`);
+
+  context.boardQuickSaveDue('task-1');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_update_task',
+    id: 'task-1',
+    scheduled_at: new Date('2099-01-08T09:45').toISOString(),
+  }]);
+});
+
+test('boardQuickAddLabel and boardQuickRemoveLabel preserve unrelated labels', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      labels: ['bug', 'loom:error', 'priority:medium'],
+    },
+  };
+
+  context.boardQuickLabelInput('ops');
+  context.boardQuickAddLabel('task-1');
+  context.boardQuickRemoveLabel('task-1', 'bug');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    {
+      cmd: 'board_update_task',
+      id: 'task-1',
+      labels: ['bug', 'loom:error', 'priority:medium', 'ops'],
+    },
+    {
+      cmd: 'board_update_task',
+      id: 'task-1',
+      labels: ['loom:error', 'priority:medium'],
+    },
+  ]);
+});
+
+test('_renderBoardCard includes compact quick-edit controls for focused root cards', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'worker', group: 'alpha', cell_type: 'agent' },
+  };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      labels: ['bug', 'priority:high'],
+      agent_id: 'agent-1',
+      scheduled_at: '2099-01-08T09:45:00.000Z',
+    },
+  };
+
+  runInContext(context, `_boardFocusedTask = 'task-1';`);
+  const html = runInContext(context, `_renderBoardCard(state.board_tasks["task-1"], {}, 0)`);
+
+  assert.match(html, /board-card-quick-controls/);
+  assert.match(html, /Labels/);
+  assert.match(html, /worker/);
+  assert.match(html, /Priority: High/);
+});
+
+test('boardToggleBatchEdit requests actions for single-group selections', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    'task-1': { id: 'task-1', group: 'alpha', task: 'Ship release' },
+    'task-2': { id: 'task-2', group: 'alpha', task: 'Write docs' },
+  };
+
+  runInContext(context, `
+    _boardSelectedTasks = { 'task-1': true, 'task-2': true };
+  `);
+
+  context.boardToggleBatchEdit({ stopPropagation() {} });
+
+  assert.equal(runInContext(context, '_boardBatchEditOpen'), true);
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    { cmd: 'list_actions', group: 'alpha' },
+  ]);
+});
+
+test('boardApplyBatchEdit applies touched fields across all selected tasks', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      labels: ['bug', 'loom:error'],
+    },
+    'task-2': {
+      id: 'task-2',
+      group: 'alpha',
+      task: 'Write docs',
+      labels: ['docs', 'priority:low'],
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedTasks = { 'task-1': true, 'task-2': true };
+    _boardBatchEditLabel = 'ops';
+    _boardBatchEditAssignee = 'agent-9';
+    _boardBatchEditDueMode = 'set';
+    _boardBatchEditDue = '2099-01-10T09:30';
+    _boardBatchEditAction = 'triage';
+    _boardBatchEditPriority = 'high';
+  `);
+
+  context.boardApplyBatchEdit();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    {
+      cmd: 'board_update_task',
+      id: 'task-1',
+      labels: ['bug', 'loom:error', 'ops', 'priority:high'],
+      agent_id: 'agent-9',
+      action_name: 'triage',
+      action_vars: {},
+      scheduled_at: new Date('2099-01-10T09:30').toISOString(),
+    },
+    {
+      cmd: 'board_update_task',
+      id: 'task-2',
+      labels: ['docs', 'ops', 'priority:high'],
+      agent_id: 'agent-9',
+      action_name: 'triage',
+      action_vars: {},
+      scheduled_at: new Date('2099-01-10T09:30').toISOString(),
+    },
+  ]);
+  assert.equal(runInContext(context, '_boardSelectedCount()'), 0);
+});
+
+test('boardApplyBatchEdit skips group-scoped changes for mixed-group selections', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    'task-1': { id: 'task-1', group: 'alpha', task: 'Ship release', labels: ['bug'] },
+    'task-2': { id: 'task-2', group: 'beta', task: 'Write docs', labels: ['docs'] },
+  };
+
+  runInContext(context, `
+    _boardSelectedTasks = { 'task-1': true, 'task-2': true };
+    _boardBatchEditLabel = 'ops';
+    _boardBatchEditAssignee = 'agent-9';
+    _boardBatchEditDueMode = 'set';
+    _boardBatchEditDue = '2099-01-10T09:30';
+    _boardBatchEditAction = 'triage';
+    _boardBatchEditPriority = 'medium';
+  `);
+
+  context.boardApplyBatchEdit();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    {
+      cmd: 'board_update_task',
+      id: 'task-1',
+      labels: ['bug', 'ops', 'priority:medium'],
+      scheduled_at: new Date('2099-01-10T09:30').toISOString(),
+    },
+    {
+      cmd: 'board_update_task',
+      id: 'task-2',
+      labels: ['docs', 'ops', 'priority:medium'],
+      scheduled_at: new Date('2099-01-10T09:30').toISOString(),
+    },
+  ]);
+});
+
+test('boardBulkArchiveSelected archives selected completed tasks and their descendants', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Ship release',
+      lane: 'Done',
+      labels: ['bug'],
+    },
+    child: {
+      id: 'child',
+      group: 'alpha',
+      task: 'Verify release',
+      lane: 'Done',
+      parent_task_id: 'root',
+      labels: ['loom:error'],
+    },
+    active: {
+      id: 'active',
+      group: 'alpha',
+      task: 'Still open',
+      lane: 'In Progress',
+      labels: ['docs'],
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedTasks = { root: true, active: true };
+  `);
+
+  context.boardBulkArchiveSelected();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    {
+      cmd: 'board_update_task',
+      id: 'root',
+      labels: ['bug', 'loom:archived'],
+    },
+    {
+      cmd: 'board_update_task',
+      id: 'child',
+      labels: ['loom:error', 'loom:archived'],
+    },
+  ]);
+  assert.equal(runInContext(context, '_boardSelectedCount()'), 0);
+});
+
+test('boardBulkRestoreSelected restores archived tasks and descendants', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Ship release',
+      lane: 'Done',
+      labels: ['bug', 'loom:archived'],
+    },
+    child: {
+      id: 'child',
+      group: 'alpha',
+      task: 'Verify release',
+      lane: 'Done',
+      parent_task_id: 'root',
+      labels: ['loom:error', 'loom:archived'],
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedTasks = { root: true };
+  `);
+
+  context.boardBulkRestoreSelected();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    {
+      cmd: 'board_update_task',
+      id: 'root',
+      labels: ['bug'],
+    },
+    {
+      cmd: 'board_update_task',
+      id: 'child',
+      labels: ['loom:error'],
+    },
+  ]);
+  assert.equal(runInContext(context, '_boardSelectedCount()'), 0);
+});
+
+test('_renderBoardSelectionBar explains mixed-group limits when batch edit is open', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+  context.state.board_tasks = {
+    'task-1': { id: 'task-1', group: 'alpha', task: 'Ship release', lane: 'Backlog', position: 1 },
+    'task-2': { id: 'task-2', group: 'beta', task: 'Write docs', lane: 'Backlog', position: 0 },
+  };
+
+  runInContext(context, `
+    _boardSelectedTasks = { 'task-1': true, 'task-2': true };
+    _boardBatchEditOpen = true;
+  `);
+
+  const html = runInContext(context, `_renderBoardSelectionBar()`);
+
+  assert.match(html, /Action and assignee edits require all selected tasks to be in the same group/);
+});
+
+test('_renderBoardSelectionBar shows archive and restore actions for eligible selections', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+  context.state.board_tasks = {
+    done: {
+      id: 'done',
+      group: 'alpha',
+      task: 'Ship release',
+      lane: 'Done',
+      labels: ['bug'],
+      position: 1,
+    },
+    archived: {
+      id: 'archived',
+      group: 'alpha',
+      task: 'Old release',
+      lane: 'Done',
+      labels: ['loom:archived'],
+      position: 0,
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedTasks = { done: true, archived: true };
+  `);
+
+  const html = runInContext(context, `_renderBoardSelectionBar()`);
+
+  assert.match(html, /Archive completed \(1\)/);
+  assert.match(html, /Restore \(1\)/);
+});
+
+test('renderBoard surfaces a stale completed-task archive suggestion on the Done lane', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Done'];
+  context.state.board_tasks = {
+    stale: {
+      id: 'stale',
+      group: 'alpha',
+      task: 'Old completed task',
+      lane: 'Done',
+      labels: ['bug'],
+      updated_at: '2000-01-01T00:00:00Z',
+      position: 0,
+    },
+  };
+
+  runInContext(context, `_boardSelectedLane = 'Done';`);
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /Archive stale/);
+  assert.match(panel.innerHTML, /inactive for 7\+ days/);
+});
+
+test('boardArchiveSuggestedDone archives only stale completed tasks', () => {
+  const { context } = createBoardHarness();
+  context.state.board_tasks = {
+    stale: {
+      id: 'stale',
+      group: 'alpha',
+      task: 'Old completed task',
+      lane: 'Done',
+      labels: ['bug'],
+      updated_at: '2000-01-01T00:00:00Z',
+    },
+    fresh: {
+      id: 'fresh',
+      group: 'alpha',
+      task: 'Recent completed task',
+      lane: 'Done',
+      labels: ['docs'],
+      updated_at: new Date().toISOString(),
+    },
+    active: {
+      id: 'active',
+      group: 'alpha',
+      task: 'Still active',
+      lane: 'In Progress',
+      labels: ['ops'],
+      updated_at: '2000-01-01T00:00:00Z',
+    },
+  };
+
+  context.boardArchiveSuggestedDone();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    {
+      cmd: 'board_update_task',
+      id: 'stale',
+      labels: ['bug', 'loom:archived'],
+    },
+  ]);
+});
+
 test('events attention items include active asks and blocked agents for the current group', () => {
   const { context } = createEventsHarness();
   context.state.board_tasks = {

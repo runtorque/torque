@@ -58,6 +58,8 @@ function connect() {
     } else if (msg.type === 'actions') {
       if (typeof _boardActDropdownWaiting !== 'undefined' && _boardActDropdownWaiting) {
         _boardShowActionList(msg);
+      } else if (typeof _boardBatchActionWaiting !== 'undefined' && _boardBatchActionWaiting) {
+        _handleBoardBatchActionList(msg);
       } else if (typeof _schedModalWaiting !== 'undefined' && _schedModalWaiting) {
         _handleScheduleActionList(msg);
       } else if (typeof _taskModalWaiting !== 'undefined' && _taskModalWaiting) {

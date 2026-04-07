@@ -40,9 +40,25 @@ var _boardLaneSortsByGroup = null; // persisted lane sort modes keyed by group
 var _boardCardDensityByGroup = null; // persisted card density keyed by group
 var _boardFilterStateGroup = '';
 var _boardShowSchedules = false; // true when "Schedules" tab is active
+var _boardShowArchived = false;  // include archived tasks in the active board view
 var _boardRenderLimit = 50;      // virtual scroll: render this many root tasks initially
 var _boardSelectedTasks = {};    // task_id → true for multi-select
 var _boardLastSelectedTask = ''; // last clicked task for shift-range select
+var _boardQuickEditTask = '';    // task_id with open inline quick editor
+var _boardQuickEditKind = '';    // 'labels' | 'assignee' | 'due' | 'priority' | ''
+var _boardQuickLabelDraft = '';  // pending label text for inline quick edit
+var _boardQuickDueDraft = '';    // pending datetime-local value for inline quick edit
+var _boardBatchEditOpen = false; // selection bar batch edit panel visibility
+var _boardBatchEditLabel = '';   // add this label to every selected task
+var _boardBatchEditAssignee = '__unchanged__'; // selected assignee value
+var _boardBatchEditDueMode = 'unchanged'; // unchanged | set | clear
+var _boardBatchEditDue = '';     // datetime-local value for batch due edits
+var _boardBatchEditAction = '__unchanged__'; // selected action value
+var _boardBatchEditPriority = '__unchanged__'; // selected priority value
+var _boardBatchActionWaiting = false; // waiting for batch action list
+var _boardBatchActionOptions = [];    // actions for batch edit action picker
+var _boardArchiveLabel = 'loom:archived';
+var _boardArchiveStaleDays = 7;
 
 var _boardHealthOrder = ['blocked', 'stalled', 'thrashing', 'idle-risk'];
 var _boardHealthLabels = {
@@ -451,12 +467,13 @@ function _boardGroupTaskCount() {
   return count;
 }
 
-/** Return visible tasks, optionally filtered to the current group. */
-function _boardVisibleTasks() {
-  _boardSyncFiltersForCurrentGroup();
+function _boardIsArchived(task) {
+  return !!(task && task.labels && task.labels.indexOf(_boardArchiveLabel) >= 0);
+}
+
+function _boardScopedTasks(includeArchived) {
   var all = _boardTasks();
   var out = {};
-  // Group filter
   if (_boardFilterByGroup) {
     var grp = _currentGroup();
     if (grp) {
@@ -469,6 +486,103 @@ function _boardVisibleTasks() {
   } else {
     for (var id in all) out[id] = all[id];
   }
+  if (includeArchived) return out;
+  var filtered = {};
+  for (var taskId in out) {
+    if (!_boardIsArchived(out[taskId])) filtered[taskId] = out[taskId];
+  }
+  return filtered;
+}
+
+function _boardArchivedCount() {
+  var tasks = _boardScopedTasks(true);
+  var count = 0;
+  for (var id in tasks) {
+    if (_boardIsArchived(tasks[id])) count++;
+  }
+  return count;
+}
+
+function _boardTaskTimestampMs(task) {
+  if (!task) return 0;
+  var iso = task.updated_at || task.created_at || '';
+  if (!iso) return 0;
+  var stamp = new Date(iso).getTime();
+  return isNaN(stamp) ? 0 : stamp;
+}
+
+function _boardTaskIdsWithDescendants(taskIds) {
+  var tasks = _boardTasks();
+  var picked = {};
+  var queue = [];
+  for (var i = 0; i < taskIds.length; i++) {
+    if (tasks[taskIds[i]] && !picked[taskIds[i]]) {
+      picked[taskIds[i]] = true;
+      queue.push(taskIds[i]);
+    }
+  }
+  while (queue.length) {
+    var parentId = queue.shift();
+    for (var id in tasks) {
+      if (tasks[id].parent_task_id === parentId && !picked[id]) {
+        picked[id] = true;
+        queue.push(id);
+      }
+    }
+  }
+  return Object.keys(picked);
+}
+
+function _boardArchiveTaskIds(taskIds, archived) {
+  var tasks = _boardTasks();
+  var expanded = _boardTaskIdsWithDescendants(taskIds);
+  for (var i = 0; i < expanded.length; i++) {
+    var task = tasks[expanded[i]];
+    if (!task) continue;
+    var labels = (task.labels || []).filter(function(label) {
+      return label !== _boardArchiveLabel;
+    });
+    if (archived) labels.push(_boardArchiveLabel);
+    task.labels = labels;
+    send({ cmd: 'board_update_task', id: task.id, labels: labels });
+  }
+}
+
+function _boardSelectedArchiveIds(archived) {
+  var tasks = _boardTasks();
+  var ids = [];
+  for (var id in _boardSelectedTasks) {
+    var task = tasks[id];
+    if (!task) continue;
+    if (archived) {
+      if (_boardIsArchived(task)) ids.push(id);
+    } else if (task.lane === 'Done' && !_boardIsArchived(task)) {
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+function _boardStaleDoneTaskIds() {
+  var tasks = _boardScopedTasks(false);
+  var cutoff = Date.now() - (_boardArchiveStaleDays * 24 * 60 * 60 * 1000);
+  var ids = [];
+  for (var id in tasks) {
+    var task = tasks[id];
+    if (task.lane !== 'Done') continue;
+    var stamp = _boardTaskTimestampMs(task);
+    if (stamp && stamp <= cutoff) ids.push(id);
+  }
+  ids.sort(function(a, b) {
+    return _boardTaskTimestampMs(tasks[a]) - _boardTaskTimestampMs(tasks[b]);
+  });
+  return ids;
+}
+
+/** Return visible tasks, optionally filtered to the current group. */
+function _boardVisibleTasks() {
+  _boardSyncFiltersForCurrentGroup();
+  var out = _boardScopedTasks(_boardShowArchived);
   if (_boardQuickView) {
     var ranked = [];
     for (var rid in out) ranked.push(out[rid]);
@@ -792,14 +906,7 @@ function _boardBacklogDispatchNote(rootTasks) {
 
 /** Collect all labels with counts (before search/label/action filters). */
 function _boardAllLabelCounts() {
-  var all = _boardTasks();
-  var pool = {};
-  if (_boardFilterByGroup) {
-    var grp = _currentGroup();
-    if (grp) {
-      for (var id in all) { if (all[id].group === grp) pool[id] = all[id]; }
-    } else { pool = all; }
-  } else { pool = all; }
+  var pool = _boardScopedTasks(_boardShowArchived);
   var counts = {};
   for (var id in pool) {
     var t = pool[id];
@@ -814,14 +921,7 @@ function _boardAllLabelCounts() {
 
 /** Collect all action names with counts from tasks. */
 function _boardAllActionCounts() {
-  var all = _boardTasks();
-  var pool = {};
-  if (_boardFilterByGroup) {
-    var grp = _currentGroup();
-    if (grp) {
-      for (var id in all) { if (all[id].group === grp) pool[id] = all[id]; }
-    } else { pool = all; }
-  } else { pool = all; }
+  var pool = _boardScopedTasks(_boardShowArchived);
   var counts = {};
   for (var id in pool) {
     var t = pool[id];
@@ -834,14 +934,7 @@ function _boardAllActionCounts() {
 
 /** Collect all agent IDs with counts from tasks. */
 function _boardAllAgentCounts() {
-  var all = _boardTasks();
-  var pool = {};
-  if (_boardFilterByGroup) {
-    var grp = _currentGroup();
-    if (grp) {
-      for (var id in all) { if (all[id].group === grp) pool[id] = all[id]; }
-    } else { pool = all; }
-  } else { pool = all; }
+  var pool = _boardScopedTasks(_boardShowArchived);
   var counts = {};
   for (var id in pool) {
     var t = pool[id];
@@ -942,6 +1035,161 @@ function _boardDepsBlocked(t) {
   return false;
 }
 
+function _boardTaskPriority(task) {
+  var labels = (task && task.labels) || [];
+  for (var i = 0; i < labels.length; i++) {
+    var match = String(labels[i]).match(/^priority:(low|medium|high)$/);
+    if (match) return match[1];
+  }
+  return '';
+}
+
+function _boardPriorityText(priority) {
+  if (priority === 'high') return 'High';
+  if (priority === 'medium') return 'Medium';
+  if (priority === 'low') return 'Low';
+  return '';
+}
+
+function _boardTaskUserLabels(task) {
+  return ((task && task.labels) || []).filter(function(label) {
+    return !isSystemLabel(label) && !/^priority:/.test(label);
+  });
+}
+
+function _boardScheduledInputValue(isoValue) {
+  if (!isoValue) return '';
+  try {
+    var d = new Date(isoValue);
+    return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 16);
+  } catch (e) {
+    return '';
+  }
+}
+
+function _boardSetQuickEdit(taskId, kind) {
+  var task = _boardTasks()[taskId];
+  if (!task) return;
+  if (_boardQuickEditTask === taskId && _boardQuickEditKind === kind) {
+    _boardQuickEditTask = '';
+    _boardQuickEditKind = '';
+    _boardQuickLabelDraft = '';
+    _boardQuickDueDraft = '';
+    renderBoard();
+    return;
+  }
+  _boardQuickEditTask = taskId;
+  _boardQuickEditKind = kind;
+  _boardQuickLabelDraft = '';
+  _boardQuickDueDraft = _boardScheduledInputValue(task.scheduled_at);
+  renderBoard();
+  requestAnimationFrame(function() {
+    var inputId = '';
+    if (kind === 'labels') inputId = 'board-quick-label-input-' + taskId;
+    else if (kind === 'due') inputId = 'board-quick-due-input-' + taskId;
+    var el = inputId ? document.getElementById(inputId) : null;
+    if (el) el.focus();
+  });
+}
+
+function _boardCloseQuickEdit() {
+  _boardQuickEditTask = '';
+  _boardQuickEditKind = '';
+  _boardQuickLabelDraft = '';
+  _boardQuickDueDraft = '';
+  renderBoard();
+}
+
+function _boardQuickEditAgents(task) {
+  var out = [];
+  if (!state || !state.agents) return out;
+  for (var id in state.agents) {
+    var agent = state.agents[id];
+    if (agent.cell_type !== 'agent') continue;
+    if (task.group && agent.group !== task.group) continue;
+    out.push(agent);
+  }
+  out.sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
+  return out;
+}
+
+function _renderBoardQuickEdit(t) {
+  var priority = _boardTaskPriority(t);
+  var labels = _boardTaskUserLabels(t);
+  var assignee = t.agent_id ? (_boardAgentName(t.agent_id) || 'Assigned') : 'Assignee';
+  var dueLabel = t.scheduled_at ? ('Due ' + _schedFormatTime(t.scheduled_at)) : 'Due';
+  var priorityLabel = priority ? ('Priority ' + _boardPriorityText(priority)) : 'Priority';
+  var labelsLabel = labels.length ? ('Labels ' + labels.length) : 'Labels';
+  var open = _boardQuickEditTask === t.id ? _boardQuickEditKind : '';
+  var html = '<div class="board-card-quick-controls">';
+  html += '<button class="board-card-quick-btn" onclick="event.stopPropagation();_boardSetQuickEdit(\'' + t.id + '\',\'labels\')">' + esc(labelsLabel) + '</button>';
+  html += '<button class="board-card-quick-btn" onclick="event.stopPropagation();_boardSetQuickEdit(\'' + t.id + '\',\'assignee\')">' + esc(assignee) + '</button>';
+  html += '<button class="board-card-quick-btn" onclick="event.stopPropagation();_boardSetQuickEdit(\'' + t.id + '\',\'due\')">' + esc(dueLabel) + '</button>';
+  html += '<button class="board-card-quick-btn" onclick="event.stopPropagation();_boardSetQuickEdit(\'' + t.id + '\',\'priority\')">' + esc(priorityLabel) + '</button>';
+  html += '</div>';
+  if (!open) return html;
+
+  html += '<div class="board-card-quick-editor" onclick="event.stopPropagation()">';
+  if (open === 'labels') {
+    if (labels.length) {
+      for (var i = 0; i < labels.length; i++) {
+        var label = labels[i];
+        html += '<span class="board-card-quick-chip">' + esc(label)
+          + '<button class="board-card-quick-chip-remove" onclick="event.stopPropagation();boardQuickRemoveLabel(\'' + t.id + '\',\'' + esc(label).replace(/'/g, "\\'") + '\')">&times;</button></span>';
+      }
+    } else {
+      html += '<span class="board-card-quick-empty">No labels</span>';
+    }
+    html += '<input type="text" id="board-quick-label-input-' + t.id + '" class="board-card-quick-input"'
+      + ' placeholder="Add label" value="' + esc(_boardQuickLabelDraft) + '"'
+      + ' oninput="boardQuickLabelInput(this.value)"'
+      + ' onkeydown="boardQuickLabelKeydown(event,\'' + t.id + '\')">';
+    html += '<button class="board-card-quick-action" onclick="event.stopPropagation();boardQuickAddLabel(\'' + t.id + '\')">Add</button>';
+  } else if (open === 'assignee') {
+    html += '<button class="board-card-quick-action' + (!t.agent_id ? ' active' : '') + '"'
+      + ' onclick="event.stopPropagation();boardQuickAssignAgent(\'' + t.id + '\',\'\')">Unassigned</button>';
+    var agents = _boardQuickEditAgents(t);
+    if (!agents.length) {
+      html += '<span class="board-card-quick-empty">No agents</span>';
+    } else {
+      for (var ai = 0; ai < agents.length; ai++) {
+        var agent = agents[ai];
+        html += '<button class="board-card-quick-action' + (agent.id === t.agent_id ? ' active' : '') + '"'
+          + ' onclick="event.stopPropagation();boardQuickAssignAgent(\'' + t.id + '\',\'' + agent.id + '\')">' + esc(agent.name || agent.id) + '</button>';
+      }
+    }
+  } else if (open === 'due') {
+    html += '<input type="datetime-local" id="board-quick-due-input-' + t.id + '" class="board-card-quick-input"'
+      + ' value="' + esc(_boardQuickDueDraft) + '"'
+      + ' oninput="boardQuickDueInput(this.value)"'
+      + ' onkeydown="boardQuickDueKeydown(event,\'' + t.id + '\')">';
+    html += '<button class="board-card-quick-action" onclick="event.stopPropagation();boardQuickSaveDue(\'' + t.id + '\')">Set</button>';
+    html += '<button class="board-card-quick-action" onclick="event.stopPropagation();boardQuickClearDue(\'' + t.id + '\')">Clear</button>';
+  } else if (open === 'priority') {
+    var levels = ['', 'low', 'medium', 'high'];
+    for (var pi = 0; pi < levels.length; pi++) {
+      var level = levels[pi];
+      var text = level ? _boardPriorityText(level) : 'None';
+      html += '<button class="board-card-quick-action' + (level === priority ? ' active' : '') + '"'
+        + ' onclick="event.stopPropagation();boardQuickSetPriority(\'' + t.id + '\',\'' + level + '\')">' + esc(text) + '</button>';
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+function _renderBoardArchiveSuggestion() {
+  if (_boardShowArchived || _boardSelectedLane !== 'Done') return '';
+  var staleIds = _boardStaleDoneTaskIds();
+  if (!staleIds.length) return '';
+  return '<div class="board-archive-suggestion">'
+    + '<span class="board-archive-suggestion-copy">'
+    + staleIds.length + ' completed task' + (staleIds.length === 1 ? '' : 's')
+    + ' inactive for ' + _boardArchiveStaleDays + '+ days</span>'
+    + '<button class="board-selection-btn" onclick="boardArchiveSuggestedDone()">Archive stale</button>'
+    + '</div>';
+}
+
 /* ---- Card rendering ------------------------------------------------- */
 
 function _renderBoardCard(t, childrenOf, depth) {
@@ -952,9 +1200,10 @@ function _renderBoardCard(t, childrenOf, depth) {
   var dotClass = t.agent_id ? _boardAgentStatus(t.agent_id) : '';
   var focused = t.id === _boardFocusedTask ? ' focused' : '';
   var selected = _boardSelectedTasks[t.id] ? ' board-card-selected' : '';
+  var quickOpen = _boardQuickEditTask === t.id ? ' board-card-quick-open' : '';
   var subClass = isSubordinate ? ' board-card-subordinate' : '';
   var doneClass = (isSubordinate && isDone) ? ' board-card-done' : '';
-  var cardHtml = '<div class="board-card' + focused + selected + subClass + doneClass + '"'
+  var cardHtml = '<div class="board-card' + focused + selected + quickOpen + subClass + doneClass + '"'
     + ' data-task-id="' + t.id + '"'
     + ' draggable="true"'
     + ' ondragstart="boardCardDragStart(event,\'' + t.id + '\')"'
@@ -988,9 +1237,14 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (t.agent_template) meta += '<span class="board-card-label board-card-template">agent: ' + esc(t.agent_template) + '</span>';
   if (t.labels && t.labels.length) {
     var userLbls = [], sysLbls = [];
+    var priority = _boardTaskPriority(t);
     for (var li = 0; li < t.labels.length; li++) {
       if (isSystemLabel(t.labels[li])) sysLbls.push(t.labels[li]);
-      else userLbls.push(t.labels[li]);
+      else if (!/^priority:/.test(t.labels[li])) userLbls.push(t.labels[li]);
+    }
+    if (priority) {
+      meta += '<span class="board-card-label board-card-priority board-card-priority-' + esc(priority) + '">'
+        + 'Priority: ' + esc(_boardPriorityText(priority)) + '</span>';
     }
     for (var li = 0; li < userLbls.length; li++) {
       var lc = labelColor(userLbls[li]);
@@ -1023,6 +1277,7 @@ function _renderBoardCard(t, childrenOf, depth) {
       + ' title="' + esc(t.external_url) + '">&#x1F517;</a>';
   }
   if (meta) cardHtml += '<div class="board-card-meta">' + meta + '</div>';
+  if (!isSubordinate) cardHtml += _renderBoardQuickEdit(t);
   // Pipeline chain indicator (only for subordinate cards)
   if (isSubordinate && t.parent_task_id) {
     var chainInfo = '↳ depth ' + (t.pipeline_depth || 0);
@@ -1192,6 +1447,7 @@ function renderBoard() {
   var actionCounts = _boardAllActionCounts();
   var agentCounts = _boardAllAgentCounts();
   var healthCounts = _boardAllHealthCounts();
+  var archivedCount = _boardArchivedCount();
   var hasLabels = Object.keys(labelCounts).length > 0;
   var hasActions = Object.keys(actionCounts).length > 0;
   var hasAgents = Object.keys(agentCounts).length > 0;
@@ -1205,7 +1461,7 @@ function renderBoard() {
     || _boardSearchQuery || _boardFilterLabels.length
     || _boardFilterActions.length || _boardFilterAgents.length
     || _boardFilterHealth.length
-    || hasSavedViews;
+    || hasSavedViews || archivedCount || _boardShowArchived;
 
   if (showToolbar) {
     html += '<div class="board-search-bar">';
@@ -1250,6 +1506,13 @@ function renderBoard() {
         + 'Health' + (healthFCount ? ' <span class="board-filter-btn-count">' + healthFCount + '</span>' : '')
         + ' &#9662;</button>';
       html += '</div>';
+    }
+    if (archivedCount || _boardShowArchived) {
+      html += '<button class="board-filter-btn' + (_boardShowArchived ? ' active' : '') + '"'
+        + ' onclick="boardToggleArchived()">'
+        + (_boardShowArchived ? 'Hide archived' : 'Show archived')
+        + (archivedCount ? ' <span class="board-filter-btn-count">' + archivedCount + '</span>' : '')
+        + '</button>';
     }
     if (filtersActive) {
       html += '<button class="board-filter-clear" onclick="boardClearFilters()">Clear</button>';
@@ -1495,6 +1758,7 @@ function renderBoard() {
     html += '</div>';
   }
 
+  html += _renderBoardArchiveSuggestion();
   var backlogDispatchNote = _boardBacklogDispatchNote(rootTasks);
   if (backlogDispatchNote) {
     html += _renderBoardMessageState(backlogDispatchNote, true);
@@ -1784,6 +2048,7 @@ function boardInlineRemoveAtt(idx) {
 var _boardLabelDropdownIdx = -1;
 
 function boardAddTaskInput(el) {
+  _boardAddingTaskDraft = el.value;
   boardAddTaskAutoResize(el);
   var text = el.value.substring(0, el.selectionStart);
   var match = text.match(/%([\w-]*)$/);
@@ -1959,23 +2224,25 @@ function _boardPickAction(name) {
   _boardAddingTask = false;
   renderBoard();
   // Open the task modal with the action pre-selected
-  _taskEditId = null;
-  _taskSelectedAction = name;
-  _taskActionVars = [];
-  _taskActionVarValues = {};
-
-  document.getElementById('task-modal-title').textContent = 'New Task';
-  document.getElementById('task-submit-btn').textContent = 'Create';
-  document.getElementById('task-task-input').value = '';
-  document.getElementById('task-labels-input').value = '';
-  document.getElementById('task-action-vars').innerHTML = '';
-  _populateTaskGroupSelect(_currentGroup());
-  document.getElementById('modal-task').dataset.lane = _boardSelectedLane || '';
-
-  _taskModalWaiting = true;
-  send({ cmd: 'list_actions', group: _currentGroup() });
-  document.getElementById('modal-task').classList.add('visible');
-  document.getElementById('task-task-input').focus();
+  _taskOpenModal({
+    editId: null,
+    title: 'New Task',
+    submitLabel: 'Create',
+    task: '',
+    description: '',
+    labels: [],
+    dependsOn: [],
+    attachments: [],
+    originalAttachments: [],
+    actionName: name,
+    agentTemplate: '',
+    actionVars: {},
+    group: _currentGroup(),
+    lane: _boardSelectedLane || '',
+    scheduledInput: '',
+    draftId: _generateDraftId(),
+    selectTask: false,
+  });
 }
 
 function _boardPickNoAction() {
@@ -2005,6 +2272,8 @@ function boardCardMenu(evt, taskId) {
   var isDerived = !!task.parent_task_id;
   var html = '';
   html += '<button onclick="event.stopPropagation();boardEditTask(\'' + taskId + '\')">Edit</button>';
+  html += '<button onclick="event.stopPropagation();boardDuplicateTask(\'' + taskId + '\')">Duplicate</button>';
+  html += '<button onclick="event.stopPropagation();boardCloneTask(\'' + taskId + '\')">Clone...</button>';
 
   html += '<div class="ctx-sep"></div>';
 
@@ -2027,6 +2296,12 @@ function boardCardMenu(evt, taskId) {
   // Resolve (ask tasks with human label)
   if (task.labels && task.labels.indexOf('loom:human') >= 0 && task.lane !== 'Done') {
     html += '<button onclick="event.stopPropagation();boardOpenResolve(\'' + taskId + '\')">Resolve...</button>';
+  }
+
+  if (_boardIsArchived(task)) {
+    html += '<button onclick="event.stopPropagation();boardRestoreTask(\'' + taskId + '\')">Restore</button>';
+  } else if (task.lane === 'Done') {
+    html += '<button onclick="event.stopPropagation();boardArchiveTask(\'' + taskId + '\')">Archive</button>';
   }
 
   // Preview prompt
@@ -2080,7 +2355,25 @@ function boardCopyTaskId(taskId) {
 
 /* ---- Card actions --------------------------------------------------- */
 
+function _boardTaskCloneFields(task) {
+  return {
+    task: task.task || '',
+    description: task.description || '',
+    group: task.group || _currentGroup(),
+    action_name: task.action_name || '',
+    action_vars: Object.assign({}, task.action_vars || {}),
+    agent_template: task.agent_template || '',
+    labels: (task.labels || []).filter(function(label) { return !isSystemLabel(label); }),
+  };
+}
+
 function boardFocusTask(id, evt) {
+  if (_boardQuickEditTask && _boardQuickEditTask !== id) {
+    _boardQuickEditTask = '';
+    _boardQuickEditKind = '';
+    _boardQuickLabelDraft = '';
+    _boardQuickDueDraft = '';
+  }
   if (evt && (evt.metaKey || evt.ctrlKey)) {
     // Cmd/Ctrl+Click: toggle in selection
     if (_boardSelectedTasks[id]) {
@@ -2129,7 +2422,248 @@ function boardFocusAgent(agentId) {
   }
 }
 
+function boardQuickLabelInput(value) {
+  _boardQuickLabelDraft = value;
+}
+
+function boardQuickLabelKeydown(evt, taskId) {
+  if (evt.key === 'Enter') {
+    evt.preventDefault();
+    boardQuickAddLabel(taskId);
+  } else if (evt.key === 'Escape') {
+    evt.preventDefault();
+    _boardCloseQuickEdit();
+  }
+}
+
+function boardQuickAddLabel(taskId) {
+  var task = _boardTasks()[taskId];
+  var label = _boardQuickLabelDraft.trim();
+  if (!task || !label || isSystemLabel(label) || /^priority:/.test(label)) return;
+  var labels = (task.labels || []).slice();
+  if (labels.indexOf(label) < 0) {
+    labels.push(label);
+    send({ cmd: 'board_update_task', id: taskId, labels: labels });
+  }
+  _boardCloseQuickEdit();
+}
+
+function boardQuickRemoveLabel(taskId, label) {
+  var task = _boardTasks()[taskId];
+  if (!task) return;
+  send({
+    cmd: 'board_update_task',
+    id: taskId,
+    labels: (task.labels || []).filter(function(item) { return item !== label; })
+  });
+  _boardCloseQuickEdit();
+}
+
+function boardQuickAssignAgent(taskId, agentId) {
+  send({ cmd: 'board_update_task', id: taskId, agent_id: agentId || '' });
+  _boardCloseQuickEdit();
+}
+
+function boardQuickDueInput(value) {
+  _boardQuickDueDraft = value;
+}
+
+function boardQuickDueKeydown(evt, taskId) {
+  if (evt.key === 'Enter') {
+    evt.preventDefault();
+    boardQuickSaveDue(taskId);
+  } else if (evt.key === 'Escape') {
+    evt.preventDefault();
+    _boardCloseQuickEdit();
+  }
+}
+
+function boardQuickSaveDue(taskId) {
+  var iso = '';
+  if (_boardQuickDueDraft) {
+    var d = new Date(_boardQuickDueDraft);
+    if (!isNaN(d.getTime())) iso = d.toISOString();
+  }
+  send({ cmd: 'board_update_task', id: taskId, scheduled_at: iso });
+  _boardCloseQuickEdit();
+}
+
+function boardQuickClearDue(taskId) {
+  _boardQuickDueDraft = '';
+  send({ cmd: 'board_update_task', id: taskId, scheduled_at: '' });
+  _boardCloseQuickEdit();
+}
+
+function boardQuickSetPriority(taskId, priority) {
+  var task = _boardTasks()[taskId];
+  if (!task) return;
+  var labels = (task.labels || []).filter(function(label) {
+    return !/^priority:/.test(label);
+  });
+  if (priority) labels.push('priority:' + priority);
+  send({ cmd: 'board_update_task', id: taskId, labels: labels });
+  _boardCloseQuickEdit();
+}
+
 /* ---- Multi-select / bulk operations --------------------------------- */
+
+function _boardResetBatchEdit() {
+  _boardBatchEditOpen = false;
+  _boardBatchEditLabel = '';
+  _boardBatchEditAssignee = '__unchanged__';
+  _boardBatchEditDueMode = 'unchanged';
+  _boardBatchEditDue = '';
+  _boardBatchEditAction = '__unchanged__';
+  _boardBatchEditPriority = '__unchanged__';
+  _boardBatchActionWaiting = false;
+  _boardBatchActionOptions = [];
+}
+
+function _boardSelectedTaskItems() {
+  var out = [];
+  var tasks = _boardTasks();
+  for (var id in _boardSelectedTasks) {
+    if (tasks[id]) out.push(tasks[id]);
+  }
+  return out;
+}
+
+function _boardSelectedSingleGroup() {
+  var tasks = _boardSelectedTaskItems();
+  if (!tasks.length) return '';
+  var group = tasks[0].group || '';
+  for (var i = 1; i < tasks.length; i++) {
+    if ((tasks[i].group || '') !== group) return '';
+  }
+  return group;
+}
+
+function _boardBatchEditAgents() {
+  var group = _boardSelectedSingleGroup();
+  if (!group || !state || !state.agents) return [];
+  var out = [];
+  for (var id in state.agents) {
+    var agent = state.agents[id];
+    if (agent.cell_type !== 'agent' || agent.group !== group) continue;
+    out.push(agent);
+  }
+  out.sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
+  return out;
+}
+
+function boardToggleBatchEdit(evt) {
+  evt.stopPropagation();
+  if (_boardBatchEditOpen) {
+    _boardResetBatchEdit();
+    renderBoard();
+    return;
+  }
+  _boardResetBatchEdit();
+  _boardBatchEditOpen = true;
+  var group = _boardSelectedSingleGroup();
+  if (group) {
+    _boardBatchActionWaiting = true;
+    send({ cmd: 'list_actions', group: group });
+  }
+  renderBoard();
+  requestAnimationFrame(function() {
+    var input = document.getElementById('board-batch-label-input');
+    if (input) input.focus();
+  });
+}
+
+function _handleBoardBatchActionList(msg) {
+  _boardBatchActionWaiting = false;
+  _boardBatchActionOptions = msg.actions || [];
+  renderBoard();
+}
+
+function boardBatchEditLabelInput(value) {
+  _boardBatchEditLabel = value;
+}
+
+function boardBatchEditDueInput(value) {
+  _boardBatchEditDueMode = value ? 'set' : 'unchanged';
+  _boardBatchEditDue = value;
+}
+
+function boardBatchEditClearDue() {
+  _boardBatchEditDueMode = 'clear';
+  _boardBatchEditDue = '';
+  renderBoard();
+}
+
+function boardBatchEditKeydown(evt) {
+  if (evt.key === 'Escape') {
+    evt.preventDefault();
+    _boardResetBatchEdit();
+    renderBoard();
+  } else if (evt.key === 'Enter' && !evt.shiftKey) {
+    evt.preventDefault();
+    boardApplyBatchEdit();
+  }
+}
+
+function boardApplyBatchEdit() {
+  var tasks = _boardSelectedTaskItems();
+  if (!tasks.length) return;
+  var addLabel = _boardBatchEditLabel.trim();
+  var changeAssignee = _boardBatchEditAssignee !== '__unchanged__';
+  var changeAction = _boardBatchEditAction !== '__unchanged__';
+  var changePriority = _boardBatchEditPriority !== '__unchanged__';
+  var changeDue = _boardBatchEditDueMode !== 'unchanged';
+  if (!addLabel && !changeAssignee && !changeAction && !changePriority && !changeDue) return;
+
+  for (var i = 0; i < tasks.length; i++) {
+    var task = tasks[i];
+    var fields = {};
+
+    if (addLabel && !isSystemLabel(addLabel) && !/^priority:/.test(addLabel)) {
+      var labels = (task.labels || []).slice();
+      if (labels.indexOf(addLabel) < 0) {
+        labels.push(addLabel);
+        fields.labels = labels;
+      }
+    }
+
+    if (changePriority) {
+      var nextLabels = (fields.labels || (task.labels || []).slice()).filter(function(label) {
+        return !/^priority:/.test(label);
+      });
+      if (_boardBatchEditPriority) nextLabels.push('priority:' + _boardBatchEditPriority);
+      fields.labels = nextLabels;
+    }
+
+    if (changeAssignee && _boardSelectedSingleGroup()) {
+      fields.agent_id = _boardBatchEditAssignee;
+    }
+
+    if (changeAction && _boardSelectedSingleGroup()) {
+      fields.action_name = _boardBatchEditAction;
+      fields.action_vars = {};
+    }
+
+    if (changeDue) {
+      if (_boardBatchEditDueMode === 'clear') {
+        fields.scheduled_at = '';
+      } else if (_boardBatchEditDue) {
+        var d = new Date(_boardBatchEditDue);
+        if (!isNaN(d.getTime())) fields.scheduled_at = d.toISOString();
+      }
+    }
+
+    if (Object.keys(fields).length) {
+      fields.cmd = 'board_update_task';
+      fields.id = task.id;
+      send(fields);
+    }
+  }
+
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = '';
+  _boardResetBatchEdit();
+  renderBoard();
+}
 
 function _boardSelectedCount() {
   var n = 0;
@@ -2140,6 +2674,11 @@ function _boardSelectedCount() {
 function boardClearSelection() {
   _boardSelectedTasks = {};
   _boardLastSelectedTask = '';
+  _boardQuickEditTask = '';
+  _boardQuickEditKind = '';
+  _boardQuickLabelDraft = '';
+  _boardQuickDueDraft = '';
+  _boardResetBatchEdit();
   renderBoard();
 }
 
@@ -2147,6 +2686,10 @@ function _renderBoardSelectionBar() {
   var count = _boardSelectedCount();
   if (count === 0) return '';
   var lanes = _boardLanes();
+  var singleGroup = _boardSelectedSingleGroup();
+  var agents = _boardBatchEditAgents();
+  var archiveIds = _boardSelectedArchiveIds(false);
+  var restoreIds = _boardSelectedArchiveIds(true);
   var html = '<div class="board-selection-bar">';
   html += '<span class="board-selection-count">' + count + ' selected</span>';
   // Move to lane dropdown
@@ -2158,13 +2701,72 @@ function _renderBoardSelectionBar() {
     html += '<button class="board-selection-dropdown-item" onclick="boardBulkMove(\'' + escLane + '\')">' + esc(lanes[i]) + '</button>';
   }
   html += '</div></div>';
-  // Add label
+  // Batch edit
   html += '<div class="board-selection-dropdown-wrap">';
-  html += '<button class="board-selection-btn" onclick="boardBulkToggleLabel(event)">Add label &#9662;</button>';
-  html += '<div class="board-selection-dropdown" id="board-bulk-label-menu" style="display:none">';
-  html += '<input type="text" class="board-selection-label-input" id="board-bulk-label-input"'
-    + ' placeholder="Label name" onkeydown="boardBulkLabelKeydown(event)">';
-  html += '</div></div>';
+  html += '<button class="board-selection-btn" onclick="boardToggleBatchEdit(event)">Batch edit</button>';
+  if (_boardBatchEditOpen) {
+    html += '<div class="board-selection-dropdown board-selection-batch-panel" id="board-batch-edit-panel">';
+    html += '<div class="board-selection-batch-grid">';
+    html += '<label class="board-selection-batch-label">Add label</label>';
+    html += '<input type="text" class="board-selection-label-input" id="board-batch-label-input"'
+      + ' value="' + esc(_boardBatchEditLabel) + '" placeholder="Label name"'
+      + ' oninput="boardBatchEditLabelInput(this.value)"'
+      + ' onkeydown="boardBatchEditKeydown(event)">';
+    html += '<label class="board-selection-batch-label">Assignee</label>';
+    html += '<select class="board-selection-select"'
+      + (singleGroup ? '' : ' disabled')
+      + ' onchange="_boardBatchEditAssignee=this.value">';
+    html += '<option value="__unchanged__"' + (_boardBatchEditAssignee === '__unchanged__' ? ' selected' : '') + '>No change</option>';
+    html += '<option value=""' + (_boardBatchEditAssignee === '' ? ' selected' : '') + '>Unassigned</option>';
+    for (var ai = 0; ai < agents.length; ai++) {
+      var agent = agents[ai];
+      html += '<option value="' + esc(agent.id) + '"' + (_boardBatchEditAssignee === agent.id ? ' selected' : '') + '>'
+        + esc(agent.name || agent.id) + '</option>';
+    }
+    html += '</select>';
+    html += '<label class="board-selection-batch-label">Due date</label>';
+    html += '<div class="board-selection-batch-inline">';
+    html += '<input type="datetime-local" class="board-selection-select" id="board-batch-due-input"'
+      + ' value="' + esc(_boardBatchEditDue) + '"'
+      + ' oninput="boardBatchEditDueInput(this.value)"'
+      + ' onkeydown="boardBatchEditKeydown(event)">';
+    html += '<button class="board-selection-btn" onclick="event.stopPropagation();boardBatchEditClearDue()">Clear</button>';
+    html += '</div>';
+    html += '<label class="board-selection-batch-label">Action</label>';
+    html += '<select class="board-selection-select"'
+      + (singleGroup ? '' : ' disabled')
+      + ' onchange="_boardBatchEditAction=this.value">';
+    html += '<option value="__unchanged__"' + (_boardBatchEditAction === '__unchanged__' ? ' selected' : '') + '>No change</option>';
+    html += '<option value=""' + (_boardBatchEditAction === '' ? ' selected' : '') + '>None</option>';
+    if (_boardBatchActionWaiting) {
+      html += '<option value="" disabled>Loading actions…</option>';
+    } else {
+      for (var acti = 0; acti < _boardBatchActionOptions.length; acti++) {
+        var action = _boardBatchActionOptions[acti];
+        html += '<option value="' + esc(action.name) + '"' + (_boardBatchEditAction === action.name ? ' selected' : '') + '>'
+          + esc(action.name) + '</option>';
+      }
+    }
+    html += '</select>';
+    html += '<label class="board-selection-batch-label">Priority</label>';
+    html += '<select class="board-selection-select" onchange="_boardBatchEditPriority=this.value">';
+    html += '<option value="__unchanged__"' + (_boardBatchEditPriority === '__unchanged__' ? ' selected' : '') + '>No change</option>';
+    html += '<option value=""' + (_boardBatchEditPriority === '' ? ' selected' : '') + '>None</option>';
+    html += '<option value="low"' + (_boardBatchEditPriority === 'low' ? ' selected' : '') + '>Low</option>';
+    html += '<option value="medium"' + (_boardBatchEditPriority === 'medium' ? ' selected' : '') + '>Medium</option>';
+    html += '<option value="high"' + (_boardBatchEditPriority === 'high' ? ' selected' : '') + '>High</option>';
+    html += '</select>';
+    html += '</div>';
+    if (!singleGroup) {
+      html += '<div class="board-selection-batch-note">Action and assignee edits require all selected tasks to be in the same group.</div>';
+    }
+    html += '<div class="board-selection-batch-actions">';
+    html += '<button class="board-selection-btn" onclick="boardApplyBatchEdit()">Apply to ' + count + '</button>';
+    html += '<button class="board-selection-btn" onclick="event.stopPropagation();_boardResetBatchEdit();renderBoard()">Cancel</button>';
+    html += '</div>';
+    html += '</div>';
+  }
+  html += '</div>';
   // Dispatch (only when all selected tasks are in Backlog)
   var allBacklog = true;
   for (var id in _boardSelectedTasks) {
@@ -2173,6 +2775,16 @@ function _renderBoardSelectionBar() {
   }
   if (allBacklog) {
     html += '<button class="board-selection-btn" onclick="boardBulkDispatch()">Dispatch</button>';
+  }
+  if (archiveIds.length) {
+    html += '<button class="board-selection-btn" onclick="boardBulkArchiveSelected()">Archive completed'
+      + (archiveIds.length === count ? '' : ' (' + archiveIds.length + ')')
+      + '</button>';
+  }
+  if (restoreIds.length) {
+    html += '<button class="board-selection-btn" onclick="boardBulkRestoreSelected()">Restore'
+      + (restoreIds.length === count ? '' : ' (' + restoreIds.length + ')')
+      + '</button>';
   }
   // Delete
   html += '<button class="board-selection-btn board-selection-btn-danger" onclick="boardBulkDelete()">Delete</button>';
@@ -2185,36 +2797,12 @@ function _renderBoardSelectionBar() {
 function boardBulkToggleMove(evt) {
   evt.stopPropagation();
   var menu = document.getElementById('board-bulk-move-menu');
-  var labelMenu = document.getElementById('board-bulk-label-menu');
-  if (labelMenu) labelMenu.style.display = 'none';
+  if (_boardBatchEditOpen) {
+    _boardResetBatchEdit();
+    renderBoard();
+    return;
+  }
   if (menu) menu.style.display = menu.style.display === 'none' ? '' : 'none';
-}
-
-function boardBulkToggleLabel(evt) {
-  evt.stopPropagation();
-  var menu = document.getElementById('board-bulk-label-menu');
-  var moveMenu = document.getElementById('board-bulk-move-menu');
-  if (moveMenu) moveMenu.style.display = 'none';
-  if (menu) {
-    menu.style.display = menu.style.display === 'none' ? '' : 'none';
-    if (menu.style.display !== 'none') {
-      var inp = document.getElementById('board-bulk-label-input');
-      if (inp) inp.focus();
-    }
-  }
-}
-
-function boardBulkLabelKeydown(evt) {
-  if (evt.key === 'Enter') {
-    evt.preventDefault();
-    var inp = document.getElementById('board-bulk-label-input');
-    var label = inp ? inp.value.trim() : '';
-    if (label) boardBulkAddLabel(label);
-  }
-  if (evt.key === 'Escape') {
-    var menu = document.getElementById('board-bulk-label-menu');
-    if (menu) menu.style.display = 'none';
-  }
 }
 
 function boardBulkMove(lane) {
@@ -2224,6 +2812,27 @@ function boardBulkMove(lane) {
   }
   _boardSelectedTasks = {};
   _boardLastSelectedTask = '';
+  _boardResetBatchEdit();
+}
+
+function boardBulkArchiveSelected() {
+  var ids = _boardSelectedArchiveIds(false);
+  if (!ids.length) return;
+  _boardArchiveTaskIds(ids, true);
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = '';
+  _boardResetBatchEdit();
+  renderBoard();
+}
+
+function boardBulkRestoreSelected() {
+  var ids = _boardSelectedArchiveIds(true);
+  if (!ids.length) return;
+  _boardArchiveTaskIds(ids, false);
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = '';
+  _boardResetBatchEdit();
+  renderBoard();
 }
 
 function boardBulkAddLabel(label) {
@@ -2239,6 +2848,7 @@ function boardBulkAddLabel(label) {
   }
   _boardSelectedTasks = {};
   _boardLastSelectedTask = '';
+  _boardResetBatchEdit();
 }
 
 function boardBulkDelete() {
@@ -2250,6 +2860,7 @@ function boardBulkDelete() {
     }
     _boardSelectedTasks = {};
     _boardLastSelectedTask = '';
+    _boardResetBatchEdit();
   });
 }
 
@@ -2282,6 +2893,7 @@ function _boardBulkDispatchSend(tasks) {
   }
   _boardSelectedTasks = {};
   _boardLastSelectedTask = '';
+  _boardResetBatchEdit();
   renderBoard();
 }
 
@@ -2354,6 +2966,50 @@ function boardEditTask(taskId) {
   openEditTask(taskId);
 }
 
+function boardDuplicateTask(taskId) {
+  _closeCtxMenu();
+  var task = _boardTasks()[taskId];
+  if (!task) return;
+  var clone = _boardTaskCloneFields(task);
+  var msg = {
+    cmd: 'board_add_task',
+    task: clone.task,
+    group: clone.group,
+  };
+  if (clone.description) msg.description = clone.description;
+  if (clone.action_name) msg.action_name = clone.action_name;
+  if (clone.agent_template) msg.agent_template = clone.agent_template;
+  if (Object.keys(clone.action_vars).length) msg.action_vars = clone.action_vars;
+  if (clone.labels.length) msg.labels = clone.labels;
+  send(msg);
+}
+
+function boardCloneTask(taskId) {
+  _closeCtxMenu();
+  var task = _boardTasks()[taskId];
+  if (!task) return;
+  var clone = _boardTaskCloneFields(task);
+  _taskOpenModal({
+    draftScope: 'clone:' + taskId,
+    editId: null,
+    title: 'Clone Task',
+    submitLabel: 'Create',
+    task: clone.task,
+    description: clone.description,
+    labels: clone.labels,
+    dependsOn: [],
+    attachments: [],
+    originalAttachments: [],
+    actionName: clone.action_name,
+    agentTemplate: clone.agent_template,
+    actionVars: clone.action_vars,
+    group: clone.group,
+    lane: '',
+    scheduledInput: '',
+    selectTask: false,
+  });
+}
+
 function boardMoveTaskToLane(taskId, lane) {
   _closeCtxMenu();
   send({ cmd: 'board_move_task', id: taskId, lane: lane });
@@ -2362,6 +3018,16 @@ function boardMoveTaskToLane(taskId, lane) {
 function boardDeleteTask(taskId) {
   _closeCtxMenu();
   send({ cmd: 'board_remove_task', id: taskId });
+}
+
+function boardArchiveTask(taskId) {
+  _closeCtxMenu();
+  _boardArchiveTaskIds([taskId], true);
+}
+
+function boardRestoreTask(taskId) {
+  _closeCtxMenu();
+  _boardArchiveTaskIds([taskId], false);
 }
 
 function boardUnlinkAgent(taskId) {
@@ -2527,6 +3193,20 @@ function boardDispatchToExisting(taskId, agentId) {
 function boardPreviewPrompt(taskId) {
   _closeCtxMenu();
   send({ cmd: 'preview_prompt', id: taskId });
+}
+
+function boardToggleArchived() {
+  _boardShowArchived = !_boardShowArchived;
+  _boardCardsScrollTop = 0;
+  _boardRenderLimit = 50;
+  renderBoard();
+}
+
+function boardArchiveSuggestedDone() {
+  var ids = _boardStaleDoneTaskIds();
+  if (!ids.length) return;
+  _boardArchiveTaskIds(ids, true);
+  renderBoard();
 }
 
 function _handleDispatchActionMissing(msg) {
