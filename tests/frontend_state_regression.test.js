@@ -2259,6 +2259,9 @@ test('submitTask includes structured artifacts alongside attachments when editin
     scheduled_at: '',
     depends_on: [],
     attachments: [{ filename: 'screenshot.png', path: '/tmp/screenshot.png', mime_type: 'image/png' }],
+    provider: '',
+    external_id: '',
+    external_url: '',
     artifacts: [{
       type: 'log',
       title: 'pytest.log',
