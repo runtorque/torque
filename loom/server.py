@@ -2919,38 +2919,55 @@ async def main(connection: iterm2.Connection):
                 else:
                     import asyncio as _aio
                     stat_only = data.get("stat_only", False)
+                    summary_only = data.get("summary_only", False)
                     paths = data.get("paths", [])
-                    diff_args = [
-                        "git", "-C", cell.worktree_path,
-                        "diff",
-                    ]
-                    if stat_only:
-                        diff_args.append("--stat")
-                    diff_args.append(
-                        f"{cell.worktree_base_branch}...HEAD")
-                    if paths:
-                        diff_args.append("--")
-                        diff_args.extend(paths)
-                    proc = await _aio.create_subprocess_exec(
-                        *diff_args,
-                        stdout=_aio.subprocess.PIPE,
-                        stderr=_aio.subprocess.PIPE,
-                    )
-                    stdout, stderr = await proc.communicate()
-                    if proc.returncode != 0:
-                        result = {"type": "error",
-                                  "message": stderr.decode().strip()
-                                  or "git diff failed"}
+                    if summary_only:
+                        summary = await worktree_mgr.diff_files_summary(
+                            cell,
+                            paths=paths,
+                        )
+                        result = {
+                            "type": "ok",
+                            "summary": {
+                                "agent_name": cell.name,
+                                "branch": cell.worktree_branch or "",
+                                "base_branch": cell.worktree_base_branch,
+                                "path_filters": paths,
+                                **summary,
+                            },
+                        }
                     else:
-                        diff_text = stdout.decode()
-                        # Truncate if too large (100K chars)
-                        if len(diff_text) > 100_000:
-                            diff_text = (
-                                diff_text[:100_000]
-                                + "\n\n... truncated (too large) ..."
-                            )
-                        result = {"type": "ok",
-                                  "diff": diff_text}
+                        diff_args = [
+                            "git", "-C", cell.worktree_path,
+                            "diff",
+                        ]
+                        if stat_only:
+                            diff_args.append("--stat")
+                        diff_args.append(
+                            f"{cell.worktree_base_branch}...HEAD")
+                        if paths:
+                            diff_args.append("--")
+                            diff_args.extend(paths)
+                        proc = await _aio.create_subprocess_exec(
+                            *diff_args,
+                            stdout=_aio.subprocess.PIPE,
+                            stderr=_aio.subprocess.PIPE,
+                        )
+                        stdout, stderr = await proc.communicate()
+                        if proc.returncode != 0:
+                            result = {"type": "error",
+                                      "message": stderr.decode().strip()
+                                      or "git diff failed"}
+                        else:
+                            diff_text = stdout.decode()
+                            # Truncate if too large (100K chars)
+                            if len(diff_text) > 100_000:
+                                diff_text = (
+                                    diff_text[:100_000]
+                                    + "\n\n... truncated (too large) ..."
+                                )
+                            result = {"type": "ok",
+                                      "diff": diff_text}
 
             elif cmd == "worktree_check_conflicts":
                 cell = state.agents.get(data.get("id", ""))

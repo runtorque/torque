@@ -267,7 +267,7 @@ All Weaver tools are available through the same `/mcp` endpoint as agent tools, 
 
 | Tool | What it is for |
 |------|-----------------|
-| `weaver_diff` | Review diff stats or full diffs before merge |
+| `weaver_diff` | Review structured summaries, diff stats, or full diffs before merge |
 | `weaver_merge` | Merge a worktree branch into its base branch |
 | `weaver_rebase` | Rebase a conflicted worktree branch onto its base branch |
 | `weaver_create_pr` | Push and open a GitHub PR with `gh` |
@@ -313,9 +313,10 @@ The Weaver is expected to handle the operational end of agent work, not just the
 A practical review sequence is:
 
 1. inspect the agent with `weaver_agent_show`
-2. start with `weaver_diff(..., stat_only=true)` to size the change
-3. inspect specific risky paths with `weaver_diff(..., paths=[...])` if needed
-4. ask the agent for clarification with `weaver_agent_message` if the diff is unclear
+2. start with `weaver_diff(..., summary_only=true)` to get machine-readable changed-file signals without loading raw patch text
+3. use `weaver_diff(..., stat_only=true)` if you want a quick human-readable diffstat to size the change
+4. inspect specific risky paths with `weaver_diff(..., paths=[...])` if needed
+5. ask the agent for clarification with `weaver_agent_message` if the diff is unclear
 
 For shared same-agent branches, `weaver_agent_show` also exposes task-boundary metadata so the Weaver can tell which completed task is the latest clean mergeable boundary and which queued tasks resume after it.
 

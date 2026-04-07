@@ -975,9 +975,10 @@ WEAVER_TOOLS = [
         "name": "weaver_diff",
         "description": (
             "Get the diff of an agent's worktree branch against "
-            "its base branch. Returns the full diff output, "
-            "optionally limited to specific files. Useful for "
-            "reviewing changes before merge or PR."
+            "its base branch. Can return a structured summary, "
+            "diffstat, or full diff output, optionally limited to "
+            "specific files. Useful for reviewing changes before "
+            "merge or PR."
         ),
         "inputSchema": {
             "type": "object",
@@ -992,6 +993,15 @@ WEAVER_TOOLS = [
                         "If true, return only the diffstat summary "
                         "(files changed, insertions, deletions) "
                         "instead of the full diff. Default: false."
+                    ),
+                },
+                "summary_only": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, return a machine-readable diff "
+                        "summary with changed files and lightweight "
+                        "review signals instead of raw diff text. "
+                        "Default: false."
                     ),
                 },
                 "paths": {
@@ -2211,10 +2221,13 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             "cmd": "worktree_diff",
             "id": agent_id,
             "stat_only": args.get("stat_only", False),
+            "summary_only": args.get("summary_only", False),
             "paths": args.get("paths", []),
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
+        if args.get("summary_only", False):
+            return json.dumps(result), False
         return result.get("diff", "No changes"), False
 
     if name == "weaver_worktree_remove":

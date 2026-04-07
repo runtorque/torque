@@ -1052,6 +1052,80 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Latest task boundary", text)
 
 
+class WeaverDiffToolTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+        self.mcp_weaver_mod = importlib.import_module("loom.mcp_weaver")
+        self.mcp_weaver_mod = importlib.reload(self.mcp_weaver_mod)
+
+    async def test_diff_summary_forwards_filters_and_returns_json(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            cell_type="agent",
+            worktree_path="/tmp/worktree",
+            worktree_branch="loom/worker",
+            worktree_base_branch="main",
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+        captured = {}
+
+        async def fake_handle_command(payload):
+            captured.update(payload)
+            return {
+                "type": "ok",
+                "summary": {
+                    "stats": {"files": 1, "insertions": 3, "deletions": 1},
+                    "files": [{
+                        "path": "config/app.yml",
+                        "status": "modified",
+                        "insertions": 3,
+                        "deletions": 1,
+                        "binary": False,
+                        "signals": ["config"],
+                    }],
+                    "interesting_files": [{
+                        "path": "config/app.yml",
+                        "signals": ["config"],
+                    }],
+                    "signal_counts": {"config": 1},
+                },
+            }
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_diff",
+            {
+                "agent": cell.slug,
+                "summary_only": True,
+                "paths": ["config/app.yml"],
+            },
+            fake_handle_command,
+            state,
+            cell_id=cell.id,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(
+            captured,
+            {
+                "cmd": "worktree_diff",
+                "id": cell.id,
+                "stat_only": False,
+                "summary_only": True,
+                "paths": ["config/app.yml"],
+            },
+        )
+        data = json.loads(text)
+        self.assertEqual(data["summary"]["stats"]["files"], 1)
+        self.assertEqual(data["summary"]["files"][0]["signals"], ["config"])
+
+
 class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         _install_aiohttp_stub()

@@ -19,6 +19,168 @@ LOOM_EXCLUDE_ENTRIES = [
     ".codex/AGENTS.md",
 ]
 
+_HIGH_CHURN_THRESHOLD = 200
+_LOCKFILE_NAMES = {
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "bun.lockb",
+    "poetry.lock",
+    "pipfile.lock",
+    "cargo.lock",
+    "composer.lock",
+    "gemfile.lock",
+    "go.sum",
+}
+_MIGRATION_RE = re.compile(
+    r"(^|/)(db/migrate|migrations?|alembic|schema\.sql|prisma/migrations?)(/|$)",
+    re.IGNORECASE,
+)
+_AUTH_RE = re.compile(
+    r"(^|/)(auth|oauth|login|session|permissions?|rbac|acl)(/|$)|"
+    r"(^|/)(auth|oauth|login|session|permissions?|rbac|acl)[._-]",
+    re.IGNORECASE,
+)
+_PROMPT_RE = re.compile(
+    r"(^|/)(prompts?|system-prompt|prompting)(/|$)|prompt",
+    re.IGNORECASE,
+)
+_CONFIG_RE = re.compile(
+    r"(^|/)(\.github/workflows|config|configs|settings|infra|deploy|docker)(/|$)|"
+    r"(^|/)(dockerfile|docker-compose\.[^/]+|compose\.[^/]+|\.env(\.|$)|"
+    r"[^/]+\.(ya?ml|toml|ini|cfg))$",
+    re.IGNORECASE,
+)
+_BUILD_TEST_RE = re.compile(
+    r"(^|/)(makefile|package\.json|pyproject\.toml|requirements[^/]*\.txt|"
+    r"tox\.ini|noxfile\.py|setup\.py|setup\.cfg|cargo\.toml|go\.mod|"
+    r"pom\.xml|build\.gradle(\.kts)?|scripts?|ci|tests?)(/|$)|"
+    r"(^|/)\.github/workflows/",
+    re.IGNORECASE,
+)
+
+
+def _diff_status_from_name_status(code: str) -> str:
+    """Normalize git ``--name-status`` codes to stable status labels."""
+    return {
+        "A": "added",
+        "C": "copied",
+        "D": "deleted",
+        "M": "modified",
+        "R": "renamed",
+        "T": "type_changed",
+        "U": "unmerged",
+    }.get((code or "M")[:1], "modified")
+
+
+def _parse_name_status_z(raw: bytes) -> list[dict]:
+    """Parse ``git diff --name-status -z`` output."""
+    records: list[dict] = []
+    tokens = raw.decode("utf-8", errors="replace").split("\0")
+    index = 0
+    while index < len(tokens) - 1:
+        status_code = tokens[index]
+        index += 1
+        if not status_code:
+            continue
+        status = _diff_status_from_name_status(status_code)
+        if status in {"renamed", "copied"}:
+            if index + 1 >= len(tokens):
+                break
+            old_path = tokens[index]
+            new_path = tokens[index + 1]
+            index += 2
+            records.append({
+                "status": status,
+                "old_path": old_path,
+                "path": new_path or old_path,
+            })
+            continue
+        if index >= len(tokens):
+            break
+        path = tokens[index]
+        index += 1
+        records.append({
+            "status": status,
+            "old_path": path if status == "deleted" else "",
+            "path": path,
+        })
+    return records
+
+
+def _parse_numstat_z(raw: bytes) -> list[dict]:
+    """Parse ``git diff --numstat -z`` output."""
+    records: list[dict] = []
+    tokens = raw.decode("utf-8", errors="replace").split("\0")
+    index = 0
+    while index < len(tokens) - 1:
+        token = tokens[index]
+        index += 1
+        if not token:
+            continue
+        parts = token.split("\t")
+        if len(parts) < 3:
+            continue
+        insertions_raw, deletions_raw, path_token = parts[:3]
+        if path_token:
+            old_path = ""
+            path = path_token
+        else:
+            if index + 1 >= len(tokens):
+                break
+            old_path = tokens[index]
+            path = tokens[index + 1]
+            index += 2
+        records.append({
+            "old_path": old_path,
+            "path": path or old_path,
+            "insertions": 0 if insertions_raw == "-" else int(insertions_raw),
+            "deletions": 0 if deletions_raw == "-" else int(deletions_raw),
+            "binary": insertions_raw == "-" or deletions_raw == "-",
+        })
+    return records
+
+
+def _diff_summary_key(record: dict):
+    """Key diff records so ``--numstat`` and ``--name-status`` can merge."""
+    old_path = record.get("old_path", "")
+    path = record.get("path", "")
+    if old_path and old_path != path:
+        return old_path, path
+    return path
+
+
+def _diff_signals(path: str, *, old_path: str = "", status: str = "modified",
+                  insertions: int = 0, deletions: int = 0,
+                  binary: bool = False) -> list[str]:
+    """Return lightweight file-interest signals for review planning."""
+    signals: list[str] = []
+    combined = " ".join(part for part in [old_path, path] if part).lower()
+    basename = os.path.basename(path).lower()
+    churn = insertions + deletions
+
+    if status == "deleted":
+        signals.append("destructive")
+    elif status in {"renamed", "copied"}:
+        signals.append("move")
+    if binary:
+        signals.append("binary")
+    if basename in _LOCKFILE_NAMES:
+        signals.append("dependency_lockfile")
+    if _MIGRATION_RE.search(combined):
+        signals.append("migration")
+    if _AUTH_RE.search(combined):
+        signals.append("auth")
+    if _PROMPT_RE.search(combined):
+        signals.append("prompt")
+    if _CONFIG_RE.search(combined):
+        signals.append("config")
+    if _BUILD_TEST_RE.search(combined):
+        signals.append("build_or_test")
+    if churn >= _HIGH_CHURN_THRESHOLD:
+        signals.append("high_churn")
+    return signals
+
 
 def ensure_git_exclude(directory: str) -> None:
     """Add Loom-injected filenames to .git/info/exclude if not present.
@@ -374,6 +536,113 @@ class WorktreeManager:
                     "deletions": deletions}
         except Exception:
             log.debug("diff_summary failed for '%s'", cell.name)
+            return {}
+
+    async def diff_files_summary(self, cell,
+                                 paths: list[str] | None = None) -> dict:
+        """Return structured per-file diff summary for review planning."""
+        if not cell.worktree_path or not cell.worktree_base_branch:
+            return {}
+        path_filters = list(paths or [])
+        base_ref = f"{cell.worktree_base_branch}...HEAD"
+        try:
+            async def _run(*extra_args):
+                args = [
+                    "git", "-C", cell.worktree_path, "diff",
+                    "--find-renames", *extra_args, base_ref,
+                ]
+                if path_filters:
+                    args.append("--")
+                    args.extend(path_filters)
+                proc = await asyncio.create_subprocess_exec(
+                    *args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                stdout, _ = await proc.communicate()
+                if proc.returncode != 0:
+                    return b""
+                return stdout
+
+            numstat_records = _parse_numstat_z(
+                await _run("--numstat", "-z")
+            )
+            status_records = _parse_name_status_z(
+                await _run("--name-status", "-z")
+            )
+
+            status_by_key = {
+                _diff_summary_key(record): record for record in status_records
+            }
+            files = []
+            for record in numstat_records:
+                status_record = status_by_key.pop(
+                    _diff_summary_key(record),
+                    {},
+                )
+                path = status_record.get("path") or record.get("path", "")
+                old_path = (
+                    status_record.get("old_path")
+                    or record.get("old_path", "")
+                )
+                status = status_record.get("status") or "modified"
+                file_info = {
+                    "path": path,
+                    "old_path": old_path,
+                    "status": status,
+                    "insertions": record.get("insertions", 0),
+                    "deletions": record.get("deletions", 0),
+                    "binary": bool(record.get("binary")),
+                }
+                file_info["signals"] = _diff_signals(
+                    file_info["path"],
+                    old_path=file_info["old_path"],
+                    status=file_info["status"],
+                    insertions=file_info["insertions"],
+                    deletions=file_info["deletions"],
+                    binary=file_info["binary"],
+                )
+                files.append(file_info)
+
+            for status_record in status_by_key.values():
+                file_info = {
+                    "path": status_record.get("path", ""),
+                    "old_path": status_record.get("old_path", ""),
+                    "status": status_record.get("status", "modified"),
+                    "insertions": 0,
+                    "deletions": 0,
+                    "binary": False,
+                }
+                file_info["signals"] = _diff_signals(
+                    file_info["path"],
+                    old_path=file_info["old_path"],
+                    status=file_info["status"],
+                )
+                files.append(file_info)
+
+            stats = {
+                "files": len(files),
+                "insertions": sum(f["insertions"] for f in files),
+                "deletions": sum(f["deletions"] for f in files),
+            }
+            interesting_files = [
+                {"path": f["path"], "signals": f["signals"]}
+                for f in files
+                if f["signals"]
+            ]
+            signal_counts: dict[str, int] = {}
+            for file_info in files:
+                for signal in file_info["signals"]:
+                    signal_counts[signal] = signal_counts.get(signal, 0) + 1
+
+            return {
+                "stats": stats,
+                "files": files,
+                "interesting_files": interesting_files,
+                "signal_counts": signal_counts,
+            }
+        except Exception:
+            log.debug("diff_files_summary failed for '%s'", cell.name)
             return {}
 
     async def changed_files(self, cell) -> list[str]:
