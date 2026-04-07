@@ -269,6 +269,7 @@ All Weaver tools are available through the same `/mcp` endpoint as agent tools, 
 |------|-----------------|
 | `weaver_diff` | Review diff stats or full diffs before merge |
 | `weaver_merge` | Merge a worktree branch into its base branch |
+| `weaver_rebase` | Rebase a conflicted worktree branch onto its base branch |
 | `weaver_create_pr` | Push and open a GitHub PR with `gh` |
 | `weaver_worktree_checkpoint` | Snapshot the worktree before a risky operation |
 | `weaver_worktree_remove` | Remove the worktree after merge or cleanup |
@@ -320,16 +321,19 @@ For shared same-agent branches, `weaver_agent_show` also exposes task-boundary m
 
 ### Merge flow
 
-`weaver_merge` is a server-side merge operation. If Loom detects conflicts, it returns an error and the Weaver should ask the human for permission before attempting a manual recovery plan.
+`weaver_merge` is a server-side merge operation. If Loom detects conflicts, it returns an error with conflict context and the Weaver can run `weaver_rebase` before retrying the merge.
 
 On shared sequential branches, `weaver_merge` also refuses to merge when the latest task boundary is no longer cleanly mergeable, for example because a queued follow-up already started or the branch tip moved after the boundary was recorded.
+
+`weaver_rebase` uses the same merge-readiness checks before it runs, aborts automatically if the rebase hits conflicts, and returns enough conflict detail for the Weaver to decide whether to retry or escalate to the human for a manual plan.
 
 Typical flow:
 
 1. review diff
 2. merge with `weaver_merge`
-3. optionally create a PR with `weaver_create_pr`
-4. close the agent and/or remove the worktree
+3. if merge reports conflicts, run `weaver_rebase` and retry `weaver_merge`
+4. optionally create a PR with `weaver_create_pr`
+5. close the agent and/or remove the worktree
 
 `weaver_merge` also supports:
 

@@ -1006,6 +1006,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_error)
         self.assertIn("Merge has conflicts", text)
         self.assertIn("README.md", text)
+        self.assertIn("weaver_rebase", text)
         self.assertEqual(
             calls,
             [{"cmd": "worktree_check_merge", "id": cell.id}],
@@ -1049,6 +1050,188 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(is_error)
         self.assertIn("Latest task boundary", text)
+
+
+class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+        self.mcp_weaver_mod = importlib.import_module("loom.mcp_weaver")
+        self.mcp_weaver_mod = importlib.reload(self.mcp_weaver_mod)
+
+    def test_rebase_tool_is_registered(self):
+        tool = next(
+            t for t in self.mcp_weaver_mod.WEAVER_TOOLS
+            if t["name"] == "weaver_rebase"
+        )
+        self.assertIn("weaver_merge reports conflicts", tool["description"])
+
+    def _make_cell(self):
+        return self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            cell_type="agent",
+            worktree_path="/tmp/worktree",
+            worktree_branch="loom/worker",
+            worktree_base_branch="main",
+        )
+
+    async def test_rebase_returns_post_rebase_merge_readiness(self):
+        state = self.state_mod.MatrixState()
+        cell = self._make_cell()
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                if len(calls) == 1:
+                    return {
+                        "type": "worktree_check_merge",
+                        "clean": False,
+                        "conflicts": [
+                            {"path": "README.md", "reason": "content"},
+                        ],
+                    }
+                return {
+                    "type": "worktree_check_merge",
+                    "clean": True,
+                    "default_message": "Merge worker",
+                    "boundary": {"task_id": "task-1"},
+                    "clean_boundary": {"task_id": "task-1"},
+                }
+            if payload["cmd"] == "worktree_rebase":
+                return {"type": "worktree_rebase", "ok": True}
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_rebase",
+            {"agent": cell.slug},
+            fake_handle_command,
+            state,
+            cell_id=cell.id,
+        )
+
+        self.assertFalse(is_error)
+        result = json.loads(text)
+        self.assertTrue(result["merge_ready"])
+        self.assertEqual(result["default_message"], "Merge worker")
+        self.assertEqual(
+            result["conflicts_before"],
+            [{"path": "README.md", "reason": "content"}],
+        )
+        self.assertEqual(result["conflicts_after"], [])
+        self.assertEqual(
+            calls,
+            [
+                {"cmd": "worktree_check_merge", "id": cell.id},
+                {"cmd": "worktree_rebase", "id": cell.id},
+                {"cmd": "worktree_check_merge", "id": cell.id},
+            ],
+        )
+
+    async def test_rebase_reports_conflict_context_when_rebase_fails(self):
+        state = self.state_mod.MatrixState()
+        cell = self._make_cell()
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+
+        async def fake_handle_command(payload):
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "clean": False,
+                    "conflicts": [
+                        {"path": "README.md", "reason": "content"},
+                        {"path": "app.py", "reason": "modify/delete"},
+                    ],
+                }
+            if payload["cmd"] == "worktree_rebase":
+                return {
+                    "type": "worktree_rebase",
+                    "ok": False,
+                    "error": "Rebase failed — conflicts require manual resolution",
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_rebase",
+            {"agent": cell.id},
+            fake_handle_command,
+            state,
+            cell_id=cell.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("Rebase failed", text)
+        self.assertIn("README.md (content)", text)
+        self.assertIn("app.py (modify/delete)", text)
+        self.assertIn("worktree should be clean", text)
+
+    async def test_rebase_preserves_merge_safety_checks(self):
+        state = self.state_mod.MatrixState()
+        cell = self._make_cell()
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "clean": False,
+                    "error": "Latest task boundary is no longer cleanly mergeable because a follow-up task has already started.",
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_rebase",
+            {"agent": cell.id},
+            fake_handle_command,
+            state,
+            cell_id=cell.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("Latest task boundary", text)
+        self.assertEqual(
+            calls,
+            [{"cmd": "worktree_check_merge", "id": cell.id}],
+        )
+
+    async def test_rebase_surfaces_command_errors(self):
+        state = self.state_mod.MatrixState()
+        cell = self._make_cell()
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+
+        async def fake_handle_command(payload):
+            if payload["cmd"] == "worktree_check_merge":
+                return {"type": "worktree_check_merge", "clean": True}
+            if payload["cmd"] == "worktree_rebase":
+                return {
+                    "type": "error",
+                    "message": "git executable not available",
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_rebase",
+            {"agent": cell.id},
+            fake_handle_command,
+            state,
+            cell_id=cell.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "git executable not available")
 
 
 class WeaverAgentLifecycleToolTests(unittest.IsolatedAsyncioTestCase):

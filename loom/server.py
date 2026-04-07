@@ -2877,6 +2877,7 @@ async def main(connection: iterm2.Connection):
                 cell = state.agents.get(data.get("id", ""))
                 aid = data.get("id", "")
                 if cell and cell.worktree_path:
+                    check = await worktree_mgr.check_merge_conflicts(cell)
                     ok = await worktree_mgr.rebase_onto_base(cell)
                     if ok:
                         cell.worktree_checkpoints = \
@@ -2893,6 +2894,7 @@ async def main(connection: iterm2.Connection):
                             "id": aid, "ok": False,
                             "error": "Rebase failed — conflicts "
                                      "require manual resolution",
+                            "conflicts": check.get("conflicts", []),
                         }
                 else:
                     result = {"type": "worktree_rebase",

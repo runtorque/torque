@@ -110,6 +110,48 @@ def _blocked_dependency_titles(state, task) -> list[str]:
     ]
 
 
+def _format_worktree_conflicts(conflicts) -> str:
+    lines = []
+    for conflict in conflicts or []:
+        if isinstance(conflict, dict):
+            path = str(conflict.get("path", "")).strip()
+            reason = str(conflict.get("reason", "")).strip()
+            if path and reason:
+                lines.append(f"  - {path} ({reason})")
+            elif path:
+                lines.append(f"  - {path}")
+            elif reason:
+                lines.append(f"  - {reason}")
+            else:
+                lines.append("  - (unknown conflict)")
+            continue
+        if conflict:
+            lines.append(f"  - {conflict}")
+    if not lines:
+        lines.append("  - (no file details reported)")
+    return "\n".join(lines)
+
+
+async def _run_worktree_merge_check(handle_command, agent_id: str):
+    result = await handle_command({
+        "cmd": "worktree_check_merge",
+        "id": agent_id,
+    })
+    if result and result.get("type") == "error":
+        return result, result.get("message", "Unknown error"), True
+    result = result or {}
+    if result.get("dirty"):
+        return (
+            result,
+            "Worktree has uncommitted changes. Create a checkpoint or "
+            "commit them before retrying.",
+            True,
+        )
+    if not result.get("clean", True) and result.get("error"):
+        return result, result.get("error", "Merge blocked"), True
+    return result, "", False
+
+
 # ---------------------------------------------------------------------------
 # Tool definitions
 # ---------------------------------------------------------------------------
@@ -848,9 +890,8 @@ WEAVER_TOOLS = [
         "description": (
             "Merge an agent's worktree branch into the base branch "
             "(usually main). Uses server-side merge — no interactive "
-            "resolution. If there are conflicts, the merge will fail "
-            "and you should ask the human for permission to rebase "
-            "and resolve conflicts before retrying."
+            "resolution. If there are conflicts, use weaver_rebase "
+            "to replay the branch onto base before retrying the merge."
         ),
         "inputSchema": {
             "type": "object",
@@ -877,6 +918,25 @@ WEAVER_TOOLS = [
                     "description": (
                         "Remove the worktree after a successful merge."
                     ),
+                },
+            },
+            "required": ["agent"],
+        },
+    },
+    {
+        "name": "weaver_rebase",
+        "description": (
+            "Rebase an agent's worktree branch onto its base branch. "
+            "Useful after weaver_merge reports conflicts. Returns "
+            "post-rebase merge readiness, and aborts automatically "
+            "if conflicts still require manual resolution."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Agent slug or ID with a worktree.",
                 },
             },
             "required": ["agent"],
@@ -1994,22 +2054,21 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             return "Agent has no worktree", True
 
         # First check for conflicts / merge boundary eligibility
-        result = await handle_command({
-            "cmd": "worktree_check_merge",
-            "id": agent_id,
-        })
-        if result and result.get("type") == "error":
-            return result.get("message", "Unknown error"), True
+        result, error_text, blocked = await _run_worktree_merge_check(
+            handle_command, agent_id
+        )
+        if blocked:
+            return error_text, True
         if result and not result.get("clean", True):
-            if result.get("error"):
-                return result.get("error", "Merge blocked"), True
-            conflicts = result.get("conflicts", [])
-            conflict_list = "\n".join(f"  - {c}" for c in conflicts)
+            conflict_list = _format_worktree_conflicts(
+                result.get("conflicts", [])
+            )
             return (
                 f"Merge has conflicts:\n{conflict_list}\n\n"
-                "Ask the human for permission to rebase and resolve "
-                "conflicts before retrying the merge. Use weaver_ask "
-                "to request permission."
+                f"Run weaver_rebase on {cell.slug or cell.id} to replay "
+                f"{cell.worktree_branch} onto {cell.worktree_base_branch}, "
+                "then retry weaver_merge. Ask the human only if the "
+                "rebase still fails."
             ), True
 
         # Proceed with merge
@@ -2025,10 +2084,22 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         if result and result.get("ok") is False:
             error = result.get("error", "Merge failed")
             if "conflict" in error.lower():
+                fresh_check, _, _ = await _run_worktree_merge_check(
+                    handle_command, agent_id
+                )
+                conflict_text = ""
+                if fresh_check and not fresh_check.get("clean", True):
+                    conflict_text = (
+                        "\n\nConflicts:\n"
+                        + _format_worktree_conflicts(
+                            fresh_check.get("conflicts", [])
+                        )
+                    )
                 return (
-                    f"Merge failed: {error}\n\n"
-                    "Ask the human for permission to rebase and "
-                    "resolve conflicts. Use weaver_ask."
+                    f"Merge failed: {error}{conflict_text}\n\n"
+                    f"Run weaver_rebase on {cell.slug or cell.id} and "
+                    "retry the merge. Ask the human only if the rebase "
+                    "still fails."
                 ), True
             return error, True
         cleanup = result.get("cleanup", {}) if result else {}
@@ -2045,6 +2116,59 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                        f"{cell.worktree_base_branch}",
             "sha": result.get("sha", ""),
             "cleanup": cleanup,
+        }), False
+
+    if name == "weaver_rebase":
+        agent_ident = args.get("agent", "")
+        agent_id = _resolve_agent(state, agent_ident)
+        if not agent_id:
+            return f"Agent not found: {agent_ident}", True
+        cell = state.agents.get(agent_id)
+        if not cell or not cell.worktree_path:
+            return "Agent has no worktree", True
+
+        check, error_text, blocked = await _run_worktree_merge_check(
+            handle_command, agent_id
+        )
+        if blocked:
+            return error_text, True
+
+        conflicts_before = check.get("conflicts", [])
+        result = await handle_command({
+            "cmd": "worktree_rebase",
+            "id": agent_id,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        if result and result.get("ok") is False:
+            conflicts = result.get("conflicts", []) or conflicts_before
+            if conflicts:
+                return (
+                    f"{result.get('error', 'Rebase failed')}\n\n"
+                    "Conflicts:\n"
+                    f"{_format_worktree_conflicts(conflicts)}\n\n"
+                    "The rebase was aborted and the worktree should be "
+                    "clean. Ask the human if you want a manual conflict-"
+                    "resolution plan."
+                ), True
+            return result.get("error", "Rebase failed"), True
+
+        postcheck, error_text, blocked = await _run_worktree_merge_check(
+            handle_command, agent_id
+        )
+        if blocked:
+            return error_text, True
+
+        return json.dumps({
+            "type": "ok",
+            "message": f"Rebased {cell.worktree_branch} onto "
+                       f"{cell.worktree_base_branch}",
+            "merge_ready": postcheck.get("clean", False),
+            "default_message": postcheck.get("default_message", ""),
+            "conflicts_before": conflicts_before,
+            "conflicts_after": postcheck.get("conflicts", []),
+            "boundary": postcheck.get("boundary"),
+            "clean_boundary": postcheck.get("clean_boundary"),
         }), False
 
     if name == "weaver_create_pr":
