@@ -10,7 +10,7 @@ import shutil
 import sys
 import time
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiohttp
@@ -27,6 +27,14 @@ from .events import EventLog, EventBus, PanelEventLog, health_check
 from .adapters import get_adapter, get_providers, get_default_command_for_provider
 from .notifications import NotificationManager
 from .worktree import WorktreeManager
+from .worktree_boundaries import (
+    boundary_summary,
+    branch_boundary_tasks,
+    latest_boundary_task,
+    queued_successor_tasks,
+    started_successor_tasks,
+    task_boundary,
+)
 from .actions import ActionManager, LOOM_CONTEXT_STUB
 from .artifacts import (
     artifact_prompt_block,
@@ -323,18 +331,22 @@ async def _generate_merge_message(cell, worktree_mgr, squash: bool,
     else:
         header = f"Merge branch '{branch}'"
 
-    # 1. Collect completed tasks assigned to this agent
+    # 1. Collect completed boundary tasks on this branch
     task_lines = []
     if state:
-        for t in state.board_tasks.values():
-            if t.agent_id != cell.id:
-                continue
+        branch_tasks = branch_boundary_tasks(
+            state.board_tasks.values(),
+            repo_root=cell.worktree_repo_root or cell.git_root or "",
+            branch=cell.worktree_branch,
+            statuses={"open", "superseded"},
+        )
+        for t in branch_tasks:
             if t.lane != "Done":
                 continue
             # Find the done message from task activity log
             done_msg = ""
             for m in reversed(t.messages):
-                if m.get("action") == "done" and m.get("message"):
+                if m.get("action") in {"done", "ready"} and m.get("message"):
                     done_msg = m["message"]
                     break
             line = f"- {t.task}"
@@ -352,7 +364,8 @@ async def _generate_merge_message(cell, worktree_mgr, squash: bool,
         for c in commits:
             msg = c["message"]
             # Skip generic checkpoint messages, but keep their body
-            if msg.startswith("loom: checkpoint"):
+            if msg.startswith("loom: checkpoint") \
+                    or msg.startswith("loom: task boundary"):
                 body = c.get("body", "").strip()
                 if body:
                     lines.append(f"- {body.splitlines()[0]}")
@@ -1200,6 +1213,17 @@ async def main(connection: iterm2.Connection):
 
     def _record_task_dispatch(cell, task, lane: str) -> None:
         """Link a task to an agent and persist dispatch history."""
+        repo_root = cell.worktree_repo_root or cell.git_root or ""
+        if (not task.resume_after_boundary_task_id and cell.worktree_branch
+                and repo_root):
+            latest = latest_boundary_task(
+                state.board_tasks.values(),
+                repo_root=repo_root,
+                branch=cell.worktree_branch,
+                statuses={"open"},
+            )
+            if latest and latest.id != task.id:
+                task.resume_after_boundary_task_id = latest.id
         state.board_update_task(task.id, agent_id=cell.id, lane=lane)
         cell.current_task_id = task.id
         state.history_record_dispatch(cell, task)
@@ -1251,6 +1275,201 @@ async def main(connection: iterm2.Connection):
             record["total_tasks"] = max(
                 int(record.get("total_tasks") or 0), live_count)
         return record
+
+    def _save_task_record(task) -> None:
+        if not task:
+            return
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+        state._emit("task_upsert", **asdict(task))
+        state._db_save_task(task)
+
+    def _branch_boundary_tasks_for_cell(cell, statuses: set[str] | None = None
+                                        ) -> list:
+        repo_root = ""
+        if cell:
+            repo_root = cell.worktree_repo_root or cell.git_root or ""
+        if not cell or not repo_root or not cell.worktree_branch:
+            return []
+        return branch_boundary_tasks(
+            state.board_tasks.values(),
+            repo_root=repo_root,
+            branch=cell.worktree_branch,
+            statuses=statuses,
+        )
+
+    async def _latest_boundary_state_for_cell(cell) -> dict:
+        if not cell or not cell.worktree_path:
+            return {"latest": None, "clean": None, "reason": ""}
+
+        latest = latest_boundary_task(
+            state.board_tasks.values(),
+            repo_root=cell.worktree_repo_root or cell.git_root or "",
+            branch=cell.worktree_branch,
+            statuses={"open"},
+        )
+        if not latest:
+            return {"latest": None, "clean": None, "reason": ""}
+
+        queued = queued_successor_tasks(state.board_tasks.values(), latest.id)
+        started = started_successor_tasks(state.board_tasks.values(), latest.id)
+        summary = boundary_summary(
+            latest,
+            queued_followers=queued,
+            started_followers=started,
+        )
+        summary["clean_mergeable"] = False
+
+        boundary = task_boundary(latest)
+        commit_sha = boundary.get("commit_sha", "")
+        if not commit_sha:
+            summary["reason"] = boundary.get("reason", "") or "missing_commit_sha"
+            return {
+                "latest": summary,
+                "clean": None,
+                "reason": summary["reason"],
+            }
+
+        head_sha = await worktree_mgr.current_head(cell)
+        summary["head_sha"] = head_sha or ""
+        if started:
+            summary["reason"] = "started_successor"
+            return {
+                "latest": summary,
+                "clean": None,
+                "reason": summary["reason"],
+            }
+        if not head_sha:
+            summary["reason"] = "missing_head_sha"
+            return {
+                "latest": summary,
+                "clean": None,
+                "reason": summary["reason"],
+            }
+        if head_sha != commit_sha:
+            summary["reason"] = "branch_tip_moved"
+            return {
+                "latest": summary,
+                "clean": None,
+                "reason": summary["reason"],
+            }
+
+        summary["clean_mergeable"] = True
+        return {"latest": summary, "clean": summary, "reason": ""}
+
+    def _boundary_reason_message(reason: str, boundary: dict | None = None) -> str:
+        if reason == "started_successor":
+            if boundary and boundary.get("started_followers"):
+                follower = boundary["started_followers"][0]
+                return (
+                    "Latest task boundary is no longer cleanly mergeable "
+                    f"because follow-up task \"{follower.get('task_title', '')}\""
+                    " has already started."
+                )
+            return (
+                "Latest task boundary is no longer cleanly mergeable "
+                "because a follow-up task has already started."
+            )
+        if reason == "branch_tip_moved":
+            return (
+                "Latest task boundary no longer matches the branch tip. "
+                "A newer commit or external rewrite moved the branch."
+            )
+        if reason == "missing_head_sha":
+            return "Cannot verify the current branch tip for the latest task boundary."
+        if reason == "missing_commit_sha":
+            return "Latest task boundary is missing its recorded commit SHA."
+        if boundary:
+            task_title = boundary.get("task_title", "")
+            if task_title:
+                return f"Latest task boundary for \"{task_title}\" is not mergeable."
+        return "Latest task boundary is not mergeable."
+
+    def _task_boundary_checkpoint_message(task, cell, message: str) -> str:
+        subject = f"loom: task boundary — {task.task[:72]}"
+        body_lines = [f"Task: {task.task}"]
+        if cell.worktree_branch:
+            body_lines.append(f"Branch: {cell.worktree_branch}")
+        if message and message.strip() and message.strip() != "Done":
+            body_lines.append("")
+            body_lines.append(message.strip())
+        return subject + "\n\n" + "\n".join(body_lines)
+
+    async def _record_task_boundary(task, cell, message: str = "") -> dict | None:
+        if not task or not cell or not cell.worktree_path:
+            return None
+
+        dirty = await worktree_mgr.has_uncommitted_changes(cell)
+        boundary_sha = ""
+        kind = "marker"
+        reason = ""
+        if dirty:
+            boundary_sha = await worktree_mgr.checkpoint(
+                cell,
+                message=_task_boundary_checkpoint_message(task, cell, message),
+            ) or ""
+            kind = "checkpoint"
+            if not boundary_sha:
+                reason = "checkpoint_failed"
+        else:
+            boundary_sha = await worktree_mgr.current_head(cell) or ""
+            if not boundary_sha:
+                reason = "missing_head_sha"
+
+        recorded_at = datetime.now(timezone.utc).isoformat()
+
+        for older in _branch_boundary_tasks_for_cell(cell, statuses={"open"}):
+            if older.id == task.id:
+                continue
+            older_boundary = dict(task_boundary(older))
+            older_boundary["status"] = "superseded"
+            older_boundary["superseded_by_task_id"] = task.id
+            older_boundary.pop("reason", None)
+            older.worktree_boundary = older_boundary
+            _save_task_record(older)
+
+        task.worktree_boundary = {
+            "version": "1",
+            "branch": cell.worktree_branch or "",
+            "repo_root": cell.worktree_repo_root or cell.git_root or "",
+            "base_branch": cell.worktree_base_branch or "",
+            "commit_sha": boundary_sha,
+            "kind": kind,
+            "status": "open" if boundary_sha else "invalid",
+            "recorded_at": recorded_at,
+            "recorded_by_agent_id": cell.id,
+            "message": message.strip(),
+            "superseded_by_task_id": "",
+            "merged_at": "",
+            "merge_commit_sha": "",
+            "reason": reason,
+        }
+        _save_task_record(task)
+
+        for queued_task in state.board_tasks.values():
+            if queued_task.id == task.id:
+                continue
+            if queued_task.agent_id != cell.id:
+                continue
+            if queued_task.lane not in {"Backlog", "To Do"}:
+                continue
+            queued_task.resume_after_boundary_task_id = task.id
+            _save_task_record(queued_task)
+
+        return dict(task.worktree_boundary)
+
+    def _mark_branch_boundaries_merged(cell, merge_sha: str) -> None:
+        if not cell:
+            return
+        merged_at = datetime.now(timezone.utc).isoformat()
+        for branch_task in _branch_boundary_tasks_for_cell(
+                cell, statuses={"open", "superseded"}):
+            boundary = dict(task_boundary(branch_task))
+            boundary["status"] = "merged"
+            boundary["merged_at"] = merged_at
+            boundary["merge_commit_sha"] = merge_sha
+            boundary.pop("reason", None)
+            branch_task.worktree_boundary = boundary
+            _save_task_record(branch_task)
 
     # -- Postscript builder -------------------------------------------------
 
@@ -1450,6 +1669,10 @@ async def main(connection: iterm2.Connection):
             "verification_updated_at": task.verification_updated_at,
             "verification_updated_by": task.verification_updated_by,
             "verification_summary": task.verification_summary or {},
+            "worktree_boundary": task.worktree_boundary or {},
+            "resume_after_boundary_task_id": (
+                task.resume_after_boundary_task_id or ""
+            ),
             "attachments": [
                 {"path": a["path"], "filename": a["filename"]}
                 for a in (task.attachments or [])
@@ -2460,6 +2683,12 @@ async def main(connection: iterm2.Connection):
             elif cmd == "worktree_diff_full":
                 cell = state.agents.get(data.get("id", ""))
                 result = await _worktree_full_diff(cell, worktree_mgr)
+                if cell and cell.worktree_path:
+                    boundary_state = await _latest_boundary_state_for_cell(
+                        cell
+                    )
+                    result["boundary"] = boundary_state.get("latest")
+                    result["clean_boundary"] = boundary_state.get("clean")
                 result["type"] = "worktree_diff_full"
                 result["id"] = data.get("id", "")
                 return result
@@ -2469,6 +2698,9 @@ async def main(connection: iterm2.Connection):
                 aid = data.get("id", "")
                 if cell and cell.worktree_path \
                         and cell.worktree_branch:
+                    boundary_state = await _latest_boundary_state_for_cell(
+                        cell
+                    )
                     dirty = await worktree_mgr.has_uncommitted_changes(
                         cell)
                     if dirty:
@@ -2476,12 +2708,31 @@ async def main(connection: iterm2.Connection):
                             "type": "worktree_check_merge",
                             "id": aid, "clean": False,
                             "dirty": True, "conflicts": [],
+                            "boundary": boundary_state.get("latest"),
+                            "clean_boundary": boundary_state.get("clean"),
+                        }
+                    elif boundary_state.get("latest") \
+                            and not boundary_state.get("clean"):
+                        result = {
+                            "type": "worktree_check_merge",
+                            "id": aid,
+                            "clean": False,
+                            "dirty": False,
+                            "conflicts": [],
+                            "boundary": boundary_state.get("latest"),
+                            "clean_boundary": None,
+                            "error": _boundary_reason_message(
+                                boundary_state.get("reason", ""),
+                                boundary_state.get("latest"),
+                            ),
                         }
                     else:
                         check = await \
                             worktree_mgr.check_merge_conflicts(cell)
                         check["type"] = "worktree_check_merge"
                         check["id"] = aid
+                        check["boundary"] = boundary_state.get("latest")
+                        check["clean_boundary"] = boundary_state.get("clean")
                         if check.get("clean"):
                             squash = cell.worktree_merge_squash
                             check["default_message"] = \
@@ -2579,14 +2830,32 @@ async def main(connection: iterm2.Connection):
                     result = {"type": "error",
                               "message": "Agent has no worktree."}
                 else:
-                    conflict_info = \
-                        await worktree_mgr.check_merge_conflicts(cell)
-                    result = {
-                        "type": "ok",
-                        "clean": conflict_info.get("clean", True),
-                        "conflicts": conflict_info.get(
-                            "conflicts", []),
-                    }
+                    boundary_state = await _latest_boundary_state_for_cell(
+                        cell
+                    )
+                    if boundary_state.get("latest") \
+                            and not boundary_state.get("clean"):
+                        result = {
+                            "type": "ok",
+                            "clean": False,
+                            "conflicts": [],
+                            "error": _boundary_reason_message(
+                                boundary_state.get("reason", ""),
+                                boundary_state.get("latest"),
+                            ),
+                            "boundary": boundary_state.get("latest"),
+                        }
+                    else:
+                        conflict_info = \
+                            await worktree_mgr.check_merge_conflicts(cell)
+                        result = {
+                            "type": "ok",
+                            "clean": conflict_info.get("clean", True),
+                            "conflicts": conflict_info.get(
+                                "conflicts", []),
+                            "boundary": boundary_state.get("latest"),
+                            "clean_boundary": boundary_state.get("clean"),
+                        }
 
             elif cmd == "worktree_create_pr":
                 cell = state.agents.get(data.get("id", ""))
@@ -2621,6 +2890,9 @@ async def main(connection: iterm2.Connection):
                 cell = state.agents.get(data.get("id", ""))
                 aid = data.get("id", "")
                 if cell and cell.worktree_path and cell.worktree_branch:
+                    boundary_state = await _latest_boundary_state_for_cell(
+                        cell
+                    )
                     # Block merge if worktree has uncommitted changes
                     dirty = await worktree_mgr.has_uncommitted_changes(
                         cell)
@@ -2630,6 +2902,17 @@ async def main(connection: iterm2.Connection):
                             "ok": False,
                             "error": "Commit or checkpoint changes "
                                      "before merging.",
+                        }
+                    elif boundary_state.get("latest") \
+                            and not boundary_state.get("clean"):
+                        result = {
+                            "type": "worktree_merge",
+                            "id": aid,
+                            "ok": False,
+                            "error": _boundary_reason_message(
+                                boundary_state.get("reason", ""),
+                                boundary_state.get("latest"),
+                            ),
                         }
                     else:
                         squash = cell.worktree_merge_squash
@@ -2642,6 +2925,9 @@ async def main(connection: iterm2.Connection):
                             await worktree_mgr.server_merge(
                                 cell, msg, squash=squash)
                         if merge_result["ok"]:
+                            _mark_branch_boundaries_merged(
+                                cell, merge_result["sha"]
+                            )
                             cell.worktree_checkpoints = 0
                             cell.worktree_merged = True
                             state.history_update_agent(
@@ -2670,12 +2956,23 @@ async def main(connection: iterm2.Connection):
                                 data.get("close_agent_on_merge"))
                             remove_flag = bool(
                                 data.get("remove_worktree_on_merge"))
+                            queued_followups = [
+                                t for t in state.board_tasks.values()
+                                if t.agent_id == cell.id
+                                and t.lane in {"Backlog", "To Do"}
+                            ]
                             if legacy_close_flag and not close_flag \
                                     and not remove_flag:
                                 close_flag = True
                                 remove_flag = True
+                            if queued_followups:
+                                close_flag = False
+                                remove_flag = False
+                                legacy_close_flag = False
                             clear_flag = bool(
                                 data.get("clear_context"))
+                            if queued_followups:
+                                clear_flag = False
                             cleanup = {
                                 "close_agent": close_flag,
                                 "remove_worktree": remove_flag,
@@ -2759,6 +3056,8 @@ async def main(connection: iterm2.Connection):
                                             .count_commits(cell)
                                         cell.worktree_dirty = False
                                         cell.worktree_diff = {}
+                                        if queued_followups:
+                                            cell.worktree_merged = False
                                         state._emit_agent(cell)
                                     else:
                                         log.warning(
@@ -4122,9 +4421,10 @@ async def main(connection: iterm2.Connection):
                         if task:
                             state.history_complete_task(
                                 cell.id, task.id, "done")
-                        # Checkpoint before moving task to Done
-                        await _checkpoint_on_report(
-                            cell, message or "Done")
+                        if task:
+                            await _record_task_boundary(
+                                task, cell, message or "Done"
+                            )
                         state._emit_agent(cell)
                         if task and task.lane != "Done":
                             state.board_move_task(task.id, "Done")
@@ -4283,6 +4583,9 @@ async def main(connection: iterm2.Connection):
                         if task:
                             state.history_complete_task(
                                 cell.id, task.id, "ready")
+                            await _record_task_boundary(
+                                task, cell, message or "Ready"
+                            )
                         state._emit_agent(cell)
                         if task:
                             if task.lane != "Done":

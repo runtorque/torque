@@ -96,6 +96,16 @@ class LoomDBTests(unittest.TestCase):
                     "deploy_needed": True,
                     "human_validation_pending": "Confirm dashboard loads",
                 },
+                worktree_boundary={
+                    "version": "1",
+                    "branch": "loom/worker",
+                    "repo_root": "/repo",
+                    "base_branch": "main",
+                    "commit_sha": "abc123",
+                    "kind": "checkpoint",
+                    "status": "open",
+                },
+                resume_after_boundary_task_id="task-0",
                 artifacts=[{
                     "id": "artifact-1",
                     "type": "test_report",
@@ -178,6 +188,14 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["verification_summary"]["tests_run"],
             "python3 -m unittest",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["worktree_boundary"]["status"],
+            "open",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["resume_after_boundary_task_id"],
+            "task-0",
         )
         self.assertFalse(loaded["schedules"]["sched-1"]["enabled"])
         self.assertEqual(loaded["schedules"]["sched-1"]["labels"], ["ops"])

@@ -192,7 +192,9 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     verification_notes TEXT NOT NULL DEFAULT '',
     verification_updated_at TEXT NOT NULL DEFAULT '',
     verification_updated_by TEXT NOT NULL DEFAULT '',
-    verification_summary TEXT NOT NULL DEFAULT '{}'
+    verification_summary TEXT NOT NULL DEFAULT '{}',
+    worktree_boundary TEXT NOT NULL DEFAULT '{}',
+    resume_after_boundary_task_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -545,6 +547,8 @@ class LoomDB:
             ("verification_updated_at", "''"),
             ("verification_updated_by", "''"),
             ("verification_summary", "'{}'"),
+            ("worktree_boundary", "'{}'"),
+            ("resume_after_boundary_task_id", "''"),
         ]:
             try:
                 self._conn.execute(
@@ -843,6 +847,7 @@ class LoomDB:
         health_details = json.dumps(d.pop("health_details", {}))
         artifacts = json.dumps(d.pop("artifacts", []))
         verification_summary = json.dumps(d.pop("verification_summary", {}))
+        worktree_boundary = json.dumps(d.pop("worktree_boundary", {}))
         # Map 'group' to 'group_name' for the DB column
         group_name = d.pop("group", "")
         self._conn.execute("""
@@ -857,8 +862,9 @@ class LoomDB:
                  health_state, health_since, health_details, artifacts,
                  verification_mode, verification_state, verification_notes,
                  verification_updated_at, verification_updated_by,
-                 verification_summary)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 verification_summary, worktree_boundary,
+                 resume_after_boundary_task_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
@@ -883,6 +889,8 @@ class LoomDB:
             d.get("verification_updated_at", ""),
             d.get("verification_updated_by", ""),
             verification_summary,
+            worktree_boundary,
+            d.get("resume_after_boundary_task_id", ""),
         ))
         self._conn.commit()
 
@@ -1987,6 +1995,11 @@ class LoomDB:
                         d.get("verification_summary", "{}"))
                 except (json.JSONDecodeError, TypeError):
                     d["verification_summary"] = {}
+                try:
+                    d["worktree_boundary"] = json.loads(
+                        d.get("worktree_boundary", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    d["worktree_boundary"] = {}
                 board_tasks[d["id"]] = d
 
         # UI state

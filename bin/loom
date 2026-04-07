@@ -84,6 +84,11 @@ def db_read_board_tasks():
                     d.get("verification_summary", "{}"))
             except (json.JSONDecodeError, TypeError):
                 d["verification_summary"] = {}
+            try:
+                d["worktree_boundary"] = json.loads(
+                    d.get("worktree_boundary", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                d["worktree_boundary"] = {}
             tasks[d["id"]] = d
         return tasks
     return _db_read(_query)
@@ -178,6 +183,11 @@ def db_read_state():
                         d.get("verification_summary", "{}"))
                 except (json.JSONDecodeError, TypeError):
                     d["verification_summary"] = {}
+                try:
+                    d["worktree_boundary"] = json.loads(
+                        d.get("worktree_boundary", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    d["worktree_boundary"] = {}
                 tasks[d["id"]] = d
 
         # Schedules

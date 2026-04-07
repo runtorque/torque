@@ -97,6 +97,16 @@ The auto-checkpoint uses the agent's last summary (if available) as the commit b
 
 When **Checkpoint on progress / done** is enabled, Loom can also create checkpoints when the agent reports progress or completion through `loom ai progress` and `loom ai done`. These checkpoints are throttled so progress spam does not create a commit every few seconds.
 
+### Task boundaries on shared branches
+
+When the same agent keeps a shared worktree across sequential tasks, Loom records a task-scoped boundary whenever a worktree-backed task reaches `done` or `ready`.
+
+- If the worktree is dirty, Loom creates a dedicated boundary checkpoint commit.
+- If the worktree is already clean, Loom records a marker against the current `HEAD`.
+- The completed task stores the boundary metadata, and queued same-agent follow-up tasks point back to that task via `resume_after_boundary_task_id`.
+
+This lets Loom identify the latest clean mergeable task boundary on a shared branch instead of treating the whole branch history as one undifferentiated unit.
+
 ### Viewing checkpoint history
 
 ```bash
@@ -151,6 +161,8 @@ Worktrees persist independently of a live terminal session. On relaunch, Loom:
 
 This is why a stopped agent can often be relaunched back into the same isolated branch without manual setup.
 
+Task boundaries are reconstructed from persisted task metadata on restart. If the recorded boundary SHA no longer matches the branch tip, Loom treats that boundary as non-clean and refuses to present it as a merge target until a new clean boundary is recorded.
+
 ## Merging
 
 When an agent's work is complete and ready to merge back to the base branch, use the merge worktree option:
@@ -163,6 +175,14 @@ This sends a merge prompt to the agent, asking it to merge the worktree branch i
 - **Squash merge** --- detected by simulating the merge with `git merge-tree` or by checking if the base branch advanced and includes the same file changes
 
 After a successful merge, the agent is flagged and can be cleaned up.
+
+### Merge boundaries for sequential waves
+
+On shared same-agent branches, Loom merges only the latest clean task boundary.
+
+- Review and merge views show which completed task currently defines the merge boundary.
+- If a queued follow-up has already started, Loom blocks merge and reports that the older boundary is no longer cleanly mergeable.
+- If queued follow-up tasks still remain after a successful merge, Loom keeps the agent/worktree alive, resets the branch to the updated base branch, and leaves those queued tasks attached for the next wave.
 
 ### Merge settings
 
