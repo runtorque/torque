@@ -1664,6 +1664,43 @@ class MatrixState:
         chain.sort(key=lambda t: (t.pipeline_depth, t.created_at))
         return chain
 
+    def extract_playbook_candidates(self, group: str = "") -> list[dict]:
+        """Mine and persist draft playbook candidates from task history."""
+        if not self.db:
+            return []
+        from .playbooks import extract_playbook_candidates
+
+        candidates = extract_playbook_candidates(self, group=group)
+        self.db.replace_playbook_candidates(candidates, group_name=group)
+        return candidates
+
+    def list_playbook_candidates(self, group: str = "",
+                                 limit: int = 50) -> list[dict]:
+        """Load persisted draft playbook candidates."""
+        if not self.db:
+            return []
+        return self.db.load_playbook_candidates(group_name=group, limit=limit)
+
+    def save_playbook(self, playbook: dict):
+        """Persist a generated draft or published playbook."""
+        if not self.db:
+            return
+        self.db.save_playbook(playbook)
+
+    def list_playbooks(self, group: str = "", status: str = "",
+                       limit: int = 50) -> list[dict]:
+        """Load persisted playbook drafts or published recipes."""
+        if not self.db:
+            return []
+        return self.db.load_playbooks(
+            group_name=group, status_filter=status, limit=limit)
+
+    def get_playbook(self, playbook_id: str) -> Optional[dict]:
+        """Load one persisted playbook draft or published recipe."""
+        if not self.db:
+            return None
+        return self.db.load_playbook(playbook_id)
+
     def board_unlink_agent(self, agent_id: str):
         """Unlink an agent from all tasks (called when agent is removed)."""
         changed = False
