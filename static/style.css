@@ -654,6 +654,15 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
 
 /* Group settings modal — tabbed layout */
 .modal-tall { max-height: 85vh; display: flex; flex-direction: column; }
+#modal-task .modal {
+  overflow: hidden;
+}
+.task-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
 
 /* Tab bar */
 .gs-tabs {

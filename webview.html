@@ -450,6 +450,7 @@
 <div class="overlay" id="modal-task">
   <div class="modal modal-tall">
     <h2 id="task-modal-title">New Task</h2>
+    <div id="task-modal-body" class="task-modal-body">
     <label>Task <span class="label-req">*</span>
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="An actionable task description, e.g. 'Create a summary of last week's deploys' instead of 'Weekly deploy report'.">?</span>
     </label>
@@ -591,6 +592,7 @@
       <div id="task-deps-dropdown" class="deps-dropdown" style="display:none"></div>
     </div>
     <div id="task-deps-chips" class="label-chips"></div>
+    </div>
     <div class="modal-actions">
       <button class="btn-secondary" id="task-preview-btn" onclick="previewTaskPrompt()" style="display:none">Preview</button>
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>

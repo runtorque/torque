@@ -2302,6 +2302,50 @@ test('openEditTask clears past scheduled times instead of showing stale dispatch
   assert.equal(document.getElementById('task-scheduled-input').value, '');
 });
 
+test('openEditTask resets task modal body scroll to the top', () => {
+  const { context, document } = createModalHarness();
+
+  document.register('task-modal-title');
+  document.register('task-submit-btn');
+  document.register('task-task-input');
+  document.register('task-description-input');
+  document.register('task-labels-input');
+  document.register('task-labels-chips');
+  document.register('task-deps-input');
+  document.register('task-deps-dropdown');
+  document.register('task-deps-chips');
+  document.register('task-action-vars');
+  document.register('task-scheduled-input');
+  document.register('task-group-select');
+  document.register('task-template-select');
+  document.register('task-action-select');
+  document.register('modal-task');
+  const taskModalBody = document.register('task-modal-body');
+  taskModalBody.scrollTop = 240;
+
+  context.state.groups = { alpha: [] };
+  context.state.board_tasks = {
+    'task-2': {
+      id: 'task-2',
+      task: 'Old task',
+      group: 'alpha',
+    },
+  };
+
+  context.openEditTask('task-2');
+
+  assert.equal(taskModalBody.scrollTop, 0);
+});
+
+test('task modal keeps a scrollable body separate from its footer actions', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(html, /<div id="task-modal-body" class="task-modal-body">[\s\S]*<div class="modal-actions">/);
+  assert.match(css, /#modal-task \.modal\s*\{[^}]*overflow:\s*hidden;/);
+  assert.match(css, /\.task-modal-body\s*\{[^}]*flex:\s*1;[^}]*overflow-y:\s*auto;/);
+});
+
 test('submitTask includes structured artifacts alongside attachments when editing a task', () => {
   const { context, document } = createModalHarness();
 
