@@ -812,7 +812,7 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["started_followups"][0]["id"], "task-current")
         self.assertFalse(item["partial_review_safe"])
 
-    async def test_board_summary_includes_recommended_dispatch(self):
+    async def test_board_summary_omits_recommended_dispatch(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(
             id="weaver-1",
@@ -899,21 +899,7 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(is_error)
         summary = json.loads(text)
-        recommendation = summary["recommended_dispatch"]
-        self.assertEqual(recommendation["task_id"], "task-recommended")
-        self.assertEqual(recommendation["lane"], "To Do")
-        self.assertEqual(recommendation["dispatch_mode"], "existing_agent")
-        self.assertEqual(recommendation["agent_name"], "Worker Two")
-        self.assertIn("Already staged in To Do", recommendation["reasons"])
-        self.assertIn(
-            'Continues after "Stable boundary"',
-            recommendation["reasons"],
-        )
-        self.assertIn(
-            "Already linked to Worker Two",
-            recommendation["reasons"],
-        )
-        self.assertIn("Priority: Medium", recommendation["reasons"])
+        self.assertNotIn("recommended_dispatch", summary)
 
     async def test_task_show_includes_health_snapshot(self):
         state = self.state_mod.MatrixState()
