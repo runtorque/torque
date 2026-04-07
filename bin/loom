@@ -33,6 +33,19 @@ LOOM_LOG = os.path.expanduser(
     "~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log")
 LOOM_DB = os.path.expanduser(
     "~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.db")
+ARCHIVED_LANE = "Archived"
+
+
+def _task_is_archived(task):
+    return (task or {}).get("lane") == ARCHIVED_LANE
+
+
+def _task_counts_as_done(task):
+    lane = (task or {}).get("lane", "")
+    if lane == "Done":
+        return True
+    return lane == ARCHIVED_LANE \
+        and (task or {}).get("archived_from_lane", "") == "Done"
 
 
 # ---------------------------------------------------------------------------
@@ -1763,7 +1776,7 @@ def cmd_task_show(args):
             dep_t = tasks.get(dep_id)
             if dep_t:
                 dep_lane = dep_t.get("lane", "?")
-                mark = "\u2713" if dep_lane == "Done" else "\u2717"
+                mark = "\u2713" if _task_counts_as_done(dep_t) else "\u2717"
                 dep_slug = dep_t.get("slug") or dep_id[:6]
                 dep_strs.append(f"{mark} {dep_slug} ({dep_lane})")
             else:
@@ -1880,6 +1893,9 @@ def cmd_task_list(args):
     found_any = False
 
     for lane in lanes:
+        if lane == ARCHIVED_LANE and not getattr(args, "archived", False) \
+                and not (lane_filter and lane.lower() == lane_filter.lower()):
+            continue
         if lane_filter and lane.lower() != lane_filter.lower():
             continue
         lane_tasks = sorted(
@@ -1923,7 +1939,12 @@ def cmd_task_list(args):
 def _filter_tasks(tasks, args):
     """Apply CLI filters to a tasks dict, return filtered dict."""
     result = {}
+    include_archived = getattr(args, "archived", False)
+    lane_filter = getattr(args, "lane", None)
     for tid, t in tasks.items():
+        if _task_is_archived(t) and not include_archived:
+            if not lane_filter or t.get("lane", "").lower() != lane_filter.lower():
+                continue
         if hasattr(args, "lane") and args.lane:
             if t.get("lane", "").lower() != args.lane.lower():
                 continue
@@ -2361,15 +2382,30 @@ def cmd_board_list(args):
 
     if args.json:
         import json as _j
-        print(_j.dumps({"lanes": lanes, "tasks": tasks}, indent=2))
+        visible_lanes = [
+            lane for lane in lanes
+            if lane != ARCHIVED_LANE or getattr(args, "archived", False)
+            or (lane_filter and lane.lower() == lane_filter.lower())
+        ]
+        filtered_tasks = {
+            tid: t for tid, t in tasks.items()
+            if not _task_is_archived(t) or getattr(args, "archived", False)
+            or (lane_filter and t.get("lane", "").lower() == lane_filter.lower())
+        }
+        print(_j.dumps({"lanes": visible_lanes, "tasks": filtered_tasks}, indent=2))
         return
 
     for lane in lanes:
+        if lane == ARCHIVED_LANE and not getattr(args, "archived", False) \
+                and not (lane_filter and lane.lower() == lane_filter.lower()):
+            continue
         if lane_filter and lane.lower() != lane_filter.lower():
             continue
         lane_tasks = sorted(
             [t for t in tasks.values()
              if t["lane"] == lane
+             and (lane != ARCHIVED_LANE or getattr(args, "archived", False)
+                  or (lane_filter and lane.lower() == lane_filter.lower()))
              and (not group_filter or t.get("group") == group_filter)],
             key=lambda t: t.get("position", 0),
             reverse=True,
@@ -2510,6 +2546,30 @@ def cmd_board_move(args):
     print(f"Moved \"{match.get('task', '')}\" to {args.lane}")
 
 
+def cmd_board_archive(args):
+    st = get_state_local(args.port)
+    match = resolve_task(st, args.identifier)
+
+    resp = api_call("board_archive_task", port=args.port, id=match["id"])
+    check_ok(resp)
+    print(f"Archived \"{match.get('task', '')}\"")
+
+
+def cmd_board_unarchive(args):
+    st = get_state_local(args.port)
+    match = resolve_task(st, args.identifier)
+
+    payload = {"id": match["id"]}
+    if getattr(args, "lane", None):
+        payload["lane"] = args.lane
+    resp = api_call("board_unarchive_task", port=args.port, **payload)
+    check_ok(resp)
+    if getattr(args, "lane", None):
+        print(f"Restored \"{match.get('task', '')}\" to {args.lane}")
+    else:
+        print(f"Restored \"{match.get('task', '')}\"")
+
+
 def cmd_board_remove(args):
     st = get_state_local(args.port)
     match = resolve_task(st, args.identifier)
@@ -2531,6 +2591,8 @@ def cmd_board_lanes(args):
         return
 
     for lane in lanes:
+        if lane == ARCHIVED_LANE and not getattr(args, "archived", False):
+            continue
         cnt = sum(1 for t in tasks.values() if t["lane"] == lane)
         print(f"  {lane} ({cnt})")
 
@@ -2564,7 +2626,7 @@ def _resolve_self(port):
     tasks = state_data.get("board_tasks", {})
     linked = [t for t in tasks.values() if t.get("agent_id") == cell_id]
     # Prefer tasks in an active lane (not Done, not Backlog)
-    active = [t for t in linked if t.get("lane") not in ("Done", "Backlog")]
+    active = [t for t in linked if t.get("lane") not in ("Done", "Backlog", ARCHIVED_LANE)]
     task = active[0] if len(active) == 1 else None
 
     return cell, task, active
@@ -2993,7 +3055,9 @@ def cmd_task_chain(args):
             if a:
                 agent = f"  {_dim(a.get('slug') or a.get('name', ''))}"
 
-        if lane == "Done":
+        if lane == ARCHIVED_LANE:
+            icon = _dim("□")
+        elif lane == "Done":
             icon = _green("✓")
         elif "loom:error" in t.get("labels", []):
             icon = _red("✕")
@@ -3612,6 +3676,8 @@ def build_parser():
     p.add_argument("-l", "--lane", help="Filter by lane name")
     p.add_argument("-g", "--group", help="Filter by group name")
     p.add_argument("--label", help="Filter by label")
+    p.add_argument("-A", "--archived", action="store_true",
+                   help="Include archived tasks in default output")
     p.set_defaults(func=cmd_task_list)
 
     p = tsk_sub.add_parser("edit", aliases=["e"],
@@ -3718,6 +3784,8 @@ def build_parser():
     p.add_argument("-g", "--group", help="Filter by group name")
     p.add_argument("-a", "--all", action="store_true",
                    help="Show all tasks (skip group auto-detection)")
+    p.add_argument("-A", "--archived", action="store_true",
+                   help="Include archived tasks in default output")
     p.set_defaults(func=cmd_board_list)
 
     p = brd_sub.add_parser("add", help="Add a task")
@@ -3769,12 +3837,24 @@ def build_parser():
                    help="Target lane")
     p.set_defaults(func=cmd_board_move)
 
+    p = brd_sub.add_parser("archive", help="Archive a task")
+    p.add_argument("identifier", help="Task ID, slug, or title")
+    p.set_defaults(func=cmd_board_archive)
+
+    p = brd_sub.add_parser("unarchive", help="Restore an archived task")
+    p.add_argument("identifier", help="Task ID, slug, or title")
+    p.add_argument("-l", "--lane",
+                   help="Restore to a specific lane instead of the saved one")
+    p.set_defaults(func=cmd_board_unarchive)
+
     p = brd_sub.add_parser("remove", aliases=["rm"],
                             help="Remove a task")
     p.add_argument("identifier", help="Task ID, slug, or title")
     p.set_defaults(func=cmd_board_remove)
 
     p = brd_sub.add_parser("lanes", help="List lanes")
+    p.add_argument("-A", "--archived", action="store_true",
+                   help="Include the Archived lane")
     p.set_defaults(func=cmd_board_lanes)
 
     # -- ai (agent reporting) -----------------------------------------------

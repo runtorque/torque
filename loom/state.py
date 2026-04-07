@@ -13,8 +13,9 @@ from .artifacts import normalize_artifacts, normalize_attachments
 from .db import LoomDB
 from .worktree_boundaries import clear_stale_successor_references
 
-_RESERVED_LANES = {"Backlog", "To Do", "In Progress", "Done"}
-_DEFAULT_LANES = ["Backlog", "To Do", "In Progress", "Done"]
+ARCHIVED_LANE = "Archived"
+_RESERVED_LANES = ("Backlog", "To Do", "In Progress", "Done", ARCHIVED_LANE)
+_DEFAULT_LANES = list(_RESERVED_LANES)
 _VERIFICATION_MODES = {"", "deploy", "restart"}
 _VERIFICATION_STATES = {"", "pending", "attempted", "passed", "failed"}
 
@@ -72,6 +73,10 @@ class BoardTask:
     # Task-scoped shared-worktree merge boundary metadata.
     worktree_boundary: dict = field(default_factory=dict)
     resume_after_boundary_task_id: str = ""
+    # Archive metadata. Archived tasks move to the Archived lane but keep
+    # their original lane and archive timestamp for restoration/reporting.
+    archived_at: str = ""
+    archived_from_lane: str = ""
 
 
 @dataclass
@@ -208,6 +213,21 @@ def _unique_slug(base: str, existing: set) -> str:
     return f"{base}-{i}"
 
 
+def _normalize_board_lanes(lanes) -> list[str]:
+    current = []
+    seen = set()
+    for lane in lanes or []:
+        if not lane or lane in seen:
+            continue
+        current.append(lane)
+        seen.add(lane)
+    for lane in _RESERVED_LANES:
+        if lane not in seen:
+            current.append(lane)
+            seen.add(lane)
+    return current
+
+
 def _normalize_verification_summary(summary) -> dict:
     if not isinstance(summary, dict):
         return {}
@@ -226,6 +246,30 @@ def _normalize_verification_summary(summary) -> dict:
         if key in summary:
             out[key] = bool(summary.get(key))
     return out
+
+
+def board_task_is_archived(task: Optional[BoardTask]) -> bool:
+    return bool(task and task.lane == ARCHIVED_LANE)
+
+
+def board_task_is_closed(task: Optional[BoardTask]) -> bool:
+    return bool(task and task.lane in {"Done", ARCHIVED_LANE})
+
+
+def board_task_counts_as_done(task: Optional[BoardTask]) -> bool:
+    if not task:
+        return False
+    if task.lane == "Done":
+        return True
+    return task.lane == ARCHIVED_LANE and task.archived_from_lane == "Done"
+
+
+def task_is_closed(task: Optional[BoardTask]) -> bool:
+    return board_task_is_closed(task)
+
+
+def task_counts_as_done(task: Optional[BoardTask]) -> bool:
+    return board_task_counts_as_done(task)
 
 
 def _normalize_verification_fields(fields: dict) -> None:
@@ -669,7 +713,7 @@ class MatrixState:
             for entry in queue:
                 task = self.board_tasks.get(entry.task_id)
                 if not task or task.group != group \
-                        or task.lane == "Done" or task.agent_id:
+                        or board_task_is_closed(task) or task.agent_id:
                     removed += 1
                     changed = True
                     continue
@@ -871,11 +915,9 @@ class MatrixState:
             # Board state — use global default_lanes as fallback
             default = (self.global_settings.default_lanes
                        or list(_DEFAULT_LANES))
-            self.board_lanes = data.get("board_lanes") or default
-            # Ensure reserved lanes exist
-            for rl in _RESERVED_LANES:
-                if rl not in self.board_lanes:
-                    self.board_lanes.insert(0, rl)
+            self.board_lanes = _normalize_board_lanes(
+                data.get("board_lanes") or default
+            )
             bt_fields = set(BoardTask.__dataclass_fields__)
             first_group = next(iter(self.groups), "")
             for tid, raw in data.get("board_tasks", {}).items():
@@ -890,6 +932,16 @@ class MatrixState:
                     raw.get("attachments", []))
                 raw["artifacts"] = normalize_artifacts(
                     raw.get("artifacts", []))
+                labels = list(raw.get("labels", []) or [])
+                if "loom:archived" in labels and raw.get("lane") != ARCHIVED_LANE:
+                    raw["lane"] = ARCHIVED_LANE
+                    raw["archived_from_lane"] = raw.get("archived_from_lane") \
+                        or "Done"
+                    raw["archived_at"] = raw.get("archived_at") \
+                        or raw.get("updated_at", "") or raw.get("created_at", "")
+                    labels = [label for label in labels
+                              if label != "loom:archived"]
+                raw["labels"] = labels
                 _normalize_verification_fields(raw)
                 raw["worktree_boundary"] = _normalize_worktree_boundary(
                     raw.get("worktree_boundary", {})
@@ -1083,7 +1135,7 @@ class MatrixState:
                 continue
             if task.parent_task_id != parent_task_id:
                 continue
-            if task.lane == "Done":
+            if board_task_is_closed(task):
                 continue
             if "loom:human" not in (task.labels or []):
                 continue
@@ -1121,7 +1173,7 @@ class MatrixState:
 
     def _expire_orphaned_ask(self, task: BoardTask, reason: str,
                              emit: bool = True) -> bool:
-        if "loom:human" not in (task.labels or []) or task.lane == "Done":
+        if "loom:human" not in (task.labels or []) or board_task_is_closed(task):
             return False
 
         from datetime import datetime, timezone
@@ -1192,7 +1244,7 @@ class MatrixState:
 
         reason = "Ask expired because the source agent is no longer available."
         for task in list(self.board_tasks.values()):
-            if "loom:human" not in (task.labels or []) or task.lane == "Done":
+            if "loom:human" not in (task.labels or []) or board_task_is_closed(task):
                 continue
             parent = self.board_tasks.get(task.parent_task_id)
             parent_agent_id = parent.agent_id if parent else ""
@@ -1776,6 +1828,44 @@ class MatrixState:
                 self._db_save_task(task)
         return changed
 
+    def _board_next_lane_position(self, lane: str, *, exclude_id: str = "") -> int:
+        return max(
+            (t.position for t in self.board_tasks.values()
+             if t.lane == lane and t.id != exclude_id),
+            default=-1,
+        ) + 1
+
+    def _board_apply_archive_state(self, task: BoardTask, *,
+                                   lane: str,
+                                   archived_at: str,
+                                   archived_from_lane: str,
+                                   position: Optional[int] = None,
+                                   clear_attention: bool = False,
+                                   unlink_agent: bool = False):
+        from datetime import datetime, timezone
+        now_iso = datetime.now(timezone.utc).isoformat()
+        old_lane = task.lane
+        task.lane = lane
+        task.archived_at = archived_at
+        task.archived_from_lane = archived_from_lane
+        if clear_attention:
+            for label in ("loom:blocked", "loom:error"):
+                if label in task.labels:
+                    task.labels.remove(label)
+        if unlink_agent:
+            task.agent_id = ""
+        if position is not None:
+            task.position = position
+        else:
+            task.position = self._board_next_lane_position(
+                lane, exclude_id=task.id
+            )
+        task.updated_at = now_iso
+        if old_lane != lane:
+            task.lane_entered_at = now_iso
+        self._emit("task_upsert", **asdict(task))
+        self._db_save_task(task)
+
     def board_add_task(self, task: str, group: str, lane: str = "",
                        **kwargs) -> Optional[BoardTask]:
         if not task:
@@ -1804,18 +1894,13 @@ class MatrixState:
         if "artifacts" in kwargs:
             kwargs["artifacts"] = normalize_artifacts(kwargs["artifacts"])
         _normalize_verification_fields(kwargs)
-        # Position = end of lane
-        max_pos = max(
-            (t.position for t in self.board_tasks.values() if t.lane == lane),
-            default=-1,
-        )
         bt = BoardTask(
             id=tid,
             task=task,
             slug=task_slug,
             group=group,
             lane=lane,
-            position=max_pos + 1,
+            position=self._board_next_lane_position(lane),
             created_at=now,
             updated_at=now,
             lane_entered_at=now,
@@ -1856,6 +1941,18 @@ class MatrixState:
         lane_changed = "lane" in fields and new_lane != old_lane
         if "lane" in fields and new_lane not in self.board_lanes:
             return
+        if lane_changed and (new_lane == ARCHIVED_LANE or old_lane == ARCHIVED_LANE):
+            archive_position = fields.pop("position", None)
+            fields.pop("lane", None)
+            if fields:
+                self.board_update_task(tid, **fields)
+            if new_lane == ARCHIVED_LANE:
+                self.board_archive_task(tid, position=archive_position)
+            else:
+                self.board_unarchive_task(
+                    tid, lane=new_lane, position=archive_position
+                )
+            return
         for key, value in fields.items():
             if key in valid:
                 setattr(task, key, value)
@@ -1867,12 +1964,9 @@ class MatrixState:
         if lane_changed:
             task.lane_entered_at = now_iso
             if "position" not in fields:
-                max_pos = max(
-                    (t.position for t in self.board_tasks.values()
-                     if t.lane == new_lane and t.id != tid),
-                    default=-1,
+                task.position = self._board_next_lane_position(
+                    new_lane, exclude_id=tid
                 )
-                task.position = max_pos + 1
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
         self.recompute_task_health()
@@ -1897,28 +1991,62 @@ class MatrixState:
         task = self.board_tasks.get(tid)
         if not task or lane not in self.board_lanes:
             return
+        if lane == ARCHIVED_LANE:
+            self.board_archive_task(tid, position=position)
+            return
+        if task.lane == ARCHIVED_LANE:
+            self.board_unarchive_task(tid, lane=lane, position=position)
+            return
         old_lane = task.lane
-        task.lane = lane
-        if lane == "Done":
-            for label in ("loom:blocked", "loom:error"):
-                if label in task.labels:
-                    task.labels.remove(label)
-        if position is not None:
-            task.position = position
-        else:
-            max_pos = max(
-                (t.position for t in self.board_tasks.values()
-                 if t.lane == lane and t.id != tid),
-                default=-1,
-            )
-            task.position = max_pos + 1
+        self._board_apply_archive_state(
+            task,
+            lane=lane,
+            archived_at="",
+            archived_from_lane="",
+            position=position,
+            clear_attention=(lane == "Done"),
+        )
+        self.recompute_task_health()
+
+    def board_archive_task(self, tid: str, *,
+                           position: Optional[int] = None):
+        task = self.board_tasks.get(tid)
+        if not task or ARCHIVED_LANE not in self.board_lanes:
+            return
+        if task.lane == ARCHIVED_LANE:
+            return
+        archived_from_lane = task.lane
         from datetime import datetime, timezone
         now_iso = datetime.now(timezone.utc).isoformat()
-        task.updated_at = now_iso
-        if old_lane != lane:
-            task.lane_entered_at = now_iso
-        self._emit("task_upsert", **asdict(task))
-        self._db_save_task(task)
+        self._board_apply_archive_state(
+            task,
+            lane=ARCHIVED_LANE,
+            archived_at=now_iso,
+            archived_from_lane=archived_from_lane,
+            position=position,
+            unlink_agent=True,
+        )
+        parent = self.board_tasks.get(task.parent_task_id)
+        self._clear_parent_awaiting_input(parent, exclude_task_id=task.id)
+        self.recompute_task_health()
+
+    def board_unarchive_task(self, tid: str, *,
+                             lane: str = "",
+                             position: Optional[int] = None):
+        task = self.board_tasks.get(tid)
+        if not task or task.lane != ARCHIVED_LANE:
+            return
+        target_lane = lane or task.archived_from_lane or "Done"
+        if target_lane == ARCHIVED_LANE or target_lane not in self.board_lanes:
+            target_lane = "Done" if "Done" in self.board_lanes else self.board_lanes[0]
+        self._board_apply_archive_state(
+            task,
+            lane=target_lane,
+            archived_at="",
+            archived_from_lane="",
+            position=position,
+            clear_attention=(target_lane == "Done"),
+        )
         self.recompute_task_health()
 
     def board_reorder_task(self, tid: str, position: int):
@@ -2022,7 +2150,7 @@ class MatrixState:
         """True if all depends_on tasks are Done (or deleted)."""
         for dep_id in task.depends_on:
             dep = self.board_tasks.get(dep_id)
-            if dep and dep.lane != "Done":
+            if dep and not board_task_counts_as_done(dep):
                 return False
         return True
 
@@ -2045,7 +2173,8 @@ class MatrixState:
     def agent_active_tasks(self, agent_id: str) -> list[BoardTask]:
         tasks = [
             t for t in self.board_tasks.values()
-            if t.agent_id == agent_id and t.lane not in {"Backlog", "Done"}
+            if t.agent_id == agent_id
+            and t.lane not in {"Backlog", "Done", ARCHIVED_LANE}
         ]
         tasks.sort(
             key=lambda t: (t.lane != "In Progress", t.position,
@@ -2057,7 +2186,7 @@ class MatrixState:
         cell = self.agents.get(agent_id)
         if cell and cell.current_task_id:
             task = self.board_tasks.get(cell.current_task_id)
-            if task and task.lane != "Done":
+            if task and not board_task_is_closed(task):
                 return task
         tasks = self.agent_active_tasks(agent_id)
         return tasks[0] if tasks else None
@@ -2066,7 +2195,7 @@ class MatrixState:
         cell = self.agents.get(agent_id)
         if cell and cell.current_task_id:
             task = self.board_tasks.get(cell.current_task_id)
-            if not task or task.lane != "Done":
+            if not task or not board_task_is_closed(task):
                 return True
         return self.agent_current_task(agent_id) is not None
 

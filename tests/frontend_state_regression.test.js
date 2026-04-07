@@ -2222,8 +2222,8 @@ test('board visible tasks hide archived items until archived view is enabled', (
       id: 'archived',
       group: 'alpha',
       task: 'Hidden task',
-      lane: 'Done',
-      labels: ['loom:archived'],
+      lane: 'Archived',
+      archived_from_lane: 'Done',
       position: 0,
     },
   };
@@ -2564,6 +2564,7 @@ test('boardBulkArchiveSelected archives selected completed tasks and their desce
       lane: 'Done',
       parent_task_id: 'root',
       labels: ['loom:error'],
+      archived_from_lane: '',
     },
     active: {
       id: 'active',
@@ -2582,14 +2583,12 @@ test('boardBulkArchiveSelected archives selected completed tasks and their desce
 
   assert.deepEqual(jsonValue(context, 'sendCalls'), [
     {
-      cmd: 'board_update_task',
+      cmd: 'board_archive_task',
       id: 'root',
-      labels: ['bug', 'loom:archived'],
     },
     {
-      cmd: 'board_update_task',
+      cmd: 'board_archive_task',
       id: 'child',
-      labels: ['loom:error', 'loom:archived'],
     },
   ]);
   assert.equal(runInContext(context, '_boardSelectedCount()'), 0);
@@ -2602,16 +2601,18 @@ test('boardBulkRestoreSelected restores archived tasks and descendants', () => {
       id: 'root',
       group: 'alpha',
       task: 'Ship release',
-      lane: 'Done',
-      labels: ['bug', 'loom:archived'],
+      lane: 'Archived',
+      archived_from_lane: 'Done',
+      labels: ['bug'],
     },
     child: {
       id: 'child',
       group: 'alpha',
       task: 'Verify release',
-      lane: 'Done',
+      lane: 'Archived',
+      archived_from_lane: 'Done',
       parent_task_id: 'root',
-      labels: ['loom:error', 'loom:archived'],
+      labels: ['loom:error'],
     },
   };
 
@@ -2623,14 +2624,12 @@ test('boardBulkRestoreSelected restores archived tasks and descendants', () => {
 
   assert.deepEqual(jsonValue(context, 'sendCalls'), [
     {
-      cmd: 'board_update_task',
+      cmd: 'board_unarchive_task',
       id: 'root',
-      labels: ['bug'],
     },
     {
-      cmd: 'board_update_task',
+      cmd: 'board_unarchive_task',
       id: 'child',
-      labels: ['loom:error'],
     },
   ]);
   assert.equal(runInContext(context, '_boardSelectedCount()'), 0);
@@ -2672,8 +2671,9 @@ test('_renderBoardSelectionBar shows archive and restore actions for eligible se
       id: 'archived',
       group: 'alpha',
       task: 'Old release',
-      lane: 'Done',
-      labels: ['loom:archived'],
+      lane: 'Archived',
+      archived_from_lane: 'Done',
+      labels: [],
       position: 0,
     },
   };
@@ -2746,9 +2746,8 @@ test('boardArchiveSuggestedDone archives only stale completed tasks', () => {
 
   assert.deepEqual(jsonValue(context, 'sendCalls'), [
     {
-      cmd: 'board_update_task',
+      cmd: 'board_archive_task',
       id: 'stale',
-      labels: ['bug', 'loom:archived'],
     },
   ]);
 });

@@ -12,6 +12,7 @@ import json
 import logging
 from dataclasses import asdict
 
+from .state import ARCHIVED_LANE, board_task_counts_as_done, board_task_is_closed
 from .task_health import HEALTH_SEVERITY
 from .worktree_boundaries import (
     latest_boundary_task,
@@ -108,7 +109,7 @@ def _blocked_dependency_titles(state, task) -> list[str]:
         state.board_tasks[d].task[:40]
         for d in task.depends_on
         if d in state.board_tasks
-        and state.board_tasks[d].lane != "Done"
+        and not board_task_counts_as_done(state.board_tasks[d])
     ]
 
 
@@ -1132,8 +1133,13 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             t for t in state.board_tasks.values()
             if t.group == _weaver_group
         ]
+        archived_tasks = [t for t in tasks if t.lane == ARCHIVED_LANE]
+        visible_tasks = [t for t in tasks if t.lane != ARCHIVED_LANE]
 
-        lane_counts = {lane_name: 0 for lane_name in state.board_lanes}
+        lane_counts = {
+            lane_name: 0 for lane_name in state.board_lanes
+            if lane_name != ARCHIVED_LANE
+        }
         extra_lanes = {}
         label_counts = {"ready": 0, "deferred": 0}
         health_counts = {
@@ -1153,7 +1159,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         unhealthy = []
         pending_asks = []
         verification_items = []
-        for task in tasks:
+        for task in visible_tasks:
             if task.lane in lane_counts:
                 lane_counts[task.lane] += 1
             else:
@@ -1168,7 +1174,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             if health_state not in health_counts:
                 health_counts[health_state] = 0
             health_counts[health_state] += 1
-            if task.lane != "Done" and health_state != "healthy":
+            if not board_task_is_closed(task) and health_state != "healthy":
                 unhealthy.append({
                     "id": task.id,
                     "title": task.task,
@@ -1177,7 +1183,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 })
 
             verification_state = getattr(task, "verification_state", "") or ""
-            if task.lane != "Done" and verification_state in verification_counts:
+            if not board_task_is_closed(task) and verification_state in verification_counts:
                 verification_counts[verification_state] += 1
                 if verification_state in {"pending", "failed"}:
                     verification_items.append({
@@ -1192,7 +1198,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                         ) or "",
                     })
 
-            if "loom:human" in labels and task.lane != "Done":
+            if "loom:human" in labels and not board_task_is_closed(task):
                 pending_asks.append({
                     "id": task.id,
                     "title": task.task,
@@ -1289,7 +1295,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
         summary = {
             "group": _weaver_group,
-            "tasks_total": len(tasks),
+            "tasks_total": len(visible_tasks),
+            "archived_total": len(archived_tasks),
             "lanes": ordered_lanes,
             "labels": label_counts,
             "task_health": {
@@ -1334,6 +1341,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             # Always scope to weaver's group
             if t.group != _weaver_group:
                 continue
+            if t.lane == ARCHIVED_LANE and lane_filter != ARCHIVED_LANE:
+                continue
             if lane_filter and t.lane != lane_filter:
                 continue
             if label_filter and label_filter not in (t.labels or []):
@@ -1376,6 +1385,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         # Order lanes by board_lanes order
         ordered = {}
         for lane_name in state.board_lanes:
+            if lane_name == ARCHIVED_LANE and lane_filter != ARCHIVED_LANE:
+                continue
             if lane_name in lanes:
                 ordered[lane_name] = lanes[lane_name]
         # Include any lanes not in board_lanes (shouldn't happen, but safe)
@@ -1837,6 +1848,10 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             if task.agent_id:
                 _fail(idx, task_ident, "already_assigned",
                       "Task is already linked to an agent.", tid)
+                continue
+            if task.lane == ARCHIVED_LANE:
+                _fail(idx, task_ident, "already_archived",
+                      "Task is archived.", tid)
                 continue
             if task.lane == "Done":
                 _fail(idx, task_ident, "already_done",

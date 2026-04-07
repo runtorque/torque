@@ -63,7 +63,8 @@ var _boardBatchEditAction = '__unchanged__'; // selected action value
 var _boardBatchEditPriority = '__unchanged__'; // selected priority value
 var _boardBatchActionWaiting = false; // waiting for batch action list
 var _boardBatchActionOptions = [];    // actions for batch edit action picker
-var _boardArchiveLabel = 'loom:archived';
+var _boardArchivedLane = 'Archived';
+var _boardArchiveLabel = 'loom:archived'; // legacy compatibility for older state
 var _boardArchiveStaleDays = 7;
 var _boardLaneEntryRefreshTimer = 0;
 var _boardEligibilityActionsByGroup = {};
@@ -338,6 +339,7 @@ function _boardCurrentViewKey() {
     group: group,
     view: 'lane',
     lane: _boardSelectedLane || '',
+    show_archived: _boardShowArchived,
     search_query: _boardSearchQuery,
     quick_view: _boardQuickView,
     filter_labels: _boardFilterLabels.slice().sort(),
@@ -463,23 +465,25 @@ function _boardLanes() {
   return (state && state.board_lanes) || [];
 }
 
+function _boardVisibleLanes() {
+  var lanes = _boardLanes();
+  if (_boardShowArchived) return lanes.slice();
+  return lanes.filter(function(lane) {
+    return lane !== _boardArchivedLane;
+  });
+}
+
 function _boardTasks() {
   return (state && state.board_tasks) || {};
 }
 
 function _boardGroupTaskCount() {
-  var all = _boardTasks();
-  if (!_boardFilterByGroup) return Object.keys(all).length;
-  var group = _currentGroup();
-  var count = 0;
-  for (var id in all) {
-    if (!group || all[id].group === group) count += 1;
-  }
-  return count;
+  return Object.keys(_boardScopedTasks(false)).length;
 }
 
 function _boardIsArchived(task) {
-  return !!(task && task.labels && task.labels.indexOf(_boardArchiveLabel) >= 0);
+  return !!(task && (task.lane === _boardArchivedLane
+    || (task.labels && task.labels.indexOf(_boardArchiveLabel) >= 0)));
 }
 
 function _boardScopedTasks(includeArchived) {
@@ -660,12 +664,10 @@ function _boardArchiveTaskIds(taskIds, archived) {
   for (var i = 0; i < expanded.length; i++) {
     var task = tasks[expanded[i]];
     if (!task) continue;
-    var labels = (task.labels || []).filter(function(label) {
-      return label !== _boardArchiveLabel;
+    send({
+      cmd: archived ? 'board_archive_task' : 'board_unarchive_task',
+      id: task.id,
     });
-    if (archived) labels.push(_boardArchiveLabel);
-    task.labels = labels;
-    send({ cmd: 'board_update_task', id: task.id, labels: labels });
   }
 }
 
@@ -1989,7 +1991,7 @@ function renderBoard() {
     if (_inp) _boardAddingTaskDraft = _inp.value;
   }
 
-  var lanes = _boardLanes();
+  var lanes = _boardVisibleLanes();
   if (!lanes.length) {
     panel.innerHTML = '<div class="board-empty">No lanes configured</div>';
     return;
@@ -2374,7 +2376,7 @@ function renderBoard() {
 /* ---- Virtual scroll ------------------------------------------------- */
 
 function boardLoadMore() {
-  var tasks = _boardTasksInLane(_boardSelectedLane || _boardLanes()[0] || '');
+  var tasks = _boardTasksInLane(_boardSelectedLane || _boardVisibleLanes()[0] || '');
   var allTasks = _boardVisibleTasks();
   var rootCount = tasks.filter(function(t) {
     return !t.parent_task_id || !allTasks[t.parent_task_id];
@@ -2831,7 +2833,7 @@ function boardCardMenu(evt, taskId) {
   if (!task) return;
 
   var menu = document.getElementById('ctx-menu');
-  var lanes = _boardLanes();
+  var lanes = _boardVisibleLanes();
 
   var isDerived = !!task.parent_task_id;
   var html = '';
@@ -2978,7 +2980,7 @@ function boardFocusTask(id, evt) {
   }
   if (evt && evt.shiftKey && _boardLastSelectedTask) {
     // Shift+Click: range select within the same lane
-    var lane = _boardSelectedLane || _boardLanes()[0] || '';
+    var lane = _boardSelectedLane || _boardVisibleLanes()[0] || '';
     var tasks = _boardTasksInLane(lane);
     var fromIdx = -1, toIdx = -1;
     for (var i = 0; i < tasks.length; i++) {
@@ -3078,7 +3080,7 @@ function boardNavigateToTask(taskId) {
   if (typeof _boardCloseFilterDropdown === 'function') _boardCloseFilterDropdown();
   if (typeof _boardCloseViewMenu === 'function') _boardCloseViewMenu();
 
-  _boardSelectedLane = task.lane || _boardSelectedLane || _boardLanes()[0] || '';
+  _boardSelectedLane = task.lane || _boardSelectedLane || _boardVisibleLanes()[0] || '';
   _boardFocusedTask = task.id;
   _boardSelectedTasks = {};
   _boardLastSelectedTask = task.id;
@@ -3364,7 +3366,7 @@ function boardClearSelection() {
 function _renderBoardSelectionBar() {
   var count = _boardSelectedCount();
   if (count === 0) return '';
-  var lanes = _boardLanes();
+  var lanes = _boardVisibleLanes();
   var singleGroup = _boardSelectedSingleGroup();
   var agents = _boardBatchEditAgents();
   var archiveIds = _boardSelectedArchiveIds(false);
@@ -4469,7 +4471,7 @@ function boardKeydown(e) {
   var panel = document.getElementById('bottom-panel');
   if (!panel || panel.classList.contains('collapsed')) return false;
 
-  var lanes = _boardLanes();
+  var lanes = _boardVisibleLanes();
   var tasks = _boardTasksInLane(_boardSelectedLane);
 
   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {

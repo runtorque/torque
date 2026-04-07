@@ -700,6 +700,78 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("tasks", summary)
 
+    async def test_board_summary_and_list_hide_archived_by_default(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+
+        state.board_add_task(
+            "Visible task",
+            "g",
+            lane="Backlog",
+            id="task-open",
+        )
+        archived = state.board_add_task(
+            "Archived task",
+            "g",
+            lane="Done",
+            id="task-archived",
+        )
+        self.assertIsNotNone(archived)
+        state.board_archive_task(archived.id)
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+        self.assertFalse(is_error)
+        summary = json.loads(text)
+        self.assertEqual(summary["tasks_total"], 1)
+        self.assertEqual(summary["archived_total"], 1)
+        self.assertNotIn("Archived", summary["lanes"])
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_list",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+        self.assertFalse(is_error)
+        lanes = json.loads(text)["lanes"]
+        self.assertEqual(list(lanes.keys()), ["Backlog"])
+        self.assertEqual([item["id"] for item in lanes["Backlog"]], ["task-open"])
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_list",
+            {"lane": "Archived"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+        self.assertFalse(is_error)
+        lanes = json.loads(text)["lanes"]
+        self.assertEqual(list(lanes.keys()), ["Archived"])
+        self.assertEqual(
+            [item["id"] for item in lanes["Archived"]],
+            ["task-archived"],
+        )
+
     async def test_board_summary_omits_dispatch_overlap_summary(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(
