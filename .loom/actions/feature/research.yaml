@@ -43,7 +43,7 @@ prompt: |
 
   If the plan needs human approval, ask for it with the `loom_ask` MCP tool so the user can review the plan in your output. If the plan is Weaver-approvable, say so explicitly in your final plan so the Weaver can approve and advance it. Do NOT derive to implementation before the appropriate approval has happened.
 
-  If approval is granted and you transition or derive directly into implementation on the same agent, send an immediate `loom ai progress` update in the implementation task before doing more exploration so the board does not look idle.
+  If approval is granted and you transition or derive directly into implementation on the same agent, send an immediate `loom_progress(message="...")` update in the implementation task before doing more exploration so the board does not look idle.
 
   Do NOT write code, deploy anything, or make changes. Only research and plan.
 labels:

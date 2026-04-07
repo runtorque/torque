@@ -42,7 +42,7 @@ Example:
 
 3. Loom launches the agent, renders the action prompt, and sends the result.
 
-4. If the action declares transitions, the agent can hand off the next step with `loom ai derive`.
+4. If the action declares transitions, the agent can hand off the next step with `loom_derive(...)`.
 
 The same action can be used in manual work, pipeline handoffs, or schedules. A schedule that fires a task with `-t feature/implement` goes through the same prompt-rendering path as a task you dispatched by hand.
 
@@ -349,7 +349,7 @@ prompt: |
 | `loom.task.id` | string | Task ID. |
 | `loom.task.slug` | string | Task slug. |
 | `loom.task.depth` | int | Pipeline depth (0 for root tasks, increments per derivation). |
-| `loom.task.is_derived` | bool | Whether this task was created by `loom ai derive`. |
+| `loom.task.is_derived` | bool | Whether this task was created by `loom_derive(...)`. |
 | `loom.task.parent_task_id` | string | ID of the parent task (empty for root tasks). |
 | `loom.task.labels` | list | Task labels (e.g., `["derived", "feature"]`). |
 | `loom.task.group` | string | Task's group name. |
@@ -440,20 +440,16 @@ loom dispatch "Fix the flaky test" -t oneshot/fix -v MODULE=auth -v TEST_COMMAND
 
 ### From an agent (pipeline derivation)
 
-An agent that's finished its task can derive a new task and dispatch it:
+An agent that's finished its task derives the next step with `loom_derive(...)`:
 
-```bash
-# Derive to a new agent (default)
-loom ai derive "Review the implementation" -t feature/review
-
-# Derive to a specific existing agent
-loom ai derive "Fix the 3 issues found" -t feature/fix-review --agent impl-add-auth
-
-# Derive to yourself (same session, preserves context)
-loom ai derive "Now add tests for the validation" -t feature/implement --self
+```text
+loom_derive(
+  description="Review the implementation",
+  action="feature/review",
+)
 ```
 
-See [Derive-to-agent](#derive-to-agent) for details.
+Transition routing decides whether the task goes to a new agent, the same agent, or a parent/root agent. See [Transition-targeted routing](#transition-targeted-routing) for details.
 
 ## Pipelines
 
@@ -492,21 +488,22 @@ The `when` field is documentation --- it's included in the agent's postscript so
 
 ### How agents use transitions
 
-When Loom dispatches a task that has transitions, it appends a postscript to the prompt telling the agent which `loom ai` commands are available:
+When Loom dispatches a task that has transitions, it appends a postscript to the prompt telling the agent which Loom MCP tools are available:
 
 ```
-Report your progress with these commands:
-- `loom ai done` — task complete, no follow-up needed
-- `loom ai derive "description" -t feature/review` — implementation is complete and ready for review
-- `loom ai blocked "reason"` — need user input
-- `loom ai error "message"` — unrecoverable error
+Report your progress with these Loom MCP tools:
+- `loom_done(message="brief summary")` — task complete, no follow-up needed
+- `loom_derive(description="description", action="feature/review")` — implementation is complete and ready for review
+- `loom_blocked(reason="reason")` — need user input
+- `loom_error(message="message")` — unrecoverable error
+- `loom_verify(state="passed", tests_run="...", notes="...")` — record manual deploy/restart/smoke verification details when relevant
 ```
 
-The agent reads these instructions and calls the appropriate command when it's done. The server validates that the transition is allowed before dispatching.
+The agent reads these instructions and calls the appropriate MCP tool when it's done. The server validates that the transition is allowed before dispatching. The dedicated [CLI reference](cli.md#agent-reporting) still documents the equivalent `loom ai ...` commands for manual workflows and debugging.
 
 ### The `ask` transition
 
-The `ask` transition is a human-in-the-loop gate. When an agent calls `loom ai ask "question"`, the derived task lands in the **Backlog** lane with a `human` label instead of being dispatched automatically. A human reviews the question, optionally edits the task, and dispatches it manually.
+The `ask` transition is a human-in-the-loop gate. When an agent calls `loom_ask(question="question")`, the derived task lands in the **Backlog** lane with a `human` label instead of being dispatched automatically. A human reviews the question, optionally edits the task, and dispatches it manually.
 
 ```yaml
 transitions:
@@ -539,22 +536,23 @@ loom task chain <task-slug>
 
 In the board UI, derived tasks show a chain indicator (`↳ depth N · from: parent-task`). Right-click a task and select **View pipeline** to see the full chain.
 
-## Derive-to-agent
+## Transition-targeted routing
 
-By default, `loom ai derive` creates a new agent for each derived task. But sometimes you want the next task to run in an existing agent that already has context.
+By default, `loom_derive(...)` follows the selected transition's routing. If the transition omits a target, Loom creates a new agent. If the transition sets `target: self`, `target: parent`, or `target: root`, Loom routes the derived task to that existing agent context.
 
-### `--self` --- continue in the same agent
+### `target: self` --- continue in the same agent
 
-When an agent derives a task to itself, the new prompt arrives in the same terminal session after a short delay. The agent keeps its full conversation context.
-
-```bash
-loom ai derive "Now add tests for the validation" -t feature/implement --self
-```
+When a transition targets `self`, the follow-up prompt arrives in the same terminal session after a short delay. The agent keeps its full conversation context.
 
 This is useful for multi-phase actions where the same agent should handle sequential steps:
 
 ```yaml
 # An action that handles both implementation and testing
+transitions:
+  - action: feature/implement
+    when: implementation is complete and tests still need to be added
+    target: self
+
 prompt: |
   {% if loom.context.is_clean %}
   You are implementing a feature. Write clean code and commit when done.
@@ -568,15 +566,27 @@ prompt: |
   {% endif %}
 ```
 
-### `--agent` --- dispatch to a specific agent
+With that transition in place, the agent just calls:
 
-When Agent B (e.g., a reviewer) finds issues, it can send the fix task back to Agent A (the original implementer) which still has the codebase in context:
-
-```bash
-loom ai derive "Fix the 3 auth issues I found" -t feature/fix-review --agent impl-add-auth
+```text
+loom_derive(
+  description="Now add tests for the validation",
+  action="feature/implement",
+)
 ```
 
-The identifier can be a slug, name, ID, or ID prefix. The new prompt is rendered with `loom.context.is_clean = False` since the target agent has processed tasks before.
+### `target: parent` / `target: root` --- reuse existing pipeline context
+
+When Agent B (for example, a reviewer) finds issues, it can send the fix task back to Agent A (the original implementer) by declaring the transition target on the action. The MCP call stays the same:
+
+```text
+loom_derive(
+  description="Fix the 3 auth issues I found",
+  action="feature/fix-review",
+)
+```
+
+The new prompt is rendered with `loom.context.is_clean = False` since the target agent has processed tasks before. If you need an explicit one-off override to a named agent outside normal worker prompts, the CLI `loom ai derive --agent ...` and `--self` forms remain available; see [CLI Reference](cli.md#agent-reporting).
 
 ### Worktree inheritance
 
@@ -916,15 +926,15 @@ prompt: |
 
 Usage:
 
-```bash
+```text
 # First dispatch — full instructions
 loom dispatch "Add the User model with email and name fields" -t iterative
 
-# Agent finishes, then derives to itself
-loom ai derive "Add the API endpoints for CRUD operations" -t iterative --self
+# Agent finishes, then derives the next routed step
+loom_derive(description="Add the API endpoints for CRUD operations", action="iterative")
 
 # Agent finishes again, derives once more
-loom ai derive "Add input validation and error handling" -t iterative --self
+loom_derive(description="Add input validation and error handling", action="iterative")
 ```
 
 Each follow-up only sends the new step. The agent retains the full context of what it built in previous steps.

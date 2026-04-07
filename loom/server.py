@@ -1182,25 +1182,26 @@ async def main(connection: iterm2.Connection):
             Loom tracks your task, manages your worktree, and coordinates
             you with other agents in a pipeline.
 
-            ## Reporting commands
+            ## Reporting tools
 
-            Signal progress and completion with these CLI commands
-            (or use the equivalent loom_* MCP tools if available):
+            Use the Loom MCP tools to report progress and completion:
 
-            - `loom ai done` — task complete, no follow-up needed
-            - `loom ai progress "message"` — update your activity status
-            - `loom ai blocked "reason"` — signal that you need help
-            - `loom ai error "message"` — report an unrecoverable error
-            - `loom ai derive "title" -d "details" -t action` — create a subtask and dispatch a new agent
-            - `loom ai ask "question" -d "details"` — pause for human input
-            - `loom ai context` — view your current task, agent info, and pipeline state
+            - `loom_done(message="summary")` — task complete, no follow-up needed
+            - `loom_ready()` — task complete and release this agent for future work
+            - `loom_progress(message="current activity")` — update your activity status
+            - `loom_blocked(reason="reason")` — signal that you need help
+            - `loom_error(message="message")` — report an unrecoverable error
+            - `loom_verify(state="passed", tests_run="...", notes="...")` — record manual deploy/restart/smoke verification details when relevant
+            - `loom_derive(description="title", action="action-name", context="details")` — create a subtask and dispatch it according to the allowed transition
+            - `loom_ask(question="question", description="details")` — pause for human input
+            - `loom_context()` — view your current task, agent info, and pipeline state
 
             ## Important
 
-            Always signal completion via one of the commands above.
+            Always signal completion via one of the tools above.
             Your dispatch prompt specifies which transitions are available —
             use those to determine valid `derive` targets.
-            When in doubt, run `loom ai context` to see your current state.
+            When in doubt, call `loom_context()` to see your current state.
         """)
 
     def _build_dispatch_persistent_prompt(system_prompt: str = "") -> str:
@@ -1509,9 +1510,9 @@ async def main(connection: iterm2.Connection):
             suffix = ""
             if tr.get("target") == "self":
                 suffix = " (continues in the same agent)"
-            return (f"- `loom ai derive \"short title\" "
-                    f"-d \"details\" "
-                    f"-t {tr['action']}`{desc}{suffix}")
+            return (f"- `loom_derive(description=\"short title\", "
+                    f"context=\"details\", "
+                    f"action=\"{tr['action']}\")`{desc}{suffix}")
 
         has_transitions = any(
             isinstance(tr, dict) and tr.get("action")
@@ -1531,10 +1532,10 @@ async def main(connection: iterm2.Connection):
         if has_transitions or has_ask:
             mandate = (
                 "\n\nIMPORTANT: When you are done, you MUST use one "
-                "of the transition commands below. Do NOT ask the "
-                "user directly — use `loom ai ask` instead so Loom "
+                "of the Loom MCP tools below. Do NOT ask the "
+                "user directly — use `loom_ask(...)` instead so Loom "
                 "can track it. Do NOT just stop — always signal "
-                "completion via one of these commands.")
+                "completion via one of these tools.")
 
         if not is_clean:
             abbrev = ("\n\n---" + mandate)
@@ -1544,22 +1545,23 @@ async def main(connection: iterm2.Connection):
                     if isinstance(tr, dict) and tr.get("action"):
                         abbrev += "\n" + _derive_line(tr)
                 if has_ask:
-                    abbrev += ("\n- `loom ai ask \"title\" "
-                              "-d \"details\"` "
+                    abbrev += ("\n- `loom_ask(question=\"title\", "
+                               "description=\"details\")` "
                               "— pause for human input")
-                abbrev += ("\n- `loom ai done` "
+                abbrev += ("\n- `loom_done(message=\"brief summary\")` "
                            "— task complete, no follow-up")
             else:
-                abbrev += ("\nUse `loom ai done` when finished, "
-                           "or `loom ai blocked \"reason\"` "
+                abbrev += ("\nUse `loom_done(message=\"brief summary\")` "
+                           "when finished, or "
+                           "`loom_blocked(reason=\"reason\")` "
                            "if stuck.")
             return abbrev + commit_hint
 
         lines = [
             mandate,
-            "\nReport your progress with these commands "
-            "(or use the equivalent loom_* MCP tools if available):",
-            "- `loom ai done` — task complete, no follow-up needed",
+            "\nReport your progress with these Loom MCP tools:",
+            "- `loom_done(message=\"brief summary\")` — task complete, no follow-up needed",
+            "- `loom_ready()` — task complete and release this agent for new work",
         ]
 
         # Dynamic derive/ask lines from action transitions
@@ -1568,18 +1570,17 @@ async def main(connection: iterm2.Connection):
                 lines.append(_derive_line(tr))
         if has_ask:
             lines.append(
-                "- `loom ai ask \"title\" -d \"details\"` "
+                "- `loom_ask(question=\"title\", description=\"details\")` "
                 "— pause for human input (creates a task in "
-                "Backlog for review; -d is optional)")
+                "Backlog for review; `description` is optional)")
         lines.extend([
-            "- `loom ai blocked \"reason\"` — need user input",
-            "- `loom ai error \"message\"` — unrecoverable error",
+            "- `loom_blocked(reason=\"reason\")` — need user input",
+            "- `loom_error(message=\"message\")` — unrecoverable error",
         ])
         lines.append(
-            "- `loom ai verify --state pending|attempted|passed|failed "
-            "[--mode deploy|restart] [--tests \"...\"] [--smoke-done] "
-            "[--deploy-needed] [--deploy-attempted] [--human \"...\"] "
-            "[-m \"notes\"]` — record manual deploy/restart/smoke "
+            "- `loom_verify(state=\"pending|attempted|passed|failed\", "
+            "mode=\"deploy|restart\", tests_run=\"...\", notes=\"...\")` "
+            "— record manual deploy/restart/smoke "
             "verification details when relevant"
         )
 

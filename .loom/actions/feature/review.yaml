@@ -42,6 +42,6 @@ prompt: |
   - **Merge-risk summary** — rate the merge risk as low / medium / high and explain why
   - **Verdict** — end with `Ship`, `Ship with fixes`, or `Needs rework`
 
-  If there are blocking issues, derive back to the implementing agent with a description of what needs to be fixed. If there are no blocking issues, use `loom ai done` and keep any follow-up suggestions separate from the verdict.
+  If there are blocking issues, call `loom_derive(description="Fix the issues found", action="feature/implement", context="...")` to send them back to the implementing agent. If there are no blocking issues, use `loom_done(message="brief review summary")` and keep any follow-up suggestions separate from the verdict.
 
   Do NOT fix issues yourself, deploy anything, or make changes. Only review and report.

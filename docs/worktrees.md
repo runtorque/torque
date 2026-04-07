@@ -95,7 +95,7 @@ The auto-checkpoint uses the agent's last summary (if available) as the commit b
 
 ### Progress checkpoints
 
-When **Checkpoint on progress / done** is enabled, Loom can also create checkpoints when the agent reports progress or completion through `loom ai progress` and `loom ai done`. These checkpoints are throttled so progress spam does not create a commit every few seconds.
+When **Checkpoint on progress / done** is enabled, Loom can also create checkpoints when the agent reports progress or completion through `loom_progress(...)`, `loom_done(...)`, or `loom_ready()`. These checkpoints are throttled so progress spam does not create a commit every few seconds.
 
 ### Task boundaries on shared branches
 
@@ -141,7 +141,7 @@ These stats update periodically (every 60 seconds) and after checkpoints.
 When agents hand off work through [pipelines](actions.md#pipelines), worktrees are inherited so the next agent works on the same code:
 
 1. Agent A (implement) works in worktree branch `loom/impl-abc1234`
-2. Agent A calls `loom ai derive "Review the changes" -t feature/review`
+2. Agent A calls `loom_derive(description="Review the changes", action="feature/review")`
 3. Agent B (review) is created and inherits Agent A's worktree
 4. Agent B sees Agent A's changes and reviews them
 

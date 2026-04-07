@@ -165,7 +165,7 @@ Same-agent follow-up queueing is treated as sequential work and is downgraded co
 
 ### Dispatching to an existing agent
 
-You can dispatch a task to an agent that's already running instead of creating a new one. Select the agent in the dispatch dialog (UI), or use `loom ai derive --agent` / `--self` from within a pipeline.
+You can dispatch a task to an agent that's already running instead of creating a new one. Select the agent in the dispatch dialog (UI), or route a pipeline handoff through the transition target used by `loom_derive(...)`. For manual one-off overrides, the CLI `loom ai derive --agent` / `--self` forms are still available.
 
 When dispatching to an existing agent, `loom.context.is_clean` is `False` in the template, so action prompts can send an abbreviated version (see [Actions & Templates](actions.md#the-loom-context-namespace)).
 
@@ -215,19 +215,20 @@ See [CLI Reference](cli.md#schedule) for the full command set.
 
 ## Agent reporting
 
-Once an agent is working on a task, it can report status back to Loom using `loom ai` commands. These are designed to be called by AI agents (like Claude Code) from within a Loom-managed session.
+Once an agent is working on a task, it can report status back to Loom using Loom MCP tools. These are designed to be called by AI agents (like Claude Code) from within a Loom-managed session.
 
-| Command | Effect |
-|---------|--------|
-| `loom ai done` | Moves task to **Done**. Agent stays linked. |
-| `loom ai ready` | Moves task to **Done** and unlinks the agent (available for new tasks). |
-| `loom ai blocked "reason"` | Adds `blocked` label, flags agent as needing attention. |
-| `loom ai error "message"` | Adds `error` label, flags agent as needing attention. |
-| `loom ai progress "message"` | Updates the activity detail shown in the UI. |
-| `loom ai derive "desc" -t action` | Marks task as Done, creates a derived task, and dispatches it. |
-| `loom ai ask "question"` | Creates a derived task in Backlog for human review. |
+| Tool | Effect |
+|------|--------|
+| `loom_done(message="summary")` | Moves task to **Done**. Agent stays linked. |
+| `loom_ready()` | Moves task to **Done** and unlinks the agent (available for new tasks). |
+| `loom_blocked(reason="reason")` | Adds `blocked` label, flags agent as needing attention. |
+| `loom_error(message="message")` | Adds `error` label, flags agent as needing attention. |
+| `loom_progress(message="message")` | Updates the activity detail shown in the UI. |
+| `loom_verify(state="passed", tests_run="...", notes="...")` | Records deploy/restart/smoke verification metadata for the task. |
+| `loom_derive(description="desc", action="action")` | Keeps the parent task in **In Progress**, creates a derived task, and dispatches it. |
+| `loom_ask(question="question", description="details")` | Creates a derived task in Backlog for human review. |
 
-When a task is dispatched with an action that has [transitions](actions.md#pipelines), the available `loom ai` commands are appended to the prompt as a postscript so the agent knows what reporting options it has.
+When a task is dispatched with an action that has [transitions](actions.md#pipelines), the available Loom MCP tools are appended to the prompt as a postscript so the agent knows what reporting options it has.
 
 ### The `done` vs `ready` distinction
 
@@ -236,7 +237,7 @@ When a task is dispatched with an action that has [transitions](actions.md#pipel
 
 ## Pipeline tasks
 
-Tasks can form chains through derivation. When an agent calls `loom ai derive`, it creates a child task linked to the parent via `parent_task_id`. The full chain is queryable:
+Tasks can form chains through derivation. When an agent calls `loom_derive(...)`, it creates a child task linked to the parent via `parent_task_id`. The full chain is queryable:
 
 ```bash
 loom task chain add-dark-mode
@@ -260,8 +261,8 @@ Loom applies labels automatically during pipeline operations:
 
 | Label | Meaning |
 |-------|---------|
-| `derived` | Task was created via `loom ai derive`. |
-| `human` | Task requires human review (from `loom ai ask`). |
+| `derived` | Task was created via `loom_derive(...)`. |
+| `human` | Task requires human review (from `loom_ask(...)`). |
 | `blocked` | Agent is blocked and needs input. |
 | `error` | Agent encountered an unrecoverable error. |
 | `depth-limit` | Pipeline depth limit was reached. |

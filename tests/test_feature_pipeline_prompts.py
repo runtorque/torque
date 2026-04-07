@@ -14,10 +14,11 @@ class FeaturePipelinePromptTests(unittest.TestCase):
         self.assertIn("Weaver approval is enough", prompt)
         self.assertIn("Human approval is required", prompt)
         self.assertIn("Do NOT derive to implementation before the appropriate approval", prompt)
-        self.assertIn("send an immediate `loom ai progress` update", prompt)
+        self.assertIn("send an immediate `loom_progress(message=\"...\")` update", prompt)
 
     def test_feature_review_prompts_lock_reporting_sections(self):
         sample_prompt = (REPO_ROOT / "actions" / "feature" / "review.yaml").read_text()
+        project_prompt = (REPO_ROOT / ".loom" / "actions" / "feature" / "review.yaml").read_text()
         rendered_prompt = ActionManager().render_prompt(
             "feature/review",
             {},
@@ -35,10 +36,15 @@ class FeaturePipelinePromptTests(unittest.TestCase):
         self.assertIn("Merge-risk summary", sample_prompt)
         self.assertIn("Blocking issues", sample_prompt)
         self.assertIn("Follow-up suggestions", sample_prompt)
+        self.assertIn("loom_ask", sample_prompt)
+        self.assertIn("loom_derive", project_prompt)
+        self.assertIn("loom_done", project_prompt)
 
         self.assertIsNotNone(rendered_prompt)
         self.assertIn("Verification summary", rendered_prompt)
         self.assertIn("Merge-risk summary", rendered_prompt)
         self.assertIn("Blocking issues", rendered_prompt)
         self.assertIn("Follow-up suggestions", rendered_prompt)
+        self.assertIn("loom_derive", rendered_prompt)
+        self.assertIn("loom_done", rendered_prompt)
         self.assertIn("deploy or live verification that still needs to happen", rendered_prompt)
