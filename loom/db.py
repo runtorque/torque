@@ -362,6 +362,19 @@ CREATE TABLE IF NOT EXISTS playbooks (
 CREATE INDEX IF NOT EXISTS idx_playbooks_group_status
     ON playbooks(group_name, status, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS auto_dispatch_queue (
+    group_name       TEXT NOT NULL,
+    position         INTEGER NOT NULL DEFAULT 0,
+    task_id          TEXT NOT NULL,
+    agent_group      TEXT NOT NULL DEFAULT '',
+    max_concurrent   INTEGER NOT NULL DEFAULT 1,
+    target_agent_id  TEXT NOT NULL DEFAULT '',
+    enqueued_at      TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (group_name, position)
+);
+CREATE INDEX IF NOT EXISTS idx_auto_dispatch_queue_group
+    ON auto_dispatch_queue(group_name, position);
+
 CREATE TABLE IF NOT EXISTS memory_entries (
     id          TEXT PRIMARY KEY,
     project_key TEXT NOT NULL DEFAULT '',
@@ -958,6 +971,38 @@ class LoomDB:
             self._conn.execute(
                 "INSERT INTO global_settings (key, value) VALUES (?,?)",
                 (key, json.dumps(value)))
+        self._conn.commit()
+
+    def save_auto_dispatch_queue(self, group_name: str, entries: list):
+        """Replace one group's auto-dispatch queue."""
+        self._conn.execute(
+            "DELETE FROM auto_dispatch_queue WHERE group_name=?",
+            (group_name,),
+        )
+        for pos, entry in enumerate(entries):
+            item = entry if isinstance(entry, dict) else asdict(entry)
+            self._conn.execute(
+                "INSERT INTO auto_dispatch_queue "
+                "(group_name, position, task_id, agent_group, "
+                "max_concurrent, target_agent_id, enqueued_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    group_name,
+                    pos,
+                    item.get("task_id", ""),
+                    item.get("agent_group", ""),
+                    int(item.get("max_concurrent", 1) or 1),
+                    item.get("target_agent_id", ""),
+                    item.get("enqueued_at", ""),
+                ),
+            )
+        self._conn.commit()
+
+    def delete_auto_dispatch_queue(self, group_name: str):
+        self._conn.execute(
+            "DELETE FROM auto_dispatch_queue WHERE group_name=?",
+            (group_name,),
+        )
         self._conn.commit()
 
     # -- Panel events -------------------------------------------------------
@@ -1830,6 +1875,27 @@ class LoomDB:
                     VALUES ({placeholders})
                 """.format(placeholders=",".join(["?"] * len(values))), values)
 
+            # Auto-dispatch queues
+            c.execute("DELETE FROM auto_dispatch_queue")
+            for gname, entries in state_dict.get(
+                    "auto_dispatch_queues", {}).items():
+                for pos, entry in enumerate(entries):
+                    item = dict(entry)
+                    c.execute("""
+                        INSERT INTO auto_dispatch_queue
+                            (group_name, position, task_id, agent_group,
+                             max_concurrent, target_agent_id, enqueued_at)
+                        VALUES (?,?,?,?,?,?,?)
+                    """, (
+                        gname,
+                        pos,
+                        item.get("task_id", ""),
+                        item.get("agent_group", ""),
+                        int(item.get("max_concurrent", 1) or 1),
+                        item.get("target_agent_id", ""),
+                        item.get("enqueued_at", ""),
+                    ))
+
             # UI state
             c.execute("DELETE FROM ui_state")
             for key in ("panel_active", "board_panel_height"):
@@ -2076,6 +2142,26 @@ class LoomDB:
         except Exception:
             pass  # table may not exist yet on first load
 
+        auto_dispatch_queues = {}
+        try:
+            rows = c.execute(
+                "SELECT group_name, position, task_id, agent_group, "
+                "max_concurrent, target_agent_id, enqueued_at "
+                "FROM auto_dispatch_queue ORDER BY group_name, position"
+            ).fetchall()
+            for row in rows:
+                group_name, _pos, task_id, agent_group, max_concurrent, \
+                    target_agent_id, enqueued_at = row
+                auto_dispatch_queues.setdefault(group_name, []).append({
+                    "task_id": task_id,
+                    "agent_group": agent_group or "",
+                    "max_concurrent": int(max_concurrent or 1),
+                    "target_agent_id": target_agent_id or "",
+                    "enqueued_at": enqueued_at or "",
+                })
+        except Exception:
+            auto_dispatch_queues = {}
+
         return {
             "agents": agents,
             "groups": groups,
@@ -2084,6 +2170,7 @@ class LoomDB:
             "board_lanes": board_lanes,
             "board_tasks": board_tasks,
             "schedules": schedules,
+            "auto_dispatch_queues": auto_dispatch_queues,
             "panel_active": ui.get("panel_active", "")
                 or ("board" if ui.get("board_panel_open", "False") == "True"
                     else ""),

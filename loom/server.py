@@ -217,12 +217,34 @@ def _cells_share_worktree_context(a, b) -> bool:
     return False
 
 
-def _agent_has_active_worktree_context(cell) -> bool:
+def _is_busy_agent(state: MatrixState, agent_id: str) -> bool:
+    cell = state.agents.get(agent_id)
+    if not cell or cell.cell_type != "agent":
+        return False
+    return state.agent_is_busy(agent_id)
+
+
+def _active_worker_ids(state: MatrixState, group: str) -> set[str]:
+    active = set()
+    weaver_id = state.get_group_settings(group).weaver_agent_id
+    for cell in state.agents.values():
+        if cell.cell_type != "agent":
+            continue
+        if cell.group != group:
+            continue
+        if cell.id == weaver_id:
+            continue
+        if _is_busy_agent(state, cell.id):
+            active.add(cell.id)
+    return active
+
+
+def _agent_has_active_worktree_context(state: MatrixState, cell) -> bool:
     """Return whether an agent is actively working on a worktree task."""
     return bool(
         cell
         and cell.cell_type == "agent"
-        and cell.current_task_id
+        and state.agent_is_busy(cell.id)
         and (cell.worktree_path or cell.worktree_branch)
     )
 
@@ -232,11 +254,90 @@ def _find_active_worktree_owner(state: MatrixState, cell):
     if not cell or not (cell.worktree_path or cell.worktree_branch):
         return None
     for other in state.agents.values():
-        if not _agent_has_active_worktree_context(other):
+        if not _agent_has_active_worktree_context(state, other):
             continue
         if _cells_share_worktree_context(cell, other):
             return other
     return None
+
+
+async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
+                                    panel_event, *, group: str = "") -> list:
+    """Dispatch queued tasks when concurrency allows.
+
+    Preserves queue ordering. Stale entries are dropped. Agent-group
+    follow-ups keep a resolved target agent once the first entry dispatches.
+    """
+    dispatched = []
+    groups = [group] if group else list(state.auto_dispatch_queues)
+    for group_name in groups:
+        while True:
+            queue = state.auto_dispatch_queues.get(group_name, [])
+            if not queue:
+                break
+            entry = queue[0]
+            task = state.board_tasks.get(entry.task_id)
+            if not task or task.group != group_name or task.lane == "Done" \
+                    or task.agent_id:
+                state.auto_dispatch_queue_remove_task(entry.task_id)
+                continue
+            if not state.board_deps_met(task):
+                break
+            if task.scheduled_at:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                if task.scheduled_at > now_iso:
+                    break
+            target_agent_id = entry.target_agent_id
+            if target_agent_id:
+                target = state.agents.get(target_agent_id)
+                if not target or target.cell_type != "agent" \
+                        or target.group != group_name:
+                    entry.target_agent_id = ""
+                    state._db_save_auto_dispatch_queue(group_name)
+                    target_agent_id = ""
+            active_agents = _active_worker_ids(state, group_name)
+            needs_capacity = not target_agent_id
+            if target_agent_id:
+                needs_capacity = not _is_busy_agent(state, target_agent_id)
+            if needs_capacity and len(active_agents) >= entry.max_concurrent:
+                break
+
+            payload = {"cmd": "dispatch_task", "id": task.id}
+            if target_agent_id:
+                payload["agent_id"] = target_agent_id
+            else:
+                payload["create_agent"] = True
+            result = await handle_command(payload)
+            if result and result.get("type") in {
+                    "error", "dispatch_action_missing"}:
+                state.auto_dispatch_queue_remove_task(task.id)
+                continue
+
+            task_after = state.board_tasks.get(task.id)
+            resolved_agent_id = task_after.agent_id if task_after else ""
+            if entry.agent_group and resolved_agent_id:
+                state.auto_dispatch_queue_bind_agent_group(
+                    group_name,
+                    entry.agent_group,
+                    resolved_agent_id,
+                )
+            state.auto_dispatch_queue_remove_task(task.id)
+            if resolved_agent_id:
+                agent = state.agents.get(resolved_agent_id)
+                panel_event(
+                    "task_auto_dispatched",
+                    resolved_agent_id,
+                    agent.name if agent else "",
+                    group_name,
+                    task.task[:80],
+                    task_id=task.id,
+                )
+            dispatched.append({
+                "group": group_name,
+                "task_id": task.id,
+                "agent_id": resolved_agent_id,
+            })
+    return dispatched
 
 
 def _should_handoff_shared_worktree(owner, *,
@@ -1353,6 +1454,7 @@ async def main(connection: iterm2.Connection):
         if task.resume_after_boundary_task_id != next_boundary_task_id:
             task.resume_after_boundary_task_id = next_boundary_task_id
         state.board_update_task(task.id, agent_id=cell.id, lane=lane)
+        state.auto_dispatch_queue_remove_task(task.id)
         cell.current_task_id = task.id
         state.history_record_dispatch(cell, task)
 
@@ -3314,7 +3416,7 @@ async def main(connection: iterm2.Connection):
                     _cell = state.agents.get(_new_aid)
                     if (_tsk and _cell
                             and _tsk.lane == "To Do"
-                            and not _cell.current_task_id
+                            and not state.agent_is_busy(_new_aid)
                             and _cell.cell_type == "agent"
                             and state.board_deps_met(_tsk)):
                         await handle_command({
@@ -3617,10 +3719,8 @@ async def main(connection: iterm2.Connection):
                         elif agent_id:
                             # Dispatch to existing agent
                             cell = state.agents.get(agent_id)
-                            if cell.current_task_id \
-                                    and cell.current_task_id != tid:
-                                active = state.board_tasks.get(
-                                    cell.current_task_id)
+                            active = state.agent_current_task(cell.id)
+                            if active and active.id != tid:
                                 allow_self_dispatch = bool(
                                     data.get("_self_dispatch")
                                     and cell.id == agent_id
@@ -3780,7 +3880,14 @@ async def main(connection: iterm2.Connection):
                                         "blocked_by_agent_id":
                                             owner.id,
                                         "blocked_by_task_id":
-                                            owner.current_task_id,
+                                            (
+                                                state.agent_current_task(
+                                                    owner.id
+                                                ).id
+                                                if state.agent_current_task(
+                                                    owner.id
+                                                ) else ""
+                                            ),
                                     }
                                     cell = None
                         if cell:
@@ -4506,6 +4613,16 @@ async def main(connection: iterm2.Connection):
                             "id": nxt.id,
                             "agent_id": c.id})
 
+                    async def _drain_auto_dispatch_queue(group_name: str):
+                        if not group_name:
+                            return
+                        await _pump_auto_dispatch_queue(
+                            state,
+                            handle_command,
+                            _panel_event,
+                            group=group_name,
+                        )
+
                     if result and result.get("type") == "error":
                         pass  # auto-resolve failed; skip action
 
@@ -4579,6 +4696,9 @@ async def main(connection: iterm2.Connection):
                             cell.name, cell.group,
                             message or "Task completed")
                         await _auto_dispatch_next(cell)
+                        await _drain_auto_dispatch_queue(
+                            task.group if task else cell.group
+                        )
 
                     elif action == "blocked":
                         cell.needs_attention = True
@@ -4723,6 +4843,9 @@ async def main(connection: iterm2.Connection):
                             cell.name, cell.group,
                             "Ready (task completed)")
                         await _auto_dispatch_next(cell)
+                        await _drain_auto_dispatch_queue(
+                            task.group if task else cell.group
+                        )
 
                     elif action == "derive":
                         # Derive a new task and dispatch it
@@ -5518,8 +5641,11 @@ async def main(connection: iterm2.Connection):
     # -- Scheduler ----------------------------------------------------------
 
     asyncio.create_task(
+        _pump_auto_dispatch_queue(state, handle_command, _panel_event)
+    )
+    asyncio.create_task(
         _scheduler_loop(state, handle_command, _panel_event))
-    log.info("Task scheduler started")
+    log.info("Task scheduler and auto-dispatch queue pump started")
 
     # -- HTTP / WS routes ---------------------------------------------------
 

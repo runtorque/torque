@@ -131,7 +131,9 @@ weaver_diff, weaver_worktree_remove, weaver_worktree_checkpoint
 11. **Loom mechanics** — Loom can dispatch multiple tasks to the same
    agent. Use `weaver_batch_dispatch` with a shared `agent_group` when
    several ordered tasks should stay on one worker so later tasks queue
-   behind earlier ones, or use `weaver_task_dispatch(agent=...)` to
+   behind earlier ones. Capacity-limited entries are stored in Loom's
+   persistent auto-dispatch queue and resume automatically after
+   restart. Use `weaver_task_dispatch(agent=...)` to
    target an existing agent directly. Same-agent queued tasks usually
    share one worktree/branch until merge or cleanup, so use this for
    short tightly coupled follow-ups, not long stacks of medium-sized

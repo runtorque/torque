@@ -160,6 +160,14 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
             [item["status"] for item in payload["results"]],
             ["dispatched", "deferred"],
         )
+        self.assertEqual(
+            [entry.task_id for entry in state.auto_dispatch_queues["g"]],
+            ["task-2"],
+        )
+        self.assertEqual(
+            state.auto_dispatch_queues["g"][0].max_concurrent,
+            2,
+        )
 
     async def test_batch_dispatch_continues_after_validation_failure(self):
         state, weaver = self._make_state()
@@ -206,6 +214,53 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             payload["results"][0]["agent_id"],
             payload["results"][1]["agent_id"],
+        )
+
+    async def test_batch_dispatch_persists_deferred_agent_group_entries(self):
+        state, weaver = self._make_state()
+        active = self.state_mod.AgentCell(
+            id="agent-active",
+            name="active",
+            group="g",
+            cell_type="agent",
+            current_task_id="task-active",
+        )
+        state.agents[active.id] = active
+        state.groups["g"].append(active.id)
+        self._add_task(
+            state,
+            "task-active",
+            "Already running",
+            lane="In Progress",
+            agent_id=active.id,
+        )
+        self._add_task(state, "task-1", "First")
+        self._add_task(state, "task-2", "Second")
+
+        payload = await self._dispatch(
+            state,
+            weaver,
+            {
+                "tasks": [
+                    {"task": "task-1", "agent_group": "followup"},
+                    {"task": "task-2", "agent_group": "followup"},
+                ],
+                "max_concurrent": 1,
+            },
+            self._make_handle_command(state),
+        )
+
+        self.assertEqual(
+            [item["status"] for item in payload["results"]],
+            ["deferred", "deferred"],
+        )
+        self.assertEqual(
+            [entry.task_id for entry in state.auto_dispatch_queues["g"]],
+            ["task-1", "task-2"],
+        )
+        self.assertEqual(
+            [entry.agent_group for entry in state.auto_dispatch_queues["g"]],
+            ["followup", "followup"],
         )
 
     async def test_batch_dispatch_dispatches_without_overlap_confirmation(self):

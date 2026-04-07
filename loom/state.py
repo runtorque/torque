@@ -104,6 +104,15 @@ class Schedule:
 
 
 @dataclass
+class AutoDispatchQueueEntry:
+    task_id: str
+    agent_group: str = ""
+    max_concurrent: int = 1
+    target_agent_id: str = ""
+    enqueued_at: str = ""
+
+
+@dataclass
 class AgentCell:
     id: str
     name: str
@@ -406,6 +415,7 @@ class MatrixState:
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
         self.schedules: dict[str, Schedule] = {}
+        self.auto_dispatch_queues: dict[str, list[AutoDispatchQueueEntry]] = {}
         self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
         self.board_panel_height: int = 0  # 0 = use CSS default
         self.board_filters_by_group: dict[str, dict] = {}
@@ -455,6 +465,10 @@ class MatrixState:
             },
             "schedules": {
                 sid: asdict(s) for sid, s in self.schedules.items()
+            },
+            "auto_dispatch_queues": {
+                group: [asdict(entry) for entry in entries]
+                for group, entries in self.auto_dispatch_queues.items()
             },
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
@@ -561,6 +575,113 @@ class MatrixState:
                 self.db.save_global_settings(self.global_settings)
             except Exception:
                 log.exception("Failed to save global settings")
+
+    def _db_save_auto_dispatch_queue(self, group: str):
+        if self.db:
+            try:
+                self.db.save_auto_dispatch_queue(
+                    group,
+                    self.auto_dispatch_queues.get(group, []),
+                )
+            except Exception:
+                log.exception("Failed to save auto-dispatch queue for %s",
+                              group)
+
+    def _db_delete_auto_dispatch_queue(self, group: str):
+        if self.db:
+            try:
+                self.db.delete_auto_dispatch_queue(group)
+            except Exception:
+                log.exception("Failed to delete auto-dispatch queue for %s",
+                              group)
+
+    def auto_dispatch_queue_find(self, task_id: str):
+        for group, entries in self.auto_dispatch_queues.items():
+            for idx, entry in enumerate(entries):
+                if entry.task_id == task_id:
+                    return group, idx, entry
+        return "", -1, None
+
+    def auto_dispatch_queue_contains(self, task_id: str) -> bool:
+        group, idx, _entry = self.auto_dispatch_queue_find(task_id)
+        return bool(group and idx >= 0)
+
+    def auto_dispatch_queue_add(self, group: str, task_id: str, *,
+                                agent_group: str = "",
+                                max_concurrent: int = 1,
+                                target_agent_id: str = ""):
+        found_group, _idx, entry = self.auto_dispatch_queue_find(task_id)
+        if entry:
+            if found_group != group:
+                self.auto_dispatch_queue_remove_task(task_id)
+            else:
+                return entry
+        from datetime import datetime, timezone
+        queue = self.auto_dispatch_queues.setdefault(group, [])
+        entry = AutoDispatchQueueEntry(
+            task_id=task_id,
+            agent_group=agent_group.strip(),
+            max_concurrent=max(1, int(max_concurrent or 1)),
+            target_agent_id=target_agent_id.strip(),
+            enqueued_at=datetime.now(timezone.utc).isoformat(),
+        )
+        queue.append(entry)
+        self._db_save_auto_dispatch_queue(group)
+        return entry
+
+    def auto_dispatch_queue_remove_task(self, task_id: str) -> bool:
+        group, idx, _entry = self.auto_dispatch_queue_find(task_id)
+        if not group or idx < 0:
+            return False
+        queue = self.auto_dispatch_queues.get(group, [])
+        queue.pop(idx)
+        if queue:
+            self._db_save_auto_dispatch_queue(group)
+        else:
+            self.auto_dispatch_queues.pop(group, None)
+            self._db_delete_auto_dispatch_queue(group)
+        return True
+
+    def auto_dispatch_queue_bind_agent_group(self, group: str,
+                                             agent_group: str,
+                                             agent_id: str) -> int:
+        if not group or not agent_group or not agent_id:
+            return 0
+        queue = self.auto_dispatch_queues.get(group, [])
+        changed = 0
+        for entry in queue:
+            if entry.agent_group != agent_group:
+                continue
+            if entry.target_agent_id == agent_id:
+                continue
+            entry.target_agent_id = agent_id
+            changed += 1
+        if changed:
+            self._db_save_auto_dispatch_queue(group)
+        return changed
+
+    def cleanup_stale_auto_dispatch_queue(self) -> int:
+        removed = 0
+        for group in list(self.auto_dispatch_queues):
+            queue = self.auto_dispatch_queues.get(group, [])
+            keep = []
+            changed = False
+            for entry in queue:
+                task = self.board_tasks.get(entry.task_id)
+                if not task or task.group != group \
+                        or task.lane == "Done" or task.agent_id:
+                    removed += 1
+                    changed = True
+                    continue
+                keep.append(entry)
+            if keep:
+                if changed or len(keep) != len(queue):
+                    self.auto_dispatch_queues[group] = keep
+                    self._db_save_auto_dispatch_queue(group)
+            else:
+                self.auto_dispatch_queues.pop(group, None)
+                self._db_delete_auto_dispatch_queue(group)
+        return removed
 
     def cleanup_stale_boundary_successors(self, emit: bool = True) -> int:
         updated = clear_stale_successor_references(
@@ -844,6 +965,23 @@ class MatrixState:
                         sched.name, exclude_id=sid)
                     self._db_save_schedule(sched)
                     slug_dirty = True
+            adq_fields = set(AutoDispatchQueueEntry.__dataclass_fields__)
+            for gname, entries in data.get("auto_dispatch_queues", {}).items():
+                if gname not in self.groups or not isinstance(entries, list):
+                    continue
+                restored = []
+                for raw in entries:
+                    if not isinstance(raw, dict):
+                        continue
+                    filtered = {
+                        k: v for k, v in raw.items() if k in adq_fields
+                    }
+                    if not filtered.get("task_id"):
+                        continue
+                    restored.append(AutoDispatchQueueEntry(**filtered))
+                if restored:
+                    self.auto_dispatch_queues[gname] = restored
+            self.cleanup_stale_auto_dispatch_queue()
             if slug_dirty:
                 self._db_save_groups()
                 log.info("Generated slugs for existing resources")
@@ -1213,6 +1351,8 @@ class MatrixState:
                     "board_card_density_by_group",
                     json.dumps(self.board_card_density_by_group),
                 )
+            self.auto_dispatch_queues.pop(name, None)
+            self._db_delete_auto_dispatch_queue(name)
             self.weaver_settings.pop(name, None)
             if self.db:
                 self.db.delete_weaver_settings(name)
@@ -1740,6 +1880,7 @@ class MatrixState:
     def board_remove_task(self, tid: str):
         task = self.board_tasks.pop(tid, None)
         if task:
+            self.auto_dispatch_queue_remove_task(tid)
             self._emit("task_remove", id=tid)
             self._db_delete_task(tid)
             # Clean up dependency references in other tasks
@@ -1900,6 +2041,34 @@ class MatrixState:
                  if (t.pipeline_root_id == root_id) or (t.id == root_id)]
         chain.sort(key=lambda t: (t.pipeline_depth, t.created_at))
         return chain
+
+    def agent_active_tasks(self, agent_id: str) -> list[BoardTask]:
+        tasks = [
+            t for t in self.board_tasks.values()
+            if t.agent_id == agent_id and t.lane not in {"Backlog", "Done"}
+        ]
+        tasks.sort(
+            key=lambda t: (t.lane != "In Progress", t.position,
+                           t.created_at, t.id)
+        )
+        return tasks
+
+    def agent_current_task(self, agent_id: str) -> Optional[BoardTask]:
+        cell = self.agents.get(agent_id)
+        if cell and cell.current_task_id:
+            task = self.board_tasks.get(cell.current_task_id)
+            if task and task.lane != "Done":
+                return task
+        tasks = self.agent_active_tasks(agent_id)
+        return tasks[0] if tasks else None
+
+    def agent_is_busy(self, agent_id: str) -> bool:
+        cell = self.agents.get(agent_id)
+        if cell and cell.current_task_id:
+            task = self.board_tasks.get(cell.current_task_id)
+            if not task or task.lane != "Done":
+                return True
+        return self.agent_current_task(agent_id) is not None
 
     def extract_playbook_candidates(self, group: str = "") -> list[dict]:
         """Mine and persist draft playbook candidates from task history."""

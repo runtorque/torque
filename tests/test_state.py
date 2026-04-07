@@ -224,6 +224,68 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "",
         )
 
+    def test_load_restores_auto_dispatch_queue_and_busy_agents(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": ["agent-1"]}, {"g": "g"})
+        db.save_group_members("g", ["agent-1"])
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+            )
+        )
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-active",
+                task="Active work",
+                group="g",
+                lane="In Progress",
+                agent_id="agent-1",
+            )
+        )
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-queued",
+                task="Queued follow-up",
+                group="g",
+                lane="Backlog",
+            )
+        )
+        db.save_auto_dispatch_queue("g", [
+            {
+                "task_id": "task-queued",
+                "agent_group": "followup",
+                "max_concurrent": 1,
+                "target_agent_id": "agent-1",
+                "enqueued_at": "2026-04-07T10:00:00+00:00",
+            }
+        ])
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertTrue(state.agent_is_busy("agent-1"))
+        self.assertEqual(
+            state.agent_current_task("agent-1").id,
+            "task-active",
+        )
+        self.assertEqual(
+            state.auto_dispatch_queues["g"][0].task_id,
+            "task-queued",
+        )
+        self.assertEqual(
+            state.auto_dispatch_queues["g"][0].target_agent_id,
+            "agent-1",
+        )
+
     def test_board_remove_task_clears_boundary_successor_links(self):
         state = self.state_mod.MatrixState()
         boundary = self.state_mod.BoardTask(

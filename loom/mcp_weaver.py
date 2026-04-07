@@ -78,11 +78,7 @@ def _is_busy_agent(state, agent_id: str) -> bool:
     cell = state.agents.get(agent_id)
     if not cell or cell.cell_type != "agent":
         return False
-    if cell.current_task_id:
-        task = state.board_tasks.get(cell.current_task_id)
-        if task and task.lane != "Done":
-            return True
-    return False
+    return state.agent_is_busy(agent_id)
 
 
 def _active_worker_ids(state, group: str) -> set[str]:
@@ -544,6 +540,8 @@ WEAVER_TOOLS = [
         "description": (
             "Dispatch a planned batch of tasks with an explicit "
             "concurrency cap. Tasks are processed in request order. "
+            "When capacity is full, remaining tasks are queued "
+            "persistently and auto-dispatched later as slots open. "
             "Tasks that share an agent_group are routed to the same "
             "agent so later tasks can queue behind earlier ones."
         ),
@@ -556,7 +554,8 @@ WEAVER_TOOLS = [
                         "Ordered task entries. Each item must include "
                         "a task slug or ID and may include an "
                         "agent_group string to keep related tasks on "
-                        "the same agent."
+                        "the same agent. Deferred entries keep their "
+                        "order across restart."
                     ),
                     "items": {
                         "type": "object",
@@ -1742,6 +1741,10 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                       "Task appears more than once in this batch.", tid)
                 continue
             seen_task_ids.add(tid)
+            if state.auto_dispatch_queue_contains(tid):
+                _fail(idx, task_ident, "already_queued",
+                      "Task is already queued for auto-dispatch.", tid)
+                continue
 
             task = state.board_tasks.get(tid)
             if not task:
@@ -1784,6 +1787,14 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             if target_agent_id:
                 needs_capacity = not _is_busy_agent(state, target_agent_id)
             if needs_capacity and len(active_agents) >= max_concurrent:
+                queue_entry = state.auto_dispatch_queue_add(
+                    _weaver_group,
+                    tid,
+                    agent_group=agent_group,
+                    max_concurrent=max_concurrent,
+                    target_agent_id=target_agent_id,
+                )
+                queue = state.auto_dispatch_queues.get(_weaver_group, [])
                 item = {
                     "index": idx,
                     "task": task_ident,
@@ -1792,6 +1803,10 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                     "reason": "max_concurrent_reached",
                     "message": (
                         "Dispatch would exceed max_concurrent for the group."
+                    ),
+                    "queue_position": len(queue),
+                    "queued_at": (
+                        queue_entry.enqueued_at if queue_entry else ""
                     ),
                 }
                 if agent_group:

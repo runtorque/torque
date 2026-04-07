@@ -137,6 +137,15 @@ class LoomDBTests(unittest.TestCase):
                 next_run_at="2026-04-07T12:00:00+00:00",
             )
         )
+        self.db.save_auto_dispatch_queue("g", [
+            {
+                "task_id": "task-1",
+                "agent_group": "release",
+                "max_concurrent": 2,
+                "target_agent_id": "agent-1",
+                "enqueued_at": "2026-04-07T09:00:00+00:00",
+            }
+        ])
         self.db.save_board_lanes(["Backlog", "To Do", "In Progress", "Done"])
 
         loaded = self.db.load_all()
@@ -204,6 +213,18 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertFalse(loaded["schedules"]["sched-1"]["enabled"])
         self.assertEqual(loaded["schedules"]["sched-1"]["labels"], ["ops"])
+        self.assertEqual(
+            loaded["auto_dispatch_queues"]["g"][0]["task_id"],
+            "task-1",
+        )
+        self.assertEqual(
+            loaded["auto_dispatch_queues"]["g"][0]["agent_group"],
+            "release",
+        )
+        self.assertEqual(
+            loaded["auto_dispatch_queues"]["g"][0]["target_agent_id"],
+            "agent-1",
+        )
 
     def test_load_all_restores_board_filters_by_group(self):
         filters = {
