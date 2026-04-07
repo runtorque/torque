@@ -49,6 +49,25 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(text), {"type": "ok"})
 
         text, is_error = await self.mcp_mod._dispatch_tool(
+            "loom_verify",
+            {
+                "state": "pending",
+                "mode": "deploy",
+                "notes": "Need manual smoke after deploy",
+                "tests_run": "python3 -m unittest",
+                "manual_smoke_done": True,
+                "deploy_needed": True,
+                "deploy_attempted": True,
+                "human_validation_pending": "Confirm dashboard loads",
+            },
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(text), {"type": "ok"})
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
             "loom_derive",
             {
                 "description": "Implement follow-up",
@@ -75,6 +94,19 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "cell_id": "agent-1",
                     "action": "progress",
                     "message": "Running tests",
+                },
+                {
+                    "cmd": "ai_report",
+                    "cell_id": "agent-1",
+                    "action": "verify",
+                    "verification_state": "pending",
+                    "verification_mode": "deploy",
+                    "verification_notes": "Need manual smoke after deploy",
+                    "tests_run": "python3 -m unittest",
+                    "manual_smoke_done": True,
+                    "deploy_needed": True,
+                    "deploy_attempted": True,
+                    "human_validation_pending": "Confirm dashboard loads",
                 },
                 {
                     "cmd": "ai_report",
@@ -213,6 +245,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         tool_names = [tool["name"] for tool in listed.payload["result"]["tools"]]
         self.assertIn("loom_progress", tool_names)
+        self.assertIn("loom_verify", tool_names)
         self.assertIn("loom_memory_publish", tool_names)
         self.assertIn("weaver_board_summary", tool_names)
 

@@ -1296,6 +1296,13 @@ async def main(connection: iterm2.Connection):
             "- `loom ai blocked \"reason\"` — need user input",
             "- `loom ai error \"message\"` — unrecoverable error",
         ])
+        lines.append(
+            "- `loom ai verify --state pending|attempted|passed|failed "
+            "[--mode deploy|restart] [--tests \"...\"] [--smoke-done] "
+            "[--deploy-needed] [--deploy-attempted] [--human \"...\"] "
+            "[-m \"notes\"]` — record manual deploy/restart/smoke "
+            "verification details when relevant"
+        )
 
         # Pipeline context for derived tasks
         if task.parent_task_id:
@@ -1388,6 +1395,12 @@ async def main(connection: iterm2.Connection):
             "labels": list(task.labels),
             "group": task.group,
             "status": task.status,
+            "verification_mode": task.verification_mode,
+            "verification_state": task.verification_state,
+            "verification_notes": task.verification_notes,
+            "verification_updated_at": task.verification_updated_at,
+            "verification_updated_by": task.verification_updated_by,
+            "verification_summary": task.verification_summary or {},
             "attachments": [
                 {"path": a["path"], "filename": a["filename"]}
                 for a in (task.attachments or [])
@@ -2738,6 +2751,15 @@ async def main(connection: iterm2.Connection):
                     external_url=ext_link["external_url"],
                     depends_on=data.get("depends_on", []),
                     scheduled_at=data.get("scheduled_at", ""),
+                    verification_mode=data.get("verification_mode", ""),
+                    verification_state=data.get("verification_state", ""),
+                    verification_notes=data.get("verification_notes", ""),
+                    verification_updated_at=data.get(
+                        "verification_updated_at", ""),
+                    verification_updated_by=data.get(
+                        "verification_updated_by", ""),
+                    verification_summary=data.get(
+                        "verification_summary", {}),
                 )
                 # Pass client-provided ID (for pre-uploaded attachments)
                 if data.get("id"):
@@ -3802,6 +3824,112 @@ async def main(connection: iterm2.Connection):
                         state._emit("task_upsert", **asdict(t))
                         state._db_save_task(t)
 
+                    def _apply_verification_report(t, payload, actor_name):
+                        if not t:
+                            return "", None
+
+                        from datetime import datetime, timezone
+
+                        summary = dict(t.verification_summary or {})
+                        if "tests_run" in payload:
+                            tests_run = str(payload.get("tests_run", "") or "").strip()
+                            if tests_run:
+                                summary["tests_run"] = tests_run
+                            else:
+                                summary.pop("tests_run", None)
+                        if "manual_smoke_done" in payload:
+                            summary["manual_smoke_done"] = bool(
+                                payload.get("manual_smoke_done")
+                            )
+                        if "deploy_needed" in payload:
+                            summary["deploy_needed"] = bool(
+                                payload.get("deploy_needed")
+                            )
+                        if "deploy_attempted" in payload:
+                            summary["deploy_attempted"] = bool(
+                                payload.get("deploy_attempted")
+                            )
+                        if "human_validation_pending" in payload:
+                            human_pending = str(
+                                payload.get("human_validation_pending", "") or ""
+                            ).strip()
+                            if human_pending:
+                                summary["human_validation_pending"] = human_pending
+                            else:
+                                summary.pop("human_validation_pending", None)
+
+                        if "verification_mode" in payload:
+                            mode = str(
+                                payload.get("verification_mode", "") or ""
+                            ).strip()
+                            t.verification_mode = (
+                                mode if mode in {"", "deploy", "restart"} else ""
+                            )
+                        if "verification_state" in payload:
+                            verify_state = str(
+                                payload.get("verification_state", "") or ""
+                            ).strip()
+                            t.verification_state = (
+                                verify_state if verify_state in {
+                                    "", "pending", "attempted",
+                                    "passed", "failed"
+                                } else ""
+                            )
+                        if "verification_notes" in payload:
+                            t.verification_notes = str(
+                                payload.get("verification_notes", "") or ""
+                            ).strip()
+
+                        t.verification_summary = summary
+                        t.verification_updated_at = datetime.now(
+                            timezone.utc
+                        ).isoformat()
+                        t.verification_updated_by = actor_name
+
+                        parts = []
+                        if t.verification_state:
+                            parts.append(f"state={t.verification_state}")
+                        if t.verification_mode:
+                            parts.append(f"mode={t.verification_mode}")
+                        if summary.get("tests_run"):
+                            parts.append(f"tests={summary['tests_run']}")
+                        if summary.get("manual_smoke_done"):
+                            parts.append("manual smoke done")
+                        if summary.get("deploy_needed"):
+                            parts.append("deploy needed")
+                        if summary.get("deploy_attempted"):
+                            parts.append("deploy attempted")
+                        if summary.get("human_validation_pending"):
+                            parts.append(
+                                "human validation="
+                                + summary["human_validation_pending"]
+                            )
+                        if t.verification_notes:
+                            parts.append(f"notes={t.verification_notes}")
+
+                        msg = "Verification updated"
+                        if parts:
+                            msg += ": " + "; ".join(parts)
+
+                        _save_task(t)
+
+                        root_task = None
+                        root_id = t.pipeline_root_id or ""
+                        if root_id and root_id != t.id:
+                            root_task = state.board_tasks.get(root_id)
+                            if root_task:
+                                root_task.verification_mode = t.verification_mode
+                                root_task.verification_state = t.verification_state
+                                root_task.verification_notes = t.verification_notes
+                                root_task.verification_updated_at = \
+                                    t.verification_updated_at
+                                root_task.verification_updated_by = \
+                                    t.verification_updated_by
+                                root_task.verification_summary = dict(summary)
+                                _save_task(root_task)
+
+                        return msg, root_task
+
                     def _cascade_done(task_id):
                         """Walk up parent chain, completing ancestors
                         whose children are all Done."""
@@ -4000,6 +4128,43 @@ async def main(connection: iterm2.Connection):
                             message=message)
                         state._emit("event_append", **pe)
                         state.recompute_task_health()
+
+                    elif action == "verify":
+                        if not task:
+                            result = {"type": "error",
+                                      "message": "No linked task to verify"}
+                        else:
+                            payload = {}
+                            for key in (
+                                "verification_mode",
+                                "verification_state",
+                                "verification_notes",
+                                "tests_run",
+                                "manual_smoke_done",
+                                "deploy_needed",
+                                "deploy_attempted",
+                                "human_validation_pending",
+                            ):
+                                if key in data:
+                                    payload[key] = data[key]
+                            verify_msg, _root_task = _apply_verification_report(
+                                task, payload, cell.name
+                            )
+                            _append_mcp(cell, "verify", verify_msg)
+                            _append_task_msg(task, "verify",
+                                             verify_msg, cell.name)
+                            _record_history_msg(cell, "verify", verify_msg)
+                            state._emit_agent(cell)
+                            _panel_event(
+                                "task_verification_updated",
+                                cell.id, cell.name, cell.group,
+                                verify_msg, task_id=task.id,
+                            )
+                            result = {
+                                "type": "verification_updated",
+                                "task_id": task.id,
+                                "message": verify_msg,
+                            }
 
                     elif action == "ready":
                         cell.activity = ""

@@ -1447,6 +1447,28 @@ function _taskScheduledInputValue(isoValue) {
   }
 }
 
+function _taskVerificationSummaryFromDom() {
+  var testsEl = document.getElementById('task-verification-tests-input');
+  var smokeEl = document.getElementById('task-verification-smoke-input');
+  var deployNeededEl = document.getElementById('task-verification-deploy-needed-input');
+  var deployAttemptedEl = document.getElementById('task-verification-deploy-attempted-input');
+  var humanEl = document.getElementById('task-verification-human-input');
+  var summary = {};
+  var testsRun = testsEl ? testsEl.value.trim() : '';
+  var humanPending = humanEl ? humanEl.value.trim() : '';
+  if (testsRun) summary.tests_run = testsRun;
+  if (smokeEl && smokeEl.checked) summary.manual_smoke_done = true;
+  if (deployNeededEl && deployNeededEl.checked) summary.deploy_needed = true;
+  if (deployAttemptedEl && deployAttemptedEl.checked) summary.deploy_attempted = true;
+  if (humanPending) summary.human_validation_pending = humanPending;
+  return summary;
+}
+
+function _taskVerificationSummaryValue(summary, key) {
+  summary = summary || {};
+  return summary[key];
+}
+
 function _taskReadDraftFromDom() {
   var modal = document.getElementById('modal-task');
   var taskEl = document.getElementById('task-task-input');
@@ -1459,6 +1481,9 @@ function _taskReadDraftFromDom() {
   var providerEl = document.getElementById('task-external-provider-input');
   var externalIdEl = document.getElementById('task-external-id-input');
   var externalUrlEl = document.getElementById('task-external-url-input');
+  var verificationModeEl = document.getElementById('task-verification-mode-input');
+  var verificationStateEl = document.getElementById('task-verification-state-input');
+  var verificationNotesEl = document.getElementById('task-verification-notes-input');
   return {
     lane: modal ? (modal.dataset.lane || '') : '',
     task: taskEl ? taskEl.value : '',
@@ -1479,6 +1504,10 @@ function _taskReadDraftFromDom() {
     provider: providerEl ? providerEl.value : _taskExternalProvider,
     external_id: externalIdEl ? externalIdEl.value : _taskExternalId,
     external_url: externalUrlEl ? externalUrlEl.value : _taskExternalUrl,
+    verification_mode: verificationModeEl ? verificationModeEl.value : '',
+    verification_state: verificationStateEl ? verificationStateEl.value : '',
+    verification_notes: verificationNotesEl ? verificationNotesEl.value : '',
+    verification_summary: _taskVerificationSummaryFromDom(),
     draft_id: _taskDraftId || '',
   };
 }
@@ -1504,6 +1533,14 @@ function _taskOpenModal(config) {
   var providerEl = document.getElementById('task-external-provider-input');
   var externalIdEl = document.getElementById('task-external-id-input');
   var externalUrlEl = document.getElementById('task-external-url-input');
+  var verificationModeEl = document.getElementById('task-verification-mode-input');
+  var verificationStateEl = document.getElementById('task-verification-state-input');
+  var verificationTestsEl = document.getElementById('task-verification-tests-input');
+  var verificationSmokeEl = document.getElementById('task-verification-smoke-input');
+  var verificationDeployNeededEl = document.getElementById('task-verification-deploy-needed-input');
+  var verificationDeployAttemptedEl = document.getElementById('task-verification-deploy-attempted-input');
+  var verificationHumanEl = document.getElementById('task-verification-human-input');
+  var verificationNotesEl = document.getElementById('task-verification-notes-input');
   var modal = document.getElementById('modal-task');
 
   _taskEditId = config.editId || null;
@@ -1548,6 +1585,50 @@ function _taskOpenModal(config) {
   if (providerEl) providerEl.value = _taskExternalProvider;
   if (externalIdEl) externalIdEl.value = _taskExternalId;
   if (externalUrlEl) externalUrlEl.value = _taskExternalUrl;
+  var verificationSummary = draft && draft.verification_summary !== undefined
+    ? (draft.verification_summary || {})
+    : (config.verificationSummary || {});
+  if (verificationModeEl) {
+    verificationModeEl.value = draft && draft.verification_mode !== undefined
+      ? draft.verification_mode
+      : (config.verificationMode || '');
+  }
+  if (verificationStateEl) {
+    verificationStateEl.value = draft && draft.verification_state !== undefined
+      ? draft.verification_state
+      : (config.verificationState || '');
+  }
+  if (verificationTestsEl) {
+    verificationTestsEl.value = _taskVerificationSummaryValue(
+      verificationSummary, 'tests_run'
+    ) || '';
+  }
+  if (verificationSmokeEl) {
+    verificationSmokeEl.checked = !!_taskVerificationSummaryValue(
+      verificationSummary, 'manual_smoke_done'
+    );
+  }
+  if (verificationDeployNeededEl) {
+    verificationDeployNeededEl.checked = !!_taskVerificationSummaryValue(
+      verificationSummary, 'deploy_needed'
+    );
+  }
+  if (verificationDeployAttemptedEl) {
+    verificationDeployAttemptedEl.checked = !!_taskVerificationSummaryValue(
+      verificationSummary, 'deploy_attempted'
+    );
+  }
+  if (verificationHumanEl) {
+    verificationHumanEl.value = _taskVerificationSummaryValue(
+      verificationSummary, 'human_validation_pending'
+    ) || '';
+  }
+  if (verificationNotesEl) {
+    verificationNotesEl.value = draft
+      && draft.verification_notes !== undefined
+      ? draft.verification_notes
+      : (config.verificationNotes || '');
+  }
   _renderTaskAttachments();
   _renderTaskArtifacts();
   _renderTaskArtifactEditor();
@@ -2218,6 +2299,10 @@ function openAddTask(lane) {
     group: _currentGroup(),
     lane: lane || '',
     scheduledInput: '',
+    verificationMode: '',
+    verificationState: '',
+    verificationNotes: '',
+    verificationSummary: {},
     draftId: _generateDraftId(),
     selectTask: false,
   });
@@ -2248,6 +2333,10 @@ function openEditTask(taskId) {
     externalId: t.external_id || '',
     externalUrl: t.external_url || '',
     scheduledInput: _taskScheduledInputValue(t.scheduled_at),
+    verificationMode: t.verification_mode || '',
+    verificationState: t.verification_state || '',
+    verificationNotes: t.verification_notes || '',
+    verificationSummary: t.verification_summary || {},
     selectTask: true,
   });
 }
@@ -2291,6 +2380,24 @@ function submitTask() {
 
   var schedVal = (document.getElementById('task-scheduled-input') || {}).value || '';
   var scheduledAt = schedVal ? new Date(schedVal).toISOString() : '';
+  var verificationMode = (document.getElementById('task-verification-mode-input') || {}).value || '';
+  var verificationState = (document.getElementById('task-verification-state-input') || {}).value || '';
+  var verificationNotes = ((document.getElementById('task-verification-notes-input') || {}).value || '').trim();
+  var verificationSummary = _taskVerificationSummaryFromDom();
+  var existingTask = _taskEditId && state && state.board_tasks
+    ? state.board_tasks[_taskEditId]
+    : null;
+  var shouldIncludeVerification = !!(
+    verificationMode || verificationState || verificationNotes
+    || Object.keys(verificationSummary).length
+    || (existingTask && (
+      existingTask.verification_mode
+      || existingTask.verification_state
+      || existingTask.verification_notes
+      || (existingTask.verification_summary
+          && Object.keys(existingTask.verification_summary).length)
+    ))
+  );
   var draftKeyId = _taskEditId;
   var draftScope = _taskDraftScope;
 
@@ -2308,6 +2415,12 @@ function submitTask() {
     msg.external_id = _taskExternalId;
     msg.external_url = _taskExternalUrl;
     msg.artifacts = _taskArtifacts.slice();
+    if (shouldIncludeVerification) {
+      msg.verification_mode = verificationMode;
+      msg.verification_state = verificationState;
+      msg.verification_notes = verificationNotes;
+      msg.verification_summary = verificationSummary;
+    }
     send(msg);
     var keepAttachmentNames = {};
     for (var ai = 0; ai < _taskAttachments.length; ai++) {
@@ -2340,6 +2453,12 @@ function submitTask() {
     if (_taskExternalId) msg.external_id = _taskExternalId;
     if (_taskExternalUrl) msg.external_url = _taskExternalUrl;
     if (_taskArtifacts.length) msg.artifacts = _taskArtifacts.slice();
+    if (verificationMode) msg.verification_mode = verificationMode;
+    if (verificationState) msg.verification_state = verificationState;
+    if (verificationNotes) msg.verification_notes = verificationNotes;
+    if (Object.keys(verificationSummary).length) {
+      msg.verification_summary = verificationSummary;
+    }
     send(msg);
   }
 

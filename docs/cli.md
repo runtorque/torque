@@ -304,6 +304,7 @@ loom task edit add-dark-mode --action feature/implement     # change action
 loom task edit add-dark-mode -l feature,priority            # update labels
 loom task edit deploy-auth-middleware --depends-on review-auth,run-auth-tests
 loom task edit release-checklist --at "2026-04-07T12:00:00Z"
+loom task edit deploy-auth-middleware --verify-state pending --verify-mode deploy
 ```
 
 | Flag | Description |
@@ -315,6 +316,14 @@ loom task edit release-checklist --at "2026-04-07T12:00:00Z"
 | `-g, --group` | Move to different group |
 | `--at` | Set or replace a scheduled dispatch time |
 | `--depends-on` | Replace the task's dependency list |
+| `--verify-mode` | Set verification mode (`deploy` or `restart`) |
+| `--verify-state` | Set verification state (`pending`, `attempted`, `passed`, `failed`) |
+| `--verify-note` | Set verification notes |
+| `--verify-tests` | Set tests run summary |
+| `--verify-smoke-done` | Mark manual smoke testing as done |
+| `--verify-deploy-needed` | Mark that a deploy is still needed |
+| `--verify-deploy-attempted` | Mark that deploy or restart was attempted |
+| `--verify-human` | Set what still needs human validation |
 
 Alias: `e`
 
@@ -514,6 +523,16 @@ Report progress on the current task (updates the activity detail in the UI).
 
 ```bash
 loom ai progress "Running test suite (3/5 passing)"
+```
+
+### ai verify
+
+Record manual deploy, restart, smoke, and human-validation checkpoints for the current task.
+
+```bash
+loom ai verify --state pending --mode deploy --tests "python3 -m unittest"
+loom ai verify --deploy-attempted --smoke-done -m "Smoke passed on staging"
+loom ai verify --state failed --human "Need PM sign-off after production check"
 ```
 
 ### ai ready

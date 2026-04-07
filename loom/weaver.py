@@ -54,6 +54,7 @@ weaver_worktree_remove, weaver_worktree_checkpoint
    - agent_error / agent_blocked → investigate and help or escalate
    - agent_reply → incorporate the information and continue
    - ask_created → review and resolve or escalate to the human
+   - task_verification_updated → review pending/failed verification before sending the next wave
 
 3. **Context recovery** — After a /clear or restart, your first actions
    should be: weaver_journal_read → weaver_board_summary → weaver_events.
@@ -78,6 +79,9 @@ weaver_worktree_remove, weaver_worktree_checkpoint
 7. **Wave planning** — Dispatch in waves.  Fill open slots with a mix of
    one complex task and simpler parallel work, then rotate in queued
    tasks as agents finish instead of dispatching everything at once.
+   Treat pending or failed verification on active work as a pause signal
+   for the next related wave until the checkpoint is resolved or a human
+   accepts the remaining risk.
 
 8. **Idle waiting** — When there's nothing to dispatch and you're waiting
    for agents to finish, do nothing.  Loom will push event digests to you

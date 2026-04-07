@@ -1349,6 +1349,42 @@ test('_renderBoardCard hides redundant group chips and only shows execution badg
   assert.equal((html.match(/board-card-health-stalled/g) || []).length, 1);
 });
 
+test('renderBoardCard shows verification badges and preview text', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Deploy billing changes',
+      lane: 'In Progress',
+      position: 1,
+      verification_mode: 'deploy',
+      verification_state: 'failed',
+      verification_notes: 'Smoke failed on login redirect',
+      verification_summary: {
+        tests_run: 'python3 -m unittest',
+        human_validation_pending: 'Confirm billing dashboard loads',
+      },
+    },
+  };
+
+  const html = runInContext(context, `
+    _renderBoardCard(
+      state.board_tasks.root,
+      {},
+      0
+    )
+  `);
+
+  assert.match(html, /board-card-verification-failed/);
+  assert.match(html, /Verify failed/);
+  assert.match(html, /board-card-verification-mode/);
+  assert.match(html, /Needs human validation: Confirm billing dashboard loads/);
+});
+
 test('renderBoard explains filtered empty states with a clear recovery action', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');

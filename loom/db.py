@@ -186,7 +186,13 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     health_state   TEXT NOT NULL DEFAULT 'healthy',
     health_since   TEXT NOT NULL DEFAULT '',
     health_details TEXT NOT NULL DEFAULT '{}',
-    artifacts      TEXT NOT NULL DEFAULT '[]'
+    artifacts      TEXT NOT NULL DEFAULT '[]',
+    verification_mode TEXT NOT NULL DEFAULT '',
+    verification_state TEXT NOT NULL DEFAULT '',
+    verification_notes TEXT NOT NULL DEFAULT '',
+    verification_updated_at TEXT NOT NULL DEFAULT '',
+    verification_updated_by TEXT NOT NULL DEFAULT '',
+    verification_summary TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -528,6 +534,23 @@ class LoomDB:
                 "ALTER TABLE board_tasks ADD COLUMN artifacts "
                 "TEXT NOT NULL DEFAULT '[]'")
             self._conn.commit()
+        # Migrate: add verification columns to board_tasks
+        for col, default in [
+            ("verification_mode", "''"),
+            ("verification_state", "''"),
+            ("verification_notes", "''"),
+            ("verification_updated_at", "''"),
+            ("verification_updated_by", "''"),
+            ("verification_summary", "'{}'"),
+        ]:
+            try:
+                self._conn.execute(
+                    f"SELECT {col} FROM board_tasks LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE board_tasks ADD COLUMN {col} "
+                    f"TEXT NOT NULL DEFAULT {default}")
+                self._conn.commit()
         # Migrate: drop assignee column from board_tasks
         try:
             self._conn.execute(
@@ -790,6 +813,7 @@ class LoomDB:
         attachments = json.dumps(d.pop("attachments", []))
         health_details = json.dumps(d.pop("health_details", {}))
         artifacts = json.dumps(d.pop("artifacts", []))
+        verification_summary = json.dumps(d.pop("verification_summary", {}))
         # Map 'group' to 'group_name' for the DB column
         group_name = d.pop("group", "")
         self._conn.execute("""
@@ -801,8 +825,11 @@ class LoomDB:
                  updated_at, provider, external_id, external_url,
                  parent_task_id, pipeline_depth, pipeline_root_id, status,
                  scheduled_at, messages, depends_on, attachments,
-                 health_state, health_since, health_details, artifacts)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 health_state, health_since, health_details, artifacts,
+                 verification_mode, verification_state, verification_notes,
+                 verification_updated_at, verification_updated_by,
+                 verification_summary)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
@@ -821,6 +848,12 @@ class LoomDB:
             d.get("health_since", ""),
             health_details,
             artifacts,
+            d.get("verification_mode", ""),
+            d.get("verification_state", ""),
+            d.get("verification_notes", ""),
+            d.get("verification_updated_at", ""),
+            d.get("verification_updated_by", ""),
+            verification_summary,
         ))
         self._conn.commit()
 
@@ -1689,6 +1722,9 @@ class LoomDB:
                 attachments = json.dumps(d.pop("attachments", []))
                 health_details = json.dumps(d.pop("health_details", {}))
                 artifacts = json.dumps(d.pop("artifacts", []))
+                verification_summary = json.dumps(
+                    d.pop("verification_summary", {})
+                )
                 group_name = d.pop("group", "")
                 c.execute("""
                     INSERT INTO board_tasks
@@ -1700,8 +1736,11 @@ class LoomDB:
                          external_url, parent_task_id, pipeline_depth,
                          pipeline_root_id, status, scheduled_at, messages,
                          depends_on, attachments, health_state, health_since,
-                         health_details, artifacts)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         health_details, artifacts, verification_mode,
+                         verification_state, verification_notes,
+                         verification_updated_at, verification_updated_by,
+                         verification_summary)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""),
                     d.get("description", ""), d.get("slug", ""),
@@ -1720,6 +1759,12 @@ class LoomDB:
                     attachments, d.get("health_state", "healthy"),
                     d.get("health_since", ""), health_details,
                     artifacts,
+                    d.get("verification_mode", ""),
+                    d.get("verification_state", ""),
+                    d.get("verification_notes", ""),
+                    d.get("verification_updated_at", ""),
+                    d.get("verification_updated_by", ""),
+                    verification_summary,
                 ))
 
             # UI state
@@ -1888,6 +1933,11 @@ class LoomDB:
                         d.get("health_details", "{}"))
                 except (json.JSONDecodeError, TypeError):
                     d["health_details"] = {}
+                try:
+                    d["verification_summary"] = json.loads(
+                        d.get("verification_summary", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    d["verification_summary"] = {}
                 board_tasks[d["id"]] = d
 
         # UI state

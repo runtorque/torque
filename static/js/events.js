@@ -51,7 +51,7 @@ function _eventsDateLabel(ts) {
 
 var _eventsKindGroups = {
   errors: ['agent_error', 'agent_blocked', 'task_health_alert'],
-  tasks: ['task_dispatched', 'task_completed', 'task_derived', 'ask_created', 'ask_resolved', 'task_health_alert'],
+  tasks: ['task_dispatched', 'task_completed', 'task_derived', 'ask_created', 'ask_resolved', 'task_health_alert', 'task_verification_updated'],
   lifecycle: ['agent_started', 'agent_finished', 'agent_renamed', 'agent_waiting', 'agent_progress']
 };
 
@@ -81,6 +81,7 @@ function _eventsKindIcon(kind) {
     case 'task_derived':   return '\u2934';  // curve arrow
     case 'ask_created':    return '\u2753';  // question
     case 'ask_resolved':   return '\u2705';  // green check
+    case 'task_verification_updated': return '\u2691'; // flag
     case 'agent_progress': return '\u2026';  // ellipsis
     case 'agent_renamed':  return '\u270E';  // pencil
     case 'agent_waiting':  return '\u23F8';  // pause

@@ -14,6 +14,8 @@ from .db import LoomDB
 
 _RESERVED_LANES = {"Backlog", "To Do", "In Progress", "Done"}
 _DEFAULT_LANES = ["Backlog", "To Do", "In Progress", "Done"]
+_VERIFICATION_MODES = {"", "deploy", "restart"}
+_VERIFICATION_STATES = {"", "pending", "attempted", "passed", "failed"}
 
 
 @dataclass
@@ -58,6 +60,13 @@ class BoardTask:
     health_details: dict = field(default_factory=dict)
     # Structured task artifacts — logs, diffs, reports, snippets, docs, refs
     artifacts: list = field(default_factory=list)
+    # Verification summary for user-visible/runtime-affecting work
+    verification_mode: str = ""      # "" | deploy | restart
+    verification_state: str = ""     # "" | pending | attempted | passed | failed
+    verification_notes: str = ""
+    verification_updated_at: str = ""
+    verification_updated_by: str = ""
+    verification_summary: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -183,6 +192,50 @@ def _unique_slug(base: str, existing: set) -> str:
     return f"{base}-{i}"
 
 
+def _normalize_verification_summary(summary) -> dict:
+    if not isinstance(summary, dict):
+        return {}
+    out = {}
+    text_keys = ("tests_run", "human_validation_pending")
+    for key in text_keys:
+        value = summary.get(key, "")
+        if value is None:
+            value = ""
+        if not isinstance(value, str):
+            value = str(value)
+        value = value.strip()
+        if value:
+            out[key] = value
+    for key in ("manual_smoke_done", "deploy_needed", "deploy_attempted"):
+        if key in summary:
+            out[key] = bool(summary.get(key))
+    return out
+
+
+def _normalize_verification_fields(fields: dict) -> None:
+    if "verification_mode" in fields:
+        mode = fields.get("verification_mode", "") or ""
+        fields["verification_mode"] = mode if mode in _VERIFICATION_MODES else ""
+    if "verification_state" in fields:
+        state = fields.get("verification_state", "") or ""
+        fields["verification_state"] = (
+            state if state in _VERIFICATION_STATES else ""
+        )
+    for key in ("verification_notes", "verification_updated_at",
+                "verification_updated_by"):
+        if key in fields:
+            value = fields.get(key, "")
+            if value is None:
+                value = ""
+            if not isinstance(value, str):
+                value = str(value)
+            fields[key] = value.strip()
+    if "verification_summary" in fields:
+        fields["verification_summary"] = _normalize_verification_summary(
+            fields.get("verification_summary")
+        )
+
+
 @dataclass
 class GroupSettings:
     """Default settings applied when creating agents/terminals in a group."""
@@ -270,7 +323,7 @@ class WeaverSettings:
 # Mandatory events — always included in weaver digests regardless of enabled_events.
 WEAVER_MANDATORY_EVENTS = frozenset({
     "task_completed", "agent_reply", "agent_error",
-    "agent_blocked", "ask_created",
+    "agent_blocked", "ask_created", "task_verification_updated",
 })
 
 
@@ -662,6 +715,7 @@ class MatrixState:
                     raw.get("attachments", []))
                 raw["artifacts"] = normalize_artifacts(
                     raw.get("artifacts", []))
+                _normalize_verification_fields(raw)
                 filtered = {k: v for k, v in raw.items() if k in bt_fields}
                 self.board_tasks[tid] = BoardTask(**filtered)
             # panel_active: new key; backward compat from board_panel_open
@@ -1539,6 +1593,7 @@ class MatrixState:
                 kwargs["attachments"])
         if "artifacts" in kwargs:
             kwargs["artifacts"] = normalize_artifacts(kwargs["artifacts"])
+        _normalize_verification_fields(kwargs)
         # Position = end of lane
         max_pos = max(
             (t.position for t in self.board_tasks.values() if t.lane == lane),
@@ -1583,6 +1638,7 @@ class MatrixState:
                 fields["attachments"])
         if "artifacts" in fields:
             fields["artifacts"] = normalize_artifacts(fields["artifacts"])
+        _normalize_verification_fields(fields)
         valid = set(BoardTask.__dataclass_fields__) - {"id", "slug", "created_at"}
         old_lane = task.lane
         for key, value in fields.items():
