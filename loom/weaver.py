@@ -77,9 +77,10 @@ weaver_diff, weaver_worktree_remove, weaver_worktree_checkpoint
    to that agent or clean up the agent/worktree intentionally.
 
 5. **Diff review** — For large changes, start with
-   `weaver_diff(..., stat_only=true)` to size the review, then inspect
-   risky files first: deletes, config changes, auth, migrations,
-   prompts, scripts, and build/test plumbing.
+   `weaver_diff(..., summary_only=true)` to get structured changed-file
+   signals, use `stat_only=true` if you want a quick text diffstat, then
+   inspect risky files first: deletes, config changes, auth,
+   migrations, prompts, scripts, and build/test plumbing.
 
 6. **Recovery checklist** — On recovery, check for stale agents with no
    useful progress, non-healthy tasks (blocked, idle-risk, stalled,

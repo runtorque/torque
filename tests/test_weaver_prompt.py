@@ -33,6 +33,7 @@ class WeaverPromptTests(unittest.TestCase):
         self.assertIn("Prefer short same-agent queues over long sequential backlogs", prompt)
         self.assertIn("prefer a clean merge boundary over leaving multiple medium-sized tasks", prompt)
         self.assertIn("**Diff review**", prompt)
+        self.assertIn("summary_only=true", prompt)
         self.assertIn("stat_only=true", prompt)
         self.assertIn("**Recovery checklist**", prompt)
         self.assertIn("orphaned or already-merged worktrees", prompt)

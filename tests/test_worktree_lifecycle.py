@@ -154,6 +154,85 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("README.md", changed)
         self.assertIn("src/dirty_only.py", changed)
 
+    async def test_diff_files_summary_reports_structured_signals(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+
+        self.assertIsNotNone(wt_path)
+
+        auth_file = Path(wt_path) / "auth" / "login.py"
+        auth_file.parent.mkdir(parents=True)
+        auth_file.write_text("def login():\n    return True\n")
+
+        config_file = Path(wt_path) / "config" / "settings.yml"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text("feature: enabled\n")
+
+        migration_file = Path(wt_path) / "db" / "migrations" / "001_add_users.sql"
+        migration_file.parent.mkdir(parents=True)
+        migration_file.write_text("create table users(id int);\n")
+
+        binary_file = Path(wt_path) / "assets" / "logo.bin"
+        binary_file.parent.mkdir(parents=True)
+        binary_file.write_bytes(b"\x00\x01\x02")
+
+        (Path(wt_path) / "shared" / "config.txt").unlink()
+
+        await self._git("add", "-A", cwd=wt_path)
+        await self._git("commit", "-m", "Add review signals", cwd=wt_path)
+
+        summary = await self.mgr.diff_files_summary(cell)
+
+        self.assertEqual(summary["stats"]["files"], 5)
+        files = {item["path"]: item for item in summary["files"]}
+        self.assertIn("auth/login.py", files)
+        self.assertIn("config/settings.yml", files)
+        self.assertIn("db/migrations/001_add_users.sql", files)
+        self.assertIn("assets/logo.bin", files)
+        self.assertIn("shared/config.txt", files)
+        self.assertIn("auth", files["auth/login.py"]["signals"])
+        self.assertIn("config", files["config/settings.yml"]["signals"])
+        self.assertIn("migration", files["db/migrations/001_add_users.sql"]["signals"])
+        self.assertIn("binary", files["assets/logo.bin"]["signals"])
+        self.assertIn("destructive", files["shared/config.txt"]["signals"])
+        self.assertEqual(summary["signal_counts"]["auth"], 1)
+        self.assertEqual(summary["signal_counts"]["config"], 1)
+        self.assertEqual(summary["signal_counts"]["migration"], 1)
+        interesting_paths = {
+            item["path"] for item in summary["interesting_files"]
+        }
+        self.assertIn("assets/logo.bin", interesting_paths)
+        self.assertIn("shared/config.txt", interesting_paths)
+
+    async def test_diff_files_summary_respects_path_filters(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+
+        self.assertIsNotNone(wt_path)
+
+        config_file = Path(wt_path) / "config" / "settings.yml"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text("feature: enabled\n")
+
+        auth_file = Path(wt_path) / "auth" / "login.py"
+        auth_file.parent.mkdir(parents=True)
+        auth_file.write_text("def login():\n    return True\n")
+
+        await self._git("add", "-A", cwd=wt_path)
+        await self._git("commit", "-m", "Add filtered paths", cwd=wt_path)
+
+        summary = await self.mgr.diff_files_summary(
+            cell,
+            paths=["config/settings.yml"],
+        )
+
+        self.assertEqual(summary["stats"]["files"], 1)
+        self.assertEqual(
+            [item["path"] for item in summary["files"]],
+            ["config/settings.yml"],
+        )
+        self.assertEqual(summary["files"][0]["signals"], ["config"])
+
     async def test_server_merge_and_reset_to_base_keep_future_work_clean(self):
         cell = self._make_cell()
         wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
