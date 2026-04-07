@@ -1744,6 +1744,90 @@ test('_renderBoardCard shows dispatch eligibility badges for ready and missing r
   assert.match(missingHtml, />Missing refs</);
 });
 
+test('_boardTaskDependencyBadges exposes blocked and blocking counts compactly', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+
+  context.state.board_tasks = {
+    depA: { id: 'depA', task: 'API contract', lane: 'To Do', group: 'alpha' },
+    depB: { id: 'depB', task: 'Schema migration', lane: 'Done', group: 'alpha' },
+    blocked1: {
+      id: 'blocked1',
+      task: 'Rollout docs',
+      lane: 'Backlog',
+      group: 'alpha',
+      depends_on: ['task-1'],
+    },
+    blocked2: {
+      id: 'blocked2',
+      task: 'Release notes',
+      lane: 'In Progress',
+      group: 'alpha',
+      depends_on: ['task-1'],
+    },
+  };
+
+  assert.equal(
+    runInContext(
+      context,
+      `JSON.stringify(_boardTaskDependencyBadges({
+        id: 'task-1',
+        task: 'Ship release',
+        lane: 'Backlog',
+        group: 'alpha',
+        depends_on: ['depA', 'depB']
+      }))`,
+    ),
+    JSON.stringify([
+      {
+        className: 'board-card-dependency board-card-dependency-blocked',
+        label: 'Blocked by 1',
+        title: 'Waiting on: API contract',
+      },
+      {
+        className: 'board-card-dependency board-card-dependency-blocking',
+        label: 'Blocks 2',
+        title: 'Blocking: Rollout docs, Release notes',
+      },
+    ]),
+  );
+});
+
+test('_renderBoardCard shows inline dependency badges instead of the old generic deps pill', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+
+  context.state.board_tasks = {
+    dep: { id: 'dep', task: 'API contract', lane: 'To Do', group: 'alpha' },
+    blocked: {
+      id: 'blocked',
+      task: 'Rollout docs',
+      lane: 'Backlog',
+      group: 'alpha',
+      depends_on: ['task-1'],
+    },
+  };
+
+  const html = runInContext(context, `
+    _renderBoardCard({
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      lane: 'Backlog',
+      depends_on: ['dep'],
+      labels: []
+    }, {}, 0)
+  `);
+
+  assert.match(html, /board-card-dependency-blocked/);
+  assert.match(html, />Blocked by 1</);
+  assert.match(html, /board-card-dependency-blocking/);
+  assert.match(html, />Blocks 1</);
+  assert.doesNotMatch(html, /&#x1F512; deps/);
+});
+
 test('renderBoardCard shows verification badges and preview text', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);

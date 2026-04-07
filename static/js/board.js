@@ -1426,6 +1426,58 @@ function _boardDepsBlocked(t) {
   return false;
 }
 
+function _boardActiveDependentNames(task) {
+  if (!task || !task.id || task.lane === 'Done') return [];
+  var tasks = _boardTasks();
+  var names = [];
+  for (var id in tasks) {
+    var candidate = tasks[id];
+    if (!candidate || candidate.lane === 'Done') continue;
+    if (Array.isArray(candidate.depends_on)
+        && candidate.depends_on.indexOf(task.id) >= 0) {
+      names.push(candidate.task || candidate.id);
+    }
+  }
+  return names;
+}
+
+function _boardTaskDependencyBadges(task) {
+  if (!task) return [];
+  var badges = [];
+  var deps = Array.isArray(task.depends_on) ? task.depends_on : [];
+  var unmetDeps = _boardUnmetDependencyNames(task);
+  if (deps.length) {
+    if (unmetDeps.length) {
+      var unmetPreview = unmetDeps.slice(0, 2).join(', ');
+      if (unmetDeps.length > 2) unmetPreview += ', +' + (unmetDeps.length - 2);
+      badges.push({
+        className: 'board-card-dependency board-card-dependency-blocked',
+        label: 'Blocked by ' + unmetDeps.length,
+        title: 'Waiting on: ' + unmetPreview,
+      });
+    } else {
+      badges.push({
+        className: 'board-card-dependency board-card-dependency-ready',
+        label: 'Deps ' + deps.length,
+        title: deps.length + ' dependenc' + (deps.length === 1 ? 'y is' : 'ies are') + ' satisfied',
+      });
+    }
+  }
+  var activeDependents = _boardActiveDependentNames(task);
+  if (activeDependents.length) {
+    var blockingPreview = activeDependents.slice(0, 2).join(', ');
+    if (activeDependents.length > 2) {
+      blockingPreview += ', +' + (activeDependents.length - 2);
+    }
+    badges.push({
+      className: 'board-card-dependency board-card-dependency-blocking',
+      label: 'Blocks ' + activeDependents.length,
+      title: 'Blocking: ' + blockingPreview,
+    });
+  }
+  return badges;
+}
+
 function _boardTaskPriority(task) {
   var labels = (task && task.labels) || [];
   for (var i = 0; i < labels.length; i++) {
@@ -1669,8 +1721,11 @@ function _renderBoardCard(t, childrenOf, depth) {
       meta += '<span class="' + cls + '">' + esc(displayLabel(lb)) + '</span>';
     }
   }
-  if (!isDone && _boardDepsBlocked(t)) {
-    meta += '<span class="board-card-label board-label-dep-blocked" title="Blocked by dependencies">&#x1F512; deps</span>';
+  var dependencyBadges = _boardTaskDependencyBadges(t);
+  for (var dbi = 0; dbi < dependencyBadges.length; dbi++) {
+    var depBadge = dependencyBadges[dbi];
+    meta += '<span class="board-card-label ' + esc(depBadge.className)
+      + '" title="' + esc(depBadge.title) + '">' + esc(depBadge.label) + '</span>';
   }
   var scheduleMeta = _boardTaskScheduleMeta(t);
   if (scheduleMeta) {

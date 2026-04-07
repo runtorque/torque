@@ -3081,6 +3081,21 @@ body.diff-view-open #ctx-menu {
   background: color-mix(in srgb, var(--amber) 15%, transparent);
   cursor: help;
 }
+.board-card-dependency {
+  font-weight: 600;
+}
+.board-card-dependency-blocked {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+}
+.board-card-dependency-ready {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
+}
+.board-card-dependency-blocking {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
 .deps-dropdown {
   position: absolute; left: 0; right: 0; z-index: 20;
   background: var(--bg-surface);
