@@ -462,6 +462,31 @@
               placeholder="Optional longer context or details..."
               oninput="taskAutoResize(this);taskPersistDraft()"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+    <label>Labels
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Type a label and press Enter to add it.">?</span>
+    </label>
+    <div style="position:relative">
+      <input id="task-labels-input" autocomplete="off" placeholder="Type and press Enter"
+             oninput="taskLabelsSearch(event)" onkeydown="taskLabelsKeydown(event)">
+      <div id="task-labels-dropdown" class="deps-dropdown" style="display:none"></div>
+    </div>
+    <div id="task-labels-chips" class="label-chips"></div>
+    <label>Dependencies
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
+            data-hint="Tasks that must be Done before this task can be dispatched. Type to search.">?</span>
+    </label>
+    <div style="position:relative">
+      <input id="task-deps-input" autocomplete="off" placeholder="Search tasks..."
+             oninput="taskDepsSearch(event)" onkeydown="taskDepsKeydown(event)">
+      <div id="task-deps-dropdown" class="deps-dropdown" style="display:none"></div>
+    </div>
+    <div id="task-deps-chips" class="label-chips"></div>
+    <label>Schedule dispatch
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Set a date/time to auto-dispatch this task. Leave empty to dispatch manually.">?</span>
+    </label>
+    <input type="datetime-local" id="task-scheduled-input"
+           oninput="taskPersistDraft()"
+           onkeydown="if(event.key==='Escape')closeModals();">
     <label>Images
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Drag-and-drop screenshots or click Add images. Image paths are included in agent prompts and shown in artifact browsers.">?</span>
     </label>
@@ -505,93 +530,92 @@
             onkeydown="if(event.key==='Escape')closeModals();">
       <option value="">None</option>
     </select>
-    <label>External provider</label>
-    <input id="task-external-provider-input" autocomplete="off"
-           placeholder="e.g. github, jira, linear"
-           oninput="taskPersistDraft()"
-           onkeydown="if(event.key==='Escape')closeModals();">
-    <label>External ID</label>
-    <input id="task-external-id-input" autocomplete="off"
-           placeholder="e.g. owner/repo#123 or PROJ-123"
-           oninput="taskPersistDraft()"
-           onkeydown="if(event.key==='Escape')closeModals();">
-    <label>External URL</label>
-    <input id="task-external-url-input" autocomplete="off"
-           placeholder="https://…"
-           oninput="taskPersistDraft()"
-           onkeydown="if(event.key==='Escape')closeModals();">
     <div id="task-action-vars"></div>
-    <label>Schedule dispatch
-      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Set a date/time to auto-dispatch this task. Leave empty to dispatch manually.">?</span>
-    </label>
-    <input type="datetime-local" id="task-scheduled-input"
-           oninput="taskPersistDraft()"
-           onkeydown="if(event.key==='Escape')closeModals();">
-    <label>Verification
-      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optional manual deploy/restart/smoke checkpoint summary for user-visible or runtime-affecting work.">?</span>
-    </label>
-    <select id="task-verification-mode-input"
-            onchange="taskPersistDraft()"
-            onkeydown="if(event.key==='Escape')closeModals();">
-      <option value="">None</option>
-      <option value="deploy">Deploy</option>
-      <option value="restart">Restart</option>
-    </select>
-    <select id="task-verification-state-input"
-            onchange="taskPersistDraft()"
-            onkeydown="if(event.key==='Escape')closeModals();">
-      <option value="">No state</option>
-      <option value="pending">Pending</option>
-      <option value="attempted">Attempted</option>
-      <option value="passed">Passed</option>
-      <option value="failed">Failed</option>
-    </select>
-    <input id="task-verification-tests-input" autocomplete="off"
-           placeholder="Tests run summary"
-           oninput="taskPersistDraft()"
-           onkeydown="if(event.key==='Escape')closeModals();">
-    <label class="gs-checkbox">
-      <input id="task-verification-smoke-input" type="checkbox"
-             onchange="taskPersistDraft()">
-      <span>Manual smoke done</span>
-    </label>
-    <label class="gs-checkbox">
-      <input id="task-verification-deploy-needed-input" type="checkbox"
-             onchange="taskPersistDraft()">
-      <span>Deploy needed</span>
-    </label>
-    <label class="gs-checkbox">
-      <input id="task-verification-deploy-attempted-input" type="checkbox"
-             onchange="taskPersistDraft()">
-      <span>Deploy/restart attempted</span>
-    </label>
-    <textarea id="task-verification-human-input" rows="2" autocomplete="off"
-              placeholder="What still needs human validation?"
-              oninput="taskAutoResize(this);taskPersistDraft()"
-              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-    <textarea id="task-verification-notes-input" rows="2" autocomplete="off"
-              placeholder="Verification notes..."
-              oninput="taskAutoResize(this);taskPersistDraft()"
-              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-    <label>Labels
-      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Type a label and press Enter to add it.">?</span>
-    </label>
-    <div style="position:relative">
-      <input id="task-labels-input" autocomplete="off" placeholder="Type and press Enter"
-             oninput="taskLabelsSearch(event)" onkeydown="taskLabelsKeydown(event)">
-      <div id="task-labels-dropdown" class="deps-dropdown" style="display:none"></div>
-    </div>
-    <div id="task-labels-chips" class="label-chips"></div>
-    <label>Dependencies
-      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)"
-            data-hint="Tasks that must be Done before this task can be dispatched. Type to search.">?</span>
-    </label>
-    <div style="position:relative">
-      <input id="task-deps-input" autocomplete="off" placeholder="Search tasks..."
-             oninput="taskDepsSearch(event)" onkeydown="taskDepsKeydown(event)">
-      <div id="task-deps-dropdown" class="deps-dropdown" style="display:none"></div>
-    </div>
-    <div id="task-deps-chips" class="label-chips"></div>
+    <details class="task-modal-section">
+      <summary>External
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optional provider and link metadata for syncing this task with another system.">?</span>
+      </summary>
+      <div class="task-modal-section-body">
+        <label>External provider</label>
+        <input id="task-external-provider-input" autocomplete="off"
+               placeholder="e.g. github, jira, linear"
+               oninput="taskPersistDraft()"
+               onkeydown="if(event.key==='Escape')closeModals();">
+        <label>External ID</label>
+        <input id="task-external-id-input" autocomplete="off"
+               placeholder="e.g. owner/repo#123 or PROJ-123"
+               oninput="taskPersistDraft()"
+               onkeydown="if(event.key==='Escape')closeModals();">
+        <label>External URL</label>
+        <input id="task-external-url-input" autocomplete="off"
+               placeholder="https://…"
+               oninput="taskPersistDraft()"
+               onkeydown="if(event.key==='Escape')closeModals();">
+      </div>
+    </details>
+    <details class="task-modal-section">
+      <summary>Verification
+        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optional manual deploy/restart/smoke checkpoint summary for user-visible or runtime-affecting work.">?</span>
+      </summary>
+      <div class="task-modal-section-body">
+        <div class="task-modal-grid">
+          <div>
+            <label>Mode</label>
+            <select id="task-verification-mode-input"
+                    onchange="taskPersistDraft()"
+                    onkeydown="if(event.key==='Escape')closeModals();">
+              <option value="">None</option>
+              <option value="deploy">Deploy</option>
+              <option value="restart">Restart</option>
+            </select>
+          </div>
+          <div>
+            <label>State</label>
+            <select id="task-verification-state-input"
+                    onchange="taskPersistDraft()"
+                    onkeydown="if(event.key==='Escape')closeModals();">
+              <option value="">No state</option>
+              <option value="pending">Pending</option>
+              <option value="attempted">Attempted</option>
+              <option value="passed">Passed</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
+        </div>
+        <label>Tests run</label>
+        <input id="task-verification-tests-input" autocomplete="off"
+               placeholder="Tests run summary"
+               oninput="taskPersistDraft()"
+               onkeydown="if(event.key==='Escape')closeModals();">
+        <div class="task-modal-check-grid">
+          <label class="gs-checkbox">
+            <input id="task-verification-smoke-input" type="checkbox"
+                   onchange="taskPersistDraft()">
+            <span>Manual smoke done</span>
+          </label>
+          <label class="gs-checkbox">
+            <input id="task-verification-deploy-needed-input" type="checkbox"
+                   onchange="taskPersistDraft()">
+            <span>Deploy needed</span>
+          </label>
+          <label class="gs-checkbox">
+            <input id="task-verification-deploy-attempted-input" type="checkbox"
+                   onchange="taskPersistDraft()">
+            <span>Deploy/restart attempted</span>
+          </label>
+        </div>
+        <label>Human validation pending</label>
+        <textarea id="task-verification-human-input" rows="2" autocomplete="off"
+                  placeholder="What still needs human validation?"
+                  oninput="taskAutoResize(this);taskPersistDraft()"
+                  onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+        <label>Notes</label>
+        <textarea id="task-verification-notes-input" rows="2" autocomplete="off"
+                  placeholder="Verification notes..."
+                  oninput="taskAutoResize(this);taskPersistDraft()"
+                  onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+      </div>
+    </details>
     </div>
     <div class="modal-actions">
       <button class="btn-secondary" id="task-preview-btn" onclick="previewTaskPrompt()" style="display:none">Preview</button>

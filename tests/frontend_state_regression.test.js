@@ -2490,6 +2490,17 @@ test('openEditTask populates modal state from the task and preserves editable ve
   document.register('task-group-select');
   document.register('task-template-select');
   document.register('task-action-select');
+  document.register('task-external-provider-input');
+  document.register('task-external-id-input');
+  document.register('task-external-url-input');
+  document.register('task-verification-mode-input');
+  document.register('task-verification-state-input');
+  document.register('task-verification-tests-input');
+  document.register('task-verification-smoke-input').checked = false;
+  document.register('task-verification-deploy-needed-input').checked = false;
+  document.register('task-verification-deploy-attempted-input').checked = false;
+  document.register('task-verification-human-input');
+  document.register('task-verification-notes-input');
   const modal = document.register('modal-task');
 
   context.state.groups = { alpha: [], beta: [] };
@@ -2511,6 +2522,19 @@ test('openEditTask populates modal state from the task and preserves editable ve
       action_vars: { OWNER: 'frontend' },
       group: 'beta',
       scheduled_at: futureIso,
+      provider: 'github',
+      external_id: 'openai/example#42',
+      external_url: 'https://github.com/openai/example/issues/42',
+      verification_mode: 'deploy',
+      verification_state: 'pending',
+      verification_notes: 'Smoke after deploy',
+      verification_summary: {
+        tests_run: 'npm test -- modal',
+        manual_smoke_done: true,
+        deploy_needed: true,
+        deploy_attempted: false,
+        human_validation_pending: 'Confirm the modal in production',
+      },
     },
   };
 
@@ -2528,6 +2552,26 @@ test('openEditTask populates modal state from the task and preserves editable ve
   assert.deepEqual(jsonValue(context, '_taskSystemLabels'), ['loom:blocked']);
   assert.deepEqual(jsonValue(context, '_taskDeps'), ['dep']);
   assert.equal(document.getElementById('task-group-select').value, 'beta');
+  assert.equal(document.getElementById('task-external-provider-input').value, 'github');
+  assert.equal(document.getElementById('task-external-id-input').value, 'openai/example#42');
+  assert.equal(
+    document.getElementById('task-external-url-input').value,
+    'https://github.com/openai/example/issues/42',
+  );
+  assert.equal(document.getElementById('task-verification-mode-input').value, 'deploy');
+  assert.equal(document.getElementById('task-verification-state-input').value, 'pending');
+  assert.equal(
+    document.getElementById('task-verification-tests-input').value,
+    'npm test -- modal',
+  );
+  assert.equal(document.getElementById('task-verification-smoke-input').checked, true);
+  assert.equal(document.getElementById('task-verification-deploy-needed-input').checked, true);
+  assert.equal(document.getElementById('task-verification-deploy-attempted-input').checked, false);
+  assert.equal(
+    document.getElementById('task-verification-human-input').value,
+    'Confirm the modal in production',
+  );
+  assert.equal(document.getElementById('task-verification-notes-input').value, 'Smoke after deploy');
   assert.equal(modal.classList.contains('visible'), true);
   assert.equal(document.getElementById('task-task-input').focused, true);
   assert.equal(document.getElementById('task-task-input').selected, true);
@@ -2613,6 +2657,42 @@ test('task modal keeps a scrollable body separate from its footer actions', () =
   assert.match(html, /<div id="task-modal-body" class="task-modal-body">[\s\S]*<div class="modal-actions">/);
   assert.match(css, /#modal-task \.modal\s*\{[^}]*overflow:\s*hidden;/);
   assert.match(css, /\.task-modal-body\s*\{[^}]*flex:\s*1;[^}]*overflow-y:\s*auto;/);
+});
+
+test('task modal prioritizes labels, dependencies, and schedule before lower-frequency sections', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const descriptionIndex = html.indexOf('<label>Description</label>');
+  const labelsIndex = html.indexOf('<label>Labels');
+  const depsIndex = html.indexOf('<label>Dependencies');
+  const scheduleIndex = html.indexOf('<label>Schedule dispatch');
+  const imagesIndex = html.indexOf('<label>Images');
+  const externalIndex = html.indexOf('<summary>External');
+  const verificationIndex = html.indexOf('<summary>Verification');
+
+  assert.notEqual(descriptionIndex, -1);
+  assert.notEqual(labelsIndex, -1);
+  assert.notEqual(depsIndex, -1);
+  assert.notEqual(scheduleIndex, -1);
+  assert.notEqual(imagesIndex, -1);
+  assert.notEqual(externalIndex, -1);
+  assert.notEqual(verificationIndex, -1);
+  assert.ok(descriptionIndex < labelsIndex);
+  assert.ok(labelsIndex < depsIndex);
+  assert.ok(depsIndex < scheduleIndex);
+  assert.ok(scheduleIndex < imagesIndex);
+  assert.ok(externalIndex < verificationIndex);
+});
+
+test('task modal keeps external and verification collapsed by default with responsive section styles', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(html, /<details class="task-modal-section">\s*<summary>External/);
+  assert.match(html, /<details class="task-modal-section">\s*<summary>Verification/);
+  assert.equal(html.includes('<details class="task-modal-section" open>'), false);
+  assert.match(css, /\.task-modal-section\s*\{/);
+  assert.match(css, /\.task-modal-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(120px,\s*1fr\)\);/);
+  assert.match(css, /\.task-modal-check-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(160px,\s*1fr\)\);/);
 });
 
 test('submitTask includes structured artifacts alongside attachments when editing a task', () => {
