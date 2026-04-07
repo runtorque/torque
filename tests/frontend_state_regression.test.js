@@ -1419,6 +1419,73 @@ test('_renderBoardCard hides redundant group chips and only shows execution badg
   assert.equal((html.match(/board-card-health-stalled/g) || []).length, 1);
 });
 
+test('_boardLaneEntryText and refresh delay track the current lane age', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+
+  assert.equal(
+    runInContext(
+      context,
+      `_boardLaneEntryText(
+        { lane_entered_at: '2026-04-07T12:00:00Z' },
+        Date.parse('2026-04-07T12:05:00Z')
+      )`,
+    ),
+    '[5m ago]',
+  );
+  assert.equal(
+    runInContext(
+      context,
+      `_boardLaneEntryText(
+        { lane_entered_at: '2026-04-07T12:00:00Z' },
+        Date.parse('2026-04-07T12:06:00Z')
+      )`,
+    ),
+    '[6m ago]',
+  );
+  assert.equal(
+    runInContext(
+      context,
+      `_boardLaneEntryNextRefreshDelay(
+        { lane_entered_at: '2026-04-07T12:00:00Z' },
+        Date.parse('2026-04-07T12:05:59Z')
+      )`,
+    ),
+    1000,
+  );
+});
+
+test('_renderBoardCard shows the lane-entry timestamp badge in the card header', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  context.Date.now = () => Date.parse('2026-04-07T12:05:00Z');
+  loadScript(context, 'static/js/board.js');
+
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Keep the board readable',
+      lane: 'In Progress',
+      lane_entered_at: '2026-04-07T12:00:00Z',
+      position: 1,
+    },
+  };
+
+  const html = runInContext(context, `
+    _renderBoardCard(
+      state.board_tasks.root,
+      {},
+      0
+    )
+  `);
+
+  assert.match(html, /board-card-heading/);
+  assert.match(html, /board-card-lane-entered/);
+  assert.match(html, /\[5m ago\]/);
+});
+
 test('renderBoardCard shows verification badges and preview text', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);

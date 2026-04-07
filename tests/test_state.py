@@ -321,6 +321,7 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertIsNotNone(task)
         self.assertEqual(task.lane, "Backlog")
         self.assertEqual(task.position, 0)
+        self.assertEqual(task.lane_entered_at, task.created_at)
         self.assertEqual(task.depends_on, ["dep-1"])
         self.assertEqual(task.artifacts[0]["type"], "log")
         self.assertEqual(task.artifacts[0]["prompt"]["mode"], "summary")
@@ -368,12 +369,18 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             "Confirm prod login redirect",
         )
         self.assertNotEqual(updated.slug, original_slug)
+        self.assertEqual(updated.lane_entered_at, task.created_at)
 
+        updated.lane_entered_at = "2026-04-06T00:30:00+00:00"
         state.board_move_task(task.id, "Done")
 
         finished = state.board_tasks[task.id]
         self.assertEqual(finished.lane, "Done")
         self.assertEqual(finished.labels, ["keep"])
+        self.assertNotEqual(
+            finished.lane_entered_at,
+            "2026-04-06T00:30:00+00:00",
+        )
 
         state.board_remove_task(dep.id)
 
@@ -408,6 +415,33 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
 
         state.board_move_task(task_b.id, "Done")
         self.assertTrue(state.board_deps_met(state.board_tasks[task_a.id]))
+
+    def test_lane_transition_timestamp_tracks_update_and_remove_lane_moves(self):
+        state = self._make_state()
+        state.board_add_lane("Review")
+        task = state.board_add_task(
+            "Review the patch",
+            "g",
+            lane="Backlog",
+            id="task-review",
+        )
+
+        self.assertIsNotNone(task)
+        self.assertEqual(task.lane_entered_at, task.created_at)
+
+        original_lane_entered_at = task.lane_entered_at
+        state.board_update_task(task.id, lane="Review")
+
+        moved = state.board_tasks[task.id]
+        self.assertEqual(moved.lane, "Review")
+        self.assertNotEqual(moved.lane_entered_at, original_lane_entered_at)
+
+        before_remove = moved.lane_entered_at
+        state.board_remove_lane("Review", move_tasks_to="To Do")
+
+        moved_again = state.board_tasks[task.id]
+        self.assertEqual(moved_again.lane, "To Do")
+        self.assertNotEqual(moved_again.lane_entered_at, before_remove)
 
     def test_schedule_crud_tracks_due_items_and_slug_updates(self):
         state = self._make_state()

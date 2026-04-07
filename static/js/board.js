@@ -65,6 +65,7 @@ var _boardBatchActionWaiting = false; // waiting for batch action list
 var _boardBatchActionOptions = [];    // actions for batch edit action picker
 var _boardArchiveLabel = 'loom:archived';
 var _boardArchiveStaleDays = 7;
+var _boardLaneEntryRefreshTimer = 0;
 
 var _boardHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
 var _boardHealthLabels = {
@@ -516,6 +517,86 @@ function _boardTaskTimestampMs(task) {
   if (!iso) return 0;
   var stamp = new Date(iso).getTime();
   return isNaN(stamp) ? 0 : stamp;
+}
+
+function _boardLaneEntryTimestampMs(task) {
+  if (!task) return 0;
+  var iso = task.lane_entered_at || task.created_at || '';
+  if (!iso) return 0;
+  var stamp = new Date(iso).getTime();
+  return isNaN(stamp) ? 0 : stamp;
+}
+
+function _boardRelativeAgeText(diffSec) {
+  if (diffSec < 60) return 'just now';
+  if (diffSec < 3600) return Math.floor(diffSec / 60) + 'm ago';
+  if (diffSec < 86400) return Math.floor(diffSec / 3600) + 'h ago';
+  return Math.floor(diffSec / 86400) + 'd ago';
+}
+
+function _boardLaneEntryText(task, nowMs) {
+  var enteredAt = _boardLaneEntryTimestampMs(task);
+  if (!enteredAt) return '';
+  var current = typeof nowMs === 'number' ? nowMs : Date.now();
+  var diffSec = Math.max(0, Math.floor((current - enteredAt) / 1000));
+  return '[' + _boardRelativeAgeText(diffSec) + ']';
+}
+
+function _boardLaneEntryNextRefreshDelay(task, nowMs) {
+  var enteredAt = _boardLaneEntryTimestampMs(task);
+  if (!enteredAt) return 0;
+  var current = typeof nowMs === 'number' ? nowMs : Date.now();
+  var diffMs = Math.max(0, current - enteredAt);
+  if (diffMs < 60000) return 1000;
+  if (diffMs < 3600000) return 60000 - (diffMs % 60000) || 60000;
+  if (diffMs < 86400000) return 3600000 - (diffMs % 3600000) || 3600000;
+  return 86400000 - (diffMs % 86400000) || 86400000;
+}
+
+function _boardClearLaneEntryRefresh() {
+  if (!_boardLaneEntryRefreshTimer) return;
+  if (window && typeof window.clearTimeout === 'function') {
+    window.clearTimeout(_boardLaneEntryRefreshTimer);
+  }
+  _boardLaneEntryRefreshTimer = 0;
+}
+
+function _boardScheduleLaneEntryRefresh(delayMs) {
+  if (_boardShowSchedules
+      || (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board')
+      || !(delayMs > 0)) {
+    _boardClearLaneEntryRefresh();
+    return;
+  }
+  if (!window || typeof window.setTimeout !== 'function') return;
+  if (_boardLaneEntryRefreshTimer && typeof window.clearTimeout === 'function') {
+    window.clearTimeout(_boardLaneEntryRefreshTimer);
+  }
+  _boardLaneEntryRefreshTimer = window.setTimeout(function() {
+    _boardLaneEntryRefreshTimer = 0;
+    if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') return;
+    renderBoard();
+  }, Math.max(1000, delayMs));
+}
+
+function _boardVisibleLaneEntryRefreshDelay(rootTasks, childrenOf, renderCap) {
+  var nextDelay = 0;
+
+  function visit(task, depth) {
+    var delay = _boardLaneEntryNextRefreshDelay(task);
+    if (delay > 0 && (!nextDelay || delay < nextDelay)) nextDelay = delay;
+    var children = childrenOf[task.id] || [];
+    if (!children.length) return;
+    if (depth === 0 && _boardCollapsedTasks[task.id]) return;
+    for (var i = 0; i < children.length; i++) {
+      visit(children[i], depth + 1);
+    }
+  }
+
+  for (var i = 0; i < renderCap; i++) {
+    visit(rootTasks[i], 0);
+  }
+  return nextDelay;
 }
 
 function _boardTaskIdsWithDescendants(taskIds) {
@@ -1343,7 +1424,14 @@ function _renderBoardCard(t, childrenOf, depth) {
   cardHtml += '<div class="board-card-info">';
   // Done checkmark for subordinate cards
   var titlePrefix = (isSubordinate && isDone) ? '&#10003; ' : '';
+  var laneEntryText = _boardLaneEntryText(t);
+  cardHtml += '<div class="board-card-heading">';
   cardHtml += '<div class="board-card-title">' + titlePrefix + formatCode(t.task || '') + '</div>';
+  if (laneEntryText) {
+    cardHtml += '<div class="board-card-lane-entered" title="Entered current lane ' + esc(laneEntryText.slice(1, -1)) + '">'
+      + esc(laneEntryText) + '</div>';
+  }
+  cardHtml += '</div>';
   var meta = '';
   if (showExecutionState && t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
   if (showExecutionState && _boardTaskHealthState(t) !== 'healthy') {
@@ -1544,6 +1632,10 @@ function _boardAfterRenderLayout() {
 function renderBoard() {
   var panel = document.getElementById('panel-board');
   if (!panel) return;
+  if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') {
+    _boardClearLaneEntryRefresh();
+    return;
+  }
   var panelState = _captureSurfaceState(panel);
   var skipRestoreFocus = _boardAddTaskFocus || _boardSaveViewFocus;
   _boardSyncFiltersForCurrentGroup();
@@ -1907,6 +1999,9 @@ function renderBoard() {
   for (var j = 0; j < renderCap; j++) {
     html += _renderBoardCard(rootTasks[j], childrenOf, 0);
   }
+  _boardScheduleLaneEntryRefresh(
+    _boardVisibleLaneEntryRefreshDelay(rootTasks, childrenOf, renderCap)
+  );
   if (rootTasks.length > renderCap) {
     var remaining = rootTasks.length - renderCap;
     html += '<div class="board-load-more" onclick="boardLoadMore()">'

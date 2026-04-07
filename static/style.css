@@ -1252,6 +1252,10 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   font-size: 9px;
   -webkit-line-clamp: 2;
 }
+.board-density-compact .board-card-lane-entered {
+  font-size: 7px;
+  line-height: 12px;
+}
 .board-density-compact .board-card-meta {
   gap: 2px;
   margin-top: 0;
@@ -1286,6 +1290,9 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-density-detailed .board-card-title {
   font-size: 11px;
   -webkit-line-clamp: 6;
+}
+.board-density-detailed .board-card-lane-entered {
+  font-size: 9px;
 }
 .board-density-detailed .board-card-meta {
   gap: 4px;
@@ -1335,11 +1342,25 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   flex: 1; min-width: 0;
   display: flex; flex-direction: column; gap: 1px;
 }
+.board-card-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
 .board-card-title {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 10px; font-weight: 500;
   white-space: normal; word-break: break-word;
   display: -webkit-box; -webkit-line-clamp: 4;
   -webkit-box-orient: vertical; overflow: hidden;
+}
+.board-card-lane-entered {
+  flex: 0 0 auto;
+  font-size: 8px;
+  line-height: 14px;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 .board-card-meta {
   display: flex; flex-wrap: wrap; gap: 3px; margin-top: 1px;
@@ -1579,6 +1600,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   padding: 3px 6px;
 }
 .board-card-subordinate .board-card-title { font-size: 9px; }
+.board-card-subordinate .board-card-lane-entered { font-size: 7px; }
 .board-card-subordinate .board-card-dot { width: 5px; height: 5px; }
 .board-card-subordinate .board-card-meta { gap: 2px; }
 .board-card-subordinate .board-card-label { font-size: 7px; }
