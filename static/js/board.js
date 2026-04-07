@@ -46,6 +46,7 @@ var _boardShowArchived = false;  // include archived tasks in the active board v
 var _boardSavingView = false;    // inline saved-view naming control visibility
 var _boardSavingViewName = '';   // draft name for inline saved-view creation
 var _boardSaveViewFocus = false; // focus the inline saved-view input after render
+var _boardRevealFocusOnRender = false; // scroll the focused card into view after navigation
 var _boardRenderLimit = 50;      // virtual scroll: render this many root tasks initially
 var _boardSelectedTasks = {};    // task_id → true for multi-select
 var _boardLastSelectedTask = ''; // last clicked task for shift-range select
@@ -1528,6 +1529,13 @@ function _boardAfterRenderLayout() {
         }
       });
     }
+    if (_boardRevealFocusOnRender) {
+      _boardRevealFocusOnRender = false;
+      var focusedCard = document.querySelector('.board-card.focused');
+      if (focusedCard && typeof focusedCard.scrollIntoView === 'function') {
+        focusedCard.scrollIntoView({ block: 'nearest' });
+      }
+    }
   });
 }
 
@@ -2551,6 +2559,95 @@ function boardFocusAgent(agentId) {
     selectedAgentId = agentId;
     focusedItemId = agentId;
   }
+}
+
+function _boardRevealTaskRootId(taskId, visibleTasks) {
+  var rootId = taskId;
+  var current = visibleTasks[rootId];
+  while (current && current.parent_task_id && visibleTasks[current.parent_task_id]) {
+    _boardCollapsedTasks[current.parent_task_id] = false;
+    rootId = current.parent_task_id;
+    current = visibleTasks[rootId];
+  }
+  return rootId;
+}
+
+function _boardEnsureRenderLimitForTask(taskId) {
+  var visibleTasks = _boardVisibleTasks();
+  if (!visibleTasks[taskId]) return;
+  var rootId = _boardRevealTaskRootId(taskId, visibleTasks);
+  var laneTasks = _boardTasksInLane(_boardSelectedLane);
+  var rootIndex = -1;
+  var rootCount = 0;
+  for (var i = 0; i < laneTasks.length; i++) {
+    var task = laneTasks[i];
+    if (task.parent_task_id && visibleTasks[task.parent_task_id]) continue;
+    if (task.id === rootId) {
+      rootIndex = rootCount;
+      break;
+    }
+    rootCount += 1;
+  }
+  if (rootIndex >= 0 && rootIndex >= _boardRenderLimit) {
+    _boardRenderLimit = Math.ceil((rootIndex + 1) / 50) * 50;
+  }
+}
+
+function boardNavigateToTask(taskId) {
+  var task = _boardTasks()[taskId];
+  if (!task) return;
+
+  if (_boardFilterByGroup && task.group && typeof _currentGroup === 'function'
+      && _currentGroup() !== task.group
+      && typeof selectedAgentId !== 'undefined'
+      && state && state.agents) {
+    if (task.agent_id && state.agents[task.agent_id]) {
+      selectedAgentId = task.agent_id;
+    } else {
+      for (var agentId in state.agents) {
+        var agent = state.agents[agentId];
+        if (agent && agent.cell_type === 'agent' && agent.group === task.group) {
+          selectedAgentId = agentId;
+          break;
+        }
+      }
+    }
+  }
+
+  _boardPrepareViewChange(true);
+  _boardShowSchedules = false;
+  _boardSearchQuery = '';
+  _boardQuickView = '';
+  _boardFilterLabels = [];
+  _boardFilterActions = [];
+  _boardFilterAgents = [];
+  _boardFilterHealth = [];
+  _boardPreFilterLane = '';
+  if (_boardIsArchived(task)) _boardShowArchived = true;
+  if (typeof _boardCloseFilterDropdown === 'function') _boardCloseFilterDropdown();
+  if (typeof _boardCloseViewMenu === 'function') _boardCloseViewMenu();
+
+  _boardSelectedLane = task.lane || _boardSelectedLane || _boardLanes()[0] || '';
+  _boardFocusedTask = task.id;
+  _boardSelectedTasks = {};
+  _boardLastSelectedTask = task.id;
+  _boardQuickEditTask = '';
+  _boardQuickEditKind = '';
+  _boardQuickLabelDraft = '';
+  _boardQuickDueDraft = '';
+  _boardCardsScrollTop = 0;
+  _boardResetBatchEdit();
+  _boardEnsureRenderLimitForTask(task.id);
+  _boardRevealFocusOnRender = true;
+  _boardPersistFilterState();
+
+  if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board'
+      && typeof togglePanel === 'function') {
+    togglePanel('board');
+    return;
+  }
+  if (typeof _activePanelApp !== 'undefined') _activePanelApp = 'board';
+  renderBoard();
 }
 
 function boardQuickLabelInput(value) {

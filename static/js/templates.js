@@ -449,6 +449,11 @@ function agentHistoryFocusAgent(agentId) {
   send({ cmd: 'focus_agent', id: agentId });
 }
 
+function agentHistoryOpenTask(taskId) {
+  if (!taskId || typeof boardNavigateToTask !== 'function') return;
+  boardNavigateToTask(taskId);
+}
+
 function renderAgentHistoryView() {
   var container = document.getElementById('agent-history-container');
   if (!container) return;
@@ -574,7 +579,7 @@ function renderAgentHistoryExpanded() {
       var outClass = 'ah-outcome-' + outcome.replace(/[^a-z]/g, '');
       var hasTask = t.task_id && (state.board_tasks || {})[t.task_id];
       html += '<div class="ah-task-row' + (hasTask ? ' ah-clickable' : '') + '"'
-        + (hasTask ? ' onclick="boardNavigateToTask(\'' + esc(t.task_id) + '\')"' : '') + '>';
+        + (hasTask ? ' onclick="agentHistoryOpenTask(\'' + esc(t.task_id) + '\')"' : '') + '>';
       html += '<span class="ah-task-outcome ' + outClass + '">' + esc(outcome) + '</span>';
       html += '<span class="ah-task-title">' + esc(t.task_title) + '</span>';
       html += '<span class="ah-meta">' + _ahFmtTs(t.started_at) + '</span>';
@@ -602,7 +607,7 @@ function renderAgentHistoryExpanded() {
       html += '<span class="ah-meta">' + _ahFmtTs(m.timestamp) + '</span>';
       if (hasTaskLink) {
         html += '<span class="ah-task-link" title="View task on board"'
-          + ' onclick="event.stopPropagation();boardNavigateToTask(\'' + esc(m.task_id) + '\')">\u2192</span>';
+          + ' onclick="event.stopPropagation();agentHistoryOpenTask(\'' + esc(m.task_id) + '\')">\u2192</span>';
       }
       html += '</div>';
       if (hasText) {
