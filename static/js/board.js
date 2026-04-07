@@ -25,13 +25,33 @@ var _boardFilterLabels = [];     // active label filters (OR logic)
 var _boardFilterActions = [];    // active action name filters (OR logic)
 var _boardSearchTimer = null;    // debounce timer for search input
 var _boardFilterAgents = [];    // active agent ID filters (OR logic)
-var _boardFilterDropdownType = null;   // 'label' | 'action' | 'agent' | null
+var _boardFilterHealth = [];    // active health filters (OR logic)
+var _boardFilterDropdownType = null;   // 'label' | 'action' | 'agent' | 'health' | null
 var _boardFilterDropdownCleanup = null;
 var _boardPreFilterLane = '';    // saved lane before search, restored on clear
 var _boardShowSchedules = false; // true when "Schedules" tab is active
 var _boardRenderLimit = 50;      // virtual scroll: render this many root tasks initially
 var _boardSelectedTasks = {};    // task_id → true for multi-select
 var _boardLastSelectedTask = ''; // last clicked task for shift-range select
+
+var _boardHealthOrder = ['blocked', 'stalled', 'thrashing', 'idle-risk'];
+var _boardHealthLabels = {
+  'blocked': 'Blocked',
+  'stalled': 'Stalled',
+  'thrashing': 'Thrashing',
+  'idle-risk': 'Idle risk',
+  'healthy': 'Healthy',
+};
+var _boardHealthReasonLabels = {
+  'awaiting_human': 'awaiting human',
+  'explicit_blocked': 'explicitly blocked',
+  'dependency_blocked': 'dependency blocked',
+  'agent_waiting': 'agent waiting',
+  'message_churn': 'message churn',
+  'no_progress_timeout': 'no progress timeout',
+  'progress_silence_warning': 'quiet progress window',
+  'no_recent_signal': 'no recent signal',
+};
 
 /* ---- Helpers -------------------------------------------------------- */
 
@@ -110,6 +130,17 @@ function _boardVisibleTasks() {
     }
     out = filtered;
   }
+  // Health filter (OR — task matches if its health state is selected)
+  if (_boardFilterHealth.length) {
+    var filtered = {};
+    for (var id in out) {
+      var t = out[id];
+      if (_boardFilterHealth.indexOf(_boardTaskHealthState(t)) >= 0) {
+        filtered[id] = t;
+      }
+    }
+    out = filtered;
+  }
   return out;
 }
 
@@ -137,7 +168,7 @@ function _boardLaneCount(lane) {
 }
 
 function _boardHasActiveFilters() {
-  return _boardSearchQuery !== '' || _boardFilterLabels.length > 0 || _boardFilterActions.length > 0 || _boardFilterAgents.length > 0;
+  return _boardSearchQuery !== '' || _boardFilterLabels.length > 0 || _boardFilterActions.length > 0 || _boardFilterAgents.length > 0 || _boardFilterHealth.length > 0;
 }
 
 /** Collect all labels with counts (before search/label/action filters). */
@@ -202,6 +233,73 @@ function _boardAllAgentCounts() {
   return counts;
 }
 
+/** Collect all unhealthy task health states with counts from tasks. */
+function _boardAllHealthCounts() {
+  var all = _boardTasks();
+  var pool = {};
+  if (_boardFilterByGroup) {
+    var grp = _currentGroup();
+    if (grp) {
+      for (var id in all) { if (all[id].group === grp) pool[id] = all[id]; }
+    } else { pool = all; }
+  } else { pool = all; }
+  var counts = {};
+  for (var hi = 0; hi < _boardHealthOrder.length; hi++) {
+    counts[_boardHealthOrder[hi]] = 0;
+  }
+  for (var id in pool) {
+    var stateName = _boardTaskHealthState(pool[id]);
+    if (stateName !== 'healthy') {
+      counts[stateName] = (counts[stateName] || 0) + 1;
+    }
+  }
+  for (var ci = _boardHealthOrder.length - 1; ci >= 0; ci--) {
+    var key = _boardHealthOrder[ci];
+    if (!counts[key]) delete counts[key];
+  }
+  return counts;
+}
+
+function _boardTaskHealthState(task) {
+  if (!task || !task.health_state) return 'healthy';
+  return task.health_state;
+}
+
+function _boardHealthDisplayName(stateName) {
+  return _boardHealthLabels[stateName] || stateName;
+}
+
+function _boardHealthTitle(task) {
+  if (!task) return '';
+  var stateName = _boardTaskHealthState(task);
+  if (stateName === 'healthy') return '';
+  var parts = [_boardHealthDisplayName(stateName)];
+  var details = task.health_details || {};
+  if (details.aggregate && details.source_task_title) {
+    parts.push('via ' + details.source_task_title);
+  }
+  if (details.silence_secs) {
+    parts.push('no progress for ' + _boardFormatDuration(details.silence_secs));
+  } else if (details.reasons && details.reasons.length) {
+    var reasonText = _boardHealthReasonLabels[details.reasons[0]] || details.reasons[0];
+    parts.push(reasonText);
+  }
+  if (task.health_since) {
+    parts.push('since ' + new Date(task.health_since).toLocaleString());
+  }
+  return parts.join(' | ');
+}
+
+function _boardFormatDuration(seconds) {
+  seconds = +seconds || 0;
+  if (seconds <= 0) return '0m';
+  var minutes = Math.max(1, Math.floor(seconds / 60));
+  if (minutes < 60) return minutes + 'm';
+  var hours = Math.floor(minutes / 60);
+  var rem = minutes % 60;
+  return rem ? (hours + 'h ' + rem + 'm') : (hours + 'h');
+}
+
 function _boardAgentStatus(agentId) {
   if (!agentId || !state || !state.agents) return '';
   var a = state.agents[agentId];
@@ -261,6 +359,10 @@ function _renderBoardCard(t, childrenOf, depth) {
   cardHtml += '<div class="board-card-title">' + titlePrefix + formatCode(t.task || '') + '</div>';
   var meta = '';
   if (t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
+  if (_boardTaskHealthState(t) !== 'healthy') {
+    meta += '<span class="board-card-label board-card-health board-card-health-' + esc(_boardTaskHealthState(t))
+      + '" title="' + esc(_boardHealthTitle(t)) + '">' + esc(_boardHealthDisplayName(_boardTaskHealthState(t))) + '</span>';
+  }
   if (_boardHasActiveFilters() && t.lane) meta += '<span class="board-card-lane-badge">' + esc(t.lane) + '</span>';
   if (t.group && !isSubordinate) meta += '<span class="board-card-group">' + esc(t.group) + '</span>';
   if (t.action_name) meta += '<span class="board-card-label board-card-template">' + esc(t.action_name) + '</span>';
@@ -402,10 +504,12 @@ function renderBoard() {
   var labelCounts = _boardAllLabelCounts();
   var actionCounts = _boardAllActionCounts();
   var agentCounts = _boardAllAgentCounts();
+  var healthCounts = _boardAllHealthCounts();
   var hasLabels = Object.keys(labelCounts).length > 0;
   var hasActions = Object.keys(actionCounts).length > 0;
   var hasAgents = Object.keys(agentCounts).length > 0;
-  var showToolbar = hasLabels || hasActions || hasAgents || _boardSearchQuery || _boardFilterLabels.length || _boardFilterActions.length || _boardFilterAgents.length;
+  var hasHealth = Object.keys(healthCounts).length > 0;
+  var showToolbar = hasLabels || hasActions || hasAgents || hasHealth || _boardSearchQuery || _boardFilterLabels.length || _boardFilterActions.length || _boardFilterAgents.length || _boardFilterHealth.length;
 
   if (showToolbar) {
     html += '<div class="board-search-bar">';
@@ -439,13 +543,22 @@ function renderBoard() {
         + ' &#9662;</button>';
       html += '</div>';
     }
+    if (hasHealth || _boardFilterHealth.length) {
+      var healthFCount = _boardFilterHealth.length;
+      html += '<div class="board-filter-btn-wrap" id="board-health-filter-wrap">';
+      html += '<button class="board-filter-btn' + (healthFCount ? ' active' : '') + '"'
+        + ' onclick="boardToggleHealthFilter()">'
+        + 'Health' + (healthFCount ? ' <span class="board-filter-btn-count">' + healthFCount + '</span>' : '')
+        + ' &#9662;</button>';
+      html += '</div>';
+    }
     if (filtersActive) {
       html += '<button class="board-filter-clear" onclick="boardClearFilters()">Clear</button>';
     }
     html += '</div>';
 
     // Active filter chips
-    if (_boardFilterLabels.length || _boardFilterActions.length || _boardFilterAgents.length) {
+    if (_boardFilterLabels.length || _boardFilterActions.length || _boardFilterAgents.length || _boardFilterHealth.length) {
       html += '<div class="board-filter-active">';
       for (var fi = 0; fi < _boardFilterLabels.length; fi++) {
         var fl = _boardFilterLabels[fi];
@@ -464,6 +577,12 @@ function renderBoard() {
         html += '<span class="board-filter-active-chip board-filter-active-action"'
           + ' onclick="boardRemoveFilterAgent(\'' + esc(aid).replace(/'/g, "\\'") + '\')">'
           + esc(_boardAgentName(aid) || aid) + ' &times;</span>';
+      }
+      for (var fi = 0; fi < _boardFilterHealth.length; fi++) {
+        var hs = _boardFilterHealth[fi];
+        html += '<span class="board-filter-active-chip board-filter-active-health"'
+          + ' onclick="boardRemoveFilterHealth(\'' + esc(hs).replace(/'/g, "\\'") + '\')">'
+          + esc(_boardHealthDisplayName(hs)) + ' &times;</span>';
       }
       html += '</div>';
     }
@@ -1789,11 +1908,34 @@ function boardRemoveFilterAgent(agentId) {
   }
 }
 
+function boardToggleHealth(stateName) {
+  var idx = _boardFilterHealth.indexOf(stateName);
+  if (idx >= 0) {
+    _boardFilterHealth.splice(idx, 1);
+  } else {
+    _boardFilterHealth.push(stateName);
+  }
+  _boardCardsScrollTop = 0;
+  _boardRenderLimit = 50;
+  renderBoard();
+}
+
+function boardRemoveFilterHealth(stateName) {
+  var idx = _boardFilterHealth.indexOf(stateName);
+  if (idx >= 0) {
+    _boardFilterHealth.splice(idx, 1);
+    _boardCardsScrollTop = 0;
+    _boardRenderLimit = 50;
+    renderBoard();
+  }
+}
+
 function boardClearFilters() {
   _boardSearchQuery = '';
   _boardFilterLabels = [];
   _boardFilterActions = [];
   _boardFilterAgents = [];
+  _boardFilterHealth = [];
   _boardCloseFilterDropdown();
   _boardCardsScrollTop = 0;
   _boardRenderLimit = 50;
@@ -1847,6 +1989,21 @@ function boardToggleAgentFilter() {
   _boardOpenFilterDropdown('board-agent-filter-wrap', 'agent', ids, counts, _boardFilterAgents);
 }
 
+function boardToggleHealthFilter() {
+  if (_boardFilterDropdownType === 'health') {
+    _boardCloseFilterDropdown();
+    return;
+  }
+  _boardCloseFilterDropdown();
+  var counts = _boardAllHealthCounts();
+  var names = _boardHealthOrder.filter(function(name) {
+    return counts[name] || _boardFilterHealth.indexOf(name) >= 0;
+  });
+  if (!names.length) return;
+  _boardFilterDropdownType = 'health';
+  _boardOpenFilterDropdown('board-health-filter-wrap', 'health', names, counts, _boardFilterHealth);
+}
+
 function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
   var wrap = document.getElementById(wrapId);
   if (!wrap) return;
@@ -1864,7 +2021,7 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
   var search = document.createElement('input');
   search.type = 'text';
   search.className = 'board-filter-dropdown-search';
-  search.placeholder = 'Filter ' + kind + 's\u2026';
+  search.placeholder = 'Filter ' + (kind === 'health' ? 'health states' : (kind + 's')) + '\u2026';
   dd.appendChild(search);
 
   var list = document.createElement('div');
@@ -1876,7 +2033,8 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
     var q = (query || '').toLowerCase();
     var filtered = [];
     for (var i = 0; i < names.length; i++) {
-      var searchText = kind === 'agent' ? (_boardAgentName(names[i]) || names[i]) : names[i];
+      var searchText = kind === 'agent' ? (_boardAgentName(names[i]) || names[i])
+        : (kind === 'health' ? _boardHealthDisplayName(names[i]) : names[i]);
       if (q && searchText.toLowerCase().indexOf(q) < 0) continue;
       filtered.push(names[i]);
     }
@@ -1891,6 +2049,7 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
         cb.addEventListener('change', function() {
           if (kind === 'label') boardToggleLabel(n);
           else if (kind === 'agent') boardToggleAgent(n);
+          else if (kind === 'health') boardToggleHealth(n);
           else boardToggleAction(n);
           buildList(search.value);
         });
@@ -1899,7 +2058,8 @@ function _boardOpenFilterDropdown(wrapId, kind, names, counts, selectedArr) {
       var span = document.createElement('span');
       span.className = 'board-filter-dropdown-name';
       var displayName = kind === 'agent' ? (_boardAgentName(name) || name)
-        : (kind === 'label' && isSystemLabel(name)) ? displayLabel(name) : name;
+        : (kind === 'health' ? _boardHealthDisplayName(name)
+          : (kind === 'label' && isSystemLabel(name)) ? displayLabel(name) : name);
       span.textContent = displayName;
       row.appendChild(span);
       var badge = document.createElement('span');

@@ -139,3 +139,46 @@ class NotificationManagerTests(unittest.IsolatedAsyncioTestCase):
         manager.on_health_alert(cell.id, "stuck")
 
         self.assertEqual(manager._pending, [])
+
+    async def test_task_health_alerts_batch_with_task_noun(self):
+        state = self._make_state()
+        stalled = state.board_add_task(
+            "Investigate silent worker",
+            "g",
+            lane="In Progress",
+            id="task-1",
+        )
+        self.assertIsNotNone(stalled)
+        thrashing = state.board_add_task(
+            "Stabilize retry loop",
+            "g",
+            lane="In Progress",
+            id="task-2",
+        )
+        self.assertIsNotNone(thrashing)
+
+        manager = self.notifications_mod.NotificationManager(state)
+        sent = []
+        orig_send = self.notifications_mod._send_notification
+
+        async def fake_send(title, body):
+            sent.append((title, body))
+
+        self.notifications_mod._send_notification = fake_send
+        try:
+            manager.on_task_health_alert("task-1", "stalled")
+            manager.on_task_health_alert("task-2", "thrashing")
+            await manager._flush(manager._pending[:])
+        finally:
+            self.notifications_mod._send_notification = orig_send
+
+        self.assertEqual(
+            sent,
+            [
+                (
+                    "Loom — g",
+                    'Task "Investigate silent worker" stalled, '
+                    'Task "Stabilize retry loop" thrashing',
+                ),
+            ],
+        )

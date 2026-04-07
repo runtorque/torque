@@ -102,6 +102,25 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Active: worker (thinking)", bridge.sent[0])
         self.assertNotIn("Heartbeat", bridge.sent[0])
 
+    async def test_board_summary_in_digest_mentions_task_health(self):
+        state, group, _ = self._make_state()
+        task = state.board_add_task(
+            "Investigate stalled dispatch",
+            group,
+            lane="In Progress",
+            id="task-1",
+        )
+        self.assertIsNotNone(task)
+        task.health_state = "stalled"
+
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        summary = buffer._board_summary(group)
+
+        self.assertIn("1 In Progress", summary)
+        self.assertIn("health 1 stalled", summary)
+        self.assertIn("Investigate stalled dispatch (stalled)", summary)
+
     async def test_paused_weaver_does_not_buffer_or_flush_events(self):
         state, group, weaver = self._make_state()
         state.weaver_settings[group] = self.state_mod.WeaverSettings(

@@ -262,6 +262,7 @@ class WeaverSettings:
             "agent_started",
             "task_dispatched",
             "task_derived",
+            "task_health_alert",
         ]
     )
 

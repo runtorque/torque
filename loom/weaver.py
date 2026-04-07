@@ -10,6 +10,7 @@ import logging
 import time
 
 from .state import WEAVER_MANDATORY_EVENTS
+from .task_health import HEALTH_SEVERITY
 
 log = logging.getLogger("loom")
 
@@ -70,8 +71,9 @@ weaver_worktree_remove, weaver_worktree_checkpoint
    prompts, scripts, and build/test plumbing.
 
 6. **Recovery checklist** — On recovery, check for stale agents with no
-   useful progress, orphaned or already-merged worktrees, and unresolved
-   asks before dispatching more work.
+   useful progress, non-healthy tasks (blocked, idle-risk, stalled,
+   thrashing), orphaned or already-merged worktrees, and unresolved asks
+   before dispatching more work.
 
 7. **Wave planning** — Dispatch in waves.  Fill open slots with a mix of
    one complex task and simpler parallel work, then rotate in queued
@@ -350,12 +352,40 @@ class WeaverEventBuffer:
         return " · ".join(actives)
 
     def _board_summary(self, group: str) -> str:
-        """Count tasks per lane for a group."""
+        """Count tasks per lane for a group, including unhealthy rollups."""
         counts: dict[str, int] = {}
+        unhealthy_counts: dict[str, int] = {}
+        unhealthy_items: list[tuple[str, str]] = []
         for t in self._state.board_tasks.values():
-            if t.group == group:
-                counts[t.lane] = counts.get(t.lane, 0) + 1
+            if t.group != group:
+                continue
+            counts[t.lane] = counts.get(t.lane, 0) + 1
+            health_state = getattr(t, "health_state", "healthy") or "healthy"
+            if t.lane != "Done" and health_state != "healthy":
+                unhealthy_counts[health_state] = (
+                    unhealthy_counts.get(health_state, 0) + 1
+                )
+                unhealthy_items.append((health_state, t.task))
         parts = [f"{count} {lane}" for lane, count in counts.items()]
+        if unhealthy_counts:
+            ordered = []
+            for state_name, count in sorted(
+                unhealthy_counts.items(),
+                key=lambda item: -HEALTH_SEVERITY.get(item[0], 0),
+            ):
+                ordered.append(f"{count} {state_name}")
+            parts.append("health " + ", ".join(ordered))
+            unhealthy_items.sort(
+                key=lambda item: (
+                    -HEALTH_SEVERITY.get(item[0], 0),
+                    item[1].lower(),
+                ),
+            )
+            preview = [
+                f"{title[:40]} ({state_name})"
+                for state_name, title in unhealthy_items[:3]
+            ]
+            parts.append("risk " + ", ".join(preview))
         return " · ".join(parts) if parts else "empty"
 
     def _context_warning(self, weaver) -> str:

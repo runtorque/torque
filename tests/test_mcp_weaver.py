@@ -540,7 +540,7 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [item["id"] for item in summary["task_health"]["unhealthy"]],
-            ["ask-1", "task-progress"],
+            ["task-progress", "ask-1"],
         )
         self.assertFalse(summary["task_health"]["truncated"])
         self.assertEqual(summary["agents"]["total"], 2)
@@ -622,6 +622,58 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             shown["health_details"]["reasons"],
             ["no_progress_timeout"],
+        )
+
+    async def test_board_list_can_filter_by_health_state(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+
+        stalled = state.board_add_task(
+            "Investigate regression",
+            "g",
+            lane="In Progress",
+            id="task-1",
+        )
+        healthy = state.board_add_task(
+            "Write release notes",
+            "g",
+            lane="Backlog",
+            id="task-2",
+        )
+        self.assertIsNotNone(stalled)
+        self.assertIsNotNone(healthy)
+        stalled.health_state = "stalled"
+        stalled.health_since = "2026-04-06T00:21:00+00:00"
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_list",
+            {"health": "stalled"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        payload = json.loads(text)
+        self.assertEqual(list(payload["lanes"].keys()), ["In Progress"])
+        self.assertEqual(
+            [item["id"] for item in payload["lanes"]["In Progress"]],
+            ["task-1"],
         )
 
 

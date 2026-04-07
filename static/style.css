@@ -1236,6 +1236,25 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   background: color-mix(in srgb, var(--green) 15%, transparent);
   font-weight: 600;
 }
+.board-card-health {
+  font-weight: 600;
+}
+.board-card-health-blocked {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+.board-card-health-stalled {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+}
+.board-card-health-thrashing {
+  color: #ff7b72;
+  background: rgba(255, 123, 114, 0.14);
+}
+.board-card-health-idle-risk {
+  color: #e3b341;
+  background: rgba(227, 179, 65, 0.14);
+}
 /* Subordinate (derived) cards */
 .board-card-subordinate {
   margin-left: 16px;
@@ -1533,6 +1552,11 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-filter-active-action {
   color: var(--status-green); border: 1px solid var(--status-green);
   background: rgba(63,185,80,.1);
+}
+.board-filter-active-health {
+  color: var(--amber);
+  border: 1px solid var(--amber);
+  background: rgba(210,153,34,.12);
 }
 /* Lane tab grayed out when empty after filtering */
 .board-lane-tab.empty-filtered { opacity: .4; }
@@ -2701,6 +2725,88 @@ body.diff-view-open #ctx-menu {
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.weaver-health-summary {
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.weaver-health-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.weaver-health-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text);
+}
+.weaver-health-total {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.weaver-health-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.weaver-health-pill {
+  font-size: 8px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+.weaver-health-pill-blocked {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+}
+.weaver-health-pill-stalled {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+}
+.weaver-health-pill-thrashing {
+  color: #ff7b72;
+  background: rgba(255, 123, 114, 0.14);
+}
+.weaver-health-pill-idle-risk {
+  color: #e3b341;
+  background: rgba(227, 179, 65, 0.14);
+}
+.weaver-health-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.weaver-health-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.weaver-health-item-state {
+  flex-shrink: 0;
+}
+.weaver-health-item-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text);
+}
+.weaver-health-item-via {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+  color: var(--text-dim);
 }
 
 /* Settings sections */

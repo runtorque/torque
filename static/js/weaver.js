@@ -4,6 +4,20 @@ var _weaverTab = 'journal';  // 'journal' | 'settings'
 var _weaverCustomInstrDirty = false;
 var _weaverCustomInstrDraft = '';
 var _weaverReplyDraft = '';
+var _weaverHealthOrder = ['blocked', 'stalled', 'thrashing', 'idle-risk'];
+var _weaverHealthLabels = {
+  'blocked': 'Blocked',
+  'stalled': 'Stalled',
+  'thrashing': 'Thrashing',
+  'idle-risk': 'Idle risk',
+};
+var _weaverHealthSeverity = {
+  'healthy': 0,
+  'idle-risk': 1,
+  'thrashing': 2,
+  'stalled': 3,
+  'blocked': 4,
+};
 
 function renderWeaverPanel() {
   var el = document.getElementById('panel-weaver');
@@ -116,6 +130,8 @@ function _weaverRenderJournal(group) {
     html += '</div>';
   }
 
+  html += _weaverRenderTaskHealth(group);
+
   // Journal entries come from state.weaver_journal (populated by delta ops)
   var entries = (state.weaver_journal && state.weaver_journal[group]) || [];
   if (!entries.length && !html) {
@@ -141,6 +157,77 @@ function _weaverRenderJournal(group) {
     html += '</div>';
   }
   return html;
+}
+
+function _weaverRenderTaskHealth(group) {
+  var summary = _weaverTaskHealthSummary(group);
+  if (!summary.total) return '';
+
+  var html = '<div class="weaver-health-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Task health</span>';
+  html += '<span class="weaver-health-total">' + summary.total + ' unhealthy</span>';
+  html += '</div>';
+  html += '<div class="weaver-health-counts">';
+  for (var i = 0; i < _weaverHealthOrder.length; i++) {
+    var stateName = _weaverHealthOrder[i];
+    var count = summary.counts[stateName] || 0;
+    if (!count) continue;
+    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(stateName) + '">'
+      + count + ' ' + _esc(_weaverHealthLabels[stateName]) + '</span>';
+  }
+  html += '</div>';
+  if (summary.items.length) {
+    html += '<div class="weaver-health-list">';
+    for (var j = 0; j < summary.items.length; j++) {
+      var item = summary.items[j];
+      html += '<div class="weaver-health-item">';
+      html += '<span class="weaver-health-item-state weaver-health-pill-' + _esc(item.health_state) + '">'
+        + _esc(_weaverHealthLabels[item.health_state] || item.health_state) + '</span>';
+      html += '<span class="weaver-health-item-title">' + _esc(item.title) + '</span>';
+      if (item.via) {
+        html += '<span class="weaver-health-item-via">via ' + _esc(item.via) + '</span>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _weaverTaskHealthSummary(group) {
+  var summary = {
+    counts: { 'blocked': 0, 'stalled': 0, 'thrashing': 0, 'idle-risk': 0 },
+    items: [],
+    total: 0,
+  };
+  var tasks = (state && state.board_tasks) || {};
+  for (var id in tasks) {
+    var task = tasks[id];
+    if (task.group !== group || task.lane === 'Done') continue;
+    var healthState = task.health_state || 'healthy';
+    if (healthState === 'healthy') continue;
+    summary.counts[healthState] = (summary.counts[healthState] || 0) + 1;
+    summary.total += 1;
+    var details = task.health_details || {};
+    summary.items.push({
+      id: task.id,
+      title: task.task || '',
+      health_state: healthState,
+      health_since: task.health_since || '',
+      via: details.aggregate ? (details.source_task_title || '') : '',
+    });
+  }
+  summary.items.sort(function(a, b) {
+    var sev = (_weaverHealthSeverity[b.health_state] || 0) - (_weaverHealthSeverity[a.health_state] || 0);
+    if (sev) return sev;
+    var timeCmp = (a.health_since || '').localeCompare(b.health_since || '');
+    if (timeCmp) return timeCmp;
+    return (a.title || '').localeCompare(b.title || '');
+  });
+  summary.items = summary.items.slice(0, 5);
+  return summary;
 }
 
 // -- Settings tab ----------------------------------------------------------
@@ -229,7 +316,7 @@ function _weaverRenderSettings(group, ws, weaver) {
   var mandatory = ['task_completed', 'agent_error', 'agent_reply',
                    'agent_blocked', 'ask_created'];
   var optional = ['agent_started', 'task_dispatched', 'task_derived',
-                  'agent_progress'];
+                  'agent_progress', 'task_health_alert'];
   var enabled = (ws && ws.enabled_events) || [];
 
   html += '<div class="weaver-events-list">';
