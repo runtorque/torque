@@ -177,6 +177,29 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("health 1 stalled", summary)
         self.assertIn("Investigate stalled dispatch (stalled)", summary)
 
+    async def test_board_summary_mentions_dispatch_overlap(self):
+        state, group, _ = self._make_state()
+        state.dispatch_overlap_groups[group] = {
+            "counts": {"notice": 0, "warning": 1, "conflict": 1},
+            "total": 2,
+            "items": [
+                {
+                    "task_id": "task-1",
+                    "title": "Implement auth flow",
+                    "level": "conflict",
+                    "summary": "Shares a branch with another active agent.",
+                }
+            ],
+            "truncated": False,
+        }
+
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        summary = buffer._board_summary(group)
+
+        self.assertIn("overlap 1 conflict, 1 warning", summary)
+        self.assertIn("Implement auth flow (conflict)", summary)
+
     async def test_idle_heartbeat_surfaces_stale_in_progress_attention(self):
         state, group, _ = self._make_state()
         task = state.board_add_task(

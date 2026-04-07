@@ -275,6 +275,7 @@ class WorktreeManager:
             cell.worktree_base_branch = ""
             cell.worktree_dirty = False
             cell.worktree_diff = {}
+            cell.worktree_changed_files = []
             cell.worktree_checkpoints = 0
 
         return success
@@ -355,6 +356,29 @@ class WorktreeManager:
         except Exception:
             log.debug("diff_summary failed for '%s'", cell.name)
             return {}
+
+    async def changed_files(self, cell) -> list[str]:
+        """Return changed file paths for the worktree vs its base branch."""
+        if not cell.worktree_path or not cell.worktree_base_branch:
+            return []
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", cell.worktree_path,
+                "diff", "--name-only",
+                f"{cell.worktree_base_branch}...HEAD",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return []
+            return sorted({
+                line.strip() for line in stdout.decode().splitlines()
+                if line.strip()
+            })
+        except Exception:
+            log.debug("changed_files failed for '%s'", cell.name)
+            return []
 
     async def checkpoint(self, cell, message: str = "") -> Optional[str]:
         """Auto-commit all changes in the worktree. Returns commit SHA."""

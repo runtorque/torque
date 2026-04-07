@@ -145,6 +145,24 @@ loom dispatch "Fix the bug" -t oneshot/fix -g backend -w
 5. **Artifact shaping** --- Loom appends safe artifact references after the rendered task prompt. Images stay on the legacy `## Attached images` path, while structured artifacts are added with type-aware summaries or references.
 6. **Prompt delivery** --- the rendered prompt is sent to the agent's terminal. New agents get a 2-second boot delay first.
 
+### Dispatch overlap warnings
+
+Before Loom dispatches work, it now runs deterministic overlap checks against open work in the same group. The first version uses:
+
+- shared files or module areas from live worktree diffs
+- same task family or action
+- shared worktree lineage
+- recent branch history on the same surface
+- queued work already linked to the same surface
+
+The board surfaces these as advisory overlap badges on task cards.
+
+- **Overlap notice** means the task probably touches a related surface, but Loom is not blocking dispatch.
+- **Overlap warning** means Loom found active or queued work on the same surface and asks for confirmation before dispatching.
+- **Overlap conflict** means Loom found a strong collision signal, such as the same live branch or direct file overlap, and requires confirmation before dispatching.
+
+Same-agent follow-up queueing is treated as sequential work and is downgraded compared with multi-agent parallel dispatch on the same surface.
+
 ### Dispatching to an existing agent
 
 You can dispatch a task to an agent that's already running instead of creating a new one. Select the agent in the dispatch dialog (UI), or use `loom ai derive --agent` / `--self` from within a pipeline.

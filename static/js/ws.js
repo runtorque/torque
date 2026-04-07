@@ -104,6 +104,8 @@ function connect() {
       _showPromptPreview(msg);
     } else if (msg.type === 'dispatch_action_missing') {
       _handleDispatchActionMissing(msg);
+    } else if (msg.type === 'dispatch_overlap_warning') {
+      _handleDispatchOverlapWarning(msg);
     } else if (msg.type === 'external_open') {
       if (msg.url) window.open(msg.url);
     } else if (msg.type === 'external_imported') {

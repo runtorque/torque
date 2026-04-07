@@ -275,6 +275,7 @@ Batch dispatch:
 - processes tasks in the order you pass them
 - enforces `max_concurrent` against active non-Weaver agents in the group
 - can keep related tasks on the same agent with `agent_group`
+- runs deterministic overlap checks before each dispatch
 - refuses tasks that are already assigned, already done, already in progress, or blocked by dependencies
 
 ### Result states
@@ -284,7 +285,21 @@ Batch results can come back as:
 - **`dispatched`** when the task was launched immediately
 - **`queued`** when Loom routed the work to an existing busy agent
 - **`deferred`** when dispatch would exceed `max_concurrent`
+- **`needs_confirmation`** when Loom found overlap warnings or conflicts and the Weaver should decide whether to rerun with `force=true`
 - **`failed`** when the task was invalid for dispatch
+
+`weaver_task_dispatch` and `weaver_batch_dispatch` also accept `force=true` when the Weaver intentionally wants to proceed despite overlap warnings.
+
+### Dispatch overlap surfaces
+
+The Weaver sees overlap risk in several places:
+
+- `weaver_board_summary` includes compact overlap counts and the top risky tasks
+- `weaver_board_list` and `weaver_task_show` include overlap level and summary fields
+- idle digests mention overlap counts and the highest-risk task previews
+- the Weaver panel shows a dedicated dispatch-overlap summary next to task health and verification
+
+These warnings are advisory. Loom does not hard-lock dispatch yet, but it does force an explicit confirmation step for warning and conflict levels so the Weaver can choose between same-agent queueing, narrower waves, or intentional parallelism.
 
 ### When to use `agent_group`
 
