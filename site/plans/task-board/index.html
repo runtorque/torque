@@ -1,0 +1,2972 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="iTerm2 agent and terminal orchestration">
+      
+      
+      
+      
+        <link rel="prev" href="../standalone_application/">
+      
+      
+        <link rel="next" href="../weaver/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Task Board Plan - Loom</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#implementation-plan-task-board-phase-5a" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Loom" class="md-header__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Loom
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Task Board Plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Loom" class="md-nav__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Loom
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start Here
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Start Here
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agents-and-sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents & Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../group-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Group Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../keyboard-shortcuts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard Shortcuts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Workflows
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../workflow-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../board/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../task-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions & Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../worktrees/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worktrees
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../schedules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schedules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate Loom
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate Loom
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7_1" id="__nav_7_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plans Archive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plans Archive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../auto-generated-playbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-Generated Playbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-awareness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Awareness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Context Preservation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI & REST API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli_ai_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI AI Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../git-worktree-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git Worktree Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../standalone_application/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standalone Application
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board Plan
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board Plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Problem
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#provider-integration-future" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider integration (future)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#boardtask-dataclass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BoardTask dataclass
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#boardstate-embedded-in-matrixstate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BoardState (embedded in MatrixState)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#serialization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Serialization
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server Commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Server Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mutation-commands-mutate-broadcast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutation commands (mutate → broadcast)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#broadcast-payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Broadcast payload
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ui-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="UI Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#taskbar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Taskbar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bottom-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bottom Panel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lane-tabs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lane Tabs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-cards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task Cards
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-collapseexpand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Panel Collapse/Expand
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keyboard-shortcuts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keyboard Shortcuts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-interface-not-implemented-design-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider Interface (not implemented, design only)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation Steps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implementation Steps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-data-model-loomstatepy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Data model (loom/state.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-server-commands-loomserverpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Server commands (loom/server.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-taskbar-bottom-panel-layout-webviewhtml-staticstylecss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Taskbar + bottom panel layout (webview.html, static/style.css)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-4-board-rendering-staticjsboardjs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: Board rendering (static/js/board.js)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-5-board-interactions-staticjsboardjs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5: Board interactions (static/js/board.js)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-6-taskbar-toggle-logic-staticjsmainjs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6: Taskbar toggle logic (static/js/main.js)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-7-agent-task-linking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 7: Agent-task linking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-8-cli-commands-binloom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8: CLI commands (bin/loom)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-were-not-building-yet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What We're NOT Building (Yet)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#file-changes-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Changes Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver Plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow-automation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Problem
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design Principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data flow
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#provider-integration-future" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider integration (future)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#boardtask-dataclass" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BoardTask dataclass
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#boardstate-embedded-in-matrixstate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BoardState (embedded in MatrixState)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#serialization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Serialization
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server Commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Server Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mutation-commands-mutate-broadcast" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutation commands (mutate → broadcast)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#broadcast-payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Broadcast payload
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ui-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UI Design
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="UI Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#taskbar" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Taskbar
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bottom-panel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bottom Panel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lane-tabs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lane Tabs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-cards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task Cards
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-collapseexpand" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Panel Collapse/Expand
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#keyboard-shortcuts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keyboard Shortcuts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-interface-not-implemented-design-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider Interface (not implemented, design only)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation Steps
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implementation Steps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-data-model-loomstatepy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Data model (loom/state.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-server-commands-loomserverpy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Server commands (loom/server.py)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-3-taskbar-bottom-panel-layout-webviewhtml-staticstylecss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3: Taskbar + bottom panel layout (webview.html, static/style.css)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-4-board-rendering-staticjsboardjs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4: Board rendering (static/js/board.js)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-5-board-interactions-staticjsboardjs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5: Board interactions (static/js/board.js)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-6-taskbar-toggle-logic-staticjsmainjs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6: Taskbar toggle logic (static/js/main.js)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-7-agent-task-linking" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 7: Agent-task linking
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-8-cli-commands-binloom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8: CLI commands (bin/loom)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-were-not-building-yet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What We're NOT Building (Yet)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#file-changes-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File Changes Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="implementation-plan-task-board-phase-5a">Implementation Plan: Task Board (Phase 5a)<a class="headerlink" href="#implementation-plan-task-board-phase-5a" title="Permanent link">&para;</a></h1>
+<p><strong>Roadmap phase</strong>: 5 — Task &amp; Ticketing Integration
+<strong>Status</strong>: Implemented
+<strong>Goal</strong>: Add a built-in Kanban board to Loom's toolbelt so users can track tasks alongside their agents. The board lives in a collapsible bottom panel with a taskbar — an extensible dock for "panel apps" where the Kanban board is the first one.</p>
+<hr />
+<h2 id="the-problem">The Problem<a class="headerlink" href="#the-problem" title="Permanent link">&para;</a></h2>
+<p>Loom manages agents and terminals but has no concept of <em>what work</em> those agents are doing. Users track tasks externally (Linear, Jira, Notion, sticky notes) and manually coordinate between the task tracker and Loom. There's no way to see "what's in the backlog" and "which agent is working on what" in the same view.</p>
+<p>The goal is a lightweight, in-Loom task board that:
+- Gives a quick overview of work status without leaving iTerm2
+- Can later sync with external trackers (Jira, Linear, GitHub Issues)
+- Links tasks to agents so you can see "Agent X is working on Task Y"</p>
+<h2 id="design-principles">Design Principles<a class="headerlink" href="#design-principles" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Panel apps, not one-off panels</strong> — The bottom area is a generic "taskbar + panel" system. The Kanban board is the first app. Future apps (logs viewer, cost dashboard, diff viewer) plug into the same dock. Each app is a self-contained render/command module.</li>
+<li><strong>One lane at a time</strong> — The toolbelt is narrow (~280px). Showing all lanes side-by-side doesn't work. Instead, show lane tabs at the top and the selected lane's cards below. This scales to any number of lanes.</li>
+<li><strong>Provider-ready data model</strong> — Every task has optional <code>provider</code> and <code>external_id</code> fields from day one. The board works standalone (manual cards), but the schema is ready for Jira/Linear sync without migration.</li>
+<li><strong>Board state lives in MatrixState</strong> — Same persistence model as agents/groups. Board mutations go through <code>MatrixState</code> methods, trigger <code>save()</code> + <code>broadcast()</code>, and the UI re-renders. No separate persistence layer.</li>
+<li><strong>Drag-and-drop between lanes</strong> — Cards can be dragged to lane tabs to move them. Same drag-drop patterns as agent/terminal reordering.</li>
+</ol>
+<hr />
+<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────┐
+│         LOOM TOOLBELT           │
+│                                 │
+│  ┌───────────────────────────┐  │
+│  │       Groups / Agents      │  │
+│  │     (existing UI, flex:1)  │  │
+│  └───────────────────────────┘  │
+│                                 │
+│  ┌───────────────────────────┐  │
+│  │      Bottom Panel          │  │  ← collapsible, resizable
+│  │  ┌─────────────────────┐  │  │
+│  │  │  Lane Tabs (scroll) │  │  │  ← &lt; [Backlog] [To Do] [In Progress] [Done] &gt; [+] [⚙]
+│  │  ├─────────────────────┤  │  │
+│  │  │  Card List           │  │  │  ← tasks in selected lane
+│  │  │  ┌─────────────────┐ │  │  │
+│  │  │  │ Task card        │ │  │  │
+│  │  │  │ Task card        │ │  │  │
+│  │  │  │ + Add task       │ │  │  │
+│  │  │  └─────────────────┘ │  │  │
+│  │  └─────────────────────┘  │  │
+│  └───────────────────────────┘  │
+│                                 │
+│  ┌───────────────────────────┐  │
+│  │  Taskbar: [📋 Board]      │  │  ← dock for panel apps
+│  └───────────────────────────┘  │
+└─────────────────────────────────┘
+</code></pre></div>
+<h3 id="data-flow">Data flow<a class="headerlink" href="#data-flow" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>User action (add task, move card, rename lane)
+  │
+  ├──► send({ cmd: &#39;board_*&#39;, ... })           ← WS command
+  │
+  ├──► server.py handle_command()
+  │      ├── state.board_add_task(...)          ← MatrixState method
+  │      ├── state.save()
+  │      └── state.broadcast()                 ← full state includes board
+  │
+  └──► UI re-renders board panel
+</code></pre></div>
+<h3 id="provider-integration-future">Provider integration (future)<a class="headerlink" href="#provider-integration-future" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>┌─────────────┐     ┌──────────────────┐     ┌────────────────┐
+│ Loom Board  │ ←── │ Provider Adapter  │ ←── │ External API   │
+│ (MatrixState)│ ──► │ (sync layer)     │ ──► │ (Jira/Linear)  │
+└─────────────┘     └──────────────────┘     └────────────────┘
+
+Provider adapters implement:
+  - pull_tasks(lane_mapping) → [Task]     # fetch from external
+  - push_task(task, lane_mapping) → void  # update external
+  - map_lanes(provider_statuses) → dict   # map provider statuses to board lanes
+</code></pre></div>
+<p>Providers are NOT part of this implementation. The data model is designed so that adding them later requires zero schema changes.</p>
+<hr />
+<h2 id="data-model">Data Model<a class="headerlink" href="#data-model" title="Permanent link">&para;</a></h2>
+<h3 id="boardtask-dataclass">BoardTask dataclass<a class="headerlink" href="#boardtask-dataclass" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nd">@dataclass</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">BoardTask</span><span class="p">:</span>
+    <span class="nb">id</span><span class="p">:</span> <span class="nb">str</span>                          <span class="c1"># 8-char hex</span>
+    <span class="n">task</span><span class="p">:</span> <span class="nb">str</span>                        <span class="c1"># actionable task description (required)</span>
+    <span class="n">group</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>                  <span class="c1"># owning group (must exist)</span>
+    <span class="n">instructions</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>           <span class="c1"># agent instructions (optional)</span>
+    <span class="n">context</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>                <span class="c1"># additional context (optional)</span>
+    <span class="n">criteria</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>               <span class="c1"># acceptance criteria (optional)</span>
+    <span class="n">lane</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;Backlog&quot;</span>            <span class="c1"># must match a lane name</span>
+    <span class="n">position</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>                <span class="c1"># sort order within lane</span>
+    <span class="n">assignee</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>               <span class="c1"># agent name prefix for pool assignment</span>
+    <span class="n">agent_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>               <span class="c1"># concrete agent working on this</span>
+    <span class="n">labels</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">created_at</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>             <span class="c1"># ISO 8601</span>
+    <span class="n">updated_at</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>             <span class="c1"># ISO 8601</span>
+
+    <span class="c1"># Provider fields (unused in v1, ready for sync)</span>
+    <span class="n">provider</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>               <span class="c1"># &quot;jira&quot;, &quot;linear&quot;, &quot;github&quot;</span>
+    <span class="n">external_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>            <span class="c1"># e.g. &quot;PROJ-123&quot;</span>
+    <span class="n">external_url</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>           <span class="c1"># link back to provider</span>
+</code></pre></div>
+<p><strong>Reserved lanes</strong>: <code>Backlog</code> and <code>In Progress</code> cannot be renamed or deleted. They are enforced on load and in the rename/remove methods. The UI shows them with italic text and a lock icon on hover.</p>
+<h3 id="boardstate-embedded-in-matrixstate">BoardState (embedded in MatrixState)<a class="headerlink" href="#boardstate-embedded-in-matrixstate" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># New fields on MatrixState:</span>
+<span class="n">board_lanes</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>              <span class="c1"># ordered lane names</span>
+<span class="n">board_tasks</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">BoardTask</span><span class="p">]</span>   <span class="c1"># id → task</span>
+<span class="n">board_selected_lane</span><span class="p">:</span> <span class="nb">str</span>            <span class="c1"># currently visible lane (ephemeral, not persisted)</span>
+</code></pre></div>
+<p>Default lanes on first load: <code>["Backlog", "To Do", "In Progress", "Done"]</code></p>
+<h3 id="serialization">Serialization<a class="headerlink" href="#serialization" title="Permanent link">&para;</a></h3>
+<p>Board state is persisted alongside existing state in the same JSON file:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;agents&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;groups&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;group_settings&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;board_lanes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;Backlog&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;To Do&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;In Progress&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;Done&quot;</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;board_tasks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;a1b2c3d4&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;a1b2c3d4&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;task&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Fix login redirect&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Backend&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;instructions&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Check auth.py for the redirect logic.&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;criteria&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Login redirects to /dashboard after success.&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;lane&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;In Progress&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;position&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;assignee&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fix&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;agent_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;e5f6g7h8&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;labels&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;bugfix&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;urgent&quot;</span><span class="p">]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<hr />
+<h2 id="server-commands">Server Commands<a class="headerlink" href="#server-commands" title="Permanent link">&para;</a></h2>
+<p>All commands are prefixed with <code>board_</code> and follow existing patterns.</p>
+<h3 id="mutation-commands-mutate-broadcast">Mutation commands (mutate → broadcast)<a class="headerlink" href="#mutation-commands-mutate-broadcast" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Payload</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>board_add_task</code></td>
+<td><code>{task, group, lane?, instructions?, context?, criteria?, assignee?, agent_id?, labels?}</code></td>
+<td>Create task in lane (default: Backlog). Position = end. Group required + must exist.</td>
+</tr>
+<tr>
+<td><code>board_update_task</code></td>
+<td><code>{id, task?, group?, instructions?, context?, criteria?, assignee?, lane?, position?, agent_id?, labels?}</code></td>
+<td>Update task fields. If <code>lane</code> changes, reposition in new lane.</td>
+</tr>
+<tr>
+<td><code>board_remove_task</code></td>
+<td><code>{id}</code></td>
+<td>Delete task.</td>
+</tr>
+<tr>
+<td><code>board_move_task</code></td>
+<td><code>{id, lane, position?}</code></td>
+<td>Move task to lane at position (default: end). Reindex positions in both source and target lanes.</td>
+</tr>
+<tr>
+<td><code>board_add_lane</code></td>
+<td><code>{name, position?}</code></td>
+<td>Add lane at position (default: end).</td>
+</tr>
+<tr>
+<td><code>board_rename_lane</code></td>
+<td><code>{old_name, new_name}</code></td>
+<td>Rename lane. Update all tasks in that lane.</td>
+</tr>
+<tr>
+<td><code>board_remove_lane</code></td>
+<td><code>{name, move_tasks_to?}</code></td>
+<td>Remove lane. Tasks in it move to <code>move_tasks_to</code> (default: first remaining lane).</td>
+</tr>
+<tr>
+<td><code>board_reorder_lanes</code></td>
+<td><code>{lanes}</code></td>
+<td>Replace lane order with new list (for drag reorder).</td>
+</tr>
+<tr>
+<td><code>board_reorder_task</code></td>
+<td><code>{id, position}</code></td>
+<td>Reorder task within its current lane.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="broadcast-payload">Broadcast payload<a class="headerlink" href="#broadcast-payload" title="Permanent link">&para;</a></h3>
+<p>The existing <code>broadcast()</code> sends <code>state.to_dict()</code>. We extend <code>to_dict()</code> to include:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;state&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;agents&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;groups&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;board_lanes&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;Backlog&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;To Do&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;In Progress&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;Done&quot;</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">&quot;board_tasks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><code>board_selected_lane</code> is client-side only — not persisted or broadcast.</p>
+<hr />
+<h2 id="ui-design">UI Design<a class="headerlink" href="#ui-design" title="Permanent link">&para;</a></h2>
+<h3 id="taskbar">Taskbar<a class="headerlink" href="#taskbar" title="Permanent link">&para;</a></h3>
+<p>A fixed bar at the very bottom of the toolbelt. Contains "app buttons" — small icons/labels that toggle their panel open/closed.</p>
+<div class="highlight"><pre><span></span><code><span class="p">&lt;</span><span class="nt">div</span> <span class="na">id</span><span class="o">=</span><span class="s">&quot;taskbar&quot;</span><span class="p">&gt;</span>
+  <span class="p">&lt;</span><span class="nt">button</span> <span class="na">class</span><span class="o">=</span><span class="s">&quot;taskbar-app active&quot;</span> <span class="na">data-app</span><span class="o">=</span><span class="s">&quot;board&quot;</span><span class="p">&gt;</span>📋 Board<span class="p">&lt;/</span><span class="nt">button</span><span class="p">&gt;</span>
+  <span class="cm">&lt;!-- future apps go here --&gt;</span>
+<span class="p">&lt;/</span><span class="nt">div</span><span class="p">&gt;</span>
+</code></pre></div>
+<p>Clicking an app button:
+- If panel is collapsed → expand and show that app
+- If panel is showing a different app → switch to that app
+- If panel is already showing that app → collapse</p>
+<h3 id="bottom-panel">Bottom Panel<a class="headerlink" href="#bottom-panel" title="Permanent link">&para;</a></h3>
+<p>A section between <code>&lt;main&gt;</code> and the taskbar. Height is user-resizable via a drag handle at the top of the panel. Default height is 55vh. The panel content is rendered by the active app.</p>
+<div class="highlight"><pre><span></span><code><span class="p">&lt;</span><span class="nt">div</span> <span class="na">id</span><span class="o">=</span><span class="s">&quot;bottom-panel&quot;</span> <span class="na">class</span><span class="o">=</span><span class="s">&quot;collapsed&quot;</span><span class="p">&gt;</span>
+  <span class="p">&lt;</span><span class="nt">div</span> <span class="na">class</span><span class="o">=</span><span class="s">&quot;panel-resize-handle&quot;</span> <span class="na">id</span><span class="o">=</span><span class="s">&quot;panel-resize-handle&quot;</span><span class="p">&gt;&lt;/</span><span class="nt">div</span><span class="p">&gt;</span>
+  <span class="p">&lt;</span><span class="nt">div</span> <span class="na">id</span><span class="o">=</span><span class="s">&quot;panel-board&quot;</span><span class="p">&gt;</span>
+    <span class="cm">&lt;!-- rendered by board app --&gt;</span>
+  <span class="p">&lt;/</span><span class="nt">div</span><span class="p">&gt;</span>
+  <span class="cm">&lt;!-- future app panels go here --&gt;</span>
+<span class="p">&lt;/</span><span class="nt">div</span><span class="p">&gt;</span>
+</code></pre></div>
+<p>The resize handle is a 5px drag target with a pill indicator. Dragging up/down resizes the panel (clamped to 80px–window height minus 80px). The height is stored in a CSS custom property (<code>--panel-height</code>) and persists for the session.</p>
+<h3 id="lane-tabs">Lane Tabs<a class="headerlink" href="#lane-tabs" title="Permanent link">&para;</a></h3>
+<p>Horizontal scrollable tab bar. Structure:</p>
+<div class="highlight"><pre><span></span><code>[&lt;] [Backlog] [To Do] [In Progress] [Done] [&gt;]  [+] [⚙]
+</code></pre></div>
+<ul>
+<li><code>&lt;</code> / <code>&gt;</code> scroll buttons fade in/out based on scroll position (use <code>opacity</code> + <code>pointer-events</code>, not <code>display</code>, to keep layout stable)</li>
+<li>Scroll buttons advance by exactly one tab: <code>&gt;</code> reveals the first clipped tab on the right, <code>&lt;</code> reveals the last clipped tab on the left</li>
+<li>Scroll position persists across re-renders; active tab auto-scrolls into view on lane switch</li>
+<li><code>.board-lane-tabs</code> has <code>position: relative</code> so child <code>offsetLeft</code> is relative to the scroll container</li>
+<li>Selected lane tab has <code>.active</code> style</li>
+<li>Clicking an already-selected tab is a no-op (no re-render)</li>
+<li>Right-click on a lane tab shows Rename/Delete context menu</li>
+<li><code>+</code> opens an inline input to name a new lane</li>
+<li><code>⚙</code> opens a popover for the selected lane (Rename, Delete, future settings)</li>
+</ul>
+<p>Clicking a lane tab switches the view to that lane. This is client-side only (no server roundtrip needed — the tasks are already in state).</p>
+<h3 id="task-cards">Task Cards<a class="headerlink" href="#task-cards" title="Permanent link">&para;</a></h3>
+<p>Each card in the lane list shows:</p>
+<div class="highlight"><pre><span></span><code>┌────────────────────────────────┐
+│ ○ Fix login redirect       ⋮  │  ← title + context menu
+│   🤖 fix-agent-a3b2            │  ← linked agent (if any)
+└────────────────────────────────┘
+</code></pre></div>
+<ul>
+<li>Left dot: color based on linked agent status (gray if unlinked)</li>
+<li>Title: clickable to edit inline</li>
+<li><code>⋮</code> menu: Edit, Move to [lane], Link Agent, Unlink Agent, Delete</li>
+<li>Linked agent: small badge showing agent name. Clicking focuses the agent.</li>
+<li>Cards are draggable within the lane (reorder) and to lane tabs (move between lanes)</li>
+<li><code>+ Add task</code> button at the bottom of the list, opens inline input</li>
+</ul>
+<h3 id="panel-collapseexpand">Panel Collapse/Expand<a class="headerlink" href="#panel-collapseexpand" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Default: collapsed (only taskbar visible)</li>
+<li>Expanded height: 20vh default, user-resizable via drag handle</li>
+<li>Open/closed state and height persist across daemon restarts via <code>board_panel_open</code> and <code>board_panel_height</code> fields in <code>MatrixState</code></li>
+<li>On first WS connect, the panel is restored to its previous state</li>
+</ul>
+<hr />
+<h2 id="keyboard-shortcuts">Keyboard Shortcuts<a class="headerlink" href="#keyboard-shortcuts" title="Permanent link">&para;</a></h2>
+<p>When the board panel is focused:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>K</code></td>
+<td>Toggle board panel (when not in a modal)</td>
+</tr>
+<tr>
+<td><code>←</code> / <code>→</code></td>
+<td>Switch lanes (when board is open)</td>
+</tr>
+<tr>
+<td><code>↑</code> / <code>↓</code></td>
+<td>Navigate cards within lane</td>
+</tr>
+<tr>
+<td><code>Enter</code></td>
+<td>Edit selected card</td>
+</tr>
+<tr>
+<td><code>Delete</code></td>
+<td>Remove selected card (with confirm)</td>
+</tr>
+</tbody>
+</table>
+<p>These bindings activate only when the bottom panel is focused. The existing group/agent navigation keeps working when the main area is focused.</p>
+<hr />
+<h2 id="provider-interface-not-implemented-design-only">Provider Interface (not implemented, design only)<a class="headerlink" href="#provider-interface-not-implemented-design-only" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># loom/providers/base.py</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">TaskProvider</span><span class="p">(</span><span class="n">ABC</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Base class for external task providers.&quot;&quot;&quot;</span>
+
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>  <span class="c1"># &quot;jira&quot;, &quot;linear&quot;, &quot;github&quot;</span>
+
+    <span class="nd">@abstractmethod</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fetch_tasks</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Fetch tasks from external system.</span>
+<span class="sd">        Returns list of dicts matching BoardTask fields.</span>
+<span class="sd">        Must include: external_id, title, description.</span>
+<span class="sd">        May include: labels, external_url.&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+
+    <span class="nd">@abstractmethod</span>
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">push_update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">task</span><span class="p">:</span> <span class="n">BoardTask</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Push task changes (lane/status, title, description) to external system.&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">map_lane_to_status</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">lane</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Map a board lane name to a provider status.</span>
+<span class="sd">        Returns None if no mapping (task won&#39;t be synced).</span>
+<span class="sd">        Config contains user-defined lane↔status mappings.&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">map_status_to_lane</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">status</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Map a provider status to a board lane name.</span>
+<span class="sd">        Returns None if no mapping (task won&#39;t be imported).&quot;&quot;&quot;</span>
+        <span class="o">...</span>
+</code></pre></div>
+<p>Provider config lives in group settings (future):</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Addition to GroupSettings (future)</span>
+<span class="n">task_provider</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>           <span class="c1"># &quot;jira&quot;, &quot;linear&quot;, etc.</span>
+<span class="n">task_provider_config</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">dict</span><span class="p">)</span>  <span class="c1"># provider-specific settings</span>
+<span class="n">task_lane_mapping</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">dict</span><span class="p">)</span>      <span class="c1"># lane_name → provider_status</span>
+</code></pre></div>
+<p>This is design-only. No provider code ships in v1.</p>
+<hr />
+<h2 id="implementation-steps">Implementation Steps<a class="headerlink" href="#implementation-steps" title="Permanent link">&para;</a></h2>
+<h3 id="step-1-data-model-loomstatepy">Step 1: Data model (<code>loom/state.py</code>)<a class="headerlink" href="#step-1-data-model-loomstatepy" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Add <code>BoardTask</code> dataclass</li>
+<li>Add <code>board_lanes</code> and <code>board_tasks</code> fields to <code>MatrixState</code></li>
+<li>Initialize defaults: <code>board_lanes = ["Backlog", "To Do", "In Progress", "Done"]</code>, <code>board_tasks = {}</code></li>
+<li>Add methods:</li>
+<li><code>board_add_task(title, lane, **kwargs) → BoardTask</code></li>
+<li><code>board_update_task(id, **kwargs)</code></li>
+<li><code>board_remove_task(id)</code></li>
+<li><code>board_move_task(id, lane, position)</code></li>
+<li><code>board_reorder_task(id, position)</code></li>
+<li><code>board_add_lane(name, position)</code></li>
+<li><code>board_rename_lane(old_name, new_name)</code></li>
+<li><code>board_remove_lane(name, move_tasks_to)</code></li>
+<li><code>board_reorder_lanes(lanes)</code></li>
+<li>Update <code>to_dict()</code> to include board state</li>
+<li>Update <code>load()</code> to deserialize board state (with defaults for missing keys)</li>
+</ul>
+<h3 id="step-2-server-commands-loomserverpy">Step 2: Server commands (<code>loom/server.py</code>)<a class="headerlink" href="#step-2-server-commands-loomserverpy" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Add <code>board_*</code> command handlers in <code>handle_command()</code></li>
+<li>Each handler: validate input → call <code>state.board_*()</code> → <code>await state.broadcast()</code></li>
+<li>Error handling: unknown lane, duplicate lane name, task not found</li>
+</ul>
+<h3 id="step-3-taskbar-bottom-panel-layout-webviewhtml-staticstylecss">Step 3: Taskbar + bottom panel layout (<code>webview.html</code>, <code>static/style.css</code>)<a class="headerlink" href="#step-3-taskbar-bottom-panel-layout-webviewhtml-staticstylecss" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Add <code>#bottom-panel</code> and <code>#taskbar</code> to <code>webview.html</code></li>
+<li>Restructure layout:</li>
+<li><code>&lt;main&gt;</code> gets <code>flex: 1; min-height: 0; overflow-y: auto</code></li>
+<li><code>#bottom-panel</code> gets collapsible height</li>
+<li><code>#taskbar</code> is fixed at bottom</li>
+<li>CSS for panel states: <code>.collapsed</code> (hidden), <code>.expanded</code> (40% height)</li>
+<li>CSS for taskbar: horizontal flex, app buttons</li>
+</ul>
+<h3 id="step-4-board-rendering-staticjsboardjs">Step 4: Board rendering (<code>static/js/board.js</code>)<a class="headerlink" href="#step-4-board-rendering-staticjsboardjs" title="Permanent link">&para;</a></h3>
+<p>New file — the board "panel app":</p>
+<ul>
+<li><code>renderBoard()</code> — renders lane tabs + card list into <code>#panel-board</code></li>
+<li><code>renderLaneTabs(lanes, selected)</code> — scrollable tab bar with <code>&lt;</code> <code>&gt;</code> <code>+</code> <code>⚙</code></li>
+<li><code>renderCards(tasks)</code> — sorted card list with <code>+ Add task</code></li>
+<li><code>renderTaskCard(task)</code> — individual card HTML</li>
+<li>Lane tab scroll logic: check overflow, show/hide arrows</li>
+<li>Client-side state: <code>_boardSelectedLane</code>, <code>_boardFocusedTask</code></li>
+</ul>
+<h3 id="step-5-board-interactions-staticjsboardjs">Step 5: Board interactions (<code>static/js/board.js</code>)<a class="headerlink" href="#step-5-board-interactions-staticjsboardjs" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Click lane tab → switch lane (client-side only)</li>
+<li>Click <code>+</code> → inline input for new lane name → <code>send({cmd: 'board_add_lane', name})</code></li>
+<li>Click <code>⚙</code> → popover with Rename/Delete for selected lane</li>
+<li>Click <code>+ Add task</code> → inline input → <code>send({cmd: 'board_add_task', title, lane})</code></li>
+<li>Click card <code>⋮</code> → context menu: Edit, Move to [lane], Link Agent, Delete</li>
+<li>Click linked agent badge → <code>send({cmd: 'focus_agent', id})</code></li>
+<li>Drag card within lane → <code>send({cmd: 'board_reorder_task', id, position})</code></li>
+<li>Drag card to lane tab → <code>send({cmd: 'board_move_task', id, lane})</code></li>
+</ul>
+<h3 id="step-6-taskbar-toggle-logic-staticjsmainjs">Step 6: Taskbar toggle logic (<code>static/js/main.js</code>)<a class="headerlink" href="#step-6-taskbar-toggle-logic-staticjsmainjs" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>togglePanel(appName)</code> — expand/collapse/switch panel</li>
+<li>Keyboard shortcut <code>K</code> — toggle board</li>
+<li>Track <code>_activePanelApp</code> state</li>
+<li>Update <code>render()</code> to call <code>renderBoard()</code> when board panel is visible</li>
+</ul>
+<h3 id="step-7-agent-task-linking">Step 7: Agent-task linking<a class="headerlink" href="#step-7-agent-task-linking" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Card context menu: "Link Agent" shows a list of agents from state → sets <code>agent_id</code></li>
+<li>Card context menu: "Unlink Agent" clears <code>agent_id</code></li>
+<li>Agent details panel: show linked task (if any) with a small badge</li>
+<li>When agent is removed: unlink from any tasks (don't delete the task)</li>
+</ul>
+<h3 id="step-8-cli-commands-binloom">Step 8: CLI commands (<code>bin/loom</code>)<a class="headerlink" href="#step-8-cli-commands-binloom" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>loom board</code> / <code>loom board list</code> — show all tasks grouped by lane</li>
+<li><code>loom board add &lt;title&gt; [--lane LANE]</code> — add task</li>
+<li><code>loom board move &lt;id-or-title&gt; --lane LANE</code> — move task</li>
+<li><code>loom board rm &lt;id-or-title&gt;</code> — remove task</li>
+<li><code>loom board lanes</code> — list lanes</li>
+</ul>
+<hr />
+<h2 id="what-were-not-building-yet">What We're NOT Building (Yet)<a class="headerlink" href="#what-were-not-building-yet" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>External provider sync</strong> — The provider interface is designed but no adapters ship. Manual board only in v1.</li>
+<li><strong>Rich content rendering</strong> — Task fields (instructions, context, criteria) are stored but only shown in the edit modal. No markdown rendering, attachments, or comments on cards.</li>
+<li><strong>Subtasks / checklists</strong> — Flat task list only. Hierarchy is a future addition.</li>
+<li><strong>Filters / search</strong> — With a narrow toolbelt and one-lane-at-a-time view, filtering is premature.</li>
+<li><strong>Due dates / priority</strong> — Not in v1. Labels cover basic categorization.</li>
+<li><strong>Auto-assignment</strong> — <code>assignee</code> prefix is stored but agents don't yet auto-pick up matching tickets.</li>
+<li><strong>Persistence across projects</strong> — Board state is per-project (stored in the same state file). No global board.</li>
+<li><strong>Multiple boards</strong> — One board per project. Multiple boards (e.g., per-group) are deferred.</li>
+</ul>
+<hr />
+<h2 id="file-changes-summary">File Changes Summary<a class="headerlink" href="#file-changes-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>loom/state.py</code></td>
+<td>Add <code>BoardTask</code> dataclass, board fields + methods on <code>MatrixState</code></td>
+</tr>
+<tr>
+<td><code>loom/server.py</code></td>
+<td>Add <code>board_*</code> command handlers</td>
+</tr>
+<tr>
+<td><code>webview.html</code></td>
+<td>Add <code>#bottom-panel</code>, <code>#taskbar</code> containers</td>
+</tr>
+<tr>
+<td><code>static/style.css</code></td>
+<td>Taskbar, bottom panel, lane tabs, card styles</td>
+</tr>
+<tr>
+<td><code>static/js/board.js</code></td>
+<td><strong>New</strong> — board panel app (render, interactions, drag)</td>
+</tr>
+<tr>
+<td><code>static/js/main.js</code></td>
+<td>Panel toggle logic, <code>K</code> shortcut, render integration</td>
+</tr>
+<tr>
+<td><code>static/js/ws.js</code></td>
+<td>Ensure board state flows through (already handled by <code>state = msg</code>)</td>
+</tr>
+<tr>
+<td><code>static/js/render.js</code></td>
+<td>Call <code>renderBoard()</code> after main render when panel is open</td>
+</tr>
+<tr>
+<td><code>bin/loom</code></td>
+<td>Add <code>board</code> subcommand</td>
+</tr>
+<tr>
+<td><code>docs/roadmap.md</code></td>
+<td>Update Phase 5 status</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

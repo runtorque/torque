@@ -53,6 +53,7 @@ nav:
   - Internals:
       - Plans Archive:
           - Overview: plans/index.md
+          - Auto-Generated Playbooks: plans/auto-generated-playbooks.md
           - Agent Awareness: plans/agent-awareness.md
           - Agent Context Preservation: plans/agent-context.md
           - CLI & REST API: plans/cli.md

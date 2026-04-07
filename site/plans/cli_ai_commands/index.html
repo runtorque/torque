@@ -1,0 +1,3087 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="iTerm2 agent and terminal orchestration">
+      
+      
+      
+      
+        <link rel="prev" href="../cli/">
+      
+      
+        <link rel="next" href="../git-worktree-lifecycle/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>CLI AI Commands - Loom</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#cli-ai-commands-implementation-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Loom" class="md-header__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Loom
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CLI AI Commands
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Loom" class="md-nav__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Loom
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start Here
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Start Here
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agents-and-sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents & Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../group-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Group Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../keyboard-shortcuts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard Shortcuts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Workflows
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../workflow-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../board/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../task-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions & Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../worktrees/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worktrees
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../schedules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schedules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate Loom
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate Loom
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7_1" id="__nav_7_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plans Archive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plans Archive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../auto-generated-playbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-Generated Playbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-awareness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Awareness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Context Preservation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI & REST API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI AI Commands
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI AI Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#motivation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Motivation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#command-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Command reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai done
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-blocked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai blocked
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai error
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai progress
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-ready" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai ready
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai context
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#identity-resolution-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity resolution flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-side-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-side changes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Server-side changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new-command-ai_report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New command: ai_report
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alternative-cli-side-composition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alternative: CLI-side composition
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-model-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data model changes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data model changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#no-new-fields-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No new fields needed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#label-conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Label conventions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#webview-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Webview changes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Webview changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-card-enhancements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task card enhancements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-cell-enhancements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent cell enhancements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dispatch-prompt-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dispatch prompt update
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cli-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI implementation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CLI implementation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#file-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#argparse-registration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Argparse registration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-side-handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-side handler
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation order
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implementation order">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-core-commands-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1 — Core commands (MVP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-pipeline-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2 — Pipeline commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-ready-auto-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3 — Ready + auto-dispatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-polish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4 — Polish
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#files-touched" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files touched
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../git-worktree-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git Worktree Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../standalone_application/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standalone Application
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../task-board/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board Plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver Plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow-automation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#motivation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Motivation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design principles
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#command-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Command reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai done
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-blocked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai blocked
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai error
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-progress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai progress
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-ready" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai ready
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loom-ai-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        loom ai context
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#identity-resolution-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity resolution flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-side-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-side changes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Server-side changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new-command-ai_report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New command: ai_report
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alternative-cli-side-composition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alternative: CLI-side composition
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-model-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data model changes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data model changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#no-new-fields-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No new fields needed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#label-conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Label conventions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#webview-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Webview changes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Webview changes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-card-enhancements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task card enhancements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#agent-cell-enhancements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent cell enhancements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dispatch-prompt-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dispatch prompt update
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cli-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI implementation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CLI implementation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#file-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#argparse-registration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Argparse registration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#server-side-handler" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-side handler
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implementation order
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implementation order">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#phase-1-core-commands-mvp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 1 — Core commands (MVP)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-2-pipeline-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 2 — Pipeline commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-3-ready-auto-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 3 — Ready + auto-dispatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-polish" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Phase 4 — Polish
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#files-touched" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Files touched
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="cli-ai-commands-implementation-plan">CLI AI Commands — Implementation Plan<a class="headerlink" href="#cli-ai-commands-implementation-plan" title="Permanent link">&para;</a></h1>
+<h2 id="motivation">Motivation<a class="headerlink" href="#motivation" title="Permanent link">&para;</a></h2>
+<p>Today, the only way Loom knows an agent finished its task is the appended dispatch postscript:</p>
+<div class="highlight"><pre><span></span><code>When you are done, run `loom task move {slug} Done` to mark the task as complete.
+</code></pre></div>
+<p>This is brittle — it only covers the "done" case and gives the agent no structured way to report richer status like "I'm blocked on user input", "I opened a PR", or "I hit an unrecoverable error". The <code>loom ai</code> subcommand group gives agents a first-class reporting interface that updates both the agent cell and the linked board task in a single call.</p>
+<h2 id="design-principles">Design principles<a class="headerlink" href="#design-principles" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Zero-config identity</strong> — agents never pass their own ID. The CLI resolves the calling agent from <code>LOOM_CELL_ID</code> (env var injected by bridge) or <code>ITERM_SESSION_ID</code> (iTerm2 session). Task is auto-resolved from the agent's linked <code>board_tasks</code> entry.</li>
+<li><strong>Single command, multiple effects</strong> — each <code>loom ai</code> subcommand updates the agent cell (activity, needs_attention, error_message), the linked board task (lane, labels, external_url), and triggers a delta broadcast + notification in one shot.</li>
+<li><strong>Idempotent</strong> — running the same command twice is safe (e.g. <code>loom ai done</code> on an already-Done task is a no-op with a warning).</li>
+<li><strong>Composable with existing CLI</strong> — <code>loom ai</code> commands are sugar over existing primitives (<code>board_move_task</code>, <code>board_update_task</code>, agent field updates). Power users can still use the lower-level commands directly.</li>
+<li><strong>Agent-type agnostic</strong> — works for Claude Code, Codex, Gemini CLI, or any agent that can run shell commands.</li>
+</ol>
+<h2 id="command-reference">Command reference<a class="headerlink" href="#command-reference" title="Permanent link">&para;</a></h2>
+<h3 id="loom-ai-done"><code>loom ai done</code><a class="headerlink" href="#loom-ai-done" title="Permanent link">&para;</a></h3>
+<p>Agent signals task completion.</p>
+<div class="highlight"><pre><span></span><code>loom ai done [-m MESSAGE] [TASK]
+</code></pre></div>
+<p><strong>Effects:</strong>
+- Moves linked task to the <code>Done</code> lane
+- Sets agent <code>activity = ""</code>, <code>activity_detail = ""</code>
+- Clears <code>needs_attention</code> and <code>error_message</code> on agent
+- If <code>-m</code> provided, stores message as <code>last_summary</code> on agent</p>
+<p><strong>Task resolution:</strong> If <code>TASK</code> (slug/ID) is omitted, finds the task where <code>agent_id == cell.id</code> and <code>lane</code> is the group's <code>dispatch_lane</code> (default "In Progress"). Dies if ambiguous (multiple in-flight tasks for this agent).</p>
+<p><strong>Example:</strong>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span><span class="k">done</span>
+loom<span class="w"> </span>ai<span class="w"> </span><span class="k">done</span><span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;Implemented the feature, all tests pass&quot;</span>
+loom<span class="w"> </span>ai<span class="w"> </span><span class="k">done</span><span class="w"> </span>fix-login-bug<span class="w">    </span><span class="c1"># explicit task slug</span>
+</code></pre></div></p>
+<hr />
+<h3 id="loom-ai-blocked"><code>loom ai blocked</code><a class="headerlink" href="#loom-ai-blocked" title="Permanent link">&para;</a></h3>
+<p>Agent is stuck and needs human input.</p>
+<div class="highlight"><pre><span></span><code>loom ai blocked REASON [TASK]
+</code></pre></div>
+<p><strong>Effects:</strong>
+- Sets agent <code>needs_attention = True</code>
+- Sets agent <code>activity = "waiting"</code>, <code>activity_detail = REASON</code>
+- Adds label <code>blocked</code> to linked task (if not already present)
+- Triggers notification (via existing <code>notify_on_attention</code> path)</p>
+<p><strong>Example:</strong>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>blocked<span class="w"> </span><span class="s2">&quot;Need credentials for staging database&quot;</span>
+loom<span class="w"> </span>ai<span class="w"> </span>blocked<span class="w"> </span><span class="s2">&quot;Design decision: should we use REST or GraphQL?&quot;</span>
+</code></pre></div></p>
+<hr />
+<h3 id="loom-ai-error"><code>loom ai error</code><a class="headerlink" href="#loom-ai-error" title="Permanent link">&para;</a></h3>
+<p>Agent hit an unrecoverable error.</p>
+<div class="highlight"><pre><span></span><code>loom ai error MESSAGE [TASK]
+</code></pre></div>
+<p><strong>Effects:</strong>
+- Sets agent <code>error_message = MESSAGE</code>, <code>needs_attention = True</code>
+- Adds label <code>error</code> to linked task
+- Triggers notification (via existing <code>notify_on_error</code> path)
+- Does <strong>not</strong> move task lane (user decides what to do)</p>
+<p><strong>Example:</strong>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>error<span class="w"> </span><span class="s2">&quot;Tests failing: 3 failures in auth_test.py&quot;</span>
+loom<span class="w"> </span>ai<span class="w"> </span>error<span class="w"> </span><span class="s2">&quot;Merge conflict on main that I cannot auto-resolve&quot;</span>
+</code></pre></div></p>
+<hr />
+<h3 id="loom-ai-progress"><code>loom ai progress</code><a class="headerlink" href="#loom-ai-progress" title="Permanent link">&para;</a></h3>
+<p>Agent reports what it's currently doing. Lightweight status update — no lane changes.</p>
+<div class="highlight"><pre><span></span><code>loom ai progress MESSAGE [TASK]
+</code></pre></div>
+<p><strong>Effects:</strong>
+- Sets agent <code>activity_detail = MESSAGE</code>
+- Clears <code>needs_attention</code> if previously set (agent is no longer stuck)
+- No task lane/label changes</p>
+<p><strong>Example:</strong>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>progress<span class="w"> </span><span class="s2">&quot;Running test suite&quot;</span>
+loom<span class="w"> </span>ai<span class="w"> </span>progress<span class="w"> </span><span class="s2">&quot;Refactoring auth module — 3 of 5 files done&quot;</span>
+</code></pre></div></p>
+<hr />
+<h3 id="loom-ai-ready"><code>loom ai ready</code><a class="headerlink" href="#loom-ai-ready" title="Permanent link">&para;</a></h3>
+<p>Agent signals it's available for another task.</p>
+<div class="highlight"><pre><span></span><code>loom ai ready [TASK]
+</code></pre></div>
+<p><strong>Effects:</strong>
+- If there's a linked in-progress task, moves it to <code>Done</code>
+- Clears <code>agent_id</code> link from the task
+- Clears agent activity, error, and attention fields
+- Sets agent <code>activity_detail = "ready"</code>
+- (Future: could auto-dispatch next Backlog task with matching assignee)</p>
+<p><strong>Example:</strong>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>ready
+</code></pre></div></p>
+<hr />
+<h3 id="loom-ai-context"><code>loom ai context</code><a class="headerlink" href="#loom-ai-context" title="Permanent link">&para;</a></h3>
+<p>Dumps the agent's current context as structured output. Useful for agents that need to orient themselves (e.g. after resume).</p>
+<div class="highlight"><pre><span></span><code>loom ai context [--json]
+</code></pre></div>
+<p><strong>Output:</strong>
+- Agent: name, slug, group, status, worktree info
+- Task: description, lane, action, labels (if linked)
+- Group: name, settings summary</p>
+<p>This is a <strong>read-only</strong> command — no state changes. Uses <code>detect_context()</code> + SQLite direct reads (works offline).</p>
+<p><strong>Example:</strong>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>ai<span class="w"> </span>context
+loom<span class="w"> </span>ai<span class="w"> </span>context<span class="w"> </span>--json
+</code></pre></div></p>
+<p><strong>Sample output:</strong>
+<div class="highlight"><pre><span></span><code>Agent: fix-auth (fix-auth)
+  Group:    Backend
+  Status:   running
+  Worktree: .loom/worktrees/a1b2c3d4  (loom/fix-auth-a1b2c3d4)
+  Base:     main
+
+Task: Fix authentication timeout on staging
+  Slug:     fix-authentication-timeout
+  Lane:     In Progress
+  Action:   bugfix
+  Labels:   urgent
+</code></pre></div></p>
+<hr />
+<h2 id="identity-resolution-flow">Identity resolution flow<a class="headerlink" href="#identity-resolution-flow" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>loom ai &lt;subcommand&gt; [args]
+        │
+        ▼
+  ┌─ Read LOOM_CELL_ID env var ──────────────────────┐
+  │  (injected by bridge.create_session for all cells)│
+  └──────────────────────┬───────────────────────────┘
+                         │
+                  found? │
+              ┌──────────┴──────────┐
+              │ yes                  │ no
+              ▼                     ▼
+     Look up cell in state   Fall back to ITERM_SESSION_ID
+     by agent ID             (existing detect_context())
+              │                     │
+              ▼                     ▼
+        cell resolved          cell resolved (or die)
+              │
+              ▼
+  ┌─ Find linked task ──────────────────────────┐
+  │  board_tasks where agent_id == cell.id      │
+  │  and lane == dispatch_lane (or any active)  │
+  └──────────────────────┬──────────────────────┘
+                         │
+              ┌──────────┴──────────┐
+              │ 0 tasks     1 task    2+ tasks
+              │                       │
+              ▼             ▼         ▼
+           (no task     use it    die with
+            context)              &quot;ambiguous, specify TASK&quot;)
+</code></pre></div>
+<p>For commands where a task is optional (<code>progress</code>, <code>context</code>), missing task is fine. For commands where a task is required (<code>done</code>), die if no task is linked.</p>
+<p>The explicit <code>TASK</code> positional arg (slug or ID) is always accepted as an override for disambiguation.</p>
+<h2 id="server-side-changes">Server-side changes<a class="headerlink" href="#server-side-changes" title="Permanent link">&para;</a></h2>
+<h3 id="new-command-ai_report">New command: <code>ai_report</code><a class="headerlink" href="#new-command-ai_report" title="Permanent link">&para;</a></h3>
+<p>A single server command handles all <code>loom ai</code> subcommands. The CLI translates each subcommand into a structured payload:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;cmd&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ai_report&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;cell_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;done|blocked|error|progress|ready|derive|ask&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;task_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>In <code>server.py</code></strong>, the <code>ai_report</code> handler:</p>
+<ol>
+<li>Validates <code>cell_id</code> exists in state</li>
+<li>Resolves linked task (from <code>task_id</code> or auto-detect)</li>
+<li>Applies action-specific mutations:</li>
+<li>Agent cell field updates (via <code>state._emit_agent()</code>)</li>
+<li>Task field updates (via <code>state.update_task()</code>)</li>
+<li>Task lane moves (via <code>state.move_task()</code>)</li>
+<li>Emits deltas + broadcast</li>
+<li>Triggers notifications where appropriate</li>
+</ol>
+<p>This keeps the CLI thin (just argument parsing + HTTP call) and the server authoritative on state transitions.</p>
+<h3 id="alternative-cli-side-composition">Alternative: CLI-side composition<a class="headerlink" href="#alternative-cli-side-composition" title="Permanent link">&para;</a></h3>
+<p>Instead of a single <code>ai_report</code> command, the CLI could compose multiple existing API calls:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># loom ai done</span>
+<span class="n">api_call</span><span class="p">(</span><span class="s2">&quot;board_move_task&quot;</span><span class="p">,</span> <span class="nb">id</span><span class="o">=</span><span class="n">task_id</span><span class="p">,</span> <span class="n">lane</span><span class="o">=</span><span class="s2">&quot;Done&quot;</span><span class="p">)</span>
+<span class="n">api_call</span><span class="p">(</span><span class="s2">&quot;ai_update_agent&quot;</span><span class="p">,</span> <span class="nb">id</span><span class="o">=</span><span class="n">cell_id</span><span class="p">,</span> <span class="n">activity</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">needs_attention</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Trade-off:</strong> Simpler server (no new command) but two HTTP round-trips and non-atomic updates. A race could leave the task moved but the agent fields stale.</p>
+<p><strong>Recommendation:</strong> Single <code>ai_report</code> command for atomicity. It's one new handler that delegates to existing <code>MatrixState</code> methods internally.</p>
+<h2 id="data-model-changes">Data model changes<a class="headerlink" href="#data-model-changes" title="Permanent link">&para;</a></h2>
+<h3 id="no-new-fields-needed">No new fields needed<a class="headerlink" href="#no-new-fields-needed" title="Permanent link">&para;</a></h3>
+<p>All required state is already modeled:</p>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>Existing field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agent blocked</td>
+<td><code>AgentCell.needs_attention</code> + <code>activity = "waiting"</code></td>
+</tr>
+<tr>
+<td>Agent error</td>
+<td><code>AgentCell.error_message</code> + <code>needs_attention</code></td>
+</tr>
+<tr>
+<td>Progress text</td>
+<td><code>AgentCell.activity_detail</code></td>
+</tr>
+<tr>
+<td>Task done</td>
+<td><code>BoardTask.lane = "Done"</code></td>
+</tr>
+<tr>
+<td>Summary</td>
+<td><code>AgentCell.last_summary</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="label-conventions">Label conventions<a class="headerlink" href="#label-conventions" title="Permanent link">&para;</a></h3>
+<p>The <code>loom ai</code> commands use structured labels with <code>:</code> separators for machine-readable status:</p>
+<ul>
+<li><code>blocked</code> — agent waiting for user input</li>
+<li><code>error</code> — agent encountered an error</li>
+<li><code>derived</code> — task was created by <code>loom ai derive</code></li>
+<li><code>human</code> — task needs human review (from <code>loom ai ask</code>)</li>
+<li><code>depth-limit</code> — pipeline depth limit reached</li>
+</ul>
+<p>These are additive (don't remove user-set labels).</p>
+<h2 id="webview-changes">Webview changes<a class="headerlink" href="#webview-changes" title="Permanent link">&para;</a></h2>
+<h3 id="task-card-enhancements">Task card enhancements<a class="headerlink" href="#task-card-enhancements" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Blocked indicator</strong>: If task has <code>blocked</code> label, show a yellow warning icon on the card.</li>
+<li><strong>Error indicator</strong>: If task has <code>error</code> label, show a red icon on the card.</li>
+</ul>
+<p>These are small CSS/render additions — no new components.</p>
+<h3 id="agent-cell-enhancements">Agent cell enhancements<a class="headerlink" href="#agent-cell-enhancements" title="Permanent link">&para;</a></h3>
+<p>The existing status dot and activity detail already cover agent-side rendering. No changes needed — <code>needs_attention</code> already shows a yellow indicator.</p>
+<h2 id="dispatch-prompt-update">Dispatch prompt update<a class="headerlink" href="#dispatch-prompt-update" title="Permanent link">&para;</a></h2>
+<p>Replace the current hardcoded postscript:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Current</span>
+<span class="n">prompt</span> <span class="o">+=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">When you are done, run `loom task move </span><span class="si">{</span><span class="n">task_ref</span><span class="si">}</span><span class="s2"> Done` to mark the task as complete.&quot;</span>
+</code></pre></div>
+<p>With a richer instruction block:</p>
+<p>The postscript is now dynamic — it only shows commands relevant to the action:</p>
+<ul>
+<li><code>done</code>, <code>blocked</code>, and <code>error</code> are always included</li>
+<li><code>derive</code> only appears when the action declares <code>transitions</code></li>
+<li><code>ask</code> only appears when an <code>ask</code> transition exists</li>
+</ul>
+<p>For an action with no transitions (e.g. <code>oneshot/feature</code>), the postscript is:
+<div class="highlight"><pre><span></span><code>Report your progress with these commands:
+- `loom ai done` — task complete, no follow-up needed
+- `loom ai blocked &quot;reason&quot;` — need user input
+- `loom ai error &quot;message&quot;` — unrecoverable error
+</code></pre></div></p>
+<p>For a pipeline action like <code>feature/implement</code> (transitions to <code>feature/review</code>):
+<div class="highlight"><pre><span></span><code>Report your progress with these commands:
+- `loom ai done` — task complete, no follow-up needed
+- `loom ai derive &quot;description&quot; -t feature/review` — implementation is complete and ready for review
+- `loom ai blocked &quot;reason&quot;` — need user input
+- `loom ai error &quot;message&quot;` — unrecoverable error
+</code></pre></div></p>
+<h2 id="cli-implementation">CLI implementation<a class="headerlink" href="#cli-implementation" title="Permanent link">&para;</a></h2>
+<h3 id="file-changes">File changes<a class="headerlink" href="#file-changes" title="Permanent link">&para;</a></h3>
+<p><strong><code>bin/loom</code></strong> — new subcommand group:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># -- ai (agent reporting) ---------------------------------------------------</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_resolve_self</span><span class="p">(</span><span class="n">port</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Resolve the calling agent&#39;s cell and linked task.</span>
+<span class="sd">    Uses LOOM_CELL_ID (preferred) or ITERM_SESSION_ID fallback.</span>
+<span class="sd">    Returns (cell_dict, task_dict_or_None).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">cell_id</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;LOOM_CELL_ID&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">state_data</span> <span class="o">=</span> <span class="n">get_state</span><span class="p">(</span><span class="n">port</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">cell_id</span><span class="p">:</span>
+        <span class="n">cell</span> <span class="o">=</span> <span class="n">state_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;agents&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cell_id</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">cell</span><span class="p">:</span>
+            <span class="n">die</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;LOOM_CELL_ID=</span><span class="si">{</span><span class="n">cell_id</span><span class="si">}</span><span class="s2"> not found in state&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">cell</span><span class="p">,</span> <span class="n">_parent</span><span class="p">,</span> <span class="n">_group</span> <span class="o">=</span> <span class="n">detect_context</span><span class="p">(</span><span class="n">state_data</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">cell</span><span class="p">:</span>
+            <span class="n">die</span><span class="p">(</span><span class="s2">&quot;Cannot identify agent — not in a Loom-managed session</span><span class="se">\n</span><span class="s2">&quot;</span>
+                <span class="s2">&quot;  (LOOM_CELL_ID not set and ITERM_SESSION_ID not matched)&quot;</span><span class="p">)</span>
+        <span class="n">cell_id</span> <span class="o">=</span> <span class="n">cell</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">]</span>
+
+    <span class="c1"># Find linked task(s)</span>
+    <span class="n">tasks</span> <span class="o">=</span> <span class="n">state_data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;board_tasks&quot;</span><span class="p">,</span> <span class="p">{})</span>
+    <span class="n">linked</span> <span class="o">=</span> <span class="p">[</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">tasks</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;agent_id&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">cell_id</span><span class="p">]</span>
+    <span class="c1"># Prefer in-progress tasks</span>
+    <span class="n">active</span> <span class="o">=</span> <span class="p">[</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">linked</span> <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;lane&quot;</span><span class="p">)</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">(</span><span class="s2">&quot;Done&quot;</span><span class="p">,</span> <span class="s2">&quot;Backlog&quot;</span><span class="p">)]</span>
+    <span class="n">task</span> <span class="o">=</span> <span class="n">active</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">active</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="kc">None</span>
+
+    <span class="k">return</span> <span class="n">cell</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span> <span class="n">active</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_resolve_self_and_task</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">require_task</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Resolve agent + task, with optional explicit TASK override.&quot;&quot;&quot;</span>
+    <span class="n">cell</span><span class="p">,</span> <span class="n">task</span><span class="p">,</span> <span class="n">active</span> <span class="o">=</span> <span class="n">_resolve_self</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">port</span><span class="p">)</span>
+    <span class="n">explicit</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s2">&quot;task_ref&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">explicit</span><span class="p">:</span>
+        <span class="n">st</span> <span class="o">=</span> <span class="n">get_state</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">port</span><span class="p">)</span>
+        <span class="n">task</span> <span class="o">=</span> <span class="n">resolve_task</span><span class="p">(</span><span class="n">st</span><span class="p">,</span> <span class="n">explicit</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">require_task</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">task</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">active</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="n">slugs</span> <span class="o">=</span> <span class="s2">&quot;, &quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;slug&quot;</span><span class="p">,</span> <span class="n">t</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">][:</span><span class="mi">6</span><span class="p">])</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">active</span><span class="p">)</span>
+            <span class="n">die</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Multiple active tasks for this agent: </span><span class="si">{</span><span class="n">slugs</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+                <span class="s2">&quot;  Specify the task: loom ai done TASK_SLUG&quot;</span><span class="p">)</span>
+        <span class="n">die</span><span class="p">(</span><span class="s2">&quot;No active task linked to this agent&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">cell</span><span class="p">,</span> <span class="n">task</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cmd_ai_done</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+    <span class="n">cell</span><span class="p">,</span> <span class="n">task</span> <span class="o">=</span> <span class="n">_resolve_self_and_task</span><span class="p">(</span><span class="n">args</span><span class="p">)</span>
+    <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;cell_id&quot;</span><span class="p">:</span> <span class="n">cell</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">],</span>
+        <span class="s2">&quot;action&quot;</span><span class="p">:</span> <span class="s2">&quot;done&quot;</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="n">task</span><span class="p">:</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;task_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">task</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">message</span><span class="p">:</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;message&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">message</span>
+    <span class="n">resp</span> <span class="o">=</span> <span class="n">api_call</span><span class="p">(</span><span class="s2">&quot;ai_report&quot;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">port</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">check_ok</span><span class="p">(</span><span class="n">resp</span><span class="p">)</span>
+    <span class="n">task_label</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;slug&quot;</span><span class="p">,</span> <span class="n">task</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">][:</span><span class="mi">6</span><span class="p">])</span> <span class="k">if</span> <span class="n">task</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Done</span><span class="si">{</span><span class="s1">&#39; — &#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">task_label</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">task_label</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cmd_ai_blocked</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+    <span class="n">cell</span><span class="p">,</span> <span class="n">task</span> <span class="o">=</span> <span class="n">_resolve_self_and_task</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">require_task</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;cell_id&quot;</span><span class="p">:</span> <span class="n">cell</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">],</span>
+        <span class="s2">&quot;action&quot;</span><span class="p">:</span> <span class="s2">&quot;blocked&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">reason</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="n">task</span><span class="p">:</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;task_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">task</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">]</span>
+    <span class="n">resp</span> <span class="o">=</span> <span class="n">api_call</span><span class="p">(</span><span class="s2">&quot;ai_report&quot;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">port</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">check_ok</span><span class="p">(</span><span class="n">resp</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Blocked: </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">reason</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cmd_ai_error</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+    <span class="n">cell</span><span class="p">,</span> <span class="n">task</span> <span class="o">=</span> <span class="n">_resolve_self_and_task</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">require_task</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;cell_id&quot;</span><span class="p">:</span> <span class="n">cell</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">],</span>
+        <span class="s2">&quot;action&quot;</span><span class="p">:</span> <span class="s2">&quot;error&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">message</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="n">task</span><span class="p">:</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;task_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">task</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">]</span>
+    <span class="n">resp</span> <span class="o">=</span> <span class="n">api_call</span><span class="p">(</span><span class="s2">&quot;ai_report&quot;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">port</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">check_ok</span><span class="p">(</span><span class="n">resp</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error reported: </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">message</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cmd_ai_progress</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+    <span class="n">cell</span><span class="p">,</span> <span class="n">task</span> <span class="o">=</span> <span class="n">_resolve_self_and_task</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">require_task</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;cell_id&quot;</span><span class="p">:</span> <span class="n">cell</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">],</span>
+        <span class="s2">&quot;action&quot;</span><span class="p">:</span> <span class="s2">&quot;progress&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">message</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="n">task</span><span class="p">:</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;task_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">task</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">]</span>
+    <span class="n">resp</span> <span class="o">=</span> <span class="n">api_call</span><span class="p">(</span><span class="s2">&quot;ai_report&quot;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">port</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">check_ok</span><span class="p">(</span><span class="n">resp</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Progress: </span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">message</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cmd_ai_ready</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+    <span class="n">cell</span><span class="p">,</span> <span class="n">task</span> <span class="o">=</span> <span class="n">_resolve_self_and_task</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">require_task</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;cell_id&quot;</span><span class="p">:</span> <span class="n">cell</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">],</span>
+        <span class="s2">&quot;action&quot;</span><span class="p">:</span> <span class="s2">&quot;ready&quot;</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="n">task</span><span class="p">:</span>
+        <span class="n">kwargs</span><span class="p">[</span><span class="s2">&quot;task_id&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">task</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">]</span>
+    <span class="n">resp</span> <span class="o">=</span> <span class="n">api_call</span><span class="p">(</span><span class="s2">&quot;ai_report&quot;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">port</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="n">check_ok</span><span class="p">(</span><span class="n">resp</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Ready for next task&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cmd_ai_context</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+    <span class="n">cell_id</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;LOOM_CELL_ID&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="c1"># Use local state (works offline)</span>
+    <span class="n">st</span> <span class="o">=</span> <span class="n">get_state_local</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">port</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">cell_id</span><span class="p">:</span>
+        <span class="n">cell</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;agents&quot;</span><span class="p">,</span> <span class="p">{})</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">cell_id</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">cell</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">detect_context</span><span class="p">(</span><span class="n">st</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cell</span><span class="p">:</span>
+        <span class="n">die</span><span class="p">(</span><span class="s2">&quot;Cannot identify agent — not in a Loom-managed session&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">json</span><span class="p">:</span>
+        <span class="c1"># Include linked task</span>
+        <span class="n">tasks</span> <span class="o">=</span> <span class="n">st</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;board_tasks&quot;</span><span class="p">,</span> <span class="p">{})</span>
+        <span class="n">linked</span> <span class="o">=</span> <span class="p">[</span><span class="n">t</span> <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="n">tasks</span><span class="o">.</span><span class="n">values</span><span class="p">()</span>
+                  <span class="k">if</span> <span class="n">t</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;agent_id&quot;</span><span class="p">)</span> <span class="o">==</span> <span class="n">cell</span><span class="p">[</span><span class="s2">&quot;id&quot;</span><span class="p">]]</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="s2">&quot;agent&quot;</span><span class="p">:</span> <span class="n">cell</span><span class="p">,</span> <span class="s2">&quot;tasks&quot;</span><span class="p">:</span> <span class="n">linked</span><span class="p">},</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+        <span class="k">return</span>
+
+    <span class="c1"># Human-readable summary</span>
+    <span class="o">...</span>
+</code></pre></div>
+<h3 id="argparse-registration">Argparse registration<a class="headerlink" href="#argparse-registration" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># -- ai (agent reporting) --------------------------------------------------</span>
+<span class="n">ai</span> <span class="o">=</span> <span class="n">sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span><span class="s2">&quot;ai&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Agent reporting (used by AI agents)&quot;</span><span class="p">)</span>
+<span class="n">ai</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">_sub_parser</span><span class="o">=</span><span class="n">ai</span><span class="p">)</span>
+<span class="n">ai_sub</span> <span class="o">=</span> <span class="n">ai</span><span class="o">.</span><span class="n">add_subparsers</span><span class="p">(</span><span class="n">dest</span><span class="o">=</span><span class="s2">&quot;ai_cmd&quot;</span><span class="p">)</span>
+
+<span class="n">p</span> <span class="o">=</span> <span class="n">ai_sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span><span class="s2">&quot;done&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Mark task as done&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;-m&quot;</span><span class="p">,</span> <span class="s2">&quot;--message&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Completion summary&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;task_ref&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;?&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Task slug/ID (auto-detected)&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="n">cmd_ai_done</span><span class="p">)</span>
+
+<span class="n">p</span> <span class="o">=</span> <span class="n">ai_sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span><span class="s2">&quot;blocked&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Signal blocked on user input&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;reason&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Why the agent is blocked&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;task_ref&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;?&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Task slug/ID (auto-detected)&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="n">cmd_ai_blocked</span><span class="p">)</span>
+
+<span class="n">p</span> <span class="o">=</span> <span class="n">ai_sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span><span class="s2">&quot;error&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Report an unrecoverable error&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;message&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Error description&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;task_ref&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;?&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Task slug/ID (auto-detected)&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="n">cmd_ai_error</span><span class="p">)</span>
+
+<span class="n">p</span> <span class="o">=</span> <span class="n">ai_sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span><span class="s2">&quot;progress&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Report current progress&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;message&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Progress description&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;task_ref&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;?&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Task slug/ID (auto-detected)&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="n">cmd_ai_progress</span><span class="p">)</span>
+
+<span class="n">p</span> <span class="o">=</span> <span class="n">ai_sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span><span class="s2">&quot;ready&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Signal ready for next task&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;task_ref&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;?&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Task slug/ID (auto-detected)&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="n">cmd_ai_ready</span><span class="p">)</span>
+
+<span class="n">p</span> <span class="o">=</span> <span class="n">ai_sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span><span class="s2">&quot;context&quot;</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Show current agent context&quot;</span><span class="p">)</span>
+<span class="n">p</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="n">cmd_ai_context</span><span class="p">)</span>
+</code></pre></div>
+<h2 id="server-side-handler">Server-side handler<a class="headerlink" href="#server-side-handler" title="Permanent link">&para;</a></h2>
+<p>In <code>server.py</code>, inside the command dispatch block:</p>
+<div class="highlight"><pre><span></span><code><span class="k">elif</span> <span class="n">cmd</span> <span class="o">==</span> <span class="s2">&quot;ai_report&quot;</span><span class="p">:</span>
+    <span class="n">cell_id</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;cell_id&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">action</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;action&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">message</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;message&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">task_id</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;task_id&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">url</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;url&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">is_draft</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;draft&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+
+    <span class="n">cell</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get_cell</span><span class="p">(</span><span class="n">cell_id</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cell</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;ok&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Cell </span><span class="si">{</span><span class="n">cell_id</span><span class="si">}</span><span class="s2"> not found&quot;</span><span class="p">}</span>
+        <span class="k">break</span>
+
+    <span class="n">task</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">board_tasks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">task_id</span><span class="p">)</span> <span class="k">if</span> <span class="n">task_id</span> <span class="k">else</span> <span class="kc">None</span>
+
+    <span class="k">if</span> <span class="n">action</span> <span class="o">==</span> <span class="s2">&quot;done&quot;</span><span class="p">:</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">activity</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">activity_detail</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">needs_attention</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">error_message</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">message</span><span class="p">:</span>
+            <span class="n">cell</span><span class="o">.</span><span class="n">last_summary</span> <span class="o">=</span> <span class="n">message</span>
+        <span class="n">state</span><span class="o">.</span><span class="n">_emit_agent</span><span class="p">(</span><span class="n">cell</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">task</span><span class="p">:</span>
+            <span class="n">state</span><span class="o">.</span><span class="n">move_task</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="s2">&quot;Done&quot;</span><span class="p">)</span>
+
+    <span class="k">elif</span> <span class="n">action</span> <span class="o">==</span> <span class="s2">&quot;blocked&quot;</span><span class="p">:</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">needs_attention</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">activity</span> <span class="o">=</span> <span class="s2">&quot;waiting&quot;</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">activity_detail</span> <span class="o">=</span> <span class="n">message</span>
+        <span class="n">state</span><span class="o">.</span><span class="n">_emit_agent</span><span class="p">(</span><span class="n">cell</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">task</span><span class="p">:</span>
+            <span class="n">_add_label</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="s2">&quot;blocked&quot;</span><span class="p">)</span>
+            <span class="n">state</span><span class="o">.</span><span class="n">_emit_task</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+            <span class="n">state</span><span class="o">.</span><span class="n">_db_save_task</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+
+    <span class="k">elif</span> <span class="n">action</span> <span class="o">==</span> <span class="s2">&quot;error&quot;</span><span class="p">:</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">error_message</span> <span class="o">=</span> <span class="n">message</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">needs_attention</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">state</span><span class="o">.</span><span class="n">_emit_agent</span><span class="p">(</span><span class="n">cell</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">task</span><span class="p">:</span>
+            <span class="n">_add_label</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="s2">&quot;error&quot;</span><span class="p">)</span>
+            <span class="n">state</span><span class="o">.</span><span class="n">_emit_task</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+            <span class="n">state</span><span class="o">.</span><span class="n">_db_save_task</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+
+    <span class="k">elif</span> <span class="n">action</span> <span class="o">==</span> <span class="s2">&quot;progress&quot;</span><span class="p">:</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">activity_detail</span> <span class="o">=</span> <span class="n">message</span>
+        <span class="k">if</span> <span class="n">cell</span><span class="o">.</span><span class="n">needs_attention</span><span class="p">:</span>
+            <span class="n">cell</span><span class="o">.</span><span class="n">needs_attention</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">state</span><span class="o">.</span><span class="n">_emit_agent</span><span class="p">(</span><span class="n">cell</span><span class="p">)</span>
+
+    <span class="k">elif</span> <span class="n">action</span> <span class="o">==</span> <span class="s2">&quot;ready&quot;</span><span class="p">:</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">activity</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">activity_detail</span> <span class="o">=</span> <span class="s2">&quot;ready&quot;</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">needs_attention</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="n">cell</span><span class="o">.</span><span class="n">error_message</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+        <span class="n">state</span><span class="o">.</span><span class="n">_emit_agent</span><span class="p">(</span><span class="n">cell</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">task</span><span class="p">:</span>
+            <span class="n">state</span><span class="o">.</span><span class="n">move_task</span><span class="p">(</span><span class="n">task</span><span class="o">.</span><span class="n">id</span><span class="p">,</span> <span class="s2">&quot;Done&quot;</span><span class="p">)</span>
+            <span class="n">task</span><span class="o">.</span><span class="n">agent_id</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+            <span class="n">state</span><span class="o">.</span><span class="n">_emit_task</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+            <span class="n">state</span><span class="o">.</span><span class="n">_db_save_task</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;ok&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+    <span class="k">await</span> <span class="n">state</span><span class="o">.</span><span class="n">broadcast</span><span class="p">()</span>
+</code></pre></div>
+<p>Helper functions for label manipulation:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">_add_label</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="n">label</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">label</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">task</span><span class="o">.</span><span class="n">labels</span><span class="p">:</span>
+        <span class="n">task</span><span class="o">.</span><span class="n">labels</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">label</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_remove_label</span><span class="p">(</span><span class="n">task</span><span class="p">,</span> <span class="n">label</span><span class="p">):</span>
+    <span class="n">task</span><span class="o">.</span><span class="n">labels</span> <span class="o">=</span> <span class="p">[</span><span class="n">l</span> <span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="n">task</span><span class="o">.</span><span class="n">labels</span> <span class="k">if</span> <span class="n">l</span> <span class="o">!=</span> <span class="n">label</span><span class="p">]</span>
+</code></pre></div>
+<h2 id="implementation-order">Implementation order<a class="headerlink" href="#implementation-order" title="Permanent link">&para;</a></h2>
+<h3 id="phase-1-core-commands-mvp">Phase 1 — Core commands (MVP)<a class="headerlink" href="#phase-1-core-commands-mvp" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong><code>_resolve_self</code> + <code>_resolve_self_and_task</code></strong> in <code>bin/loom</code> — identity resolution</li>
+<li><strong><code>ai_report</code> handler</strong> in <code>server.py</code> — single handler for all actions</li>
+<li><strong>CLI subcommands</strong>: <code>done</code>, <code>blocked</code>, <code>error</code>, <code>progress</code>, <code>context</code></li>
+<li><strong>Update dispatch postscript</strong> — replace <code>loom task move</code> with <code>loom ai</code> instructions</li>
+<li><strong>Label helpers</strong> in <code>server.py</code></li>
+</ol>
+<h3 id="phase-2-pipeline-commands">Phase 2 — Pipeline commands<a class="headerlink" href="#phase-2-pipeline-commands" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>CLI subcommands</strong>: <code>derive</code>, <code>ask</code></li>
+<li><strong>Label-based indicators</strong> in <code>board.js</code> — visual badges for <code>blocked</code>, <code>error</code> labels</li>
+</ol>
+<h3 id="phase-3-ready-auto-dispatch">Phase 3 — Ready + auto-dispatch<a class="headerlink" href="#phase-3-ready-auto-dispatch" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>CLI subcommand</strong>: <code>ready</code></li>
+<li><strong>Auto-dispatch</strong>: when an agent reports <code>ready</code>, check Backlog for tasks with matching <code>assignee</code> prefix and auto-dispatch the next one. This is the foundation for continuous agent pools.</li>
+</ol>
+<h3 id="phase-4-polish">Phase 4 — Polish<a class="headerlink" href="#phase-4-polish" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Configurable dispatch instructions</strong> — group setting to control what <code>loom ai</code> instructions are appended to the dispatch prompt</li>
+<li><strong><code>loom ai context</code> enrichment</strong> — include recent event log, worktree diff summary, sibling agent status</li>
+</ol>
+<h2 id="files-touched">Files touched<a class="headerlink" href="#files-touched" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>bin/loom                  # ~200 lines: ai subcommand group, _resolve_self, 8 handlers
+loom/server.py            # ~80 lines: ai_report handler, label helpers
+loom/state.py             # 0 lines (no new fields)
+static/js/board.js        # ~30 lines: PR badge, label indicators on cards
+static/style.css          # ~15 lines: badge styles
+CLAUDE.md                 # Document new commands
+</code></pre></div>
+<h2 id="compatibility-notes">Compatibility notes<a class="headerlink" href="#compatibility-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Existing <code>loom task move X Done</code></strong> still works — agents using the old postscript won't break.</li>
+<li><strong><code>external_url</code></strong> field already exists on <code>BoardTask</code> but is unused — repurposing it for PR URLs requires no schema migration.</li>
+<li><strong>Labels</strong> are free-form strings — the <code>pr:*</code> / <code>blocked</code> / <code>error</code> conventions are just conventions, not enforced at the schema level.</li>
+<li><strong><code>LOOM_CELL_ID</code></strong> is already injected into every Loom-managed session — no bridge changes needed.</li>
+</ul>
+<h2 id="decisions">Decisions<a class="headerlink" href="#decisions" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong><code>loom ai done</code> auto-trigger worktree merge</strong> — will be a group setting (not in MVP, added when the setting exists).</li>
+<li><strong>Daemon required</strong> — yes, all <code>loom ai</code> commands (except <code>context</code>) require the daemon. No offline queueing.</li>
+<li><strong>Notification customization</strong> — not implementing per-action toggles now. Existing <code>notify_on_finish</code> / <code>notify_on_error</code> / <code>notify_on_attention</code> settings cover the cases.</li>
+<li><strong><code>loom ai ready</code> auto-dispatch</strong> — no. When pipelines are introduced, the user will decide what happens on ready.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2784 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="iTerm2 agent and terminal orchestration">
+      
+      
+      
+      
+        <link rel="prev" href="../sessions/">
+      
+      
+        <link rel="next" href="../group-settings/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Agents & Sessions - Loom</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#agents-sessions" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Loom" class="md-header__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Loom
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Agents & Sessions
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Loom" class="md-nav__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Loom
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start Here
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Start Here
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents & Sessions
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents & Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-three-layers-loom-manages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The three layers Loom manages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-creation-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent creation flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#providers-backends-and-boot-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Providers, backends, and boot commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Providers, backends, and boot commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#built-in-adapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in adapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-provider-resolution-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How provider resolution works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-permissions-and-max-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model, permissions, and max turns
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-model-system-persistent-initial-and-task-prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt model: system, persistent, initial, and task prompts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Prompt model: system, persistent, initial, and task prompts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#system_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        system_prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#persistent-loom-prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Persistent Loom prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#initial_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        initial_prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task prompts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hooks-mcp-and-injected-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hooks, MCP, and injected files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hooks, MCP, and injected files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#common-runtime-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common runtime behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#codex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Codex
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gemini-cli-and-generic-adapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gemini CLI and generic adapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session lifecycle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Session lifecycle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#readiness-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Readiness detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#activity-and-idle-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Activity and idle state
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relaunch-resume-and-clear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relaunch, resume, and /clear
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Relaunch, resume, and /clear">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#relaunch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relaunch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#clearing-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Clearing context
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worktrees-and-execution-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktrees and execution environment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worktrees and execution environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-changes-when-worktrees-are-enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changes when worktrees are enabled
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-inheritance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktree inheritance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#relaunch-and-missing-worktrees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relaunch and missing worktrees
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#terminals-versus-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terminals versus agents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a provider
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../group-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Group Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../keyboard-shortcuts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard Shortcuts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Workflows
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../board/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../task-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions & Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../worktrees/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worktrees
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../schedules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schedules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate Loom
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate Loom
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_7_1" id="__nav_7_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plans Archive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plans Archive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/auto-generated-playbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-Generated Playbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/agent-awareness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Awareness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/agent-context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Context Preservation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI & REST API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/cli_ai_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI AI Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/git-worktree-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git Worktree Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/standalone_application/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standalone Application
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/task-board/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board Plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver Plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/workflow-automation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-three-layers-loom-manages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The three layers Loom manages
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent-creation-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent creation flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#providers-backends-and-boot-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Providers, backends, and boot commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Providers, backends, and boot commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#built-in-adapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in adapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-provider-resolution-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How provider resolution works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-permissions-and-max-turns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model, permissions, and max turns
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-model-system-persistent-initial-and-task-prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt model: system, persistent, initial, and task prompts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Prompt model: system, persistent, initial, and task prompts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#system_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        system_prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#persistent-loom-prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Persistent Loom prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#initial_prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        initial_prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task prompts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hooks-mcp-and-injected-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hooks, MCP, and injected files
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Hooks, MCP, and injected files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#common-runtime-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common runtime behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#codex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Codex
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gemini-cli-and-generic-adapters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gemini CLI and generic adapters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session lifecycle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Session lifecycle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#readiness-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Readiness detection
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#activity-and-idle-state" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Activity and idle state
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relaunch-resume-and-clear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relaunch, resume, and /clear
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Relaunch, resume, and /clear">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#relaunch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relaunch
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#clearing-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Clearing context
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worktrees-and-execution-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktrees and execution environment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worktrees and execution environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-changes-when-worktrees-are-enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What changes when worktrees are enabled
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-inheritance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktree inheritance
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#relaunch-and-missing-worktrees" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relaunch and missing worktrees
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cleanup
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#terminals-versus-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Terminals versus agents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a provider
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="agents-sessions">Agents &amp; Sessions<a class="headerlink" href="#agents-sessions" title="Permanent link">&para;</a></h1>
+<p>This guide explains how Loom turns a saved configuration into a live agent session. It covers agent creation, providers and backends, boot commands, prompts, hooks, MCP integration, worktrees, relaunch and resume behavior, and the differences between adapters such as Claude Code and Codex.</p>
+<p>For configuration reference, see <a href="../agent-templates/">Agent Templates</a>, <a href="../group-settings/">Group Settings</a>, and <a href="../worktrees/">Worktrees</a>.</p>
+<h2 id="the-three-layers-loom-manages">The three layers Loom manages<a class="headerlink" href="#the-three-layers-loom-manages" title="Permanent link">&para;</a></h2>
+<p>When you create an agent, Loom is tracking three related things:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>What it is</th>
+<th>Where it lives</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Loom agent</strong></td>
+<td>The saved agent record: name, group, template, worktree, status, dispatch history</td>
+<td>Loom state / SQLite</td>
+</tr>
+<tr>
+<td><strong>Terminal session</strong></td>
+<td>The live iTerm2 tab or pane Loom created</td>
+<td>iTerm2</td>
+</tr>
+<tr>
+<td><strong>Provider session</strong></td>
+<td>The AI tool's own session or conversation state</td>
+<td>Claude Code, Codex, or another adapter</td>
+</tr>
+</tbody>
+</table>
+<p>Two IDs matter:</p>
+<ul>
+<li><strong><code>session_id</code></strong> is the iTerm2 session ID. Loom uses it to focus tabs, send text, and reconnect after restarts.</li>
+<li><strong><code>agent_session_id</code></strong> is the provider's own session ID when the adapter exposes one. Loom uses it for provider-level resume.</li>
+</ul>
+<p>Terminals only have the first layer and the iTerm2 session. Provider-aware agents use all three.</p>
+<h2 id="agent-creation-flow">Agent creation flow<a class="headerlink" href="#agent-creation-flow" title="Permanent link">&para;</a></h2>
+<p>Every new agent follows the same high-level flow:</p>
+<ol>
+<li>
+<p><strong>Resolve launch settings</strong>
+   Loom merges group defaults, the group's default agent template, any explicit template, and per-agent overrides from the creation dialog or dispatch.</p>
+</li>
+<li>
+<p><strong>Choose provider and boot command</strong>
+   Loom decides which adapter to use and what command to run.</p>
+</li>
+<li>
+<p><strong>Create a worktree if needed</strong>
+   If worktrees are enabled and the directory is inside a git repo, Loom creates a per-agent worktree and points the agent at it.</p>
+</li>
+<li>
+<p><strong>Create the iTerm2 session</strong>
+   Loom opens a new tab, sets the title and color, changes to the working directory, exports environment variables, and sources any configured env file or init script.</p>
+</li>
+<li>
+<p><strong>Install runtime integration</strong>
+   For supported adapters, Loom installs hooks, MCP configuration, provider-specific helper files, and persistent prompt files into the working directory.</p>
+</li>
+<li>
+<p><strong>Launch the provider</strong>
+   Loom runs the final boot command.</p>
+</li>
+<li>
+<p><strong>Send the first user message</strong>
+   If the template defines an <code>initial_prompt</code>, or if the agent was created by dispatching a task, Loom sends that text after the provider is ready.</p>
+</li>
+</ol>
+<p>This is why provider, prompt, and worktree settings all need to be understood together: they affect different stages of the same launch flow.</p>
+<h2 id="providers-backends-and-boot-commands">Providers, backends, and boot commands<a class="headerlink" href="#providers-backends-and-boot-commands" title="Permanent link">&para;</a></h2>
+<p>Loom has a provider-agnostic adapter layer. A provider tells Loom how to launch and integrate with a backend such as Claude Code or Codex.</p>
+<h3 id="built-in-adapters">Built-in adapters<a class="headerlink" href="#built-in-adapters" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Default command</th>
+<th>Hooks / activity</th>
+<th>MCP</th>
+<th>Resume</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>claude-code</code></strong></td>
+<td><code>claude</code></td>
+<td>Full</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Richest integration: tool activity, permission prompts, slash skills, persistent system prompt file</td>
+</tr>
+<tr>
+<td><strong><code>codex</code></strong></td>
+<td><code>codex</code></td>
+<td>Partial</td>
+<td>Yes</td>
+<td>Yes</td>
+<td>Command-hook integration, MCP config in <code>.codex/config.toml</code>, explicit prompt injection</td>
+</tr>
+<tr>
+<td><strong><code>gemini-cli</code></strong></td>
+<td><code>gemini</code></td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>Launch + model selection only; no hook or MCP integration yet</td>
+</tr>
+<tr>
+<td><strong>generic fallback</strong></td>
+<td>none</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>Used when Loom cannot identify a provider from the command or process</td>
+</tr>
+</tbody>
+</table>
+<h3 id="how-provider-resolution-works">How provider resolution works<a class="headerlink" href="#how-provider-resolution-works" title="Permanent link">&para;</a></h3>
+<p>Loom resolves the backend in this order:</p>
+<ol>
+<li>If a <strong>provider</strong> is set explicitly, Loom treats that adapter as the source of truth.</li>
+<li>If the provider is known, Loom uses that adapter's default command unless you override the boot command.</li>
+<li>If no provider is set, Loom uses the boot command or global default command and then tries to auto-detect the adapter from the command name.</li>
+<li>If no adapter matches, Loom falls back to the generic adapter.</li>
+</ol>
+<p>Practical consequences:</p>
+<ul>
+<li>Setting <code>provider: claude-code</code> with no command runs <code>claude</code>.</li>
+<li>Setting <code>provider: codex</code> with no command runs <code>codex</code>.</li>
+<li>Leaving provider empty but setting command to <code>claude --model sonnet</code> lets Loom auto-detect Claude Code from the command.</li>
+<li>Supplying a custom raw command means Loom does less automatic shaping around model flags.</li>
+</ul>
+<h3 id="model-permissions-and-max-turns">Model, permissions, and max turns<a class="headerlink" href="#model-permissions-and-max-turns" title="Permanent link">&para;</a></h3>
+<p>These settings are adapter-aware:</p>
+<ul>
+<li><strong><code>model</code></strong> is appended as provider-specific model flags when Loom is using the adapter's default command path.</li>
+<li><strong><code>permissions</code></strong> currently affects Claude Code only:
+  <code>skip</code> becomes <code>--dangerously-skip-permissions</code>; any other value becomes <code>--allowed-tools ...</code>.</li>
+<li><strong><code>max_turns</code></strong> is appended as <code>--max-turns N</code> when set.</li>
+</ul>
+<p>If you fully override the boot command yourself, prefer to include any provider-specific flags you need directly in that command.</p>
+<h2 id="prompt-model-system-persistent-initial-and-task-prompts">Prompt model: system, persistent, initial, and task prompts<a class="headerlink" href="#prompt-model-system-persistent-initial-and-task-prompts" title="Permanent link">&para;</a></h2>
+<p>Loom uses several different prompt layers for different purposes.</p>
+<h3 id="system_prompt"><code>system_prompt</code><a class="headerlink" href="#system_prompt" title="Permanent link">&para;</a></h3>
+<p>This comes from the resolved agent configuration. It is adapter-specific launch context, not a task. Loom uses it while building the provider's persistent session instructions.</p>
+<h3 id="persistent-loom-prompt">Persistent Loom prompt<a class="headerlink" href="#persistent-loom-prompt" title="Permanent link">&para;</a></h3>
+<p>For provider-aware agents, Loom builds a persistent prompt that combines:</p>
+<ul>
+<li>the resolved <code>system_prompt</code></li>
+<li>Loom's own agent instructions, such as <code>loom ai done</code>, <code>loom ai derive</code>, and <code>loom ai ask</code></li>
+</ul>
+<p>This is what gives a Loom-managed agent its long-lived identity inside a session.</p>
+<p>Adapter behavior differs:</p>
+<ul>
+<li><strong>Claude Code</strong> writes a Loom-managed markdown file under <code>.loom/</code> and appends it with <code>--append-system-prompt-file</code>.</li>
+<li><strong>Codex</strong> injects the prompt explicitly into the launch command and preserves that path on resume; older Loom-managed <code>.codex/AGENTS.md</code> blocks are cleaned up if present.</li>
+<li><strong>Gemini CLI</strong> and the generic adapter do not currently have persistent prompt integration.</li>
+</ul>
+<h3 id="initial_prompt"><code>initial_prompt</code><a class="headerlink" href="#initial_prompt" title="Permanent link">&para;</a></h3>
+<p>This is the first normal user message Loom sends after the agent boots. Use it for "what to do first" instructions that should not become part of the provider's persistent identity.</p>
+<h3 id="task-prompts">Task prompts<a class="headerlink" href="#task-prompts" title="Permanent link">&para;</a></h3>
+<p>Dispatched tasks are sent after the session exists. They are separate from the persistent prompt. This is why the same agent can keep its Loom identity while receiving many tasks over time.</p>
+<p>See <a href="../actions/">Actions &amp; Templates</a> for how task prompts are rendered from actions.</p>
+<h2 id="hooks-mcp-and-injected-files">Hooks, MCP, and injected files<a class="headerlink" href="#hooks-mcp-and-injected-files" title="Permanent link">&para;</a></h2>
+<p>Loom installs adapter-specific files into the agent's working directory so it can observe activity and expose Loom tools inside the provider.</p>
+<h3 id="common-runtime-behavior">Common runtime behavior<a class="headerlink" href="#common-runtime-behavior" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Loom exports <code>LOOM_CELL_ID</code> into every session.</li>
+<li>Provider-aware adapters use that ID to identify the agent in hook payloads and MCP calls.</li>
+<li>Loom excludes its own injected files from git status via <code>.git/info/exclude</code>.</li>
+</ul>
+<h3 id="claude-code">Claude Code<a class="headerlink" href="#claude-code" title="Permanent link">&para;</a></h3>
+<p>Loom can install:</p>
+<ul>
+<li><code>.claude/settings.local.json</code> for hooks</li>
+<li><code>.mcp.json</code> for the Loom MCP server</li>
+<li><code>.claude/skills/loom-*/SKILL.md</code> for Loom slash-command helpers</li>
+<li><code>.claude/instructions.md</code> for non-persistent system prompt injection when needed</li>
+<li><code>.loom/loom-system-prompt-&lt;agent-id&gt;.md</code> for the persistent Loom prompt</li>
+</ul>
+<p>Claude Code hooks send rich activity data such as tool usage, permission prompts, session start, stop, and subagent activity.</p>
+<h3 id="codex">Codex<a class="headerlink" href="#codex" title="Permanent link">&para;</a></h3>
+<p>Loom can install:</p>
+<ul>
+<li><code>.codex/hooks.json</code> for hooks</li>
+<li><code>.codex/config.toml</code> for MCP and the Codex hooks feature</li>
+<li>cleanup for old Loom-managed <code>.codex/AGENTS.md</code> prompt blocks</li>
+</ul>
+<p>Codex currently reports less runtime detail than Claude Code. Loom primarily sees session start, stop, and tool usage hooks that are useful for activity tracking.</p>
+<h3 id="gemini-cli-and-generic-adapters">Gemini CLI and generic adapters<a class="headerlink" href="#gemini-cli-and-generic-adapters" title="Permanent link">&para;</a></h3>
+<p>These adapters currently run without hook or MCP integration. Loom can still manage the tab, directory, worktree, and prompt delivery, but it has less visibility into what the provider is doing.</p>
+<h2 id="session-lifecycle">Session lifecycle<a class="headerlink" href="#session-lifecycle" title="Permanent link">&para;</a></h2>
+<p>From Loom's point of view, a managed agent goes through these phases:</p>
+<ol>
+<li>
+<p><strong>Created</strong>
+   Loom has created the agent record and the iTerm2 tab.</p>
+</li>
+<li>
+<p><strong>Booting</strong>
+   The provider command has been launched and Loom is waiting until the TUI is ready for input.</p>
+</li>
+<li>
+<p><strong>Active</strong>
+   The agent is thinking, using tools, or otherwise working.</p>
+</li>
+<li>
+<p><strong>Idle</strong>
+   The provider is waiting for the next message. Loom detects this via hooks or prompt monitoring.</p>
+</li>
+<li>
+<p><strong>Stopped</strong>
+   The underlying iTerm2 session is gone, but the Loom agent record remains and can be relaunched.</p>
+</li>
+</ol>
+<h3 id="readiness-detection">Readiness detection<a class="headerlink" href="#readiness-detection" title="Permanent link">&para;</a></h3>
+<p>Some TUIs are not ready to accept the first prompt immediately after launch. Loom uses adapter-specific input-ready policies:</p>
+<ul>
+<li><strong>Claude Code</strong> waits for the session-start hook, with a screen-text fallback.</li>
+<li><strong>Codex</strong> waits for the visible Codex startup UI to stabilize.</li>
+<li>Other adapters fall back to a simpler send path.</li>
+</ul>
+<p>This is why Loom can send <code>initial_prompt</code> or dispatched task text reliably even when the provider takes a moment to initialize.</p>
+<h3 id="activity-and-idle-state">Activity and idle state<a class="headerlink" href="#activity-and-idle-state" title="Permanent link">&para;</a></h3>
+<p>Provider-aware adapters report activity through hooks. Loom normalizes those events into status, activity, and last-summary fields for the UI.</p>
+<p>At the same time, Loom also uses iTerm2 prompt monitoring. When the shell prompt returns, Loom marks the session idle. For provider-aware agents, hook events provide the richer "what is the agent doing right now?" detail.</p>
+<h2 id="relaunch-resume-and-clear">Relaunch, resume, and <code>/clear</code><a class="headerlink" href="#relaunch-resume-and-clear" title="Permanent link">&para;</a></h2>
+<p>Loom distinguishes between relaunching an iTerm2 session and resuming a provider conversation.</p>
+<h3 id="relaunch">Relaunch<a class="headerlink" href="#relaunch" title="Permanent link">&para;</a></h3>
+<p>Relaunch always creates a fresh iTerm2 tab. Before relaunch, Loom re-resolves the current launch configuration so it picks up changes to:</p>
+<ul>
+<li>templates</li>
+<li>group defaults</li>
+<li>provider and boot command</li>
+<li>worktree settings</li>
+<li>tab color, shell, env vars, and env files</li>
+</ul>
+<h3 id="resume">Resume<a class="headerlink" href="#resume" title="Permanent link">&para;</a></h3>
+<p>If the adapter supports it and <code>session_resume</code> is enabled, Loom uses the provider's own resume command when <code>agent_session_id</code> is available:</p>
+<ul>
+<li><strong>Claude Code</strong>: <code>claude --resume &lt;session-id&gt;</code></li>
+<li><strong>Codex</strong>: <code>codex resume ... &lt;session-id&gt;</code></li>
+</ul>
+<p>If no provider session ID is available, or the adapter does not support resume, Loom starts a fresh provider session in the new tab.</p>
+<h3 id="clearing-context">Clearing context<a class="headerlink" href="#clearing-context" title="Permanent link">&para;</a></h3>
+<p>When you clear agent context in Loom:</p>
+<ul>
+<li>supported adapters receive <code>/clear</code></li>
+<li>Loom resets <code>tasks_dispatched</code></li>
+<li>Loom clears the stored <code>agent_session_id</code></li>
+<li>Loom clears the current-task and MCP message history</li>
+</ul>
+<p>This means a later relaunch starts from a fresh provider conversation rather than resuming the old one.</p>
+<h2 id="worktrees-and-execution-environment">Worktrees and execution environment<a class="headerlink" href="#worktrees-and-execution-environment" title="Permanent link">&para;</a></h2>
+<p>Worktrees are part of the agent session model, not a separate feature bolted on afterward.</p>
+<h3 id="what-changes-when-worktrees-are-enabled">What changes when worktrees are enabled<a class="headerlink" href="#what-changes-when-worktrees-are-enabled" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Loom creates a branch named <code>loom/&lt;slug&gt;-&lt;short-id&gt;</code>.</li>
+<li>The agent's working directory is changed to the new worktree path.</li>
+<li>Hooks, MCP files, and persistent prompt files are installed into that worktree's directory.</li>
+<li>The worktree becomes the environment future dispatches and relaunches use.</li>
+</ul>
+<p>This is why relaunching a worktree-backed agent usually drops you back into the same isolated branch automatically.</p>
+<h3 id="worktree-inheritance">Worktree inheritance<a class="headerlink" href="#worktree-inheritance" title="Permanent link">&para;</a></h3>
+<p>Pipelines can inherit worktrees so the next agent sees the same branch and files. This is how an implement agent can hand a review or fix task to another agent without copying changes manually.</p>
+<h3 id="relaunch-and-missing-worktrees">Relaunch and missing worktrees<a class="headerlink" href="#relaunch-and-missing-worktrees" title="Permanent link">&para;</a></h3>
+<p>On relaunch, Loom:</p>
+<ul>
+<li>reuses the existing worktree if it is still valid</li>
+<li>clears stale worktree metadata if the path is gone</li>
+<li>recreates a worktree if the config still says one should exist</li>
+</ul>
+<h3 id="cleanup">Cleanup<a class="headerlink" href="#cleanup" title="Permanent link">&para;</a></h3>
+<p>When an agent or worktree is removed, Loom also cleans up its runtime integration:</p>
+<ul>
+<li>provider hooks</li>
+<li>MCP config</li>
+<li>Loom-managed persistent prompt files</li>
+<li>the git worktree itself when present</li>
+</ul>
+<p>If a worktree is removed but the agent is kept, Loom restores the agent's directory to the repo root.</p>
+<p>See <a href="../worktrees/">Worktrees</a> for checkpoint, rollback, merge, and manual worktree commands.</p>
+<h2 id="terminals-versus-agents">Terminals versus agents<a class="headerlink" href="#terminals-versus-agents" title="Permanent link">&para;</a></h2>
+<p>A Loom terminal is simpler than a Loom agent:</p>
+<ul>
+<li>no provider adapter</li>
+<li>no hooks or MCP</li>
+<li>no provider session resume</li>
+<li>optional boot command only</li>
+</ul>
+<p>Use agents for AI sessions and terminals for companion shells such as tests, logs, or servers.</p>
+<h2 id="choosing-a-provider">Choosing a provider<a class="headerlink" href="#choosing-a-provider" title="Permanent link">&para;</a></h2>
+<p>Use this as a practical rule of thumb:</p>
+<ul>
+<li>Choose <strong>Claude Code</strong> when you want the richest runtime awareness, permission prompts, slash skills, and session resume.</li>
+<li>Choose <strong>Codex</strong> when you want Loom-aware launch, MCP tools, and resume, but can live with less detailed tool telemetry.</li>
+<li>Choose <strong>Gemini CLI</strong> or another custom command when Loom mainly needs to manage tabs, directories, worktrees, and prompt delivery.</li>
+</ul>
+<p>The adapter layer lets Loom degrade gracefully: even when a provider has limited integration, it still participates in the same task board, dispatch, and worktree model.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

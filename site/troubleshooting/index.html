@@ -1,0 +1,2912 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="iTerm2 agent and terminal orchestration">
+      
+      
+      
+      
+        <link rel="prev" href="../operations/">
+      
+      
+        <link rel="next" href="../reference-guide/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Troubleshooting - Loom</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="blue" data-md-color-accent="blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#troubleshooting" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Loom" class="md-header__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Loom
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Troubleshooting
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Loom" class="md-nav__button md-logo" aria-label="Loom" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Loom
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/aleksanderarruda/iterm2-agent-orchestration" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start Here
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Start Here
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agents-and-sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agents & Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../group-settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Group Settings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../keyboard-shortcuts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard Shortcuts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Workflows
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflow-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../board/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../task-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions & Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../worktrees/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worktrees
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../schedules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Schedules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operate Loom
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operate Loom
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#first-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loom-will-not-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loom will not start
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Loom will not start">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-causes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common causes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-toolbelt-panel-or-standalone-ui-does-not-appear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Toolbelt panel or standalone UI does not appear
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The Toolbelt panel or standalone UI does not appear">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#buttons-do-nothing-or-the-ui-feels-stale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Buttons do nothing or the UI feels stale
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Buttons do nothing or the UI feels stale">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-this-happens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this happens
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#an-agent-is-stopped-missing-or-linked-to-the-wrong-live-tab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        An agent is stopped, missing, or linked to the wrong live tab
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="An agent is stopped, missing, or linked to the wrong live tab">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-session-did-not-resume-or-the-conversation-state-is-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider session did not resume, or the conversation state is wrong
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Provider session did not resume, or the conversation state is wrong">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-to-expect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What to expect
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worktree-is-missing-dirty-or-on-the-wrong-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktree is missing, dirty, or on the wrong branch
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worktree is missing, dirty, or on the wrong branch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-causes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common causes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#merge-is-blocked-or-there-are-merge-conflicts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Merge is blocked or there are merge conflicts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Merge is blocked or there are merge conflicts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dispatch-schedules-or-board-movement-are-not-happening" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dispatch, schedules, or board movement are not happening
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Dispatch, schedules, or board movement are not happening">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-usually-causes-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What usually causes this
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#weaver-is-not-progressing-or-event-digests-look-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Weaver is not progressing or event digests look wrong
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Weaver is not progressing or event digests look wrong">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#broken-or-stale-agent-state-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Broken or stale agent state recovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logs-and-diagnostic-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logs and diagnostic data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-update-and-deployment-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing, update, and deployment notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Project
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Internals
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Internals
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_7_1" id="__nav_7_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plans Archive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Plans Archive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/auto-generated-playbooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auto-Generated Playbooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/agent-awareness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Awareness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/agent-context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Context Preservation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI & REST API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/cli_ai_commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI AI Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/git-worktree-lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Git Worktree Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/pipelines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Pipelines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/standalone_application/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standalone Application
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/task-board/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Task Board Plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/weaver/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weaver Plan
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plans/workflow-automation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflow Automation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#first-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        First checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loom-will-not-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loom will not start
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Loom will not start">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-causes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common causes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-toolbelt-panel-or-standalone-ui-does-not-appear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Toolbelt panel or standalone UI does not appear
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The Toolbelt panel or standalone UI does not appear">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#buttons-do-nothing-or-the-ui-feels-stale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Buttons do nothing or the UI feels stale
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Buttons do nothing or the UI feels stale">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-this-happens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why this happens
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#an-agent-is-stopped-missing-or-linked-to-the-wrong-live-tab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        An agent is stopped, missing, or linked to the wrong live tab
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="An agent is stopped, missing, or linked to the wrong live tab">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-session-did-not-resume-or-the-conversation-state-is-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider session did not resume, or the conversation state is wrong
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Provider session did not resume, or the conversation state is wrong">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-to-expect" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What to expect
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worktree-is-missing-dirty-or-on-the-wrong-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktree is missing, dirty, or on the wrong branch
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Worktree is missing, dirty, or on the wrong branch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-causes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common causes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#merge-is-blocked-or-there-are-merge-conflicts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Merge is blocked or there are merge conflicts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Merge is blocked or there are merge conflicts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dispatch-schedules-or-board-movement-are-not-happening" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dispatch, schedules, or board movement are not happening
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Dispatch, schedules, or board movement are not happening">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-usually-causes-this" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What usually causes this
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#weaver-is-not-progressing-or-event-digests-look-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Weaver is not progressing or event digests look wrong
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Weaver is not progressing or event digests look wrong">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#symptoms_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptoms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#recovery_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#broken-or-stale-agent-state-recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Broken or stale agent state recovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logs-and-diagnostic-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logs and diagnostic data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-update-and-deployment-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing, update, and deployment notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h1>
+<p>This page is for operating Loom when something is wrong. Start with the symptom that matches what you see, then follow the smallest recovery step that fixes it.</p>
+<p>For command details, see <a href="../cli/">CLI Reference</a>. For the underlying behavior of agents, worktrees, and orchestration, use <a href="../agents-and-sessions/">Agents &amp; Sessions</a>, <a href="../worktrees/">Worktrees</a>, and <a href="../weaver/">Weaver</a>.</p>
+<h2 id="first-checks">First checks<a class="headerlink" href="#first-checks" title="Permanent link">&para;</a></h2>
+<p>Before digging into a specific symptom, run these checks:</p>
+<div class="highlight"><pre><span></span><code>loom<span class="w"> </span>status
+make<span class="w"> </span>check
+loom<span class="w"> </span>logs<span class="w"> </span>-f
+</code></pre></div>
+<p>These answer three different questions:</p>
+<ul>
+<li><code>loom status</code> tells you what Loom thinks exists right now.</li>
+<li><code>make check</code> verifies the install and iTerm2 Python environment.</li>
+<li><code>loom logs -f</code> shows daemon-side errors while you reproduce the problem.</li>
+</ul>
+<h2 id="loom-will-not-start">Loom will not start<a class="headerlink" href="#loom-will-not-start" title="Permanent link">&para;</a></h2>
+<h3 id="symptoms">Symptoms<a class="headerlink" href="#symptoms" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The Scripts menu launch fails immediately.</li>
+<li>The Toolbelt panel stays empty.</li>
+<li><code>loom</code> commands that need the daemon report that they cannot connect.</li>
+</ul>
+<h3 id="recovery">Recovery<a class="headerlink" href="#recovery" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Run <code>make check</code>.</li>
+<li>If iTerm2 Python or dependencies are missing, run <code>make deps</code> and <code>make install</code>.</li>
+<li>If port <code>18932</code> is already in use, run <code>make stop</code>.</li>
+<li>Start Loom again from the Scripts menu, or run <code>make run</code>.</li>
+<li>Tail <code>loom logs -f</code> while starting it again.</li>
+</ol>
+<h3 id="common-causes">Common causes<a class="headerlink" href="#common-causes" title="Permanent link">&para;</a></h3>
+<ul>
+<li>iTerm2 Python API is not enabled.</li>
+<li>Loom was updated in the repo, but the installed copy under iTerm2 Scripts was not refreshed.</li>
+<li>Another process is still listening on Loom's port.</li>
+</ul>
+<h2 id="the-toolbelt-panel-or-standalone-ui-does-not-appear">The Toolbelt panel or standalone UI does not appear<a class="headerlink" href="#the-toolbelt-panel-or-standalone-ui-does-not-appear" title="Permanent link">&para;</a></h2>
+<h3 id="symptoms_1">Symptoms<a class="headerlink" href="#symptoms_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Loom is running, but you do not see the panel.</li>
+<li>The browser view does not connect.</li>
+</ul>
+<h3 id="recovery_1">Recovery<a class="headerlink" href="#recovery_1" title="Permanent link">&para;</a></h3>
+<ol>
+<li>In iTerm2, open <strong>View &gt; Show Toolbelt</strong> and make sure <strong>Loom</strong> is enabled in the Toolbelt gear menu.</li>
+<li>If you are using standalone mode, run <code>make open</code> after <code>make standalone</code> or <code>make run</code>.</li>
+<li>Confirm the port with <code>LOOM_PORT</code> if you changed it from the default.</li>
+<li>Check the daemon log for startup or bind errors.</li>
+</ol>
+<h2 id="buttons-do-nothing-or-the-ui-feels-stale">Buttons do nothing or the UI feels stale<a class="headerlink" href="#buttons-do-nothing-or-the-ui-feels-stale" title="Permanent link">&para;</a></h2>
+<h3 id="symptoms_2">Symptoms<a class="headerlink" href="#symptoms_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Clicking relaunch, remove, or dispatch appears to do nothing.</li>
+<li>The board or grid does not reflect the current terminal state.</li>
+</ul>
+<h3 id="recovery_2">Recovery<a class="headerlink" href="#recovery_2" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Run <code>loom logs -f</code> and repeat the action.</li>
+<li>If the daemon is wedged, run <code>make stop</code>, then restart Loom.</li>
+<li>Refresh the browser page if you are in standalone mode.</li>
+<li>If the problem is limited to one agent session, relaunch that agent instead of restarting everything.</li>
+</ol>
+<h3 id="why-this-happens">Why this happens<a class="headerlink" href="#why-this-happens" title="Permanent link">&para;</a></h3>
+<p>This usually means the UI is connected to an old daemon instance or the daemon lost contact with iTerm2 state.</p>
+<h2 id="an-agent-is-stopped-missing-or-linked-to-the-wrong-live-tab">An agent is stopped, missing, or linked to the wrong live tab<a class="headerlink" href="#an-agent-is-stopped-missing-or-linked-to-the-wrong-live-tab" title="Permanent link">&para;</a></h2>
+<h3 id="symptoms_3">Symptoms<a class="headerlink" href="#symptoms_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>An agent shows as stopped even though you expect it to be active.</li>
+<li>The agent record exists, but its terminal tab is gone.</li>
+<li>A relaunch created a new tab because Loom could not reuse the prior session.</li>
+</ul>
+<h3 id="recovery_3">Recovery<a class="headerlink" href="#recovery_3" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Inspect the agent with <code>loom status &lt;agent&gt;</code>.</li>
+<li>Relaunch the agent with <code>loom agent relaunch &lt;agent&gt;</code>.</li>
+<li>If the agent was using a worktree, confirm the worktree still exists with <code>loom worktree history &lt;agent&gt;</code> or by checking the path in the UI.</li>
+<li>If only the conversation state is bad, clear context in the Loom UI instead of removing the agent.</li>
+<li>Remove and recreate the agent only after relaunch and context clearing fail.</li>
+</ol>
+<h3 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Relaunch creates a fresh iTerm2 tab.</li>
+<li>Resume only happens when the provider adapter supports it and Loom still has a valid provider session ID.</li>
+<li>A stale tab title or a terminated terminal session can leave a saved agent record behind even though the live tab is gone.</li>
+</ul>
+<h2 id="provider-session-did-not-resume-or-the-conversation-state-is-wrong">Provider session did not resume, or the conversation state is wrong<a class="headerlink" href="#provider-session-did-not-resume-or-the-conversation-state-is-wrong" title="Permanent link">&para;</a></h2>
+<h3 id="symptoms_4">Symptoms<a class="headerlink" href="#symptoms_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Relaunch opens the provider, but the prior conversation is gone.</li>
+<li>The provider resumed, but the agent should really start fresh.</li>
+<li>Dispatches or prompts are being influenced by stale context.</li>
+</ul>
+<h3 id="recovery_4">Recovery<a class="headerlink" href="#recovery_4" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Confirm the group or template still has session resume enabled.</li>
+<li>Relaunch the agent once. If Loom has a provider session ID, it will try the adapter's resume flow automatically.</li>
+<li>If you want a fresh conversation, use <strong>Clear Context</strong> in Loom before relaunching again.</li>
+<li>If resume keeps failing, treat it as a fresh session problem and continue with a new conversation.</li>
+</ol>
+<h3 id="what-to-expect">What to expect<a class="headerlink" href="#what-to-expect" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Claude Code and Codex can resume when Loom still has the provider session ID.</li>
+<li>After <strong>Clear Context</strong>, Loom intentionally forgets the stored provider session so the next relaunch starts fresh.</li>
+<li>Generic shells and terminals do not have provider-level resume.</li>
+</ul>
+<h2 id="worktree-is-missing-dirty-or-on-the-wrong-branch">Worktree is missing, dirty, or on the wrong branch<a class="headerlink" href="#worktree-is-missing-dirty-or-on-the-wrong-branch" title="Permanent link">&para;</a></h2>
+<h3 id="symptoms_5">Symptoms<a class="headerlink" href="#symptoms_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A worktree-backed agent relaunches into the repo root instead of its branch.</li>
+<li>The worktree path was deleted or moved.</li>
+<li><code>git status</code> inside the worktree is not what you expected.</li>
+</ul>
+<h3 id="recovery_5">Recovery<a class="headerlink" href="#recovery_5" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Check worktree history with <code>loom worktree history &lt;agent&gt;</code>.</li>
+<li>Create a safety checkpoint with <code>loom worktree checkpoint &lt;agent&gt;</code> if the worktree still exists.</li>
+<li>If the worktree metadata is stale, remove it with <code>loom worktree remove &lt;agent&gt;</code>.</li>
+<li>If you want the running agent moved back into the repo or a fresh worktree, use <code>loom worktree remove &lt;agent&gt; --relaunch</code> or <code>loom worktree create &lt;agent&gt; --relaunch</code>.</li>
+<li>Confirm the group's worktree settings still match the behavior you want.</li>
+</ol>
+<h3 id="common-causes_1">Common causes<a class="headerlink" href="#common-causes_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The worktree directory was cleaned up outside Loom.</li>
+<li>The repository root changed.</li>
+<li>The group is no longer configured to launch agents with worktrees.</li>
+</ul>
+<h2 id="merge-is-blocked-or-there-are-merge-conflicts">Merge is blocked or there are merge conflicts<a class="headerlink" href="#merge-is-blocked-or-there-are-merge-conflicts" title="Permanent link">&para;</a></h2>
+<h3 id="symptoms_6">Symptoms<a class="headerlink" href="#symptoms_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Merge/review flow stops before completion.</li>
+<li>Loom reports that the worktree cannot be merged cleanly.</li>
+<li>The base branch has moved and the worktree no longer merges automatically.</li>
+</ul>
+<h3 id="recovery_6">Recovery<a class="headerlink" href="#recovery_6" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Create a checkpoint before changing anything: <code>loom worktree checkpoint &lt;agent&gt;</code>.</li>
+<li>Review the worktree status and history.</li>
+<li>Merge or rebase manually in the worktree if your team wants a human fix.</li>
+<li>If you need the agent to continue from the current branch state, relaunch the same agent after the conflict is resolved.</li>
+<li>If the branch is no longer useful, remove the worktree and restart from a fresh task.</li>
+</ol>
+<h3 id="notes_1">Notes<a class="headerlink" href="#notes_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Loom can detect merge problems before cleanup, but it does not make a risky conflict-resolution decision for you.</li>
+<li>Squash merge settings affect how the final merge is expected to complete, not whether the branches conflict.</li>
+</ul>
+<h2 id="dispatch-schedules-or-board-movement-are-not-happening">Dispatch, schedules, or board movement are not happening<a class="headerlink" href="#dispatch-schedules-or-board-movement-are-not-happening" title="Permanent link">&para;</a></h2>
+<h3 id="symptoms_7">Symptoms<a class="headerlink" href="#symptoms_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A task stays in Backlog and never launches.</li>
+<li>A scheduled task does not appear.</li>
+<li>A task cannot move because something upstream is still unresolved.</li>
+</ul>
+<h3 id="recovery_7">Recovery<a class="headerlink" href="#recovery_7" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Run <code>loom task list</code> and <code>loom board lanes</code> to see where the task actually is.</li>
+<li>Inspect the task with <code>loom task show &lt;task&gt;</code>.</li>
+<li>Check for unmet dependencies, pending human asks, or a disabled schedule.</li>
+<li>Use <code>loom schedule list</code> and <code>loom schedule show &lt;schedule&gt;</code> if the task should have been created automatically.</li>
+<li>Dispatch the task manually if you want to bypass waiting conditions.</li>
+</ol>
+<h3 id="what-usually-causes-this">What usually causes this<a class="headerlink" href="#what-usually-causes-this" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The task is blocked by dependencies.</li>
+<li>A human-in-the-loop ask task is still waiting for an answer.</li>
+<li>The schedule exists but is disabled or timed differently than expected.</li>
+</ul>
+<h2 id="weaver-is-not-progressing-or-event-digests-look-wrong">Weaver is not progressing or event digests look wrong<a class="headerlink" href="#weaver-is-not-progressing-or-event-digests-look-wrong" title="Permanent link">&para;</a></h2>
+<h3 id="symptoms_8">Symptoms<a class="headerlink" href="#symptoms_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The Weaver panel stops sending digests.</li>
+<li>The Weaver is paused and never resumes.</li>
+<li>The human replied, but the orchestration flow still looks stuck.</li>
+</ul>
+<h3 id="recovery_8">Recovery<a class="headerlink" href="#recovery_8" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Open the Weaver panel and check whether event delivery is paused.</li>
+<li>If the Weaver asked a human question, make sure the reply was actually sent back to the waiting task.</li>
+<li>Resume orchestration after the reply if the flow expects that step.</li>
+<li>Relaunch the Weaver agent if the session itself stopped.</li>
+<li>Use the journal and recent event views in the Weaver workflow to recover context before dispatching more work.</li>
+</ol>
+<p>See <a href="../weaver/">Weaver</a> for the full operating model and MCP tool surface.</p>
+<h2 id="broken-or-stale-agent-state-recovery">Broken or stale agent state recovery<a class="headerlink" href="#broken-or-stale-agent-state-recovery" title="Permanent link">&para;</a></h2>
+<p>Use this order of operations. It solves most operational issues without deleting useful state.</p>
+<ol>
+<li>Check status and logs.</li>
+<li>Relaunch the affected agent or terminal.</li>
+<li>Clear agent context if the conversation is wrong but the agent record is still valid.</li>
+<li>Checkpoint the worktree before destructive recovery.</li>
+<li>Remove and recreate the worktree if the branch state is the problem.</li>
+<li>Remove and recreate the agent only when the saved agent record itself is no longer worth preserving.</li>
+<li>Restart the daemon only when the problem is global rather than isolated to one agent.</li>
+</ol>
+<h2 id="logs-and-diagnostic-data">Logs and diagnostic data<a class="headerlink" href="#logs-and-diagnostic-data" title="Permanent link">&para;</a></h2>
+<p>The most useful operator-level diagnostics are:</p>
+<ul>
+<li><code>loom logs</code> and <code>loom logs -f</code></li>
+<li><code>loom status</code></li>
+<li><code>make check</code></li>
+<li>the daemon log at <code>~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log</code></li>
+<li>the state database at <code>~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.db</code></li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The log file and database are useful for diagnosis, but most operators should treat them as read-only. Use Loom commands and UI actions for normal recovery instead of editing runtime files directly.</p>
+</div>
+<h2 id="testing-update-and-deployment-notes">Testing, update, and deployment notes<a class="headerlink" href="#testing-update-and-deployment-notes" title="Permanent link">&para;</a></h2>
+<p>When you are operating Loom rather than developing Loom, these are the practical rules:</p>
+<ul>
+<li>Run <code>make check</code> before assuming a runtime bug.</li>
+<li>Run <code>make deploy</code> after pulling repo changes so the installed iTerm2 copy matches the repo.</li>
+<li>Restart Loom after <code>make deploy</code>.</li>
+<li>Use <code>make stop</code> only to clear a stuck daemon or port conflict.</li>
+<li>Use <code>make standalone</code> and <code>make open</code> only when you intentionally want the browser UI.</li>
+</ul>
+<p>If you are changing Loom itself, testing and release workflows belong in the project/developer docs rather than in the operator recovery path.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
