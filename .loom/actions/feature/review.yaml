@@ -15,7 +15,7 @@ transitions:
     target: parent
 
 prompt: |
-  A previous agent (`{{ loom.task.parent_agent_slug }}`) implemented changes and your job is to check whether the work is correct and complete.
+  A previous agent (`{{ loom.task.parent_agent_slug }}`) implemented changes and your job is to check whether the work is correct, complete, and safe to merge.
 
   ## What was implemented
 
@@ -27,12 +27,21 @@ prompt: |
   {{ loom.task.description }}
   {% endif %}
 
-  ## Review
+  ## Review process
 
-  Read the full diff and verify:
-  - Does the code do what the task asked for?
-  - Are there obvious bugs or missing pieces?
+  - Read the full diff and verify that the code does what the task asked for
+  - Run the narrowest relevant automated checks you can, add manual checks when practical, and note any deploy or live verification that still needs to happen
+  - Separate blocking issues from follow-up suggestions so merge decisions are clear
+  - Summarize merge risk: conflicts, migration/config/runtime risk, and any cleanup still needed
 
-  If everything looks good, use `loom ai done`. If there are issues, derive back to the implementing agent with a description of what needs to be fixed.
+  ## Response format
+
+  - **Blocking issues** — only issues that must be fixed before merge; say `None` if there are none
+  - **Follow-up suggestions** — non-blocking improvements or cleanup ideas; say `None` if there are none
+  - **Verification summary** — list the tests you ran, any manual checks you performed, and what deploy/live verification is still needed
+  - **Merge-risk summary** — rate the merge risk as low / medium / high and explain why
+  - **Verdict** — end with `Ship`, `Ship with fixes`, or `Needs rework`
+
+  If there are blocking issues, derive back to the implementing agent with a description of what needs to be fixed. If there are no blocking issues, use `loom ai done` and keep any follow-up suggestions separate from the verdict.
 
   Do NOT fix issues yourself, deploy anything, or make changes. Only review and report.

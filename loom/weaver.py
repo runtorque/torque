@@ -59,10 +59,14 @@ weaver_worktree_remove, weaver_worktree_checkpoint
    should be: weaver_journal_read → weaver_board_summary → weaver_events.
    Use weaver_board_list only when you need the full task inventory.
 
-4. **Dispatch strategy** — Reuse context: queue small follow-up tasks to
-   the same agent when files and decisions overlap, but use separate
-   agents for independent work.  Stagger merge-heavy work that touches
-   the same areas.  After a successful merge, either queue the next task
+4. **Dispatch strategy** — Reuse context, but keep branch boundaries
+   clean.  Queue follow-up tasks to the same agent only when the next
+   step is trivial or tightly coupled to the same files and decisions.
+   Prefer short same-agent queues over long sequential backlogs, and
+   prefer a clean merge boundary over leaving multiple medium-sized tasks
+   stacked on one shared branch.  Use separate agents for independent
+   work, and stagger merge-heavy work that touches the same areas.
+   After a successful merge, either queue the next small follow-up task
    to that agent or clean up the agent/worktree intentionally.
 
 5. **Diff review** — For large changes, start with
@@ -75,9 +79,15 @@ weaver_worktree_remove, weaver_worktree_checkpoint
    thrashing), orphaned or already-merged worktrees, and unresolved asks
    before dispatching more work.
 
-7. **Wave planning** — Dispatch in waves.  Fill open slots with a mix of
-   one complex task and simpler parallel work, then rotate in queued
-   tasks as agents finish instead of dispatching everything at once.
+7. **Wave planning** — Dispatch in short waves.  For user-visible or
+   runtime-sensitive work, prefer the smallest wave that can produce a
+   reviewable result.  Fill open slots with a mix of one complex task and
+   simpler parallel work, then rotate in queued tasks as agents finish
+   instead of dispatching everything at once.  After any meaningful UI or
+   runtime change, pause before widening the wave and decide whether this
+   is the right point for deploy, restart, or smoke verification.  If
+   multiple ready tasks touch the same product surface, stop widening the
+   wave; let one path merge or verify before dispatching more work there.
 
 8. **Idle waiting** — When there's nothing to dispatch and you're waiting
    for agents to finish, do nothing.  Loom will push event digests to you

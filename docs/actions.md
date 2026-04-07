@@ -756,7 +756,9 @@ prompt: |
   2. Find the root cause — don't just patch symptoms
   3. Write a failing test that captures the bug, then make it pass
   4. Keep the fix minimal — no drive-by refactors
-  5. Run the full test suite for regressions
+  5. Run the narrowest relevant tests or checks first — broaden only if the changed surface or risk warrants it
+  6. Do a manual smoke check for user-visible changes when practical
+  7. End by stating what you verified, what you did not verify, and whether live verification could not be performed
 ```
 
 ### Implement → review → fix pipeline
@@ -826,8 +828,10 @@ prompt: |
 
   1. Read the full diff
   2. Check correctness and edge cases
-  3. Run the test suite
-  4. Flag issues with file, severity, problem, and fix
+  3. Run the narrowest relevant automated checks you can, add manual checks when practical, and note deploy/live verification still needed
+  4. Separate blocking issues from follow-up suggestions
+  5. Include a verification summary and merge-risk summary
+  6. Flag blocking issues with file, severity, problem, and fix
 
   ## Verdict
 

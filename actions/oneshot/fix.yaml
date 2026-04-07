@@ -21,4 +21,6 @@ prompt: |
   2. **Find the root cause** — don't just patch symptoms
   3. **Write a failing test** that captures the bug, then make it pass with your fix
   4. **Keep the fix minimal** — no drive-by refactors or unrelated changes
-  5. **Run the full test suite** to check for regressions
+  5. **Run the narrowest relevant tests or checks first** — only broaden to a larger suite if the changed surface or risk warrants it
+  6. **Do a manual smoke check for user-visible changes when practical**
+  7. **Report verification explicitly** — say what you verified, what you did not verify, and when live verification could not be performed
