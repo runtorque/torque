@@ -76,6 +76,119 @@ def _build_self_dispatch_prompt() -> str:
     return "Proceed with the derived task you just created."
 
 
+def _apply_verification_report(task, payload, actor_name, save_task,
+                               *, root_task=None, timestamp=None):
+    """Apply a verification checkpoint update to a task and optional root."""
+    if not task:
+        return "", None
+
+    from datetime import datetime, timezone
+
+    summary = dict(task.verification_summary or {})
+    if "tests_run" in payload:
+        tests_run = str(payload.get("tests_run", "") or "").strip()
+        if tests_run:
+            summary["tests_run"] = tests_run
+        else:
+            summary.pop("tests_run", None)
+    if "manual_smoke_done" in payload:
+        summary["manual_smoke_done"] = bool(
+            payload.get("manual_smoke_done")
+        )
+    smoke_status = str(payload.get("smoke_status", "") or "").strip()
+    if smoke_status in {"passed", "failed"}:
+        summary["manual_smoke_done"] = True
+    if "deploy_needed" in payload:
+        summary["deploy_needed"] = bool(
+            payload.get("deploy_needed")
+        )
+    if "deploy_attempted" in payload:
+        summary["deploy_attempted"] = bool(
+            payload.get("deploy_attempted")
+        )
+    if "human_validation_pending" in payload:
+        human_pending = str(
+            payload.get("human_validation_pending", "") or ""
+        ).strip()
+        if human_pending:
+            summary["human_validation_pending"] = human_pending
+        else:
+            summary.pop("human_validation_pending", None)
+
+    if "verification_mode" in payload:
+        mode = str(payload.get("verification_mode", "") or "").strip()
+        task.verification_mode = (
+            mode if mode in {"", "deploy", "restart"} else ""
+        )
+
+    verification_state = None
+    if "verification_state" in payload:
+        verify_state = str(
+            payload.get("verification_state", "") or ""
+        ).strip()
+        verification_state = (
+            verify_state if verify_state in {
+                "", "pending", "attempted", "passed", "failed"
+            } else ""
+        )
+    elif smoke_status in {"passed", "failed"}:
+        verification_state = smoke_status
+    elif "deploy_attempted" in payload and payload.get("deploy_attempted"):
+        verification_state = "attempted"
+    if verification_state is not None:
+        task.verification_state = verification_state
+
+    if "verification_notes" in payload:
+        task.verification_notes = str(
+            payload.get("verification_notes", "") or ""
+        ).strip()
+
+    task.verification_summary = summary
+    task.verification_updated_at = (
+        timestamp
+        or datetime.now(timezone.utc).isoformat()
+    )
+    task.verification_updated_by = actor_name
+
+    parts = []
+    if task.verification_state:
+        parts.append(f"state={task.verification_state}")
+    if task.verification_mode:
+        parts.append(f"mode={task.verification_mode}")
+    if summary.get("tests_run"):
+        parts.append(f"tests={summary['tests_run']}")
+    if summary.get("manual_smoke_done"):
+        parts.append("manual smoke done")
+    if summary.get("deploy_needed"):
+        parts.append("deploy needed")
+    if summary.get("deploy_attempted"):
+        parts.append("deploy attempted")
+    if summary.get("human_validation_pending"):
+        parts.append(
+            "human validation="
+            + summary["human_validation_pending"]
+        )
+    if task.verification_notes:
+        parts.append(f"notes={task.verification_notes}")
+
+    msg = "Verification updated"
+    if parts:
+        msg += ": " + "; ".join(parts)
+
+    save_task(task)
+
+    if root_task:
+        root_task.verification_mode = task.verification_mode
+        root_task.verification_state = task.verification_state
+        root_task.verification_notes = task.verification_notes
+        root_task.verification_updated_at = task.verification_updated_at
+        root_task.verification_updated_by = task.verification_updated_by
+        root_task.verification_summary = dict(summary)
+        save_task(root_task)
+
+    return msg, root_task
+
+
 def _should_queue_existing_agent_dispatch(active_task, *,
                                           target_task_id: str,
                                           self_dispatch: bool) -> bool:
@@ -3189,6 +3302,63 @@ async def main(connection: iterm2.Connection):
                             "cmd": "dispatch_task",
                             "id": tid, "agent_id": _new_aid})
 
+            elif cmd == "board_verify_task":
+                tid = _resolve_task_id(data.get("id", ""))
+                task = state.board_tasks.get(tid)
+                if not task:
+                    result = {"type": "error", "message": "Task not found"}
+                else:
+                    actor_name = str(
+                        data.get("actor_name", "") or "loom"
+                    ).strip()
+
+                    def _save_verified_task(current_task):
+                        current_task.updated_at = datetime.now(
+                            timezone.utc
+                        ).isoformat()
+                        state._emit("task_upsert", **asdict(current_task))
+                        state._db_save_task(current_task)
+
+                    root_task = None
+                    root_id = task.pipeline_root_id or ""
+                    if root_id and root_id != task.id:
+                        root_task = state.board_tasks.get(root_id)
+                    payload = {}
+                    for key in (
+                        "verification_mode",
+                        "verification_state",
+                        "verification_notes",
+                        "tests_run",
+                        "manual_smoke_done",
+                        "deploy_needed",
+                        "deploy_attempted",
+                        "human_validation_pending",
+                        "smoke_status",
+                    ):
+                        if key in data:
+                            payload[key] = data[key]
+                    verify_msg, _updated_root = _apply_verification_report(
+                        task,
+                        payload,
+                        actor_name,
+                        _save_verified_task,
+                        root_task=root_task,
+                    )
+                    _panel_event(
+                        "task_verification_updated",
+                        "",
+                        actor_name,
+                        task.group,
+                        verify_msg,
+                        task_id=task.id,
+                    )
+                    state.recompute_task_health()
+                    result = {
+                        "type": "verification_updated",
+                        "task_id": task.id,
+                        "message": verify_msg,
+                    }
+
             elif cmd == "external_import_task":
                 group = data.get("group", "")
                 lane = data.get("lane", "") or "Backlog"
@@ -4247,112 +4417,6 @@ async def main(connection: iterm2.Connection):
                         state._emit("task_upsert", **asdict(t))
                         state._db_save_task(t)
 
-                    def _apply_verification_report(t, payload, actor_name):
-                        if not t:
-                            return "", None
-
-                        from datetime import datetime, timezone
-
-                        summary = dict(t.verification_summary or {})
-                        if "tests_run" in payload:
-                            tests_run = str(payload.get("tests_run", "") or "").strip()
-                            if tests_run:
-                                summary["tests_run"] = tests_run
-                            else:
-                                summary.pop("tests_run", None)
-                        if "manual_smoke_done" in payload:
-                            summary["manual_smoke_done"] = bool(
-                                payload.get("manual_smoke_done")
-                            )
-                        if "deploy_needed" in payload:
-                            summary["deploy_needed"] = bool(
-                                payload.get("deploy_needed")
-                            )
-                        if "deploy_attempted" in payload:
-                            summary["deploy_attempted"] = bool(
-                                payload.get("deploy_attempted")
-                            )
-                        if "human_validation_pending" in payload:
-                            human_pending = str(
-                                payload.get("human_validation_pending", "") or ""
-                            ).strip()
-                            if human_pending:
-                                summary["human_validation_pending"] = human_pending
-                            else:
-                                summary.pop("human_validation_pending", None)
-
-                        if "verification_mode" in payload:
-                            mode = str(
-                                payload.get("verification_mode", "") or ""
-                            ).strip()
-                            t.verification_mode = (
-                                mode if mode in {"", "deploy", "restart"} else ""
-                            )
-                        if "verification_state" in payload:
-                            verify_state = str(
-                                payload.get("verification_state", "") or ""
-                            ).strip()
-                            t.verification_state = (
-                                verify_state if verify_state in {
-                                    "", "pending", "attempted",
-                                    "passed", "failed"
-                                } else ""
-                            )
-                        if "verification_notes" in payload:
-                            t.verification_notes = str(
-                                payload.get("verification_notes", "") or ""
-                            ).strip()
-
-                        t.verification_summary = summary
-                        t.verification_updated_at = datetime.now(
-                            timezone.utc
-                        ).isoformat()
-                        t.verification_updated_by = actor_name
-
-                        parts = []
-                        if t.verification_state:
-                            parts.append(f"state={t.verification_state}")
-                        if t.verification_mode:
-                            parts.append(f"mode={t.verification_mode}")
-                        if summary.get("tests_run"):
-                            parts.append(f"tests={summary['tests_run']}")
-                        if summary.get("manual_smoke_done"):
-                            parts.append("manual smoke done")
-                        if summary.get("deploy_needed"):
-                            parts.append("deploy needed")
-                        if summary.get("deploy_attempted"):
-                            parts.append("deploy attempted")
-                        if summary.get("human_validation_pending"):
-                            parts.append(
-                                "human validation="
-                                + summary["human_validation_pending"]
-                            )
-                        if t.verification_notes:
-                            parts.append(f"notes={t.verification_notes}")
-
-                        msg = "Verification updated"
-                        if parts:
-                            msg += ": " + "; ".join(parts)
-
-                        _save_task(t)
-
-                        root_task = None
-                        root_id = t.pipeline_root_id or ""
-                        if root_id and root_id != t.id:
-                            root_task = state.board_tasks.get(root_id)
-                            if root_task:
-                                root_task.verification_mode = t.verification_mode
-                                root_task.verification_state = t.verification_state
-                                root_task.verification_notes = t.verification_notes
-                                root_task.verification_updated_at = \
-                                    t.verification_updated_at
-                                root_task.verification_updated_by = \
-                                    t.verification_updated_by
-                                root_task.verification_summary = dict(summary)
-                                _save_task(root_task)
-
-                        return msg, root_task
-
                     def _cascade_done(task_id):
                         """Walk up parent chain, completing ancestors
                         whose children are all Done."""
@@ -4571,8 +4635,16 @@ async def main(connection: iterm2.Connection):
                             ):
                                 if key in data:
                                     payload[key] = data[key]
+                            root_task = None
+                            root_id = task.pipeline_root_id or ""
+                            if root_id and root_id != task.id:
+                                root_task = state.board_tasks.get(root_id)
                             verify_msg, _root_task = _apply_verification_report(
-                                task, payload, cell.name
+                                task,
+                                payload,
+                                cell.name,
+                                _save_task,
+                                root_task=root_task,
                             )
                             _append_mcp(cell, "verify", verify_msg)
                             _append_task_msg(task, "verify",

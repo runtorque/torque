@@ -327,6 +327,28 @@ loom task edit deploy-auth-middleware --verify-state pending --verify-mode deplo
 
 Alias: `e`
 
+### task verify
+
+Record a deploy/restart verification checkpoint without opening the full task editor.
+
+```bash
+loom task verify deploy-auth-middleware --mode deploy --state pending --note "Waiting for staging deploy"
+loom task verify deploy-auth-middleware --mode deploy --attempted --note "Deployed to staging"
+loom task verify deploy-auth-middleware --smoke passed --note "Login and billing pages load"
+loom task verify deploy-auth-middleware --smoke failed --note "Smoke failed on login redirect"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--mode` | Set verification mode (`deploy` or `restart`) |
+| `--state` | Set explicit verification state (`pending`, `attempted`, `passed`, `failed`) |
+| `--attempted` | Mark that deploy or restart was attempted and move state to `attempted` unless overridden |
+| `--smoke` | Record smoke result (`passed` or `failed`) and mark manual smoke as done |
+| `--note` | Set verification notes |
+| `--tests` | Set tests run summary |
+| `--deploy-needed` | Mark that a deploy is still needed |
+| `--human` | Set what still needs human validation |
+
 ### task move
 
 Move a task to a different lane.

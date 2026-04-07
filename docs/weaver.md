@@ -237,6 +237,7 @@ All Weaver tools are available through the same `/mcp` endpoint as agent tools, 
 |------|-----------------|
 | `weaver_task_create` | Create a board task |
 | `weaver_task_edit` | Change task title, description, labels, action, or action vars |
+| `weaver_task_verify` | Record deploy/restart attempted, smoke passed/failed, and verification notes |
 | `weaver_task_move` | Move a task between lanes |
 | `weaver_task_dispatch` | Dispatch one task to a new or existing agent |
 | `weaver_batch_dispatch` | Dispatch a planned batch with concurrency control |

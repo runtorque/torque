@@ -95,3 +95,55 @@ class CliExternalTicketTests(unittest.TestCase):
             self.cli.cmd_board_comment(args)
         self.assertEqual(calls[0][0], "external_post_task_comment")
         self.assertEqual(calls[0][1]["comment"], "Looks good")
+
+    def test_task_verify_calls_board_verify_task(self):
+        calls = []
+        self.cli.get_state_local = lambda _port: {
+            "board_tasks": {
+                "task-1": {"id": "task-1", "task": "Deploy billing changes"}
+            }
+        }
+        self.cli.resolve_task = lambda _state, _ident: {
+            "id": "task-1", "task": "Deploy billing changes"
+        }
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            calls.append((cmd, kwargs))
+            return {
+                "ok": True,
+                "data": {
+                    "message": "Verification updated: state=failed",
+                },
+            }
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(
+            port=18932,
+            identifier="task-1",
+            mode="deploy",
+            state=None,
+            attempted=True,
+            smoke="failed",
+            note="Smoke failed on login redirect",
+            tests="python3 -m unittest",
+            deploy_needed=False,
+            human="Confirm fixed build",
+        )
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.cli.cmd_task_verify(args)
+
+        self.assertEqual(calls[0][0], "board_verify_task")
+        self.assertEqual(
+            calls[0][1],
+            {
+                "id": "task-1",
+                "actor_name": "loom-cli",
+                "verification_mode": "deploy",
+                "verification_notes": "Smoke failed on login redirect",
+                "tests_run": "python3 -m unittest",
+                "human_validation_pending": "Confirm fixed build",
+                "deploy_attempted": True,
+                "smoke_status": "failed",
+            },
+        )
