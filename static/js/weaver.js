@@ -4,9 +4,10 @@ var _weaverTab = 'journal';  // 'journal' | 'settings'
 var _weaverCustomInstrDirty = false;
 var _weaverCustomInstrDraft = '';
 var _weaverReplyDraft = '';
-var _weaverHealthOrder = ['blocked', 'stalled', 'thrashing', 'idle-risk'];
+var _weaverHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
 var _weaverHealthLabels = {
   'blocked': 'Blocked',
+  'stale-in-progress': 'Stale in progress',
   'stalled': 'Stalled',
   'thrashing': 'Thrashing',
   'idle-risk': 'Idle risk',
@@ -16,7 +17,8 @@ var _weaverHealthSeverity = {
   'idle-risk': 1,
   'thrashing': 2,
   'stalled': 3,
-  'blocked': 4,
+  'stale-in-progress': 4,
+  'blocked': 5,
 };
 
 function renderWeaverPanel() {
@@ -126,6 +128,20 @@ function _weaverRenderJournal(group) {
     html += '<div class="weaver-ask-actions">';
     html += '<button class="weaver-dismiss-btn" onclick="weaverDismissQuestion()">Dismiss</button>';
     html += '<button class="weaver-reply-btn" onclick="weaverReply()">Send Reply</button>';
+    html += '</div>';
+    html += '</div>';
+  }
+  if (ws && ws.pending_note) {
+    var noteKind = ws.pending_note_kind || 'note';
+    html += '<div class="weaver-note-banner">';
+    html += '<div class="weaver-note-label">'
+      + (noteKind === 'question'
+        ? 'Weaver asks (non-blocking):'
+        : 'Weaver note:')
+      + '</div>';
+    html += '<div class="weaver-note-text">' + _esc(ws.pending_note) + '</div>';
+    html += '<div class="weaver-note-actions">';
+    html += '<button class="weaver-dismiss-btn" onclick="weaverDismissNote()">Dismiss</button>';
     html += '</div>';
     html += '</div>';
   }
@@ -296,6 +312,9 @@ function _weaverRenderSettings(group, ws, weaver) {
 
   var pushInt = (ws && ws.push_interval) || 60;
   var maxInt = (ws && ws.max_interval) || 300;
+  var heartbeatInt = ws && typeof ws.heartbeat_interval === 'number'
+    ? ws.heartbeat_interval
+    : maxInt;
   html += '<div class="weaver-field"><label>Push interval</label>';
   html += '<select onchange="weaverUpdateSetting(\'push_interval\', +this.value)">';
   [10, 30, 60, 120, 300].forEach(function(v) {
@@ -309,6 +328,17 @@ function _weaverRenderSettings(group, ws, weaver) {
   [60, 120, 300, 600].forEach(function(v) {
     var sel = v === maxInt ? ' selected' : '';
     html += '<option value="' + v + '"' + sel + '>' + v + 's</option>';
+  });
+  html += '</select></div>';
+
+  html += '<div class="weaver-field"><label>Idle heartbeat</label>';
+  html += '<div class="weaver-field-note">Send idle heartbeat if no digest was sent for:</div>';
+  html += '<select onchange="weaverUpdateSetting(\'heartbeat_interval\', +this.value)">';
+  [[0, 'Off'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [600, '10 min']].forEach(function(opt) {
+    var v = opt[0];
+    var label = opt[1];
+    var sel = v === heartbeatInt ? ' selected' : '';
+    html += '<option value="' + v + '"' + sel + '>' + label + '</option>';
   });
   html += '</select></div>';
 
@@ -380,6 +410,12 @@ function weaverDismissQuestion() {
   if (!group) return;
   _weaverReplyDraft = '';
   send({ cmd: 'weaver_resume', group: group });
+}
+
+function weaverDismissNote() {
+  var group = _currentGroup();
+  if (!group) return;
+  send({ cmd: 'weaver_dismiss_note', group: group });
 }
 
 // -- Create weaver ---------------------------------------------------------

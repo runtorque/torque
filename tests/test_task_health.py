@@ -113,6 +113,125 @@ class TaskHealthTests(unittest.TestCase):
             ["message_churn"],
         )
 
+    def test_idle_agent_with_checkpointed_work_is_flagged_stale_in_progress(self):
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Wrap up release notes",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(25_000),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_path="/repo/.loom/worktrees/agent-1",
+                worktree_checkpoints=2,
+                worktree_dirty=False,
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": task},
+            agents,
+            now_ts=25_120,
+        )
+
+        self.assertEqual(snapshots["task-1"].state, "stale-in-progress")
+        self.assertIn(
+            "checkpointed_worktree",
+            snapshots["task-1"].details["reasons"],
+        )
+
+    def test_open_derived_handoff_is_not_flagged_stale_in_progress(self):
+        parent = self.state_mod.BoardTask(
+            id="task-parent",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(26_000),
+        )
+        child = self.state_mod.BoardTask(
+            id="task-review",
+            task="Review feature",
+            group="g",
+            lane="In Progress",
+            parent_task_id="task-parent",
+            agent_id="agent-2",
+            updated_at=_iso(26_000),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Implementer",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_path="/repo/.loom/worktrees/agent-1",
+                worktree_checkpoints=1,
+                worktree_dirty=False,
+            ),
+            "agent-2": self.state_mod.AgentCell(
+                id="agent-2",
+                name="Reviewer",
+                group="g",
+                cell_type="agent",
+                status="running",
+                activity="thinking",
+            ),
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-parent": parent, "task-review": child},
+            agents,
+            now_ts=26_060,
+        )
+
+        self.assertEqual(snapshots["task-parent"].state, "healthy")
+
+    def test_queued_same_agent_follow_up_is_not_flagged_stale_in_progress(self):
+        current = self.state_mod.BoardTask(
+            id="task-1",
+            task="Current task",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+            updated_at=_iso(27_000),
+        )
+        queued = self.state_mod.BoardTask(
+            id="task-2",
+            task="Queued follow-up",
+            group="g",
+            lane="To Do",
+            agent_id="agent-1",
+            updated_at=_iso(27_100),
+        )
+        agents = {
+            "agent-1": self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+                status="running",
+                worktree_path="/repo/.loom/worktrees/agent-1",
+                worktree_checkpoints=1,
+                worktree_dirty=False,
+            )
+        }
+
+        snapshots = self.task_health_mod.compute_task_health(
+            {"task-1": current, "task-2": queued},
+            agents,
+            now_ts=27_120,
+        )
+
+        self.assertEqual(snapshots["task-1"].state, "healthy")
+
     def test_parent_rolls_up_worst_open_child_health(self):
         parent = self.state_mod.BoardTask(
             id="parent",

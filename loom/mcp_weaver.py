@@ -535,8 +535,15 @@ WEAVER_TOOLS = [
                 "max_interval": {
                     "type": "integer",
                     "description": (
-                        "Max seconds between pushes including "
-                        "idle digests (default: 300)."
+                        "Max seconds between regular digests "
+                        "(default: 300)."
+                    ),
+                },
+                "heartbeat_interval": {
+                    "type": "integer",
+                    "description": (
+                        "Send an idle heartbeat if no digest was sent "
+                        "for this many seconds (0 = off, default: 300)."
                     ),
                 },
                 "enable": {
@@ -676,6 +683,29 @@ WEAVER_TOOLS = [
                 },
             },
             "required": ["question"],
+        },
+    },
+    {
+        "name": "weaver_note",
+        "description": (
+            "Post a non-blocking note or soft question for the human. "
+            "Unlike weaver_ask, this does not pause event delivery or "
+            "put Loom into awaiting-input mode."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "The note or soft question for the human.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["note", "question"],
+                    "description": "Render as an informational note or a soft question.",
+                },
+            },
+            "required": ["message"],
         },
     },
     {
@@ -902,6 +932,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         health_counts = {
             "healthy": 0,
             "blocked": 0,
+            "stale-in-progress": 0,
             "idle-risk": 0,
             "stalled": 0,
             "thrashing": 0,
@@ -1573,6 +1604,10 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             fields["push_interval"] = max(10, args["push_interval"])
         if "max_interval" in args:
             fields["max_interval"] = max(30, args["max_interval"])
+        if "heartbeat_interval" in args:
+            heartbeat_interval = args["heartbeat_interval"]
+            fields["heartbeat_interval"] = 0 if heartbeat_interval <= 0 \
+                else max(30, heartbeat_interval)
         if "enable" in args or "disable" in args:
             current = set(ws.enabled_events)
             for e in args.get("enable", []):
@@ -1659,6 +1694,27 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             "via the panel or directly in this terminal.\n\n"
             "After the human responds, call weaver_resume to unpause "
             "event delivery."
+        ), False
+
+    if name == "weaver_note":
+        message = args.get("message", "").strip()
+        if not message:
+            return "Message is required", True
+        kind = args.get("kind", "note")
+        if kind not in {"note", "question"}:
+            return "kind must be 'note' or 'question'", True
+
+        result = await handle_command({
+            "cmd": "weaver_note",
+            "group": _weaver_group,
+            "message": message,
+            "kind": kind,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return (
+            "Note posted to the Weaver panel without pausing event "
+            "delivery. It will remain visible until dismissed."
         ), False
 
     if name == "weaver_agent_close":

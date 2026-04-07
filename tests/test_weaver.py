@@ -78,6 +78,14 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_overdue_idle_push_uses_digest_format(self):
         state, group, _ = self._make_state()
+        task = state.board_add_task(
+            "Investigate blocked review",
+            group,
+            lane="In Progress",
+            id="task-1",
+        )
+        self.assertIsNotNone(task)
+        task.health_state = "blocked"
         active = self.state_mod.AgentCell(
             id="agent-2",
             name="Worker",
@@ -100,7 +108,55 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("── Loom Digest (0 events)", bridge.sent[0])
         self.assertIn("No new events since last digest.", bridge.sent[0])
         self.assertIn("Active: worker (thinking)", bridge.sent[0])
+        self.assertIn("Attention: blocked: Investigate blocked review", bridge.sent[0])
         self.assertNotIn("Heartbeat", bridge.sent[0])
+
+    async def test_idle_heartbeat_can_be_disabled(self):
+        state, group, _ = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            heartbeat_interval=0,
+        )
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[group] = time.time() - 600
+
+        buffer._timer_tick()
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(bridge.sent, [])
+
+    async def test_idle_heartbeat_does_not_duplicate_regular_event_pushes(self):
+        state, group, _ = self._make_state()
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[group] = time.time() - 600
+
+        buffer.on_panel_event({
+            "group": group,
+            "kind": "task_completed",
+            "message": "done",
+        })
+        buffer._timer_tick()
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("── Loom Digest (1 event)", bridge.sent[0])
+
+    async def test_idle_heartbeat_does_not_fire_while_weaver_is_active(self):
+        state, group, weaver = self._make_state()
+        weaver.activity = "thinking"
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[group] = time.time() - 600
+
+        buffer._timer_tick()
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(bridge.sent, [])
 
     async def test_board_summary_in_digest_mentions_task_health(self):
         state, group, _ = self._make_state()
@@ -120,6 +176,31 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("1 In Progress", summary)
         self.assertIn("health 1 stalled", summary)
         self.assertIn("Investigate stalled dispatch (stalled)", summary)
+
+    async def test_idle_heartbeat_surfaces_stale_in_progress_attention(self):
+        state, group, _ = self._make_state()
+        task = state.board_add_task(
+            "Close the loop on merge",
+            group,
+            lane="In Progress",
+            id="task-stale",
+        )
+        self.assertIsNotNone(task)
+        task.health_state = "stale-in-progress"
+
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[group] = time.time() - 301
+
+        buffer._timer_tick()
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn(
+            "Attention: stale-in-progress: Close the loop on merge",
+            bridge.sent[0],
+        )
 
     async def test_paused_weaver_does_not_buffer_or_flush_events(self):
         state, group, weaver = self._make_state()

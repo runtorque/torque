@@ -251,10 +251,13 @@ class WeaverSettings:
     """Per-group weaver configuration."""
     group: str = ""
     push_interval: int = 60              # seconds between digest pushes (min: 10)
-    max_interval: int = 300              # max seconds between pushes, including idle digests
+    max_interval: int = 300              # max seconds between normal digest pushes
+    heartbeat_interval: int = 300        # quiet seconds before idle heartbeat digest (0 = off)
     paused: bool = False                 # user paused event pushes
     custom_instructions: str = ""        # user-defined instructions appended to weaver system prompt
     pending_question: str = ""           # question awaiting human reply (non-empty = awaiting input)
+    pending_note: str = ""               # non-blocking note/question for the human
+    pending_note_kind: str = ""          # "note" | "question" | ""
     weaver_provider: str = ""            # adapter name override (empty = use group default)
     weaver_boot_command: str = ""        # boot command override (empty = use provider default)
     enabled_events: list[str] = field(   # optional events (mandatory always on)
@@ -925,8 +928,14 @@ class MatrixState:
             if ws.pending_question and (not weaver_id or weaver_id not in live_agents):
                 ws.pending_question = ""
                 ws.paused = False
+                ws.pending_note = ""
+                ws.pending_note_kind = ""
                 self._save_weaver_settings(group, emit=emit)
                 cleaned["weaver_questions"] += 1
+            elif ws.pending_note and (not weaver_id or weaver_id not in live_agents):
+                ws.pending_note = ""
+                ws.pending_note_kind = ""
+                self._save_weaver_settings(group, emit=emit)
 
         reason = "Ask expired because the source agent is no longer available."
         for task in list(self.board_tasks.values()):

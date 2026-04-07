@@ -36,7 +36,7 @@ weaver_board_summary
 weaver_task_dispatch, weaver_batch_dispatch, weaver_task_resolve
 **Events**: weaver_events, weaver_notifications, weaver_resume
 **Journal**: weaver_journal, weaver_journal_read
-**Interaction**: weaver_agent_message, weaver_ask, weaver_agent_close, \
+**Interaction**: weaver_agent_message, weaver_note, weaver_ask, weaver_agent_close, \
 weaver_agent_relaunch
 **Worktree**: weaver_merge, weaver_create_pr, weaver_diff, \
 weaver_worktree_remove, weaver_worktree_checkpoint
@@ -83,8 +83,10 @@ weaver_worktree_remove, weaver_worktree_checkpoint
    for agents to finish, do nothing.  Loom will push event digests to you
    when something happens.
 
-9. **Human interaction** — Use `weaver_ask` to ask the human questions.
-   This pauses event delivery and shows your question in the Weaver panel.
+9. **Human interaction** — Use `weaver_note` for non-blocking notes or
+   soft questions that should stay visible without pausing orchestration.
+   Use `weaver_ask` only when you need a blocking human decision. That
+   pauses event delivery and shows your question in the Weaver panel.
    The human will reply via the panel or directly in your terminal.
    After receiving their answer, call `weaver_resume` to unpause events.
 
@@ -261,11 +263,14 @@ class WeaverEventBuffer:
         self._loop.create_task(self._flush(group))
 
     def _is_digest_due(self, group: str, ws) -> bool:
-        """Check if max_interval has elapsed since last push."""
+        """Check if the idle heartbeat interval has elapsed since last push."""
+        interval = getattr(ws, "heartbeat_interval", 0)
+        if not interval:
+            return False
         last = self._last_push.get(group, 0)
         if last == 0:
             return False  # never pushed — wait for first event
-        return (time.time() - last) >= ws.max_interval
+        return (time.time() - last) >= interval
 
     async def _flush(self, group: str):
         """Format and send buffered events as a digest to the weaver."""
@@ -284,7 +289,7 @@ class WeaverEventBuffer:
 
             events = self._buffers.pop(group, [])
             board_summary = self._board_summary(group)
-            text = self._format_digest(events, board_summary, weaver)
+            text = self._format_digest(group, events, board_summary, weaver)
 
             self._last_push[group] = time.time()
 
@@ -309,7 +314,7 @@ class WeaverEventBuffer:
                         or self._is_digest_due(group, ws)):
                     self._schedule_flush(group)
 
-    def _format_digest(self, events: list[dict], board_summary: str,
+    def _format_digest(self, group: str, events: list[dict], board_summary: str,
                        weaver=None) -> str:
         lines = [f"── Loom Digest ({len(events)} event"
                  f"{'s' if len(events) != 1 else ''}) "
@@ -334,6 +339,9 @@ class WeaverEventBuffer:
             active_summary = self._active_agents_summary()
             if active_summary:
                 lines.append(f"Active: {active_summary}")
+            attention = self._quiet_attention_summary(group)
+            if attention:
+                lines.append(attention)
 
         # Context warning
         if weaver:
@@ -350,6 +358,30 @@ class WeaverEventBuffer:
             if c.cell_type == "agent" and c.activity:
                 actives.append(f"{c.slug or c.name} ({c.activity})")
         return " · ".join(actives)
+
+    def _quiet_attention_summary(self, group: str) -> str:
+        """Summarize blocked/unhealthy tasks for quiet-period heartbeats."""
+        items = []
+        for task in self._state.board_tasks.values():
+            if task.group != group or task.lane == "Done":
+                continue
+            health_state = getattr(task, "health_state", "healthy") or "healthy"
+            if health_state == "healthy":
+                continue
+            items.append((health_state, task.task))
+        if not items:
+            return ""
+        items.sort(
+            key=lambda item: (
+                -HEALTH_SEVERITY.get(item[0], 0),
+                item[1].lower(),
+            ),
+        )
+        preview = [
+            f"{state_name}: {title[:40]}"
+            for state_name, title in items[:3]
+        ]
+        return "Attention: " + " · ".join(preview)
 
     def _board_summary(self, group: str) -> str:
         """Count tasks per lane for a group, including unhealthy rollups."""
@@ -430,11 +462,10 @@ class WeaverEventBuffer:
                 continue
 
             # Flush if weaver is idle and has buffered events,
-            # or if an idle digest is overdue.
+            # or if an idle heartbeat digest is overdue.
             is_idle = not weaver.activity or weaver.activity == "waiting"
             has_events = bool(self._buffers.get(group))
-            last = self._last_push.get(group, 0)
-            digest_due = last and (now - last) >= ws.max_interval
+            digest_due = self._is_digest_due(group, ws)
             if is_idle and (has_events or digest_due):
                 self._schedule_flush(group)
 

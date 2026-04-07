@@ -533,6 +533,7 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
             {
                 "healthy": 2,
                 "blocked": 2,
+                "stale-in-progress": 0,
                 "idle-risk": 0,
                 "stalled": 0,
                 "thrashing": 0,
@@ -1182,6 +1183,7 @@ class WeaverEventAndInteractionToolTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             push_interval=60,
             max_interval=300,
+            heartbeat_interval=300,
             enabled_events=["agent_started", "task_derived"],
         )
         captured = {}
@@ -1192,6 +1194,7 @@ class WeaverEventAndInteractionToolTests(unittest.IsolatedAsyncioTestCase):
                 payload["group"],
                 push_interval=payload["push_interval"],
                 max_interval=payload["max_interval"],
+                heartbeat_interval=payload["heartbeat_interval"],
                 enabled_events=payload["enabled_events"],
             )
             return {"type": "ok"}
@@ -1201,6 +1204,7 @@ class WeaverEventAndInteractionToolTests(unittest.IsolatedAsyncioTestCase):
             {
                 "push_interval": 5,
                 "max_interval": 20,
+                "heartbeat_interval": 20,
                 "enable": ["agent_progress"],
                 "disable": ["agent_started"],
             },
@@ -1217,13 +1221,51 @@ class WeaverEventAndInteractionToolTests(unittest.IsolatedAsyncioTestCase):
                 "group": "g",
                 "push_interval": 10,
                 "max_interval": 30,
+                "heartbeat_interval": 30,
                 "enabled_events": ["agent_progress", "task_derived"],
             },
         )
         settings = json.loads(text)["settings"]
         self.assertEqual(settings["push_interval"], 10)
         self.assertEqual(settings["max_interval"], 30)
+        self.assertEqual(settings["heartbeat_interval"], 30)
         self.assertEqual(settings["enabled_events"], ["agent_progress", "task_derived"])
+
+    async def test_notifications_allow_disabling_idle_heartbeat(self):
+        state, weaver = self._make_state()
+        state.weaver_settings["g"] = self.state_mod.WeaverSettings(
+            group="g",
+            heartbeat_interval=300,
+        )
+        captured = {}
+
+        async def fake_handle_command(payload):
+            captured.update(payload)
+            state.update_weaver_settings(
+                payload["group"],
+                heartbeat_interval=payload["heartbeat_interval"],
+            )
+            return {"type": "ok"}
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_notifications",
+            {"heartbeat_interval": 0},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(
+            captured,
+            {
+                "cmd": "weaver_update_settings",
+                "group": "g",
+                "heartbeat_interval": 0,
+            },
+        )
+        settings = json.loads(text)["settings"]
+        self.assertEqual(settings["heartbeat_interval"], 0)
 
     async def test_ask_and_resolve_forward_expected_payloads(self):
         state, weaver = self._make_state()
@@ -1275,6 +1317,38 @@ class WeaverEventAndInteractionToolTests(unittest.IsolatedAsyncioTestCase):
                     "cmd": "resolve_ask",
                     "id": ask.id,
                     "answer": "Take the review task first.",
+                },
+            ],
+        )
+
+    async def test_note_posts_without_pausing_event_delivery(self):
+        state, weaver = self._make_state()
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "weaver_note":
+                return {"type": "ok"}
+            self.fail(f"Unexpected command: {payload}")
+
+        note_text, note_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_note",
+            {"message": "FYI: branch looks mergeable", "kind": "question"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(note_error)
+        self.assertIn("without pausing event delivery", note_text)
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "cmd": "weaver_note",
+                    "group": "g",
+                    "message": "FYI: branch looks mergeable",
+                    "kind": "question",
                 },
             ],
         )

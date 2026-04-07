@@ -31,7 +31,7 @@ The Weaver must be created through this flow because Loom needs to boot it with 
 
 The panel has two tabs:
 
-- **Journal** shows the persistent journal and the pending-question banner when the Weaver is waiting on a human reply.
+- **Journal** shows the persistent journal, blocking asks, and non-blocking notes/questions from the Weaver.
 - **Settings** controls the Weaver agent, backend override, custom instructions, and notification settings.
 
 The panel header also shows:
@@ -92,10 +92,21 @@ Digests are:
 
 - **idle-gated**: Loom only pushes them when the Weaver is idle or waiting
 - **buffered**: events accumulate between pushes
-- **periodic**: an idle digest still arrives if `max_interval` elapses
+- **heartbeat-aware**: an idle heartbeat can arrive if no digest was sent
+  for `heartbeat_interval`
 - **scoped**: each Weaver only sees events for its own group
 
-If there are no new events, Loom still sends a heartbeat-style digest with a board summary and active-agent summary when the max interval is reached.
+The notification controls expose three separate intervals:
+
+- `push_interval`: the normal digest cadence
+- `max_interval`: the cap for regular digest timing
+- `heartbeat_interval`: send an idle heartbeat if no digest was sent for
+  this long
+
+If there are no new events, Loom can still send a heartbeat-style digest
+with a board summary, active-agent summary, and compact blocked/unhealthy
+task context when the heartbeat interval is reached. Set the heartbeat
+interval to `0` or `Off` to disable it.
 
 ### Mandatory events
 
@@ -164,7 +175,17 @@ The Journal tab in the UI shows entries newest-first, and entries can be deleted
 
 ## Asking the human
 
-`weaver_ask` is the Weaver's human-in-the-loop mechanism.
+`weaver_note` is the non-blocking path for notes or soft questions that
+should stay visible without pausing orchestration.
+
+`weaver_ask` is the Weaver's blocking human-in-the-loop mechanism.
+
+When the Weaver posts a non-blocking note:
+
+1. the note appears in the Journal tab as an informational banner
+2. event pushes continue normally
+3. Loom does not enter awaiting-input state
+4. the note is recorded in the journal and survives restart until dismissed
 
 When the Weaver asks a question:
 
@@ -228,6 +249,7 @@ All Weaver tools are available through the same `/mcp` endpoint as agent tools, 
 | Tool | What it is for |
 |------|-----------------|
 | `weaver_agent_message` | Send a message into another agent's terminal |
+| `weaver_note` | Post a non-blocking note or soft question for the human |
 | `weaver_ask` | Ask the human a question and pause event pushes |
 | `weaver_agent_close` | Close an agent session while leaving its worktree on disk |
 | `weaver_agent_relaunch` | Relaunch a stopped agent, reusing worktree and provider resume when available |
