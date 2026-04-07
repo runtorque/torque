@@ -3,7 +3,8 @@
 var _diffViewOpen = false;
 var _diffViewAgentId = '';
 var _diffViewData = null;
-var _diffCollapsedFiles = {};
+var _diffCollapsedFiles = {};  // path -> 'collapsed' | 'expanded' override
+var _diffCollapseAllFiles = false;
 var _diffMergeCheck = null;   // null = loading, {clean, dirty, conflicts}
 var _diffCommitMsg = '';       // editable commit message
 var _diffMerging = false;      // true while merge request in flight
@@ -15,6 +16,7 @@ function showDiffView(agentId, readOnly) {
   _diffViewAgentId = agentId;
   _diffViewData = null;
   _diffCollapsedFiles = {};
+  _diffCollapseAllFiles = false;
   _diffMergeCheck = null;
   _diffCommitMsg = '';
   _diffMerging = false;
@@ -29,6 +31,7 @@ function hideDiffView() {
   _diffViewAgentId = '';
   _diffViewData = null;
   _diffCollapsedFiles = {};
+  _diffCollapseAllFiles = false;
   _diffMergeCheck = null;
   _diffCommitMsg = '';
   _diffMerging = false;
@@ -86,8 +89,50 @@ function diffReceiveRebaseResult(msg) {
 }
 
 function toggleDiffFile(path) {
-  _diffCollapsedFiles[path] = !_diffCollapsedFiles[path];
+  if (!path) return;
+  _setDiffFileCollapsed(path, !_isDiffFileCollapsed(path));
   renderDiffView();
+}
+
+function _isDiffFileCollapsed(path) {
+  if (!path) return false;
+  if (_diffCollapsedFiles[path] === 'collapsed') return true;
+  if (_diffCollapsedFiles[path] === 'expanded') return false;
+  return !!_diffCollapseAllFiles;
+}
+
+function _setDiffFileCollapsed(path, collapsed) {
+  if (!path) return;
+  if (!!collapsed === !!_diffCollapseAllFiles) {
+    delete _diffCollapsedFiles[path];
+    return;
+  }
+  _diffCollapsedFiles[path] = collapsed ? 'collapsed' : 'expanded';
+}
+
+function diffSetAllFilesCollapsed(collapsed) {
+  _diffCollapseAllFiles = !!collapsed;
+  _diffCollapsedFiles = {};
+  renderDiffView();
+}
+
+function _syncDiffCollapsedFiles(files) {
+  var active = {};
+  for (var i = 0; i < files.length; i++) {
+    var path = files[i] && files[i].path;
+    if (path) active[path] = true;
+  }
+  for (var key in _diffCollapsedFiles) {
+    if (!active[key]) delete _diffCollapsedFiles[key];
+  }
+}
+
+function _diffCollapsedCount(files) {
+  var count = 0;
+  for (var i = 0; i < files.length; i++) {
+    if (_isDiffFileCollapsed(files[i] && files[i].path)) count++;
+  }
+  return count;
 }
 
 function _diffStatsLabel(stats) {
@@ -240,7 +285,7 @@ function _renderDiffLines(lines) {
 
 function _renderDiffFile(file) {
   var path = file.path || '(unknown file)';
-  var collapsed = !!_diffCollapsedFiles[path];
+  var collapsed = _isDiffFileCollapsed(path);
   var status = _diffStatusLabel(file.status);
   var summary = '';
   if (file.insertions || file.deletions) {
@@ -274,6 +319,22 @@ function _renderDiffFile(file) {
     html += '</div>';
   }
   html += '</section>';
+  return html;
+}
+
+function _renderDiffCollapseControls(files) {
+  if (!files.length) return '';
+  var collapsedCount = _diffCollapsedCount(files);
+  var html = '<div class="diff-view-toolbar">';
+  html += '<button class="diff-collapse-btn"'
+    + (_diffCollapseAllFiles ? ' disabled' : '')
+    + ' onclick="diffSetAllFilesCollapsed(true)">Collapse all</button>';
+  html += '<button class="diff-collapse-btn"'
+    + (!_diffCollapseAllFiles && !collapsedCount ? ' disabled' : '')
+    + ' onclick="diffSetAllFilesCollapsed(false)">Expand all</button>';
+  html += '<span class="diff-collapse-summary">' + collapsedCount + ' of '
+    + files.length + ' collapsed</span>';
+  html += '</div>';
   return html;
 }
 
@@ -398,11 +459,13 @@ function renderDiffView() {
 
   var stats = _diffViewData.stats || {};
   var files = _diffViewData.files || [];
+  _syncDiffCollapsedFiles(files);
   html += '<div class="diff-view-header">';
   html += '<div class="diff-view-title">' + esc(_diffViewData.agent_name || 'Worktree diff') + '</div>';
   html += '<div class="diff-view-branch">' + esc(_diffViewData.branch || '') + ' \u2192 '
     + esc(_diffViewData.base_branch || 'main') + '</div>';
   html += '<div class="diff-view-stats">' + esc(_diffStatsLabel(stats)) + '</div>';
+  html += _renderDiffCollapseControls(files);
   html += '</div>';
   html += '<div class="diff-view-content">';
   html += _renderBoundarySummary();

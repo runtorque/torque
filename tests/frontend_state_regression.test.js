@@ -2797,3 +2797,93 @@ test('diff review surfaces related task artifacts next to the synthesized diff a
     { title: 'pytest report', type: 'test_report', taskLabel: 'Review auth patch' },
   ]);
 });
+
+test('diff review bulk collapse controls stay stable across refreshes', () => {
+  const { context, document } = createDiffHarness();
+  const root = document.getElementById('diff-view-root');
+
+  runInContext(context, `
+    _diffViewOpen = true;
+    _diffViewData = {
+      agent_name: 'Worker',
+      branch: 'loom/worker',
+      base_branch: 'main',
+      stats: { files: 2, insertions: 4, deletions: 1 },
+      files: [
+        {
+          path: 'src/a.js',
+          status: 'modified',
+          insertions: 2,
+          deletions: 1,
+          hunks: [{ header: '@@ -1 +1 @@', lines: [{ type: 'add', text: 'a' }] }],
+        },
+        {
+          path: 'src/b.js',
+          status: 'modified',
+          insertions: 2,
+          deletions: 0,
+          hunks: [{ header: '@@ -1 +1 @@', lines: [{ type: 'add', text: 'b' }] }],
+        },
+      ],
+    };
+    renderDiffView();
+  `);
+
+  assert.match(root.innerHTML, /Collapse all/);
+  assert.match(root.innerHTML, /Expand all/);
+  assert.match(root.innerHTML, /0 of 2 collapsed/);
+
+  runInContext(context, `diffSetAllFilesCollapsed(true)`);
+
+  assert.equal(jsonValue(context, `_isDiffFileCollapsed('src/a.js')`), true);
+  assert.equal(jsonValue(context, `_isDiffFileCollapsed('src/b.js')`), true);
+  assert.match(root.innerHTML, /2 of 2 collapsed/);
+
+  runInContext(context, `
+    _diffViewData = {
+      agent_name: 'Worker',
+      branch: 'loom/worker',
+      base_branch: 'main',
+      stats: { files: 3, insertions: 5, deletions: 1 },
+      files: [
+        {
+          path: 'src/a.js',
+          status: 'modified',
+          insertions: 2,
+          deletions: 1,
+          hunks: [{ header: '@@ -1 +1 @@', lines: [{ type: 'add', text: 'a' }] }],
+        },
+        {
+          path: 'src/b.js',
+          status: 'modified',
+          insertions: 2,
+          deletions: 0,
+          hunks: [{ header: '@@ -1 +1 @@', lines: [{ type: 'add', text: 'b' }] }],
+        },
+        {
+          path: 'src/c.js',
+          status: 'added',
+          insertions: 1,
+          deletions: 0,
+          hunks: [{ header: '@@ -0,0 +1 @@', lines: [{ type: 'add', text: 'c' }] }],
+        },
+      ],
+    };
+    renderDiffView();
+  `);
+
+  assert.equal(jsonValue(context, `_isDiffFileCollapsed('src/c.js')`), true);
+  assert.match(root.innerHTML, /3 of 3 collapsed/);
+
+  runInContext(context, `toggleDiffFile('src/a.js')`);
+
+  assert.equal(jsonValue(context, `_isDiffFileCollapsed('src/a.js')`), false);
+  assert.equal(jsonValue(context, `_isDiffFileCollapsed('src/b.js')`), true);
+  assert.match(root.innerHTML, /2 of 3 collapsed/);
+
+  runInContext(context, `diffSetAllFilesCollapsed(false)`);
+
+  assert.equal(jsonValue(context, `_isDiffFileCollapsed('src/b.js')`), false);
+  assert.equal(jsonValue(context, `_isDiffFileCollapsed('src/c.js')`), false);
+  assert.match(root.innerHTML, /0 of 3 collapsed/);
+});
