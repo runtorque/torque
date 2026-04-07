@@ -295,6 +295,21 @@ function createWeaverHarness() {
   return { context, document };
 }
 
+function createAgentHistoryHarness() {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/board.js');
+  loadScript(context, 'static/js/templates.js');
+  runInContext(context, `
+    _renderBoardSelectionBar = function() { return ''; };
+    _boardScheduleCount = function() { return 0; };
+    boardUpdateScrollArrows = function() {};
+    boardAddTaskAutoResize = function() {};
+  `);
+  return { context, document };
+}
+
 function createWsRenderHarness() {
   const { sandbox, document } = createSandbox();
   sandbox._activePanelApp = '';
@@ -2289,10 +2304,12 @@ test('renderBoard restores focused input value and caret across rerenders', () =
   assert.equal(input.selectionEnd, 11);
 });
 
-test('boardNavigateToTask opens the board and focuses the selected task', () => {
-  const { context, document } = createBoardHarness();
+test('agent history task links open the board and focus the selected task', () => {
+  const { context, document } = createAgentHistoryHarness();
   document.register('panel-board');
   document.register('board-cards');
+  document.register('panel-templates');
+  const detail = document.register('ah-detail-agent-1');
   const focusedCard = new FakeElement('focused-card');
   document.setSelector('.board-card.focused', focusedCard);
 
@@ -2307,6 +2324,13 @@ test('boardNavigateToTask opens the board and focuses the selected task', () => 
       position: 1,
     },
   };
+  runInContext(context, `
+    _agentHistoryDetail = {
+      record: { id: 'agent-1', template: '', worktree_branch: '', created_at: 1 },
+      tasks: [{ task_id: 'task-1', task_title: 'Review agent output', outcome: 'done', started_at: 1 }],
+      messages: [],
+    };
+  `);
   context.togglePanel = function(appName) {
     context._activePanelApp = appName;
     context.toggledPanel = appName;
@@ -2325,7 +2349,10 @@ test('boardNavigateToTask opens the board and focuses the selected task', () => 
     _boardShowArchived = false;
   `);
 
-  context.boardNavigateToTask('task-1');
+  context.renderAgentHistoryExpanded();
+  assert.match(detail.innerHTML, /agentHistoryOpenTask\('task-1'\)/);
+
+  context.agentHistoryOpenTask('task-1');
 
   assert.equal(context.toggledPanel, 'board');
   assert.equal(runInContext(context, '_boardSelectedLane'), 'Done');
