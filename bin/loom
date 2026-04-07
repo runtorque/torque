@@ -1759,6 +1759,24 @@ def cmd_task_show(args):
             print(f"  {'Variables:':<14}")
             for k, v in tvars.items():
                 print(f"    {k}: {v}")
+    if t.get("attachments"):
+        print(f"  {'Attachments:':<14}")
+        for att in t["attachments"]:
+            path = att.get("path", "")
+            name = att.get("filename", "")
+            print(f"    {name or path}")
+            if path and path != name:
+                print(f"      path: {path}")
+    if t.get("artifacts"):
+        print(f"  {'Artifacts:':<14}")
+        for art in t["artifacts"]:
+            atype = art.get("type", "artifact")
+            title = art.get("title") or art.get("filename") or atype
+            print(f"    [{atype}] {title}")
+            if art.get("path"):
+                print(f"      ref: {art['path']}")
+            if art.get("summary"):
+                print(f"      summary: {art['summary']}")
 
     # Backward compat: show legacy fields if present on old tasks
     for field, label in [("instructions", "Instructions"),
@@ -1877,6 +1895,7 @@ def _filter_tasks(tasks, args):
 _TASK_EDIT_FIELDS = [
     "task", "lane", "group", "labels",
     "action_name", "action_vars",
+    "artifacts",
 ]
 
 _TASK_EDIT_COMMENT = """\
@@ -1897,6 +1916,8 @@ def _task_to_yaml(t):
             doc[key] = val if isinstance(val, list) else []
         elif key == "action_vars":
             doc[key] = val if isinstance(val, dict) else {}
+        elif key == "artifacts":
+            doc[key] = val if isinstance(val, list) else []
         else:
             doc[key] = val or ""
     comment = _TASK_EDIT_COMMENT.format(id=t["id"])
@@ -1925,7 +1946,14 @@ def _yaml_to_fields(text, original):
         if key not in doc:
             continue
         new_val = doc[key]
-        old_val = original.get(key, "" if key not in ("labels", "action_vars") else ([] if key == "labels" else {}))
+        if key == "labels":
+            old_val = original.get(key, [])
+        elif key == "action_vars":
+            old_val = original.get(key, {})
+        elif key == "artifacts":
+            old_val = original.get(key, [])
+        else:
+            old_val = original.get(key, "")
         if key == "labels":
             new_val = new_val if isinstance(new_val, list) else []
             if new_val != old_val:
@@ -1933,6 +1961,10 @@ def _yaml_to_fields(text, original):
         elif key == "action_vars":
             new_val = new_val if isinstance(new_val, dict) else {}
             if new_val != (old_val or {}):
+                fields[key] = new_val
+        elif key == "artifacts":
+            new_val = new_val if isinstance(new_val, list) else []
+            if new_val != (old_val or []):
                 fields[key] = new_val
         else:
             new_val = str(new_val) if new_val is not None else ""

@@ -81,7 +81,7 @@ The docs are organized by job:
 
 - [Getting Started](docs/getting-started.md) for installation and first use
 - [Sessions](docs/sessions.md) for groups, agents, terminals, and day-to-day navigation
-- [Task Board](docs/board.md) for tasks, dispatch, attachments, dependencies, and agent reporting
+- [Task Board](docs/board.md) for tasks, dispatch, attachments, artifacts, dependencies, and agent reporting
 - [Actions & Templates](docs/actions.md) for prompt templates, transitions, and pipelines
 - [Worktrees](docs/worktrees.md) for isolated branches and checkpoints
 - [Sessions](docs/sessions.md) for groups, agents, terminals, broadcast, relaunch, and navigation

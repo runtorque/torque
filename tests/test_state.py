@@ -142,6 +142,13 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             id="task-1",
             labels=["loom:blocked", "keep"],
             depends_on=["dep-1", "missing-task"],
+            artifacts=[{
+                "type": "log",
+                "title": "build.log",
+                "path": "/tmp/build.log",
+                "summary": "Compile failed in auth module",
+                "prompt": {"mode": "summary"},
+            }],
         )
 
         self.assertIsNotNone(dep)
@@ -149,6 +156,8 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(task.lane, "Backlog")
         self.assertEqual(task.position, 0)
         self.assertEqual(task.depends_on, ["dep-1"])
+        self.assertEqual(task.artifacts[0]["type"], "log")
+        self.assertEqual(task.artifacts[0]["prompt"]["mode"], "summary")
 
         original_slug = task.slug
         state.board_update_task(
@@ -157,12 +166,20 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             description="Updated description",
             labels=["loom:error", "keep"],
             scheduled_at="2026-04-07T10:00:00+00:00",
+            artifacts=[{
+                "type": "snippet",
+                "title": "failing example",
+                "content": "assert actual == expected",
+                "prompt": {"mode": "auto"},
+            }],
         )
 
         updated = state.board_tasks[task.id]
         self.assertEqual(updated.description, "Updated description")
         self.assertEqual(updated.labels, ["loom:error", "keep"])
         self.assertEqual(updated.scheduled_at, "2026-04-07T10:00:00+00:00")
+        self.assertEqual(updated.artifacts[0]["type"], "snippet")
+        self.assertEqual(updated.artifacts[0]["storage"]["kind"], "inline")
         self.assertNotEqual(updated.slug, original_slug)
 
         state.board_move_task(task.id, "Done")

@@ -198,7 +198,7 @@ LOOM_CONTEXT_STUB = {
                   "depth": 0, "is_derived": False,
                   "parent_task_id": "", "parent_agent_slug": "",
                   "labels": [], "group": "", "status": "",
-                  "attachments": []},
+                  "attachments": [], "artifacts": []},
     "terminals": [],
 }
 
