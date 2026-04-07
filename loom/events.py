@@ -7,6 +7,7 @@ from dataclasses import asdict
 
 from .adapters.base import AgentEvent
 from .config import log
+from .task_health import HEALTH_SEVERITY
 
 
 class PanelEventLog:
@@ -346,6 +347,16 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
         await asyncio.sleep(30)
         now = time.time()
         changed = False
+        old_task_health = {
+            tid: {
+                "state": getattr(task, "health_state", "healthy") or "healthy",
+                "source_task_id": (
+                    task.health_details.get("source_task_id", "")
+                    if isinstance(task.health_details, dict) else ""
+                ),
+            }
+            for tid, task in state.board_tasks.items()
+        }
 
         for cell in state.cells_with_awareness():
             if cell.status != "running":
@@ -399,8 +410,106 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
                     if notifier:
                         notifier.on_health_alert(cell.id, msg)
 
-        if state.recompute_task_health(now_ts=now):
+        changed_task_ids = state.recompute_task_health(now_ts=now)
+        if changed_task_ids:
             changed = True
+            _emit_task_health_alerts(
+                state,
+                event_bus,
+                changed_task_ids,
+                old_task_health,
+                notifier,
+            )
 
         if changed:
             await state.broadcast()
+
+
+def _emit_task_health_alerts(state, event_bus: EventBus,
+                             changed_task_ids: list[str],
+                             old_task_health: dict[str, dict],
+                             notifier=None):
+    panel_log = getattr(state, "panel_log", None) or getattr(
+        event_bus, "_panel_log", None)
+    if not panel_log:
+        return
+
+    pending_by_source: dict[str, object] = {}
+    for tid in changed_task_ids:
+        task = state.board_tasks.get(tid)
+        if not task or task.lane == "Done":
+            continue
+        new_state = getattr(task, "health_state", "healthy") or "healthy"
+        if new_state not in {"idle-risk", "stalled", "thrashing"}:
+            continue
+        previous = old_task_health.get(tid, {})
+        old_state = previous.get("state", "healthy") or "healthy"
+        if new_state == old_state:
+            continue
+        if HEALTH_SEVERITY.get(new_state, 0) < HEALTH_SEVERITY.get(old_state, 0):
+            continue
+        details = task.health_details if isinstance(task.health_details, dict) else {}
+        source_task_id = details.get("source_task_id", "") or task.id
+        incumbent = pending_by_source.get(source_task_id)
+        if incumbent is None:
+            pending_by_source[source_task_id] = task
+            continue
+        incumbent_details = (
+            incumbent.health_details if isinstance(incumbent.health_details, dict)
+            else {}
+        )
+        incumbent_aggregate = bool(incumbent_details.get("aggregate"))
+        current_aggregate = bool(details.get("aggregate"))
+        incumbent_severity = HEALTH_SEVERITY.get(
+            getattr(incumbent, "health_state", "healthy") or "healthy", 0)
+        current_severity = HEALTH_SEVERITY.get(new_state, 0)
+        if current_severity > incumbent_severity:
+            pending_by_source[source_task_id] = task
+        elif current_severity == incumbent_severity \
+                and incumbent_aggregate and not current_aggregate:
+            pending_by_source[source_task_id] = task
+
+    for task in pending_by_source.values():
+        evt = panel_log.append(
+            kind="task_health_alert",
+            cell_id="",
+            agent_name=task.task[:80],
+            group=task.group,
+            message=_task_health_alert_message(task),
+            task_id=task.id,
+        )
+        state._emit("event_append", **evt)
+        if notifier:
+            notifier.on_task_health_alert(task.id, task.health_state)
+
+
+def _task_health_alert_message(task) -> str:
+    details = task.health_details if isinstance(task.health_details, dict) else {}
+    state_name = getattr(task, "health_state", "healthy") or "healthy"
+    if state_name == "idle-risk":
+        prefix = "idle risk"
+    else:
+        prefix = state_name
+
+    parts = [prefix]
+    silence_secs = details.get("silence_secs")
+    if isinstance(silence_secs, int) and silence_secs > 0:
+        parts.append(f"no progress for {_format_duration(silence_secs)}")
+    elif "message_churn" in (details.get("reasons") or []):
+        parts.append("recent progress/block churn")
+
+    if details.get("aggregate") and details.get("source_task_title"):
+        parts.append(f"via {details['source_task_title'][:40]}")
+
+    return ": ".join([parts[0], ", ".join(parts[1:])]) if len(parts) > 1 else parts[0]
+
+
+def _format_duration(seconds: int) -> str:
+    minutes = max(1, seconds // 60)
+    if minutes < 60:
+        return f"{minutes}m"
+    hours = minutes // 60
+    rem_minutes = minutes % 60
+    if rem_minutes:
+        return f"{hours}h {rem_minutes}m"
+    return f"{hours}h"

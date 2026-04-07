@@ -18,7 +18,7 @@ class NotificationManager:
 
     def __init__(self, state):
         self._state = state
-        self._pending: list[dict] = []  # {group, cell_name, kind}
+        self._pending: list[dict] = []  # {group, cell_name, kind, noun}
         self._timer: asyncio.TimerHandle | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -50,6 +50,7 @@ class NotificationManager:
             "group": cell.group,
             "cell_name": cell.name,
             "kind": kind,
+            "noun": "agents",
         })
         self._schedule_flush()
 
@@ -67,6 +68,29 @@ class NotificationManager:
             "group": cell.group,
             "cell_name": cell.name,
             "kind": "needs attention",
+            "noun": "agents",
+        })
+        self._schedule_flush()
+
+    def on_task_health_alert(self, task_id: str, health_state: str):
+        """Queue a task-health notification when a task becomes risky."""
+        task = self._state.board_tasks.get(task_id)
+        if not task:
+            return
+
+        gs = self._state.get_group_settings(task.group)
+        if not gs.notifications or not gs.notify_on_attention:
+            return
+
+        kind = _health_notification_kind(health_state)
+        if not kind:
+            return
+
+        self._pending.append({
+            "group": task.group,
+            "cell_name": _task_subject(task.task),
+            "kind": kind,
+            "noun": "tasks",
         })
         self._schedule_flush()
 
@@ -105,20 +129,38 @@ def _build_body(items: list[dict]) -> str:
         return f"{item['cell_name']} {item['kind']}"
 
     # Summarize by kind
-    by_kind: dict[str, int] = {}
+    by_kind: dict[tuple[str, str], int] = {}
     for item in items:
-        by_kind[item["kind"]] = by_kind.get(item["kind"], 0) + 1
+        key = (item["kind"], item.get("noun", "agents"))
+        by_kind[key] = by_kind.get(key, 0) + 1
 
     parts = []
-    for kind, count in by_kind.items():
+    for (kind, noun), count in by_kind.items():
         if count == 1:
-            # Find the single agent name for this kind
-            name = next(i["cell_name"] for i in items if i["kind"] == kind)
+            name = next(
+                i["cell_name"] for i in items
+                if i["kind"] == kind and i.get("noun", "agents") == noun
+            )
             parts.append(f"{name} {kind}")
         else:
-            parts.append(f"{count} agents {kind}")
+            parts.append(f"{count} {noun} {kind}")
 
     return ", ".join(parts)
+
+
+def _health_notification_kind(health_state: str) -> str:
+    if health_state == "idle-risk":
+        return "at risk"
+    if health_state in ("stalled", "thrashing"):
+        return health_state
+    return ""
+
+
+def _task_subject(title: str) -> str:
+    title = (title or "").strip()
+    if len(title) > 40:
+        title = title[:37].rstrip() + "..."
+    return f'Task "{title or "untitled"}"'
 
 
 async def _send_notification(title: str, body: str):

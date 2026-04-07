@@ -12,6 +12,8 @@ import json
 import logging
 from dataclasses import asdict
 
+from .task_health import HEALTH_SEVERITY
+
 log = logging.getLogger("loom")
 
 # ---------------------------------------------------------------------------
@@ -119,7 +121,8 @@ WEAVER_TOOLS = [
         "description": (
             "Return a compact board overview for the weaver's group. "
             "Includes lane counts, active agent status, pending asks, "
-            "and key label counts without embedding full task lists."
+            "task-health rollups, and key label counts without embedding "
+            "full task lists."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -127,9 +130,10 @@ WEAVER_TOOLS = [
         "name": "weaver_board_list",
         "description": (
             "List all tasks on the board grouped by lane. "
-            "Supports optional filters by lane, label, group, or "
+            "Supports optional filters by lane, label, task health, or "
             "text search. Returns a summary of each task including "
-            "title, slug, lane, labels, action, and assigned agent."
+            "title, slug, lane, labels, action, assigned agent, and "
+            "health."
         ),
         "inputSchema": {
             "type": "object",
@@ -142,9 +146,12 @@ WEAVER_TOOLS = [
                     "type": "string",
                     "description": "Filter to tasks with this label.",
                 },
-                "group": {
+                "health": {
                     "type": "string",
-                    "description": "Filter to tasks in this group.",
+                    "description": (
+                        "Filter to a health state such as blocked, "
+                        "idle-risk, stalled, or thrashing."
+                    ),
                 },
                 "search": {
                     "type": "string",
@@ -984,8 +991,11 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
         pending_asks.sort(key=lambda item: (item["title"].lower(), item["id"]))
         unhealthy.sort(
-            key=lambda item: (item["health_state"], item["health_since"], item["title"]),
-            reverse=True,
+            key=lambda item: (
+                -HEALTH_SEVERITY.get(item["health_state"], 0),
+                item["health_since"] or "",
+                item["title"].lower(),
+            ),
         )
 
         summary = {
@@ -1017,6 +1027,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
     if name == "weaver_board_list":
         lane_filter = args.get("lane", "")
         label_filter = args.get("label", "")
+        health_filter = args.get("health", "")
         search = args.get("search", "").lower()
 
         lanes = {}
@@ -1027,6 +1038,9 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             if lane_filter and t.lane != lane_filter:
                 continue
             if label_filter and label_filter not in (t.labels or []):
+                continue
+            health_state = getattr(t, "health_state", "healthy") or "healthy"
+            if health_filter and health_state != health_filter:
                 continue
             if search and search not in t.task.lower() \
                     and search not in (t.description or "").lower():
@@ -1046,7 +1060,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "action": t.action_name,
                 "agent": agent_name,
                 "status": t.status,
-                "health_state": getattr(t, "health_state", "healthy"),
+                "health_state": health_state,
                 "health_since": getattr(t, "health_since", ""),
                 "parent_task_id": t.parent_task_id,
             })

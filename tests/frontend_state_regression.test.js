@@ -237,6 +237,16 @@ function createEventsHarness() {
   return { context, document };
 }
 
+function createWeaverHarness() {
+  const { sandbox, document } = createSandbox({
+    _cachedProviders: [],
+    _esc(value) { return String(value); },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/weaver.js');
+  return { context, document };
+}
+
 function createModalHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -299,6 +309,19 @@ test('board visible tasks combine group, search, label, action, and agent filter
       lane: 'Backlog',
       position: 0,
     },
+    'task-5': {
+      id: 'task-5',
+      group: 'alpha',
+      task: 'Deploy fix',
+      description: 'Looks healthy',
+      slug: 'deploy-fix-healthy',
+      labels: ['bug'],
+      action_name: 'triage',
+      agent_id: 'agent-1',
+      lane: 'Backlog',
+      position: 4,
+      health_state: 'healthy',
+    },
   };
 
   runInContext(context, `
@@ -306,9 +329,51 @@ test('board visible tasks combine group, search, label, action, and agent filter
     _boardFilterLabels = ['bug'];
     _boardFilterActions = ['triage'];
     _boardFilterAgents = ['agent-1'];
+    _boardFilterHealth = ['stalled'];
+    state.board_tasks['task-1'].health_state = 'stalled';
   `);
 
   assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks()).sort()'), ['task-1']);
+});
+
+test('weaver task health summary prioritizes severe unhealthy tasks', () => {
+  const { context } = createWeaverHarness();
+  context.state.board_tasks = {
+    healthy: {
+      id: 'healthy',
+      group: 'alpha',
+      task: 'Healthy task',
+      lane: 'Backlog',
+      health_state: 'healthy',
+    },
+    stalled: {
+      id: 'stalled',
+      group: 'alpha',
+      task: 'Stalled task',
+      lane: 'In Progress',
+      health_state: 'stalled',
+      health_since: '2026-04-06T00:21:00+00:00',
+    },
+    blocked: {
+      id: 'blocked',
+      group: 'alpha',
+      task: 'Blocked task',
+      lane: 'In Progress',
+      health_state: 'blocked',
+      health_since: '2026-04-06T00:20:00+00:00',
+    },
+  };
+
+  const summary = jsonValue(context, `_weaverTaskHealthSummary('alpha')`);
+
+  assert.equal(summary.total, 2);
+  assert.deepEqual(summary.counts, {
+    blocked: 1,
+    stalled: 1,
+    thrashing: 0,
+    'idle-risk': 0,
+  });
+  assert.deepEqual(summary.items.map((item) => item.id), ['blocked', 'stalled']);
 });
 
 test('board lane counts ignore subordinate tasks in the same lane', () => {
