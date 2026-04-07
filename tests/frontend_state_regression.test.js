@@ -1784,11 +1784,13 @@ test('_boardTaskDependencyBadges exposes blocked and blocking counts compactly',
         className: 'board-card-dependency board-card-dependency-blocked',
         label: 'Blocked by 1',
         title: 'Waiting on: API contract',
+        targetTaskId: 'depA',
       },
       {
         className: 'board-card-dependency board-card-dependency-blocking',
         label: 'Blocks 2',
         title: 'Blocking: Rollout docs, Release notes',
+        targetTaskId: 'blocked1',
       },
     ]),
   );
@@ -1823,9 +1825,52 @@ test('_renderBoardCard shows inline dependency badges instead of the old generic
 
   assert.match(html, /board-card-dependency-blocked/);
   assert.match(html, />Blocked by 1</);
+  assert.match(html, /board-card-badge-jump/);
+  assert.match(html, /boardJumpToTask\('dep'\)/);
   assert.match(html, /board-card-dependency-blocking/);
   assert.match(html, />Blocks 1</);
+  assert.match(html, /boardJumpToTask\('blocked'\)/);
   assert.doesNotMatch(html, /&#x1F512; deps/);
+});
+
+test('boardCardMenu exposes jump actions for blockers and dependents', () => {
+  const { sandbox, document } = createSandbox();
+  sandbox.window.innerWidth = 1200;
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+
+  context.state.board_lanes = ['Backlog', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    depA: { id: 'depA', task: 'API contract', lane: 'To Do', group: 'alpha' },
+    depB: { id: 'depB', task: 'Schema migration', lane: 'Done', group: 'alpha' },
+    blocked1: {
+      id: 'blocked1',
+      task: 'Rollout docs',
+      lane: 'Backlog',
+      group: 'alpha',
+      depends_on: ['task-1'],
+    },
+    'task-1': {
+      id: 'task-1',
+      task: 'Ship release',
+      lane: 'Backlog',
+      group: 'alpha',
+      depends_on: ['depA', 'depB'],
+    },
+  };
+
+  const menu = document.register('ctx-menu');
+  context.boardCardMenu({
+    preventDefault() {},
+    clientX: 64,
+    clientY: 32,
+  }, 'task-1');
+
+  assert.equal(menu.classList.contains('open'), true);
+  assert.match(menu.innerHTML, /Jump to blocker: API contract/);
+  assert.match(menu.innerHTML, /boardJumpToTask\('depA'\)/);
+  assert.match(menu.innerHTML, /Jump to dependent: Rollout docs/);
+  assert.match(menu.innerHTML, /boardJumpToTask\('blocked1'\)/);
 });
 
 test('renderBoardCard shows verification badges and preview text', () => {

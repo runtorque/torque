@@ -3096,6 +3096,14 @@ body.diff-view-open #ctx-menu {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
+.board-card-badge-jump {
+  cursor: pointer;
+  transition: transform .1s ease, filter .1s ease;
+}
+.board-card-badge-jump:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
 .deps-dropdown {
   position: absolute; left: 0; right: 0; z-index: 20;
   background: var(--bg-surface);

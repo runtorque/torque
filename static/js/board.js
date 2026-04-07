@@ -1426,34 +1426,66 @@ function _boardDepsBlocked(t) {
   return false;
 }
 
+function _boardSortTaskRefs(tasks) {
+  return tasks.slice().sort(function(a, b) {
+    var laneCmp = String(a.lane || '').localeCompare(String(b.lane || ''));
+    if (laneCmp) return laneCmp;
+    var posCmp = (a.position || 0) - (b.position || 0);
+    if (posCmp) return posCmp;
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
+}
+
+function _boardUnmetDependencyTasks(task) {
+  if (!task || !Array.isArray(task.depends_on)) return [];
+  var tasks = _boardTasks();
+  var unmet = [];
+  for (var i = 0; i < task.depends_on.length; i++) {
+    var dep = tasks[task.depends_on[i]];
+    if (dep && dep.lane !== 'Done') unmet.push(dep);
+  }
+  return _boardSortTaskRefs(unmet);
+}
+
 function _boardActiveDependentNames(task) {
+  var dependents = _boardActiveDependents(task);
+  var names = [];
+  for (var i = 0; i < dependents.length; i++) {
+    names.push(dependents[i].task || dependents[i].id);
+  }
+  return names;
+}
+
+function _boardActiveDependents(task) {
   if (!task || !task.id || task.lane === 'Done') return [];
   var tasks = _boardTasks();
-  var names = [];
+  var dependents = [];
   for (var id in tasks) {
     var candidate = tasks[id];
     if (!candidate || candidate.lane === 'Done') continue;
     if (Array.isArray(candidate.depends_on)
         && candidate.depends_on.indexOf(task.id) >= 0) {
-      names.push(candidate.task || candidate.id);
+      dependents.push(candidate);
     }
   }
-  return names;
+  return _boardSortTaskRefs(dependents);
 }
 
 function _boardTaskDependencyBadges(task) {
   if (!task) return [];
   var badges = [];
   var deps = Array.isArray(task.depends_on) ? task.depends_on : [];
+  var unmetDepTasks = _boardUnmetDependencyTasks(task);
   var unmetDeps = _boardUnmetDependencyNames(task);
   if (deps.length) {
-    if (unmetDeps.length) {
+    if (unmetDepTasks.length) {
       var unmetPreview = unmetDeps.slice(0, 2).join(', ');
       if (unmetDeps.length > 2) unmetPreview += ', +' + (unmetDeps.length - 2);
       badges.push({
         className: 'board-card-dependency board-card-dependency-blocked',
         label: 'Blocked by ' + unmetDeps.length,
         title: 'Waiting on: ' + unmetPreview,
+        targetTaskId: unmetDepTasks[0].id,
       });
     } else {
       badges.push({
@@ -1469,10 +1501,12 @@ function _boardTaskDependencyBadges(task) {
     if (activeDependents.length > 2) {
       blockingPreview += ', +' + (activeDependents.length - 2);
     }
+    var activeDependentTasks = _boardActiveDependents(task);
     badges.push({
       className: 'board-card-dependency board-card-dependency-blocking',
       label: 'Blocks ' + activeDependents.length,
       title: 'Blocking: ' + blockingPreview,
+      targetTaskId: activeDependentTasks[0].id,
     });
   }
   return badges;
@@ -1724,8 +1758,15 @@ function _renderBoardCard(t, childrenOf, depth) {
   var dependencyBadges = _boardTaskDependencyBadges(t);
   for (var dbi = 0; dbi < dependencyBadges.length; dbi++) {
     var depBadge = dependencyBadges[dbi];
-    meta += '<span class="board-card-label ' + esc(depBadge.className)
-      + '" title="' + esc(depBadge.title) + '">' + esc(depBadge.label) + '</span>';
+    var depClassName = depBadge.className;
+    var depAttrs = '';
+    if (depBadge.targetTaskId) {
+      depClassName += ' board-card-badge-jump';
+      depAttrs = ' onclick="event.stopPropagation();boardJumpToTask(\''
+        + esc(depBadge.targetTaskId).replace(/'/g, "\\'") + '\')"';
+    }
+    meta += '<span class="board-card-label ' + esc(depClassName) + '"'
+      + depAttrs + ' title="' + esc(depBadge.title) + '">' + esc(depBadge.label) + '</span>';
   }
   var scheduleMeta = _boardTaskScheduleMeta(t);
   if (scheduleMeta) {
@@ -2797,6 +2838,26 @@ function boardCardMenu(evt, taskId) {
   html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
   html += '<button onclick="openTaskArtifactBrowser(\'' + taskId + '\')">Artifacts...</button>';
 
+  var blockers = _boardUnmetDependencyTasks(task);
+  var dependents = _boardActiveDependents(task);
+  if (blockers.length || dependents.length) {
+    html += '<div class="ctx-sep"></div>';
+    for (var bi = 0; bi < Math.min(blockers.length, 5); bi++) {
+      html += '<button onclick="event.stopPropagation();boardJumpToTask(\'' + blockers[bi].id + '\')">'
+        + 'Jump to blocker: ' + esc(blockers[bi].task || blockers[bi].id) + '</button>';
+    }
+    if (blockers.length > 5) {
+      html += '<button disabled>+' + (blockers.length - 5) + ' more blockers</button>';
+    }
+    for (var di = 0; di < Math.min(dependents.length, 5); di++) {
+      html += '<button onclick="event.stopPropagation();boardJumpToTask(\'' + dependents[di].id + '\')">'
+        + 'Jump to dependent: ' + esc(dependents[di].task || dependents[di].id) + '</button>';
+    }
+    if (dependents.length > 5) {
+      html += '<button disabled>+' + (dependents.length - 5) + ' more dependents</button>';
+    }
+  }
+
   html += '<div class="ctx-sep"></div>';
   if (task.provider || task.external_id || task.external_url) {
     html += '<button onclick="event.stopPropagation();boardOpenExternal(\'' + taskId + '\')">Open external issue</button>';
@@ -2841,6 +2902,11 @@ function boardCardMenu(evt, taskId) {
 
 function boardCopyTaskId(taskId) {
   navigator.clipboard.writeText(taskId).then(function() { _closeCtxMenu(); });
+}
+
+function boardJumpToTask(taskId) {
+  _closeCtxMenu();
+  boardNavigateToTask(taskId);
 }
 
 /* ---- Card actions --------------------------------------------------- */
