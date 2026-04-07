@@ -1909,6 +1909,55 @@ test('renderBoardCard shows verification badges and preview text', () => {
   assert.match(html, /Needs human validation: Confirm billing dashboard loads/);
 });
 
+test('renderBoardCard shows branch boundary review notes', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/board.js');
+
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      group: 'alpha',
+      task: 'Stable review point',
+      lane: 'Done',
+      position: 1,
+      worktree_boundary: {
+        repo_root: '/repo',
+        branch: 'loom/worker',
+        status: 'open',
+        recorded_at: '2026-04-07T10:00:00+00:00',
+      },
+    },
+    queued: {
+      id: 'queued',
+      group: 'alpha',
+      task: 'Queued polish',
+      lane: 'To Do',
+      position: 2,
+      resume_after_boundary_task_id: 'boundary',
+    },
+  };
+
+  const boundaryHtml = runInContext(context, `
+    _renderBoardCard(
+      state.board_tasks.boundary,
+      {},
+      0
+    )
+  `);
+  const queuedHtml = runInContext(context, `
+    _renderBoardCard(
+      state.board_tasks.queued,
+      {},
+      0
+    )
+  `);
+
+  assert.match(boundaryHtml, /Safe review point/);
+  assert.match(queuedHtml, /Queued after .*Stable review point/);
+});
+
 test('renderBoardCard does not render overlap badges or preview text', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -1943,6 +1992,67 @@ test('renderBoardCard does not render overlap badges or preview text', () => {
   assert.doesNotMatch(html, /Shares the same worktree branch as another active agent/);
 });
 
+test('renderAgentDetails shows branch boundary status and queued follow-ups', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+
+  context.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      worktree_path: '/repo/.loom/worktrees/worker',
+      worktree_repo_root: '/repo',
+      worktree_branch: 'loom/worker',
+      mcp_messages: [],
+    },
+  };
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      group: 'alpha',
+      task: 'Stable review point',
+      lane: 'Done',
+      agent_id: 'agent-1',
+      worktree_boundary: {
+        repo_root: '/repo',
+        branch: 'loom/worker',
+        status: 'open',
+        recorded_at: '2026-04-07T10:00:00+00:00',
+      },
+    },
+    current: {
+      id: 'current',
+      group: 'alpha',
+      task: 'Implement follow-up',
+      lane: 'In Progress',
+      agent_id: 'agent-1',
+      resume_after_boundary_task_id: 'boundary',
+    },
+    queued: {
+      id: 'queued',
+      group: 'alpha',
+      task: 'Queue release notes',
+      lane: 'To Do',
+      agent_id: 'agent-1',
+      resume_after_boundary_task_id: 'boundary',
+    },
+  };
+
+  const html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+
+  assert.match(html, /Review point/);
+  assert.match(html, /Stable review point/);
+  assert.match(html, /Branch advanced/);
+  assert.match(html, /Queued next/);
+  assert.match(html, /Queue release notes/);
+  assert.match(html, /Beyond boundary/);
+  assert.match(html, /Implement follow-up/);
+});
+
 test('backlog dispatch note ignores overlap warnings for ready work', () => {
   const { context } = createBoardHarness();
   context.state.board_tasks = {
@@ -1965,6 +2075,138 @@ test('backlog dispatch note ignores overlap warnings for ready work', () => {
   const note = runInContext(context, `_boardBacklogDispatchNote([state.board_tasks.ready])`);
 
   assert.equal(note, null);
+});
+
+test('board recommendation prefers the best ready task and skips queued or busy work', () => {
+  const { context } = createBoardHarness();
+  context.state.agents = {
+    'agent-busy': {
+      id: 'agent-busy',
+      name: 'Worker One',
+      current_task_id: 'task-active',
+    },
+    'agent-idle': {
+      id: 'agent-idle',
+      name: 'Worker Two',
+      current_task_id: '',
+    },
+  };
+  context.state.auto_dispatch_queues = {
+    alpha: [{ task_id: 'task-queued' }],
+  };
+  context.state.board_tasks = {
+    'task-active': {
+      id: 'task-active',
+      group: 'alpha',
+      task: 'Active implementation',
+      lane: 'In Progress',
+      agent_id: 'agent-busy',
+      position: 0,
+    },
+    'task-busy': {
+      id: 'task-busy',
+      group: 'alpha',
+      task: 'Busy follow-up',
+      lane: 'To Do',
+      agent_id: 'agent-busy',
+      labels: ['priority:high'],
+      position: 1,
+    },
+    'task-queued': {
+      id: 'task-queued',
+      group: 'alpha',
+      task: 'Queued separately',
+      lane: 'To Do',
+      labels: ['priority:high'],
+      position: 2,
+    },
+    boundary: {
+      id: 'boundary',
+      group: 'alpha',
+      task: 'Stable boundary',
+      lane: 'Done',
+      position: 3,
+    },
+    recommended: {
+      id: 'recommended',
+      group: 'alpha',
+      task: 'Release notes follow-up',
+      lane: 'To Do',
+      agent_id: 'agent-idle',
+      labels: ['priority:medium'],
+      resume_after_boundary_task_id: 'boundary',
+      position: 4,
+    },
+    backlog: {
+      id: 'backlog',
+      group: 'alpha',
+      task: 'Refactor auth',
+      lane: 'Backlog',
+      labels: ['priority:high'],
+      position: 0,
+    },
+  };
+
+  const recommendation = jsonValue(context, `_boardRecommendedDispatch()`);
+
+  assert.equal(recommendation.task.id, 'recommended');
+  assert.match(recommendation.reason_summary, /Already staged in To Do/);
+  assert.match(recommendation.reason_summary, /Continues after "Stable boundary"/);
+  assert.match(recommendation.reason_summary, /Already linked to Worker Two/);
+  assert.match(recommendation.reason_summary, /Priority: Medium/);
+});
+
+test('renderBoard surfaces the recommended dispatch banner with inspectable reasoning', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.agents = {
+    'agent-idle': {
+      id: 'agent-idle',
+      name: 'Worker Two',
+      current_task_id: '',
+    },
+  };
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      group: 'alpha',
+      task: 'Stable boundary',
+      lane: 'Done',
+      position: 2,
+    },
+    recommended: {
+      id: 'recommended',
+      group: 'alpha',
+      task: 'Release notes follow-up',
+      lane: 'To Do',
+      agent_id: 'agent-idle',
+      labels: ['priority:medium'],
+      resume_after_boundary_task_id: 'boundary',
+      position: 1,
+    },
+    other: {
+      id: 'other',
+      group: 'alpha',
+      task: 'Refactor auth',
+      lane: 'Backlog',
+      labels: ['priority:high'],
+      position: 0,
+    },
+  };
+
+  runInContext(context, `_boardSelectedLane = 'To Do';`);
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /Recommended next dispatch: Release notes follow-up/);
+  assert.match(panel.innerHTML, /Already staged in To Do/);
+  assert.match(panel.innerHTML, /Continues after &quot;Stable boundary&quot;/);
+  assert.match(panel.innerHTML, /Already linked to Worker Two/);
+  assert.match(panel.innerHTML, /Priority: Medium/);
+  assert.match(panel.innerHTML, /Show Task/);
+  assert.match(panel.innerHTML, /Dispatch\.\.\./);
 });
 
 test('renderBoard explains filtered empty states with a clear recovery action', () => {
@@ -2838,6 +3080,75 @@ test('renderWeaverPanel preserves focused reply draft across rerenders', () => {
   assert.equal(input.value, 'Proceed with merge');
   assert.equal(input.selectionStart, 8);
   assert.equal(input.selectionEnd, 13);
+});
+
+test('renderWeaverPanel shows branch review-point summary', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-weaver');
+
+  context.state.agents = {
+    'weaver-1': {
+      id: 'weaver-1',
+      name: 'Weaver',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+    },
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      worktree_path: '/repo/.loom/worktrees/worker',
+      worktree_repo_root: '/repo',
+      worktree_branch: 'loom/worker',
+    },
+  };
+  context.state.group_settings = {
+    alpha: {
+      weaver_agent_id: 'weaver-1',
+    },
+  };
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      group: 'alpha',
+      task: 'Stable review point',
+      lane: 'Done',
+      agent_id: 'agent-1',
+      worktree_boundary: {
+        repo_root: '/repo',
+        branch: 'loom/worker',
+        status: 'open',
+        recorded_at: '2026-04-07T10:00:00+00:00',
+      },
+    },
+    current: {
+      id: 'current',
+      group: 'alpha',
+      task: 'Implement follow-up',
+      lane: 'In Progress',
+      agent_id: 'agent-1',
+      resume_after_boundary_task_id: 'boundary',
+    },
+    queued: {
+      id: 'queued',
+      group: 'alpha',
+      task: 'Queue release notes',
+      lane: 'To Do',
+      agent_id: 'agent-1',
+      resume_after_boundary_task_id: 'boundary',
+    },
+  };
+
+  context.renderWeaverPanel();
+
+  assert.match(panel.innerHTML, /Branch review points/);
+  assert.match(panel.innerHTML, /Stable review point/);
+  assert.match(panel.innerHTML, /Branch advanced/);
+  assert.match(panel.innerHTML, /Current: Implement follow-up/);
+  assert.match(panel.innerHTML, /Queued next: Queue release notes/);
 });
 
 test('task deltas do not rerender the templates panel when it is active', () => {

@@ -534,6 +534,10 @@ Dispatch a task to an agent. Creates a new agent by default, or dispatches to an
 }
 ```
 
+##### `weaver_batch_dispatch`
+
+Dispatch an ordered wave of tasks with a concurrency cap. Entries that cannot start immediately are kept in a persistent auto-dispatch queue, so Loom can continue launching the next eligible task as worker slots open, even after restart. When entries share an `agent_group`, the first dispatch binds that group to one agent and later queued entries follow that same worker in order.
+
 ##### `weaver_task_resolve` (keep)
 
 Resolve an ask task by providing an answer. The answer is sent to the parent task's agent and the ask task moves to Done.

@@ -11,8 +11,15 @@ Tools are served from the same ``/mcp`` endpoint as agent tools — the
 import json
 import logging
 from dataclasses import asdict
+from datetime import datetime, timezone
 
 from .task_health import HEALTH_SEVERITY
+from .worktree_boundaries import (
+    latest_boundary_task,
+    queued_successor_tasks,
+    started_successor_tasks,
+    task_boundary,
+)
 
 log = logging.getLogger("loom")
 
@@ -78,11 +85,7 @@ def _is_busy_agent(state, agent_id: str) -> bool:
     cell = state.agents.get(agent_id)
     if not cell or cell.cell_type != "agent":
         return False
-    if cell.current_task_id:
-        task = state.board_tasks.get(cell.current_task_id)
-        if task and task.lane != "Done":
-            return True
-    return False
+    return state.agent_is_busy(agent_id)
 
 
 def _active_worker_ids(state, group: str) -> set[str]:
@@ -150,6 +153,175 @@ async def _run_worktree_merge_check(handle_command, agent_id: str):
     if not result.get("clean", True) and result.get("error"):
         return result, result.get("error", "Merge blocked"), True
     return result, "", False
+
+
+def _worktree_boundary_overview(state, *, repo_root: str, branch: str):
+    if not repo_root or not branch:
+        return None
+    latest = latest_boundary_task(
+        state.board_tasks.values(),
+        repo_root=repo_root,
+        branch=branch,
+        statuses={"open"},
+    )
+    if not latest:
+        return None
+    queued = queued_successor_tasks(state.board_tasks.values(), latest.id)
+    started = started_successor_tasks(state.board_tasks.values(), latest.id)
+    boundary = task_boundary(latest)
+    return {
+        "repo_root": repo_root,
+        "branch": branch,
+        "latest_boundary_task_id": latest.id,
+        "latest_boundary_task": latest.task,
+        "latest_boundary_status": boundary.get("status", "") or "",
+        "latest_boundary_recorded_at": boundary.get("recorded_at", "") or "",
+        "latest_boundary_commit_sha": boundary.get("commit_sha", "") or "",
+        "queued_followups": [
+            {"id": task.id, "title": task.task, "lane": task.lane}
+            for task in queued
+        ],
+        "started_followups": [
+            {"id": task.id, "title": task.task, "lane": task.lane}
+            for task in started
+        ],
+        "queued_count": len(queued),
+        "started_count": len(started),
+        "branch_advanced": bool(started),
+        "partial_review_safe": not started,
+    }
+
+
+def _task_priority(task) -> str:
+    for label in getattr(task, "labels", []) or []:
+        if label in {"priority:high", "priority:medium", "priority:low"}:
+            return label.split(":", 1)[1]
+    return ""
+
+
+def _task_is_future_scheduled(task, *, now_iso: str) -> bool:
+    scheduled_at = getattr(task, "scheduled_at", "") or ""
+    return bool(scheduled_at and scheduled_at > now_iso)
+
+
+def _task_has_busy_assigned_agent(state, task) -> bool:
+    agent_id = getattr(task, "agent_id", "") or ""
+    if not agent_id:
+        return False
+    cell = state.agents.get(agent_id)
+    if cell and cell.current_task_id and cell.current_task_id != task.id:
+        linked = state.board_tasks.get(cell.current_task_id)
+        if not linked or linked.lane != "Done":
+            return True
+    current = state.agent_current_task(agent_id)
+    return bool(current and current.id != task.id)
+
+
+def _dispatch_recommendation_for_group(state, group: str):
+    if not group:
+        return None
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    candidates = []
+    priority_weights = {"high": 60, "medium": 40, "low": 20}
+
+    for task in state.board_tasks.values():
+        if task.group != group:
+            continue
+        if task.lane not in {"Backlog", "To Do"}:
+            continue
+
+        labels = set(task.labels or [])
+        if "loom:archived" in labels:
+            continue
+        if "loom:blocked" in labels or "loom:human" in labels:
+            continue
+        if not state.board_deps_met(task):
+            continue
+        if _task_is_future_scheduled(task, now_iso=now_iso):
+            continue
+        if state.auto_dispatch_queue_contains(task.id):
+            continue
+        if _task_has_busy_assigned_agent(state, task):
+            continue
+
+        score = 0
+        reasons = []
+        score_breakdown = []
+
+        def _add_reason(weight: int, label: str) -> None:
+            nonlocal score
+            score += weight
+            reasons.append(label)
+            score_breakdown.append({"weight": weight, "label": label})
+
+        if task.lane == "To Do":
+            _add_reason(300, "Already staged in To Do")
+        else:
+            _add_reason(200, "Ready from Backlog")
+
+        boundary_task = None
+        if task.resume_after_boundary_task_id:
+            boundary_task = state.board_tasks.get(
+                task.resume_after_boundary_task_id
+            )
+            if boundary_task:
+                _add_reason(
+                    120,
+                    f'Continues after "{boundary_task.task}"',
+                )
+
+        agent_name = ""
+        if task.agent_id:
+            cell = state.agents.get(task.agent_id)
+            if cell:
+                agent_name = cell.name or cell.slug or cell.id
+                _add_reason(80, f"Already linked to {agent_name}")
+
+        priority = _task_priority(task)
+        if priority:
+            _add_reason(
+                priority_weights.get(priority, 0),
+                f"Priority: {priority.title()}",
+            )
+
+        candidates.append({
+            "task_id": task.id,
+            "task_title": task.task,
+            "lane": task.lane,
+            "score": score,
+            "reason_summary": "; ".join(reasons),
+            "reasons": reasons,
+            "score_breakdown": score_breakdown,
+            "agent_id": task.agent_id or "",
+            "agent_name": agent_name,
+            "dispatch_mode": (
+                "existing_agent"
+                if task.agent_id and task.agent_id in state.agents
+                else "new_agent"
+            ),
+            "resume_after_boundary_task_id": (
+                task.resume_after_boundary_task_id or ""
+            ),
+            "resume_after_boundary_task": (
+                boundary_task.task if boundary_task else ""
+            ),
+            "_sort": (
+                -score,
+                task.position if isinstance(task.position, int) else 0,
+                task.created_at or "",
+                task.task.lower(),
+                task.id,
+            ),
+        })
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: item["_sort"])
+    best = candidates[0]
+    best.pop("_sort", None)
+    return best
 
 
 # ---------------------------------------------------------------------------
@@ -544,6 +716,8 @@ WEAVER_TOOLS = [
         "description": (
             "Dispatch a planned batch of tasks with an explicit "
             "concurrency cap. Tasks are processed in request order. "
+            "When capacity is full, remaining tasks are queued "
+            "persistently and auto-dispatched later as slots open. "
             "Tasks that share an agent_group are routed to the same "
             "agent so later tasks can queue behind earlier ones."
         ),
@@ -556,7 +730,8 @@ WEAVER_TOOLS = [
                         "Ordered task entries. Each item must include "
                         "a task slug or ID and may include an "
                         "agent_group string to keep related tasks on "
-                        "the same agent."
+                        "the same agent. Deferred entries keep their "
+                        "order across restart."
                     ),
                     "items": {
                         "type": "object",
@@ -1176,6 +1351,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         active_agents = []
         total_agents = 0
         needs_attention = 0
+        boundary_items = []
+        seen_branch_keys = set()
 
         agents = [
             c for c in state.agents.values()
@@ -1191,21 +1368,34 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 needs_attention += 1
             status = cell.status or "stopped"
             agent_status_counts[status] = agent_status_counts.get(status, 0) + 1
+            current_task = state.agent_current_task(cell.id)
+            repo_root = cell.worktree_repo_root or cell.git_root or ""
+            branch = cell.worktree_branch or ""
+            boundary_key = repo_root + "::" + branch if repo_root and branch else ""
+            if boundary_key and boundary_key not in seen_branch_keys:
+                overview = _worktree_boundary_overview(
+                    state,
+                    repo_root=repo_root,
+                    branch=branch,
+                )
+                if overview:
+                    overview["agent_id"] = cell.id
+                    overview["agent_name"] = cell.name
+                    overview["agent_slug"] = cell.slug
+                    overview["current_task_id"] = current_task.id if current_task else ""
+                    overview["current_task"] = current_task.task if current_task else ""
+                    boundary_items.append(overview)
+                    seen_branch_keys.add(boundary_key)
             if status == "stopped":
                 continue
-            task_title = ""
-            if cell.current_task_id:
-                task = state.board_tasks.get(cell.current_task_id)
-                if task:
-                    task_title = task.task
             active_agents.append({
                 "id": cell.id,
                 "name": cell.name,
                 "slug": cell.slug,
                 "type": cell.agent_type,
                 "status": status,
-                "current_task_id": cell.current_task_id,
-                "current_task": task_title,
+                "current_task_id": current_task.id if current_task else "",
+                "current_task": current_task.task if current_task else "",
                 "needs_attention": cell.needs_attention,
             })
 
@@ -1221,6 +1411,13 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             key=lambda item: (
                 0 if item["verification_state"] == "failed" else 1,
                 item["title"].lower(),
+            ),
+        )
+        boundary_items.sort(
+            key=lambda item: (
+                0 if item["partial_review_safe"] else 1,
+                item.get("branch", ""),
+                item.get("latest_boundary_recorded_at", ""),
             ),
         )
 
@@ -1252,6 +1449,15 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "active": active_agents[:10],
                 "truncated": len(active_agents) > 10,
             },
+            "branch_boundaries": {
+                "count": len(boundary_items),
+                "items": boundary_items[:10],
+                "truncated": len(boundary_items) > 10,
+            },
+            "recommended_dispatch": _dispatch_recommendation_for_group(
+                state,
+                _weaver_group,
+            ),
         }
         return json.dumps(summary), False
 
@@ -1399,19 +1605,15 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 continue
             if c.group != _weaver_group:
                 continue
-            task_title = ""
-            if c.current_task_id:
-                t = state.board_tasks.get(c.current_task_id)
-                if t:
-                    task_title = t.task
+            current_task = state.agent_current_task(c.id)
             agents.append({
                 "id": c.id,
                 "name": c.name,
                 "slug": c.slug,
                 "status": c.status,
                 "group": c.group,
-                "current_task_id": c.current_task_id,
-                "current_task": task_title,
+                "current_task_id": current_task.id if current_task else "",
+                "current_task": current_task.task if current_task else "",
                 "activity": c.activity,
                 "activity_detail": c.activity_detail,
             })
@@ -1485,6 +1687,20 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             )
             if boundary_tasks:
                 d["worktree"]["task_boundaries"] = boundary_tasks
+            overview = _worktree_boundary_overview(
+                state,
+                repo_root=repo_root,
+                branch=cell.worktree_branch or "",
+            )
+            if overview:
+                current_task = state.agent_current_task(agent_id)
+                overview["current_task_id"] = (
+                    current_task.id if current_task else ""
+                )
+                overview["current_task"] = (
+                    current_task.task if current_task else ""
+                )
+                d["worktree"]["boundary_overview"] = overview
 
         # Child terminals
         children_ids = state._children.get(agent_id, [])
@@ -1528,8 +1744,9 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             d["tasks"] = tasks
 
         # Current task (may differ from tasks list if unlinked)
-        if cell.current_task_id:
-            d["current_task_id"] = cell.current_task_id
+        current_task = state.agent_current_task(agent_id)
+        if current_task:
+            d["current_task_id"] = current_task.id
 
         return json.dumps(d), False
 
@@ -1742,6 +1959,10 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                       "Task appears more than once in this batch.", tid)
                 continue
             seen_task_ids.add(tid)
+            if state.auto_dispatch_queue_contains(tid):
+                _fail(idx, task_ident, "already_queued",
+                      "Task is already queued for auto-dispatch.", tid)
+                continue
 
             task = state.board_tasks.get(tid)
             if not task:
@@ -1784,6 +2005,14 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             if target_agent_id:
                 needs_capacity = not _is_busy_agent(state, target_agent_id)
             if needs_capacity and len(active_agents) >= max_concurrent:
+                queue_entry = state.auto_dispatch_queue_add(
+                    _weaver_group,
+                    tid,
+                    agent_group=agent_group,
+                    max_concurrent=max_concurrent,
+                    target_agent_id=target_agent_id,
+                )
+                queue = state.auto_dispatch_queues.get(_weaver_group, [])
                 item = {
                     "index": idx,
                     "task": task_ident,
@@ -1792,6 +2021,10 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                     "reason": "max_concurrent_reached",
                     "message": (
                         "Dispatch would exceed max_concurrent for the group."
+                    ),
+                    "queue_position": len(queue),
+                    "queued_at": (
+                        queue_entry.enqueued_at if queue_entry else ""
                     ),
                 }
                 if agent_group:

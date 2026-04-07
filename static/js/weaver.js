@@ -158,6 +158,7 @@ function _weaverRenderJournal(group) {
 
   html += _weaverRenderTaskHealth(group);
   html += _weaverRenderVerificationSummary(group);
+  html += _weaverRenderBoundarySummary(group);
 
   // Journal entries come from state.weaver_journal (populated by delta ops)
   var entries = (state.weaver_journal && state.weaver_journal[group]) || [];
@@ -253,6 +254,75 @@ function _weaverRenderVerificationSummary(group) {
     html += '</div>';
     if (item.detail) {
       html += '<div class="weaver-verification-item-meta">' + _esc(item.detail) + '</div>';
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderBoundarySummary(group) {
+  if (!group || !state || !state.agents) return '';
+  var items = [];
+  var seen = {};
+  for (var agentId in state.agents) {
+    var agent = state.agents[agentId];
+    if (!agent || agent.cell_type !== 'agent' || agent.group !== group) continue;
+    var settings = (state.group_settings || {})[group] || {};
+    if (settings.weaver_agent_id === agent.id) continue;
+    var overview = typeof _branchBoundaryOverviewForAgent === 'function'
+      ? _branchBoundaryOverviewForAgent(agent)
+      : null;
+    if (!overview || !overview.latest_boundary_task) continue;
+    var key = (overview.repo_root || '') + '::' + (overview.branch || '');
+    if (seen[key]) continue;
+    seen[key] = true;
+    items.push({
+      agent_name: agent.name,
+      branch: overview.branch || '',
+      current_task: overview.current_task ? overview.current_task.task : '',
+      latest_boundary_task: overview.latest_boundary_task.task || '',
+      queued_followers: overview.queued_followers || [],
+      started_followers: overview.started_followers || [],
+      partial_review_safe: !!overview.partial_review_safe,
+    });
+  }
+  items.sort(function(a, b) {
+    return (a.branch || a.agent_name || '').localeCompare(
+      b.branch || b.agent_name || ''
+    );
+  });
+  if (!items.length) return '';
+
+  var html = '<div class="weaver-health-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Branch review points</span>';
+  html += '<span class="weaver-health-total">' + items.length + ' branch'
+    + (items.length === 1 ? '' : 'es') + '</span>';
+  html += '</div>';
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var pillState = item.partial_review_safe ? 'passed' : 'failed';
+    var pillLabel = item.partial_review_safe ? 'Safe for partial review' : 'Branch advanced';
+    html += '<div class="weaver-verification-item">';
+    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(pillState) + '">'
+      + _esc(pillLabel) + '</span>';
+    html += '<span class="weaver-verification-item-title">' + _esc(item.latest_boundary_task) + '</span>';
+    if (item.branch) {
+      html += '<span class="weaver-verification-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+    }
+    html += '</div>';
+    if (item.current_task) {
+      html += '<div class="weaver-verification-item-meta">Current: ' + _esc(item.current_task) + '</div>';
+    }
+    if (item.queued_followers.length) {
+      html += '<div class="weaver-verification-item-meta">Queued next: '
+        + _esc(item.queued_followers.map(function(task) { return task.task; }).join(', '))
+        + '</div>';
+    }
+    if (item.started_followers.length) {
+      html += '<div class="weaver-verification-item-meta">Beyond boundary: '
+        + _esc(item.started_followers.map(function(task) { return task.task; }).join(', '))
+        + '</div>';
     }
   }
   html += '</div>';
