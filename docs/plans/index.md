@@ -6,6 +6,7 @@ They are not the primary user-facing docs. For day-to-day usage, start from [Get
 
 ## Archived Plan Pages
 
+- [Auto-Generated Playbooks](auto-generated-playbooks.md)
 - [Agent Awareness](agent-awareness.md)
 - [Agent Context Preservation](agent-context.md)
 - [CLI & REST API](cli.md)
