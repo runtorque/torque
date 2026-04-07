@@ -1,7 +1,7 @@
 # Implementation Plan: Auto-Generated Playbooks
 
 **Status**: Proposed research/design
-**Goal**: Learn reusable Loom workflows from successful historical task and pipeline runs, then publish them as reviewable playbook drafts that map cleanly onto existing actions, agent templates, and pipeline transitions.
+**Goal**: Learn reusable Loom workflows from successful historical task and pipeline runs, then publish them as reviewable playbook drafts that can become explicit, human-approved operational artifacts built from existing Loom actions, agent templates, and pipeline transitions.
 
 ---
 
@@ -25,6 +25,10 @@ The design therefore has to answer two questions at once:
 
 1. What counts as a playbook candidate?
 2. How do we prevent Loom from publishing false patterns?
+
+It also needs a third answer for v1 that earlier versions left too vague:
+
+3. Who actually uses a playbook, and when does it become usable?
 
 ---
 
@@ -50,11 +54,46 @@ The design therefore has to answer two questions at once:
 
    If the evidence is sparse, noisy, or contradictory, the output should be "no candidate" rather than a weak playbook.
 
+6. **Separate drafts from operational objects**
+
+   Unpublished candidates are inert review artifacts. Only published playbooks become usable Loom objects.
+
+---
+
+## Consumer And Activation Path
+
+The primary v1 consumer is a **human workflow curator**:
+
+- a project maintainer
+- an operator managing Loom actions/templates
+- a human reviewing project automation before it is exposed to day-to-day users
+
+The activation path is explicit:
+
+1. Loom mines history and creates a **draft playbook candidate**.
+2. A human reviews the candidate, its evidence, and the exact publication effect.
+3. If approved, Loom publishes a **playbook recipe**.
+4. Only that published recipe is exposed operationally in Loom.
+
+For v1, a published playbook should be a named **dispatch recipe**:
+
+- it defines when the playbook applies
+- it points to the entry action and preferred agent template
+- it records required constraints such as worktree usage and required human gates
+- it may also generate or validate the action-transition bundle that supports the expected workflow
+
+That makes the consumer and the activation path concrete:
+
+- **draft candidates** are used only by the human reviewer
+- **published playbook recipes** are used by Loom operators in task creation/dispatch flows
+
+The Weaver is **not** a v1 consumer of raw generated candidates. A later phase may let Weaver recommend or execute **published** playbooks, but unpublished drafts must remain inert.
+
 ---
 
 ## What A Playbook Is
 
-A **playbook** is a reusable workflow recommendation describing how Loom should approach a recurring class of work.
+A **playbook** is a reusable workflow artifact describing how Loom should approach a recurring class of work.
 
 It should include:
 
@@ -66,14 +105,17 @@ It should include:
 - the human-review points that must remain in the loop
 - evidence explaining why this pattern was suggested
 
-A playbook is **not** a separate execution engine. At runtime Loom should still dispatch an action, use an agent template, and rely on action transitions for pipeline derivation.
+A draft playbook candidate is **not** operational by itself. It becomes operational only after publication.
 
-The playbook layer is therefore a publishing and recommendation layer:
+For v1, the operational form should be a **published dispatch recipe** that references existing Loom primitives. A published playbook is **not** a separate execution engine. At runtime Loom should still dispatch an action, use an agent template, and rely on action transitions for pipeline derivation.
+
+The playbook layer is therefore a publishing and packaging layer:
 
 - **actions** answer "what prompt should each stage use?"
 - **agent templates** answer "how should each stage be launched?"
 - **pipelines** answer "what transitions are valid between stages?"
-- **playbooks** answer "for this class of work, which action/template/pipeline combination has historically worked best?"
+- **draft playbook candidates** answer "what historically worked, and should a human publish it?"
+- **published playbooks** answer "which approved action/template/pipeline bundle should an operator reuse for this class of work?"
 
 ---
 
@@ -157,6 +199,8 @@ The extractor should emit a draft object with:
 - generated follow-up patches or suggestions for actions/templates/transitions
 
 If the family does not pass the gates, the output should be an internal observation only.
+
+If the family does pass the gates, the output is still only a **draft candidate**. It does not become visible as a reusable Loom object until a human publishes it.
 
 ---
 
@@ -290,7 +334,7 @@ evidence:
 review_required: true
 ```
 
-This object is for review and recommendation. Runtime dispatch still resolves through `entry_action`, the chosen template, and the declared transitions.
+This object is for review only. Runtime dispatch does not consume it directly. Runtime dispatch still resolves through `entry_action`, the chosen template, and the declared transitions, but only after a human publishes a corresponding operational playbook recipe.
 
 ### Human review requirements
 
@@ -299,21 +343,27 @@ Before publication, a human should approve:
 - the match scope
 - the proposed action/template mapping
 - the stage graph and any human gates
-- whether a new playbook should create new action files, update existing ones, or stay as a recommendation only
+- whether publication should create or update the operational recipe and any supporting action/transition artifacts
 
 Initial versions should require review for **every** published playbook. Auto-publishing should be out of scope until Loom has richer telemetry and a proven approval history.
 
 ### Publication targets
 
-Publishing a playbook may result in one or more of:
+Publishing a playbook should produce a concrete operational object. For v1, that object should be a **published dispatch recipe** stored in project metadata and exposed intentionally in Loom's dispatch/task-creation flows.
 
-- a new playbook metadata file used for recommendation
+Publication may also result in one or more supporting changes:
+
+- a new published playbook recipe
 - a patch to existing action files
 - a new agent template or a template recommendation
 - new or updated action transitions to expose the learned pipeline
-- a board or dispatch recommendation when the match rule fires
+- optional validation that the referenced action bundle exists and matches the approved workflow
 
-The important boundary is that playbooks do not replace actions or pipelines. They synthesize and organize them.
+The important boundary is:
+
+- draft candidates are not operational
+- published playbooks are explicit operator-facing recipes
+- playbooks do not replace actions or pipelines; they package and organize them
 
 ---
 
@@ -324,7 +374,8 @@ The cleanest model is:
 - **Actions** remain the stage-level authored prompts
 - **Agent templates** remain the execution preset for a stage or playbook
 - **Pipelines** remain the allowed graph of action transitions
-- **Playbooks** become the learned entrypoint and workflow recommendation derived from history
+- **Draft playbook candidates** become the mined review artifacts derived from history
+- **Published playbooks** become the approved dispatch recipes that bind the learned workflow to Loom's runtime primitives
 
 This has two advantages:
 
@@ -337,10 +388,24 @@ In practice, a published playbook should usually point to:
 - one preferred template
 - zero or more approved transitions already represented in action YAML
 - optional guidance on when to stop, ask, or branch
+- a clear operator-facing activation point in task creation or dispatch
+
+### Weaver integration
+
+Weaver integration should be deferred until after publication exists.
+
+If added later, Weaver may:
+
+- recommend a **published** playbook when planning work
+- choose a **published** playbook as part of an explicit orchestration strategy
+
+Weaver should not read or act on unpublished candidate drafts.
 
 ---
 
 ## Follow-Up Implementation Tasks
+
+### Task 1: Historical pattern extraction
 
 1. **Persist stronger outcome signals**
    Add explicit run outcome, human review result, merge/PR result, and structured test summary fields to history.
@@ -351,19 +416,24 @@ In practice, a published playbook should usually point to:
 3. **Add candidate-family scoring**
    Implement support/diversity/consistency scoring and ambiguity detection.
 
-4. **Define playbook draft storage**
-   Introduce a persisted draft format and storage location, likely alongside existing Loom project metadata rather than inside runtime state blobs.
+4. **Store inert draft candidates**
+   Introduce persisted draft-candidate storage with evidence and counterexamples, but no runtime activation.
+
+### Task 2: Draft playbook generation and explicit human publication
 
 5. **Create a review UI/CLI**
-   Show evidence, counterexamples, and the concrete file changes a publication would make.
+   Show evidence, counterexamples, and the exact publication effect for a candidate.
 
-6. **Publish into existing primitives**
-   Implement safe generation of action YAML updates, template recommendations, and transition patches from an approved playbook.
+6. **Define the published operational object**
+   Add a published playbook recipe format for task-creation/dispatch flows. This is the v1 consumer-facing artifact.
 
-7. **Add recommendation-time matching**
-   When a new task is created or dispatched, surface matching published playbooks as suggestions instead of silently forcing one.
+7. **Publish into existing primitives**
+   Implement safe generation or validation of the referenced action/template/transition bundle from an approved playbook.
 
-8. **Backtest before enabling by default**
+8. **Surface only published playbooks operationally**
+   Expose published recipes in task creation/dispatch flows. Do not surface raw candidates to Weaver or normal operators.
+
+9. **Backtest before enabling by default**
    Run the miner over existing Loom history fixtures and real projects to measure false positives and ambiguous families.
 
 ---
@@ -374,8 +444,11 @@ The first implementation should stay intentionally narrow:
 
 - mine only from completed root-task chains
 - cluster using root action plus conservative text normalization
+- produce only inert draft candidates from the mining step
+- publish only explicit operator-facing dispatch recipes
 - suggest only entry action, template, and simple linear stage sequences
 - require human approval for every publication
-- surface recommendations only in task creation/dispatch flows
+- surface only **published** playbooks in task creation/dispatch flows
+- keep Weaver out of the loop until a later published-playbook integration step
 
 That scope is enough to prove whether Loom can learn useful workflows from history without claiming more certainty than the data supports.
