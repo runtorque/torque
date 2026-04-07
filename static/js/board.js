@@ -1339,8 +1339,14 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (t.scheduled_at) {
     meta += '<span class="board-card-label board-card-scheduled">' + _schedFormatTime(t.scheduled_at) + '</span>';
   }
-  if (t.attachments && t.attachments.length) {
-    meta += '<span class="board-card-label board-card-attachments" title="' + t.attachments.length + ' image(s) attached">&#x1F4CE; ' + t.attachments.length + '</span>';
+  var artifactCount = typeof _artifactCountForTask === 'function'
+    ? _artifactCountForTask(t)
+    : (((t.attachments || []).length) + ((t.artifacts || []).length));
+  if (artifactCount) {
+    meta += '<span class="board-card-label board-card-attachments"'
+      + ' title="' + artifactCount + ' artifact' + (artifactCount === 1 ? '' : 's') + '"'
+      + ' onclick="event.stopPropagation();openTaskArtifactBrowser(\'' + t.id + '\')">'
+      + '&#x1F4CE; ' + artifactCount + '</span>';
   }
   if (t.provider || t.external_id) {
     var extLabel = (t.provider ? t.provider + ': ' : '') + (t.external_id || 'linked');
@@ -2373,6 +2379,7 @@ function boardCardMenu(evt, taskId) {
 
   // Preview prompt
   html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
+  html += '<button onclick="openTaskArtifactBrowser(\'' + taskId + '\')">Artifacts...</button>';
 
   html += '<div class="ctx-sep"></div>';
   if (task.provider || task.external_id || task.external_url) {

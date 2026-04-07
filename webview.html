@@ -461,15 +461,30 @@
               placeholder="Optional longer context or details..."
               oninput="taskAutoResize(this);taskPersistDraft()"
               onkeydown="if(event.key==='Escape')closeModals();"></textarea>
-    <label>Attachments
-      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Drag-and-drop images or click to browse. Attached image paths are included in agent prompts.">?</span>
+    <label>Images
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Drag-and-drop screenshots or click Add images. Image paths are included in agent prompts and shown in artifact browsers.">?</span>
     </label>
+    <div class="task-artifact-toolbar">
+      <button class="btn-secondary" type="button" onclick="document.getElementById('task-attachments-input').click()">Add images</button>
+      <input id="task-attachments-input" type="file" accept="image/*" multiple style="display:none" onchange="taskAttFilePicked(this)">
+    </div>
     <div id="task-attachments-zone" class="attachments-zone"
          ondragover="taskAttDragOver(event)" ondragleave="taskAttDragLeave(event)"
          ondrop="taskAttDrop(event)">
       <div id="task-attachments-thumbs" class="attachments-thumbs"></div>
       <span class="attachments-hint">Drop images here</span>
     </div>
+    <label>Artifacts
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Attach logs, reports, diffs, notes, or file references. Common text artifacts get inline previews; other files keep clear metadata.">?</span>
+    </label>
+    <div class="task-artifact-toolbar">
+      <button class="btn-secondary" type="button" onclick="taskArtifactPickFiles()">Upload files</button>
+      <button class="btn-secondary" type="button" onclick="taskArtifactStart('snippet')">Add note</button>
+      <button class="btn-secondary" type="button" onclick="taskArtifactStart('file_ref')">Add reference</button>
+      <input id="task-artifact-upload-input" type="file" multiple style="display:none" onchange="taskArtifactFilePicked(this)">
+    </div>
+    <div id="task-artifacts-list" class="task-artifacts-list"></div>
+    <div id="task-artifact-editor" class="task-artifact-editor"></div>
     <label>Group <span class="label-req">*</span></label>
     <select id="task-group-select"
             onchange="taskPersistDraft()"
@@ -558,6 +573,18 @@
     <div id="task-messages-content" class="task-messages-list"></div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="document.getElementById('modal-task-messages').classList.remove('visible')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Task artifacts browser modal -->
+<div class="overlay" id="modal-task-artifacts">
+  <div class="modal modal-tall modal-wide">
+    <h2 id="task-artifacts-modal-title">Task Artifacts</h2>
+    <div id="task-artifacts-modal-summary" class="task-artifacts-modal-summary"></div>
+    <div id="task-artifacts-modal-content" class="task-artifacts-browser"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="document.getElementById('modal-task-artifacts').classList.remove('visible')">Close</button>
     </div>
   </div>
 </div>

@@ -107,6 +107,79 @@ function _diffStatusLabel(status) {
   return labels[status] || 'Changed';
 }
 
+function _diffSyntheticArtifact() {
+  if (!_diffViewData || !_diffViewData.stats) return null;
+  var files = _diffViewData.files || [];
+  var previewLines = [];
+  for (var i = 0; i < files.length && i < 8; i++) {
+    var file = files[i];
+    previewLines.push((_diffStatusLabel(file.status) + ': ' + (file.path || '(unknown file)')).trim());
+  }
+  return _artifactNormalizeClient({
+    id: 'review-diff',
+    type: 'diff',
+    title: 'Worktree diff',
+    summary: _diffStatsLabel(_diffViewData.stats),
+    content: previewLines.join('\n'),
+    metadata: {
+      files: _diffViewData.stats.files || files.length,
+      insertions: _diffViewData.stats.insertions || 0,
+      deletions: _diffViewData.stats.deletions || 0,
+    },
+    prompt: { mode: 'summary' },
+    storage: { kind: 'inline', path: '', content: previewLines.join('\n') },
+  }, 0);
+}
+
+function _diffRelatedArtifacts() {
+  if (!state || !state.board_tasks) return [];
+  var agent = state.agents ? state.agents[_diffViewAgentId] : null;
+  var currentTaskId = agent ? (agent.current_task_id || '') : '';
+  var tasks = [];
+  for (var id in state.board_tasks) {
+    var task = state.board_tasks[id];
+    if (task.agent_id === _diffViewAgentId) tasks.push(task);
+  }
+  tasks.sort(function(a, b) {
+    if (a.id === currentTaskId) return -1;
+    if (b.id === currentTaskId) return 1;
+    if (a.lane !== 'Done' && b.lane === 'Done') return -1;
+    if (a.lane === 'Done' && b.lane !== 'Done') return 1;
+    return (b.updated_at || '').localeCompare(a.updated_at || '');
+  });
+  var artifacts = [];
+  var synthetic = _diffSyntheticArtifact();
+  if (synthetic) artifacts.push(synthetic);
+  for (var i = 0; i < tasks.length; i++) {
+    var combined = typeof _taskArtifactsCombined === 'function'
+      ? _taskArtifactsCombined(tasks[i])
+      : [];
+    for (var j = 0; j < combined.length; j++) {
+      combined[j].taskId = combined[j].taskId || tasks[i].id;
+      combined[j].taskLabel = combined[j].taskLabel || tasks[i].task || tasks[i].id;
+      artifacts.push(combined[j]);
+      if (artifacts.length >= 12) return artifacts;
+    }
+  }
+  return artifacts;
+}
+
+function _renderDiffArtifacts() {
+  var artifacts = _diffRelatedArtifacts();
+  if (!artifacts.length || typeof _renderArtifactCollection !== 'function') return '';
+  var html = '<section class="diff-artifacts-section">';
+  html += '<div class="diff-artifacts-header">';
+  html += '<div class="diff-artifacts-title">Review artifacts</div>';
+  html += '<div class="diff-artifacts-subtitle">Logs, reports, images, and the synthesized diff summary for this branch.</div>';
+  html += '</div>';
+  html += _renderArtifactCollection(artifacts, {
+    empty: 'No review artifacts available.',
+    cardOptions: { showTaskLabel: true },
+  });
+  html += '</section>';
+  return html;
+}
+
 function _renderDiffLines(lines) {
   var html = '';
   for (var i = 0; i < lines.length; i++) {
@@ -294,6 +367,7 @@ function renderDiffView() {
   html += '<div class="diff-view-stats">' + esc(_diffStatsLabel(stats)) + '</div>';
   html += '</div>';
   html += '<div class="diff-view-content">';
+  html += _renderDiffArtifacts();
   if (!files.length) {
     html += '<div class="diff-empty">No changes to review.</div>';
   } else {
