@@ -193,7 +193,7 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
             payload["results"][1]["agent_id"],
         )
 
-    async def test_batch_dispatch_requires_confirmation_for_overlap(self):
+    async def test_batch_dispatch_dispatches_without_overlap_confirmation(self):
         state, weaver = self._make_state()
         active = self.state_mod.AgentCell(
             id="agent-active",
@@ -225,11 +225,7 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             payload["results"][0]["status"],
-            "needs_confirmation",
-        )
-        self.assertEqual(
-            payload["results"][0]["reason"],
-            "dispatch_overlap",
+            "dispatched",
         )
 
     async def test_batch_dispatch_excludes_weaver_from_active_count(self):
@@ -442,7 +438,7 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
             {"cmd": "dispatch_task", "id": task.id, "agent_id": worker.id},
         )
 
-    async def test_dispatch_forwards_force_flag(self):
+    async def test_dispatch_ignores_legacy_force_flag(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(
             id="weaver-1",
@@ -470,7 +466,7 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertFalse(is_error)
-        self.assertTrue(captured["force"])
+        self.assertNotIn("force", captured)
 
 
 class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
@@ -634,7 +630,7 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("tasks", summary)
 
-    async def test_board_summary_includes_dispatch_overlap_summary(self):
+    async def test_board_summary_omits_dispatch_overlap_summary(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(
             id="weaver-1",
@@ -649,19 +645,6 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         state.group_settings["g"] = self.state_mod.GroupSettings(
             weaver_agent_id=weaver.id
         )
-        state.dispatch_overlap_groups["g"] = {
-            "counts": {"notice": 1, "warning": 2, "conflict": 1},
-            "total": 4,
-            "items": [
-                {
-                    "task_id": "task-1",
-                    "title": "Implement auth flow",
-                    "level": "conflict",
-                    "summary": "Shares a branch with another active agent.",
-                }
-            ],
-            "truncated": False,
-        }
 
         async def fake_handle_command(payload):
             self.fail(f"Unexpected handle_command call: {payload}")
@@ -676,8 +659,7 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(is_error)
         summary = json.loads(text)
-        self.assertEqual(summary["dispatch_overlap"]["counts"]["warning"], 2)
-        self.assertEqual(summary["dispatch_overlap"]["items"][0]["level"], "conflict")
+        self.assertNotIn("dispatch_overlap", summary)
 
     async def test_task_show_includes_health_snapshot(self):
         state = self.state_mod.MatrixState()
