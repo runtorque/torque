@@ -1645,6 +1645,8 @@ function _taskOpenModal(config) {
   send({ cmd: 'list_templates', group: (groupEl && groupEl.value) || _currentGroup() });
 
   modal.classList.add('visible');
+  var bodyEl = document.getElementById('task-modal-body');
+  if (bodyEl) bodyEl.scrollTop = 0;
   taskAutoResize(taskEl);
   taskAutoResize(descEl);
   taskEl.focus();
