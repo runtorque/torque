@@ -248,6 +248,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("loom_verify", tool_names)
         self.assertIn("loom_memory_publish", tool_names)
         self.assertIn("weaver_board_summary", tool_names)
+        self.assertIn("weaver_task_verify", tool_names)
 
         missing_header = await handler(
             FakeRequest(

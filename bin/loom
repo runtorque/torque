@@ -2133,6 +2133,55 @@ def cmd_task_edit(args):
     print(f"Updated task {t.get('slug', '') or t['id'][:6]}")
 
 
+def cmd_task_verify(args):
+    """Record a deploy/restart verification checkpoint for a task."""
+    st = get_state_local(args.port)
+    t = resolve_task(st, args.identifier)
+
+    payload = {
+        "id": t["id"],
+        "actor_name": "loom-cli",
+    }
+    if args.mode is not None:
+        payload["verification_mode"] = "" if args.mode == "clear" else args.mode
+    if args.state is not None:
+        payload["verification_state"] = (
+            "" if args.state == "clear" else args.state
+        )
+    if args.note is not None:
+        payload["verification_notes"] = args.note
+    if args.clear_note:
+        payload["verification_notes"] = ""
+    if args.tests is not None:
+        payload["tests_run"] = args.tests
+    if args.clear_tests:
+        payload["tests_run"] = ""
+    if args.human is not None:
+        payload["human_validation_pending"] = args.human
+    if args.clear_human:
+        payload["human_validation_pending"] = ""
+    if args.deploy_needed:
+        payload["deploy_needed"] = True
+    if args.clear_deploy_needed:
+        payload["deploy_needed"] = False
+    if args.attempted:
+        payload["deploy_attempted"] = True
+    if args.clear_attempted:
+        payload["deploy_attempted"] = False
+    if args.smoke is not None:
+        if args.smoke == "clear":
+            payload["manual_smoke_done"] = False
+        else:
+            payload["smoke_status"] = args.smoke
+
+    if len(payload) == 2:
+        die("No verification changes specified")
+
+    resp = api_call("board_verify_task", port=args.port, **payload)
+    data = check_ok(resp)
+    print(data.get("message", "Verification updated"))
+
+
 def cmd_task_move(args):
     """Move a task to a different lane."""
     st = get_state_local(args.port)
@@ -3593,6 +3642,36 @@ def build_parser():
     p.add_argument("--verify-human",
                    help="What still needs human validation")
     p.set_defaults(func=cmd_task_edit)
+
+    p = tsk_sub.add_parser("verify",
+                           help="Record a deploy/restart/smoke checkpoint")
+    p.add_argument("identifier", help="Task ID, slug, or title")
+    p.add_argument("--mode", choices=["deploy", "restart", "clear"],
+                   help="Verification mode")
+    p.add_argument("--state",
+                   choices=["pending", "attempted", "passed", "failed", "clear"],
+                   help="Explicit verification state override")
+    p.add_argument("--attempted", action="store_true",
+                   help="Record that deploy/restart was attempted")
+    p.add_argument("--clear-attempted", action="store_true",
+                   help="Clear the recorded deploy/restart attempted flag")
+    p.add_argument("--smoke", choices=["passed", "failed", "clear"],
+                   help="Record smoke result and mark smoke as done")
+    p.add_argument("--note", help="Verification notes")
+    p.add_argument("--clear-note", action="store_true",
+                   help="Clear verification notes")
+    p.add_argument("--tests", help="Tests run summary")
+    p.add_argument("--clear-tests", action="store_true",
+                   help="Clear the tests run summary")
+    p.add_argument("--deploy-needed", action="store_true",
+                   help="Mark that a deploy is still required")
+    p.add_argument("--clear-deploy-needed", action="store_true",
+                   help="Clear the deploy-needed flag")
+    p.add_argument("--human",
+                   help="What still needs human validation")
+    p.add_argument("--clear-human", action="store_true",
+                   help="Clear human validation requirements")
+    p.set_defaults(func=cmd_task_verify)
 
     p = tsk_sub.add_parser("move", aliases=["mv"],
                            help="Move task to a different lane")

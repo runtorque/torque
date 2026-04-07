@@ -168,6 +168,8 @@ Once an agent is working on a task, the agent can report back to Loom with MCP t
 
 These updates make the board readable without opening each agent session. A person scanning the board can see which tasks are moving, which are blocked, and which are waiting on a human decision.
 
+When the checkpoint needs to be recorded by Loom itself instead of the active agent, use `loom task verify ...` or `weaver_task_verify(...)` to mark deploy/restart attempted, smoke passed or failed, and any remaining verification notes.
+
 `loom_ask` is not a general status or suggestion channel. If the agent can keep moving, it should keep moving and report context through `loom_progress`, `loom_done`, `loom_blocked`, or derived-task context instead of pausing the task.
 
 For the lane and completion model, see [Task Lifecycle](task-lifecycle.md).

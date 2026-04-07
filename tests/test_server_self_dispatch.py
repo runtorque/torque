@@ -83,6 +83,80 @@ class ServerSelfDispatchTests(unittest.TestCase):
             "Proceed with the derived task you just created.",
         )
 
+    def test_apply_verification_report_marks_attempted(self):
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Deploy billing changes",
+            group="g",
+            lane="In Progress",
+        )
+        saved = []
+
+        message, root = self.server_mod._apply_verification_report(
+            task,
+            {
+                "verification_mode": "deploy",
+                "deploy_attempted": True,
+                "verification_notes": "Deployed to staging",
+            },
+            "loom-cli",
+            lambda current: saved.append(current.id),
+            timestamp="2026-04-07T18:00:00+00:00",
+        )
+
+        self.assertIsNone(root)
+        self.assertEqual(task.verification_mode, "deploy")
+        self.assertEqual(task.verification_state, "attempted")
+        self.assertTrue(task.verification_summary["deploy_attempted"])
+        self.assertEqual(task.verification_notes, "Deployed to staging")
+        self.assertEqual(task.verification_updated_by, "loom-cli")
+        self.assertEqual(task.verification_updated_at, "2026-04-07T18:00:00+00:00")
+        self.assertEqual(saved, ["task-1"])
+        self.assertIn("state=attempted", message)
+        self.assertIn("deploy attempted", message)
+
+    def test_apply_verification_report_marks_smoke_failure_and_updates_root(self):
+        root_task = self.state_mod.BoardTask(
+            id="root-1",
+            task="Release billing changes",
+            group="g",
+            lane="In Progress",
+        )
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Restart billing service",
+            group="g",
+            lane="In Progress",
+            pipeline_root_id=root_task.id,
+        )
+        saved = []
+
+        message, root = self.server_mod._apply_verification_report(
+            task,
+            {
+                "verification_mode": "restart",
+                "smoke_status": "failed",
+                "verification_notes": "Smoke failed on login redirect",
+            },
+            "Weaver",
+            lambda current: saved.append(current.id),
+            root_task=root_task,
+            timestamp="2026-04-07T18:05:00+00:00",
+        )
+
+        self.assertIs(root, root_task)
+        self.assertEqual(task.verification_mode, "restart")
+        self.assertEqual(task.verification_state, "failed")
+        self.assertTrue(task.verification_summary["manual_smoke_done"])
+        self.assertEqual(task.verification_updated_by, "Weaver")
+        self.assertEqual(root_task.verification_state, "failed")
+        self.assertEqual(root_task.verification_mode, "restart")
+        self.assertTrue(root_task.verification_summary["manual_smoke_done"])
+        self.assertEqual(root_task.verification_notes, "Smoke failed on login redirect")
+        self.assertEqual(saved, ["task-1", "root-1"])
+        self.assertIn("state=failed", message)
+        self.assertIn("manual smoke done", message)
+
     def test_loom_system_prompt_prefers_mcp_reporting_tools(self):
         prompt_source = (Path(__file__).resolve().parents[1] / "loom" / "server.py").read_text()
 

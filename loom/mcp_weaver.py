@@ -380,6 +380,59 @@ WEAVER_TOOLS = [
         },
     },
     {
+        "name": "weaver_task_verify",
+        "description": (
+            "Record a deploy/restart verification checkpoint for a task. "
+            "Use this for explicit attempt, smoke pass/fail, and notes "
+            "without routing through a generic task edit."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Task slug or ID to update.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["deploy", "restart"],
+                    "description": "Whether the checkpoint is for deploy or restart.",
+                },
+                "state": {
+                    "type": "string",
+                    "enum": ["pending", "attempted", "passed", "failed", ""],
+                    "description": "Optional explicit verification state override.",
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Free-form verification notes.",
+                },
+                "tests_run": {
+                    "type": "string",
+                    "description": "Short summary of tests that were run.",
+                },
+                "human_validation_pending": {
+                    "type": "string",
+                    "description": "What still needs human validation.",
+                },
+                "deploy_needed": {
+                    "type": "boolean",
+                    "description": "Whether a deploy is still required.",
+                },
+                "attempted": {
+                    "type": "boolean",
+                    "description": "Set or clear the recorded deploy/restart attempted flag.",
+                },
+                "smoke": {
+                    "type": "string",
+                    "enum": ["passed", "failed", "clear"],
+                    "description": "Record a smoke result, or clear smoke completion with `clear`.",
+                },
+            },
+            "required": ["task"],
+        },
+    },
+    {
         "name": "weaver_task_move",
         "description": "Move a task to a different lane on the board.",
         "inputSchema": {
@@ -1474,6 +1527,44 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         ):
             if key in args:
                 payload[key] = args[key]
+        result = await handle_command(payload)
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if name == "weaver_task_verify":
+        tid = _resolve_task(state, args.get("task", ""))
+        if not tid:
+            return "Task not found", True
+        actor_name = "weaver"
+        if cell_id:
+            cell = state.agents.get(cell_id)
+            if cell and getattr(cell, "name", ""):
+                actor_name = cell.name
+        payload = {
+            "cmd": "board_verify_task",
+            "id": tid,
+            "actor_name": actor_name,
+        }
+        if "mode" in args:
+            payload["verification_mode"] = args["mode"]
+        if "state" in args:
+            payload["verification_state"] = args["state"]
+        if "notes" in args:
+            payload["verification_notes"] = args["notes"]
+        if "tests_run" in args:
+            payload["tests_run"] = args["tests_run"]
+        if "human_validation_pending" in args:
+            payload["human_validation_pending"] = args["human_validation_pending"]
+        if "deploy_needed" in args:
+            payload["deploy_needed"] = args["deploy_needed"]
+        if "attempted" in args:
+            payload["deploy_attempted"] = args["attempted"]
+        if "smoke" in args:
+            if args["smoke"] == "clear":
+                payload["manual_smoke_done"] = False
+            else:
+                payload["smoke_status"] = args["smoke"]
         result = await handle_command(payload)
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True

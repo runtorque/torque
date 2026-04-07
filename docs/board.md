@@ -212,6 +212,8 @@ Once an agent is working on a task, it can report status back to Loom using Loom
 
 When a task is dispatched with an action that has [transitions](actions.md#pipelines), the available Loom MCP tools are appended to the prompt as a postscript so the agent knows what reporting options it has.
 
+For board-level checkpoint updates outside an agent session, use `loom task verify ...` from the CLI or `weaver_task_verify(...)` from the Weaver. Those paths stamp verification audit fields and emit a `task_verification_updated` event so pending or failed checkpoints stay visible at the orchestration layer.
+
 ### The `done` vs `ready` distinction
 
 - **`done`** --- task is complete, agent stays linked. Use this when the agent might receive follow-up work (via `--self` or `--agent` dispatch).
