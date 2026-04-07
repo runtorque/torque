@@ -513,10 +513,13 @@ class ITerm2Adapter:
     async def send_text(self, session_id: str, text: str):
         """Send text to a terminal session.
 
-        For multi-line prompts, the body is sent first and the submit
-        key is sent separately after a short delay. Some TUIs ignore an
-        early submit during startup, so the first send to adapters with
-        an input-ready policy waits until the visible screen stabilizes.
+        The body is sent first and the submit key is sent separately.
+        Some TUIs treat ``async_send_text()`` as a paste operation, which
+        can leave an appended return sitting in the composer instead of
+        actually submitting the prompt. Multi-line sends keep a short
+        delay before submit; single-line sends submit immediately after
+        the body. The first send to adapters with an input-ready policy
+        still waits until the visible screen stabilizes.
         """
         session = await self._find_session(session_id)
         if session:
@@ -530,13 +533,11 @@ class ITerm2Adapter:
             if cell:
                 await self._wait_for_input_ready(session, cell)
             body = text.rstrip("\r\n")
-            if "\n" in body:
-                # Multi-line: send body, then submit separately.
+            if body:
                 await session.async_send_text(body)
+            if "\n" in body:
                 await asyncio.sleep(submit_delay)
-                await session.async_send_text(submit_key)
-            else:
-                await session.async_send_text(body + submit_key)
+            await session.async_send_text(submit_key)
 
     # -- Helpers ------------------------------------------------------------
 

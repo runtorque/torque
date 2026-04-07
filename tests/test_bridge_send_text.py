@@ -150,6 +150,28 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.sent, ["line one\nline two", "\r"])
         self.assertEqual(delays, [0.3])
 
+    async def test_send_text_single_line_sends_submit_separately(self):
+        session = FakeSession("session-1")
+        bridge, state = await self._make_bridge(session)
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="agent",
+            group="g",
+            cell_type="agent",
+            session_id="session-1",
+        )
+        state.agents[cell.id] = cell
+
+        await bridge.send_text(
+            "session-1",
+            "Proceed with the derived task you just created.\r",
+        )
+
+        self.assertEqual(session.sent, [
+            "Proceed with the derived task you just created.",
+            "\r",
+        ])
+
     async def test_send_text_waits_for_codex_ready_once(self):
         ready_screen = [
             "OpenAI Codex",
@@ -194,7 +216,8 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.sent, [
             "line one\nline two",
             "\r",
-            "follow up\r",
+            "follow up",
+            "\r",
         ])
         self.assertEqual(first_reads, 3)
         self.assertEqual(session.screen_reads, first_reads)
