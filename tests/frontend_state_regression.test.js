@@ -148,6 +148,7 @@ class FakeDocument {
     this.elements = new Map();
     this.selectorMap = new Map();
     this.body = new FakeElement('body');
+    this.activeElement = null;
     this.listeners = {};
   }
 
@@ -196,6 +197,7 @@ function createSandbox(overrides = {}) {
     Math,
     document,
     window: { open() {} },
+    location: { host: 'localhost:9000' },
     navigator: { clipboard: { writeText() {} } },
     requestAnimationFrame(fn) { fn(); },
     setTimeout(fn) { fn(); return 1; },
@@ -250,6 +252,7 @@ function jsonValue(context, expression) {
 function createBoardHarness(options = {}) {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/board.js');
   const boot = [
     `_renderBoardSelectionBar = function() { return ''; };`,
@@ -267,6 +270,7 @@ function createBoardHarness(options = {}) {
 function createEventsHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/events.js');
   runInContext(context, `
     _renderAttentionCard = function(item) { return '<div class="attention-item">' + item.id + '</div>'; };
@@ -282,8 +286,36 @@ function createWeaverHarness() {
     _esc(value) { return String(value); },
   });
   const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/weaver.js');
   return { context, document };
+}
+
+function createWsRenderHarness() {
+  const { sandbox, document } = createSandbox();
+  sandbox._activePanelApp = '';
+  sandbox.renderCalls = {
+    main: 0,
+    board: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  };
+  document.register('main');
+  document.register('bottom-panel');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    render = function() { renderCalls.main++; };
+    renderBoard = function() { renderCalls.board++; };
+    renderEvents = function() { renderCalls.events++; };
+    renderWeaverPanel = function() { renderCalls.weaver++; };
+    renderAgentTemplatesPanel = function() { renderCalls.templates++; };
+    updateEventsAttentionBadge = function() {};
+    _expectedSeq = 1;
+  `);
+  return { context, document, sandbox };
 }
 
 function createModalHarness() {
@@ -2206,6 +2238,135 @@ test('renderEvents preserves inline resolve drafts across panel rerenders', () =
     'ask-1': 'Please re-run the failing test',
   });
   assert.equal(runInContext(context, '_eventsScrollTop'), 41);
+});
+
+test('renderBoard restores focused input value and caret across rerenders', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  const input = document.register('board-search-input');
+  input.value = 'deploy auth';
+  input.selectionStart = 6;
+  input.selectionEnd = 11;
+  panel.appendChild(input);
+  document.activeElement = input;
+
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    task: { id: 'task', group: 'alpha', task: 'Deploy auth flow', lane: 'Backlog', position: 1 },
+  };
+
+  runInContext(context, `_boardSearchQuery = '';`);
+  context.renderBoard();
+
+  assert.equal(input.focused, true);
+  assert.equal(input.value, 'deploy auth');
+  assert.equal(input.selectionStart, 6);
+  assert.equal(input.selectionEnd, 11);
+});
+
+test('renderEvents restores focused search input value and caret across rerenders', () => {
+  const { context, document } = createEventsHarness();
+  const panel = document.register('panel-events');
+  panel.setQuerySelector('.events-log', null);
+  panel.setQuerySelectorAll('.events-resolve-textarea', []);
+  const input = document.register('events-search-input');
+  input.value = 'stuck';
+  input.selectionStart = 2;
+  input.selectionEnd = 5;
+  panel.appendChild(input);
+  panel.setQuerySelector('.events-search-input', input);
+  document.activeElement = input;
+
+  context.state.panel_events = [];
+
+  runInContext(context, `_eventsSearchQuery = '';`);
+  context.renderEvents();
+
+  assert.equal(input.focused, true);
+  assert.equal(input.value, 'stuck');
+  assert.equal(input.selectionStart, 2);
+  assert.equal(input.selectionEnd, 5);
+});
+
+test('renderWeaverPanel preserves focused reply draft across rerenders', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-weaver');
+  const input = document.register('weaver-reply-input');
+  input.value = 'Proceed with merge';
+  input.selectionStart = 8;
+  input.selectionEnd = 13;
+  panel.appendChild(input);
+  document.activeElement = input;
+
+  context.state.weaver_settings = {
+    alpha: { pending_question: 'Merge this branch?' },
+  };
+
+  runInContext(context, `_weaverReplyDraft = '';`);
+  context.renderWeaverPanel();
+
+  assert.equal(input.focused, true);
+  assert.equal(input.value, 'Proceed with merge');
+  assert.equal(input.selectionStart, 8);
+  assert.equal(input.selectionEnd, 13);
+});
+
+test('task deltas do not rerender the templates panel when it is active', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'templates';
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      { op: 'task_upsert', id: 'task-1', group: 'alpha', task: 'Ship docs', lane: 'Backlog', position: 1 },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('event deltas rerender only the active events panel', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'board';
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      { op: 'event_append', id: 7, kind: 'agent_progress', message: 'Still working', group: 'alpha', timestamp: 1 },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+
+  sandbox._activePanelApp = 'events';
+  runInContext(context, `_expectedSeq = 2;`);
+  context._handleDelta({
+    seq: 2,
+    ops: [
+      { op: 'event_append', id: 8, kind: 'agent_progress', message: 'More work', group: 'alpha', timestamp: 2 },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    events: 1,
+    weaver: 0,
+    templates: 0,
+  });
 });
 
 test('eventsDismiss clears drafts and hides dismissed attention items from the badge', () => {

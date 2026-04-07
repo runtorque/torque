@@ -74,6 +74,133 @@ function toggleGroup(name) {
 /* FLIP animation — capture old positions, render, animate to new positions */
 let _flipUntil = 0;
 
+function _surfacePanelApp(surface) {
+  if (surface === 'board') return 'board';
+  if (surface === 'events') return 'events';
+  if (surface === 'weaver') return 'weaver';
+  if (surface === 'templates') return 'templates';
+  return '';
+}
+
+function _activePanelSurface() {
+  return _surfacePanelApp(typeof _activePanelApp !== 'undefined' ? _activePanelApp : '');
+}
+
+function _renderSurface(surface) {
+  if (surface === 'board' && typeof renderBoard === 'function') renderBoard();
+  if (surface === 'events' && typeof renderEvents === 'function') renderEvents();
+  if (surface === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
+  if (surface === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
+}
+
+function renderActivePanel() {
+  const surface = _activePanelSurface();
+  if (surface) _renderSurface(surface);
+  _updateWeaverTaskbarBadge();
+  if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
+}
+
+function renderInvalidatedSurfaces(flags) {
+  if (!flags) return;
+  if (flags.main) render();
+  const surface = _activePanelSurface();
+  if (surface && flags[surface]) _renderSurface(surface);
+  _updateWeaverTaskbarBadge();
+  if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
+}
+
+function _updateWeaverTaskbarBadge() {
+  const btn = document.querySelector('.taskbar-app[data-app="weaver"]');
+  if (!btn) return;
+  let hasAsk = false;
+  for (const name in (state.weaver_settings || {})) {
+    if (state.weaver_settings[name].pending_question) {
+      hasAsk = true;
+      break;
+    }
+  }
+  btn.classList.toggle('has-badge', hasAsk);
+}
+
+function _findSurfaceNode(root, selector) {
+  if (!root || !selector) return null;
+  if (selector === ':root') return root;
+  if (selector.charAt(0) === '#' && document.getElementById) {
+    return document.getElementById(selector.slice(1));
+  }
+  return root.querySelector ? root.querySelector(selector) : null;
+}
+
+function _surfaceContains(root, el) {
+  if (!root || !el) return false;
+  if (typeof root.contains === 'function' && root.contains(el)) return true;
+  if (!el.id) return false;
+  return _findSurfaceNode(root, '#' + el.id) === el;
+}
+
+function _captureSurfaceState(root, opts) {
+  if (!root) return null;
+  opts = opts || {};
+  const snapshot = { focus: null, scrolls: [] };
+  const active = document.activeElement;
+  if (active && _surfaceContains(root, active)) {
+    let key = active.id ? ('#' + active.id) : '';
+    if (!key && typeof opts.captureFocusKey === 'function') {
+      key = opts.captureFocusKey(active, root) || '';
+    }
+    if (key) {
+      snapshot.focus = {
+        key,
+        value: 'value' in active ? active.value : null,
+        checked: 'checked' in active ? !!active.checked : null,
+        selectionStart: typeof active.selectionStart === 'number' ? active.selectionStart : null,
+        selectionEnd: typeof active.selectionEnd === 'number' ? active.selectionEnd : null,
+      };
+    }
+  }
+  const selectors = opts.scrollSelectors || [];
+  for (let i = 0; i < selectors.length; i++) {
+    const selector = selectors[i];
+    const el = _findSurfaceNode(root, selector);
+    if (!el) continue;
+    snapshot.scrolls.push({
+      selector,
+      top: typeof el.scrollTop === 'number' ? el.scrollTop : null,
+      left: typeof el.scrollLeft === 'number' ? el.scrollLeft : null,
+    });
+  }
+  if (typeof opts.capture === 'function') opts.capture(snapshot, root);
+  return snapshot;
+}
+
+function _restoreSurfaceState(root, snapshot, opts) {
+  if (!root || !snapshot) return;
+  opts = opts || {};
+  for (let i = 0; i < snapshot.scrolls.length; i++) {
+    const saved = snapshot.scrolls[i];
+    const el = _findSurfaceNode(root, saved.selector);
+    if (!el) continue;
+    if (typeof saved.top === 'number') el.scrollTop = saved.top;
+    if (typeof saved.left === 'number') el.scrollLeft = saved.left;
+  }
+  if (typeof opts.restore === 'function') opts.restore(root, snapshot);
+  if (!snapshot.focus) return;
+  let el = _findSurfaceNode(root, snapshot.focus.key);
+  if (!el && typeof opts.resolveFocus === 'function') {
+    el = opts.resolveFocus(root, snapshot.focus);
+  }
+  if (!el) return;
+  if (snapshot.focus.value != null && 'value' in el) el.value = snapshot.focus.value;
+  if (snapshot.focus.checked != null && 'checked' in el) el.checked = snapshot.focus.checked;
+  if (typeof el.focus === 'function') el.focus();
+  if (typeof snapshot.focus.selectionStart === 'number' && 'selectionStart' in el) {
+    el.selectionStart = snapshot.focus.selectionStart;
+  }
+  if (typeof snapshot.focus.selectionEnd === 'number' && 'selectionEnd' in el) {
+    el.selectionEnd = snapshot.focus.selectionEnd;
+  }
+}
+
 function _captureRects(main) {
   const rects = {};
   main.querySelectorAll('[data-drag-id]').forEach(el => {
@@ -285,26 +412,7 @@ function render() {
   if (focusedItemId && !navItems.includes(focusedItemId)) focusedItemId = null;
 
   if (oldRects) _applyFlip(main, oldRects);
-
-  // Render active panel if open
-  var bottomPanel = document.getElementById('bottom-panel');
-  if (bottomPanel && !bottomPanel.classList.contains('collapsed')) {
-    if (_activePanelApp === 'board') renderBoard();
-    if (_activePanelApp === 'events' && typeof renderEvents === 'function') renderEvents();
-    if (_activePanelApp === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
-    if (_activePanelApp === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
-    // Update weaver taskbar badge
-    const _weaverBtn = document.querySelector('.taskbar-app[data-app="weaver"]');
-    if (_weaverBtn) {
-      let _hasAsk = false;
-      for (const gn in (state.weaver_settings || {})) {
-        if (state.weaver_settings[gn].pending_question) { _hasAsk = true; break; }
-      }
-      _weaverBtn.classList.toggle('has-badge', _hasAsk);
-    }
-  }
-
-  // Update events attention badge regardless of panel state
+  _updateWeaverTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
 }
 

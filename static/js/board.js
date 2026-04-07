@@ -1586,6 +1586,8 @@ function _boardAfterRenderLayout() {
 function renderBoard() {
   var panel = document.getElementById('panel-board');
   if (!panel) return;
+  var panelState = _captureSurfaceState(panel);
+  var skipRestoreFocus = _boardAddTaskFocus || _boardSaveViewFocus;
   _boardSyncFiltersForCurrentGroup();
   _boardHydrateSavedViews();
   _boardHydrateLaneSorts();
@@ -1823,6 +1825,7 @@ function renderBoard() {
     html += _renderSchedulesView();
     panel.innerHTML = html;
     _boardAfterRenderLayout();
+    if (!skipRestoreFocus) _restoreSurfaceState(panel, panelState);
     return;
   }
 
@@ -1981,6 +1984,7 @@ function renderBoard() {
   }
 
   _boardAfterRenderLayout();
+  if (!skipRestoreFocus) _restoreSurfaceState(panel, panelState);
 }
 
 /* ---- Virtual scroll ------------------------------------------------- */

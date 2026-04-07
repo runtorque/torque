@@ -40,13 +40,16 @@ var _weaverOverlapSeverity = {
 function renderWeaverPanel() {
   var el = document.getElementById('panel-weaver');
   if (!el) return;
-
-  // Don't re-render while user is typing in the reply box or instructions
-  var active = document.activeElement;
-  if (active && (active.id === 'weaver-reply-input' ||
-                 active.classList.contains('weaver-instructions'))) {
-    return;
-  }
+  var panelState = _captureSurfaceState(el, {
+    scrollSelectors: ['.weaver-content'],
+    captureFocusKey(active) {
+      if (active && active.classList
+          && active.classList.contains('weaver-instructions')) {
+        return '.weaver-instructions';
+      }
+      return '';
+    },
+  });
 
   var group = _currentGroup();
   var ws = _weaverGetSettings(group);
@@ -108,6 +111,7 @@ function renderWeaverPanel() {
   html += '</div>';
   html += '</div>';
   el.innerHTML = html;
+  _restoreSurfaceState(el, panelState);
 }
 
 function weaverSwitchTab(tab) {
