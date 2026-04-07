@@ -156,14 +156,15 @@ For the full dispatch reference, see [Task Board](board.md#dispatching).
 
 ## 5. Work in progress: updates, blockers, and human input
 
-Once an agent is working on a task, the agent can report back to Loom:
+Once an agent is working on a task, the agent can report back to Loom with MCP tools:
 
-- `loom ai progress "message"` updates the activity detail
-- `loom ai blocked "reason"` marks the task as blocked
-- `loom ai error "message"` marks the task as failed and needing attention
-- `loom ai done` completes the current task
-- `loom ai ready` completes the task and releases the agent for future work
-- `loom ai ask "question"` creates a human-in-the-loop follow-up task in **Backlog**
+- `loom_progress(message="message")` updates the activity detail
+- `loom_blocked(reason="reason")` marks the task as blocked
+- `loom_error(message="message")` marks the task as failed and needing attention
+- `loom_done(message="summary")` completes the current task
+- `loom_ready()` completes the task and releases the agent for future work
+- `loom_verify(state="passed", tests_run="...", notes="...")` records deploy/restart/smoke verification status when relevant
+- `loom_ask(question="question", description="details")` creates a human-in-the-loop follow-up task in **Backlog**
 
 These updates make the board readable without opening each agent session. A person scanning the board can see which tasks are moving, which are blocked, and which are waiting on a human decision.
 
@@ -189,8 +190,11 @@ That creates a workflow such as:
 
 From the agent's perspective, this is usually one command:
 
-```bash
-loom ai derive "Review the auth middleware implementation" -t feature/review
+```text
+loom_derive(
+  description="Review the auth middleware implementation",
+  action="feature/review",
+)
 ```
 
 What Loom does next:
@@ -210,7 +214,7 @@ Work is complete when the active task reaches **Done** and any required follow-u
 
 There are two common endings:
 
-- A single task finishes directly with `loom ai done`.
+- A single task finishes directly with `loom_done(message="summary")`.
 - A pipeline finishes when its last derived task is marked done and Loom cascades completion back up the chain.
 
 If you use worktrees, completion is often followed by a git step such as review, merge, checkpoint cleanup, or worktree removal. That git flow is separate from the board flow, which is why the board can remain clean even when code review takes longer.
@@ -237,15 +241,18 @@ Here is a typical day-to-day flow:
 
 4. The implementation agent finishes and derives a review task:
 
-   ```bash
-   loom ai derive "Review auth middleware" -t feature/review
+   ```text
+   loom_derive(
+     description="Review auth middleware",
+     action="feature/review",
+   )
    ```
 
 5. The reviewer either:
 
-- calls `loom ai done` if the work is good
-- calls `loom ai derive ... -t feature/fix-review` if fixes are needed
-- calls `loom ai ask "..."` if a human decision is required
+- calls `loom_done(message="summary")` if the work is good
+- calls `loom_derive(description="...", action="feature/fix-review")` if fixes are needed
+- calls `loom_ask(question="...", description="...")` if a human decision is required
 
 6. Once the implementation chain reaches **Done**, the dependent deployment task can be dispatched.
 

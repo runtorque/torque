@@ -3,6 +3,7 @@ import sys
 import types
 import unittest
 from enum import Enum
+from pathlib import Path
 
 try:
     from helpers import install_aiohttp_stub
@@ -81,6 +82,22 @@ class ServerSelfDispatchTests(unittest.TestCase):
             self.server_mod._build_self_dispatch_prompt(),
             "Proceed with the derived task you just created.",
         )
+
+    def test_loom_system_prompt_prefers_mcp_reporting_tools(self):
+        prompt_source = (Path(__file__).resolve().parents[1] / "loom" / "server.py").read_text()
+
+        self.assertIn("Use the Loom MCP tools", prompt_source)
+        self.assertIn("loom_done(message=", prompt_source)
+        self.assertIn("loom_verify(state=", prompt_source)
+        self.assertIn("loom_context()", prompt_source)
+
+    def test_dispatch_postscript_prefers_mcp_reporting_tools(self):
+        prompt_source = (Path(__file__).resolve().parents[1] / "loom" / "server.py").read_text()
+
+        self.assertIn("Report your progress with these Loom MCP tools", prompt_source)
+        self.assertIn("loom_done(message=", prompt_source)
+        self.assertIn("loom_derive(description=", prompt_source)
+        self.assertIn("loom_verify(state=", prompt_source)
 
     def test_self_dispatch_bypasses_busy_agent_queue(self):
         active = self.state_mod.BoardTask(

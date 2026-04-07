@@ -101,7 +101,7 @@ This comes from the resolved agent configuration. It is adapter-specific launch 
 For provider-aware agents, Loom builds a persistent prompt that combines:
 
 - the resolved `system_prompt`
-- Loom's own agent instructions, such as `loom ai done`, `loom ai derive`, and `loom ai ask`
+- Loom's own agent instructions, centered on the `loom_done`, `loom_derive`, and `loom_ask` MCP tools for task reporting and handoff
 
 This is what gives a Loom-managed agent its long-lived identity inside a session.
 

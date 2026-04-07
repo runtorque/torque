@@ -18,10 +18,10 @@ All four default lanes are reserved --- they cannot be renamed or deleted:
 
 | Lane | Purpose |
 |------|---------|
-| **Backlog** | Tasks waiting to be started. New tasks land here by default. `loom ai ask` creates tasks here for human review. |
+| **Backlog** | Tasks waiting to be started. New tasks land here by default. `loom_ask(...)` creates tasks here for human review. |
 | **To Do** | Planned tasks, prioritized and ready to be picked up. |
 | **In Progress** | Active work. Tasks move here on dispatch and stay here until their pipeline chain resolves. |
-| **Done** | Completed tasks. Reached via `loom ai done` or cascade completion. |
+| **Done** | Completed tasks. Reached via `loom_done(...)` or cascade completion. |
 
 A task in **In Progress** means work is happening on it --- either directly by an agent, or indirectly through derived tasks in its pipeline chain. A task only leaves In Progress when its entire chain completes.
 
@@ -41,7 +41,7 @@ transitions:
     status: "On Review"
 ```
 
-When the implementing agent calls `loom ai derive -t review`, the parent task stays in In Progress and its status changes to **On Review**. If `status` is omitted, the status defaults to the target action's name (e.g., deriving to `review` sets status "review").
+When the implementing agent calls `loom_derive(description="Review auth implementation", action="review")`, the parent task stays in In Progress and its status changes to **On Review**. If `status` is omitted, the status defaults to the target action's name (e.g., deriving to `review` sets status "review").
 
 The board displays the status as a badge on the task card, giving you immediate visibility into what's happening without leaving the board view.
 
@@ -76,7 +76,7 @@ This means the board gives you two levels of detail:
 
 ## Transitions and status
 
-When an agent derives a follow-up task via `loom ai derive`, two things happen:
+When an agent derives a follow-up task via `loom_derive(...)`, two things happen:
 
 1. The **parent task** stays in In Progress. Its status updates to the value from the transition's `status` field.
 2. A **new task** is created, dispatched to an agent, and shown as a subordinate card under the parent.
@@ -99,18 +99,18 @@ The parent task's status reflects the current stage of its pipeline chain. As ag
 
 ## Cascade completion
 
-When a task is marked done via `loom ai done`, Loom walks up the parent chain and completes any ancestor tasks whose children are all finished. This is **cascade completion** --- the mechanism that moves tasks from In Progress to Done when their pipeline chain resolves.
+When a task is marked done via `loom_done(...)`, Loom walks up the parent chain and completes any ancestor tasks whose children are all finished. This is **cascade completion** --- the mechanism that moves tasks from In Progress to Done when their pipeline chain resolves.
 
 ### How it works
 
-1. The agent calls `loom ai done`. The current task moves to **Done**.
+1. The agent calls `loom_done(message="summary")`. The current task moves to **Done**.
 2. Loom looks at the parent task (via `parent_task_id`).
 3. If the parent is already in Done, skip it and check the grandparent.
 4. If the parent is NOT in Done, check: are **all** of this parent's derived tasks in Done?
 5. If yes, move the parent to Done and continue up the chain.
 6. If no, stop. The parent stays where it is.
 
-Cascade only fires on `loom ai done` (and `loom ai ready`), never on derive. This prevents premature completion --- a review task that derives a fix task won't cascade the root task, because the fix task isn't done yet.
+Cascade only fires on `loom_done(...)` (and `loom_ready()`), never on derive. This prevents premature completion --- a review task that derives a fix task won't cascade the root task, because the fix task isn't done yet.
 
 ### Example: a review cycle
 
@@ -142,7 +142,7 @@ In Progress                        Done
 └──────────────────────────────┘
 ```
 
-**Step 2** --- Agent A calls `loom ai derive -t review "Review auth implementation"`. The task's status changes to "On Review". T2 (review) appears as a subordinate card.
+**Step 2** --- Agent A calls `loom_derive(description="Review auth implementation", action="review")`. The task's status changes to "On Review". T2 (review) appears as a subordinate card.
 
 ```
 In Progress                        Done
@@ -157,7 +157,7 @@ In Progress                        Done
 └──────────────────────────────┘
 ```
 
-**Step 3** --- Agent B reviews and finds issues. Calls `loom ai derive -t fix "Fix null check in auth.py"`. T2 moves to Done (subordinate card grays out or gets a checkmark). T3 (fix) appears as a new subordinate card. The root task's status changes to "Fixing".
+**Step 3** --- Agent B reviews and finds issues. Calls `loom_derive(description="Fix null check in auth.py", action="fix")`. T2 moves to Done (subordinate card grays out or gets a checkmark). T3 (fix) appears as a new subordinate card. The root task's status changes to "Fixing".
 
 ```
 In Progress                        Done
@@ -175,7 +175,7 @@ In Progress                        Done
 └──────────────────────────────┘
 ```
 
-**Step 4** --- Agent C fixes the issue. Calls `loom ai derive -t review "Re-review after fix"`. T3 moves to Done. T4 (review) appears.
+**Step 4** --- Agent C fixes the issue. Calls `loom_derive(description="Re-review after fix", action="review")`. T3 moves to Done. T4 (review) appears.
 
 ```
 In Progress                        Done
@@ -196,7 +196,7 @@ In Progress                        Done
 └──────────────────────────────┘
 ```
 
-**Step 5** --- Agent D reviews and approves. Calls `loom ai done "Approved, all tests pass"`. T4 moves to Done. **Cascade fires:**
+**Step 5** --- Agent D reviews and approves. Calls `loom_done(message="Approved, all tests pass")`. T4 moves to Done. **Cascade fires:**
 
 - T4's parent is T3. T3 is already Done --- skip, continue up.
 - T3's parent is T2. T2 is already Done --- skip, continue up.
