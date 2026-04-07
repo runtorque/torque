@@ -1602,6 +1602,57 @@ class WeaverEventAndInteractionToolTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_task_verify_can_clear_attempted_and_smoke_fields(self):
+        state, weaver = self._make_state()
+        state.board_add_task(
+            "Deploy billing changes",
+            "g",
+            id="task-1",
+        )
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {
+                "type": "verification_updated",
+                "task_id": "task-1",
+                "message": "Verification updated",
+            }
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_verify",
+            {
+                "task": "task-1",
+                "attempted": False,
+                "smoke": "clear",
+            },
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(
+            json.loads(text),
+            {
+                "type": "verification_updated",
+                "task_id": "task-1",
+                "message": "Verification updated",
+            },
+        )
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "cmd": "board_verify_task",
+                    "id": "task-1",
+                    "actor_name": "Weaver",
+                    "deploy_attempted": False,
+                    "manual_smoke_done": False,
+                },
+            ],
+        )
+
     async def test_note_posts_without_pausing_event_delivery(self):
         state, weaver = self._make_state()
         calls = []

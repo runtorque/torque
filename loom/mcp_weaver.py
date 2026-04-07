@@ -421,12 +421,12 @@ WEAVER_TOOLS = [
                 },
                 "attempted": {
                     "type": "boolean",
-                    "description": "Record that deploy or restart was attempted.",
+                    "description": "Set or clear the recorded deploy/restart attempted flag.",
                 },
                 "smoke": {
                     "type": "string",
-                    "enum": ["passed", "failed"],
-                    "description": "Record a smoke result and mark smoke as done.",
+                    "enum": ["passed", "failed", "clear"],
+                    "description": "Record a smoke result, or clear smoke completion with `clear`.",
                 },
             },
             "required": ["task"],
@@ -1558,10 +1558,13 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             payload["human_validation_pending"] = args["human_validation_pending"]
         if "deploy_needed" in args:
             payload["deploy_needed"] = args["deploy_needed"]
-        if args.get("attempted"):
-            payload["deploy_attempted"] = True
+        if "attempted" in args:
+            payload["deploy_attempted"] = args["attempted"]
         if "smoke" in args:
-            payload["smoke_status"] = args["smoke"]
+            if args["smoke"] == "clear":
+                payload["manual_smoke_done"] = False
+            else:
+                payload["smoke_status"] = args["smoke"]
         result = await handle_command(payload)
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
