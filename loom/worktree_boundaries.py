@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Iterable
 
 
@@ -117,3 +118,41 @@ def boundary_summary(task, *, queued_followers: list | None = None,
             for follower in started_followers
         ],
     }
+
+
+def mark_branch_boundaries_merged(tasks: Iterable, *,
+                                  repo_root: str,
+                                  branch: str,
+                                  merge_sha: str,
+                                  merged_at: str | None = None) -> list:
+    """Mark merged branch-boundary tasks and apply the `merged` label.
+
+    Scope is limited to boundary tasks for the merged branch whose boundary
+    state was still active (`open`) or superseded by later work on that same
+    branch. Queued or unrelated tasks are left untouched.
+    """
+    if not repo_root or not branch:
+        return []
+
+    merged_at = merged_at or datetime.now(timezone.utc).isoformat()
+    updated = []
+    for task in branch_boundary_tasks(
+            tasks,
+            repo_root=repo_root,
+            branch=branch,
+            statuses={"open", "superseded"}):
+        boundary = dict(task_boundary(task))
+        boundary["status"] = "merged"
+        boundary["merged_at"] = merged_at
+        boundary["merge_commit_sha"] = merge_sha
+        boundary.pop("reason", None)
+        task.worktree_boundary = boundary
+
+        labels = list(getattr(task, "labels", []) or [])
+        if "merged" not in labels:
+            labels.append("merged")
+            task.labels = labels
+
+        updated.append(task)
+
+    return updated

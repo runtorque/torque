@@ -31,6 +31,7 @@ from .worktree_boundaries import (
     boundary_summary,
     branch_boundary_tasks,
     latest_boundary_task,
+    mark_branch_boundaries_merged,
     queued_successor_tasks,
     started_successor_tasks,
     task_boundary,
@@ -1471,15 +1472,12 @@ async def main(connection: iterm2.Connection):
     def _mark_branch_boundaries_merged(cell, merge_sha: str) -> None:
         if not cell:
             return
-        merged_at = datetime.now(timezone.utc).isoformat()
-        for branch_task in _branch_boundary_tasks_for_cell(
-                cell, statuses={"open", "superseded"}):
-            boundary = dict(task_boundary(branch_task))
-            boundary["status"] = "merged"
-            boundary["merged_at"] = merged_at
-            boundary["merge_commit_sha"] = merge_sha
-            boundary.pop("reason", None)
-            branch_task.worktree_boundary = boundary
+        repo_root = cell.worktree_repo_root or cell.git_root or ""
+        for branch_task in mark_branch_boundaries_merged(
+                state.board_tasks.values(),
+                repo_root=repo_root,
+                branch=cell.worktree_branch or "",
+                merge_sha=merge_sha):
             _save_task_record(branch_task)
 
     # -- Postscript builder -------------------------------------------------
