@@ -51,6 +51,10 @@ class BoardTask:
     depends_on: list = field(default_factory=list)  # [task_id, ...]
     # Image attachments — [{path, filename, mime_type}]
     attachments: list = field(default_factory=list)
+    # Derived task-health snapshot (advisory only; never drives lane/status)
+    health_state: str = "healthy"
+    health_since: str = ""
+    health_details: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -704,6 +708,7 @@ class MatrixState:
                     filtered = {k: v for k, v in raw.items() if k in ws_fields}
                     self.weaver_settings[gname] = WeaverSettings(**filtered)
             cleaned = self.cleanup_orphaned_attention(emit=False)
+            self.recompute_task_health(emit=False, persist=False)
             if cleaned["asks"] or cleaned["weaver_questions"]:
                 log.info(
                     "Expired %d orphaned ask(s) and cleared %d stale weaver question(s)",
@@ -1340,6 +1345,77 @@ class MatrixState:
         for i, t in enumerate(tasks):
             t.position = i
 
+    def recompute_task_health(self, now_ts: float | None = None,
+                              *, emit: bool = True,
+                              persist: bool = True) -> list[str]:
+        """Recompute advisory health for all tasks.
+
+        Health is deterministic and derived from persisted task signals plus
+        live agent state. It never mutates task lanes or statuses.
+        """
+        if not self.board_tasks:
+            return []
+
+        from .task_health import compute_task_health, now_iso
+
+        snapshots = compute_task_health(self.board_tasks, self.agents,
+                                        now_ts=now_ts)
+        changed = []
+        changed_set = set()
+        changed_task_ids = []
+        snapshot_now = now_iso(now_ts)
+        for tid, snapshot in snapshots.items():
+            task = self.board_tasks.get(tid)
+            if not task:
+                continue
+            old_state = task.health_state or "healthy"
+            old_source = ""
+            if isinstance(task.health_details, dict):
+                old_source = task.health_details.get("source_task_id", "")
+            new_source = snapshot.details.get("source_task_id", "")
+            state_changed = old_state != snapshot.state
+            source_changed = old_source != new_source
+            next_since = task.health_since
+            if state_changed or source_changed or not next_since:
+                next_since = snapshot_now
+            if (task.health_state == snapshot.state
+                    and task.health_since == next_since
+                    and task.health_details == snapshot.details):
+                continue
+            task.health_state = snapshot.state
+            task.health_since = next_since
+            task.health_details = snapshot.details
+            changed.append(tid)
+            changed_set.add(tid)
+            changed_task_ids.append(task)
+
+        if not changed:
+            return []
+
+        # If a task changes, re-emit and persist any open ancestors so root
+        # cards can reflect descendant health without waiting for their own
+        # direct mutation.
+        for task in list(changed_task_ids):
+            pid = task.parent_task_id
+            while pid:
+                parent = self.board_tasks.get(pid)
+                if not parent or pid in changed_set:
+                    break
+                changed_set.add(pid)
+                changed.append(pid)
+                changed_task_ids.append(parent)
+                pid = parent.parent_task_id
+
+        for tid in changed:
+            task = self.board_tasks.get(tid)
+            if not task:
+                continue
+            if emit:
+                self._emit("task_upsert", **asdict(task))
+            if persist and self.db:
+                self._db_save_task(task)
+        return changed
+
     def board_add_task(self, task: str, group: str, lane: str = "",
                        **kwargs) -> Optional[BoardTask]:
         if not task:
@@ -1384,6 +1460,7 @@ class MatrixState:
         self.board_tasks[tid] = bt
         self._emit("task_upsert", **asdict(bt))
         self._db_save_task(bt)
+        self.recompute_task_health()
         return bt
 
     def board_update_task(self, tid: str, **fields):
@@ -1411,6 +1488,7 @@ class MatrixState:
         task.updated_at = datetime.now(timezone.utc).isoformat()
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
+        self.recompute_task_health()
 
     def board_remove_task(self, tid: str):
         task = self.board_tasks.pop(tid, None)
@@ -1423,6 +1501,7 @@ class MatrixState:
                     t.depends_on.remove(tid)
                     self._emit("task_upsert", **asdict(t))
                     self._db_save_task(t)
+            self.recompute_task_health()
 
     def board_move_task(self, tid: str, lane: str,
                         position: Optional[int] = None):
@@ -1448,6 +1527,7 @@ class MatrixState:
         task.updated_at = datetime.now(timezone.utc).isoformat()
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
+        self.recompute_task_health()
 
     def board_reorder_task(self, tid: str, position: int):
         task = self.board_tasks.get(tid)
@@ -1575,6 +1655,8 @@ class MatrixState:
                 self._emit("task_upsert", **asdict(t))
                 self._db_save_task(t)
                 changed = True
+        if changed:
+            self.recompute_task_health()
 
     # -- Schedule CRUD ------------------------------------------------------
 

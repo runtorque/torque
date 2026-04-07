@@ -3461,6 +3461,7 @@ async def main(connection: iterm2.Connection):
                         _panel_event(
                             "agent_blocked", cell.id,
                             cell.name, cell.group, message)
+                        state.recompute_task_health()
 
                     elif action == "error":
                         cell.error_message = message
@@ -3476,6 +3477,7 @@ async def main(connection: iterm2.Connection):
                         _panel_event(
                             "agent_error", cell.id,
                             cell.name, cell.group, message)
+                        state.recompute_task_health()
 
                     elif action == "progress":
                         cell.activity_detail = message
@@ -3498,6 +3500,7 @@ async def main(connection: iterm2.Connection):
                             group=cell.group,
                             message=message)
                         state._emit("event_append", **pe)
+                        state.recompute_task_health()
 
                     elif action == "ready":
                         cell.activity = ""
@@ -3939,6 +3942,7 @@ async def main(connection: iterm2.Connection):
                                 "agent_renamed", cell.id,
                                 cell.name, cell.group,
                                 f"{old_name} \u2192 {cell.name}")
+                            state.recompute_task_health()
                             result = {"type": "ok",
                                       "slug": cell.slug}
 

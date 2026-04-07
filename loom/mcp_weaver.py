@@ -891,6 +891,14 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         lane_counts = {lane_name: 0 for lane_name in state.board_lanes}
         extra_lanes = {}
         label_counts = {"ready": 0, "deferred": 0}
+        health_counts = {
+            "healthy": 0,
+            "blocked": 0,
+            "idle-risk": 0,
+            "stalled": 0,
+            "thrashing": 0,
+        }
+        unhealthy = []
         pending_asks = []
 
         for task in tasks:
@@ -903,6 +911,18 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             for label_name in label_counts:
                 if label_name in labels:
                     label_counts[label_name] += 1
+
+            health_state = getattr(task, "health_state", "healthy") or "healthy"
+            if health_state not in health_counts:
+                health_counts[health_state] = 0
+            health_counts[health_state] += 1
+            if task.lane != "Done" and health_state != "healthy":
+                unhealthy.append({
+                    "id": task.id,
+                    "title": task.task,
+                    "health_state": health_state,
+                    "health_since": getattr(task, "health_since", ""),
+                })
 
             if "loom:human" in labels and task.lane != "Done":
                 pending_asks.append({
@@ -963,12 +983,21 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             })
 
         pending_asks.sort(key=lambda item: (item["title"].lower(), item["id"]))
+        unhealthy.sort(
+            key=lambda item: (item["health_state"], item["health_since"], item["title"]),
+            reverse=True,
+        )
 
         summary = {
             "group": _weaver_group,
             "tasks_total": len(tasks),
             "lanes": ordered_lanes,
             "labels": label_counts,
+            "task_health": {
+                "counts": health_counts,
+                "unhealthy": unhealthy[:10],
+                "truncated": len(unhealthy) > 10,
+            },
             "asks": {
                 "count": len(pending_asks),
                 "items": pending_asks[:10],
@@ -1017,6 +1046,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "action": t.action_name,
                 "agent": agent_name,
                 "status": t.status,
+                "health_state": getattr(t, "health_state", "healthy"),
+                "health_since": getattr(t, "health_since", ""),
                 "parent_task_id": t.parent_task_id,
             })
 
@@ -1055,6 +1086,9 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             "pipeline_depth": task.pipeline_depth,
             "depends_on": task.depends_on or [],
             "created_at": task.created_at,
+            "health_state": getattr(task, "health_state", "healthy"),
+            "health_since": getattr(task, "health_since", ""),
+            "health_details": getattr(task, "health_details", {}) or {},
         }
         # Include recent messages (last 10 only)
         if task.messages:
@@ -1080,6 +1114,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                     "title": ct.task,
                     "lane": ct.lane,
                     "status": ct.status,
+                    "health_state": getattr(ct, "health_state", "healthy"),
                     "depth": ct.pipeline_depth,
                     "agent": agent_slug,
                 })
