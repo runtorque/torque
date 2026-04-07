@@ -208,7 +208,7 @@ Once an agent is working on a task, it can report status back to Loom using Loom
 | `loom_progress(message="message")` | Updates the activity detail shown in the UI. |
 | `loom_verify(state="passed", tests_run="...", notes="...")` | Records deploy/restart/smoke verification metadata for the task. |
 | `loom_derive(description="desc", action="action")` | Keeps the parent task in **In Progress**, creates a derived task, and dispatches it. |
-| `loom_ask(question="question", description="details")` | Creates a derived task in Backlog for human review. |
+| `loom_ask(question="question", description="details")` | Creates a blocking human-review task in Backlog when the agent cannot continue safely without a decision or approval. |
 
 When a task is dispatched with an action that has [transitions](actions.md#pipelines), the available Loom MCP tools are appended to the prompt as a postscript so the agent knows what reporting options it has.
 

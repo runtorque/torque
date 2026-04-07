@@ -89,6 +89,8 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("Use the Loom MCP tools", prompt_source)
         self.assertIn("loom_done(message=", prompt_source)
         self.assertIn("loom_verify(state=", prompt_source)
+        self.assertIn("blocking human decision or approval", prompt_source)
+        self.assertIn("Do not use it for status updates or", prompt_source)
         self.assertIn("loom_context()", prompt_source)
 
     def test_dispatch_postscript_prefers_mcp_reporting_tools(self):
@@ -98,6 +100,7 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("loom_done(message=", prompt_source)
         self.assertIn("loom_derive(description=", prompt_source)
         self.assertIn("loom_verify(state=", prompt_source)
+        self.assertIn("blocking human decision/approval only", prompt_source)
 
     def test_self_dispatch_bypasses_busy_agent_queue(self):
         active = self.state_mod.BoardTask(

@@ -503,7 +503,7 @@ The agent reads these instructions and calls the appropriate MCP tool when it's 
 
 ### The `ask` transition
 
-The `ask` transition is a human-in-the-loop gate. When an agent calls `loom_ask(question="question")`, the derived task lands in the **Backlog** lane with a `human` label instead of being dispatched automatically. A human reviews the question, optionally edits the task, and dispatches it manually.
+The `ask` transition is a blocking human-in-the-loop gate, not a general notification path. Use it only when the agent cannot responsibly continue without a human decision or approval. When an agent calls `loom_ask(question="question")`, the derived task lands in the **Backlog** lane with a `human` label instead of being dispatched automatically. A human reviews the question, optionally edits the task, and dispatches it manually.
 
 ```yaml
 transitions:
