@@ -66,6 +66,7 @@ class FakeElement {
     this._innerHTML = '';
     this._querySelectorMap = new Map();
     this._querySelectorAllMap = new Map();
+    this.parentNode = null;
   }
 
   get innerHTML() {
@@ -78,6 +79,7 @@ class FakeElement {
   }
 
   appendChild(child) {
+    child.parentNode = this;
     this.children.push(child);
     if (child.selected) this.value = child.value;
     return child;
@@ -97,6 +99,31 @@ class FakeElement {
 
   remove() {
     this.removed = true;
+    if (this.parentNode && Array.isArray(this.parentNode.children)) {
+      this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+    }
+    this.parentNode = null;
+  }
+
+  contains(target) {
+    if (target === this) return true;
+    return this.children.includes(target);
+  }
+
+  closest(selector) {
+    if (!selector || selector.charAt(0) !== '.') return null;
+    return this.classList.contains(selector.slice(1)) ? this : null;
+  }
+
+  getBoundingClientRect() {
+    return {
+      top: 16,
+      bottom: 40,
+      left: 24,
+      right: 184,
+      width: 160,
+      height: 24,
+    };
   }
 
   querySelector(selector) {
@@ -121,6 +148,7 @@ class FakeDocument {
     this.elements = new Map();
     this.selectorMap = new Map();
     this.body = new FakeElement('body');
+    this.listeners = {};
   }
 
   register(id, element = new FakeElement(id)) {
@@ -136,6 +164,14 @@ class FakeDocument {
     const el = new FakeElement();
     el.tagName = tagName.toUpperCase();
     return el;
+  }
+
+  addEventListener(type, handler) {
+    this.listeners[type] = handler;
+  }
+
+  removeEventListener(type, handler) {
+    if (this.listeners[type] === handler) delete this.listeners[type];
   }
 
   querySelector(selector) {
@@ -1028,12 +1064,12 @@ test('board lane sort modes persist per group and render stable visible ordering
     jsonValue(context, `_boardTasksInLane('Backlog').map(function(t) { return t.id; })`),
     ['oldest', 'manualTop', 'dueSoon', 'newest'],
   );
-  assert.match(panel.innerHTML, /<option value="oldest" selected>Oldest<\/option>/);
+  assert.match(runInContext(context, `_renderBoardDisplayControls()`), /<option value="oldest" selected>Oldest<\/option>/);
 
   context.activeGroup = 'beta';
   context.renderBoard();
   assert.equal(runInContext(context, `_boardLaneSortMode('Backlog')`), 'manual');
-  assert.match(panel.innerHTML, /<option value="manual" selected>Manual<\/option>/);
+  assert.match(runInContext(context, `_renderBoardDisplayControls()`), /<option value="manual" selected>Manual<\/option>/);
 
   context.activeGroup = 'alpha';
   context.renderBoard();
@@ -1073,7 +1109,7 @@ test('board lane sort modes persist per group and render stable visible ordering
     jsonValue(context, `_boardTasksInLane('Backlog').map(function(t) { return t.id; })`),
     ['dueSoon', 'newest', 'manualTop', 'oldest'],
   );
-  assert.match(panel.innerHTML, /<option value="due" selected>Due Soonest<\/option>/);
+  assert.match(runInContext(context, `_renderBoardDisplayControls()`), /<option value="due" selected>Due Soonest<\/option>/);
 });
 
 test('board card density persists per group and keeps key signals rendered', () => {
@@ -1110,14 +1146,14 @@ test('board card density persists per group and keeps key signals rendered', () 
   context.renderBoard();
 
   assert.match(panel.innerHTML, /board-density-compact/);
-  assert.match(panel.innerHTML, /<option value="compact" selected>Compact<\/option>/);
+  assert.match(runInContext(context, `_renderBoardDisplayControls()`), /<option value="compact" selected>Compact<\/option>/);
   assert.match(panel.innerHTML, /board-card-meta/);
   assert.match(panel.innerHTML, /board-card-agent/);
 
   context.activeGroup = 'beta';
   context.renderBoard();
   assert.match(panel.innerHTML, /board-density-normal/);
-  assert.match(panel.innerHTML, /<option value="normal" selected>Normal<\/option>/);
+  assert.match(runInContext(context, `_renderBoardDisplayControls()`), /<option value="normal" selected>Normal<\/option>/);
 
   context.activeGroup = 'alpha';
   context.renderBoard();
@@ -1133,10 +1169,10 @@ test('board card density persists per group and keeps key signals rendered', () 
     },
   );
   assert.match(panel.innerHTML, /board-density-detailed/);
-  assert.match(panel.innerHTML, /<option value="detailed" selected>Detailed<\/option>/);
+  assert.match(runInContext(context, `_renderBoardDisplayControls()`), /<option value="detailed" selected>Detailed<\/option>/);
 });
 
-test('renderBoard shows a compact sticky lane header with counts, filter summary, and quick actions', () => {
+test('renderBoard relies on the filter toolbar and lane tabs instead of a duplicate lane header', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');
   document.register('board-cards');
@@ -1179,16 +1215,64 @@ test('renderBoard shows a compact sticky lane header with counts, filter summary
 
   context.renderBoard();
 
-  assert.match(panel.innerHTML, /board-lane-header/);
+  assert.doesNotMatch(panel.innerHTML, /board-lane-header/);
   assert.match(panel.innerHTML, /Backlog/);
-  assert.match(panel.innerHTML, /1 root · 2 total/);
-  assert.match(panel.innerHTML, /Search "deploy"/);
-  assert.match(panel.innerHTML, /Labels bug/);
-  assert.match(panel.innerHTML, /Actions feature\/review/);
-  assert.match(panel.innerHTML, /Agents Alice Reviewer/);
-  assert.match(panel.innerHTML, /\+ Task/);
-  assert.match(panel.innerHTML, /Clear Filters/);
+  assert.match(panel.innerHTML, /value="deploy"/);
+  assert.match(panel.innerHTML, /bug &times;/);
+  assert.match(panel.innerHTML, /feature\/review &times;/);
+  assert.match(panel.innerHTML, /Alice Reviewer &times;/);
+  assert.match(panel.innerHTML, /boardClearFilters\(\)">Clear/);
   assert.match(panel.innerHTML, /Save View/);
+  assert.match(panel.innerHTML, /board-view-menu-wrap/);
+  assert.match(panel.innerHTML, /View &#9662;/);
+  assert.equal(panel.innerHTML.includes('Import external'), false);
+  assert.equal(
+    panel.innerHTML.indexOf('board-view-menu-wrap') < panel.innerHTML.indexOf('board-lane-bar'),
+    true,
+  );
+});
+
+test('_renderBoardCard hides redundant group chips and only shows execution badges on derived cards', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Research shared context bus',
+      lane: 'Backlog',
+      position: 2,
+      status: 'Implementing',
+      health_state: 'stalled',
+      action_name: 'feature/research',
+      labels: ['ready', 'memory'],
+    },
+    child: {
+      id: 'child',
+      group: 'alpha',
+      task: 'Implement shared context memory v1',
+      lane: 'In Progress',
+      position: 1,
+      parent_task_id: 'root',
+      pipeline_depth: 1,
+      status: 'Implementing',
+      health_state: 'stalled',
+    },
+  };
+
+  const html = runInContext(context, `
+    _renderBoardCard(
+      state.board_tasks.root,
+      { root: [state.board_tasks.child] },
+      0
+    )
+  `);
+
+  assert.equal((html.match(/board-card-group/g) || []).length, 0);
+  assert.equal((html.match(/board-card-status/g) || []).length, 1);
+  assert.equal((html.match(/board-card-health-stalled/g) || []).length, 1);
 });
 
 test('renderBoard explains filtered empty states with a clear recovery action', () => {

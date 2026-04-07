@@ -33,6 +33,8 @@ var _boardFilterAgents = [];    // active agent ID filters (OR logic)
 var _boardFilterHealth = [];    // active health filters (OR logic)
 var _boardFilterDropdownType = null;   // 'label' | 'action' | 'agent' | 'health' | null
 var _boardFilterDropdownCleanup = null;
+var _boardViewMenuCleanup = null;
+var _boardViewMenuOpen = false;
 var _boardPreFilterLane = '';    // saved lane before search, restored on clear
 var _boardFiltersByGroup = null; // persisted filter state keyed by group
 var _boardSavedViewsByGroup = null; // saved view snapshots keyed by group
@@ -737,37 +739,107 @@ function _boardFilterSummaryText() {
   return parts.length ? parts.join(' · ') : 'No active filters';
 }
 
-function _boardLaneCountSummary(rootCount, totalCount) {
-  if (totalCount === rootCount) {
-    return rootCount + ' task' + (rootCount === 1 ? '' : 's');
-  }
-  return rootCount + ' root' + (rootCount === 1 ? '' : 's')
-    + ' · ' + totalCount + ' total';
+function _renderBoardDisplayControls() {
+  if (_boardShowSchedules || !_boardSelectedLane) return '';
+  var sortMode = _boardLaneSortMode(_boardSelectedLane);
+  var densityMode = _boardCardDensityMode();
+  var archivedCount = _boardArchivedCount();
+  var html = '<div class="board-view-menu-section">';
+  html += '<label class="board-display-label" for="board-lane-sort-select">Sort</label>';
+  html += '<select class="board-display-select" id="board-lane-sort-select"'
+    + ' onchange="boardSetLaneSort(this.value)">';
+  html += '<option value="manual"' + (sortMode === 'manual' ? ' selected' : '') + '>Manual</option>';
+  html += '<option value="newest"' + (sortMode === 'newest' ? ' selected' : '') + '>Newest</option>';
+  html += '<option value="oldest"' + (sortMode === 'oldest' ? ' selected' : '') + '>Oldest</option>';
+  html += '<option value="due"' + (sortMode === 'due' ? ' selected' : '') + '>Due Soonest</option>';
+  html += '</select>';
+  html += '</div>';
+  html += '<div class="board-view-menu-section">';
+  html += '<label class="board-display-label" for="board-card-density-select">Density</label>';
+  html += '<select class="board-display-select" id="board-card-density-select"'
+    + ' onchange="boardSetCardDensity(this.value)">';
+  html += '<option value="compact"' + (densityMode === 'compact' ? ' selected' : '') + '>Compact</option>';
+  html += '<option value="normal"' + (densityMode === 'normal' ? ' selected' : '') + '>Normal</option>';
+  html += '<option value="detailed"' + (densityMode === 'detailed' ? ' selected' : '') + '>Detailed</option>';
+  html += '</select>';
+  html += '</div>';
+  html += '<button class="board-view-menu-toggle' + (_boardShowArchived ? ' active' : '') + '"'
+    + ' onclick="boardToggleArchived()">'
+    + (_boardShowArchived ? 'Hide archived' : 'Show archived')
+    + (archivedCount ? ' <span class="board-filter-btn-count">' + archivedCount + '</span>' : '')
+    + '</button>';
+  return html;
 }
 
-function _renderBoardLaneHeader(lane, rootCount, totalCount, currentViewSavable) {
-  var html = '<div class="board-lane-header">';
-  html += '<div class="board-lane-header-main">';
-  html += '<div class="board-lane-header-title">';
-  html += '<span class="board-lane-header-name">' + esc(lane) + '</span>';
-  html += '<span class="board-lane-header-counts">'
-    + esc(_boardLaneCountSummary(rootCount, totalCount)) + '</span>';
-  html += '</div>';
-  html += '<div class="board-lane-header-actions">';
-  if (!_boardAddingTask) {
-    html += '<button class="board-lane-header-action" onclick="boardStartAddTask()">+ Task</button>';
+function boardToggleViewMenu() {
+  if (_boardViewMenuOpen) {
+    _boardCloseViewMenu();
+    renderBoard();
+    return;
   }
-  if (_boardHasActiveFilters()) {
-    html += '<button class="board-lane-header-action" onclick="boardClearFilters()">Clear Filters</button>';
-  }
-  if (currentViewSavable) {
-    html += '<button class="board-lane-header-action" onclick="boardSaveCurrentView()">Save View</button>';
-  }
-  html += '</div>';
-  html += '</div>';
-  html += '<div class="board-lane-header-summary">' + esc(_boardFilterSummaryText()) + '</div>';
-  html += '</div>';
-  return html;
+  _boardCloseFilterDropdown();
+  _boardOpenViewMenu();
+  renderBoard();
+}
+
+function _boardOpenViewMenu() {
+  var wrap = document.getElementById('board-view-menu-wrap');
+  if (!wrap) return;
+  var btn = wrap.querySelector('.board-filter-btn');
+  if (!btn || typeof btn.getBoundingClientRect !== 'function') return;
+  var rect = btn.getBoundingClientRect();
+
+  _boardCloseViewMenu();
+  _boardViewMenuOpen = true;
+
+  var menu = document.createElement('div');
+  menu.className = 'board-view-menu';
+  menu.id = 'board-view-menu-active';
+  menu.style.position = 'fixed';
+  menu.style.top = (rect.bottom + 2) + 'px';
+  menu.style.left = rect.left + 'px';
+  menu.innerHTML = _renderBoardDisplayControls();
+  document.body.appendChild(menu);
+
+  requestAnimationFrame(function() {
+    if (typeof menu.getBoundingClientRect !== 'function') return;
+    var menuRect = menu.getBoundingClientRect();
+    if (menuRect.right > window.innerWidth) {
+      menu.style.left = Math.max(4, window.innerWidth - menuRect.width - 4) + 'px';
+    }
+    if (menuRect.bottom > window.innerHeight) {
+      menu.style.top = Math.max(4, rect.top - menuRect.height - 2) + 'px';
+    }
+  });
+
+  var handler = function(e) {
+    var target = e && e.target;
+    var insideMenu = !!(menu && typeof menu.contains === 'function' && menu.contains(target));
+    var insideWrap = !!(wrap && typeof wrap.contains === 'function' && wrap.contains(target));
+    if (!insideMenu && !insideWrap) {
+      _boardCloseViewMenu();
+      renderBoard();
+    }
+  };
+
+  setTimeout(function() {
+    if (document && typeof document.addEventListener === 'function') {
+      document.addEventListener('mousedown', handler, true);
+    }
+  }, 0);
+
+  _boardViewMenuCleanup = function() {
+    if (document && typeof document.removeEventListener === 'function') {
+      document.removeEventListener('mousedown', handler, true);
+    }
+    if (menu && menu.parentNode) menu.remove();
+    _boardViewMenuCleanup = null;
+  };
+}
+
+function _boardCloseViewMenu() {
+  _boardViewMenuOpen = false;
+  if (_boardViewMenuCleanup) _boardViewMenuCleanup();
 }
 
 function _boardLanePoolTasks(lane) {
@@ -1195,6 +1267,7 @@ function _renderBoardArchiveSuggestion() {
 function _renderBoardCard(t, childrenOf, depth) {
   var isSubordinate = depth > 0;
   var hasChildren = childrenOf[t.id] && childrenOf[t.id].length > 0;
+  var showExecutionState = isSubordinate || !hasChildren;
   var isCollapsed = _boardCollapsedTasks[t.id];
   var isDone = t.lane === 'Done';
   var dotClass = t.agent_id ? _boardAgentStatus(t.agent_id) : '';
@@ -1226,13 +1299,12 @@ function _renderBoardCard(t, childrenOf, depth) {
   var titlePrefix = (isSubordinate && isDone) ? '&#10003; ' : '';
   cardHtml += '<div class="board-card-title">' + titlePrefix + formatCode(t.task || '') + '</div>';
   var meta = '';
-  if (t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
-  if (_boardTaskHealthState(t) !== 'healthy') {
+  if (showExecutionState && t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
+  if (showExecutionState && _boardTaskHealthState(t) !== 'healthy') {
     meta += '<span class="board-card-label board-card-health board-card-health-' + esc(_boardTaskHealthState(t))
       + '" title="' + esc(_boardHealthTitle(t)) + '">' + esc(_boardHealthDisplayName(_boardTaskHealthState(t))) + '</span>';
   }
   if (_boardHasActiveFilters() && t.lane) meta += '<span class="board-card-lane-badge">' + esc(t.lane) + '</span>';
-  if (t.group && !isSubordinate) meta += '<span class="board-card-group">' + esc(t.group) + '</span>';
   if (t.action_name) meta += '<span class="board-card-label board-card-template">' + esc(t.action_name) + '</span>';
   if (t.agent_template) meta += '<span class="board-card-label board-card-template">agent: ' + esc(t.agent_template) + '</span>';
   if (t.labels && t.labels.length) {
@@ -1507,19 +1579,12 @@ function renderBoard() {
         + ' &#9662;</button>';
       html += '</div>';
     }
-    if (archivedCount || _boardShowArchived) {
-      html += '<button class="board-filter-btn' + (_boardShowArchived ? ' active' : '') + '"'
-        + ' onclick="boardToggleArchived()">'
-        + (_boardShowArchived ? 'Hide archived' : 'Show archived')
-        + (archivedCount ? ' <span class="board-filter-btn-count">' + archivedCount + '</span>' : '')
-        + '</button>';
-    }
     if (filtersActive) {
       html += '<button class="board-filter-clear" onclick="boardClearFilters()">Clear</button>';
     }
     html += '</div>';
 
-    if (hasQuickViews || hasSavedViews) {
+    if (hasQuickViews || hasSavedViews || !_boardShowSchedules) {
       html += '<div class="board-saved-views">';
       if (hasQuickViews) {
         html += '<button class="board-filter-btn'
@@ -1539,6 +1604,13 @@ function renderBoard() {
           + esc(view.name) + '</button>';
         html += '<button class="board-saved-view-delete"'
           + ' onclick="event.stopPropagation();boardDeleteSavedView(\'' + viewName + '\')">&times;</button>';
+        html += '</div>';
+      }
+      if (!_boardShowSchedules && _boardSelectedLane) {
+        html += '<div class="board-saved-views-spacer"></div>';
+        html += '<div class="board-filter-btn-wrap" id="board-view-menu-wrap">';
+        html += '<button class="board-filter-btn' + (_boardViewMenuOpen ? ' active' : '') + '"'
+          + ' onclick="boardToggleViewMenu()">View &#9662;</button>';
         html += '</div>';
       }
       html += '</div>';
@@ -1574,7 +1646,6 @@ function renderBoard() {
       html += '</div>';
     }
   }
-
   // When filters become active, save the current lane; auto-select first non-empty lane
   if (filtersActive) {
     if (!_boardPreFilterLane) _boardPreFilterLane = _boardSelectedLane;
@@ -1621,29 +1692,6 @@ function renderBoard() {
 
   html += '</div>';
   html += '<button class="board-lane-scroll-btn" id="board-scroll-right" onclick="boardScrollLanes(1)" title="Scroll right">&#9654;</button>';
-  if (!_boardShowSchedules && _boardSelectedLane) {
-    var sortMode = _boardLaneSortMode(_boardSelectedLane);
-    var densityMode = _boardCardDensityMode();
-    html += '<div class="board-lane-sort">';
-    html += '<label class="board-lane-sort-label" for="board-lane-sort-select">Sort</label>';
-    html += '<select class="board-lane-sort-select" id="board-lane-sort-select"'
-      + ' onchange="boardSetLaneSort(this.value)">';
-    html += '<option value="manual"' + (sortMode === 'manual' ? ' selected' : '') + '>Manual</option>';
-    html += '<option value="newest"' + (sortMode === 'newest' ? ' selected' : '') + '>Newest</option>';
-    html += '<option value="oldest"' + (sortMode === 'oldest' ? ' selected' : '') + '>Oldest</option>';
-    html += '<option value="due"' + (sortMode === 'due' ? ' selected' : '') + '>Due Soonest</option>';
-    html += '</select>';
-    html += '</div>';
-    html += '<div class="board-lane-density">';
-    html += '<label class="board-lane-density-label" for="board-card-density-select">Density</label>';
-    html += '<select class="board-lane-density-select" id="board-card-density-select"'
-      + ' onchange="boardSetCardDensity(this.value)">';
-    html += '<option value="compact"' + (densityMode === 'compact' ? ' selected' : '') + '>Compact</option>';
-    html += '<option value="normal"' + (densityMode === 'normal' ? ' selected' : '') + '>Normal</option>';
-    html += '<option value="detailed"' + (densityMode === 'detailed' ? ' selected' : '') + '>Detailed</option>';
-    html += '</select>';
-    html += '</div>';
-  }
   html += '</div>';
 
   // Schedules view (replaces cards when active)
@@ -1677,12 +1725,6 @@ function renderBoard() {
   });
 
   html += '<div class="board-cards board-density-' + _boardCardDensityMode() + '" id="board-cards">';
-  html += _renderBoardLaneHeader(
-    _boardSelectedLane,
-    rootTasks.length,
-    tasks.length,
-    currentViewSavable,
-  );
 
   // Add task: inline input or button (at top)
   if (_boardAddingTask) {
@@ -1728,7 +1770,6 @@ function renderBoard() {
   } else {
     html += '<div class="board-add-task" onclick="boardStartAddTask()">';
     html += '<span>+ Add task</span>';
-    html += '<button class="board-add-tpl-btn-idle" onclick="event.stopPropagation();boardImportExternal()">Import external</button>';
     html += '<button class="board-add-tpl-btn-idle" onclick="event.stopPropagation();boardToggleActionList()">From action &#9662;</button>';
     html += '</div>';
   }
@@ -1844,6 +1885,7 @@ function boardSetLaneSort(mode) {
   var group = _currentGroup();
   var lane = _boardSelectedLane;
   if (!group || !lane) return;
+  _boardCloseViewMenu();
   _boardPrepareViewChange(false);
   mode = _boardNormalizeLaneSortMode(mode);
   var sorts = _boardLaneSortsByGroup[group] || {};
@@ -1868,6 +1910,7 @@ function boardSetCardDensity(mode) {
   _boardHydrateCardDensity();
   var group = _currentGroup();
   if (!group) return;
+  _boardCloseViewMenu();
   mode = _boardNormalizeCardDensity(mode);
   if (mode === 'normal') {
     delete _boardCardDensityByGroup[group];
@@ -3196,6 +3239,7 @@ function boardPreviewPrompt(taskId) {
 }
 
 function boardToggleArchived() {
+  _boardCloseViewMenu();
   _boardShowArchived = !_boardShowArchived;
   _boardCardsScrollTop = 0;
   _boardRenderLimit = 50;
@@ -3553,6 +3597,7 @@ function boardDeleteSavedView(name) {
 /* ---- Filter dropdowns ----------------------------------------------- */
 
 function boardToggleLabelFilter() {
+  _boardCloseViewMenu();
   if (_boardFilterDropdownType === 'label') {
     _boardCloseFilterDropdown();
     return;
@@ -3566,6 +3611,7 @@ function boardToggleLabelFilter() {
 }
 
 function boardToggleActionFilter() {
+  _boardCloseViewMenu();
   if (_boardFilterDropdownType === 'action') {
     _boardCloseFilterDropdown();
     return;
@@ -3579,6 +3625,7 @@ function boardToggleActionFilter() {
 }
 
 function boardToggleAgentFilter() {
+  _boardCloseViewMenu();
   if (_boardFilterDropdownType === 'agent') {
     _boardCloseFilterDropdown();
     return;
@@ -3594,6 +3641,7 @@ function boardToggleAgentFilter() {
 }
 
 function boardToggleHealthFilter() {
+  _boardCloseViewMenu();
   if (_boardFilterDropdownType === 'health') {
     _boardCloseFilterDropdown();
     return;
