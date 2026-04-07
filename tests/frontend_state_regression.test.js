@@ -2077,6 +2077,138 @@ test('backlog dispatch note ignores overlap warnings for ready work', () => {
   assert.equal(note, null);
 });
 
+test('board recommendation prefers the best ready task and skips queued or busy work', () => {
+  const { context } = createBoardHarness();
+  context.state.agents = {
+    'agent-busy': {
+      id: 'agent-busy',
+      name: 'Worker One',
+      current_task_id: 'task-active',
+    },
+    'agent-idle': {
+      id: 'agent-idle',
+      name: 'Worker Two',
+      current_task_id: '',
+    },
+  };
+  context.state.auto_dispatch_queues = {
+    alpha: [{ task_id: 'task-queued' }],
+  };
+  context.state.board_tasks = {
+    'task-active': {
+      id: 'task-active',
+      group: 'alpha',
+      task: 'Active implementation',
+      lane: 'In Progress',
+      agent_id: 'agent-busy',
+      position: 0,
+    },
+    'task-busy': {
+      id: 'task-busy',
+      group: 'alpha',
+      task: 'Busy follow-up',
+      lane: 'To Do',
+      agent_id: 'agent-busy',
+      labels: ['priority:high'],
+      position: 1,
+    },
+    'task-queued': {
+      id: 'task-queued',
+      group: 'alpha',
+      task: 'Queued separately',
+      lane: 'To Do',
+      labels: ['priority:high'],
+      position: 2,
+    },
+    boundary: {
+      id: 'boundary',
+      group: 'alpha',
+      task: 'Stable boundary',
+      lane: 'Done',
+      position: 3,
+    },
+    recommended: {
+      id: 'recommended',
+      group: 'alpha',
+      task: 'Release notes follow-up',
+      lane: 'To Do',
+      agent_id: 'agent-idle',
+      labels: ['priority:medium'],
+      resume_after_boundary_task_id: 'boundary',
+      position: 4,
+    },
+    backlog: {
+      id: 'backlog',
+      group: 'alpha',
+      task: 'Refactor auth',
+      lane: 'Backlog',
+      labels: ['priority:high'],
+      position: 0,
+    },
+  };
+
+  const recommendation = jsonValue(context, `_boardRecommendedDispatch()`);
+
+  assert.equal(recommendation.task.id, 'recommended');
+  assert.match(recommendation.reason_summary, /Already staged in To Do/);
+  assert.match(recommendation.reason_summary, /Continues after "Stable boundary"/);
+  assert.match(recommendation.reason_summary, /Already linked to Worker Two/);
+  assert.match(recommendation.reason_summary, /Priority: Medium/);
+});
+
+test('renderBoard surfaces the recommended dispatch banner with inspectable reasoning', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.agents = {
+    'agent-idle': {
+      id: 'agent-idle',
+      name: 'Worker Two',
+      current_task_id: '',
+    },
+  };
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      group: 'alpha',
+      task: 'Stable boundary',
+      lane: 'Done',
+      position: 2,
+    },
+    recommended: {
+      id: 'recommended',
+      group: 'alpha',
+      task: 'Release notes follow-up',
+      lane: 'To Do',
+      agent_id: 'agent-idle',
+      labels: ['priority:medium'],
+      resume_after_boundary_task_id: 'boundary',
+      position: 1,
+    },
+    other: {
+      id: 'other',
+      group: 'alpha',
+      task: 'Refactor auth',
+      lane: 'Backlog',
+      labels: ['priority:high'],
+      position: 0,
+    },
+  };
+
+  runInContext(context, `_boardSelectedLane = 'To Do';`);
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /Recommended next dispatch: Release notes follow-up/);
+  assert.match(panel.innerHTML, /Already staged in To Do/);
+  assert.match(panel.innerHTML, /Continues after &quot;Stable boundary&quot;/);
+  assert.match(panel.innerHTML, /Already linked to Worker Two/);
+  assert.match(panel.innerHTML, /Priority: Medium/);
+  assert.match(panel.innerHTML, /Show Task/);
+  assert.match(panel.innerHTML, /Dispatch\.\.\./);
+});
+
 test('renderBoard explains filtered empty states with a clear recovery action', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');

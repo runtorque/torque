@@ -70,6 +70,7 @@ var _boardEligibilityActionsByGroup = {};
 var _boardEligibilityTemplatesByGroup = {};
 var _boardEligibilityActionWaiting = false;
 var _boardEligibilityTemplateWaiting = false;
+var _boardActiveDispatchRecommendation = null;
 
 var _boardHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
 var _boardHealthLabels = {
@@ -1260,6 +1261,137 @@ function _boardBacklogDispatchNote(rootTasks) {
   };
 }
 
+function _boardTaskIsAutoQueued(task) {
+  if (!task || !state || !state.auto_dispatch_queues) return false;
+  for (var group in state.auto_dispatch_queues) {
+    var entries = state.auto_dispatch_queues[group] || [];
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i] && entries[i].task_id === task.id) return true;
+    }
+  }
+  return false;
+}
+
+function _boardTaskHasBusyAssignedAgent(task) {
+  if (!task || !task.agent_id || !state || !state.board_tasks) return false;
+  var agent = state.agents ? state.agents[task.agent_id] : null;
+  if (agent && agent.current_task_id && agent.current_task_id !== task.id) {
+    return true;
+  }
+  for (var id in state.board_tasks) {
+    var other = state.board_tasks[id];
+    if (!other || other.id === task.id || other.agent_id !== task.agent_id) continue;
+    if (other.lane === 'In Progress') return true;
+  }
+  return false;
+}
+
+function _boardDispatchRecommendation(task) {
+  if (!task) return null;
+  if (task.lane !== 'Backlog' && task.lane !== 'To Do') return null;
+  if (_boardIsArchived(task)) return null;
+  if (_boardDepsBlocked(task)) return null;
+  if (_boardTaskIsFutureScheduled(task)) return null;
+  if (_boardTaskIsAutoQueued(task)) return null;
+  if (_boardTaskHasBusyAssignedAgent(task)) return null;
+  var labels = task.labels || [];
+  if (labels.indexOf('loom:blocked') >= 0 || labels.indexOf('loom:human') >= 0) {
+    return null;
+  }
+
+  var score = 0;
+  var reasons = [];
+  var scoreBreakdown = [];
+
+  function addReason(weight, label) {
+    score += weight;
+    reasons.push(label);
+    scoreBreakdown.push({ weight: weight, label: label });
+  }
+
+  if (task.lane === 'To Do') {
+    addReason(300, 'Already staged in To Do');
+  } else {
+    addReason(200, 'Ready from Backlog');
+  }
+
+  if (task.resume_after_boundary_task_id && state && state.board_tasks) {
+    var boundaryTask = state.board_tasks[task.resume_after_boundary_task_id];
+    if (boundaryTask && boundaryTask.task) {
+      addReason(120, 'Continues after "' + boundaryTask.task + '"');
+    }
+  }
+
+  if (task.agent_id && state && state.agents && state.agents[task.agent_id]) {
+    addReason(80, 'Already linked to ' + _boardAgentName(task.agent_id));
+  }
+
+  var priority = _boardTaskPriority(task);
+  if (priority === 'high') addReason(60, 'Priority: High');
+  else if (priority === 'medium') addReason(40, 'Priority: Medium');
+  else if (priority === 'low') addReason(20, 'Priority: Low');
+
+  return {
+    task: task,
+    score: score,
+    reasons: reasons,
+    score_breakdown: scoreBreakdown,
+    reason_summary: reasons.join('; '),
+  };
+}
+
+function _boardRecommendedDispatch() {
+  var visible = typeof _boardVisibleTasks === 'function'
+    ? _boardVisibleTasks()
+    : _boardTasks();
+  if (!visible) return null;
+
+  var best = null;
+  for (var id in visible) {
+    var recommendation = _boardDispatchRecommendation(visible[id]);
+    if (!recommendation) continue;
+    if (!best) {
+      best = recommendation;
+      continue;
+    }
+    if (recommendation.score !== best.score) {
+      if (recommendation.score > best.score) best = recommendation;
+      continue;
+    }
+    var a = recommendation.task;
+    var b = best.task;
+    var aPos = typeof a.position === 'number' ? a.position : Number.MAX_SAFE_INTEGER;
+    var bPos = typeof b.position === 'number' ? b.position : Number.MAX_SAFE_INTEGER;
+    if (aPos !== bPos) {
+      if (aPos < bPos) best = recommendation;
+      continue;
+    }
+    var aCreated = String(a.created_at || '');
+    var bCreated = String(b.created_at || '');
+    if (aCreated !== bCreated) {
+      if (aCreated < bCreated) best = recommendation;
+      continue;
+    }
+    if ((a.task || '').localeCompare(b.task || '') < 0) best = recommendation;
+  }
+  return best;
+}
+
+function _renderBoardDispatchRecommendation() {
+  var recommendation = _boardRecommendedDispatch();
+  _boardActiveDispatchRecommendation = recommendation;
+  if (!recommendation) return '';
+  var task = recommendation.task;
+  return _renderBoardMessageState({
+    title: 'Recommended next dispatch: ' + (task.task || 'Untitled task'),
+    body: recommendation.reason_summary,
+    actions: [
+      { label: 'Show Task', onclick: 'boardNavigateToTask(\'' + task.id + '\')' },
+      { label: 'Dispatch...', onclick: 'boardDispatchTask(\'' + task.id + '\')' },
+    ],
+  }, true);
+}
+
 /** Collect all labels with counts (before search/label/action filters). */
 function _boardAllLabelCounts() {
   var pool = _boardScopedTasks(_boardShowArchived);
@@ -1810,6 +1942,12 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (verificationPreview) {
     cardHtml += '<div class="board-card-verification-note">' + esc(verificationPreview) + '</div>';
   }
+  var recommendedDispatch = _boardActiveDispatchRecommendation
+    || _boardRecommendedDispatch();
+  if (recommendedDispatch && recommendedDispatch.task
+      && recommendedDispatch.task.id === t.id) {
+    cardHtml += '<div class="board-card-verification-note">Recommended next dispatch</div>';
+  }
   var boundaryNote = '';
   if (typeof _branchBoundaryOverviewForContext === 'function') {
     var boundary = t.worktree_boundary || {};
@@ -2309,6 +2447,7 @@ function renderBoard() {
   }
 
   html += _renderBoardArchiveSuggestion();
+  html += _renderBoardDispatchRecommendation();
   var backlogDispatchNote = _boardBacklogDispatchNote(rootTasks);
   if (backlogDispatchNote) {
     html += _renderBoardMessageState(backlogDispatchNote, true);

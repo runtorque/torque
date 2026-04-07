@@ -812,6 +812,109 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["started_followups"][0]["id"], "task-current")
         self.assertFalse(item["partial_review_safe"])
 
+    async def test_board_summary_includes_recommended_dispatch(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        busy_worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker One",
+            group="g",
+            slug="worker-one",
+            cell_type="agent",
+            status="running",
+            current_task_id="task-active",
+        )
+        idle_worker = self.state_mod.AgentCell(
+            id="worker-2",
+            name="Worker Two",
+            group="g",
+            slug="worker-two",
+            cell_type="agent",
+            status="idle",
+        )
+        state.agents[weaver.id] = weaver
+        state.agents[busy_worker.id] = busy_worker
+        state.agents[idle_worker.id] = idle_worker
+        state.groups["g"] = [weaver.id, busy_worker.id, idle_worker.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+
+        state.board_add_task(
+            "Active implementation",
+            "g",
+            lane="In Progress",
+            id="task-active",
+            agent_id=busy_worker.id,
+        )
+        state.board_add_task(
+            "Busy follow-up",
+            "g",
+            lane="To Do",
+            id="task-busy",
+            agent_id=busy_worker.id,
+            labels=["priority:high"],
+        )
+        state.board_add_task(
+            "Queued separately",
+            "g",
+            lane="To Do",
+            id="task-queued",
+            labels=["priority:high"],
+        )
+        state.auto_dispatch_queue_add("g", "task-queued", max_concurrent=1)
+        state.board_add_task(
+            "Stable boundary",
+            "g",
+            lane="Done",
+            id="task-boundary",
+        )
+        state.board_add_task(
+            "Release notes follow-up",
+            "g",
+            lane="To Do",
+            id="task-recommended",
+            agent_id=idle_worker.id,
+            labels=["priority:medium"],
+            resume_after_boundary_task_id="task-boundary",
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        summary = json.loads(text)
+        recommendation = summary["recommended_dispatch"]
+        self.assertEqual(recommendation["task_id"], "task-recommended")
+        self.assertEqual(recommendation["lane"], "To Do")
+        self.assertEqual(recommendation["dispatch_mode"], "existing_agent")
+        self.assertEqual(recommendation["agent_name"], "Worker Two")
+        self.assertIn("Already staged in To Do", recommendation["reasons"])
+        self.assertIn(
+            'Continues after "Stable boundary"',
+            recommendation["reasons"],
+        )
+        self.assertIn(
+            "Already linked to Worker Two",
+            recommendation["reasons"],
+        )
+        self.assertIn("Priority: Medium", recommendation["reasons"])
+
     async def test_task_show_includes_health_snapshot(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(
