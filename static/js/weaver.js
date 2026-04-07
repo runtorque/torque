@@ -18,11 +18,6 @@ var _weaverVerificationLabels = {
   'passed': 'Verified',
   'failed': 'Verify failed',
 };
-var _weaverOverlapLabels = {
-  'notice': 'Overlap notice',
-  'warning': 'Overlap warning',
-  'conflict': 'Overlap conflict',
-};
 var _weaverHealthSeverity = {
   'healthy': 0,
   'idle-risk': 1,
@@ -30,11 +25,6 @@ var _weaverHealthSeverity = {
   'stalled': 3,
   'stale-in-progress': 4,
   'blocked': 5,
-};
-var _weaverOverlapSeverity = {
-  'notice': 1,
-  'warning': 2,
-  'conflict': 3,
 };
 
 function renderWeaverPanel() {
@@ -167,7 +157,6 @@ function _weaverRenderJournal(group) {
   }
 
   html += _weaverRenderTaskHealth(group);
-  html += _weaverRenderOverlapSummary(group);
   html += _weaverRenderVerificationSummary(group);
 
   // Journal entries come from state.weaver_journal (populated by delta ops)
@@ -270,39 +259,6 @@ function _weaverRenderVerificationSummary(group) {
   return html;
 }
 
-function _weaverRenderOverlapSummary(group) {
-  var summary = _weaverOverlapSummary(group);
-  if (!summary.total) return '';
-
-  var html = '<div class="weaver-verification-summary">';
-  html += '<div class="weaver-health-header">';
-  html += '<span class="weaver-health-title">Dispatch overlap</span>';
-  html += '<span class="weaver-health-total">' + summary.total + ' open warning' + (summary.total === 1 ? '' : 's') + '</span>';
-  html += '</div>';
-  html += '<div class="weaver-health-counts">';
-  for (var i = 0; i < summary.order.length; i++) {
-    var stateName = summary.order[i];
-    var count = summary.counts[stateName] || 0;
-    if (!count) continue;
-    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(stateName) + '">'
-      + count + ' ' + _esc(_weaverOverlapLabels[stateName] || stateName) + '</span>';
-  }
-  html += '</div>';
-  for (var j = 0; j < summary.items.length; j++) {
-    var item = summary.items[j];
-    html += '<div class="weaver-verification-item">';
-    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(item.level) + '">'
-      + _esc(_weaverOverlapLabels[item.level] || item.level) + '</span>';
-    html += '<span class="weaver-verification-item-title">' + _esc(item.title) + '</span>';
-    html += '</div>';
-    if (item.summary) {
-      html += '<div class="weaver-verification-item-meta">' + _esc(item.summary) + '</div>';
-    }
-  }
-  html += '</div>';
-  return html;
-}
-
 function _weaverTaskHealthSummary(group) {
   var summary = {
     counts: { 'blocked': 0, 'stalled': 0, 'thrashing': 0, 'idle-risk': 0 },
@@ -372,27 +328,6 @@ function _weaverVerificationSummary(group) {
   });
   summary.items = summary.items.slice(0, 5);
   return summary;
-}
-
-function _weaverOverlapSummary(group) {
-  var raw = state && state.dispatch_overlap_groups && state.dispatch_overlap_groups[group];
-  var counts = raw && raw.counts ? raw.counts : {};
-  var items = raw && raw.items ? raw.items.slice() : [];
-  items.sort(function(a, b) {
-    var sev = (_weaverOverlapSeverity[b.level] || 0) - (_weaverOverlapSeverity[a.level] || 0);
-    if (sev) return sev;
-    return (a.title || '').localeCompare(b.title || '');
-  });
-  return {
-    counts: {
-      notice: counts.notice || 0,
-      warning: counts.warning || 0,
-      conflict: counts.conflict || 0,
-    },
-    order: ['conflict', 'warning', 'notice'],
-    items: items.slice(0, 5),
-    total: raw && raw.total ? raw.total : 0,
-  };
 }
 
 // -- Settings tab ----------------------------------------------------------
