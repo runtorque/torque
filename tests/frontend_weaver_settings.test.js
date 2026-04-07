@@ -18,6 +18,8 @@ function createSandbox() {
     _cachedProviders: [],
     _esc(value) { return String(value); },
     _currentGroup() { return 'alpha'; },
+    _captureSurfaceState() { return null; },
+    _restoreSurfaceState() {},
     sendCalls: [],
   };
   sandbox.send = function(message) {
@@ -104,4 +106,67 @@ test('weaverDismissNote clears the non-blocking banner without resuming', () => 
       group: 'alpha',
     },
   ]);
+});
+
+test('weaverCreate prefers the focused group over a stale selected group', () => {
+  const sandbox = createSandbox();
+  sandbox.selectedAgentId = 'agent-alpha';
+  sandbox.state.groups = { alpha: ['agent-alpha'], beta: [] };
+  sandbox.state.agents = {
+    'agent-alpha': { id: 'agent-alpha', group: 'alpha' },
+  };
+  sandbox.state.group_settings = {
+    alpha: { weaver_agent_id: 'weaver-alpha' },
+    beta: {},
+  };
+  sandbox._focusedGroup = function() { return 'beta'; };
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+
+  vm.runInContext('weaverCreate()', context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    {
+      cmd: 'add_agent',
+      name: 'Weaver',
+      group: 'beta',
+      is_weaver: true,
+    },
+  ]);
+});
+
+test('renderWeaverPanel uses the focused group in multi-project workspaces', () => {
+  const sandbox = createSandbox();
+  sandbox.document.getElementById = function(id) {
+    if (id !== 'panel-weaver') return null;
+    return {
+      innerHTML: '',
+      querySelector() { return null; },
+    };
+  };
+  sandbox.state.groups = { alpha: [], beta: [] };
+  sandbox.state.group_settings = {
+    alpha: { weaver_agent_id: 'weaver-alpha' },
+    beta: {},
+  };
+  sandbox.state.agents = {
+    'stale-selected': { id: 'stale-selected', group: 'alpha' },
+  };
+  sandbox.selectedAgentId = 'stale-selected';
+  sandbox._focusedGroup = function() { return 'beta'; };
+  const panel = {
+    innerHTML: '',
+    querySelector() { return null; },
+  };
+  sandbox.document.getElementById = function(id) {
+    return id === 'panel-weaver' ? panel : null;
+  };
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+  vm.runInContext(`_weaverTab = 'settings'`, context);
+
+  vm.runInContext('renderWeaverPanel()', context);
+
+  assert.match(panel.innerHTML, /Weaver — beta/);
+  assert.match(panel.innerHTML, /No weaver agent/);
 });

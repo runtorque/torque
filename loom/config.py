@@ -32,17 +32,42 @@ def init_paths(script_dir: Path):
     WEBVIEW_FILE = script_dir / "webview.html"
     LOG_FILE = script_dir / "loom.log"
     _setup_logging()
+    log.info("Logging initialized at %s", LOG_FILE)
 
 
 log = logging.getLogger("loom")
 
 
+def _managed_log_handlers():
+    for handler in list(log.handlers):
+        if getattr(handler, "_loom_managed", False):
+            yield handler
+
+
 def _setup_logging():
-    if log.handlers:
-        return
+    target = LOG_FILE.expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target_str = str(target)
+
+    for handler in list(_managed_log_handlers()):
+        if getattr(handler, "baseFilename", "") == target_str:
+            log.setLevel(logging.DEBUG)
+            log.propagate = False
+            return
+        log.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
+
     log.setLevel(logging.DEBUG)
-    fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    log.propagate = False
+    fh = logging.FileHandler(target, encoding="utf-8")
+    fh._loom_managed = True
     fh.setFormatter(logging.Formatter(
         "%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S"
     ))
     log.addHandler(fh)
+
+
+_setup_logging()

@@ -41,7 +41,7 @@ function renderWeaverPanel() {
     },
   });
 
-  var group = _currentGroup();
+  var group = _weaverCurrentGroup();
   var ws = _weaverGetSettings(group);
   var weaver = group ? _weaverGetAgent(group) : null;
 
@@ -110,7 +110,7 @@ function weaverSwitchTab(tab) {
 }
 
 function weaverTogglePause() {
-  var group = _currentGroup();
+  var group = _weaverCurrentGroup();
   if (!group) return;
   var ws = _weaverGetSettings(group);
   var cmd = (ws && ws.paused) ? 'weaver_resume' : 'weaver_pause';
@@ -533,7 +533,7 @@ function weaverEntryCtx(e, entryId) {
 }
 
 function weaverDeleteEntry(entryId) {
-  var group = _currentGroup();
+  var group = _weaverCurrentGroup();
   if (!group) return;
   send({ cmd: 'weaver_journal_delete', group: group, entry_id: entryId });
   // Optimistic removal from local state
@@ -551,7 +551,7 @@ function weaverReply() {
   if (!input) return;
   var answer = input.value.trim();
   if (!answer) return;
-  var group = _currentGroup();
+  var group = _weaverCurrentGroup();
   if (!group) return;
   _weaverReplyDraft = '';
   // Blur so the re-render skip guard doesn't block the banner clearing
@@ -560,14 +560,14 @@ function weaverReply() {
 }
 
 function weaverDismissQuestion() {
-  var group = _currentGroup();
+  var group = _weaverCurrentGroup();
   if (!group) return;
   _weaverReplyDraft = '';
   send({ cmd: 'weaver_resume', group: group });
 }
 
 function weaverDismissNote() {
-  var group = _currentGroup();
+  var group = _weaverCurrentGroup();
   if (!group) return;
   send({ cmd: 'weaver_dismiss_note', group: group });
 }
@@ -575,13 +575,7 @@ function weaverDismissNote() {
 // -- Create weaver ---------------------------------------------------------
 
 function weaverCreate() {
-  var group = _currentGroup();
-  // If no group has settings yet, use the first group
-  if (!group) {
-    var groups = Object.keys(state.groups || {});
-    if (!groups.length) return;
-    group = groups[0];
-  }
+  var group = _weaverCurrentGroup();
   // Check if group already has a weaver
   var gs = state.group_settings && state.group_settings[group];
   if (gs && gs.weaver_agent_id) return;
@@ -612,7 +606,7 @@ function weaverInstrInput(textarea) {
 }
 
 function weaverSaveInstructions() {
-  var group = _currentGroup();
+  var group = _weaverCurrentGroup();
   if (!group) return;
   send({
     cmd: 'weaver_update_settings',
@@ -624,7 +618,7 @@ function weaverSaveInstructions() {
 }
 
 function weaverUpdateSetting(key, value) {
-  var group = _currentGroup();
+  var group = _weaverCurrentGroup();
   if (!group) return;
   var payload = { cmd: 'weaver_update_settings', group: group };
   payload[key] = value;
@@ -632,7 +626,7 @@ function weaverUpdateSetting(key, value) {
 }
 
 function weaverToggleEvent(evt, enabled) {
-  var group = _currentGroup();
+  var group = _weaverCurrentGroup();
   if (!group) return;
   var ws = _weaverGetSettings(group);
   var current = (ws && ws.enabled_events) ? ws.enabled_events.slice() : [];
@@ -653,6 +647,30 @@ function weaverToggleEvent(evt, enabled) {
 function _weaverGetSettings(group) {
   if (!group || !state.weaver_settings) return null;
   return state.weaver_settings[group] || null;
+}
+
+function _weaverCurrentGroup() {
+  if (typeof _focusedGroup === 'function') {
+    var focused = _focusedGroup();
+    if (focused) return focused;
+  }
+  if (state && state.active_session_id && state.agents) {
+    for (var agentId in state.agents) {
+      var agent = state.agents[agentId];
+      if (agent && agent.session_id === state.active_session_id) {
+        return agent.group || '';
+      }
+    }
+  }
+  if (typeof _currentGroup === 'function') {
+    var group = _currentGroup();
+    if (group) return group;
+  }
+  if (state && state.groups) {
+    var groups = Object.keys(state.groups || {});
+    if (groups.length) return groups[0];
+  }
+  return '';
 }
 
 function _weaverGetAgent(group) {
