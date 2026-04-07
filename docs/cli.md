@@ -336,18 +336,24 @@ loom task verify deploy-auth-middleware --mode deploy --state pending --note "Wa
 loom task verify deploy-auth-middleware --mode deploy --attempted --note "Deployed to staging"
 loom task verify deploy-auth-middleware --smoke passed --note "Login and billing pages load"
 loom task verify deploy-auth-middleware --smoke failed --note "Smoke failed on login redirect"
+loom task verify deploy-auth-middleware --clear-deploy-needed --clear-human --smoke passed
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--mode` | Set verification mode (`deploy` or `restart`) |
-| `--state` | Set explicit verification state (`pending`, `attempted`, `passed`, `failed`) |
+| `--mode` | Set verification mode (`deploy` or `restart`) or clear it with `clear` |
+| `--state` | Set explicit verification state (`pending`, `attempted`, `passed`, `failed`) or clear it with `clear` |
 | `--attempted` | Mark that deploy or restart was attempted and move state to `attempted` unless overridden |
-| `--smoke` | Record smoke result (`passed` or `failed`) and mark manual smoke as done |
+| `--clear-attempted` | Clear the recorded attempted flag |
+| `--smoke` | Record smoke result (`passed` or `failed`), or clear smoke-complete with `clear` |
 | `--note` | Set verification notes |
+| `--clear-note` | Clear verification notes |
 | `--tests` | Set tests run summary |
+| `--clear-tests` | Clear the tests run summary |
 | `--deploy-needed` | Mark that a deploy is still needed |
+| `--clear-deploy-needed` | Clear the deploy-needed flag |
 | `--human` | Set what still needs human validation |
+| `--clear-human` | Clear what still needs human validation |
 
 ### task move
 

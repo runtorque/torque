@@ -123,11 +123,16 @@ class CliExternalTicketTests(unittest.TestCase):
             mode="deploy",
             state=None,
             attempted=True,
+            clear_attempted=False,
             smoke="failed",
             note="Smoke failed on login redirect",
+            clear_note=False,
             tests="python3 -m unittest",
+            clear_tests=False,
             deploy_needed=False,
+            clear_deploy_needed=False,
             human="Confirm fixed build",
+            clear_human=False,
         )
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -145,5 +150,64 @@ class CliExternalTicketTests(unittest.TestCase):
                 "human_validation_pending": "Confirm fixed build",
                 "deploy_attempted": True,
                 "smoke_status": "failed",
+            },
+        )
+
+    def test_task_verify_can_clear_stale_checkpoint_fields(self):
+        calls = []
+        self.cli.get_state_local = lambda _port: {
+            "board_tasks": {
+                "task-1": {"id": "task-1", "task": "Deploy billing changes"}
+            }
+        }
+        self.cli.resolve_task = lambda _state, _ident: {
+            "id": "task-1", "task": "Deploy billing changes"
+        }
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            calls.append((cmd, kwargs))
+            return {
+                "ok": True,
+                "data": {
+                    "message": "Verification updated: state=passed",
+                },
+            }
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(
+            port=18932,
+            identifier="task-1",
+            mode="clear",
+            state="clear",
+            attempted=False,
+            clear_attempted=True,
+            smoke="clear",
+            note=None,
+            clear_note=True,
+            tests=None,
+            clear_tests=True,
+            deploy_needed=False,
+            clear_deploy_needed=True,
+            human=None,
+            clear_human=True,
+        )
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.cli.cmd_task_verify(args)
+
+        self.assertEqual(calls[0][0], "board_verify_task")
+        self.assertEqual(
+            calls[0][1],
+            {
+                "id": "task-1",
+                "actor_name": "loom-cli",
+                "verification_mode": "",
+                "verification_state": "",
+                "verification_notes": "",
+                "tests_run": "",
+                "human_validation_pending": "",
+                "deploy_needed": False,
+                "deploy_attempted": False,
+                "manual_smoke_done": False,
             },
         )
