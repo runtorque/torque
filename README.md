@@ -40,6 +40,7 @@ Loom is an iTerm2-first agent orchestration workspace for people who already liv
 ### Reference and project docs
 
 - [CLI Reference](docs/cli.md) — script Loom from the command line
+- [Testing](docs/testing.md) — regression matrix, suite structure, and how to run coverage locally
 - [Reference Guide](docs/reference-guide.md) — grouped operator reference for commands, shortcuts, settings, logs, and runtime paths
 - [Troubleshooting](docs/troubleshooting.md) — symptom-first recovery steps for startup, sessions, worktrees, merge issues, and stale state
 - [Operations](docs/operations.md) — runtime modes, deploy/update flow, logs, notifications, and operational guidance
@@ -108,6 +109,16 @@ For the more detailed system view, see [docs/architecture.md](docs/architecture.
 - Core package: [`loom/`](loom)
 - CLI: [`bin/loom`](bin/loom)
 - Docs site config: [`mkdocs.yml`](mkdocs.yml)
+- Regression suite entrypoint: `make test`
+
+## Testing
+
+```bash
+make test
+```
+
+The regression matrix, current suite layering, and remaining gaps live in
+[docs/testing.md](docs/testing.md).
 
 ## License
 

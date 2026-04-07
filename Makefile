@@ -15,7 +15,7 @@ GLOBAL_PYTHON  := $(shell ls $(HOME)/.config/iterm2/AppSupport/iterm2env*/versio
                     2>/dev/null | sort -V | tail -1)
 ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
 
-.PHONY: install uninstall run deps check stop deploy autolaunch cli standalone open
+.PHONY: install uninstall run deps check stop deploy autolaunch cli standalone open test
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
@@ -183,3 +183,7 @@ check:
 	@test -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
 		&& echo "Installed:    yes" \
 		|| echo "Installed:    no (run: make install)"
+
+## test: Run the automated regression suite
+test:
+	@python3 -m unittest discover -s tests -v
