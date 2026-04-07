@@ -934,9 +934,10 @@ class MatrixState:
                     raw.get("artifacts", []))
                 labels = list(raw.get("labels", []) or [])
                 if "loom:archived" in labels and raw.get("lane") != ARCHIVED_LANE:
+                    prior_lane = raw.get("lane") or ""
                     raw["lane"] = ARCHIVED_LANE
                     raw["archived_from_lane"] = raw.get("archived_from_lane") \
-                        or "Done"
+                        or prior_lane
                     raw["archived_at"] = raw.get("archived_at") \
                         or raw.get("updated_at", "") or raw.get("created_at", "")
                     labels = [label for label in labels

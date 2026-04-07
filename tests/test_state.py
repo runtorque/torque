@@ -253,6 +253,44 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(task.archived_at, "2026-04-07T10:00:00+00:00")
         self.assertEqual(task.labels, ["bug"])
 
+    def test_load_migrates_legacy_non_done_archives_without_done_semantics(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": []}, {"g": "g"})
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="dep-1",
+                task="Legacy archived child",
+                group="g",
+                lane="In Progress",
+                labels=["loom:archived"],
+                updated_at="2026-04-07T10:00:00+00:00",
+            )
+        )
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-1",
+                task="Blocked follow-up",
+                group="g",
+                lane="Backlog",
+                depends_on=["dep-1"],
+            )
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        dep = state.board_tasks["dep-1"]
+        self.assertEqual(dep.lane, "Archived")
+        self.assertEqual(dep.archived_from_lane, "In Progress")
+        self.assertEqual(dep.archived_at, "2026-04-07T10:00:00+00:00")
+        self.assertFalse(state.board_deps_met(state.board_tasks["task-1"]))
+
     def test_load_restores_auto_dispatch_queue_and_busy_agents(self):
         from loom.db import LoomDB
 
