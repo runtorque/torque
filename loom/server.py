@@ -21,7 +21,7 @@ import yaml
 from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, STANDALONE, BIND_HOST, ATTACHMENTS_DIR, log
 from .db import LoomDB
 from dataclasses import asdict
-from .state import MatrixState
+from .state import MatrixState, task_counts_as_done, task_is_closed
 from .bridge import ITerm2Adapter
 from .events import EventLog, EventBus, PanelEventLog, health_check
 from .adapters import get_adapter, get_providers, get_default_command_for_provider
@@ -199,7 +199,7 @@ def _should_queue_existing_agent_dispatch(active_task, *,
         return False
     if active_task.id == target_task_id:
         return False
-    return active_task.lane != "Done"
+    return not task_is_closed(active_task)
 
 
 def _cells_share_worktree_context(a, b) -> bool:
@@ -277,7 +277,7 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
                 break
             entry = queue[0]
             task = state.board_tasks.get(entry.task_id)
-            if not task or task.group != group_name or task.lane == "Done" \
+            if not task or task.group != group_name or task_is_closed(task) \
                     or task.agent_id:
                 state.auto_dispatch_queue_remove_task(entry.task_id)
                 continue
@@ -561,7 +561,7 @@ async def _generate_merge_message(cell, worktree_mgr, squash: bool,
             statuses={"open", "superseded"},
         )
         for t in branch_tasks:
-            if t.lane != "Done":
+            if not task_counts_as_done(t):
                 continue
             # Find the done message from task activity log
             done_msg = ""
@@ -617,7 +617,7 @@ async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
                 continue
             if task.agent_id:
                 continue
-            if task.lane in ("In Progress", "Done"):
+            if task.lane in ("In Progress", "Done", "Archived"):
                 continue
             log.info("Scheduled task '%s' (%s) is due — dispatching",
                      task.task, task.id)
@@ -1473,8 +1473,10 @@ async def main(connection: iterm2.Connection):
             if task.agent_id != agent_id:
                 continue
             outcome = ""
-            if task.lane == "Done":
+            if task_counts_as_done(task):
                 outcome = "done"
+            elif task.lane == "Archived":
+                outcome = "archived"
             elif "loom:error" in (task.labels or []):
                 outcome = "error"
             elif "loom:blocked" in (task.labels or []):
@@ -1486,7 +1488,7 @@ async def main(connection: iterm2.Connection):
                 "started_at": (_iso_to_unix(task.updated_at)
                                 or _iso_to_unix(task.created_at)),
                 "completed_at": (_iso_to_unix(task.updated_at)
-                                  if task.lane == "Done" else None),
+                                  if task_is_closed(task) else None),
                 "outcome": outcome,
             })
         tasks.sort(key=lambda t: t.get("started_at") or 0, reverse=True)
@@ -2477,13 +2479,19 @@ async def main(connection: iterm2.Connection):
                     )
 
                     persistent_prompt_text = ""
+                    weaver_bootstrap_prompt = ""
                     # Weaver: build persistent prompt and skip worktree
                     if is_weaver:
-                        from .weaver import build_weaver_system_prompt
+                        from .weaver import (
+                            build_weaver_startup_digest,
+                            build_weaver_system_prompt,
+                        )
                         ws = state.get_weaver_settings(group)
                         action_sp = launch_cfg.get("system_prompt", "")
                         persistent_prompt_text = build_weaver_system_prompt(
                             group, ws, action_sp)
+                        weaver_bootstrap_prompt = build_weaver_startup_digest(
+                            state, group)
                         launch_cfg["worktree"] = False
 
                     name = (data.get("name", "") or "").strip()
@@ -2522,6 +2530,11 @@ async def main(connection: iterm2.Connection):
                                 and cell.session_id:
                             await _send_agent_prompt(
                                 cell, launch_cfg["initial_prompt"],
+                                background=True)
+                        elif is_weaver and weaver_bootstrap_prompt \
+                                and cell.session_id:
+                            await _send_agent_prompt(
+                                cell, weaver_bootstrap_prompt,
                                 background=True)
 
             elif cmd == "add_terminal":
@@ -3186,14 +3199,14 @@ async def main(connection: iterm2.Connection):
                                 f'"{cell.name}" merged to '
                                 f"{cell.worktree_base_branch}",
                                 "success")
-                            # Unlink Done tasks from this agent so
+                            # Unlink completed/archive-closed tasks from this agent so
                             # they don't re-appear in future merge
-                            # messages.  Tasks stay in Done as a
+                            # messages.  Tasks stay on the board as a
                             # historical record.
                             for t in list(
                                     state.board_tasks.values()):
                                 if t.agent_id == cell.id \
-                                        and t.lane == "Done":
+                                        and task_is_closed(t):
                                     t.agent_id = ""
                                     state._emit(
                                         "task_upsert", **asdict(t))
@@ -3393,6 +3406,41 @@ async def main(connection: iterm2.Connection):
                         or bt.external_url else "board_task_added",
                         "task_id": bt.id,
                         "title": bt.task,
+                    }
+
+            elif cmd == "board_archive_task":
+                tid = _resolve_task_id(data.get("id", ""))
+                changed = state.board_archive_task(
+                    tid,
+                    include_descendants=bool(
+                        data.get("include_descendants", True)
+                    ),
+                )
+                if not changed:
+                    result = {"type": "error", "message": "Task not found"}
+                else:
+                    result = {
+                        "type": "board_task_archived",
+                        "task_id": tid,
+                        "changed_ids": changed,
+                    }
+
+            elif cmd == "board_unarchive_task":
+                tid = _resolve_task_id(data.get("id", ""))
+                changed = state.board_unarchive_task(
+                    tid,
+                    lane=data.get("lane", ""),
+                    include_descendants=bool(
+                        data.get("include_descendants", True)
+                    ),
+                )
+                if not changed:
+                    result = {"type": "error", "message": "Task not found"}
+                else:
+                    result = {
+                        "type": "board_task_unarchived",
+                        "task_id": tid,
+                        "changed_ids": changed,
                     }
 
             elif cmd == "board_update_task":
@@ -3652,14 +3700,15 @@ async def main(connection: iterm2.Connection):
             elif cmd == "board_move_task":
                 _mv_id = _resolve_task_id(data.get("id", ""))
                 _mv_task = state.board_tasks.get(_mv_id)
-                _mv_old = _mv_task.lane if _mv_task else ""
+                _mv_done_before = task_counts_as_done(_mv_task)
                 _mv_new = data.get("lane", "")
                 state.board_move_task(
                     _mv_id, _mv_new, data.get("position"))
                 # Moving out of Done may re-block dependents
-                if _mv_old == "Done" and _mv_new != "Done":
+                _mv_after = state.board_tasks.get(_mv_id)
+                if _mv_done_before and not task_counts_as_done(_mv_after):
                     for _dt in state.board_get_dependents(_mv_id):
-                        if _dt.lane != "Done":
+                        if not task_is_closed(_dt):
                             _panel_event(
                                 "task_blocked_by_dep", "",
                                 "", _dt.group,
@@ -3692,7 +3741,9 @@ async def main(connection: iterm2.Connection):
                             state.board_tasks[d].task[:40]
                             for d in task.depends_on
                             if d in state.board_tasks
-                            and state.board_tasks[d].lane != "Done"]
+                            and not task_counts_as_done(
+                                state.board_tasks[d]
+                            )]
                         result = {
                             "type": "error",
                             "message":
@@ -4043,7 +4094,7 @@ async def main(connection: iterm2.Connection):
 
                             # Move ask task to Done (no cascade)
                             from datetime import datetime, timezone
-                            if task.lane != "Done":
+                            if not task_counts_as_done(task):
                                 state.board_move_task(
                                     task.id, "Done")
                             task.status = ""
@@ -4528,7 +4579,7 @@ async def main(connection: iterm2.Connection):
                         linked = [
                             t for t in state.board_tasks.values()
                             if t.agent_id == cell_id
-                            and t.lane not in ("Done", "Backlog")]
+                            and t.lane not in ("Done", "Backlog", "Archived")]
                         if len(linked) == 1:
                             task = linked[0]
 
@@ -4554,11 +4605,11 @@ async def main(connection: iterm2.Connection):
                             parent = state.board_tasks.get(pid)
                             if not parent:
                                 break
-                            if parent.lane == "Done":
+                            if task_is_closed(parent):
                                 pid = parent.parent_task_id
                                 continue
                             children = state.board_get_children(pid)
-                            if all(c.lane == "Done" for c in children):
+                            if all(task_counts_as_done(c) for c in children):
                                 parent.status = ""
                                 state.board_move_task(pid, "Done")
                                 _save_task(parent)
@@ -4647,7 +4698,7 @@ async def main(connection: iterm2.Connection):
                                 task, cell, message or "Done"
                             )
                         state._emit_agent(cell)
-                        if task and task.lane != "Done":
+                        if task and not task_counts_as_done(task):
                             state.board_move_task(task.id, "Done")
                         if task:
                             task.status = ""
@@ -4683,7 +4734,7 @@ async def main(connection: iterm2.Connection):
                             # Notify dependents that are now unblocked
                             for _dt in state.board_get_dependents(
                                     task.id):
-                                if _dt.lane != "Done" \
+                                if not task_is_closed(_dt) \
                                         and state.board_deps_met(_dt):
                                     _panel_event(
                                         "task_unblocked", "",
@@ -4820,7 +4871,7 @@ async def main(connection: iterm2.Connection):
                             )
                         state._emit_agent(cell)
                         if task:
-                            if task.lane != "Done":
+                            if not task_counts_as_done(task):
                                 state.board_move_task(
                                     task.id, "Done")
                             task.agent_id = ""
@@ -4830,7 +4881,7 @@ async def main(connection: iterm2.Connection):
                             # Notify dependents now unblocked
                             for _dt in state.board_get_dependents(
                                     task.id):
-                                if _dt.lane != "Done" \
+                                if not task_is_closed(_dt) \
                                         and state.board_deps_met(_dt):
                                     _panel_event(
                                         "task_unblocked", "",
