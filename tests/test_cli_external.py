@@ -1,6 +1,7 @@
 import contextlib
 import importlib.util
 import io
+import os
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -210,4 +211,84 @@ class CliExternalTicketTests(unittest.TestCase):
                 "deploy_attempted": False,
                 "manual_smoke_done": False,
             },
+        )
+
+    def test_memory_show_calls_memory_read_endpoint(self):
+        calls = []
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            calls.append((cmd, kwargs))
+            return {
+                "ok": True,
+                "data": {
+                    "entry": {
+                        "id": "mem-1",
+                        "entry_type": "decision",
+                        "scope_kind": "task",
+                        "scope_ref": "task-1",
+                        "title": "Storage choice",
+                        "content": "Use SQLite.",
+                        "pinned": True,
+                        "links": [
+                            {
+                                "entry_id": "mem-1",
+                                "target_kind": "agent",
+                                "target_ref": "agent-1",
+                            }
+                        ],
+                    }
+                },
+            }
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(
+            port=18932,
+            entry_id="mem-1",
+            json=False,
+        )
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.cli.cmd_memory_show(args)
+
+        self.assertEqual(calls[0], ("memory_read", {"entry_id": "mem-1"}))
+        self.assertIn("Storage choice", out.getvalue())
+        self.assertIn("agent:agent-1", out.getvalue())
+
+    def test_memory_link_uses_current_cell_context(self):
+        calls = []
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            calls.append((cmd, kwargs))
+            return {"ok": True, "data": {"entry": {"id": "mem-1"}}}
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(
+            port=18932,
+            entry_id="mem-1",
+            kind="task",
+            ref="task-1",
+        )
+        out = io.StringIO()
+        prev = os.environ.get("LOOM_CELL_ID")
+        os.environ["LOOM_CELL_ID"] = "agent-1"
+        try:
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_memory_link(args)
+        finally:
+            if prev is None:
+                os.environ.pop("LOOM_CELL_ID", None)
+            else:
+                os.environ["LOOM_CELL_ID"] = prev
+
+        self.assertEqual(
+            calls[0],
+            (
+                "memory_link",
+                {
+                    "entry_id": "mem-1",
+                    "target_kind": "task",
+                    "target_ref": "task-1",
+                    "cell_id": "agent-1",
+                },
+            ),
         )

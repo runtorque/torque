@@ -44,7 +44,13 @@ from .artifacts import (
     normalize_artifacts,
     task_artifacts,
 )
-from .memory import build_memory_entry, detect_current_task, normalize_entry_type
+from .memory import (
+    build_memory_entry,
+    build_memory_link,
+    detect_current_task,
+    normalize_entry_type,
+    normalize_link_target_kind,
+)
 from .templates import TemplateManager
 from .external_tickets import (
     ExternalTicketError,
@@ -1350,6 +1356,46 @@ async def main(connection: iterm2.Connection):
         if not task and cell:
             task = detect_current_task(state, cell.id)
         return cell, task
+
+    def _resolve_memory_scope_ref(scope_kind: str, scope_ref: str) -> str:
+        """Normalize task/pipeline scope refs to canonical persisted IDs."""
+        ref = (scope_ref or "").strip()
+        if not ref:
+            return ref
+        if scope_kind == "task":
+            return _resolve_task_id(ref)
+        if scope_kind == "pipeline":
+            resolved_task_id = _resolve_task_id(ref)
+            task = state.board_tasks.get(resolved_task_id)
+            if task:
+                return task.pipeline_root_id or task.id
+        return ref
+
+    def _resolve_memory_link_ref(target_kind: str, target_ref: str,
+                                 *, cell=None, task=None) -> str:
+        """Normalize memory-link refs to canonical persisted IDs."""
+        kind = normalize_link_target_kind(target_kind)
+        ref = (target_ref or "").strip()
+        if kind == "task":
+            if ref:
+                return _resolve_task_id(ref)
+            if task:
+                return task.id
+            return ref
+        if kind == "agent":
+            if ref:
+                return _resolve_agent_id(ref) or ref
+            if cell:
+                return cell.id
+            return ref
+        if ref:
+            resolved_task_id = _resolve_task_id(ref)
+            linked_task = state.board_tasks.get(resolved_task_id)
+            if linked_task:
+                return linked_task.pipeline_root_id or linked_task.id
+        if task:
+            return task.pipeline_root_id or task.id
+        return ref
 
     async def _send_agent_prompt(cell, prompt: str, *,
                                  delay: float = 0,
@@ -4166,48 +4212,95 @@ async def main(connection: iterm2.Connection):
                         data.get("task_id", ""),
                     )
                     scope_kind = (data.get("scope_kind", "") or "").strip()
-                    scope_ref = (data.get("scope_ref", "") or "").strip()
-                    if scope_kind == "task" and scope_ref:
-                        scope_ref = _resolve_task_id(scope_ref)
+                    scope_ref = _resolve_memory_scope_ref(
+                        scope_kind,
+                        (data.get("scope_ref", "") or "").strip(),
+                    )
                     group_name = (data.get("group_name", "") or "").strip()
                     project_key = (data.get("project_key", "") or "").strip()
-                    if not scope_kind and not scope_ref and not group_name:
-                        if task:
-                            scope_kind = "task"
-                            scope_ref = task.id
-                        elif cell and cell.group:
-                            scope_kind = "group"
-                            scope_ref = cell.group
-                            group_name = cell.group
-                    if not group_name:
-                        if task and task.group:
-                            group_name = task.group
-                        elif scope_kind == "group" and scope_ref:
-                            group_name = scope_ref
-                        elif cell and cell.group and not project_key:
-                            group_name = cell.group
-                    entries = state.db.load_memory_entries(
-                        group_name=group_name,
-                        project_key=project_key,
-                        scope_kind=scope_kind,
-                        scope_ref=scope_ref,
-                        entry_type=(data.get("entry_type", "") or "").strip(),
-                        task_id=_resolve_task_id(
-                            (data.get("filter_task_id", "") or "").strip()
-                        ),
-                        pinned_only=bool(data.get("pinned_only", False)),
-                        search=(data.get("search", "") or "").strip(),
-                        limit=int(data.get("limit", 20) or 20),
-                        offset=int(data.get("offset", 0) or 0),
-                    )
+                    linked_target_kind = (
+                        data.get("linked_target_kind", "") or ""
+                    ).strip()
+                    linked_target_ref = (
+                        data.get("linked_target_ref", "") or ""
+                    ).strip()
+                    if linked_target_kind:
+                        try:
+                            linked_target_kind = normalize_link_target_kind(
+                                linked_target_kind
+                            )
+                        except ValueError as exc:
+                            result = {
+                                "type": "error",
+                                "message": str(exc),
+                            }
+                            linked_target_kind = ""
+                    if result is None and linked_target_kind:
+                        linked_target_ref = _resolve_memory_link_ref(
+                            linked_target_kind,
+                            linked_target_ref,
+                            cell=cell,
+                            task=task,
+                        )
+                    if result is None:
+                        if not scope_kind and not scope_ref and not group_name:
+                            if task:
+                                scope_kind = "task"
+                                scope_ref = task.id
+                            elif cell and cell.group:
+                                scope_kind = "group"
+                                scope_ref = cell.group
+                                group_name = cell.group
+                        if not group_name:
+                            if task and task.group:
+                                group_name = task.group
+                            elif scope_kind == "group" and scope_ref:
+                                group_name = scope_ref
+                            elif cell and cell.group and not project_key:
+                                group_name = cell.group
+                        entries = state.db.load_memory_entries(
+                            group_name=group_name,
+                            project_key=project_key,
+                            scope_kind=scope_kind,
+                            scope_ref=scope_ref,
+                            entry_type=(data.get("entry_type", "") or "").strip(),
+                            task_id=_resolve_task_id(
+                                (data.get("filter_task_id", "") or "").strip()
+                            ),
+                            pinned_only=bool(data.get("pinned_only", False)),
+                            search=(data.get("search", "") or "").strip(),
+                            linked_target_kind=linked_target_kind,
+                            linked_target_ref=linked_target_ref,
+                            limit=int(data.get("limit", 20) or 20),
+                            offset=int(data.get("offset", 0) or 0),
+                        )
+                        result = {
+                            "type": "memory_entries",
+                            "entries": entries,
+                            "scope_kind": scope_kind,
+                            "scope_ref": scope_ref,
+                            "group_name": group_name,
+                            "project_key": project_key,
+                            "linked_target_kind": linked_target_kind,
+                            "linked_target_ref": linked_target_ref,
+                        }
+
+            elif cmd == "memory_read":
+                if not state.db:
                     result = {
-                        "type": "memory_entries",
-                        "entries": entries,
-                        "scope_kind": scope_kind,
-                        "scope_ref": scope_ref,
-                        "group_name": group_name,
-                        "project_key": project_key,
+                        "type": "error",
+                        "message": "Memory storage is unavailable",
                     }
+                else:
+                    entry_id = (data.get("entry_id", "") or "").strip()
+                    entry = state.db.load_memory_entry(entry_id)
+                    if not entry:
+                        result = {
+                            "type": "error",
+                            "message": "Memory entry not found",
+                        }
+                    else:
+                        result = {"type": "memory_entry", "entry": entry}
 
             elif cmd == "board_add_lane":
                 name = data.get("name", "").strip()
@@ -5294,9 +5387,10 @@ async def main(connection: iterm2.Connection):
                     )
                     try:
                         scope_kind = data.get("scope_kind", "")
-                        scope_ref = data.get("scope_ref", "")
-                        if scope_kind == "task" and scope_ref:
-                            scope_ref = _resolve_task_id(scope_ref)
+                        scope_ref = _resolve_memory_scope_ref(
+                            scope_kind,
+                            data.get("scope_ref", ""),
+                        )
                         entry = build_memory_entry(
                             state,
                             cell=cell,
@@ -5337,6 +5431,49 @@ async def main(connection: iterm2.Connection):
                         entry["pinned"] = True
                         entry["updated_at"] = now
                         result = {"type": "memory_entry", "entry": entry}
+
+            elif cmd == "memory_link":
+                if not state.db:
+                    result = {
+                        "type": "error",
+                        "message": "Memory storage is unavailable",
+                    }
+                else:
+                    entry_id = (data.get("entry_id", "") or "").strip()
+                    entry = state.db.load_memory_entry(entry_id)
+                    if not entry:
+                        result = {
+                            "type": "error",
+                            "message": "Memory entry not found",
+                        }
+                    else:
+                        cell, task = _resolve_memory_cell_and_task(
+                            data.get("cell_id", ""),
+                            data.get("task_id", ""),
+                        )
+                        try:
+                            target_kind = normalize_link_target_kind(
+                                data.get("target_kind", "")
+                            )
+                            link = build_memory_link(
+                                state,
+                                entry_id=entry_id,
+                                target_kind=target_kind,
+                                target_ref=_resolve_memory_link_ref(
+                                    target_kind,
+                                    data.get("target_ref", ""),
+                                    cell=cell,
+                                    task=task,
+                                ),
+                                cell=cell,
+                                task=task,
+                            )
+                        except ValueError as exc:
+                            result = {"type": "error", "message": str(exc)}
+                        else:
+                            state.db.save_memory_link(link)
+                            entry = state.db.load_memory_entry(entry_id)
+                            result = {"type": "memory_entry", "entry": entry}
 
             elif cmd == "memory_unpin":
                 if not state.db:

@@ -15,6 +15,7 @@ import uuid
 
 ENTRY_TYPES = ("finding", "decision", "warning", "handoff", "note")
 SCOPE_KINDS = ("task", "pipeline", "group", "project")
+LINK_TARGET_KINDS = ("task", "agent", "pipeline")
 
 MAX_TITLE_LEN = 200
 MAX_CONTENT_LEN = 4000
@@ -36,6 +37,16 @@ def normalize_scope_kind(value: str) -> str:
         raise ValueError(
             f"Invalid scope kind '{value}'. "
             f"Expected one of: {', '.join(SCOPE_KINDS)}"
+        )
+    return value
+
+
+def normalize_link_target_kind(value: str) -> str:
+    value = (value or "").strip().lower()
+    if value not in LINK_TARGET_KINDS:
+        raise ValueError(
+            f"Invalid link target kind '{value}'. "
+            f"Expected one of: {', '.join(LINK_TARGET_KINDS)}"
         )
     return value
 
@@ -188,4 +199,42 @@ def build_memory_entry(state, *, cell=None, task=None,
         "source_name": cell_name,
         "created_at": now,
         "updated_at": now,
+    }
+
+
+def build_memory_link(state, *, entry_id: str, target_kind: str,
+                      target_ref: str = "", cell=None, task=None) -> dict:
+    """Build a normalized memory-link record ready for persistence."""
+    kind = normalize_link_target_kind(target_kind)
+    ref = (target_ref or "").strip()
+
+    if kind == "task":
+        if not ref:
+            if not task:
+                raise ValueError("Task link requires an active task or target_ref")
+            ref = task.id
+    elif kind == "agent":
+        if not ref:
+            if not cell:
+                raise ValueError(
+                    "Agent link requires an active agent or target_ref"
+                )
+            ref = getattr(cell, "id", "") or ""
+        if not ref:
+            raise ValueError("Agent link requires a target_ref")
+    else:
+        if not ref:
+            if not task:
+                raise ValueError(
+                    "Pipeline link requires an active task or target_ref"
+                )
+            ref = task.pipeline_root_id or task.id
+        if not ref:
+            raise ValueError("Pipeline link requires a target_ref")
+
+    return {
+        "entry_id": entry_id,
+        "target_kind": kind,
+        "target_ref": ref,
+        "created_at": time.time(),
     }

@@ -519,9 +519,37 @@ class LoomDBTests(unittest.TestCase):
                 "updated_at": 20.0,
             }
         )
+        self.db.save_memory_link(
+            {
+                "entry_id": "mem-1",
+                "target_kind": "task",
+                "target_ref": "task-1",
+                "created_at": 11.0,
+            }
+        )
+        self.db.save_memory_link(
+            {
+                "entry_id": "mem-1",
+                "target_kind": "agent",
+                "target_ref": "agent-1",
+                "created_at": 12.0,
+            }
+        )
+        self.db.save_memory_link(
+            {
+                "entry_id": "mem-2",
+                "target_kind": "pipeline",
+                "target_ref": "task-1",
+                "created_at": 21.0,
+            }
+        )
 
         all_entries = self.db.load_memory_entries(group_name="g", limit=10)
         self.assertEqual([entry["id"] for entry in all_entries], ["mem-1", "mem-2"])
+        self.assertEqual(
+            [link["target_kind"] for link in all_entries[0]["links"]],
+            ["task", "agent"],
+        )
 
         pinned = self.db.load_memory_entries(
             group_name="g", pinned_only=True, limit=10
@@ -536,7 +564,25 @@ class LoomDBTests(unittest.TestCase):
         searched = self.db.load_memory_entries(search="snapshots", limit=10)
         self.assertEqual([entry["id"] for entry in searched], ["mem-2"])
 
+        linked = self.db.load_memory_entries(
+            linked_target_kind="agent",
+            linked_target_ref="agent-1",
+            limit=10,
+        )
+        self.assertEqual([entry["id"] for entry in linked], ["mem-1"])
+
         self.db.set_memory_entry_pinned("mem-2", True, 30.0)
         entry = self.db.load_memory_entry("mem-2")
         self.assertTrue(entry["pinned"])
         self.assertEqual(entry["updated_at"], 30.0)
+        self.assertEqual(
+            entry["links"],
+            [
+                {
+                    "entry_id": "mem-2",
+                    "target_kind": "pipeline",
+                    "target_ref": "task-1",
+                    "created_at": 21.0,
+                }
+            ],
+        )

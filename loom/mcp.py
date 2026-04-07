@@ -346,6 +346,15 @@ TOOLS = [
                     "type": "string",
                     "description": "Simple text search over title and content.",
                 },
+                "linked_target_kind": {
+                    "type": "string",
+                    "enum": ["task", "agent", "pipeline"],
+                    "description": "Optional linked-target filter.",
+                },
+                "linked_target_ref": {
+                    "type": "string",
+                    "description": "Optional explicit linked target reference.",
+                },
                 "limit": {
                     "type": "integer",
                     "description": "Maximum entries to return (default: 20).",
@@ -355,6 +364,20 @@ TOOLS = [
                     "description": "Offset for pagination (default: 0).",
                 },
             },
+        },
+    },
+    {
+        "name": "loom_memory_read",
+        "description": "Read one shared memory entry, including its links.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "Memory entry ID.",
+                },
+            },
+            "required": ["entry_id"],
         },
     },
     {
@@ -369,6 +392,32 @@ TOOLS = [
                 },
             },
             "required": ["entry_id"],
+        },
+    },
+    {
+        "name": "loom_memory_link",
+        "description": (
+            "Link a memory entry to a task, agent, or pipeline so it is "
+            "discoverable outside its primary scope."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "Memory entry ID.",
+                },
+                "target_kind": {
+                    "type": "string",
+                    "enum": ["task", "agent", "pipeline"],
+                    "description": "What to link the entry to.",
+                },
+                "target_ref": {
+                    "type": "string",
+                    "description": "Optional explicit target ID/slug.",
+                },
+            },
+            "required": ["entry_id", "target_kind"],
         },
     },
     {
@@ -414,7 +463,9 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
     if name in {
         "loom_memory_publish",
         "loom_memory_list",
+        "loom_memory_read",
         "loom_memory_pin",
+        "loom_memory_link",
         "loom_memory_unpin",
     }:
         payload = {"cell_id": cell_id}
@@ -434,13 +485,24 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
             payload["cmd"] = "memory_list"
             for key in (
                 "scope_kind", "scope_ref", "entry_type",
-                "pinned_only", "search", "limit", "offset",
+                "pinned_only", "search",
+                "linked_target_kind", "linked_target_ref",
+                "limit", "offset",
             ):
                 if key in args:
                     payload[key] = args[key]
+        elif name == "loom_memory_read":
+            payload["cmd"] = "memory_read"
+            payload["entry_id"] = args.get("entry_id", "")
         elif name == "loom_memory_pin":
             payload["cmd"] = "memory_pin"
             payload["entry_id"] = args.get("entry_id", "")
+        elif name == "loom_memory_link":
+            payload["cmd"] = "memory_link"
+            payload["entry_id"] = args.get("entry_id", "")
+            payload["target_kind"] = args.get("target_kind", "")
+            if args.get("target_ref"):
+                payload["target_ref"] = args["target_ref"]
         else:
             payload["cmd"] = "memory_unpin"
             payload["entry_id"] = args.get("entry_id", "")

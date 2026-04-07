@@ -77,3 +77,37 @@ class MemoryHelpersTests(unittest.TestCase):
                 scope_kind="group",
                 scope_ref="g",
             )
+
+    def test_build_memory_link_defaults_from_current_context(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+        )
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Implement feature",
+            group="g",
+        )
+
+        link = self.memory_mod.build_memory_link(
+            state,
+            entry_id="mem-1",
+            target_kind="pipeline",
+            cell=cell,
+            task=task,
+        )
+
+        self.assertEqual(link["entry_id"], "mem-1")
+        self.assertEqual(link["target_kind"], "pipeline")
+        self.assertEqual(link["target_ref"], "task-1")
+
+    def test_build_memory_link_rejects_missing_context(self):
+        state = self.state_mod.MatrixState()
+        with self.assertRaises(ValueError):
+            self.memory_mod.build_memory_link(
+                state,
+                entry_id="mem-1",
+                target_kind="agent",
+            )

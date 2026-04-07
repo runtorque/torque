@@ -158,7 +158,13 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         text, is_error = await self.mcp_mod._dispatch_tool(
             "loom_memory_list",
-            {"scope_kind": "group", "scope_ref": "g", "pinned_only": True},
+            {
+                "scope_kind": "group",
+                "scope_ref": "g",
+                "pinned_only": True,
+                "linked_target_kind": "task",
+                "linked_target_ref": "task-1",
+            },
             cell.id,
             fake_handle_command,
             state,
@@ -167,8 +173,26 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads(text)["type"], "memory_entries")
 
         text, is_error = await self.mcp_mod._dispatch_tool(
+            "loom_memory_read",
+            {"entry_id": "mem-1"},
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+        self.assertFalse(is_error)
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
             "loom_memory_pin",
             {"entry_id": "mem-1"},
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+        self.assertFalse(is_error)
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "loom_memory_link",
+            {"entry_id": "mem-1", "target_kind": "task", "target_ref": "task-1"},
             cell.id,
             fake_handle_command,
             state,
@@ -203,11 +227,25 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "scope_kind": "group",
                     "scope_ref": "g",
                     "pinned_only": True,
+                    "linked_target_kind": "task",
+                    "linked_target_ref": "task-1",
+                },
+                {
+                    "cmd": "memory_read",
+                    "cell_id": "agent-1",
+                    "entry_id": "mem-1",
                 },
                 {
                     "cmd": "memory_pin",
                     "cell_id": "agent-1",
                     "entry_id": "mem-1",
+                },
+                {
+                    "cmd": "memory_link",
+                    "cell_id": "agent-1",
+                    "entry_id": "mem-1",
+                    "target_kind": "task",
+                    "target_ref": "task-1",
                 },
                 {
                     "cmd": "memory_unpin",
@@ -247,6 +285,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("loom_progress", tool_names)
         self.assertIn("loom_verify", tool_names)
         self.assertIn("loom_memory_publish", tool_names)
+        self.assertIn("loom_memory_read", tool_names)
+        self.assertIn("loom_memory_link", tool_names)
         self.assertIn("weaver_board_summary", tool_names)
         self.assertIn("weaver_task_verify", tool_names)
 

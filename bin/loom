@@ -2835,6 +2835,10 @@ def cmd_memory_list(args):
         kwargs["entry_type"] = args.type
     if args.search:
         kwargs["search"] = args.search
+    if args.link_kind:
+        kwargs["linked_target_kind"] = args.link_kind
+    if args.link_ref:
+        kwargs["linked_target_ref"] = args.link_ref
     resp = api_call("memory_list", port=args.port, **kwargs)
     data = check_ok(resp)
     entries = data.get("entries", [])
@@ -2852,6 +2856,51 @@ def cmd_memory_list(args):
         print(f"  {title}")
         if entry.get("source_name"):
             print(f"  source: {entry['source_name']}")
+        links = entry.get("links", [])
+        if links:
+            link_text = ", ".join(
+                f"{link.get('target_kind', '')}:{link.get('target_ref', '')}"
+                for link in links
+            )
+            print(f"  links: {link_text}")
+
+
+def cmd_memory_show(args):
+    resp = api_call("memory_read", port=args.port, entry_id=args.entry_id)
+    data = check_ok(resp)
+    entry = data.get("entry", {})
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return
+    star = "*" if entry.get("pinned") else " "
+    scope = f"{entry.get('scope_kind', '')}:{entry.get('scope_ref', '')}"
+    print(f"{star} {entry.get('id', '')} [{entry.get('entry_type', '')}] {scope}")
+    if entry.get("title"):
+        print(f"title: {entry['title']}")
+    print(f"content: {entry.get('content', '')}")
+    if entry.get("source_name"):
+        print(f"source: {entry['source_name']}")
+    links = entry.get("links", [])
+    if links:
+        print("links:")
+        for link in links:
+            print(f"  - {link.get('target_kind', '')}:{link.get('target_ref', '')}")
+
+
+def cmd_memory_link(args):
+    kwargs = {
+        "entry_id": args.entry_id,
+        "target_kind": args.kind,
+    }
+    if args.ref:
+        kwargs["target_ref"] = args.ref
+    cell_id = os.environ.get("LOOM_CELL_ID", "")
+    if cell_id:
+        kwargs["cell_id"] = cell_id
+    resp = api_call("memory_link", port=args.port, **kwargs)
+    data = check_ok(resp)
+    entry = data.get("entry", {})
+    print(f"Linked: {entry.get('id', args.entry_id)} -> {args.kind}:{args.ref or '(auto)'}")
 
 
 def cmd_memory_pin(args):
@@ -3898,6 +3947,10 @@ def build_parser():
                    choices=["finding", "decision", "warning", "handoff", "note"],
                    help="Entry type filter")
     p.add_argument("--search", help="Text search")
+    p.add_argument("--link-kind",
+                   choices=["task", "agent", "pipeline"],
+                   help="Filter by linked target kind")
+    p.add_argument("--link-ref", help="Filter by linked target reference")
     p.add_argument("--pinned-only", action="store_true",
                    help="Only show pinned entries")
     p.add_argument("-n", "--limit", type=int, default=20,
@@ -3906,6 +3959,19 @@ def build_parser():
                    help="Pagination offset")
     p.add_argument("--json", action="store_true", help="JSON output")
     p.set_defaults(func=cmd_memory_list)
+
+    p = mem_sub.add_parser("show", aliases=["get"], help="Show one shared memory entry")
+    p.add_argument("entry_id", help="Memory entry ID")
+    p.add_argument("--json", action="store_true", help="JSON output")
+    p.set_defaults(func=cmd_memory_show)
+
+    p = mem_sub.add_parser("link", help="Link a memory entry to another Loom object")
+    p.add_argument("entry_id", help="Memory entry ID")
+    p.add_argument("--kind", required=True,
+                   choices=["task", "agent", "pipeline"],
+                   help="Target kind")
+    p.add_argument("--ref", help="Target reference (defaults from current context)")
+    p.set_defaults(func=cmd_memory_link)
 
     p = mem_sub.add_parser("pin", help="Pin a memory entry")
     p.add_argument("entry_id", help="Memory entry ID")
