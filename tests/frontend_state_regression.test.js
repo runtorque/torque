@@ -811,7 +811,6 @@ test('board saved views persist per group and apply without extra hidden state',
   document.register('board-cards');
 
   context.activeGroup = 'alpha';
-  context.window.prompt = () => 'Docs Tasks';
   runInContext(context, `
     _currentGroup = function() { return activeGroup; };
   `);
@@ -860,7 +859,7 @@ test('board saved views persist per group and apply without extra hidden state',
     _boardFilterActions = ['feature/docs'];
     _boardFilterAgents = [];
   `);
-  context.boardSaveCurrentView();
+  context.boardSubmitSaveView('Docs Tasks');
 
   assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.at(-1))), {
     cmd: 'board_set_saved_views',
@@ -919,6 +918,38 @@ test('board saved views persist per group and apply without extra hidden state',
   context.activeGroup = 'beta';
   context.renderBoard();
   assert.equal(runInContext(context, '_boardCurrentGroupSavedViews().length'), 0);
+});
+
+test('boardSaveCurrentView opens an inline naming control and boardSubmitSaveView persists it', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    alphaTask: {
+      id: 'alphaTask',
+      group: 'alpha',
+      task: 'Docs follow-up',
+      labels: ['docs'],
+      lane: 'Backlog',
+      position: 1,
+    },
+  };
+
+  runInContext(context, `
+    _boardSearchQuery = 'docs';
+    _boardFilterLabels = ['docs'];
+  `);
+  context.renderBoard();
+
+  context.boardSaveCurrentView();
+  assert.equal(runInContext(context, '_boardSavingView'), true);
+  assert.match(panel.innerHTML, /board-save-view-input/);
+
+  context.boardSubmitSaveView('Docs View');
+  assert.equal(runInContext(context, '_boardSavingView'), false);
+  assert.match(panel.innerHTML, /Docs View/);
 });
 
 test('board quick views expose recent and recently touched tasks through the existing filter model', () => {
@@ -1110,6 +1141,38 @@ test('board lane sort modes persist per group and render stable visible ordering
     ['dueSoon', 'newest', 'manualTop', 'oldest'],
   );
   assert.match(runInContext(context, `_renderBoardDisplayControls()`), /<option value="due" selected>Due Soonest<\/option>/);
+});
+
+test('boardCardDrop maps manual drag ordering to the expected server position', () => {
+  const { context } = createBoardHarness();
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    top: { id: 'top', group: 'alpha', task: 'Top', lane: 'Backlog', position: 4 },
+    upper: { id: 'upper', group: 'alpha', task: 'Upper', lane: 'Backlog', position: 3 },
+    lower: { id: 'lower', group: 'alpha', task: 'Lower', lane: 'Backlog', position: 2 },
+    bottom: { id: 'bottom', group: 'alpha', task: 'Bottom', lane: 'Backlog', position: 1 },
+  };
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardDragId = 'top';
+  `);
+
+  const card = new FakeElement();
+  card.dataset.taskId = 'lower';
+  card.classList.add('board-card');
+  card.getBoundingClientRect = () => ({ top: 0, height: 100 });
+
+  context.boardCardDrop({
+    preventDefault() {},
+    clientY: 80,
+    target: card,
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.at(-1))), {
+    cmd: 'board_reorder_task',
+    id: 'top',
+    position: 0,
+  });
 });
 
 test('board card density persists per group and keeps key signals rendered', () => {

@@ -58,21 +58,8 @@ install:
 	@# -- Copy source files --
 	cp loom.py "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
 	cp webview.html "$(SCRIPT_DIR)/webview.html"
-	cp loom/__init__.py loom/config.py \
-	   loom/state.py loom/bridge.py \
-	   loom/server.py loom/keybindings.py \
-	   loom/events.py loom/notifications.py \
-	   loom/worktree.py loom/actions.py \
-	   loom/templates.py \
-	   loom/terminal_adapter.py \
-	   loom/db.py loom/mcp.py \
-	   loom/mcp_weaver.py loom/weaver.py \
-	   loom/cron.py \
-	   "$(SCRIPT_DIR)/loom/"
-	cp loom/adapters/__init__.py loom/adapters/base.py \
-	   loom/adapters/claude_code.py loom/adapters/codex.py \
-	   loom/adapters/gemini_cli.py loom/adapters/generic.py \
-	   "$(SCRIPT_DIR)/loom/adapters/"
+	find loom -maxdepth 1 -type f -name '*.py' -exec cp {} "$(SCRIPT_DIR)/loom/" \;
+	find loom/adapters -maxdepth 1 -type f -name '*.py' -exec cp {} "$(SCRIPT_DIR)/loom/adapters/" \;
 	cp static/style.css "$(SCRIPT_DIR)/static/"
 	cp static/js/*.js   "$(SCRIPT_DIR)/static/js/"
 	@# -- Install dependencies --

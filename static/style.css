@@ -1218,10 +1218,16 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   height: 18px;
   font-size: 10px;
 }
+.board-density-compact .board-card-quick-controls {
+  display: none !important;
+}
 .board-density-detailed .board-card {
   align-items: flex-start;
   padding: 8px 10px;
   min-height: 40px;
+}
+.board-density-detailed .board-card-info {
+  gap: 4px;
 }
 .board-density-detailed .board-card-title {
   font-size: 11px;
@@ -1231,6 +1237,18 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   gap: 4px;
   margin-top: 2px;
 }
+.board-density-detailed .board-card-quick-controls {
+  max-height: none;
+  opacity: 1;
+  overflow: visible;
+  pointer-events: auto;
+  margin-top: 6px;
+}
+.board-density-detailed .board-card-quick-btn {
+  font-size: 9px;
+  line-height: 18px;
+  padding: 0 7px;
+}
 .board-density-detailed .board-card-agent,
 .board-density-detailed .board-card-chain,
 .board-density-detailed .board-card-activity {
@@ -1238,6 +1256,14 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 }
 .board-density-detailed .board-card-activity {
   -webkit-line-clamp: 3;
+}
+.board-density-detailed .board-card-dot {
+  margin-top: 5px;
+}
+.board-density-detailed .board-card-menu-btn {
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
 }
 .board-card.focused {
   border-color: var(--accent);
@@ -1882,6 +1908,26 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   align-items: center;
   padding: 4px 8px; flex-shrink: 0;
   border-bottom: 1px solid var(--border);
+}
+.board-saved-views-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin-left: 6px;
+}
+.board-save-view-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.board-save-view-input {
+  width: 132px;
+  min-width: 0;
+  height: 22px;
+  padding: 3px 8px;
+  font-size: 9px;
 }
 .board-saved-views-spacer {
   flex: 1 1 auto;

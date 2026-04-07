@@ -43,6 +43,9 @@ var _boardCardDensityByGroup = null; // persisted card density keyed by group
 var _boardFilterStateGroup = '';
 var _boardShowSchedules = false; // true when "Schedules" tab is active
 var _boardShowArchived = false;  // include archived tasks in the active board view
+var _boardSavingView = false;    // inline saved-view naming control visibility
+var _boardSavingViewName = '';   // draft name for inline saved-view creation
+var _boardSaveViewFocus = false; // focus the inline saved-view input after render
 var _boardRenderLimit = 50;      // virtual scroll: render this many root tasks initially
 var _boardSelectedTasks = {};    // task_id → true for multi-select
 var _boardLastSelectedTask = ''; // last clicked task for shift-range select
@@ -1535,14 +1538,11 @@ function renderBoard() {
     || _boardFilterHealth.length
     || hasSavedViews || archivedCount || _boardShowArchived;
 
-  if (showToolbar) {
+    if (showToolbar) {
     html += '<div class="board-search-bar">';
     html += '<input type="text" class="board-search-input" id="board-search-input"'
       + ' placeholder="Search tasks..." value="' + esc(_boardSearchQuery) + '"'
       + ' oninput="boardUpdateSearch(this.value)">';
-    if (currentViewSavable || hasSavedViews) {
-      html += '<button class="board-filter-btn" onclick="boardSaveCurrentView()">Save View</button>';
-    }
     if (hasLabels || _boardFilterLabels.length) {
       var lblCount = _boardFilterLabels.length;
       html += '<div class="board-filter-btn-wrap" id="board-label-filter-wrap">';
@@ -1584,7 +1584,7 @@ function renderBoard() {
     }
     html += '</div>';
 
-    if (hasQuickViews || hasSavedViews || !_boardShowSchedules) {
+    if (hasQuickViews || hasSavedViews || currentViewSavable || _boardSavingView || !_boardShowSchedules) {
       html += '<div class="board-saved-views">';
       if (hasQuickViews) {
         html += '<button class="board-filter-btn'
@@ -1593,6 +1593,21 @@ function renderBoard() {
         html += '<button class="board-filter-btn'
           + (_boardQuickView === 'touched' ? ' active' : '')
           + '" onclick="boardApplyQuickView(\'touched\')">Recently Touched</button>';
+      }
+      if (currentViewSavable || hasSavedViews || _boardSavingView) {
+        html += '<span class="board-saved-views-label">Saved</span>';
+        if (_boardSavingView) {
+          html += '<div class="board-save-view-form">';
+          html += '<input type="text" class="board-save-view-input" id="board-save-view-input"'
+            + ' placeholder="View name" value="' + esc(_boardSavingViewName) + '"'
+            + ' oninput="boardUpdateSaveViewName(this.value)"'
+            + ' onkeydown="boardSaveViewKeydown(event)">';
+          html += '<button class="board-filter-btn active" onclick="boardSubmitSaveView()">Save</button>';
+          html += '<button class="board-filter-btn" onclick="boardCancelSaveView()">Cancel</button>';
+          html += '</div>';
+        } else if (currentViewSavable) {
+          html += '<button class="board-filter-btn" onclick="boardStartSaveView()">Save View</button>';
+        }
       }
       for (var vi = 0; vi < savedViews.length; vi++) {
         var view = savedViews[vi];
@@ -1844,6 +1859,15 @@ function renderBoard() {
       tInp.focus();
       // Place cursor at end
       tInp.selectionStart = tInp.selectionEnd = tInp.value.length;
+    }
+  }
+  if (_boardSavingView && _boardSaveViewFocus) {
+    _boardSaveViewFocus = false;
+    var viewInp = document.getElementById('board-save-view-input');
+    if (viewInp) {
+      viewInp.focus();
+      viewInp.selectionStart = 0;
+      viewInp.selectionEnd = viewInp.value.length;
     }
   }
 
@@ -3352,7 +3376,7 @@ function boardCardDrop(e) {
   var pos = e.clientY < mid ? targetIdx : targetIdx + 1;
 
   // UI is sorted newest-first (descending position), invert for server
-  var serverPos = tasks.length - pos;
+  var serverPos = Math.max(0, tasks.length - pos - 1);
   send({ cmd: 'board_reorder_task', id: _boardDragId, position: serverPos });
   card.classList.remove('drop-before', 'drop-after');
 }
@@ -3523,13 +3547,50 @@ function boardClearFilters() {
 }
 
 function boardSaveCurrentView() {
+  boardStartSaveView();
+}
+
+function boardStartSaveView() {
+  if (_boardIsDefaultFilterState(_boardCurrentViewState())) return;
+  _boardSavingView = true;
+  _boardSavingViewName = '';
+  _boardSaveViewFocus = true;
+  renderBoard();
+}
+
+function boardUpdateSaveViewName(value) {
+  _boardSavingViewName = value || '';
+}
+
+function boardSaveViewKeydown(e) {
+  if (!e) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    boardSubmitSaveView();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    boardCancelSaveView();
+  }
+}
+
+function boardCancelSaveView() {
+  _boardSavingView = false;
+  _boardSavingViewName = '';
+  _boardSaveViewFocus = false;
+  renderBoard();
+}
+
+function boardSubmitSaveView(name) {
   _boardHydrateSavedViews();
   if (_boardIsDefaultFilterState(_boardCurrentViewState())) return;
   var group = _currentGroup();
   if (!group) return;
-  var name = (window.prompt
-    ? window.prompt('Save board view as:', '')
-    : '').trim();
+  if (typeof name !== 'string') {
+    name = _boardSavingViewName;
+    var input = document.getElementById('board-save-view-input');
+    if (input && typeof input.value === 'string') name = input.value;
+  }
+  name = (name || '').trim();
   if (!name) return;
   var views = _boardSavedViewsByGroup[group] || [];
   var next = _boardCurrentViewState();
@@ -3545,6 +3606,9 @@ function boardSaveCurrentView() {
   }
   if (!replaced) views.push(normalized);
   _boardSavedViewsByGroup[group] = views;
+  _boardSavingView = false;
+  _boardSavingViewName = '';
+  _boardSaveViewFocus = false;
   _boardPersistSavedViews();
   renderBoard();
 }
