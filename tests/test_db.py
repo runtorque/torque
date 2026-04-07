@@ -378,3 +378,64 @@ class LoomDBTests(unittest.TestCase):
         self.assertTrue(loaded[0]["generated"])
         self.assertEqual(loaded[0]["match"]["normalized_task_family"], "billing-dashboard")
         self.assertTrue(loaded[0]["publication_preview"]["ready_to_publish"])
+
+    def test_memory_entries_roundtrip_and_filters(self):
+        self.db.save_memory_entry(
+            {
+                "id": "mem-1",
+                "project_key": "/repo",
+                "group_name": "g",
+                "scope_kind": "task",
+                "scope_ref": "task-1",
+                "entry_type": "decision",
+                "title": "Adopt SQLite memory",
+                "content": "Use SQLite as the durable source of truth.",
+                "pinned": True,
+                "task_id": "task-1",
+                "source_kind": "agent",
+                "source_id": "agent-1",
+                "source_name": "Worker",
+                "created_at": 10.0,
+                "updated_at": 10.0,
+            }
+        )
+        self.db.save_memory_entry(
+            {
+                "id": "mem-2",
+                "project_key": "/repo",
+                "group_name": "g",
+                "scope_kind": "group",
+                "scope_ref": "g",
+                "entry_type": "finding",
+                "title": "Keep snapshots small",
+                "content": "Do not mirror memory into full UI snapshots.",
+                "pinned": False,
+                "task_id": "",
+                "source_kind": "agent",
+                "source_id": "agent-2",
+                "source_name": "Reviewer",
+                "created_at": 20.0,
+                "updated_at": 20.0,
+            }
+        )
+
+        all_entries = self.db.load_memory_entries(group_name="g", limit=10)
+        self.assertEqual([entry["id"] for entry in all_entries], ["mem-1", "mem-2"])
+
+        pinned = self.db.load_memory_entries(
+            group_name="g", pinned_only=True, limit=10
+        )
+        self.assertEqual([entry["id"] for entry in pinned], ["mem-1"])
+
+        scoped = self.db.load_memory_entries(
+            scope_kind="task", scope_ref="task-1", limit=10
+        )
+        self.assertEqual([entry["id"] for entry in scoped], ["mem-1"])
+
+        searched = self.db.load_memory_entries(search="snapshots", limit=10)
+        self.assertEqual([entry["id"] for entry in searched], ["mem-2"])
+
+        self.db.set_memory_entry_pinned("mem-2", True, 30.0)
+        entry = self.db.load_memory_entry("mem-2")
+        self.assertTrue(entry["pinned"])
+        self.assertEqual(entry["updated_at"], 30.0)

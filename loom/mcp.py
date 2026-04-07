@@ -223,6 +223,119 @@ TOOLS = [
             "required": ["message"],
         },
     },
+    {
+        "name": "loom_memory_publish",
+        "description": (
+            "Publish an explicit shared memory entry for the current "
+            "task, pipeline, group, or project. Use this for durable "
+            "findings, decisions, warnings, handoffs, and pinned notes."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_type": {
+                    "type": "string",
+                    "enum": ["finding", "decision", "warning", "handoff", "note"],
+                    "description": "Type of memory entry to publish.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The durable memory content.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Optional short title.",
+                },
+                "scope_kind": {
+                    "type": "string",
+                    "enum": ["task", "pipeline", "group", "project"],
+                    "description": (
+                        "Optional scope. Defaults to task when the agent "
+                        "has an active task, otherwise group."
+                    ),
+                },
+                "scope_ref": {
+                    "type": "string",
+                    "description": "Optional explicit scope reference.",
+                },
+                "pinned": {
+                    "type": "boolean",
+                    "description": "Whether to pin this entry.",
+                },
+            },
+            "required": ["entry_type", "content"],
+        },
+    },
+    {
+        "name": "loom_memory_list",
+        "description": (
+            "List shared memory entries with deterministic filtering by "
+            "scope, type, pin, and simple text search."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scope_kind": {
+                    "type": "string",
+                    "enum": ["task", "pipeline", "group", "project"],
+                    "description": "Optional scope filter.",
+                },
+                "scope_ref": {
+                    "type": "string",
+                    "description": "Optional explicit scope reference.",
+                },
+                "entry_type": {
+                    "type": "string",
+                    "enum": ["finding", "decision", "warning", "handoff", "note"],
+                    "description": "Optional entry type filter.",
+                },
+                "pinned_only": {
+                    "type": "boolean",
+                    "description": "Only return pinned entries.",
+                },
+                "search": {
+                    "type": "string",
+                    "description": "Simple text search over title and content.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum entries to return (default: 20).",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Offset for pagination (default: 0).",
+                },
+            },
+        },
+    },
+    {
+        "name": "loom_memory_pin",
+        "description": "Pin a shared memory entry so it stays high-signal.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "Memory entry ID.",
+                },
+            },
+            "required": ["entry_id"],
+        },
+    },
+    {
+        "name": "loom_memory_unpin",
+        "description": "Remove the pin from a shared memory entry.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "string",
+                    "description": "Memory entry ID.",
+                },
+            },
+            "required": ["entry_id"],
+        },
+    },
 ]
 
 _TOOL_MAP = {t["name"]: t for t in TOOLS}
@@ -248,6 +361,45 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
                  if t.agent_id == cell_id}
         return json.dumps({"agent": asdict(cell), "tasks": tasks},
                           indent=2), False
+
+    if name in {
+        "loom_memory_publish",
+        "loom_memory_list",
+        "loom_memory_pin",
+        "loom_memory_unpin",
+    }:
+        payload = {"cell_id": cell_id}
+        if name == "loom_memory_publish":
+            payload["cmd"] = "memory_publish"
+            payload["entry_type"] = args.get("entry_type", "")
+            payload["content"] = args.get("content", "")
+            if args.get("title"):
+                payload["title"] = args["title"]
+            if args.get("scope_kind"):
+                payload["scope_kind"] = args["scope_kind"]
+            if args.get("scope_ref"):
+                payload["scope_ref"] = args["scope_ref"]
+            if "pinned" in args:
+                payload["pinned"] = bool(args["pinned"])
+        elif name == "loom_memory_list":
+            payload["cmd"] = "memory_list"
+            for key in (
+                "scope_kind", "scope_ref", "entry_type",
+                "pinned_only", "search", "limit", "offset",
+            ):
+                if key in args:
+                    payload[key] = args[key]
+        elif name == "loom_memory_pin":
+            payload["cmd"] = "memory_pin"
+            payload["entry_id"] = args.get("entry_id", "")
+        else:
+            payload["cmd"] = "memory_unpin"
+            payload["entry_id"] = args.get("entry_id", "")
+
+        result = await handle_command(payload)
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
 
     # Map tool name → ai_report action + argument extraction
     action_map = {
