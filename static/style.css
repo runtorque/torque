@@ -663,6 +663,51 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
   overflow-y: auto;
   padding-right: 4px;
 }
+.task-modal-section {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+}
+.task-modal-section summary {
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+  list-style-position: inside;
+}
+.task-modal-section summary:hover {
+  color: var(--text);
+}
+.task-modal-section summary .hint-btn {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+.task-modal-section-body {
+  padding: 2px 10px 10px;
+}
+.task-modal-section-body label:first-child {
+  margin-top: 0;
+}
+.task-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+.task-modal-grid > div label {
+  margin-top: 0;
+}
+.task-modal-check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 6px 10px;
+  margin-top: 8px;
+}
+.task-modal-check-grid .gs-checkbox {
+  margin-top: 0 !important;
+}
 
 /* Tab bar */
 .gs-tabs {
