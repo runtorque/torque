@@ -133,7 +133,7 @@ WEAVER_TOOLS = [
             "Supports optional filters by lane, label, task health, or "
             "text search. Returns a summary of each task including "
             "title, slug, lane, labels, action, assigned agent, and "
-            "health."
+            "health and linked external ticket metadata."
         ),
         "inputSchema": {
             "type": "object",
@@ -167,7 +167,8 @@ WEAVER_TOOLS = [
         "description": (
             "Show full details for a task by slug or ID. "
             "Returns title, description, labels, action, action variables, "
-            "pipeline info, assigned agent, and activity messages. "
+            "pipeline info, assigned agent, linked external ticket "
+            "metadata, and activity messages. "
             "For pipeline tasks, automatically includes the chain summary."
         ),
         "inputSchema": {
@@ -1061,6 +1062,9 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "agent": agent_name,
                 "status": t.status,
                 "health_state": health_state,
+                "provider": t.provider,
+                "external_id": t.external_id,
+                "external_url": t.external_url,
                 "health_since": getattr(t, "health_since", ""),
                 "parent_task_id": t.parent_task_id,
             })
@@ -1096,6 +1100,9 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             "action": task.action_name,
             "action_vars": task.action_vars or {},
             "agent_id": task.agent_id,
+            "provider": task.provider,
+            "external_id": task.external_id,
+            "external_url": task.external_url,
             "parent_task_id": task.parent_task_id,
             "pipeline_depth": task.pipeline_depth,
             "depends_on": task.depends_on or [],

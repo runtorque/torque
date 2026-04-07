@@ -2272,6 +2272,100 @@ def cmd_board_add(args):
         print(f"Task added to {args.lane or 'first lane'}")
 
 
+def cmd_board_import(args):
+    state_data = get_state_local(args.port)
+    group = args.group
+    if not group:
+        _cell, _parent, group = detect_context(state_data)
+        if not group:
+            groups = state_data.get("groups", {})
+            group = next(iter(groups), "")
+    resp = api_call(
+        "external_import_task",
+        port=args.port,
+        ref=args.ref,
+        group=group,
+        lane=args.lane or "",
+        provider=args.provider or "",
+        title=args.title or "",
+        description=args.description or "",
+    )
+    data = check_ok(resp)
+    print(f"Imported external ticket as {data.get('task_id', 'task')}")
+
+
+def cmd_board_link(args):
+    st = get_state_local(args.port)
+    match = resolve_task(st, args.identifier)
+    payload = {
+        "id": match["id"],
+        "provider": "",
+        "external_id": "",
+        "external_url": "",
+        "ref": "",
+    } if args.clear else {
+        "id": match["id"],
+        "provider": args.provider or match.get("provider", ""),
+        "external_id": args.external_id or match.get("external_id", ""),
+        "external_url": args.url or match.get("external_url", ""),
+        "ref": args.ref or "",
+    }
+    resp = api_call("external_link_task", port=args.port, **payload)
+    data = check_ok(resp)
+    if args.clear:
+        print(f"Unlinked external issue from \"{match.get('task', '')}\"")
+    else:
+        provider = data.get("provider", "")
+        external_id = data.get("external_id", "")
+        suffix = f"{provider}:{external_id}" if provider and external_id else external_id or data.get("external_url", "")
+        print(f"Linked \"{match.get('task', '')}\" to {suffix or 'external issue'}")
+
+
+def cmd_board_open(args):
+    st = get_state_local(args.port)
+    match = resolve_task(st, args.identifier)
+    resp = api_call("external_open_task", port=args.port, id=match["id"])
+    data = check_ok(resp)
+    url = data.get("url", "")
+    if not url:
+        die("No external URL available")
+    try:
+        subprocess.run(["open", url], check=False)
+    except Exception:
+        pass
+    print(url)
+
+
+def cmd_board_push(args):
+    st = get_state_local(args.port)
+    match = resolve_task(st, args.identifier)
+    resp = api_call(
+        "external_push_task_status",
+        port=args.port,
+        id=match["id"],
+        status=args.status or match.get("status", "") or match.get("lane", ""),
+        note=args.message or "",
+    )
+    data = check_ok(resp)
+    print(data.get("message", "External status pushed"))
+
+
+def cmd_board_comment(args):
+    st = get_state_local(args.port)
+    match = resolve_task(st, args.identifier)
+    comment = args.message or args.comment or ""
+    if not comment:
+        die("Comment is required")
+    resp = api_call(
+        "external_post_task_comment",
+        port=args.port,
+        id=match["id"],
+        comment=comment,
+    )
+    data = check_ok(resp)
+    print(data.get("message", "External comment posted"))
+
+
 def cmd_board_move(args):
     st = get_state_local(args.port)
     match = resolve_task(st, args.identifier)
@@ -2367,10 +2461,14 @@ def cmd_ai_done(args):
         kwargs["task_id"] = task["id"]
     if args.message:
         kwargs["message"] = args.message
+    if args.post_external:
+        kwargs["push_external"] = True
     resp = api_call("ai_report", port=args.port, **kwargs)
-    check_ok(resp)
+    data = check_ok(resp)
     label = task.get("slug", task["id"][:6]) if task else ""
     print(f"Done{' — ' + label if label else ''}")
+    if data.get("type") == "warning" and data.get("message"):
+        print(f"Warning: {data['message']}")
 
 
 def cmd_ai_blocked(args):
@@ -3358,6 +3456,42 @@ def build_parser():
     p.add_argument("-l", "--lane", help="Target lane (default: first lane)")
     p.set_defaults(func=cmd_board_add)
 
+    p = brd_sub.add_parser("import", help="Import an external ticket")
+    p.add_argument("ref", help="External reference or URL")
+    p.add_argument("-g", "--group",
+                   help="Target group (auto-detected if in a Loom session)")
+    p.add_argument("-l", "--lane", help="Target lane")
+    p.add_argument("--provider", help="Provider override")
+    p.add_argument("--title", help="Manual title override")
+    p.add_argument("-d", "--description", help="Manual description override")
+    p.set_defaults(func=cmd_board_import)
+
+    p = brd_sub.add_parser("link", help="Link or unlink an external issue")
+    p.add_argument("identifier", help="Task ID, slug, or title")
+    p.add_argument("ref", nargs="?", help="External reference or URL")
+    p.add_argument("--provider", help="Provider override")
+    p.add_argument("--external-id", help="External issue ID override")
+    p.add_argument("--url", help="External URL override")
+    p.add_argument("--clear", action="store_true",
+                   help="Remove the external link")
+    p.set_defaults(func=cmd_board_link)
+
+    p = brd_sub.add_parser("open", help="Open the linked external issue")
+    p.add_argument("identifier", help="Task ID, slug, or title")
+    p.set_defaults(func=cmd_board_open)
+
+    p = brd_sub.add_parser("push", help="Push task status to the external issue")
+    p.add_argument("identifier", help="Task ID, slug, or title")
+    p.add_argument("-s", "--status", help="Status text override")
+    p.add_argument("-m", "--message", help="Optional note")
+    p.set_defaults(func=cmd_board_push)
+
+    p = brd_sub.add_parser("comment", help="Post a comment to the external issue")
+    p.add_argument("identifier", help="Task ID, slug, or title")
+    p.add_argument("comment", nargs="?", help="Comment text")
+    p.add_argument("-m", "--message", help="Comment text")
+    p.set_defaults(func=cmd_board_comment)
+
     p = brd_sub.add_parser("move", help="Move a task to a lane")
     p.add_argument("identifier", help="Task ID, slug, or title")
     p.add_argument("-l", "--lane", required=True,
@@ -3379,6 +3513,8 @@ def build_parser():
 
     p = ai_sub.add_parser("done", help="Mark task as done")
     p.add_argument("-m", "--message", help="Completion summary")
+    p.add_argument("--post-external", action="store_true",
+                   help="Post the completion summary to the linked external issue")
     p.add_argument("task_ref", nargs="?",
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_done)

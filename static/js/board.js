@@ -394,6 +394,10 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (t.attachments && t.attachments.length) {
     meta += '<span class="board-card-label board-card-attachments" title="' + t.attachments.length + ' image(s) attached">&#x1F4CE; ' + t.attachments.length + '</span>';
   }
+  if (t.provider || t.external_id) {
+    var extLabel = (t.provider ? t.provider + ': ' : '') + (t.external_id || 'linked');
+    meta += '<span class="board-card-label board-card-template" title="Linked external ticket">' + esc(extLabel) + '</span>';
+  }
   if (t.external_url) {
     meta += '<a class="board-card-pr-link" href="' + esc(t.external_url)
       + '" onclick="event.stopPropagation();window.open(this.href);return false"'
@@ -691,6 +695,7 @@ function renderBoard() {
   } else {
     html += '<div class="board-add-task" onclick="boardStartAddTask()">';
     html += '<span>+ Add task</span>';
+    html += '<button class="board-add-tpl-btn-idle" onclick="event.stopPropagation();boardImportExternal()">Import external</button>';
     html += '<button class="board-add-tpl-btn-idle" onclick="event.stopPropagation();boardToggleActionList()">From action &#9662;</button>';
     html += '</div>';
   }
@@ -1275,6 +1280,17 @@ function boardCardMenu(evt, taskId) {
   // Preview prompt
   html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
 
+  html += '<div class="ctx-sep"></div>';
+  if (task.provider || task.external_id || task.external_url) {
+    html += '<button onclick="event.stopPropagation();boardOpenExternal(\'' + taskId + '\')">Open external issue</button>';
+    html += '<button onclick="event.stopPropagation();boardPushExternalStatus(\'' + taskId + '\')">Push status...</button>';
+    html += '<button onclick="event.stopPropagation();boardPostExternalComment(\'' + taskId + '\')">Post comment...</button>';
+    html += '<button onclick="event.stopPropagation();boardLinkExternal(\'' + taskId + '\')">Edit external link...</button>';
+    html += '<button onclick="event.stopPropagation();boardClearExternal(\'' + taskId + '\')">Unlink external issue</button>';
+  } else {
+    html += '<button onclick="event.stopPropagation();boardLinkExternal(\'' + taskId + '\')">Link external issue...</button>';
+  }
+
   // Detach from pipeline (derived tasks only)
   if (isDerived) {
     html += '<button onclick="boardDetachTask(\'' + taskId + '\')">Detach from pipeline</button>';
@@ -1601,6 +1617,15 @@ function boardUnlinkAgent(taskId) {
   send({ cmd: 'board_update_task', id: taskId, agent_id: '' });
 }
 
+function boardImportExternal() {
+  _closeCtxMenu();
+  var ref = window.prompt('External reference or URL');
+  if (!ref) return;
+  var group = window.prompt('Group', _currentGroup() || '');
+  if (!group) return;
+  send({ cmd: 'external_import_task', ref: ref.trim(), group: group, lane: _boardSelectedLane || '' });
+}
+
 function boardDetachTask(taskId) {
   _closeCtxMenu();
   var tasks = _boardTasks();
@@ -1645,6 +1670,59 @@ function boardLinkAgent(taskId) {
 function boardDoLinkAgent(taskId, agentId) {
   _closeCtxMenu();
   send({ cmd: 'board_update_task', id: taskId, agent_id: agentId });
+}
+
+function boardLinkExternal(taskId) {
+  _closeCtxMenu();
+  var task = _boardTasks()[taskId];
+  if (!task) return;
+  var refDefault = task.external_url || ((task.provider && task.external_id)
+    ? (task.provider + ':' + task.external_id) : (task.external_id || ''));
+  var ref = window.prompt('External reference or URL', refDefault);
+  if (ref === null) return;
+  send({
+    cmd: 'external_link_task',
+    id: taskId,
+    ref: ref.trim(),
+    provider: task.provider || '',
+    external_id: task.external_id || '',
+    external_url: task.external_url || '',
+  });
+}
+
+function boardClearExternal(taskId) {
+  _closeCtxMenu();
+  send({
+    cmd: 'external_link_task',
+    id: taskId,
+    provider: '',
+    external_id: '',
+    external_url: '',
+    ref: '',
+  });
+}
+
+function boardOpenExternal(taskId) {
+  _closeCtxMenu();
+  send({ cmd: 'external_open_task', id: taskId });
+}
+
+function boardPushExternalStatus(taskId) {
+  _closeCtxMenu();
+  var task = _boardTasks()[taskId];
+  if (!task) return;
+  var status = window.prompt('External status', task.status || task.lane || '');
+  if (status === null) return;
+  var note = window.prompt('Optional note', '');
+  if (note === null) return;
+  send({ cmd: 'external_push_task_status', id: taskId, status: status.trim(), note: note.trim() });
+}
+
+function boardPostExternalComment(taskId) {
+  _closeCtxMenu();
+  var comment = window.prompt('Comment to post externally');
+  if (comment === null || !comment.trim()) return;
+  send({ cmd: 'external_post_task_comment', id: taskId, comment: comment.trim() });
 }
 
 /* ---- Dispatch task to agent ----------------------------------------- */

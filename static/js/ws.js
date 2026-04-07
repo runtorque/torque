@@ -102,6 +102,18 @@ function connect() {
       _showPromptPreview(msg);
     } else if (msg.type === 'dispatch_action_missing') {
       _handleDispatchActionMissing(msg);
+    } else if (msg.type === 'external_open') {
+      if (msg.url) window.open(msg.url);
+    } else if (msg.type === 'external_imported') {
+      _showToast('Imported external ticket', 'info');
+    } else if (msg.type === 'external_linked') {
+      _showToast('External issue linked', 'info');
+    } else if (msg.type === 'external_unlinked') {
+      _showToast('External issue unlinked', 'info');
+    } else if (msg.type === 'external_status_pushed') {
+      _showToast('External status pushed', 'info');
+    } else if (msg.type === 'external_comment_posted') {
+      _showToast('External comment posted', 'info');
     } else if (msg.type === 'pipelines') {
       if (typeof tplReceivePipelines !== 'undefined') tplReceivePipelines(msg);
     } else if (msg.type === 'global_settings') {

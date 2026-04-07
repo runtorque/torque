@@ -676,6 +676,64 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
             ["task-1"],
         )
 
+    async def test_task_show_and_board_list_include_external_ticket_metadata(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        task = state.board_add_task(
+            "Investigate sync",
+            "g",
+            id="task-ext",
+            provider="github",
+            external_id="openai/example#7",
+            external_url="https://github.com/openai/example/issues/7",
+        )
+        self.assertIsNotNone(task)
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_show",
+            {"task": "task-ext"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+        self.assertFalse(is_error)
+        shown = json.loads(text)
+        self.assertEqual(shown["provider"], "github")
+        self.assertEqual(shown["external_id"], "openai/example#7")
+        self.assertEqual(
+            shown["external_url"],
+            "https://github.com/openai/example/issues/7",
+        )
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_list",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+        self.assertFalse(is_error)
+        lanes = json.loads(text)["lanes"]
+        self.assertEqual(lanes["Backlog"][0]["provider"], "github")
+        self.assertEqual(
+            lanes["Backlog"][0]["external_id"],
+            "openai/example#7",
+        )
+
 
 class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
