@@ -47,6 +47,7 @@ from .artifacts import (
 from .memory import (
     build_memory_entry,
     build_memory_link,
+    build_prompt_memory_block,
     detect_current_task,
     normalize_entry_type,
     normalize_link_target_kind,
@@ -77,9 +78,12 @@ def _append_task_artifacts(prompt: str, attachments, artifacts) -> str:
     return final_prompt
 
 
-def _build_self_dispatch_prompt() -> str:
+def _build_self_dispatch_prompt(shared_context_block: str = "") -> str:
     """Return the minimal follow-up prompt for derive-to-self."""
-    return "Proceed with the derived task you just created."
+    prompt = "Proceed with the derived task you just created."
+    if shared_context_block:
+        prompt += shared_context_block
+    return prompt
 
 
 def _apply_verification_report(task, payload, actor_name, save_task,
@@ -3945,8 +3949,15 @@ async def main(connection: iterm2.Connection):
                                 cell, task, dispatch_lane)
 
                             final_prompt = ""
+                            shared_context_block = build_prompt_memory_block(
+                                state.db,
+                                cell=cell,
+                                task=task,
+                            )
                             if data.get("_self_dispatch"):
-                                final_prompt = _build_self_dispatch_prompt()
+                                final_prompt = _build_self_dispatch_prompt(
+                                    shared_context_block,
+                                )
                             else:
                                 # Build loom context for template rendering
                                 loom_ctx = _build_loom_context(cell, task)
@@ -4000,6 +4011,7 @@ async def main(connection: iterm2.Connection):
                                     is_clean = \
                                         loom_ctx["context"]["is_clean"]
                                     final_prompt = prompt
+                                    final_prompt += shared_context_block
                                     final_prompt += _build_postscript(
                                         task, action_mgr,
                                         base_dir if task.action_name

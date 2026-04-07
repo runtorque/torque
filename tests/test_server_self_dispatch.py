@@ -82,6 +82,14 @@ class ServerSelfDispatchTests(unittest.TestCase):
             "Proceed with the derived task you just created.",
         )
 
+    def test_self_dispatch_prompt_can_append_shared_context(self):
+        prompt = self.server_mod._build_self_dispatch_prompt(
+            "\n\nRelevant shared context:\n- [decision] Keep it focused."
+        )
+
+        self.assertIn("Proceed with the derived task you just created.", prompt)
+        self.assertIn("Relevant shared context", prompt)
+
     def test_apply_verification_report_marks_attempted(self):
         task = self.state_mod.BoardTask(
             id="task-1",

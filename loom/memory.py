@@ -17,6 +17,30 @@ ENTRY_TYPES = ("finding", "decision", "warning", "handoff", "note")
 SCOPE_KINDS = ("task", "pipeline", "group", "project")
 LINK_TARGET_KINDS = ("task", "agent", "pipeline")
 
+PROMPT_QUERY_LIMIT = 8
+PROMPT_MAX_ENTRIES = 4
+PROMPT_MAX_CHARS = 1200
+PROMPT_ITEM_MAX_CHARS = 220
+
+_PROMPT_REASON_WEIGHTS = {
+    "scope_task": 4000,
+    "link_task": 3400,
+    "scope_pipeline": 3000,
+    "link_pipeline": 2600,
+    "link_agent": 2200,
+    "scope_group": 1200,
+    "scope_project": 500,
+}
+_PROMPT_REASON_LABELS = {
+    "scope_task": "task",
+    "link_task": "task-link",
+    "scope_pipeline": "pipeline",
+    "link_pipeline": "pipeline-link",
+    "link_agent": "agent-link",
+    "scope_group": "group",
+    "scope_project": "project",
+}
+
 MAX_TITLE_LEN = 200
 MAX_CONTENT_LEN = 4000
 
@@ -238,3 +262,177 @@ def build_memory_link(state, *, entry_id: str, target_kind: str,
         "target_ref": ref,
         "created_at": time.time(),
     }
+
+
+def select_relevant_prompt_entries(db, *, cell=None, task=None,
+                                   query_limit: int = PROMPT_QUERY_LIMIT,
+                                   max_entries: int = PROMPT_MAX_ENTRIES
+                                   ) -> list[dict]:
+    """Return top shared-memory entries for prompt injection.
+
+    Ordering is deterministic:
+    - pinned entries first
+    - nearest matching scope/link next
+    - newer entries ahead of older ones
+    """
+    if not db or (not cell and not task):
+        return []
+
+    pipeline_ref = ""
+    if task:
+        pipeline_ref = task.pipeline_root_id or task.id
+
+    group_ref = ""
+    if task and getattr(task, "group", ""):
+        group_ref = task.group
+    elif cell and getattr(cell, "group", ""):
+        group_ref = cell.group
+
+    project_ref = infer_project_key(cell=cell, task=task)
+    agent_ref = getattr(cell, "id", "") if cell else ""
+
+    queries = []
+    if task and getattr(task, "id", ""):
+        queries.append((
+            "scope_task",
+            {"scope_kind": "task", "scope_ref": task.id},
+        ))
+        queries.append((
+            "link_task",
+            {"linked_target_kind": "task", "linked_target_ref": task.id},
+        ))
+    if pipeline_ref:
+        queries.append((
+            "scope_pipeline",
+            {"scope_kind": "pipeline", "scope_ref": pipeline_ref},
+        ))
+        queries.append((
+            "link_pipeline",
+            {
+                "linked_target_kind": "pipeline",
+                "linked_target_ref": pipeline_ref,
+            },
+        ))
+    if agent_ref:
+        queries.append((
+            "link_agent",
+            {"linked_target_kind": "agent", "linked_target_ref": agent_ref},
+        ))
+    if group_ref:
+        queries.append((
+            "scope_group",
+            {"scope_kind": "group", "scope_ref": group_ref},
+        ))
+    if project_ref:
+        queries.append((
+            "scope_project",
+            {
+                "scope_kind": "project",
+                "scope_ref": project_ref,
+                "project_key": project_ref,
+            },
+        ))
+
+    candidates = {}
+    for reason, filters in queries:
+        entries = db.load_memory_entries(
+            limit=max(1, int(query_limit)),
+            **filters,
+        )
+        for rank, entry in enumerate(entries):
+            current = candidates.setdefault(
+                entry["id"],
+                {
+                    "entry": dict(entry),
+                    "reasons": set(),
+                    "best_rank": rank,
+                },
+            )
+            current["reasons"].add(reason)
+            current["best_rank"] = min(current["best_rank"], rank)
+
+    ranked = []
+    for item in candidates.values():
+        entry = item["entry"]
+        score = sum(_PROMPT_REASON_WEIGHTS[r] for r in item["reasons"])
+        if entry.get("pinned"):
+            score += 10000
+        score += max(0, 50 - item["best_rank"])
+        ranked.append({
+            "entry": entry,
+            "score": score,
+            "match_reasons": sorted(
+                item["reasons"],
+                key=lambda reason: (
+                    -_PROMPT_REASON_WEIGHTS[reason],
+                    reason,
+                ),
+            ),
+        })
+
+    ranked.sort(
+        key=lambda item: (
+            -item["score"],
+            -float(item["entry"].get("created_at", 0)),
+            item["entry"]["id"],
+        )
+    )
+    return ranked[:max(1, int(max_entries))]
+
+
+def build_prompt_memory_block(db, *, cell=None, task=None,
+                              query_limit: int = PROMPT_QUERY_LIMIT,
+                              max_entries: int = PROMPT_MAX_ENTRIES,
+                              max_chars: int = PROMPT_MAX_CHARS) -> str:
+    """Render a bounded shared-context block for task prompts."""
+    selected = select_relevant_prompt_entries(
+        db,
+        cell=cell,
+        task=task,
+        query_limit=query_limit,
+        max_entries=max_entries,
+    )
+    if not selected:
+        return ""
+
+    header = "\n\nRelevant shared context (pinned + nearest scope first):"
+    lines = []
+    total_len = len(header)
+
+    for item in selected:
+        entry = item["entry"]
+        tags = []
+        if entry.get("pinned"):
+            tags.append("pinned")
+        for reason in item["match_reasons"]:
+            label = _PROMPT_REASON_LABELS[reason]
+            if label not in tags:
+                tags.append(label)
+
+        title = clamp_text(entry.get("title", ""), 80)
+        content = clamp_text(entry.get("content", ""), PROMPT_ITEM_MAX_CHARS)
+        if title and title != content:
+            body = f"{title} — {content}"
+        else:
+            body = content
+        body = clamp_text(body, PROMPT_ITEM_MAX_CHARS)
+
+        tag_text = entry.get("entry_type", "")
+        if tags:
+            tag_text += " • " + ", ".join(tags[:3])
+        line = f"\n- [{tag_text}] {body}"
+
+        remaining = max_chars - total_len
+        if remaining <= 0:
+            break
+        if len(line) > remaining:
+            min_body = clamp_text(body, max(20, remaining - len(f"\n- [{tag_text}] ")))
+            line = f"\n- [{tag_text}] {min_body}"
+            if len(line) > remaining:
+                break
+        lines.append(line)
+        total_len += len(line)
+
+    if not lines:
+        return ""
+    return header + "".join(lines)
