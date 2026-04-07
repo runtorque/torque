@@ -16,11 +16,16 @@ var _boardActDropdownWaiting = false;  // waiting for action list for dropdown
 var _boardActList = null;              // fetched actions shown inline (null = hidden)
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
 var _boardCardsScrollTop = 0;  // preserve cards scroll across re-renders
+var _boardViewStates = {};     // keyed lane/filter/schedules scroll + render state
+var _boardActiveViewKey = '';
+var _boardNextViewDefault = null;
+var _boardSkipViewCaptureOnce = false;
 var _boardDragId = '';          // card being dragged
 
 var _boardCollapsedTasks = {};  // task_id → true if collapsed
 var _boardFilterByGroup = true;  // When true, board shows only tasks from the current group
 var _boardSearchQuery = '';      // text search filter
+var _boardQuickView = '';        // '' | 'recent' | 'touched'
 var _boardFilterLabels = [];     // active label filters (OR logic)
 var _boardFilterActions = [];    // active action name filters (OR logic)
 var _boardSearchTimer = null;    // debounce timer for search input
@@ -29,6 +34,11 @@ var _boardFilterHealth = [];    // active health filters (OR logic)
 var _boardFilterDropdownType = null;   // 'label' | 'action' | 'agent' | 'health' | null
 var _boardFilterDropdownCleanup = null;
 var _boardPreFilterLane = '';    // saved lane before search, restored on clear
+var _boardFiltersByGroup = null; // persisted filter state keyed by group
+var _boardSavedViewsByGroup = null; // saved view snapshots keyed by group
+var _boardLaneSortsByGroup = null; // persisted lane sort modes keyed by group
+var _boardCardDensityByGroup = null; // persisted card density keyed by group
+var _boardFilterStateGroup = '';
 var _boardShowSchedules = false; // true when "Schedules" tab is active
 var _boardRenderLimit = 50;      // virtual scroll: render this many root tasks initially
 var _boardSelectedTasks = {};    // task_id → true for multi-select
@@ -55,6 +65,373 @@ var _boardHealthReasonLabels = {
 
 /* ---- Helpers -------------------------------------------------------- */
 
+function _boardNormalizeFilterState(raw) {
+  raw = raw || {};
+  return {
+    search_query: typeof raw.search_query === 'string' ? raw.search_query : '',
+    quick_view: raw.quick_view === 'recent' || raw.quick_view === 'touched'
+      ? raw.quick_view
+      : '',
+    filter_labels: Array.isArray(raw.filter_labels) ? raw.filter_labels.slice() : [],
+    filter_actions: Array.isArray(raw.filter_actions) ? raw.filter_actions.slice() : [],
+    filter_agents: Array.isArray(raw.filter_agents) ? raw.filter_agents.slice() : [],
+    filter_health: Array.isArray(raw.filter_health) ? raw.filter_health.slice() : [],
+    pre_filter_lane: typeof raw.pre_filter_lane === 'string' ? raw.pre_filter_lane : '',
+  };
+}
+
+function _boardHydratePersistedFilters() {
+  if (_boardFiltersByGroup) return;
+  _boardFiltersByGroup = {};
+  var persisted = (state && state.board_filters_by_group) || {};
+  for (var group in persisted) {
+    _boardFiltersByGroup[group] = _boardNormalizeFilterState(persisted[group]);
+  }
+}
+
+function _boardCurrentFilterState() {
+  return _boardNormalizeFilterState({
+    search_query: _boardSearchQuery,
+    quick_view: _boardQuickView,
+    filter_labels: _boardFilterLabels,
+    filter_actions: _boardFilterActions,
+    filter_agents: _boardFilterAgents,
+    filter_health: _boardFilterHealth,
+    pre_filter_lane: _boardPreFilterLane,
+  });
+}
+
+function _boardApplyFilterState(raw) {
+  var next = _boardNormalizeFilterState(raw);
+  _boardSearchQuery = next.search_query;
+  _boardQuickView = next.quick_view;
+  _boardFilterLabels = next.filter_labels;
+  _boardFilterActions = next.filter_actions;
+  _boardFilterAgents = next.filter_agents;
+  _boardFilterHealth = next.filter_health;
+  _boardPreFilterLane = next.pre_filter_lane;
+}
+
+function _boardIsDefaultFilterState(raw) {
+  var next = _boardNormalizeFilterState(raw);
+  return next.search_query === ''
+    && next.quick_view === ''
+    && next.filter_labels.length === 0
+    && next.filter_actions.length === 0
+    && next.filter_agents.length === 0
+    && next.filter_health.length === 0
+    && next.pre_filter_lane === '';
+}
+
+function _boardPersistFilterState() {
+  _boardHydratePersistedFilters();
+  var group = _currentGroup();
+  if (!group) return;
+  var next = _boardCurrentFilterState();
+  if (_boardIsDefaultFilterState(next)) {
+    delete _boardFiltersByGroup[group];
+  } else {
+    _boardFiltersByGroup[group] = next;
+  }
+  if (typeof send === 'function') {
+    send({ cmd: 'board_set_filters', filters_by_group: _boardFiltersByGroup });
+  }
+}
+
+function _boardNormalizeSavedView(raw) {
+  raw = raw || {};
+  var filters = _boardNormalizeFilterState(raw);
+  var name = typeof raw.name === 'string' ? raw.name.trim() : '';
+  if (!name) return null;
+  return {
+    name: name,
+    search_query: filters.search_query,
+    quick_view: filters.quick_view,
+    filter_labels: filters.filter_labels,
+    filter_actions: filters.filter_actions,
+    filter_agents: filters.filter_agents,
+    filter_health: filters.filter_health,
+  };
+}
+
+function _boardHydrateSavedViews() {
+  if (_boardSavedViewsByGroup) return;
+  _boardSavedViewsByGroup = {};
+  var persisted = (state && state.board_saved_views_by_group) || {};
+  for (var group in persisted) {
+    var views = Array.isArray(persisted[group]) ? persisted[group] : [];
+    _boardSavedViewsByGroup[group] = [];
+    for (var i = 0; i < views.length; i++) {
+      var normalized = _boardNormalizeSavedView(views[i]);
+      if (normalized) _boardSavedViewsByGroup[group].push(normalized);
+    }
+  }
+}
+
+function _boardNormalizeLaneSortMode(mode) {
+  return mode === 'newest' || mode === 'oldest' || mode === 'due'
+    ? mode
+    : 'manual';
+}
+
+function _boardHydrateLaneSorts() {
+  if (_boardLaneSortsByGroup) return;
+  _boardLaneSortsByGroup = {};
+  var persisted = (state && state.board_lane_sorts_by_group) || {};
+  for (var group in persisted) {
+    var raw = persisted[group];
+    if (!raw || typeof raw !== 'object') continue;
+    _boardLaneSortsByGroup[group] = {};
+    for (var lane in raw) {
+      _boardLaneSortsByGroup[group][lane] =
+        _boardNormalizeLaneSortMode(raw[lane]);
+    }
+  }
+}
+
+function _boardNormalizeCardDensity(mode) {
+  return mode === 'compact' || mode === 'detailed'
+    ? mode
+    : 'normal';
+}
+
+function _boardHydrateCardDensity() {
+  if (_boardCardDensityByGroup) return;
+  _boardCardDensityByGroup = {};
+  var persisted = (state && state.board_card_density_by_group) || {};
+  for (var group in persisted) {
+    _boardCardDensityByGroup[group] =
+      _boardNormalizeCardDensity(persisted[group]);
+  }
+}
+
+function _boardCardDensityMode() {
+  _boardHydrateCardDensity();
+  var group = _currentGroup();
+  if (!group) return 'normal';
+  return _boardNormalizeCardDensity(_boardCardDensityByGroup[group]);
+}
+
+function _boardPersistCardDensity() {
+  _boardHydrateCardDensity();
+  if (typeof send === 'function') {
+    send({
+      cmd: 'board_set_card_density',
+      card_density_by_group: _boardCardDensityByGroup,
+    });
+  }
+}
+
+function _boardCurrentGroupLaneSorts() {
+  _boardHydrateLaneSorts();
+  var group = _currentGroup();
+  if (!group) return {};
+  return _boardLaneSortsByGroup[group] || {};
+}
+
+function _boardLaneSortMode(lane) {
+  if (!lane) return 'manual';
+  var sorts = _boardCurrentGroupLaneSorts();
+  return _boardNormalizeLaneSortMode(sorts[lane]);
+}
+
+function _boardPersistLaneSorts() {
+  _boardHydrateLaneSorts();
+  if (typeof send === 'function') {
+    send({
+      cmd: 'board_set_lane_sorts',
+      lane_sorts_by_group: _boardLaneSortsByGroup,
+    });
+  }
+}
+
+function _boardCurrentViewState() {
+  var filters = _boardCurrentFilterState();
+  return {
+    search_query: filters.search_query,
+    quick_view: filters.quick_view,
+    filter_labels: filters.filter_labels,
+    filter_actions: filters.filter_actions,
+    filter_agents: filters.filter_agents,
+    filter_health: filters.filter_health,
+  };
+}
+
+function _boardCurrentGroupSavedViews() {
+  _boardHydrateSavedViews();
+  var group = _currentGroup();
+  if (!group) return [];
+  return _boardSavedViewsByGroup[group] || [];
+}
+
+function _boardPersistSavedViews() {
+  _boardHydrateSavedViews();
+  if (typeof send === 'function') {
+    send({
+      cmd: 'board_set_saved_views',
+      saved_views_by_group: _boardSavedViewsByGroup,
+    });
+  }
+}
+
+function _boardViewMatchesCurrent(raw) {
+  var view = _boardNormalizeSavedView(raw);
+  if (!view) return false;
+  var current = _boardCurrentViewState();
+  return JSON.stringify(current) === JSON.stringify({
+    search_query: view.search_query,
+    quick_view: view.quick_view,
+    filter_labels: view.filter_labels,
+    filter_actions: view.filter_actions,
+    filter_agents: view.filter_agents,
+    filter_health: view.filter_health,
+  });
+}
+
+function _boardSyncFiltersForCurrentGroup() {
+  _boardHydratePersistedFilters();
+  var group = _currentGroup() || '';
+  if (group === _boardFilterStateGroup) return;
+  var hasPriorGroup = _boardFilterStateGroup !== '';
+  _boardFilterStateGroup = group;
+  if (!hasPriorGroup
+      && !_boardFiltersByGroup[group]
+      && !_boardIsDefaultFilterState(_boardCurrentFilterState())) {
+    return;
+  }
+  _boardApplyFilterState(_boardFiltersByGroup[group]);
+}
+
+function _boardCurrentViewKey() {
+  var group = _currentGroup() || '';
+  if (_boardShowSchedules) {
+    return JSON.stringify({ group: group, view: 'schedules' });
+  }
+  return JSON.stringify({
+    group: group,
+    view: 'lane',
+    lane: _boardSelectedLane || '',
+    search_query: _boardSearchQuery,
+    quick_view: _boardQuickView,
+    filter_labels: _boardFilterLabels.slice().sort(),
+    filter_actions: _boardFilterActions.slice().sort(),
+    filter_agents: _boardFilterAgents.slice().sort(),
+  });
+}
+
+function _boardActivateViewState(key) {
+  _boardActiveViewKey = key;
+  var saved = _boardViewStates[key];
+  var fallback = _boardNextViewDefault;
+  _boardNextViewDefault = null;
+  if (saved) {
+    _boardCardsScrollTop = saved.scroll_top || 0;
+    _boardRenderLimit = saved.render_limit || 50;
+    return;
+  }
+  if (fallback) {
+    _boardCardsScrollTop = fallback.scroll_top || 0;
+    _boardRenderLimit = fallback.render_limit || 50;
+  }
+}
+
+function _boardSyncActiveViewState(cardsEl) {
+  if (!_boardActiveViewKey) return;
+  var saved = _boardViewStates[_boardActiveViewKey] || {
+    scroll_top: 0,
+    render_limit: 50,
+  };
+  if (cardsEl) {
+    saved.scroll_top = cardsEl.scrollTop;
+    _boardCardsScrollTop = cardsEl.scrollTop;
+  } else {
+    saved.scroll_top = _boardCardsScrollTop || 0;
+  }
+  saved.render_limit = _boardRenderLimit || 50;
+  _boardViewStates[_boardActiveViewKey] = saved;
+}
+
+function _boardPrepareViewChange(resetNextView) {
+  var cardsEl = document.getElementById('board-cards');
+  if (!_boardActiveViewKey && cardsEl) {
+    _boardActiveViewKey = _boardCurrentViewKey();
+  }
+  _boardSyncActiveViewState(cardsEl);
+  _boardSkipViewCaptureOnce = true;
+  if (resetNextView) {
+    _boardNextViewDefault = { scroll_top: 0, render_limit: 50 };
+  }
+}
+
+function _boardTimestamp(value) {
+  if (!value || typeof value !== 'string') return Number.NaN;
+  return Date.parse(value);
+}
+
+function _boardQuickViewLabel(mode) {
+  return mode === 'recent'
+    ? 'Recent tasks'
+    : mode === 'touched'
+      ? 'Recently touched'
+      : '';
+}
+
+function _boardManualCompare(a, b) {
+  var posDelta = (b.position || 0) - (a.position || 0);
+  if (posDelta) return posDelta;
+  return String(a.id || '').localeCompare(String(b.id || ''));
+}
+
+function _boardNewestCompare(a, b) {
+  var aTime = _boardTimestamp(a.created_at);
+  var bTime = _boardTimestamp(b.created_at);
+  var aValid = !Number.isNaN(aTime);
+  var bValid = !Number.isNaN(bTime);
+  if (aValid && bValid && aTime !== bTime) return bTime - aTime;
+  if (aValid !== bValid) return aValid ? -1 : 1;
+  return _boardManualCompare(a, b);
+}
+
+function _boardRecentlyTouchedCompare(a, b) {
+  var aTime = _boardTimestamp(a.updated_at || a.created_at);
+  var bTime = _boardTimestamp(b.updated_at || b.created_at);
+  var aValid = !Number.isNaN(aTime);
+  var bValid = !Number.isNaN(bTime);
+  if (aValid && bValid && aTime !== bTime) return bTime - aTime;
+  if (aValid !== bValid) return aValid ? -1 : 1;
+  return _boardNewestCompare(a, b);
+}
+
+function _boardOldestCompare(a, b) {
+  var aTime = _boardTimestamp(a.created_at);
+  var bTime = _boardTimestamp(b.created_at);
+  var aValid = !Number.isNaN(aTime);
+  var bValid = !Number.isNaN(bTime);
+  if (aValid && bValid && aTime !== bTime) return aTime - bTime;
+  if (aValid !== bValid) return aValid ? -1 : 1;
+  return _boardManualCompare(a, b);
+}
+
+function _boardDueSoonestCompare(a, b) {
+  var aTime = _boardTimestamp(a.scheduled_at);
+  var bTime = _boardTimestamp(b.scheduled_at);
+  var aValid = !Number.isNaN(aTime);
+  var bValid = !Number.isNaN(bTime);
+  if (aValid && bValid && aTime !== bTime) return aTime - bTime;
+  if (aValid !== bValid) return aValid ? -1 : 1;
+  return _boardNewestCompare(a, b);
+}
+
+function _boardCompareLaneTasks(a, b, lane) {
+  if (_boardQuickView === 'recent') return _boardNewestCompare(a, b);
+  if (_boardQuickView === 'touched') return _boardRecentlyTouchedCompare(a, b);
+  var mode = _boardLaneSortMode(lane);
+  if (mode === 'newest') return _boardNewestCompare(a, b);
+  if (mode === 'oldest') return _boardOldestCompare(a, b);
+  if (mode === 'due') return _boardDueSoonestCompare(a, b);
+  return _boardManualCompare(a, b);
+}
+
 function _boardLanes() {
   return (state && state.board_lanes) || [];
 }
@@ -63,8 +440,20 @@ function _boardTasks() {
   return (state && state.board_tasks) || {};
 }
 
+function _boardGroupTaskCount() {
+  var all = _boardTasks();
+  if (!_boardFilterByGroup) return Object.keys(all).length;
+  var group = _currentGroup();
+  var count = 0;
+  for (var id in all) {
+    if (!group || all[id].group === group) count += 1;
+  }
+  return count;
+}
+
 /** Return visible tasks, optionally filtered to the current group. */
 function _boardVisibleTasks() {
+  _boardSyncFiltersForCurrentGroup();
   var all = _boardTasks();
   var out = {};
   // Group filter
@@ -80,15 +469,40 @@ function _boardVisibleTasks() {
   } else {
     for (var id in all) out[id] = all[id];
   }
+  if (_boardQuickView) {
+    var ranked = [];
+    for (var rid in out) ranked.push(out[rid]);
+    ranked.sort(_boardQuickView === 'recent'
+      ? _boardNewestCompare
+      : _boardRecentlyTouchedCompare);
+    var limited = {};
+    for (var li = 0; li < Math.min(ranked.length, 25); li++) {
+      limited[ranked[li].id] = ranked[li];
+    }
+    out = limited;
+  }
   // Text search filter
   if (_boardSearchQuery) {
     var q = _boardSearchQuery.toLowerCase();
     var filtered = {};
     for (var id in out) {
       var t = out[id];
-      if ((t.task && t.task.toLowerCase().indexOf(q) >= 0)
-        || (t.description && t.description.toLowerCase().indexOf(q) >= 0)
-        || (t.slug && t.slug.toLowerCase().indexOf(q) >= 0)) {
+      var parts = [t.task, t.description, t.slug, t.action_name, t.agent_id];
+      if (t.labels && t.labels.length) {
+        for (var li = 0; li < t.labels.length; li++) {
+          parts.push(t.labels[li]);
+          if (typeof displayLabel === 'function') {
+            parts.push(displayLabel(t.labels[li]));
+          }
+        }
+      }
+      if (t.agent_id && state && state.agents && state.agents[t.agent_id]) {
+        var agent = state.agents[t.agent_id];
+        parts.push(agent.name || '');
+        parts.push(agent.slug || '');
+      }
+      var haystack = parts.join('\n').toLowerCase();
+      if (haystack.indexOf(q) >= 0) {
         filtered[id] = t;
       }
     }
@@ -150,7 +564,7 @@ function _boardTasksInLane(lane) {
   for (var id in tasks) {
     if (tasks[id].lane === lane) arr.push(tasks[id]);
   }
-  arr.sort(function(a, b) { return b.position - a.position; });
+  arr.sort(function(a, b) { return _boardCompareLaneTasks(a, b, lane); });
   return arr;
 }
 
@@ -168,7 +582,212 @@ function _boardLaneCount(lane) {
 }
 
 function _boardHasActiveFilters() {
-  return _boardSearchQuery !== '' || _boardFilterLabels.length > 0 || _boardFilterActions.length > 0 || _boardFilterAgents.length > 0 || _boardFilterHealth.length > 0;
+  return _boardSearchQuery !== ''
+    || _boardQuickView !== ''
+    || _boardFilterLabels.length > 0
+    || _boardFilterActions.length > 0
+    || _boardFilterAgents.length > 0
+    || _boardFilterHealth.length > 0;
+}
+
+function _boardSummarizeNames(values, formatter) {
+  if (!values || !values.length) return '';
+  var shown = values.slice(0, 2).map(function(value) {
+    return formatter ? formatter(value) : value;
+  });
+  var text = shown.join(', ');
+  if (values.length > 2) text += ' +' + (values.length - 2);
+  return text;
+}
+
+function _boardFilterSummaryText() {
+  var parts = [];
+  if (_boardQuickView) parts.push(_boardQuickViewLabel(_boardQuickView));
+  if (_boardSearchQuery) parts.push('Search "' + _boardSearchQuery + '"');
+  if (_boardFilterLabels.length) {
+    parts.push('Labels ' + _boardSummarizeNames(_boardFilterLabels));
+  }
+  if (_boardFilterActions.length) {
+    parts.push('Actions ' + _boardSummarizeNames(_boardFilterActions));
+  }
+  if (_boardFilterAgents.length) {
+    parts.push('Agents ' + _boardSummarizeNames(_boardFilterAgents, function(agentId) {
+      return _boardAgentName(agentId) || agentId;
+    }));
+  }
+  if (_boardFilterHealth.length) {
+    parts.push('Health ' + _boardSummarizeNames(_boardFilterHealth, function(stateName) {
+      return _boardHealthDisplayName(stateName);
+    }));
+  }
+  return parts.length ? parts.join(' · ') : 'No active filters';
+}
+
+function _boardLaneCountSummary(rootCount, totalCount) {
+  if (totalCount === rootCount) {
+    return rootCount + ' task' + (rootCount === 1 ? '' : 's');
+  }
+  return rootCount + ' root' + (rootCount === 1 ? '' : 's')
+    + ' · ' + totalCount + ' total';
+}
+
+function _renderBoardLaneHeader(lane, rootCount, totalCount, currentViewSavable) {
+  var html = '<div class="board-lane-header">';
+  html += '<div class="board-lane-header-main">';
+  html += '<div class="board-lane-header-title">';
+  html += '<span class="board-lane-header-name">' + esc(lane) + '</span>';
+  html += '<span class="board-lane-header-counts">'
+    + esc(_boardLaneCountSummary(rootCount, totalCount)) + '</span>';
+  html += '</div>';
+  html += '<div class="board-lane-header-actions">';
+  if (!_boardAddingTask) {
+    html += '<button class="board-lane-header-action" onclick="boardStartAddTask()">+ Task</button>';
+  }
+  if (_boardHasActiveFilters()) {
+    html += '<button class="board-lane-header-action" onclick="boardClearFilters()">Clear Filters</button>';
+  }
+  if (currentViewSavable) {
+    html += '<button class="board-lane-header-action" onclick="boardSaveCurrentView()">Save View</button>';
+  }
+  html += '</div>';
+  html += '</div>';
+  html += '<div class="board-lane-header-summary">' + esc(_boardFilterSummaryText()) + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _boardLanePoolTasks(lane) {
+  var all = _boardTasks();
+  var pool = [];
+  var group = _boardFilterByGroup ? _currentGroup() : '';
+  for (var id in all) {
+    var task = all[id];
+    if (task.lane !== lane) continue;
+    if (group && task.group !== group) continue;
+    pool.push(task);
+  }
+  return pool;
+}
+
+function _boardTaskIsFutureScheduled(task) {
+  if (!task || !task.scheduled_at) return false;
+  var when = _boardTimestamp(task.scheduled_at);
+  if (Number.isNaN(when)) return false;
+  return when > Date.now();
+}
+
+function _boardTaskIsDispatchBlocked(task) {
+  return _boardDepsBlocked(task)
+    || !!(task.labels && task.labels.indexOf('loom:blocked') >= 0);
+}
+
+function _renderBoardMessageState(state, noteOnly) {
+  var cls = 'board-empty';
+  if (noteOnly) cls += ' board-empty-note';
+  var html = '<div class="' + cls + '">';
+  html += '<div class="board-empty-title">' + esc(state.title) + '</div>';
+  if (state.body) {
+    html += '<div class="board-empty-body">' + esc(state.body) + '</div>';
+  }
+  if (state.actions && state.actions.length) {
+    html += '<div class="board-empty-actions">';
+    for (var i = 0; i < state.actions.length; i++) {
+      html += '<button class="board-empty-action" onclick="' + state.actions[i].onclick + '">'
+        + esc(state.actions[i].label) + '</button>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _boardEmptyStateForLane(lane, laneTasks, rootTasks, filtersActive) {
+  if (filtersActive) {
+    return {
+      title: 'No matching tasks',
+      body: 'The current search or filters hide everything in ' + lane + '. Clear filters or broaden the query.',
+      actions: [{ label: 'Clear Filters', onclick: 'boardClearFilters()' }],
+    };
+  }
+  if (lane === 'Backlog') {
+    var blocked = 0;
+    var scheduled = 0;
+    for (var i = 0; i < laneTasks.length; i++) {
+      if (_boardTaskIsFutureScheduled(laneTasks[i])) scheduled += 1;
+      else if (_boardTaskIsDispatchBlocked(laneTasks[i])) blocked += 1;
+    }
+    if (laneTasks.length && blocked === laneTasks.length) {
+      return {
+        title: 'Everything in Backlog is blocked',
+        body: blocked + ' task' + (blocked === 1 ? ' is' : 's are')
+          + ' waiting on dependencies or blockers. Resolve prerequisites to make work dispatchable.',
+        actions: !_boardAddingTask
+          ? [{ label: '+ Task', onclick: 'boardStartAddTask()' }]
+          : [],
+      };
+    }
+    if (laneTasks.length && blocked + scheduled === laneTasks.length) {
+      return {
+        title: 'Nothing is ready to dispatch',
+        body: scheduled
+          ? scheduled + ' task' + (scheduled === 1 ? ' is' : 's are')
+            + ' scheduled for later. Wait for the dispatch window or add a ready task.'
+          : 'Backlog tasks need attention before they can be dispatched.',
+        actions: !_boardAddingTask
+          ? [{ label: '+ Task', onclick: 'boardStartAddTask()' }]
+          : [],
+      };
+    }
+  }
+  if (laneTasks.length && rootTasks.length === 0) {
+    return {
+      title: 'No standalone tasks to show',
+      body: 'The matching tasks in ' + lane + ' are nested under work shown elsewhere. Open the parent chain or adjust filters.',
+      actions: filtersActive
+        ? [{ label: 'Clear Filters', onclick: 'boardClearFilters()' }]
+        : [],
+    };
+  }
+  var actions = [];
+  if (!_boardAddingTask && lane !== 'Done') {
+    actions.push({ label: '+ Task', onclick: 'boardStartAddTask()' });
+  }
+  return {
+    title: 'No tasks in ' + lane,
+    body: lane === 'Done'
+      ? 'Nothing has landed here yet. Complete work in another lane to fill this view.'
+      : 'Add a task here or move existing work into this lane.',
+    actions: actions,
+  };
+}
+
+function _boardBacklogDispatchNote(rootTasks) {
+  if (_boardSelectedLane !== 'Backlog' || !rootTasks.length) return null;
+  var blocked = 0;
+  var scheduled = 0;
+  var ready = 0;
+  for (var i = 0; i < rootTasks.length; i++) {
+    if (_boardTaskIsFutureScheduled(rootTasks[i])) scheduled += 1;
+    else if (_boardTaskIsDispatchBlocked(rootTasks[i])) blocked += 1;
+    else ready += 1;
+  }
+  if (ready > 0) return null;
+  if (blocked && !scheduled) {
+    return {
+      title: 'Everything in Backlog is blocked',
+      body: blocked + ' task' + (blocked === 1 ? ' is' : 's are')
+        + ' waiting on dependencies or blockers. Resolve prerequisites to dispatch work.',
+      actions: [],
+    };
+  }
+  return {
+    title: 'Nothing is ready to dispatch',
+    body: scheduled
+      ? scheduled + ' task' + (scheduled === 1 ? ' is' : 's are')
+        + ' scheduled for later, and the rest are blocked. Wait for schedule windows or clear blockers.'
+      : 'Backlog tasks need attention before they can be dispatched.',
+    actions: [],
+  };
 }
 
 /** Collect all labels with counts (before search/label/action filters). */
@@ -470,15 +1089,79 @@ function boardToggleTaskCollapse(taskId) {
   renderBoard();
 }
 
+function _boardAfterRenderLayout() {
+  requestAnimationFrame(function() {
+    var tabsEl = document.getElementById('board-lane-tabs');
+    if (tabsEl) {
+      // Attach scroll listener (re-attached each render since DOM is rebuilt)
+      tabsEl.addEventListener('scroll', function() {
+        _boardScrollLeft = tabsEl.scrollLeft;
+        boardUpdateScrollArrows();
+      });
+
+      // Restore saved scroll position
+      tabsEl.scrollLeft = _boardScrollLeft;
+
+      // Ensure active tab is fully visible
+      var activeTab = tabsEl.querySelector('.board-lane-tab.active');
+      if (activeTab) {
+        var tabLeft = activeTab.offsetLeft;
+        var tabRight = tabLeft + activeTab.offsetWidth;
+        var viewLeft = tabsEl.scrollLeft;
+        var viewRight = viewLeft + tabsEl.clientWidth;
+        if (tabLeft < viewLeft) {
+          tabsEl.scrollLeft = tabLeft;
+        } else if (tabRight > viewRight) {
+          tabsEl.scrollLeft = tabRight - tabsEl.clientWidth;
+        }
+      }
+
+      _boardScrollLeft = tabsEl.scrollLeft;
+      boardUpdateScrollArrows();
+    }
+
+    // Restore cards scroll position + infinite scroll
+    var cardsEl = document.getElementById('board-cards');
+    if (cardsEl) {
+      cardsEl.scrollTop = _boardCardsScrollTop;
+      cardsEl.addEventListener('scroll', function() {
+        _boardCardsScrollTop = cardsEl.scrollTop;
+        _boardSyncActiveViewState(cardsEl);
+        // Load more when within 100px of the bottom
+        if (cardsEl.scrollTop + cardsEl.clientHeight >= cardsEl.scrollHeight - 100) {
+          boardLoadMore();
+        }
+      });
+      // Click on empty space clears selection
+      cardsEl.addEventListener('click', function(e) {
+        if (e.target === cardsEl && _boardSelectedCount() > 0) {
+          boardClearSelection();
+        }
+      });
+    }
+  });
+}
+
 /* ---- Render --------------------------------------------------------- */
 
 function renderBoard() {
   var panel = document.getElementById('panel-board');
   if (!panel) return;
+  _boardSyncFiltersForCurrentGroup();
+  _boardHydrateSavedViews();
+  _boardHydrateLaneSorts();
+  _boardHydrateCardDensity();
 
   // Preserve scroll + draft before DOM rebuild
   var _cardsEl = document.getElementById('board-cards');
-  if (_cardsEl) _boardCardsScrollTop = _cardsEl.scrollTop;
+  if (_boardSkipViewCaptureOnce) {
+    _boardSkipViewCaptureOnce = false;
+  } else {
+    if (!_boardActiveViewKey && _cardsEl) {
+      _boardActiveViewKey = _boardCurrentViewKey();
+    }
+    _boardSyncActiveViewState(_cardsEl);
+  }
   if (_boardAddingTask) {
     var _inp = document.getElementById('board-add-task-input');
     if (_inp) _boardAddingTaskDraft = _inp.value;
@@ -513,13 +1196,25 @@ function renderBoard() {
   var hasActions = Object.keys(actionCounts).length > 0;
   var hasAgents = Object.keys(agentCounts).length > 0;
   var hasHealth = Object.keys(healthCounts).length > 0;
-  var showToolbar = hasLabels || hasActions || hasAgents || hasHealth || _boardSearchQuery || _boardFilterLabels.length || _boardFilterActions.length || _boardFilterAgents.length || _boardFilterHealth.length;
+  var savedViews = _boardCurrentGroupSavedViews();
+  var hasSavedViews = savedViews.length > 0;
+  var hasQuickViews = _boardGroupTaskCount() > 0 || _boardQuickView !== '';
+  var currentViewSavable = !_boardIsDefaultFilterState(_boardCurrentViewState());
+  var showToolbar = _boardGroupTaskCount() > 0
+    || hasLabels || hasActions || hasAgents || hasHealth
+    || _boardSearchQuery || _boardFilterLabels.length
+    || _boardFilterActions.length || _boardFilterAgents.length
+    || _boardFilterHealth.length
+    || hasSavedViews;
 
   if (showToolbar) {
     html += '<div class="board-search-bar">';
     html += '<input type="text" class="board-search-input" id="board-search-input"'
       + ' placeholder="Search tasks..." value="' + esc(_boardSearchQuery) + '"'
       + ' oninput="boardUpdateSearch(this.value)">';
+    if (currentViewSavable || hasSavedViews) {
+      html += '<button class="board-filter-btn" onclick="boardSaveCurrentView()">Save View</button>';
+    }
     if (hasLabels || _boardFilterLabels.length) {
       var lblCount = _boardFilterLabels.length;
       html += '<div class="board-filter-btn-wrap" id="board-label-filter-wrap">';
@@ -560,6 +1255,31 @@ function renderBoard() {
       html += '<button class="board-filter-clear" onclick="boardClearFilters()">Clear</button>';
     }
     html += '</div>';
+
+    if (hasQuickViews || hasSavedViews) {
+      html += '<div class="board-saved-views">';
+      if (hasQuickViews) {
+        html += '<button class="board-filter-btn'
+          + (_boardQuickView === 'recent' ? ' active' : '')
+          + '" onclick="boardApplyQuickView(\'recent\')">Recent</button>';
+        html += '<button class="board-filter-btn'
+          + (_boardQuickView === 'touched' ? ' active' : '')
+          + '" onclick="boardApplyQuickView(\'touched\')">Recently Touched</button>';
+      }
+      for (var vi = 0; vi < savedViews.length; vi++) {
+        var view = savedViews[vi];
+        var viewName = esc(view.name).replace(/'/g, "\\'");
+        html += '<div class="board-saved-view">';
+        html += '<button class="board-filter-btn'
+          + (_boardViewMatchesCurrent(view) ? ' active' : '')
+          + '" onclick="boardApplySavedView(\'' + viewName + '\')">'
+          + esc(view.name) + '</button>';
+        html += '<button class="board-saved-view-delete"'
+          + ' onclick="event.stopPropagation();boardDeleteSavedView(\'' + viewName + '\')">&times;</button>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
 
     // Active filter chips
     if (_boardFilterLabels.length || _boardFilterActions.length || _boardFilterAgents.length || _boardFilterHealth.length) {
@@ -607,6 +1327,8 @@ function renderBoard() {
     }
   }
 
+  _boardActivateViewState(_boardCurrentViewKey());
+
   // Lane tab bar
   html += '<div class="board-lane-bar">';
   html += '<button class="board-lane-scroll-btn" id="board-scroll-left" onclick="boardScrollLanes(-1)" title="Scroll left">&#9664;</button>';
@@ -636,20 +1358,68 @@ function renderBoard() {
 
   html += '</div>';
   html += '<button class="board-lane-scroll-btn" id="board-scroll-right" onclick="boardScrollLanes(1)" title="Scroll right">&#9654;</button>';
-
+  if (!_boardShowSchedules && _boardSelectedLane) {
+    var sortMode = _boardLaneSortMode(_boardSelectedLane);
+    var densityMode = _boardCardDensityMode();
+    html += '<div class="board-lane-sort">';
+    html += '<label class="board-lane-sort-label" for="board-lane-sort-select">Sort</label>';
+    html += '<select class="board-lane-sort-select" id="board-lane-sort-select"'
+      + ' onchange="boardSetLaneSort(this.value)">';
+    html += '<option value="manual"' + (sortMode === 'manual' ? ' selected' : '') + '>Manual</option>';
+    html += '<option value="newest"' + (sortMode === 'newest' ? ' selected' : '') + '>Newest</option>';
+    html += '<option value="oldest"' + (sortMode === 'oldest' ? ' selected' : '') + '>Oldest</option>';
+    html += '<option value="due"' + (sortMode === 'due' ? ' selected' : '') + '>Due Soonest</option>';
+    html += '</select>';
+    html += '</div>';
+    html += '<div class="board-lane-density">';
+    html += '<label class="board-lane-density-label" for="board-card-density-select">Density</label>';
+    html += '<select class="board-lane-density-select" id="board-card-density-select"'
+      + ' onchange="boardSetCardDensity(this.value)">';
+    html += '<option value="compact"' + (densityMode === 'compact' ? ' selected' : '') + '>Compact</option>';
+    html += '<option value="normal"' + (densityMode === 'normal' ? ' selected' : '') + '>Normal</option>';
+    html += '<option value="detailed"' + (densityMode === 'detailed' ? ' selected' : '') + '>Detailed</option>';
+    html += '</select>';
+    html += '</div>';
+  }
   html += '</div>';
 
   // Schedules view (replaces cards when active)
   if (_boardShowSchedules) {
     html += _renderSchedulesView();
     panel.innerHTML = html;
-    requestAnimationFrame(function() { boardUpdateScrollArrows(); });
+    _boardAfterRenderLayout();
     return;
   }
 
   // Cards — always show tasks in the selected lane
   var tasks = _boardTasksInLane(_boardSelectedLane);
-  html += '<div class="board-cards" id="board-cards">';
+  var allTasks = _boardVisibleTasks();
+  var childrenOf = {};  // parent_id → [tasks]
+  for (var cid in allTasks) {
+    var ct = allTasks[cid];
+    if (ct.parent_task_id && allTasks[ct.parent_task_id]) {
+      if (!childrenOf[ct.parent_task_id]) childrenOf[ct.parent_task_id] = [];
+      childrenOf[ct.parent_task_id].push(ct);
+    }
+  }
+  // Sort children by depth then created_at
+  for (var pid in childrenOf) {
+    childrenOf[pid].sort(function(a, b) {
+      return (a.pipeline_depth - b.pipeline_depth) || (a.created_at || '').localeCompare(b.created_at || '');
+    });
+  }
+  // Root tasks: in this lane, with no parent in the visible set
+  var rootTasks = tasks.filter(function(t) {
+    return !t.parent_task_id || !allTasks[t.parent_task_id];
+  });
+
+  html += '<div class="board-cards board-density-' + _boardCardDensityMode() + '" id="board-cards">';
+  html += _renderBoardLaneHeader(
+    _boardSelectedLane,
+    rootTasks.length,
+    tasks.length,
+    currentViewSavable,
+  );
 
   // Add task: inline input or button (at top)
   if (_boardAddingTask) {
@@ -725,30 +1495,22 @@ function renderBoard() {
     html += '</div>';
   }
 
-  // Build task tree: root tasks + children index
-  var allTasks = _boardVisibleTasks();
-  var childrenOf = {};  // parent_id → [tasks]
-  for (var cid in allTasks) {
-    var ct = allTasks[cid];
-    if (ct.parent_task_id && allTasks[ct.parent_task_id]) {
-      if (!childrenOf[ct.parent_task_id]) childrenOf[ct.parent_task_id] = [];
-      childrenOf[ct.parent_task_id].push(ct);
-    }
+  var backlogDispatchNote = _boardBacklogDispatchNote(rootTasks);
+  if (backlogDispatchNote) {
+    html += _renderBoardMessageState(backlogDispatchNote, true);
   }
-  // Sort children by depth then created_at
-  for (var pid in childrenOf) {
-    childrenOf[pid].sort(function(a, b) {
-      return (a.pipeline_depth - b.pipeline_depth) || (a.created_at || '').localeCompare(b.created_at || '');
-    });
-  }
-  // Root tasks: in this lane, with no parent in the visible set
-  var rootTasks = tasks.filter(function(t) {
-    return !t.parent_task_id || !allTasks[t.parent_task_id];
-  });
 
   // Task cards
-  if (tasks.length === 0) {
-    html += '<div class="board-empty">' + (filtersActive ? 'No matching tasks' : 'No tasks in this lane') + '</div>';
+  if (rootTasks.length === 0) {
+    html += _renderBoardMessageState(
+      _boardEmptyStateForLane(
+        _boardSelectedLane,
+        _boardLanePoolTasks(_boardSelectedLane),
+        rootTasks,
+        filtersActive,
+      ),
+      false,
+    );
   }
 
   var renderCap = Math.min(rootTasks.length, _boardRenderLimit);
@@ -780,57 +1542,7 @@ function renderBoard() {
     }
   }
 
-  // Defer scroll restore + arrow update to after layout
-  requestAnimationFrame(function() {
-    var tabsEl = document.getElementById('board-lane-tabs');
-    if (tabsEl) {
-      // Attach scroll listener (re-attached each render since DOM is rebuilt)
-      tabsEl.addEventListener('scroll', function() {
-        _boardScrollLeft = tabsEl.scrollLeft;
-        boardUpdateScrollArrows();
-      });
-
-      // Restore saved scroll position
-      tabsEl.scrollLeft = _boardScrollLeft;
-
-      // Ensure active tab is fully visible
-      var activeTab = tabsEl.querySelector('.board-lane-tab.active');
-      if (activeTab) {
-        var tabLeft = activeTab.offsetLeft;
-        var tabRight = tabLeft + activeTab.offsetWidth;
-        var viewLeft = tabsEl.scrollLeft;
-        var viewRight = viewLeft + tabsEl.clientWidth;
-        if (tabLeft < viewLeft) {
-          tabsEl.scrollLeft = tabLeft;
-        } else if (tabRight > viewRight) {
-          tabsEl.scrollLeft = tabRight - tabsEl.clientWidth;
-        }
-      }
-
-      _boardScrollLeft = tabsEl.scrollLeft;
-      boardUpdateScrollArrows();
-    }
-
-    // Restore cards scroll position + infinite scroll
-    var cardsEl = document.getElementById('board-cards');
-    if (cardsEl) {
-      cardsEl.scrollTop = _boardCardsScrollTop;
-      cardsEl.addEventListener('scroll', function() {
-        _boardCardsScrollTop = cardsEl.scrollTop;
-        // Load more when within 100px of the bottom
-        if (cardsEl.scrollTop + cardsEl.clientHeight >= cardsEl.scrollHeight - 100) {
-          boardLoadMore();
-        }
-      });
-      // Click on empty space clears selection
-      cardsEl.addEventListener('click', function(e) {
-        if (e.target === cardsEl && _boardSelectedCount() > 0) {
-          boardClearSelection();
-        }
-      });
-    }
-
-  });
+  _boardAfterRenderLayout();
 }
 
 /* ---- Virtual scroll ------------------------------------------------- */
@@ -843,14 +1555,16 @@ function boardLoadMore() {
   }).length;
   if (_boardRenderLimit >= rootCount) return;
   _boardRenderLimit += 50;
+  _boardSyncActiveViewState();
   renderBoard();
 }
 
 /* ---- Lane selection ------------------------------------------------- */
 
 function boardSelectLane(lane) {
+  if (!_boardShowSchedules && lane === _boardSelectedLane) return;
+  _boardPrepareViewChange(true);
   _boardShowSchedules = false;  // exit schedules view on lane click
-  if (lane === _boardSelectedLane) return;
   // Save current scroll so renderBoard can restore + adjust for new active tab
   var tabs = document.getElementById('board-lane-tabs');
   if (tabs) _boardScrollLeft = tabs.scrollLeft;
@@ -858,7 +1572,45 @@ function boardSelectLane(lane) {
   _boardFocusedTask = '';
   _boardSelectedTasks = {};
   _boardLastSelectedTask = '';
+  renderBoard();
+}
+
+function boardSetLaneSort(mode) {
+  _boardHydrateLaneSorts();
+  var group = _currentGroup();
+  var lane = _boardSelectedLane;
+  if (!group || !lane) return;
+  _boardPrepareViewChange(false);
+  mode = _boardNormalizeLaneSortMode(mode);
+  var sorts = _boardLaneSortsByGroup[group] || {};
+  if (mode === 'manual') {
+    delete sorts[lane];
+  } else {
+    sorts[lane] = mode;
+  }
+  if (Object.keys(sorts).length) {
+    _boardLaneSortsByGroup[group] = sorts;
+  } else {
+    delete _boardLaneSortsByGroup[group];
+  }
+  _boardViewStates[_boardCurrentViewKey()] = { scroll_top: 0, render_limit: 50 };
+  _boardCardsScrollTop = 0;
   _boardRenderLimit = 50;
+  _boardPersistLaneSorts();
+  renderBoard();
+}
+
+function boardSetCardDensity(mode) {
+  _boardHydrateCardDensity();
+  var group = _currentGroup();
+  if (!group) return;
+  mode = _boardNormalizeCardDensity(mode);
+  if (mode === 'normal') {
+    delete _boardCardDensityByGroup[group];
+  } else {
+    _boardCardDensityByGroup[group] = mode;
+  }
+  _boardPersistCardDensity();
   renderBoard();
 }
 
@@ -1858,6 +2610,7 @@ function boardCardDragLeave(e) {
 
 function boardCardDrop(e) {
   e.preventDefault();
+  if (_boardLaneSortMode(_boardSelectedLane) !== 'manual') return;
   var card = e.target.closest('.board-card');
   if (!card || !_boardDragId) return;
   var targetId = card.dataset.taskId;
@@ -1910,10 +2663,12 @@ function boardLaneTabDrop(e) {
 function boardUpdateSearch(query) {
   clearTimeout(_boardSearchTimer);
   _boardSearchTimer = setTimeout(function() {
+    _boardPrepareViewChange(true);
     _boardSearchQuery = query;
     _boardCardsScrollTop = 0;
     _boardRenderLimit = 50;
     renderBoard();
+    _boardPersistFilterState();
     // Restore focus and cursor to search input
     var inp = document.getElementById('board-search-input');
     if (inp) { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }
@@ -1921,6 +2676,7 @@ function boardUpdateSearch(query) {
 }
 
 function boardToggleLabel(label) {
+  _boardPrepareViewChange(true);
   var idx = _boardFilterLabels.indexOf(label);
   if (idx >= 0) {
     _boardFilterLabels.splice(idx, 1);
@@ -1930,9 +2686,11 @@ function boardToggleLabel(label) {
   _boardCardsScrollTop = 0;
   _boardRenderLimit = 50;
   renderBoard();
+  _boardPersistFilterState();
 }
 
 function boardToggleAction(action) {
+  _boardPrepareViewChange(true);
   var idx = _boardFilterActions.indexOf(action);
   if (idx >= 0) {
     _boardFilterActions.splice(idx, 1);
@@ -1942,29 +2700,35 @@ function boardToggleAction(action) {
   _boardCardsScrollTop = 0;
   _boardRenderLimit = 50;
   renderBoard();
+  _boardPersistFilterState();
 }
 
 function boardRemoveFilterLabel(label) {
   var idx = _boardFilterLabels.indexOf(label);
   if (idx >= 0) {
+    _boardPrepareViewChange(true);
     _boardFilterLabels.splice(idx, 1);
     _boardCardsScrollTop = 0;
     _boardRenderLimit = 50;
     renderBoard();
+    _boardPersistFilterState();
   }
 }
 
 function boardRemoveFilterAction(action) {
   var idx = _boardFilterActions.indexOf(action);
   if (idx >= 0) {
+    _boardPrepareViewChange(true);
     _boardFilterActions.splice(idx, 1);
     _boardCardsScrollTop = 0;
     _boardRenderLimit = 50;
     renderBoard();
+    _boardPersistFilterState();
   }
 }
 
 function boardToggleAgent(agentId) {
+  _boardPrepareViewChange(true);
   var idx = _boardFilterAgents.indexOf(agentId);
   if (idx >= 0) {
     _boardFilterAgents.splice(idx, 1);
@@ -1974,19 +2738,23 @@ function boardToggleAgent(agentId) {
   _boardCardsScrollTop = 0;
   _boardRenderLimit = 50;
   renderBoard();
+  _boardPersistFilterState();
 }
 
 function boardRemoveFilterAgent(agentId) {
   var idx = _boardFilterAgents.indexOf(agentId);
   if (idx >= 0) {
+    _boardPrepareViewChange(true);
     _boardFilterAgents.splice(idx, 1);
     _boardCardsScrollTop = 0;
     _boardRenderLimit = 50;
     renderBoard();
+    _boardPersistFilterState();
   }
 }
 
 function boardToggleHealth(stateName) {
+  _boardPrepareViewChange(true);
   var idx = _boardFilterHealth.indexOf(stateName);
   if (idx >= 0) {
     _boardFilterHealth.splice(idx, 1);
@@ -1996,20 +2764,25 @@ function boardToggleHealth(stateName) {
   _boardCardsScrollTop = 0;
   _boardRenderLimit = 50;
   renderBoard();
+  _boardPersistFilterState();
 }
 
 function boardRemoveFilterHealth(stateName) {
   var idx = _boardFilterHealth.indexOf(stateName);
   if (idx >= 0) {
+    _boardPrepareViewChange(true);
     _boardFilterHealth.splice(idx, 1);
     _boardCardsScrollTop = 0;
     _boardRenderLimit = 50;
     renderBoard();
+    _boardPersistFilterState();
   }
 }
 
 function boardClearFilters() {
+  _boardPrepareViewChange(true);
   _boardSearchQuery = '';
+  _boardQuickView = '';
   _boardFilterLabels = [];
   _boardFilterActions = [];
   _boardFilterAgents = [];
@@ -2021,6 +2794,79 @@ function boardClearFilters() {
     _boardSelectedLane = _boardPreFilterLane;
     _boardPreFilterLane = '';
   }
+  renderBoard();
+  _boardPersistFilterState();
+}
+
+function boardSaveCurrentView() {
+  _boardHydrateSavedViews();
+  if (_boardIsDefaultFilterState(_boardCurrentViewState())) return;
+  var group = _currentGroup();
+  if (!group) return;
+  var name = (window.prompt
+    ? window.prompt('Save board view as:', '')
+    : '').trim();
+  if (!name) return;
+  var views = _boardSavedViewsByGroup[group] || [];
+  var next = _boardCurrentViewState();
+  next.name = name;
+  var normalized = _boardNormalizeSavedView(next);
+  var replaced = false;
+  for (var i = 0; i < views.length; i++) {
+    if (views[i].name === name) {
+      views[i] = normalized;
+      replaced = true;
+      break;
+    }
+  }
+  if (!replaced) views.push(normalized);
+  _boardSavedViewsByGroup[group] = views;
+  _boardPersistSavedViews();
+  renderBoard();
+}
+
+function boardApplyQuickView(mode) {
+  _boardPrepareViewChange(true);
+  _boardQuickView = (_boardQuickView === mode) ? '' : mode;
+  _boardPreFilterLane = '';
+  _boardCardsScrollTop = 0;
+  _boardRenderLimit = 50;
+  renderBoard();
+  _boardPersistFilterState();
+}
+
+function boardApplySavedView(name) {
+  var views = _boardCurrentGroupSavedViews();
+  for (var i = 0; i < views.length; i++) {
+    if (views[i].name !== name) continue;
+    _boardPrepareViewChange(true);
+    _boardSearchQuery = views[i].search_query;
+    _boardQuickView = views[i].quick_view || '';
+    _boardFilterLabels = views[i].filter_labels.slice();
+    _boardFilterActions = views[i].filter_actions.slice();
+    _boardFilterAgents = views[i].filter_agents.slice();
+    _boardFilterHealth = (views[i].filter_health || []).slice();
+    _boardPreFilterLane = '';
+    _boardCardsScrollTop = 0;
+    _boardRenderLimit = 50;
+    renderBoard();
+    _boardPersistFilterState();
+    return;
+  }
+}
+
+function boardDeleteSavedView(name) {
+  _boardHydrateSavedViews();
+  var group = _currentGroup();
+  if (!group) return;
+  var views = _boardSavedViewsByGroup[group] || [];
+  _boardSavedViewsByGroup[group] = views.filter(function(view) {
+    return view.name !== name;
+  });
+  if (_boardSavedViewsByGroup[group].length === 0) {
+    delete _boardSavedViewsByGroup[group];
+  }
+  _boardPersistSavedViews();
   renderBoard();
 }
 
@@ -2300,8 +3146,8 @@ function _boardScheduleCount() {
 }
 
 function boardToggleSchedules() {
+  _boardPrepareViewChange(true);
   _boardShowSchedules = !_boardShowSchedules;
-  if (_boardShowSchedules) _boardSelectedLane = '';
   renderBoard();
 }
 

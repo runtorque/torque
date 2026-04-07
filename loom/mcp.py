@@ -302,14 +302,6 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
     if result and result.get("type") == "error":
         return result.get("message", "Unknown error"), True
 
-    # Self-dispatch: return task inline so the agent can proceed
-    # immediately without waiting for a prompt via terminal input.
-    if result and result.get("proceed"):
-        text = f"Task derived to self. Proceed with:\n\n{result['task']}"
-        if result.get("description"):
-            text += f"\n\n{result['description']}"
-        return text, False
-
     return json.dumps(result) if result else '{"type":"ok"}', False
 
 

@@ -1572,6 +1572,42 @@ class LoomDB:
                     c.execute(
                         "INSERT INTO ui_state (key, value) VALUES (?,?)",
                         (key, str(val)))
+            if state_dict.get("board_filters_by_group") is not None:
+                c.execute(
+                    "INSERT INTO ui_state (key, value) VALUES (?,?)",
+                    (
+                        "board_filters_by_group",
+                        json.dumps(state_dict.get("board_filters_by_group")
+                                   or {}),
+                    ),
+                )
+            if state_dict.get("board_saved_views_by_group") is not None:
+                c.execute(
+                    "INSERT INTO ui_state (key, value) VALUES (?,?)",
+                    (
+                        "board_saved_views_by_group",
+                        json.dumps(state_dict.get("board_saved_views_by_group")
+                                   or {}),
+                    ),
+                )
+            if state_dict.get("board_lane_sorts_by_group") is not None:
+                c.execute(
+                    "INSERT INTO ui_state (key, value) VALUES (?,?)",
+                    (
+                        "board_lane_sorts_by_group",
+                        json.dumps(state_dict.get("board_lane_sorts_by_group")
+                                   or {}),
+                    ),
+                )
+            if state_dict.get("board_card_density_by_group") is not None:
+                c.execute(
+                    "INSERT INTO ui_state (key, value) VALUES (?,?)",
+                    (
+                        "board_card_density_by_group",
+                        json.dumps(state_dict.get("board_card_density_by_group")
+                                   or {}),
+                    ),
+                )
 
             self._conn.commit()
         except Exception:
@@ -1700,6 +1736,38 @@ class LoomDB:
         ui = {}
         for row in c.execute("SELECT key, value FROM ui_state"):
             ui[row[0]] = row[1]
+        try:
+            board_filters_by_group = json.loads(
+                ui.get("board_filters_by_group", "{}") or "{}"
+            )
+            if not isinstance(board_filters_by_group, dict):
+                board_filters_by_group = {}
+        except Exception:
+            board_filters_by_group = {}
+        try:
+            board_saved_views_by_group = json.loads(
+                ui.get("board_saved_views_by_group", "{}") or "{}"
+            )
+            if not isinstance(board_saved_views_by_group, dict):
+                board_saved_views_by_group = {}
+        except Exception:
+            board_saved_views_by_group = {}
+        try:
+            board_lane_sorts_by_group = json.loads(
+                ui.get("board_lane_sorts_by_group", "{}") or "{}"
+            )
+            if not isinstance(board_lane_sorts_by_group, dict):
+                board_lane_sorts_by_group = {}
+        except Exception:
+            board_lane_sorts_by_group = {}
+        try:
+            board_card_density_by_group = json.loads(
+                ui.get("board_card_density_by_group", "{}") or "{}"
+            )
+            if not isinstance(board_card_density_by_group, dict):
+                board_card_density_by_group = {}
+        except Exception:
+            board_card_density_by_group = {}
 
         # Global settings
         global_settings = {}
@@ -1744,6 +1812,10 @@ class LoomDB:
                 or ("board" if ui.get("board_panel_open", "False") == "True"
                     else ""),
             "board_panel_height": int(ui.get("board_panel_height", "0")),
+            "board_filters_by_group": board_filters_by_group,
+            "board_saved_views_by_group": board_saved_views_by_group,
+            "board_lane_sorts_by_group": board_lane_sorts_by_group,
+            "board_card_density_by_group": board_card_density_by_group,
             "global_settings": global_settings,
         }
 

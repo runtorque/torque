@@ -136,6 +136,11 @@ function connect() {
 function _handleFullState(msg) {
   const prevActive = state.active_session_id;
   state = msg;
+  if (typeof _boardFiltersByGroup !== 'undefined') _boardFiltersByGroup = null;
+  if (typeof _boardSavedViewsByGroup !== 'undefined') _boardSavedViewsByGroup = null;
+  if (typeof _boardLaneSortsByGroup !== 'undefined') _boardLaneSortsByGroup = null;
+  if (typeof _boardCardDensityByGroup !== 'undefined') _boardCardDensityByGroup = null;
+  if (typeof _boardFilterStateGroup !== 'undefined') _boardFilterStateGroup = '';
   if (msg.providers) _cachedProviders = msg.providers;
   if (!state.panel_events) state.panel_events = [];
   _expectedSeq = (msg.seq || 0) + 1;
@@ -288,6 +293,25 @@ function _applyDelta(ops) {
 
       case 'ui_update':
         state[op.key] = op.value;
+        if (op.key === 'board_filters_by_group'
+            && typeof _boardFiltersByGroup !== 'undefined') {
+          _boardFiltersByGroup = null;
+          if (typeof _boardFilterStateGroup !== 'undefined') {
+            _boardFilterStateGroup = '';
+          }
+        }
+        if (op.key === 'board_saved_views_by_group'
+            && typeof _boardSavedViewsByGroup !== 'undefined') {
+          _boardSavedViewsByGroup = null;
+        }
+        if (op.key === 'board_lane_sorts_by_group'
+            && typeof _boardLaneSortsByGroup !== 'undefined') {
+          _boardLaneSortsByGroup = null;
+        }
+        if (op.key === 'board_card_density_by_group'
+            && typeof _boardCardDensityByGroup !== 'undefined') {
+          _boardCardDensityByGroup = null;
+        }
         break;
 
       case 'journal_append': {

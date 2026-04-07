@@ -1083,6 +1083,32 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   -ms-overflow-style: none;        /* IE/Edge */
 }
 .board-lane-tabs::-webkit-scrollbar { display: none; }
+.board-lane-sort,
+.board-lane-density {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 8px;
+  flex-shrink: 0;
+}
+.board-lane-sort-label,
+.board-lane-density-label {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.board-lane-sort-select,
+.board-lane-density-select {
+  height: 22px;
+  min-width: 98px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elev-1);
+  color: var(--text);
+  font-size: 10px;
+  padding: 0 22px 0 8px;
+}
 .board-lane-tab {
   font-size: 10px; font-weight: 500;
   color: var(--text-dim);
@@ -1112,6 +1138,72 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   position: relative;
 }
 .board-cards > * { flex-shrink: 0; }
+.board-lane-header {
+  position: sticky;
+  top: -6px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -6px -8px 0;
+  padding: 8px 8px 6px;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--bg) 96%, transparent) 0%,
+      color-mix(in srgb, var(--bg) 92%, transparent) 100%);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+}
+.board-lane-header-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.board-lane-header-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.board-lane-header-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.board-lane-header-counts {
+  font-size: 9px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.board-lane-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.board-lane-header-action {
+  font: 9px/1 var(--font);
+  color: var(--text-dim);
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.board-lane-header-action:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.board-lane-header-summary {
+  font-size: 9px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .board-card {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px;
@@ -1123,6 +1215,57 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   min-height: 32px;
 }
 .board-card:hover { background: var(--bg-hover); }
+.board-density-compact .board-card {
+  gap: 6px;
+  padding: 4px 6px;
+  min-height: 24px;
+}
+.board-density-compact .board-card-title {
+  font-size: 9px;
+  -webkit-line-clamp: 2;
+}
+.board-density-compact .board-card-meta {
+  gap: 2px;
+  margin-top: 0;
+}
+.board-density-compact .board-card-label,
+.board-density-compact .board-card-group {
+  font-size: 7px;
+  line-height: 12px;
+}
+.board-density-compact .board-card-agent {
+  font-size: 8px;
+}
+.board-density-compact .board-card-chain,
+.board-density-compact .board-card-activity {
+  display: none;
+}
+.board-density-compact .board-card-menu-btn {
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+}
+.board-density-detailed .board-card {
+  align-items: flex-start;
+  padding: 8px 10px;
+  min-height: 40px;
+}
+.board-density-detailed .board-card-title {
+  font-size: 11px;
+  -webkit-line-clamp: 6;
+}
+.board-density-detailed .board-card-meta {
+  gap: 4px;
+  margin-top: 2px;
+}
+.board-density-detailed .board-card-agent,
+.board-density-detailed .board-card-chain,
+.board-density-detailed .board-card-activity {
+  font-size: 10px;
+}
+.board-density-detailed .board-card-activity {
+  -webkit-line-clamp: 3;
+}
 .board-card.focused {
   border-color: var(--accent);
   outline: none;
@@ -1269,6 +1412,16 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-card-subordinate .board-card-agent { font-size: 8px; }
 .board-card-subordinate .board-card-chain { font-size: 8px; }
 .board-card-subordinate .board-card-menu-btn { width: 16px; height: 16px; font-size: 10px; }
+.board-density-compact .board-card-subordinate {
+  margin-left: 12px;
+  padding: 2px 5px;
+  min-height: 22px;
+}
+.board-density-detailed .board-card-subordinate {
+  margin-left: 20px;
+  padding: 5px 8px;
+  min-height: 30px;
+}
 .board-card-done { opacity: 0.5; }
 /* Multi-select */
 .board-card-selected {
@@ -1436,8 +1589,50 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 
 /* Empty lane */
 .board-empty {
-  text-align: center; color: var(--text-dim);
-  font-size: 10px; padding: 16px 8px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 16px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-cell) 92%, transparent);
+}
+.board-empty-note {
+  text-align: left;
+  padding: 10px 12px;
+  border-style: solid;
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-cell));
+}
+.board-empty-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.board-empty-body {
+  margin-top: 4px;
+  line-height: 1.45;
+}
+.board-empty-actions {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.board-empty-note .board-empty-actions {
+  justify-content: flex-start;
+}
+.board-empty-action {
+  font: 9px/1 var(--font);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.board-empty-action:hover {
+  background: var(--bg-hover);
 }
 .board-load-more {
   text-align: center; color: var(--dim);
@@ -1538,6 +1733,20 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   padding: 3px 8px; flex-shrink: 0;
   border-bottom: 1px solid var(--border);
 }
+.board-saved-views {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  padding: 4px 8px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+.board-saved-view {
+  display: inline-flex; align-items: center; gap: 2px;
+}
+.board-saved-view-delete {
+  font: 9px/1 var(--font); color: var(--text-dim);
+  background: none; border: none; cursor: pointer;
+  padding: 2px 3px;
+}
+.board-saved-view-delete:hover { color: var(--text); }
 .board-filter-active-chip {
   font: 9px/1 var(--font);
   border-radius: 9px; padding: 2px 7px;

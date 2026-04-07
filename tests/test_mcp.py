@@ -16,7 +16,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.mcp_mod = importlib.import_module("loom.mcp")
         self.mcp_mod = importlib.reload(self.mcp_mod)
 
-    async def test_dispatch_tool_maps_agent_reports_and_self_dispatch(self):
+    async def test_dispatch_tool_maps_agent_reports_and_derive_returns_json(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(
             id="agent-1",
@@ -33,9 +33,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             if payload["action"] == "derive":
                 return {
                     "type": "ok",
-                    "proceed": True,
-                    "task": "Implement follow-up",
-                    "description": "Derived inline",
+                    "task_id": "task-2",
+                    "agent_id": "agent-1",
                 }
             return {"type": "ok"}
 
@@ -64,7 +63,10 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertFalse(is_error)
-        self.assertIn("Task derived to self. Proceed with:", text)
+        self.assertEqual(
+            json.loads(text),
+            {"type": "ok", "task_id": "task-2", "agent_id": "agent-1"},
+        )
         self.assertEqual(
             calls,
             [

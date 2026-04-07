@@ -2608,14 +2608,9 @@ def cmd_ai_derive(args):
     new_tid = data.get("task_id", "")
     new_aid = data.get("agent_id", "")
     act = f" (action: {args.action})" if args.action else ""
-    if data.get("proceed"):
-        print(f"Task derived. Proceed with:\n\n{data.get('task', '')}")
-        if data.get("description"):
-            print(f"\n{data['description']}")
-    else:
-        print(f"Derived task {new_tid}{act}")
-        if new_aid:
-            print(f"  Agent: {new_aid}")
+    print(f"Derived task {new_tid}{act}")
+    if new_aid:
+        print(f"  Agent: {new_aid}")
 
 
 def cmd_ai_ask(args):
