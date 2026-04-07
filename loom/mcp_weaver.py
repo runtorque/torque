@@ -11,7 +11,6 @@ Tools are served from the same ``/mcp`` endpoint as agent tools — the
 import json
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
 
 from .task_health import HEALTH_SEVERITY
 from .worktree_boundaries import (
@@ -190,139 +189,6 @@ def _worktree_boundary_overview(state, *, repo_root: str, branch: str):
         "branch_advanced": bool(started),
         "partial_review_safe": not started,
     }
-
-
-def _task_priority(task) -> str:
-    for label in getattr(task, "labels", []) or []:
-        if label in {"priority:high", "priority:medium", "priority:low"}:
-            return label.split(":", 1)[1]
-    return ""
-
-
-def _task_is_future_scheduled(task, *, now_iso: str) -> bool:
-    scheduled_at = getattr(task, "scheduled_at", "") or ""
-    return bool(scheduled_at and scheduled_at > now_iso)
-
-
-def _task_has_busy_assigned_agent(state, task) -> bool:
-    agent_id = getattr(task, "agent_id", "") or ""
-    if not agent_id:
-        return False
-    cell = state.agents.get(agent_id)
-    if cell and cell.current_task_id and cell.current_task_id != task.id:
-        linked = state.board_tasks.get(cell.current_task_id)
-        if not linked or linked.lane != "Done":
-            return True
-    current = state.agent_current_task(agent_id)
-    return bool(current and current.id != task.id)
-
-
-def _dispatch_recommendation_for_group(state, group: str):
-    if not group:
-        return None
-
-    now_iso = datetime.now(timezone.utc).isoformat()
-    candidates = []
-    priority_weights = {"high": 60, "medium": 40, "low": 20}
-
-    for task in state.board_tasks.values():
-        if task.group != group:
-            continue
-        if task.lane not in {"Backlog", "To Do"}:
-            continue
-
-        labels = set(task.labels or [])
-        if "loom:archived" in labels:
-            continue
-        if "loom:blocked" in labels or "loom:human" in labels:
-            continue
-        if not state.board_deps_met(task):
-            continue
-        if _task_is_future_scheduled(task, now_iso=now_iso):
-            continue
-        if state.auto_dispatch_queue_contains(task.id):
-            continue
-        if _task_has_busy_assigned_agent(state, task):
-            continue
-
-        score = 0
-        reasons = []
-        score_breakdown = []
-
-        def _add_reason(weight: int, label: str) -> None:
-            nonlocal score
-            score += weight
-            reasons.append(label)
-            score_breakdown.append({"weight": weight, "label": label})
-
-        if task.lane == "To Do":
-            _add_reason(300, "Already staged in To Do")
-        else:
-            _add_reason(200, "Ready from Backlog")
-
-        boundary_task = None
-        if task.resume_after_boundary_task_id:
-            boundary_task = state.board_tasks.get(
-                task.resume_after_boundary_task_id
-            )
-            if boundary_task:
-                _add_reason(
-                    120,
-                    f'Continues after "{boundary_task.task}"',
-                )
-
-        agent_name = ""
-        if task.agent_id:
-            cell = state.agents.get(task.agent_id)
-            if cell:
-                agent_name = cell.name or cell.slug or cell.id
-                _add_reason(80, f"Already linked to {agent_name}")
-
-        priority = _task_priority(task)
-        if priority:
-            _add_reason(
-                priority_weights.get(priority, 0),
-                f"Priority: {priority.title()}",
-            )
-
-        candidates.append({
-            "task_id": task.id,
-            "task_title": task.task,
-            "lane": task.lane,
-            "score": score,
-            "reason_summary": "; ".join(reasons),
-            "reasons": reasons,
-            "score_breakdown": score_breakdown,
-            "agent_id": task.agent_id or "",
-            "agent_name": agent_name,
-            "dispatch_mode": (
-                "existing_agent"
-                if task.agent_id and task.agent_id in state.agents
-                else "new_agent"
-            ),
-            "resume_after_boundary_task_id": (
-                task.resume_after_boundary_task_id or ""
-            ),
-            "resume_after_boundary_task": (
-                boundary_task.task if boundary_task else ""
-            ),
-            "_sort": (
-                -score,
-                task.position if isinstance(task.position, int) else 0,
-                task.created_at or "",
-                task.task.lower(),
-                task.id,
-            ),
-        })
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda item: item["_sort"])
-    best = candidates[0]
-    best.pop("_sort", None)
-    return best
-
 
 # ---------------------------------------------------------------------------
 # Tool definitions
@@ -1454,10 +1320,6 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "items": boundary_items[:10],
                 "truncated": len(boundary_items) > 10,
             },
-            "recommended_dispatch": _dispatch_recommendation_for_group(
-                state,
-                _weaver_group,
-            ),
         }
         return json.dumps(summary), False
 
