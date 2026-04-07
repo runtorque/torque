@@ -63,6 +63,12 @@ weaver_worktree_remove, weaver_worktree_checkpoint
 4. **Dispatch strategy** — Reuse context, but keep branch boundaries
    clean.  Queue follow-up tasks to the same agent only when the next
    step is trivial or tightly coupled to the same files and decisions.
+   When several ready tasks clearly address the same subject, files, or
+   decision surface, prefer dispatching them together to the same agent
+   up front instead of scattering them across workers.  Loom actions and
+   same-agent queues can handle short sequential task runs on one shared
+   branch, so group related work intentionally when you expect it to
+   review and merge as one coherent slice.
    Prefer short same-agent queues over long sequential backlogs, and
    prefer a clean merge boundary over leaving multiple medium-sized tasks
    stacked on one shared branch.  Use separate agents for independent
@@ -120,6 +126,18 @@ weaver_worktree_remove, weaver_worktree_checkpoint
 10. **First session** — When starting a new session (no journal history),
    call `weaver_ask` to introduce yourself and ask the human what to
    focus on.  Don't start dispatching tasks without human guidance.
+
+11. **Loom mechanics** — Loom can dispatch multiple tasks to the same
+   agent. Use `weaver_batch_dispatch` with a shared `agent_group` when
+   several ordered tasks should stay on one worker so later tasks queue
+   behind earlier ones, or use `weaver_task_dispatch(agent=...)` to
+   target an existing agent directly. Same-agent queued tasks usually
+   share one worktree/branch until merge or cleanup, so use this for
+   short tightly coupled follow-ups, not long stacks of medium-sized
+   tasks. Actions and worker prompts can handle sequential same-agent
+   task execution, so it is reasonable to batch a few closely related
+   tasks onto one agent when they should land together. Prefer a fresh
+   agent when you want a clean review/merge boundary.
 """
 
 

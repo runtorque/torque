@@ -28,6 +28,8 @@ class WeaverPromptTests(unittest.TestCase):
 
         self.assertIn("**Dispatch strategy**", prompt)
         self.assertIn("Queue follow-up tasks to the same agent only", prompt)
+        self.assertIn("prefer dispatching them together to the same agent", prompt)
+        self.assertIn("same-agent queues can handle short sequential task runs", prompt)
         self.assertIn("Prefer short same-agent queues over long sequential backlogs", prompt)
         self.assertIn("prefer a clean merge boundary over leaving multiple medium-sized tasks", prompt)
         self.assertIn("**Diff review**", prompt)
@@ -52,3 +54,8 @@ class WeaverPromptTests(unittest.TestCase):
         self.assertIn("board should stop widening work", prompt)
         self.assertIn("use `weaver_note`", prompt)
         self.assertIn("instead of `weaver_ask`", prompt)
+        self.assertIn("**Loom mechanics**", prompt)
+        self.assertIn("shared `agent_group`", prompt)
+        self.assertIn("`weaver_task_dispatch(agent=...)`", prompt)
+        self.assertIn("share one worktree/branch until merge or cleanup", prompt)
+        self.assertIn("Actions and worker prompts can handle sequential same-agent", prompt)
