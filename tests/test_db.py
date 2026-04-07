@@ -74,6 +74,7 @@ class LoomDBTests(unittest.TestCase):
                 labels=["loom:blocked", "keep"],
                 created_at="2026-04-06T00:00:00+00:00",
                 updated_at="2026-04-06T01:00:00+00:00",
+                lane_entered_at="2026-04-06T00:30:00+00:00",
                 parent_task_id="parent-1",
                 pipeline_depth=2,
                 pipeline_root_id="root-1",
@@ -160,6 +161,10 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["depends_on"],
             ["dep-1"],
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["lane_entered_at"],
+            "2026-04-06T00:30:00+00:00",
         )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["attachments"][0]["filename"],

@@ -1252,6 +1252,10 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   font-size: 9px;
   -webkit-line-clamp: 2;
 }
+.board-density-compact .board-card-lane-entered {
+  font-size: 7px;
+  line-height: 12px;
+}
 .board-density-compact .board-card-meta {
   gap: 2px;
   margin-top: 0;
@@ -1286,6 +1290,9 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-density-detailed .board-card-title {
   font-size: 11px;
   -webkit-line-clamp: 6;
+}
+.board-density-detailed .board-card-lane-entered {
+  font-size: 9px;
 }
 .board-density-detailed .board-card-meta {
   gap: 4px;
@@ -1335,11 +1342,25 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   flex: 1; min-width: 0;
   display: flex; flex-direction: column; gap: 1px;
 }
+.board-card-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
 .board-card-title {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 10px; font-weight: 500;
   white-space: normal; word-break: break-word;
   display: -webkit-box; -webkit-line-clamp: 4;
   -webkit-box-orient: vertical; overflow: hidden;
+}
+.board-card-lane-entered {
+  flex: 0 0 auto;
+  font-size: 8px;
+  line-height: 14px;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 .board-card-meta {
   display: flex; flex-wrap: wrap; gap: 3px; margin-top: 1px;
@@ -1552,6 +1573,33 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   background: color-mix(in srgb, var(--green) 15%, transparent);
   font-weight: 600;
 }
+.board-card-dispatch {
+  font-weight: 600;
+}
+.board-card-dispatch-ready {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+}
+.board-card-dispatch-blocked {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+.board-card-dispatch-scheduled {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.board-card-dispatch-warning {
+  color: #ff7b72;
+  background: rgba(255, 123, 114, 0.14);
+}
+.board-card-dispatch-queued {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
+}
+.board-card-dispatch-checking {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 10%, transparent);
+}
 .board-card-health {
   font-weight: 600;
 }
@@ -1579,6 +1627,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   padding: 3px 6px;
 }
 .board-card-subordinate .board-card-title { font-size: 9px; }
+.board-card-subordinate .board-card-lane-entered { font-size: 7px; }
 .board-card-subordinate .board-card-dot { width: 5px; height: 5px; }
 .board-card-subordinate .board-card-meta { gap: 2px; }
 .board-card-subordinate .board-card-label { font-size: 7px; }
@@ -3042,11 +3091,47 @@ body.diff-view-open #ctx-menu {
 .btn-green[disabled] { opacity: 0.4; pointer-events: none; }
 .modal-wide { max-width: 760px; }
 
-.board-card-scheduled { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+.board-card-scheduled {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+.board-card-due-soon {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--amber);
+  font-weight: 600;
+}
+.board-card-overdue {
+  background: rgba(248, 81, 73, 0.14);
+  color: var(--red);
+  font-weight: 600;
+}
 .board-label-dep-blocked {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 15%, transparent);
   cursor: help;
+}
+.board-card-dependency {
+  font-weight: 600;
+}
+.board-card-dependency-blocked {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+}
+.board-card-dependency-ready {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
+}
+.board-card-dependency-blocking {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.board-card-badge-jump {
+  cursor: pointer;
+  transition: transform .1s ease, filter .1s ease;
+}
+.board-card-badge-jump:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
 }
 .deps-dropdown {
   position: absolute; left: 0; right: 0; z-index: 20;

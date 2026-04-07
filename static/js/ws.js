@@ -56,6 +56,9 @@ function connect() {
     } else if (msg.type === 'worktree_rebase') {
       if (typeof diffReceiveRebaseResult === 'function') diffReceiveRebaseResult(msg);
     } else if (msg.type === 'actions') {
+      if (typeof _boardCacheDispatchActionList === 'function') {
+        _boardCacheDispatchActionList(msg);
+      }
       if (typeof _boardActDropdownWaiting !== 'undefined' && _boardActDropdownWaiting) {
         _boardShowActionList(msg);
       } else if (typeof _boardBatchActionWaiting !== 'undefined' && _boardBatchActionWaiting) {
@@ -64,6 +67,10 @@ function connect() {
         _handleScheduleActionList(msg);
       } else if (typeof _taskModalWaiting !== 'undefined' && _taskModalWaiting) {
         _handleTaskActionList(msg);
+      } else if (typeof _boardEligibilityActionWaiting !== 'undefined'
+          && _boardEligibilityActionWaiting
+          && typeof _boardHandleEligibilityActionList === 'function') {
+        _boardHandleEligibilityActionList(msg);
       } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
         tplEditorReceiveList(msg);
       } else {
@@ -71,8 +78,15 @@ function connect() {
       }
     } else if (msg.type === 'templates') {
       _cachedAgentTemplates = msg.templates || [];
+      if (typeof _boardCacheDispatchTemplateList === 'function') {
+        _boardCacheDispatchTemplateList(msg);
+      }
       if (typeof _taskTemplateWaiting !== 'undefined' && _taskTemplateWaiting) {
         _handleTaskTemplateList(msg);
+      } else if (typeof _boardEligibilityTemplateWaiting !== 'undefined'
+          && _boardEligibilityTemplateWaiting
+          && typeof _boardHandleEligibilityTemplateList === 'function') {
+        _boardHandleEligibilityTemplateList(msg);
       } else if (typeof _activePanelApp !== 'undefined'
           && _activePanelApp === 'templates'
           && typeof agentTemplateReceiveList === 'function') {

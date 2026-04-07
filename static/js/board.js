@@ -65,6 +65,11 @@ var _boardBatchActionWaiting = false; // waiting for batch action list
 var _boardBatchActionOptions = [];    // actions for batch edit action picker
 var _boardArchiveLabel = 'loom:archived';
 var _boardArchiveStaleDays = 7;
+var _boardLaneEntryRefreshTimer = 0;
+var _boardEligibilityActionsByGroup = {};
+var _boardEligibilityTemplatesByGroup = {};
+var _boardEligibilityActionWaiting = false;
+var _boardEligibilityTemplateWaiting = false;
 
 var _boardHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
 var _boardHealthLabels = {
@@ -518,6 +523,116 @@ function _boardTaskTimestampMs(task) {
   return isNaN(stamp) ? 0 : stamp;
 }
 
+function _boardTaskScheduleMeta(task, nowMs) {
+  if (!task || !task.scheduled_at) return null;
+  var when = _boardTimestamp(task.scheduled_at);
+  var formatted = _schedFormatTime(task.scheduled_at) || task.scheduled_at;
+  if (Number.isNaN(when)) {
+    return {
+      className: 'board-card-scheduled',
+      label: 'Due ' + formatted,
+    };
+  }
+  var current = typeof nowMs === 'number' ? nowMs : Date.now();
+  var diffMs = when - current;
+  if (task.lane !== 'Done' && diffMs < 0) {
+    return {
+      className: 'board-card-scheduled board-card-overdue',
+      label: 'Overdue ' + formatted,
+    };
+  }
+  if (task.lane !== 'Done' && diffMs <= 86400000) {
+    return {
+      className: 'board-card-scheduled board-card-due-soon',
+      label: 'Due ' + formatted,
+    };
+  }
+  return {
+    className: 'board-card-scheduled',
+    label: (task.lane === 'Done' ? 'Due ' : 'Scheduled ') + formatted,
+  };
+}
+
+function _boardLaneEntryTimestampMs(task) {
+  if (!task) return 0;
+  var iso = task.lane_entered_at || task.created_at || '';
+  if (!iso) return 0;
+  var stamp = new Date(iso).getTime();
+  return isNaN(stamp) ? 0 : stamp;
+}
+
+function _boardRelativeAgeText(diffSec) {
+  if (diffSec < 60) return 'just now';
+  if (diffSec < 3600) return Math.floor(diffSec / 60) + 'm ago';
+  if (diffSec < 86400) return Math.floor(diffSec / 3600) + 'h ago';
+  return Math.floor(diffSec / 86400) + 'd ago';
+}
+
+function _boardLaneEntryText(task, nowMs) {
+  var enteredAt = _boardLaneEntryTimestampMs(task);
+  if (!enteredAt) return '';
+  var current = typeof nowMs === 'number' ? nowMs : Date.now();
+  var diffSec = Math.max(0, Math.floor((current - enteredAt) / 1000));
+  return '[' + _boardRelativeAgeText(diffSec) + ']';
+}
+
+function _boardLaneEntryNextRefreshDelay(task, nowMs) {
+  var enteredAt = _boardLaneEntryTimestampMs(task);
+  if (!enteredAt) return 0;
+  var current = typeof nowMs === 'number' ? nowMs : Date.now();
+  var diffMs = Math.max(0, current - enteredAt);
+  if (diffMs < 60000) return 1000;
+  if (diffMs < 3600000) return 60000 - (diffMs % 60000) || 60000;
+  if (diffMs < 86400000) return 3600000 - (diffMs % 3600000) || 3600000;
+  return 86400000 - (diffMs % 86400000) || 86400000;
+}
+
+function _boardClearLaneEntryRefresh() {
+  if (!_boardLaneEntryRefreshTimer) return;
+  if (window && typeof window.clearTimeout === 'function') {
+    window.clearTimeout(_boardLaneEntryRefreshTimer);
+  }
+  _boardLaneEntryRefreshTimer = 0;
+}
+
+function _boardScheduleLaneEntryRefresh(delayMs) {
+  if (_boardShowSchedules
+      || (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board')
+      || !(delayMs > 0)) {
+    _boardClearLaneEntryRefresh();
+    return;
+  }
+  if (!window || typeof window.setTimeout !== 'function') return;
+  if (_boardLaneEntryRefreshTimer && typeof window.clearTimeout === 'function') {
+    window.clearTimeout(_boardLaneEntryRefreshTimer);
+  }
+  _boardLaneEntryRefreshTimer = window.setTimeout(function() {
+    _boardLaneEntryRefreshTimer = 0;
+    if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') return;
+    renderBoard();
+  }, Math.max(1000, delayMs));
+}
+
+function _boardVisibleLaneEntryRefreshDelay(rootTasks, childrenOf, renderCap) {
+  var nextDelay = 0;
+
+  function visit(task, depth) {
+    var delay = _boardLaneEntryNextRefreshDelay(task);
+    if (delay > 0 && (!nextDelay || delay < nextDelay)) nextDelay = delay;
+    var children = childrenOf[task.id] || [];
+    if (!children.length) return;
+    if (depth === 0 && _boardCollapsedTasks[task.id]) return;
+    for (var i = 0; i < children.length; i++) {
+      visit(children[i], depth + 1);
+    }
+  }
+
+  for (var i = 0; i < renderCap; i++) {
+    visit(rootTasks[i], 0);
+  }
+  return nextDelay;
+}
+
 function _boardTaskIdsWithDescendants(taskIds) {
   var tasks = _boardTasks();
   var picked = {};
@@ -873,9 +988,167 @@ function _boardTaskIsFutureScheduled(task) {
   return when > Date.now();
 }
 
+function _boardCacheDispatchActionList(msg) {
+  if (!msg || !msg.group) return;
+  _boardEligibilityActionsByGroup[msg.group] = msg.actions || [];
+  if (_boardEligibilityActionWaiting && msg.group === (_currentGroup() || '')) {
+    _boardEligibilityActionWaiting = false;
+  }
+}
+
+function _boardCacheDispatchTemplateList(msg) {
+  if (!msg || !msg.group) return;
+  _boardEligibilityTemplatesByGroup[msg.group] = msg.templates || [];
+  if (_boardEligibilityTemplateWaiting
+      && msg.group === (_currentGroup() || '')) {
+    _boardEligibilityTemplateWaiting = false;
+  }
+}
+
+function _boardHandleEligibilityActionList(msg) {
+  _boardCacheDispatchActionList(msg);
+  _boardEligibilityActionWaiting = false;
+  renderBoard();
+}
+
+function _boardHandleEligibilityTemplateList(msg) {
+  _boardCacheDispatchTemplateList(msg);
+  _boardEligibilityTemplateWaiting = false;
+  renderBoard();
+}
+
+function _boardEnsureDispatchEligibilityRefs(group) {
+  if (!group || typeof send !== 'function') return;
+  var tasks = _boardScopedTasks(_boardShowArchived);
+  var needsActions = false;
+  var needsTemplates = false;
+  for (var id in tasks) {
+    var task = tasks[id];
+    if (task.group !== group) continue;
+    if (task.action_name) needsActions = true;
+    if (task.agent_template) needsTemplates = true;
+  }
+  if (needsActions && !_boardEligibilityActionsByGroup[group]
+      && !_boardEligibilityActionWaiting) {
+    _boardEligibilityActionWaiting = true;
+    send({ cmd: 'list_actions', group: group });
+  }
+  if (needsTemplates && !_boardEligibilityTemplatesByGroup[group]
+      && !_boardEligibilityTemplateWaiting) {
+    _boardEligibilityTemplateWaiting = true;
+    send({ cmd: 'list_templates', group: group });
+  }
+}
+
+function _boardUnmetDependencyNames(task) {
+  if (!task || !Array.isArray(task.depends_on)) return [];
+  var tasks = _boardTasks();
+  var names = [];
+  for (var i = 0; i < task.depends_on.length; i++) {
+    var dep = tasks[task.depends_on[i]];
+    if (dep && dep.lane !== 'Done') names.push(dep.task || dep.id);
+  }
+  return names;
+}
+
+function _boardTaskHasMissingAction(task) {
+  if (!task || !task.action_name) return false;
+  var group = task.group || _currentGroup() || '';
+  var actions = _boardEligibilityActionsByGroup[group];
+  if (!actions) return false;
+  for (var i = 0; i < actions.length; i++) {
+    if (actions[i] && actions[i].name === task.action_name) return false;
+  }
+  return true;
+}
+
+function _boardTaskHasMissingTemplate(task) {
+  if (!task || !task.agent_template) return false;
+  var group = task.group || _currentGroup() || '';
+  var templates = _boardEligibilityTemplatesByGroup[group];
+  if (!templates) return false;
+  for (var i = 0; i < templates.length; i++) {
+    if (templates[i] && templates[i].name === task.agent_template) return false;
+  }
+  return true;
+}
+
+function _boardTaskNeedsEligibilityRefs(task) {
+  if (!task) return false;
+  var group = task.group || _currentGroup() || '';
+  return !!(
+    (task.action_name && !_boardEligibilityActionsByGroup[group])
+    || (task.agent_template && !_boardEligibilityTemplatesByGroup[group])
+  );
+}
+
 function _boardTaskIsDispatchBlocked(task) {
   return _boardDepsBlocked(task)
     || !!(task.labels && task.labels.indexOf('loom:blocked') >= 0);
+}
+
+function _boardTaskDispatchEligibility(task) {
+  if (!task) return null;
+  if (task.lane === 'To Do' && task.agent_id) {
+    return {
+      className: 'board-card-dispatch board-card-dispatch-queued',
+      label: 'Queued',
+      title: 'Already queued for dispatch',
+    };
+  }
+  if (task.lane !== 'Backlog') return null;
+  if (_boardTaskNeedsEligibilityRefs(task)) {
+    return {
+      className: 'board-card-dispatch board-card-dispatch-checking',
+      label: 'Checking refs',
+      title: 'Loading action/template availability',
+    };
+  }
+  var unmetDeps = _boardUnmetDependencyNames(task);
+  if (unmetDeps.length) {
+    var preview = unmetDeps.slice(0, 2).join(', ');
+    if (unmetDeps.length > 2) preview += ', +' + (unmetDeps.length - 2);
+    return {
+      className: 'board-card-dispatch board-card-dispatch-blocked',
+      label: 'Blocked by deps',
+      title: 'Waiting on: ' + preview,
+    };
+  }
+  if (task.labels && task.labels.indexOf('loom:blocked') >= 0) {
+    return {
+      className: 'board-card-dispatch board-card-dispatch-blocked',
+      label: 'Blocked',
+      title: 'Task is explicitly blocked',
+    };
+  }
+  if (_boardTaskIsFutureScheduled(task)) {
+    return {
+      className: 'board-card-dispatch board-card-dispatch-scheduled',
+      label: 'Scheduled later',
+      title: 'Dispatch window opens ' + _schedFormatTime(task.scheduled_at),
+    };
+  }
+  var missingAction = _boardTaskHasMissingAction(task);
+  var missingTemplate = _boardTaskHasMissingTemplate(task);
+  if (missingAction || missingTemplate) {
+    var missing = [];
+    if (missingAction) missing.push('action');
+    if (missingTemplate) missing.push('template');
+    return {
+      className: 'board-card-dispatch board-card-dispatch-warning',
+      label: missing.length === 2 ? 'Missing refs' : 'Missing ' + missing[0],
+      title: missingAction && missingTemplate
+        ? 'Missing action "' + task.action_name + '" and template "' + task.agent_template + '"'
+        : missingAction
+          ? 'Missing action "' + task.action_name + '"'
+          : 'Missing template "' + task.agent_template + '"',
+    };
+  }
+  return {
+    className: 'board-card-dispatch board-card-dispatch-ready',
+    label: 'Ready',
+    title: 'Ready to dispatch',
+  };
 }
 
 function _renderBoardMessageState(state, noteOnly) {
@@ -1153,6 +1426,92 @@ function _boardDepsBlocked(t) {
   return false;
 }
 
+function _boardSortTaskRefs(tasks) {
+  return tasks.slice().sort(function(a, b) {
+    var laneCmp = String(a.lane || '').localeCompare(String(b.lane || ''));
+    if (laneCmp) return laneCmp;
+    var posCmp = (a.position || 0) - (b.position || 0);
+    if (posCmp) return posCmp;
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
+}
+
+function _boardUnmetDependencyTasks(task) {
+  if (!task || !Array.isArray(task.depends_on)) return [];
+  var tasks = _boardTasks();
+  var unmet = [];
+  for (var i = 0; i < task.depends_on.length; i++) {
+    var dep = tasks[task.depends_on[i]];
+    if (dep && dep.lane !== 'Done') unmet.push(dep);
+  }
+  return _boardSortTaskRefs(unmet);
+}
+
+function _boardActiveDependentNames(task) {
+  var dependents = _boardActiveDependents(task);
+  var names = [];
+  for (var i = 0; i < dependents.length; i++) {
+    names.push(dependents[i].task || dependents[i].id);
+  }
+  return names;
+}
+
+function _boardActiveDependents(task) {
+  if (!task || !task.id || task.lane === 'Done') return [];
+  var tasks = _boardTasks();
+  var dependents = [];
+  for (var id in tasks) {
+    var candidate = tasks[id];
+    if (!candidate || candidate.lane === 'Done') continue;
+    if (Array.isArray(candidate.depends_on)
+        && candidate.depends_on.indexOf(task.id) >= 0) {
+      dependents.push(candidate);
+    }
+  }
+  return _boardSortTaskRefs(dependents);
+}
+
+function _boardTaskDependencyBadges(task) {
+  if (!task) return [];
+  var badges = [];
+  var deps = Array.isArray(task.depends_on) ? task.depends_on : [];
+  var unmetDepTasks = _boardUnmetDependencyTasks(task);
+  var unmetDeps = _boardUnmetDependencyNames(task);
+  if (deps.length) {
+    if (unmetDepTasks.length) {
+      var unmetPreview = unmetDeps.slice(0, 2).join(', ');
+      if (unmetDeps.length > 2) unmetPreview += ', +' + (unmetDeps.length - 2);
+      badges.push({
+        className: 'board-card-dependency board-card-dependency-blocked',
+        label: 'Blocked by ' + unmetDeps.length,
+        title: 'Waiting on: ' + unmetPreview,
+        targetTaskId: unmetDepTasks[0].id,
+      });
+    } else {
+      badges.push({
+        className: 'board-card-dependency board-card-dependency-ready',
+        label: 'Deps ' + deps.length,
+        title: deps.length + ' dependenc' + (deps.length === 1 ? 'y is' : 'ies are') + ' satisfied',
+      });
+    }
+  }
+  var activeDependents = _boardActiveDependentNames(task);
+  if (activeDependents.length) {
+    var blockingPreview = activeDependents.slice(0, 2).join(', ');
+    if (activeDependents.length > 2) {
+      blockingPreview += ', +' + (activeDependents.length - 2);
+    }
+    var activeDependentTasks = _boardActiveDependents(task);
+    badges.push({
+      className: 'board-card-dependency board-card-dependency-blocking',
+      label: 'Blocks ' + activeDependents.length,
+      title: 'Blocking: ' + blockingPreview,
+      targetTaskId: activeDependentTasks[0].id,
+    });
+  }
+  return badges;
+}
+
 function _boardTaskPriority(task) {
   var labels = (task && task.labels) || [];
   for (var i = 0; i < labels.length; i++) {
@@ -1343,8 +1702,21 @@ function _renderBoardCard(t, childrenOf, depth) {
   cardHtml += '<div class="board-card-info">';
   // Done checkmark for subordinate cards
   var titlePrefix = (isSubordinate && isDone) ? '&#10003; ' : '';
+  var laneEntryText = _boardLaneEntryText(t);
+  cardHtml += '<div class="board-card-heading">';
   cardHtml += '<div class="board-card-title">' + titlePrefix + formatCode(t.task || '') + '</div>';
+  if (laneEntryText) {
+    cardHtml += '<div class="board-card-lane-entered" title="Entered current lane ' + esc(laneEntryText.slice(1, -1)) + '">'
+      + esc(laneEntryText) + '</div>';
+  }
+  cardHtml += '</div>';
   var meta = '';
+  var dispatchEligibility = _boardTaskDispatchEligibility(t);
+  if (dispatchEligibility) {
+    meta += '<span class="board-card-label ' + esc(dispatchEligibility.className)
+      + '" title="' + esc(dispatchEligibility.title) + '">'
+      + esc(dispatchEligibility.label) + '</span>';
+  }
   if (showExecutionState && t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
   if (showExecutionState && _boardTaskHealthState(t) !== 'healthy') {
     meta += '<span class="board-card-label board-card-health board-card-health-' + esc(_boardTaskHealthState(t))
@@ -1383,11 +1755,23 @@ function _renderBoardCard(t, childrenOf, depth) {
       meta += '<span class="' + cls + '">' + esc(displayLabel(lb)) + '</span>';
     }
   }
-  if (!isDone && _boardDepsBlocked(t)) {
-    meta += '<span class="board-card-label board-label-dep-blocked" title="Blocked by dependencies">&#x1F512; deps</span>';
+  var dependencyBadges = _boardTaskDependencyBadges(t);
+  for (var dbi = 0; dbi < dependencyBadges.length; dbi++) {
+    var depBadge = dependencyBadges[dbi];
+    var depClassName = depBadge.className;
+    var depAttrs = '';
+    if (depBadge.targetTaskId) {
+      depClassName += ' board-card-badge-jump';
+      depAttrs = ' onclick="event.stopPropagation();boardJumpToTask(\''
+        + esc(depBadge.targetTaskId).replace(/'/g, "\\'") + '\')"';
+    }
+    meta += '<span class="board-card-label ' + esc(depClassName) + '"'
+      + depAttrs + ' title="' + esc(depBadge.title) + '">' + esc(depBadge.label) + '</span>';
   }
-  if (t.scheduled_at) {
-    meta += '<span class="board-card-label board-card-scheduled">' + _schedFormatTime(t.scheduled_at) + '</span>';
+  var scheduleMeta = _boardTaskScheduleMeta(t);
+  if (scheduleMeta) {
+    meta += '<span class="board-card-label ' + esc(scheduleMeta.className)
+      + '" title="' + esc(scheduleMeta.label) + '">' + esc(scheduleMeta.label) + '</span>';
   }
   var artifactCount = typeof _artifactCountForTask === 'function'
     ? _artifactCountForTask(t)
@@ -1544,12 +1928,17 @@ function _boardAfterRenderLayout() {
 function renderBoard() {
   var panel = document.getElementById('panel-board');
   if (!panel) return;
+  if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') {
+    _boardClearLaneEntryRefresh();
+    return;
+  }
   var panelState = _captureSurfaceState(panel);
   var skipRestoreFocus = _boardAddTaskFocus || _boardSaveViewFocus;
   _boardSyncFiltersForCurrentGroup();
   _boardHydrateSavedViews();
   _boardHydrateLaneSorts();
   _boardHydrateCardDensity();
+  _boardEnsureDispatchEligibilityRefs(_currentGroup());
 
   // Preserve scroll + draft before DOM rebuild
   var _cardsEl = document.getElementById('board-cards');
@@ -1907,6 +2296,9 @@ function renderBoard() {
   for (var j = 0; j < renderCap; j++) {
     html += _renderBoardCard(rootTasks[j], childrenOf, 0);
   }
+  _boardScheduleLaneEntryRefresh(
+    _boardVisibleLaneEntryRefreshDelay(rootTasks, childrenOf, renderCap)
+  );
   if (rootTasks.length > renderCap) {
     var remaining = rootTasks.length - renderCap;
     html += '<div class="board-load-more" onclick="boardLoadMore()">'
@@ -2446,6 +2838,26 @@ function boardCardMenu(evt, taskId) {
   html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
   html += '<button onclick="openTaskArtifactBrowser(\'' + taskId + '\')">Artifacts...</button>';
 
+  var blockers = _boardUnmetDependencyTasks(task);
+  var dependents = _boardActiveDependents(task);
+  if (blockers.length || dependents.length) {
+    html += '<div class="ctx-sep"></div>';
+    for (var bi = 0; bi < Math.min(blockers.length, 5); bi++) {
+      html += '<button onclick="event.stopPropagation();boardJumpToTask(\'' + blockers[bi].id + '\')">'
+        + 'Jump to blocker: ' + esc(blockers[bi].task || blockers[bi].id) + '</button>';
+    }
+    if (blockers.length > 5) {
+      html += '<button disabled>+' + (blockers.length - 5) + ' more blockers</button>';
+    }
+    for (var di = 0; di < Math.min(dependents.length, 5); di++) {
+      html += '<button onclick="event.stopPropagation();boardJumpToTask(\'' + dependents[di].id + '\')">'
+        + 'Jump to dependent: ' + esc(dependents[di].task || dependents[di].id) + '</button>';
+    }
+    if (dependents.length > 5) {
+      html += '<button disabled>+' + (dependents.length - 5) + ' more dependents</button>';
+    }
+  }
+
   html += '<div class="ctx-sep"></div>';
   if (task.provider || task.external_id || task.external_url) {
     html += '<button onclick="event.stopPropagation();boardOpenExternal(\'' + taskId + '\')">Open external issue</button>';
@@ -2490,6 +2902,11 @@ function boardCardMenu(evt, taskId) {
 
 function boardCopyTaskId(taskId) {
   navigator.clipboard.writeText(taskId).then(function() { _closeCtxMenu(); });
+}
+
+function boardJumpToTask(taskId) {
+  _closeCtxMenu();
+  boardNavigateToTask(taskId);
 }
 
 /* ---- Card actions --------------------------------------------------- */

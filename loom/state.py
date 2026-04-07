@@ -38,6 +38,7 @@ class BoardTask:
     labels: list[str] = field(default_factory=list)
     created_at: str = ""        # ISO 8601
     updated_at: str = ""        # ISO 8601
+    lane_entered_at: str = ""   # ISO 8601 of most recent transition into lane
     # Provider fields (unused in v1, ready for sync)
     provider: str = ""          # "jira", "linear", "github"
     external_id: str = ""       # e.g. "PROJ-123"
@@ -1677,10 +1678,11 @@ class MatrixState:
             position=max_pos + 1,
             created_at=now,
             updated_at=now,
+            lane_entered_at=now,
             **{k: v for k, v in kwargs.items()
                if k in BoardTask.__dataclass_fields__ and k not in
                ("id", "task", "slug", "group", "lane", "position",
-                "created_at", "updated_at")},
+                "created_at", "updated_at", "lane_entered_at")},
         )
         self.board_tasks[tid] = bt
         self._emit("task_upsert", **asdict(bt))
@@ -1710,13 +1712,27 @@ class MatrixState:
         _normalize_verification_fields(fields)
         valid = set(BoardTask.__dataclass_fields__) - {"id", "slug", "created_at"}
         old_lane = task.lane
+        new_lane = fields.get("lane", old_lane)
+        lane_changed = "lane" in fields and new_lane != old_lane
+        if "lane" in fields and new_lane not in self.board_lanes:
+            return
         for key, value in fields.items():
             if key in valid:
                 setattr(task, key, value)
         if "task" in fields:
             task.slug = self._unique_task_slug(task.task, exclude_id=tid)
         from datetime import datetime, timezone
-        task.updated_at = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        task.updated_at = now_iso
+        if lane_changed:
+            task.lane_entered_at = now_iso
+            if "position" not in fields:
+                max_pos = max(
+                    (t.position for t in self.board_tasks.values()
+                     if t.lane == new_lane and t.id != tid),
+                    default=-1,
+                )
+                task.position = max_pos + 1
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
         self.recompute_task_health()
@@ -1756,7 +1772,10 @@ class MatrixState:
             )
             task.position = max_pos + 1
         from datetime import datetime, timezone
-        task.updated_at = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        task.updated_at = now_iso
+        if old_lane != lane:
+            task.lane_entered_at = now_iso
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
         self.recompute_task_health()
@@ -1807,9 +1826,11 @@ class MatrixState:
         if (name in _RESERVED_LANES or name not in self.board_lanes
                 or len(self.board_lanes) <= 1):
             return
+        from datetime import datetime, timezone
         self.board_lanes.remove(name)
         target = move_tasks_to if move_tasks_to in self.board_lanes \
             else self.board_lanes[0]
+        now_iso = datetime.now(timezone.utc).isoformat()
         max_pos = max(
             (t.position for t in self.board_tasks.values()
              if t.lane == target),
@@ -1820,6 +1841,8 @@ class MatrixState:
                 max_pos += 1
                 t.lane = target
                 t.position = max_pos
+                t.updated_at = now_iso
+                t.lane_entered_at = now_iso
                 self._emit("task_upsert", **asdict(t))
                 self._db_save_task(t)
         self._emit("lanes_update", lanes=list(self.board_lanes))

@@ -14,11 +14,19 @@ function togglePanel(appName) {
 
   if (_activePanelApp === appName) {
     // Collapse
+    if (_activePanelApp === 'board'
+        && typeof _boardClearLaneEntryRefresh === 'function') {
+      _boardClearLaneEntryRefresh();
+    }
     _activePanelApp = '';
     panel.classList.add('collapsed');
     buttons.forEach(function(b) { b.classList.remove('active'); });
   } else {
     // Expand / switch
+    if (_activePanelApp === 'board' && appName !== 'board'
+        && typeof _boardClearLaneEntryRefresh === 'function') {
+      _boardClearLaneEntryRefresh();
+    }
     _activePanelApp = appName;
     panel.classList.remove('collapsed');
     if (_panelHeight > 0) {

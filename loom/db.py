@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     labels         TEXT NOT NULL DEFAULT '[]',
     created_at     TEXT NOT NULL DEFAULT '',
     updated_at     TEXT NOT NULL DEFAULT '',
+    lane_entered_at TEXT NOT NULL DEFAULT '',
     provider       TEXT NOT NULL DEFAULT '',
     external_id    TEXT NOT NULL DEFAULT '',
     external_url   TEXT NOT NULL DEFAULT '',
@@ -541,6 +542,7 @@ class LoomDB:
             self._conn.commit()
         # Migrate: add verification columns to board_tasks
         for col, default in [
+            ("lane_entered_at", "''"),
             ("verification_mode", "''"),
             ("verification_state", "''"),
             ("verification_notes", "''"),
@@ -850,22 +852,7 @@ class LoomDB:
         worktree_boundary = json.dumps(d.pop("worktree_boundary", {}))
         # Map 'group' to 'group_name' for the DB column
         group_name = d.pop("group", "")
-        self._conn.execute("""
-            INSERT OR REPLACE INTO board_tasks
-                (id, task, description, slug, group_name,
-                 action_name, action_vars, agent_template,
-                 instructions, context, criteria,
-                 lane, position, agent_id, labels, created_at,
-                 updated_at, provider, external_id, external_url,
-                 parent_task_id, pipeline_depth, pipeline_root_id, status,
-                 scheduled_at, messages, depends_on, attachments,
-                 health_state, health_since, health_details, artifacts,
-                 verification_mode, verification_state, verification_notes,
-                 verification_updated_at, verification_updated_by,
-                 verification_summary, worktree_boundary,
-                 resume_after_boundary_task_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
+        values = (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
             d.get("action_name", ""), action_vars,
@@ -873,7 +860,8 @@ class LoomDB:
             d["instructions"], d["context"], d["criteria"],
             d["lane"], d["position"],
             d["agent_id"], labels, d["created_at"],
-            d["updated_at"], d["provider"], d["external_id"],
+            d["updated_at"], d.get("lane_entered_at", ""),
+            d["provider"], d["external_id"],
             d["external_url"],
             d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
             d.get("pipeline_root_id", ""), d.get("status", ""),
@@ -891,7 +879,23 @@ class LoomDB:
             verification_summary,
             worktree_boundary,
             d.get("resume_after_boundary_task_id", ""),
-        ))
+        )
+        self._conn.execute("""
+            INSERT OR REPLACE INTO board_tasks
+                (id, task, description, slug, group_name,
+                 action_name, action_vars, agent_template,
+                 instructions, context, criteria,
+                 lane, position, agent_id, labels, created_at,
+                 updated_at, lane_entered_at, provider, external_id, external_url,
+                 parent_task_id, pipeline_depth, pipeline_root_id, status,
+                 scheduled_at, messages, depends_on, attachments,
+                 health_state, health_since, health_details, artifacts,
+                 verification_mode, verification_state, verification_notes,
+                 verification_updated_at, verification_updated_by,
+                 verification_summary, worktree_boundary,
+                 resume_after_boundary_task_id)
+            VALUES ({placeholders})
+        """.format(placeholders=",".join(["?"] * len(values))), values)
         self._conn.commit()
 
     def delete_board_task(self, task_id: str):
@@ -1783,22 +1787,7 @@ class LoomDB:
                     d.pop("verification_summary", {})
                 )
                 group_name = d.pop("group", "")
-                c.execute("""
-                    INSERT INTO board_tasks
-                        (id, task, description, slug, group_name,
-                         action_name, agent_template,
-                         action_vars, instructions, context,
-                         criteria, lane, position, agent_id, labels,
-                         created_at, updated_at, provider, external_id,
-                         external_url, parent_task_id, pipeline_depth,
-                         pipeline_root_id, status, scheduled_at, messages,
-                         depends_on, attachments, health_state, health_since,
-                         health_details, artifacts, verification_mode,
-                         verification_state, verification_notes,
-                         verification_updated_at, verification_updated_by,
-                         verification_summary)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (
+                values = (
                     d.get("id", tid), d.get("task", ""),
                     d.get("description", ""), d.get("slug", ""),
                     group_name, d.get("action_name", ""),
@@ -1808,6 +1797,7 @@ class LoomDB:
                     d.get("lane", "Backlog"), d.get("position", 0),
                     d.get("agent_id", ""), labels,
                     d.get("created_at", ""), d.get("updated_at", ""),
+                    d.get("lane_entered_at", ""),
                     d.get("provider", ""), d.get("external_id", ""),
                     d.get("external_url", ""),
                     d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
@@ -1822,7 +1812,23 @@ class LoomDB:
                     d.get("verification_updated_at", ""),
                     d.get("verification_updated_by", ""),
                     verification_summary,
-                ))
+                )
+                c.execute("""
+                    INSERT INTO board_tasks
+                        (id, task, description, slug, group_name,
+                         action_name, agent_template,
+                         action_vars, instructions, context,
+                         criteria, lane, position, agent_id, labels,
+                         created_at, updated_at, lane_entered_at, provider, external_id,
+                         external_url, parent_task_id, pipeline_depth,
+                         pipeline_root_id, status, scheduled_at, messages,
+                         depends_on, attachments, health_state, health_since,
+                         health_details, artifacts, verification_mode,
+                         verification_state, verification_notes,
+                         verification_updated_at, verification_updated_by,
+                         verification_summary)
+                    VALUES ({placeholders})
+                """.format(placeholders=",".join(["?"] * len(values))), values)
 
             # UI state
             c.execute("DELETE FROM ui_state")
