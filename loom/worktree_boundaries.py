@@ -15,6 +15,14 @@ def task_boundary(task) -> dict:
     return boundary if isinstance(boundary, dict) else {}
 
 
+def task_boundary_status(task) -> str:
+    return str(task_boundary(task).get("status", "") or "")
+
+
+def task_has_open_boundary(task) -> bool:
+    return task_boundary_status(task) == "open"
+
+
 def task_branch_key(task) -> str:
     boundary = task_boundary(task)
     repo_root = boundary.get("repo_root", "")
@@ -88,6 +96,46 @@ def started_successor_tasks(tasks: Iterable, boundary_task_id: str) -> list:
         task for task in successor_tasks(tasks, boundary_task_id)
         if getattr(task, "lane", "") not in {"Backlog", "To Do"}
     ]
+
+
+def retarget_queued_successor_tasks(tasks: Iterable, *,
+                                    agent_id: str,
+                                    boundary_task_id: str,
+                                    exclude_task_id: str = "") -> list:
+    updated = []
+    for task in tasks:
+        if getattr(task, "id", "") == exclude_task_id:
+            continue
+        if getattr(task, "agent_id", "") != agent_id:
+            continue
+        if getattr(task, "lane", "") not in {"Backlog", "To Do"}:
+            continue
+        if getattr(task, "resume_after_boundary_task_id", "") == boundary_task_id:
+            continue
+        task.resume_after_boundary_task_id = boundary_task_id
+        updated.append(task)
+    return updated
+
+
+def clear_stale_successor_references(tasks: Iterable) -> list:
+    tasks_by_id = {
+        getattr(task, "id", ""): task
+        for task in tasks
+        if getattr(task, "id", "")
+    }
+    updated = []
+    for task in tasks_by_id.values():
+        boundary_task_id = (
+            getattr(task, "resume_after_boundary_task_id", "") or ""
+        )
+        if not boundary_task_id:
+            continue
+        boundary_task = tasks_by_id.get(boundary_task_id)
+        if boundary_task and task_has_open_boundary(boundary_task):
+            continue
+        task.resume_after_boundary_task_id = ""
+        updated.append(task)
+    return updated
 
 
 def boundary_summary(task, *, queued_followers: list | None = None,

@@ -11,6 +11,7 @@ from aiohttp import web
 from .config import DEFAULT_COMMAND, log
 from .artifacts import normalize_artifacts, normalize_attachments
 from .db import LoomDB
+from .worktree_boundaries import clear_stale_successor_references
 
 _RESERVED_LANES = {"Backlog", "To Do", "In Progress", "Done"}
 _DEFAULT_LANES = ["Backlog", "To Do", "In Progress", "Done"]
@@ -560,6 +561,18 @@ class MatrixState:
             except Exception:
                 log.exception("Failed to save global settings")
 
+    def cleanup_stale_boundary_successors(self, emit: bool = True) -> int:
+        updated = clear_stale_successor_references(
+            self.board_tasks.values()
+        )
+        for task in updated:
+            if emit:
+                self._emit("task_upsert", **asdict(task))
+            self._db_save_task(task)
+        if updated and emit:
+            self.recompute_task_health()
+        return len(updated)
+
     # -- Agent history helpers -----------------------------------------------
 
     def history_record_agent(self, cell: AgentCell):
@@ -767,6 +780,7 @@ class MatrixState:
                 raw["resume_after_boundary_task_id"] = resume_after.strip()
                 filtered = {k: v for k, v in raw.items() if k in bt_fields}
                 self.board_tasks[tid] = BoardTask(**filtered)
+            self.cleanup_stale_boundary_successors(emit=False)
             # panel_active: new key; backward compat from board_panel_open
             pa = data.get("panel_active", "")
             if not pa and data.get("board_panel_open"):
@@ -1718,7 +1732,8 @@ class MatrixState:
                     t.depends_on.remove(tid)
                     self._emit("task_upsert", **asdict(t))
                     self._db_save_task(t)
-            self.recompute_task_health()
+            if not self.cleanup_stale_boundary_successors():
+                self.recompute_task_health()
 
     def board_move_task(self, tid: str, lane: str,
                         position: Optional[int] = None):

@@ -4,20 +4,24 @@ import unittest
 from loom.worktree_boundaries import (
     boundary_summary,
     branch_boundary_tasks,
+    clear_stale_successor_references,
     latest_boundary_task,
     mark_branch_boundaries_merged,
     queued_successor_tasks,
+    retarget_queued_successor_tasks,
     started_successor_tasks,
 )
 
 
 def _task(task_id, lane="Done", *, boundary=None,
-          resume_after="", created_at="", updated_at="", labels=None):
+          resume_after="", created_at="", updated_at="", labels=None,
+          agent_id="agent-1"):
     return SimpleNamespace(
         id=task_id,
         task=f"Task {task_id}",
         slug=task_id,
         lane=lane,
+        agent_id=agent_id,
         labels=list(labels or []),
         created_at=created_at,
         updated_at=updated_at,
@@ -129,6 +133,66 @@ class WorktreeBoundaryTests(unittest.TestCase):
         )
 
         self.assertEqual([t.id for t in tasks], ["task-a"])
+
+    def test_retarget_queued_successors_tracks_latest_completed_task(self):
+        first = _task("task-a")
+        second = _task("task-b", lane="To Do", resume_after="")
+        third = _task("task-c", lane="Backlog", resume_after="")
+
+        updated = retarget_queued_successor_tasks(
+            [first, second, third],
+            agent_id="agent-1",
+            boundary_task_id="task-a",
+            exclude_task_id="task-a",
+        )
+
+        self.assertEqual([task.id for task in updated], ["task-b", "task-c"])
+        self.assertEqual(second.resume_after_boundary_task_id, "task-a")
+        self.assertEqual(third.resume_after_boundary_task_id, "task-a")
+
+        second.lane = "Done"
+        updated = retarget_queued_successor_tasks(
+            [first, second, third],
+            agent_id="agent-1",
+            boundary_task_id="task-b",
+            exclude_task_id="task-b",
+        )
+
+        self.assertEqual([task.id for task in updated], ["task-c"])
+        self.assertEqual(second.resume_after_boundary_task_id, "task-a")
+        self.assertEqual(third.resume_after_boundary_task_id, "task-b")
+
+    def test_clear_stale_successor_references_drops_missing_or_closed_links(self):
+        open_boundary = _task(
+            "task-a",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+            },
+        )
+        merged_boundary = _task(
+            "task-b",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "merged",
+                "recorded_at": "2026-04-07T11:00:00+00:00",
+            },
+        )
+        valid = _task("task-c", lane="To Do", resume_after="task-a")
+        stale = _task("task-d", lane="To Do", resume_after="task-b")
+        missing = _task("task-e", lane="To Do", resume_after="task-missing")
+
+        updated = clear_stale_successor_references(
+            [open_boundary, merged_boundary, valid, stale, missing]
+        )
+
+        self.assertEqual([task.id for task in updated], ["task-d", "task-e"])
+        self.assertEqual(valid.resume_after_boundary_task_id, "task-a")
+        self.assertEqual(stale.resume_after_boundary_task_id, "")
+        self.assertEqual(missing.resume_after_boundary_task_id, "")
 
     def test_mark_branch_boundaries_merged_updates_all_branch_boundaries(self):
         open_task = _task(
