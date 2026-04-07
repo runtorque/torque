@@ -126,6 +126,10 @@ class FakeElement {
     };
   }
 
+  scrollIntoView(options) {
+    this.scrollIntoViewOptions = options;
+  }
+
   querySelector(selector) {
     return this._querySelectorMap.get(selector) || null;
   }
@@ -2283,6 +2287,59 @@ test('renderBoard restores focused input value and caret across rerenders', () =
   assert.equal(input.value, 'deploy auth');
   assert.equal(input.selectionStart, 6);
   assert.equal(input.selectionEnd, 11);
+});
+
+test('boardNavigateToTask opens the board and focuses the selected task', () => {
+  const { context, document } = createBoardHarness();
+  document.register('panel-board');
+  document.register('board-cards');
+  const focusedCard = new FakeElement('focused-card');
+  document.setSelector('.board-card.focused', focusedCard);
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Review agent output',
+      lane: 'Done',
+      labels: ['loom:archived'],
+      position: 1,
+    },
+  };
+  context.togglePanel = function(appName) {
+    context._activePanelApp = appName;
+    context.toggledPanel = appName;
+    context.renderBoard();
+  };
+
+  runInContext(context, `
+    _activePanelApp = 'templates';
+    _boardShowSchedules = true;
+    _boardSearchQuery = 'worker';
+    _boardQuickView = 'recent';
+    _boardFilterLabels = ['ops'];
+    _boardFilterActions = ['review'];
+    _boardFilterAgents = ['agent-1'];
+    _boardFilterHealth = ['blocked'];
+    _boardShowArchived = false;
+  `);
+
+  context.boardNavigateToTask('task-1');
+
+  assert.equal(context.toggledPanel, 'board');
+  assert.equal(runInContext(context, '_boardSelectedLane'), 'Done');
+  assert.equal(runInContext(context, '_boardFocusedTask'), 'task-1');
+  assert.equal(runInContext(context, '_boardLastSelectedTask'), 'task-1');
+  assert.equal(runInContext(context, '_boardShowSchedules'), false);
+  assert.equal(runInContext(context, '_boardSearchQuery'), '');
+  assert.equal(runInContext(context, '_boardQuickView'), '');
+  assert.deepEqual(jsonValue(context, '_boardFilterLabels'), []);
+  assert.deepEqual(jsonValue(context, '_boardFilterActions'), []);
+  assert.deepEqual(jsonValue(context, '_boardFilterAgents'), []);
+  assert.deepEqual(jsonValue(context, '_boardFilterHealth'), []);
+  assert.equal(runInContext(context, '_boardShowArchived'), true);
+  assert.equal(focusedCard.scrollIntoViewOptions.block, 'nearest');
 });
 
 test('renderEvents restores focused search input value and caret across rerenders', () => {
