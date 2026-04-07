@@ -101,3 +101,47 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No new events since last digest.", bridge.sent[0])
         self.assertIn("Active: worker (thinking)", bridge.sent[0])
         self.assertNotIn("Heartbeat", bridge.sent[0])
+
+    async def test_paused_weaver_does_not_buffer_or_flush_events(self):
+        state, group, weaver = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            paused=True,
+        )
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        buffer.on_panel_event({
+            "group": group,
+            "kind": "task_completed",
+            "message": "done",
+        })
+        buffer._check_weaver_flush(weaver)
+
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(buffer.get_buffer_stats(group)["buffered_events"], 0)
+        self.assertEqual(bridge.sent, [])
+
+    async def test_pending_question_clears_only_after_weaver_becomes_active(self):
+        state, group, weaver = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            pending_question="Need approval",
+            paused=True,
+        )
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+
+        buffer.on_agent_activity_change(weaver)
+        self.assertEqual(
+            state.get_weaver_settings(group).pending_question,
+            "Need approval",
+        )
+
+        weaver.activity = "thinking"
+        buffer.on_agent_activity_change(weaver)
+
+        ws = state.get_weaver_settings(group)
+        self.assertEqual(ws.pending_question, "")
+        self.assertFalse(ws.paused)
