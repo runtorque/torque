@@ -155,9 +155,9 @@ Before Loom dispatches work, it now runs deterministic overlap checks against op
 - recent branch history on the same surface
 - queued work already linked to the same surface
 
-The board surfaces these as advisory overlap badges on task cards.
+The board surfaces human-actionable overlap badges on task cards.
 
-- **Overlap notice** means the task probably touches a related surface, but Loom is not blocking dispatch.
+- **Overlap notice** remains available to Loom/Weaver internals, but is not shown on board task cards because it is advisory-only.
 - **Overlap warning** means Loom found active or queued work on the same surface and asks for confirmation before dispatching.
 - **Overlap conflict** means Loom found a strong collision signal, such as the same live branch or direct file overlap, and requires confirmation before dispatching.
 

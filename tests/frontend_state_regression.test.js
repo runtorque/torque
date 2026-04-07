@@ -1404,7 +1404,7 @@ test('renderBoardCard shows verification badges and preview text', () => {
   assert.match(html, /Needs human validation: Confirm billing dashboard loads/);
 });
 
-test('renderBoardCard shows overlap badges and preview text', () => {
+test('renderBoardCard shows overlap badges and preview text for human-facing levels', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/board.js');
@@ -1436,6 +1436,40 @@ test('renderBoardCard shows overlap badges and preview text', () => {
   assert.match(html, /board-card-overlap-conflict/);
   assert.match(html, /Overlap conflict/);
   assert.match(html, /Shares the same worktree branch as another active agent/);
+});
+
+test('renderBoardCard hides overlap notice badges and preview text', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+
+  context.state.dispatch_overlap = {
+    root: {
+      level: 'notice',
+      summary: 'May touch a related module based on recent branch history.',
+    },
+  };
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Implement auth flow',
+      lane: 'In Progress',
+      position: 1,
+    },
+  };
+
+  const html = runInContext(context, `
+    _renderBoardCard(
+      state.board_tasks.root,
+      {},
+      0
+    )
+  `);
+
+  assert.doesNotMatch(html, /board-card-overlap-notice/);
+  assert.doesNotMatch(html, /Overlap notice/);
+  assert.doesNotMatch(html, /May touch a related module based on recent branch history/);
 });
 
 test('renderBoard explains filtered empty states with a clear recovery action', () => {

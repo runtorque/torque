@@ -1118,7 +1118,8 @@ function _boardOverlapInfo(task) {
 
 function _boardOverlapLevel(task) {
   var info = _boardOverlapInfo(task);
-  return info.level || '';
+  if (info.level === 'warning' || info.level === 'conflict') return info.level;
+  return '';
 }
 
 function _boardOverlapLabel(task) {
@@ -1131,6 +1132,7 @@ function _boardOverlapLabel(task) {
 
 function _boardOverlapPreview(task) {
   var info = _boardOverlapInfo(task);
+  if (!_boardOverlapLevel(task)) return '';
   return info.summary || '';
 }
 
