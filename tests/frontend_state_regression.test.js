@@ -429,6 +429,25 @@ test('weaver task health summary prioritizes severe unhealthy tasks', () => {
   assert.deepEqual(summary.items.map((item) => item.id), ['blocked', 'stalled']);
 });
 
+test('weaver overlap summary prioritizes conflicts before warnings', () => {
+  const { context } = createWeaverHarness();
+  context.state.dispatch_overlap_groups = {
+    alpha: {
+      counts: { notice: 1, warning: 1, conflict: 1 },
+      total: 3,
+      items: [
+        { task_id: 'warn', title: 'Warning task', level: 'warning', summary: 'Same module' },
+        { task_id: 'conflict', title: 'Conflict task', level: 'conflict', summary: 'Same branch' },
+      ],
+    },
+  };
+
+  const summary = jsonValue(context, `_weaverOverlapSummary('alpha')`);
+
+  assert.equal(summary.total, 3);
+  assert.deepEqual(summary.items.map((item) => item.task_id), ['conflict', 'warn']);
+});
+
 test('board search matches title, description, labels, action, and linked agent fields', () => {
   const { context } = createBoardHarness();
   context.state.agents = {
@@ -1383,6 +1402,40 @@ test('renderBoardCard shows verification badges and preview text', () => {
   assert.match(html, /Verify failed/);
   assert.match(html, /board-card-verification-mode/);
   assert.match(html, /Needs human validation: Confirm billing dashboard loads/);
+});
+
+test('renderBoardCard shows overlap badges and preview text', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+
+  context.state.dispatch_overlap = {
+    root: {
+      level: 'conflict',
+      summary: 'Shares the same worktree branch as another active agent.',
+    },
+  };
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Implement auth flow',
+      lane: 'In Progress',
+      position: 1,
+    },
+  };
+
+  const html = runInContext(context, `
+    _renderBoardCard(
+      state.board_tasks.root,
+      {},
+      0
+    )
+  `);
+
+  assert.match(html, /board-card-overlap-conflict/);
+  assert.match(html, /Overlap conflict/);
+  assert.match(html, /Shares the same worktree branch as another active agent/);
 });
 
 test('renderBoard explains filtered empty states with a clear recovery action', () => {

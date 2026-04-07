@@ -137,6 +137,23 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(rolled_back)
         self.assertEqual(readme.read_text(), "line one\ncheckpoint one\n")
 
+    async def test_changed_files_includes_dirty_and_untracked_work(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+
+        self.assertIsNotNone(wt_path)
+
+        readme = Path(wt_path) / "README.md"
+        readme.write_text("line one\nlocal dirty edit\n")
+        new_file = Path(wt_path) / "src" / "dirty_only.py"
+        new_file.parent.mkdir()
+        new_file.write_text("print('dirty')\n")
+
+        changed = await self.mgr.changed_files(cell)
+
+        self.assertIn("README.md", changed)
+        self.assertIn("src/dirty_only.py", changed)
+
     async def test_server_merge_and_reset_to_base_keep_future_work_clean(self):
         cell = self._make_cell()
         wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")

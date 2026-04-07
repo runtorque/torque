@@ -147,6 +147,7 @@ class AgentCell:
     # Worktree status (Phase 2, ephemeral)
     worktree_dirty: bool = False  # has uncommitted changes
     worktree_diff: dict = field(default_factory=dict)  # {files, insertions, deletions}
+    worktree_changed_files: list[str] = field(default_factory=list)  # changed paths vs base
     worktree_checkpoints: int = 0  # number of checkpoint commits
     worktree_behind: int = 0  # commits on base not in branch (ephemeral)
     worktree_ahead: int = 0  # commits on branch not in base (ephemeral)
@@ -168,6 +169,7 @@ _EPHEMERAL_FIELDS = ("current_process", "current_path",
                      "error_message", "needs_attention", "last_summary",
                      "current_task_id",
                      "worktree_dirty", "worktree_diff",
+                     "worktree_changed_files",
                      "worktree_checkpoints", "last_checkpoint_at",
                      "mcp_messages",
                      "pending_weaver_message")
@@ -373,6 +375,8 @@ class MatrixState:
         self.board_saved_views_by_group: dict[str, list] = {}
         self.board_lane_sorts_by_group: dict[str, dict] = {}
         self.board_card_density_by_group: dict[str, str] = {}
+        self.dispatch_overlap: dict[str, dict] = {}
+        self.dispatch_overlap_groups: dict[str, dict] = {}
         self.panel_log = None  # PanelEventLog, set from server.py
         # Weaver settings (per-group)
         self.weaver_settings: dict[str, WeaverSettings] = {}
@@ -423,6 +427,8 @@ class MatrixState:
             "board_saved_views_by_group": self.board_saved_views_by_group,
             "board_lane_sorts_by_group": self.board_lane_sorts_by_group,
             "board_card_density_by_group": self.board_card_density_by_group,
+            "dispatch_overlap": self.dispatch_overlap,
+            "dispatch_overlap_groups": self.dispatch_overlap_groups,
             "panel_events": self.panel_log.get_recent(50) if self.panel_log else [],
             "weaver_settings": {
                 n: asdict(ws) for n, ws in self.weaver_settings.items()
@@ -794,6 +800,7 @@ class MatrixState:
                     self.weaver_settings[gname] = WeaverSettings(**filtered)
             cleaned = self.cleanup_orphaned_attention(emit=False)
             self.recompute_task_health(emit=False, persist=False)
+            self.recompute_dispatch_overlap(emit=False)
             if cleaned["asks"] or cleaned["weaver_questions"]:
                 log.info(
                     "Expired %d orphaned ask(s) and cleared %d stale weaver question(s)",
@@ -1575,6 +1582,24 @@ class MatrixState:
                 self._db_save_task(task)
         return changed
 
+    def recompute_dispatch_overlap(self, *, emit: bool = True) -> list[str]:
+        """Recompute advisory overlap snapshots for open tasks."""
+        from .dispatch_overlap import compute_dispatch_overlap
+
+        snapshots, group_summaries = compute_dispatch_overlap(
+            self.board_tasks, self.agents, db=self.db)
+        if snapshots == self.dispatch_overlap \
+                and group_summaries == self.dispatch_overlap_groups:
+            return []
+        self.dispatch_overlap = snapshots
+        self.dispatch_overlap_groups = group_summaries
+        if emit:
+            self._emit("ui_update", key="dispatch_overlap",
+                       value=self.dispatch_overlap)
+            self._emit("ui_update", key="dispatch_overlap_groups",
+                       value=self.dispatch_overlap_groups)
+        return list(self.dispatch_overlap.keys())
+
     def board_add_task(self, task: str, group: str, lane: str = "",
                        **kwargs) -> Optional[BoardTask]:
         if not task:
@@ -1626,6 +1651,7 @@ class MatrixState:
         self._emit("task_upsert", **asdict(bt))
         self._db_save_task(bt)
         self.recompute_task_health()
+        self.recompute_dispatch_overlap()
         return bt
 
     def board_update_task(self, tid: str, **fields):
@@ -1660,6 +1686,7 @@ class MatrixState:
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
         self.recompute_task_health()
+        self.recompute_dispatch_overlap()
 
     def board_remove_task(self, tid: str):
         task = self.board_tasks.pop(tid, None)
@@ -1673,6 +1700,7 @@ class MatrixState:
                     self._emit("task_upsert", **asdict(t))
                     self._db_save_task(t)
             self.recompute_task_health()
+            self.recompute_dispatch_overlap()
 
     def board_move_task(self, tid: str, lane: str,
                         position: Optional[int] = None):
@@ -1699,6 +1727,7 @@ class MatrixState:
         self._emit("task_upsert", **asdict(task))
         self._db_save_task(task)
         self.recompute_task_health()
+        self.recompute_dispatch_overlap()
 
     def board_reorder_task(self, tid: str, position: int):
         task = self.board_tasks.get(tid)
@@ -1865,6 +1894,7 @@ class MatrixState:
                 changed = True
         if changed:
             self.recompute_task_health()
+            self.recompute_dispatch_overlap()
 
     # -- Schedule CRUD ------------------------------------------------------
 

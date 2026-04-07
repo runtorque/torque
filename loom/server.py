@@ -34,6 +34,11 @@ from .artifacts import (
     normalize_artifacts,
     task_artifacts,
 )
+from .dispatch_overlap import (
+    OVERLAP_CONFLICT,
+    OVERLAP_WARNING,
+    assess_dispatch_overlap,
+)
 from .memory import build_memory_entry, detect_current_task, normalize_entry_type
 from .templates import TemplateManager
 from .external_tickets import (
@@ -138,17 +143,21 @@ async def _worktree_diff_updater(state: MatrixState,
             if not cell.worktree_path:
                 continue
             diff = await worktree_mgr.diff_summary(cell)
+            changed_files = await worktree_mgr.changed_files(cell)
             dirty = await worktree_mgr.has_uncommitted_changes(cell)
             checkpoints = await worktree_mgr.count_commits(cell)
             ahead = checkpoints
             behind = await worktree_mgr.count_behind(cell)
             merged = await worktree_mgr.is_merged(cell)
-            if diff != cell.worktree_diff or dirty != cell.worktree_dirty \
+            if diff != cell.worktree_diff \
+                    or changed_files != cell.worktree_changed_files \
+                    or dirty != cell.worktree_dirty \
                     or checkpoints != cell.worktree_checkpoints \
                     or behind != cell.worktree_behind \
                     or ahead != cell.worktree_ahead \
                     or merged != cell.worktree_merged:
                 cell.worktree_diff = diff
+                cell.worktree_changed_files = changed_files
                 cell.worktree_dirty = dirty
                 cell.worktree_checkpoints = checkpoints
                 cell.worktree_behind = behind
@@ -156,6 +165,8 @@ async def _worktree_diff_updater(state: MatrixState,
                 cell.worktree_merged = merged
                 state._emit_agent(cell)
                 changed = True
+        if changed:
+            state.recompute_dispatch_overlap()
         if changed:
             await state.broadcast()
 
@@ -2507,7 +2518,9 @@ async def main(connection: iterm2.Connection):
                             await worktree_mgr.count_commits(cell)
                         cell.worktree_dirty = False
                         cell.worktree_diff = {}
+                        cell.worktree_changed_files = []
                         state._emit_agent(cell)
+                        state.recompute_dispatch_overlap()
                         result = {"type": "worktree_rebase",
                                   "id": aid, "ok": True}
                     else:
@@ -2644,6 +2657,7 @@ async def main(connection: iterm2.Connection):
                         if merge_result["ok"]:
                             cell.worktree_checkpoints = 0
                             cell.worktree_merged = True
+                            cell.worktree_changed_files = []
                             state.history_update_agent(
                                 cell, status="merged")
                             state._emit_agent(cell)
@@ -3105,143 +3119,178 @@ async def main(connection: iterm2.Connection):
                             if isinstance(raw_agent, str):
                                 action_template = raw_agent
                         explicit_template = task.agent_template or action_template
+                        force_dispatch = bool(data.get("force"))
                         agent_id = data.get("agent_id", "")
-                        if agent_id:
-                            # Dispatch to existing agent
-                            cell = state.agents.get(agent_id)
-                            if not cell:
-                                result = {"type": "error",
-                                          "message": "Agent not found"}
-                            elif cell.current_task_id \
-                                    and cell.current_task_id != tid:
-                                active = state.board_tasks.get(
-                                    cell.current_task_id)
-                                allow_self_dispatch = bool(
-                                    data.get("_self_dispatch")
-                                    and cell.id == agent_id
+                        handoff_from = data.get(
+                            "handoff_worktree_from", "")
+                        if agent_id and agent_id not in state.agents:
+                            result = {"type": "error",
+                                      "message": "Agent not found"}
+                        else:
+                            overlap = assess_dispatch_overlap(
+                                state.board_tasks,
+                                state.agents,
+                                task,
+                                db=state.db,
+                                target_agent_id=agent_id,
+                                create_agent=bool(data.get("create_agent")),
+                                handoff_from=handoff_from,
+                            )
+                            if (not force_dispatch
+                                    and overlap.get("level") in {
+                                        OVERLAP_WARNING,
+                                        OVERLAP_CONFLICT,
+                                    }):
+                                result = {
+                                    "type": "dispatch_overlap_warning",
+                                    "task_id": tid,
+                                    "level": overlap.get("level", ""),
+                                    "summary": overlap.get("summary", ""),
+                                    "findings": overlap.get("findings", []),
+                                    "agent_id": agent_id,
+                                    "create_agent": bool(
+                                        data.get("create_agent")),
+                                    "name": data.get("name", ""),
+                                    "force_no_action": bool(
+                                        data.get("force_no_action")),
+                                }
+                            elif agent_id:
+                                # Dispatch to existing agent
+                                cell = state.agents.get(agent_id)
+                                if cell.current_task_id \
+                                        and cell.current_task_id != tid:
+                                    active = state.board_tasks.get(
+                                        cell.current_task_id)
+                                    allow_self_dispatch = bool(
+                                        data.get("_self_dispatch")
+                                        and cell.id == agent_id
+                                    )
+                                    if _should_queue_existing_agent_dispatch(
+                                            active,
+                                            target_task_id=tid,
+                                            self_dispatch=allow_self_dispatch):
+                                        # Agent is busy — queue the task
+                                        state.board_update_task(
+                                            tid, agent_id=cell.id)
+                                        state.board_move_task(tid, "To Do")
+                                        _panel_event(
+                                            "task_queued", cell.id,
+                                            cell.name, cell.group,
+                                            task.task[:80],
+                                            task_id=tid)
+                                        result = {
+                                            "type": "queued",
+                                            "task_id": tid,
+                                            "agent_id": cell.id}
+                                        cell = None  # skip dispatch below
+                            elif data.get("create_agent"):
+                                # Create a new agent
+                                from loom.state import _slugify
+                                agent_name = data.get("name", "")
+                                if not agent_name:
+                                    slug = _slugify(task.task)
+                                    agent_name = slug or "agent"
+                                launch_overrides = {}
+                                agent_type = (data.get("agent_type", "")
+                                              or "").strip()
+                                if agent_type:
+                                    launch_overrides["provider"] = agent_type
+                                command_override = (data.get("command", "")
+                                                    or "").strip()
+                                if command_override:
+                                    launch_overrides["command"] = (
+                                        command_override)
+                                launch_cfg = _resolve_agent_launch_config(
+                                    group,
+                                    base_dir=base_dir,
+                                    explicit_template=explicit_template,
+                                    overrides=launch_overrides,
                                 )
-                                if _should_queue_existing_agent_dispatch(
-                                        active,
-                                        target_task_id=tid,
-                                        self_dispatch=allow_self_dispatch):
-                                    # Agent is busy — queue the task
-                                    state.board_update_task(
-                                        tid, agent_id=cell.id)
-                                    state.board_move_task(tid, "To Do")
-                                    _panel_event(
-                                        "task_queued", cell.id,
-                                        cell.name, cell.group,
-                                        task.task[:80],
-                                        task_id=tid)
-                                    result = {
-                                        "type": "queued",
-                                        "task_id": tid,
-                                        "agent_id": cell.id}
-                                    cell = None  # skip dispatch below
-                        elif data.get("create_agent"):
-                            # Create a new agent
-                            from loom.state import _slugify
-                            agent_name = data.get("name", "")
-                            if not agent_name:
-                                slug = _slugify(task.task)
-                                agent_name = slug or "agent"
-                            launch_overrides = {}
-                            agent_type = (data.get("agent_type", "")
-                                          or "").strip()
-                            if agent_type:
-                                launch_overrides["provider"] = agent_type
-                            command_override = (data.get("command", "")
-                                                or "").strip()
-                            if command_override:
-                                launch_overrides["command"] = (
-                                    command_override)
-                            launch_cfg = _resolve_agent_launch_config(
-                                group,
-                                base_dir=base_dir,
-                                explicit_template=explicit_template,
-                                overrides=launch_overrides,
-                            )
-                            persistent_prompt_text = ""
-                            if launch_cfg.get("agent_type"):
-                                persistent_prompt_text = \
-                                    _build_dispatch_persistent_prompt(
-                                        launch_cfg.get("system_prompt", ""))
-                            cell = await _create_agent_with_config(
-                                group, agent_name, launch_cfg,
-                                explicit_template=explicit_template,
-                                target_session_id=data.get(
-                                    "target_session_id", ""),
-                                target_window_id=data.get(
-                                    "target_window_id", ""),
-                                persistent_prompt_text=persistent_prompt_text,
-                            )
-                            if cell:
-                                # Worktree inheritance (pipeline)
-                                inherit_from = data.get(
-                                    "inherit_worktree_from", "")
-                                if inherit_from:
-                                    src = state.agents.get(inherit_from)
-                                    if src and src.worktree_path:
-                                        cell.worktree_path = \
-                                            src.worktree_path
-                                        cell.worktree_branch = \
-                                            src.worktree_branch
-                                        cell.worktree_repo_root = \
-                                            src.worktree_repo_root
-                                        cell.worktree_base_branch = \
-                                            src.worktree_base_branch
-                                        cell.directory = \
-                                            src.worktree_path
-                                        state._emit_agent(cell)
-                                        state._db_save_agent(cell)
-                                elif not cell.worktree_path \
-                                        and task.parent_task_id:
-                                    # HITL dispatch: walk parent
-                                    # chain to find worktree
-                                    _ptid = task.parent_task_id
-                                    while _ptid:
-                                        _pt = state.board_tasks.get(
-                                            _ptid)
-                                        if not _pt:
-                                            break
-                                        if _pt.agent_id:
-                                            _pa = state.agents.get(
-                                                _pt.agent_id)
-                                            if _pa and \
-                                                    _pa.worktree_path:
-                                                cell.worktree_path = \
-                                                    _pa.worktree_path
-                                                cell.worktree_branch =\
-                                                    _pa.worktree_branch
-                                                cell.worktree_repo_root = \
-                                                    _pa.worktree_repo_root
-                                                cell.worktree_base_branch = \
-                                                    _pa.worktree_base_branch
-                                                cell.directory = \
-                                                    _pa.worktree_path
-                                                state._emit_agent(cell)
-                                                state._db_save_agent(
-                                                    cell)
+                                persistent_prompt_text = ""
+                                if launch_cfg.get("agent_type"):
+                                    persistent_prompt_text = \
+                                        _build_dispatch_persistent_prompt(
+                                            launch_cfg.get("system_prompt", ""))
+                                cell = await _create_agent_with_config(
+                                    group, agent_name, launch_cfg,
+                                    explicit_template=explicit_template,
+                                    target_session_id=data.get(
+                                        "target_session_id", ""),
+                                    target_window_id=data.get(
+                                        "target_window_id", ""),
+                                    persistent_prompt_text=persistent_prompt_text,
+                                )
+                                if cell:
+                                    # Worktree inheritance (pipeline)
+                                    inherit_from = data.get(
+                                        "inherit_worktree_from", "")
+                                    if inherit_from:
+                                        src = state.agents.get(inherit_from)
+                                        if src and src.worktree_path:
+                                            cell.worktree_path = \
+                                                src.worktree_path
+                                            cell.worktree_branch = \
+                                                src.worktree_branch
+                                            cell.worktree_repo_root = \
+                                                src.worktree_repo_root
+                                            cell.worktree_base_branch = \
+                                                src.worktree_base_branch
+                                            cell.worktree_changed_files = list(
+                                                src.worktree_changed_files
+                                                or [])
+                                            cell.directory = \
+                                                src.worktree_path
+                                            state._emit_agent(cell)
+                                            state._db_save_agent(cell)
+                                    elif not cell.worktree_path \
+                                            and task.parent_task_id:
+                                        # HITL dispatch: walk parent
+                                        # chain to find worktree
+                                        _ptid = task.parent_task_id
+                                        while _ptid:
+                                            _pt = state.board_tasks.get(
+                                                _ptid)
+                                            if not _pt:
                                                 break
-                                        _ptid = _pt.parent_task_id
+                                            if _pt.agent_id:
+                                                _pa = state.agents.get(
+                                                    _pt.agent_id)
+                                                if _pa and \
+                                                        _pa.worktree_path:
+                                                    cell.worktree_path = \
+                                                        _pa.worktree_path
+                                                    cell.worktree_branch =\
+                                                        _pa.worktree_branch
+                                                    cell.worktree_repo_root = \
+                                                        _pa.worktree_repo_root
+                                                    cell.worktree_base_branch = \
+                                                        _pa.worktree_base_branch
+                                                    cell.worktree_changed_files = list(
+                                                        _pa.worktree_changed_files
+                                                        or [])
+                                                    cell.directory = \
+                                                        _pa.worktree_path
+                                                    state._emit_agent(cell)
+                                                    state._db_save_agent(
+                                                        cell)
+                                                    break
+                                            _ptid = _pt.parent_task_id
 
-                                if launch_cfg.get("terminals"):
-                                    await _create_child_terminals(
-                                        group, cell,
-                                        terminals=launch_cfg["terminals"])
+                                    if launch_cfg.get("terminals"):
+                                        await _create_child_terminals(
+                                            group, cell,
+                                            terminals=launch_cfg["terminals"])
 
-                                # Auto-create child terminals (off by default for dispatch)
-                                gs = state.get_group_settings(group)
-                                if gs.dispatch_auto_terminals \
-                                        and gs.auto_terminals > 0:
-                                    await _create_child_terminals(
-                                        group, cell, count=gs.auto_terminals)
+                                    # Auto-create child terminals (off by default for dispatch)
+                                    gs = state.get_group_settings(group)
+                                    if gs.dispatch_auto_terminals \
+                                            and gs.auto_terminals > 0:
+                                        await _create_child_terminals(
+                                            group, cell, count=gs.auto_terminals)
 
                         if cell:
                             # Link task to agent and move to In Progress
                             owner = _find_active_worktree_owner(state, cell)
-                            handoff_from = data.get(
-                                "handoff_worktree_from", "")
                             if owner:
                                 if _should_handoff_shared_worktree(
                                         owner,
@@ -4192,6 +4241,7 @@ async def main(connection: iterm2.Connection):
                             "agent_blocked", cell.id,
                             cell.name, cell.group, message)
                         state.recompute_task_health()
+                        state.recompute_dispatch_overlap()
 
                     elif action == "error":
                         cell.error_message = message
@@ -4208,6 +4258,7 @@ async def main(connection: iterm2.Connection):
                             "agent_error", cell.id,
                             cell.name, cell.group, message)
                         state.recompute_task_health()
+                        state.recompute_dispatch_overlap()
 
                     elif action == "progress":
                         cell.activity_detail = message
@@ -4231,6 +4282,7 @@ async def main(connection: iterm2.Connection):
                             message=message)
                         state._emit("event_append", **pe)
                         state.recompute_task_health()
+                        state.recompute_dispatch_overlap()
 
                     elif action == "verify":
                         if not task:
@@ -4715,6 +4767,7 @@ async def main(connection: iterm2.Connection):
                                 cell.name, cell.group,
                                 f"{old_name} \u2192 {cell.name}")
                             state.recompute_task_health()
+                            state.recompute_dispatch_overlap()
                             result = {"type": "ok",
                                       "slug": cell.slug}
 

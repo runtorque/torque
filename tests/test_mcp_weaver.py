@@ -193,6 +193,45 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
             payload["results"][1]["agent_id"],
         )
 
+    async def test_batch_dispatch_requires_confirmation_for_overlap(self):
+        state, weaver = self._make_state()
+        active = self.state_mod.AgentCell(
+            id="agent-active",
+            name="active",
+            group="g",
+            cell_type="agent",
+            current_task_id="task-active",
+        )
+        state.agents[active.id] = active
+        state.groups["g"].append(active.id)
+        self._add_task(
+            state,
+            "task-active",
+            "Auth flow implementation",
+            lane="In Progress",
+            agent_id=active.id,
+        )
+        self._add_task(state, "task-1", "Auth flow review")
+
+        payload = await self._dispatch(
+            state,
+            weaver,
+            {
+                "tasks": [{"task": "task-1"}],
+                "max_concurrent": 2,
+            },
+            self._make_handle_command(state),
+        )
+
+        self.assertEqual(
+            payload["results"][0]["status"],
+            "needs_confirmation",
+        )
+        self.assertEqual(
+            payload["results"][0]["reason"],
+            "dispatch_overlap",
+        )
+
     async def test_batch_dispatch_excludes_weaver_from_active_count(self):
         state, weaver = self._make_state()
         weaver.current_task_id = "weaver-task"
@@ -403,6 +442,36 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
             {"cmd": "dispatch_task", "id": task.id, "agent_id": worker.id},
         )
 
+    async def test_dispatch_forwards_force_flag(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        task = state.board_add_task("Investigate overlap", "g")
+
+        self.assertIsNotNone(task)
+        captured = {}
+
+        async def fake_handle_command(payload):
+            captured.update(payload)
+            return {"type": "ok"}
+
+        _, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_dispatch",
+            {"task": task.id, "force": True},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        self.assertTrue(captured["force"])
+
 
 class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -564,6 +633,51 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
             }],
         )
         self.assertNotIn("tasks", summary)
+
+    async def test_board_summary_includes_dispatch_overlap_summary(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        state.dispatch_overlap_groups["g"] = {
+            "counts": {"notice": 1, "warning": 2, "conflict": 1},
+            "total": 4,
+            "items": [
+                {
+                    "task_id": "task-1",
+                    "title": "Implement auth flow",
+                    "level": "conflict",
+                    "summary": "Shares a branch with another active agent.",
+                }
+            ],
+            "truncated": False,
+        }
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        summary = json.loads(text)
+        self.assertEqual(summary["dispatch_overlap"]["counts"]["warning"], 2)
+        self.assertEqual(summary["dispatch_overlap"]["items"][0]["level"], "conflict")
 
     async def test_task_show_includes_health_snapshot(self):
         state = self.state_mod.MatrixState()

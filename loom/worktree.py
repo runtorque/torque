@@ -275,6 +275,7 @@ class WorktreeManager:
             cell.worktree_base_branch = ""
             cell.worktree_dirty = False
             cell.worktree_diff = {}
+            cell.worktree_changed_files = []
             cell.worktree_checkpoints = 0
 
         return success
@@ -355,6 +356,45 @@ class WorktreeManager:
         except Exception:
             log.debug("diff_summary failed for '%s'", cell.name)
             return {}
+
+    async def changed_files(self, cell) -> list[str]:
+        """Return live changed file paths for the worktree vs its base branch.
+
+        Includes committed branch diff plus staged/unstaged tracked changes
+        and untracked files so overlap warnings can fire before a checkpoint.
+        """
+        if not cell.worktree_path or not cell.worktree_base_branch:
+            return []
+        try:
+            changed = set()
+
+            async def _collect(*args):
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "-C", cell.worktree_path,
+                    *args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                stdout, _ = await proc.communicate()
+                if proc.returncode != 0:
+                    return
+                for line in stdout.decode().splitlines():
+                    path = line.strip()
+                    if path:
+                        changed.add(path)
+
+            # Committed work on the branch since it forked from base.
+            await _collect("diff", "--name-only",
+                           f"{cell.worktree_base_branch}...HEAD")
+            # Staged + unstaged tracked edits not yet committed.
+            await _collect("diff", "--name-only", "HEAD")
+            # Untracked files that would not appear in git diff.
+            await _collect("ls-files", "--others", "--exclude-standard")
+
+            return sorted(changed)
+        except Exception:
+            log.debug("changed_files failed for '%s'", cell.name)
+            return []
 
     async def checkpoint(self, cell, message: str = "") -> Optional[str]:
         """Auto-commit all changes in the worktree. Returns commit SHA."""
