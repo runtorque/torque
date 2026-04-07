@@ -151,9 +151,10 @@ This usually means the UI is connected to an old daemon instance or the daemon l
 
 1. Create a checkpoint before changing anything: `loom worktree checkpoint <agent>`.
 2. Review the worktree status and history.
-3. Merge or rebase manually in the worktree if your team wants a human fix.
-4. If you need the agent to continue from the current branch state, relaunch the same agent after the conflict is resolved.
-5. If the branch is no longer useful, remove the worktree and restart from a fresh task.
+3. If the conflict came from Weaver review/merge flow, run `weaver_rebase` and retry `weaver_merge`.
+4. Merge or rebase manually in the worktree if your team wants a human fix.
+5. If you need the agent to continue from the current branch state, relaunch the same agent after the conflict is resolved.
+6. If the branch is no longer useful, remove the worktree and restart from a fresh task.
 
 ### Notes
 

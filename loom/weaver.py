@@ -38,8 +38,8 @@ weaver_task_dispatch, weaver_batch_dispatch, weaver_task_resolve
 **Journal**: weaver_journal, weaver_journal_read
 **Interaction**: weaver_agent_message, weaver_note, weaver_ask, weaver_agent_close, \
 weaver_agent_relaunch
-**Worktree**: weaver_merge, weaver_create_pr, weaver_diff, \
-weaver_worktree_remove, weaver_worktree_checkpoint
+**Worktree**: weaver_merge, weaver_rebase, weaver_create_pr, \
+weaver_diff, weaver_worktree_remove, weaver_worktree_checkpoint
 
 ## Operating guidelines
 
