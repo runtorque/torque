@@ -182,7 +182,10 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     external_id    TEXT NOT NULL DEFAULT '',
     external_url   TEXT NOT NULL DEFAULT '',
     status         TEXT NOT NULL DEFAULT '',
-    attachments    TEXT NOT NULL DEFAULT '[]'
+    attachments    TEXT NOT NULL DEFAULT '[]',
+    health_state   TEXT NOT NULL DEFAULT 'healthy',
+    health_since   TEXT NOT NULL DEFAULT '',
+    health_details TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -426,6 +429,20 @@ class LoomDB:
                 "ALTER TABLE board_tasks ADD COLUMN attachments "
                 "TEXT NOT NULL DEFAULT '[]'")
             self._conn.commit()
+        # Migrate: add task health columns to board_tasks
+        for col, default in [
+            ("health_state", "'healthy'"),
+            ("health_since", "''"),
+            ("health_details", "'{}'"),
+        ]:
+            try:
+                self._conn.execute(
+                    f"SELECT {col} FROM board_tasks LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE board_tasks ADD COLUMN {col} "
+                    f"TEXT NOT NULL DEFAULT {default}")
+                self._conn.commit()
         # Migrate: drop assignee column from board_tasks
         try:
             self._conn.execute(
@@ -686,6 +703,7 @@ class LoomDB:
         messages = json.dumps(d.pop("messages", []))
         depends_on = json.dumps(d.pop("depends_on", []))
         attachments = json.dumps(d.pop("attachments", []))
+        health_details = json.dumps(d.pop("health_details", {}))
         # Map 'group' to 'group_name' for the DB column
         group_name = d.pop("group", "")
         self._conn.execute("""
@@ -696,8 +714,9 @@ class LoomDB:
                  lane, position, agent_id, labels, created_at,
                  updated_at, provider, external_id, external_url,
                  parent_task_id, pipeline_depth, pipeline_root_id, status,
-                 scheduled_at, messages, depends_on, attachments)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 scheduled_at, messages, depends_on, attachments,
+                 health_state, health_since, health_details)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
@@ -712,6 +731,9 @@ class LoomDB:
             d.get("pipeline_root_id", ""), d.get("status", ""),
             d.get("scheduled_at", ""),
             messages, depends_on, attachments,
+            d.get("health_state", "healthy"),
+            d.get("health_since", ""),
+            health_details,
         ))
         self._conn.commit()
 
@@ -1233,7 +1255,9 @@ class LoomDB:
                 labels = json.dumps(d.pop("labels", []))
                 action_vars = json.dumps(d.pop("action_vars", {}))
                 messages = json.dumps(d.pop("messages", []))
+                depends_on = json.dumps(d.pop("depends_on", []))
                 attachments = json.dumps(d.pop("attachments", []))
+                health_details = json.dumps(d.pop("health_details", {}))
                 group_name = d.pop("group", "")
                 c.execute("""
                     INSERT INTO board_tasks
@@ -1243,8 +1267,10 @@ class LoomDB:
                          criteria, lane, position, agent_id, labels,
                          created_at, updated_at, provider, external_id,
                          external_url, parent_task_id, pipeline_depth,
-                         pipeline_root_id, status, messages, attachments)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         pipeline_root_id, status, scheduled_at, messages,
+                         depends_on, attachments, health_state, health_since,
+                         health_details)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""),
                     d.get("description", ""), d.get("slug", ""),
@@ -1259,7 +1285,9 @@ class LoomDB:
                     d.get("external_url", ""),
                     d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
                     d.get("pipeline_root_id", ""), d.get("status", ""),
-                    messages, attachments,
+                    d.get("scheduled_at", ""), messages, depends_on,
+                    attachments, d.get("health_state", "healthy"),
+                    d.get("health_since", ""), health_details,
                 ))
 
             # UI state
@@ -1381,6 +1409,11 @@ class LoomDB:
                         d.get("depends_on", "[]"))
                 except (json.JSONDecodeError, TypeError):
                     d["depends_on"] = []
+                try:
+                    d["health_details"] = json.loads(
+                        d.get("health_details", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    d["health_details"] = {}
                 board_tasks[d["id"]] = d
 
         # UI state

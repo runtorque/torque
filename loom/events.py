@@ -156,6 +156,7 @@ class EventBus:
 
         prev_activity = cell.activity
         self._apply(event, cell)
+        self._state.recompute_task_health()
         self._log.append(event)
         log.info("Event: cell='%s' type=%s activity='%s' detail='%s'",
                  cell.name, event.event_type, cell.activity,
@@ -397,6 +398,9 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
                     changed = True
                     if notifier:
                         notifier.on_health_alert(cell.id, msg)
+
+        if state.recompute_task_health(now_ts=now):
+            changed = True
 
         if changed:
             await state.broadcast()

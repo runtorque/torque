@@ -1,3 +1,4 @@
+from datetime import datetime
 import importlib
 import json
 import sys
@@ -527,6 +528,21 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
                 "parent_task_id": "task-progress",
             }],
         )
+        self.assertEqual(
+            summary["task_health"]["counts"],
+            {
+                "healthy": 2,
+                "blocked": 2,
+                "idle-risk": 0,
+                "stalled": 0,
+                "thrashing": 0,
+            },
+        )
+        self.assertEqual(
+            [item["id"] for item in summary["task_health"]["unhealthy"]],
+            ["ask-1", "task-progress"],
+        )
+        self.assertFalse(summary["task_health"]["truncated"])
         self.assertEqual(summary["agents"]["total"], 2)
         self.assertEqual(summary["agents"]["active_count"], 1)
         self.assertEqual(
@@ -547,6 +563,66 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
             }],
         )
         self.assertNotIn("tasks", summary)
+
+    async def test_task_show_includes_health_snapshot(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker One",
+            group="g",
+            slug="worker-one",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.agents[worker.id] = worker
+        state.groups["g"] = [weaver.id, worker.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+
+        task = state.board_add_task(
+            "Investigate regression",
+            "g",
+            lane="In Progress",
+            id="task-1",
+            agent_id=worker.id,
+        )
+        self.assertIsNotNone(task)
+        task.created_at = "2026-04-06T00:00:00+00:00"
+        task.updated_at = "2026-04-06T00:00:00+00:00"
+        state.recompute_task_health(
+            now_ts=datetime.fromisoformat(
+                "2026-04-06T00:21:00+00:00"
+            ).timestamp(),
+            persist=False,
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_show",
+            {"task": "task-1"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        shown = json.loads(text)
+        self.assertEqual(shown["health_state"], "stalled")
+        self.assertEqual(
+            shown["health_details"]["reasons"],
+            ["no_progress_timeout"],
+        )
 
 
 class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):

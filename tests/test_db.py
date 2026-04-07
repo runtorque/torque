@@ -81,6 +81,9 @@ class LoomDBTests(unittest.TestCase):
                 messages=[{"action": "progress", "message": "Working"}],
                 depends_on=["dep-1"],
                 attachments=[{"path": "/tmp/mock.png", "filename": "mock.png"}],
+                health_state="idle-risk",
+                health_since="2026-04-06T01:05:00+00:00",
+                health_details={"reasons": ["progress_silence_warning"]},
             )
         )
         self.db.save_schedule(
@@ -128,6 +131,14 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["attachments"][0]["filename"],
             "mock.png",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["health_state"],
+            "idle-risk",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["health_details"]["reasons"],
+            ["progress_silence_warning"],
         )
         self.assertFalse(loaded["schedules"]["sched-1"]["enabled"])
         self.assertEqual(loaded["schedules"]["sched-1"]["labels"], ["ops"])
