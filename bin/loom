@@ -2637,6 +2637,77 @@ def cmd_ai_reply(args):
     print("Reply sent to weaver.")
 
 
+def cmd_memory_add(args):
+    cell_id = os.environ.get("LOOM_CELL_ID", "")
+    kwargs = {
+        "entry_type": args.type,
+        "content": args.content,
+        "pinned": bool(args.pin),
+    }
+    if cell_id:
+        kwargs["cell_id"] = cell_id
+    if args.title:
+        kwargs["title"] = args.title
+    if args.scope:
+        kwargs["scope_kind"] = args.scope
+    if args.ref:
+        kwargs["scope_ref"] = args.ref
+    resp = api_call("memory_publish", port=args.port, **kwargs)
+    data = check_ok(resp)
+    entry = data.get("entry", {})
+    print(f"Memory entry saved: {entry.get('id', '')}")
+
+
+def cmd_memory_list(args):
+    cell_id = os.environ.get("LOOM_CELL_ID", "")
+    kwargs = {
+        "limit": args.limit,
+        "offset": args.offset,
+        "pinned_only": bool(args.pinned_only),
+    }
+    if cell_id:
+        kwargs["cell_id"] = cell_id
+    if args.scope:
+        kwargs["scope_kind"] = args.scope
+    if args.ref:
+        kwargs["scope_ref"] = args.ref
+    if args.type:
+        kwargs["entry_type"] = args.type
+    if args.search:
+        kwargs["search"] = args.search
+    resp = api_call("memory_list", port=args.port, **kwargs)
+    data = check_ok(resp)
+    entries = data.get("entries", [])
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return
+    if not entries:
+        print("No memory entries found.")
+        return
+    for entry in entries:
+        star = "*" if entry.get("pinned") else " "
+        scope = f"{entry.get('scope_kind', '')}:{entry.get('scope_ref', '')}"
+        title = entry.get("title", "") or entry.get("content", "")[:60]
+        print(f"{star} {entry.get('id', '')} [{entry.get('entry_type', '')}] {scope}")
+        print(f"  {title}")
+        if entry.get("source_name"):
+            print(f"  source: {entry['source_name']}")
+
+
+def cmd_memory_pin(args):
+    resp = api_call("memory_pin", port=args.port, entry_id=args.entry_id)
+    data = check_ok(resp)
+    entry = data.get("entry", {})
+    print(f"Pinned: {entry.get('id', args.entry_id)}")
+
+
+def cmd_memory_unpin(args):
+    resp = api_call("memory_unpin", port=args.port, entry_id=args.entry_id)
+    data = check_ok(resp)
+    entry = data.get("entry", {})
+    print(f"Unpinned: {entry.get('id', args.entry_id)}")
+
+
 def cmd_weaver_journal(args):
     """Read weaver journal entries from SQLite."""
     st = get_state_local(args.port)
@@ -3572,6 +3643,51 @@ def build_parser():
     p.add_argument("task_ref", nargs="?",
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_reply)
+
+    # -- memory ------------------------------------------------------------
+    mem = sub.add_parser("memory", aliases=["mem"],
+                         help="Shared context memory")
+    mem.set_defaults(func=None, _sub_parser=mem)
+    mem_sub = mem.add_subparsers(dest="memory_cmd")
+
+    p = mem_sub.add_parser("add", help="Publish a shared memory entry")
+    p.add_argument("content", help="Memory content")
+    p.add_argument("-t", "--type", required=True,
+                   choices=["finding", "decision", "warning", "handoff", "note"],
+                   help="Entry type")
+    p.add_argument("--title", help="Optional short title")
+    p.add_argument("--scope",
+                   choices=["task", "pipeline", "group", "project"],
+                   help="Scope kind (defaults from current agent/task context)")
+    p.add_argument("--ref", help="Explicit scope reference")
+    p.add_argument("--pin", action="store_true", help="Pin this entry")
+    p.set_defaults(func=cmd_memory_add)
+
+    p = mem_sub.add_parser("list", aliases=["ls"], help="List shared memory entries")
+    p.add_argument("--scope",
+                   choices=["task", "pipeline", "group", "project"],
+                   help="Scope kind filter")
+    p.add_argument("--ref", help="Explicit scope reference")
+    p.add_argument("-t", "--type",
+                   choices=["finding", "decision", "warning", "handoff", "note"],
+                   help="Entry type filter")
+    p.add_argument("--search", help="Text search")
+    p.add_argument("--pinned-only", action="store_true",
+                   help="Only show pinned entries")
+    p.add_argument("-n", "--limit", type=int, default=20,
+                   help="Maximum entries to show")
+    p.add_argument("--offset", type=int, default=0,
+                   help="Pagination offset")
+    p.add_argument("--json", action="store_true", help="JSON output")
+    p.set_defaults(func=cmd_memory_list)
+
+    p = mem_sub.add_parser("pin", help="Pin a memory entry")
+    p.add_argument("entry_id", help="Memory entry ID")
+    p.set_defaults(func=cmd_memory_pin)
+
+    p = mem_sub.add_parser("unpin", help="Unpin a memory entry")
+    p.add_argument("entry_id", help="Memory entry ID")
+    p.set_defaults(func=cmd_memory_unpin)
 
     # -- task chain ---------------------------------------------------------
     # (added to task subcommand group)

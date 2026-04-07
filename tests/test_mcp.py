@@ -89,6 +89,102 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_dispatch_tool_maps_memory_commands(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "memory_list":
+                return {"type": "memory_entries", "entries": []}
+            return {"type": "memory_entry", "entry": {"id": "mem-1"}}
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "loom_memory_publish",
+            {
+                "entry_type": "decision",
+                "content": "Use durable storage.",
+                "title": "Storage choice",
+                "scope_kind": "task",
+                "scope_ref": "task-1",
+                "pinned": True,
+            },
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(text)["entry"]["id"], "mem-1")
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "loom_memory_list",
+            {"scope_kind": "group", "scope_ref": "g", "pinned_only": True},
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(text)["type"], "memory_entries")
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "loom_memory_pin",
+            {"entry_id": "mem-1"},
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+        self.assertFalse(is_error)
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "loom_memory_unpin",
+            {"entry_id": "mem-1"},
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+        self.assertFalse(is_error)
+
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "cmd": "memory_publish",
+                    "cell_id": "agent-1",
+                    "entry_type": "decision",
+                    "content": "Use durable storage.",
+                    "title": "Storage choice",
+                    "scope_kind": "task",
+                    "scope_ref": "task-1",
+                    "pinned": True,
+                },
+                {
+                    "cmd": "memory_list",
+                    "cell_id": "agent-1",
+                    "scope_kind": "group",
+                    "scope_ref": "g",
+                    "pinned_only": True,
+                },
+                {
+                    "cmd": "memory_pin",
+                    "cell_id": "agent-1",
+                    "entry_id": "mem-1",
+                },
+                {
+                    "cmd": "memory_unpin",
+                    "cell_id": "agent-1",
+                    "entry_id": "mem-1",
+                },
+            ],
+        )
+
     async def test_create_mcp_handler_lists_tools_and_enforces_agent_header(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(
@@ -117,6 +213,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         tool_names = [tool["name"] for tool in listed.payload["result"]["tools"]]
         self.assertIn("loom_progress", tool_names)
+        self.assertIn("loom_memory_publish", tool_names)
         self.assertIn("weaver_board_summary", tool_names)
 
         missing_header = await handler(
