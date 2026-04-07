@@ -221,3 +221,100 @@ class LoomDBTests(unittest.TestCase):
             self.db.load_journal_entries("g", limit=10, entry_type="decision"),
             [entries[1]],
         )
+
+    def test_playbook_candidates_roundtrip(self):
+        candidate = {
+            "id": "cand-1",
+            "group": "g",
+            "family_key": "g|feature/implement|feature|billing-dashboard",
+            "status": "draft",
+            "created_at": 10.0,
+            "updated_at": 12.0,
+            "name": "feature-implement-billing-dashboard",
+            "root_action": "feature/implement",
+            "labels": ["feature"],
+            "normalized_task_family": "billing-dashboard",
+            "entry_action": "feature/implement",
+            "agent_template": "default",
+            "workflow": [
+                {"kind": "action", "action": "feature/implement"},
+                {"kind": "action", "action": "feature/review"},
+            ],
+            "workflow_shape": [
+                {"kind": "action", "action": "feature/implement"},
+                {"kind": "action", "action": "feature/review"},
+            ],
+            "dispatch_sequence": [
+                {
+                    "action": "feature/implement",
+                    "agent_template": "default",
+                    "agent_type": "codex",
+                    "uses_worktree": True,
+                },
+                {
+                    "action": "feature/review",
+                    "agent_template": "default",
+                    "agent_type": "codex",
+                    "uses_worktree": True,
+                },
+            ],
+            "action_combination": ["feature/implement", "feature/review"],
+            "constraints": {"worktree": True, "review_required": False},
+            "evidence": {"quality_score": 0.91, "successful_runs": 3},
+            "supporting_runs": [{"root_task_id": "root-1"}],
+            "counterexamples": [{"root_task_id": "root-4", "reason": "blocked"}],
+        }
+
+        self.db.replace_playbook_candidates([candidate], group_name="g")
+
+        loaded = self.db.load_playbook_candidates(group_name="g", limit=10)
+
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0]["name"], candidate["name"])
+        self.assertEqual(loaded[0]["workflow"][1]["action"], "feature/review")
+        self.assertTrue(loaded[0]["constraints"]["worktree"])
+        self.assertEqual(loaded[0]["supporting_runs"][0]["root_task_id"], "root-1")
+
+    def test_playbooks_roundtrip(self):
+        playbook = {
+            "id": "playbook-cand-1",
+            "group": "g",
+            "source_candidate_id": "cand-1",
+            "status": "draft",
+            "generated": True,
+            "review_required": True,
+            "created_at": 20.0,
+            "updated_at": 21.0,
+            "published_at": None,
+            "discarded_at": None,
+            "name": "feature-implement-billing-dashboard",
+            "description": "Generated from Loom history. Review before publication.",
+            "match": {
+                "root_action": "feature/implement",
+                "labels": ["feature"],
+                "normalized_task_family": "billing-dashboard",
+            },
+            "entry_action": "feature/implement",
+            "agent_template": "default",
+            "workflow": [
+                {"kind": "action", "action": "feature/implement"},
+                {"kind": "action", "action": "feature/review"},
+            ],
+            "constraints": {"worktree": True},
+            "evidence": {"quality_score": 0.91},
+            "publication_preview": {
+                "generated": True,
+                "review_state": "pending",
+                "ready_to_publish": True,
+            },
+        }
+
+        self.db.save_playbook(playbook)
+
+        loaded = self.db.load_playbooks(group_name="g", status_filter="draft", limit=10)
+
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0]["source_candidate_id"], "cand-1")
+        self.assertTrue(loaded[0]["generated"])
+        self.assertEqual(loaded[0]["match"]["normalized_task_family"], "billing-dashboard")
+        self.assertTrue(loaded[0]["publication_preview"]["ready_to_publish"])

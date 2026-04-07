@@ -1452,6 +1452,9 @@ async def main(connection: iterm2.Connection):
                 "providers": get_providers(),
                 "templates": template_mgr.list_templates(current_path
                                                           or await _resolve_base_dir(group)),
+                "playbooks": state.list_playbooks(group=group,
+                                                   status="published",
+                                                   limit=200),
             }
 
         # get_group_settings: respond directly, no state mutation
@@ -1477,6 +1480,9 @@ async def main(connection: iterm2.Connection):
                 "providers": get_providers(),
                 "templates": template_mgr.list_templates(base_dir),
                 "actions": action_mgr.list_actions(base_dir),
+                "playbooks": state.list_playbooks(group=group,
+                                                   status="published",
+                                                   limit=200),
             }
 
         # get_global_settings: respond directly
@@ -1525,6 +1531,106 @@ async def main(connection: iterm2.Connection):
                     "record": record,
                     "tasks": tasks,
                     "messages": messages}
+
+        if cmd == "get_playbook_candidates":
+            limit = min(int(data.get("limit", 50)), 200)
+            return {
+                "type": "playbook_candidates",
+                "group": data.get("group", ""),
+                "candidates": state.list_playbook_candidates(
+                    group=data.get("group", ""), limit=limit),
+            }
+
+        if cmd == "extract_playbook_candidates":
+            return {
+                "type": "playbook_candidates",
+                "group": data.get("group", ""),
+                "candidates": state.extract_playbook_candidates(
+                    group=data.get("group", "")),
+            }
+
+        if cmd == "get_playbooks":
+            limit = min(int(data.get("limit", 50)), 200)
+            return {
+                "type": "playbooks",
+                "group": data.get("group", ""),
+                "status": data.get("status", ""),
+                "playbooks": state.list_playbooks(
+                    group=data.get("group", ""),
+                    status=data.get("status", ""),
+                    limit=limit,
+                ),
+            }
+
+        if cmd == "get_playbook":
+            playbook_id = data.get("id", "")
+            if not playbook_id:
+                return {"type": "error", "message": "id required"}
+            playbook = state.get_playbook(playbook_id)
+            if not playbook:
+                return {"type": "error", "message": "Playbook not found"}
+            return {"type": "playbook_detail", "playbook": playbook}
+
+        if cmd == "generate_playbook_draft":
+            candidate_id = data.get("candidate_id", "")
+            if not candidate_id:
+                return {"type": "error",
+                        "message": "candidate_id required"}
+            candidate = db.load_playbook_candidate(candidate_id)
+            if not candidate:
+                return {"type": "error",
+                        "message": "Playbook candidate not found"}
+            base_dir = await _resolve_base_dir(
+                data.get("group", "") or candidate.get("group", ""))
+            from .playbooks import build_playbook_draft
+
+            draft = build_playbook_draft(
+                candidate, action_mgr, template_mgr, base_dir=base_dir)
+            existing = state.get_playbook(draft["id"])
+            if existing and existing.get("status") == "published":
+                draft["created_at"] = existing.get("created_at",
+                                                    draft["created_at"])
+                draft["published_at"] = existing.get("published_at")
+                draft["status"] = existing.get("status", "published")
+            state.save_playbook(draft)
+            return {"type": "playbook_detail", "playbook": draft}
+
+        if cmd == "publish_playbook_draft":
+            playbook_id = data.get("id", "")
+            if not playbook_id:
+                return {"type": "error", "message": "id required"}
+            playbook = state.get_playbook(playbook_id)
+            if not playbook:
+                return {"type": "error", "message": "Playbook not found"}
+            if playbook.get("status") != "draft":
+                return {"type": "error",
+                        "message": "Only draft playbooks can be published"}
+            preview = playbook.get("publication_preview", {})
+            if not preview.get("ready_to_publish", False):
+                return {"type": "error",
+                        "message": "Draft is missing required action "
+                                   "or template references"}
+            from .playbooks import publish_playbook_record
+
+            published = publish_playbook_record(playbook)
+            state.save_playbook(published)
+            return {"type": "playbook_detail", "playbook": published}
+
+        if cmd == "discard_playbook_draft":
+            playbook_id = data.get("id", "")
+            if not playbook_id:
+                return {"type": "error", "message": "id required"}
+            playbook = state.get_playbook(playbook_id)
+            if not playbook:
+                return {"type": "error", "message": "Playbook not found"}
+            if playbook.get("status") != "draft":
+                return {"type": "error",
+                        "message": "Only draft playbooks can be discarded"}
+            from .playbooks import discard_playbook_record
+
+            discarded = discard_playbook_record(playbook)
+            state.save_playbook(discarded)
+            return {"type": "playbook_detail", "playbook": discarded}
 
         # list_actions: respond directly
         if cmd == "list_actions":
