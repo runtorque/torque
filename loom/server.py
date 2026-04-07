@@ -60,6 +60,24 @@ def _append_task_artifacts(prompt: str, attachments, artifacts) -> str:
     return final_prompt
 
 
+def _build_self_dispatch_prompt() -> str:
+    """Return the minimal follow-up prompt for derive-to-self."""
+    return "Proceed with the derived task you just created."
+
+
+def _should_queue_existing_agent_dispatch(active_task, *,
+                                          target_task_id: str,
+                                          self_dispatch: bool) -> bool:
+    """Return whether an existing-agent dispatch should be queued."""
+    if self_dispatch:
+        return False
+    if not active_task:
+        return False
+    if active_task.id == target_task_id:
+        return False
+    return active_task.lane != "Done"
+
+
 async def _worktree_diff_updater(state: MatrixState,
                                  worktree_mgr: WorktreeManager):
     """Periodically update diff stats for cells with active worktrees."""
@@ -1199,7 +1217,7 @@ async def main(connection: iterm2.Connection):
             desc = f" — {when}" if when else ""
             suffix = ""
             if tr.get("target") == "self":
-                suffix = " (returns task inline — proceed immediately)"
+                suffix = " (continues in the same agent)"
             return (f"- `loom ai derive \"short title\" "
                     f"-d \"details\" "
                     f"-t {tr['action']}`{desc}{suffix}")
@@ -2996,10 +3014,17 @@ async def main(connection: iterm2.Connection):
                                           "message": "Agent not found"}
                             elif cell.current_task_id \
                                     and cell.current_task_id != tid:
-                                # Agent is busy — queue the task
                                 active = state.board_tasks.get(
                                     cell.current_task_id)
-                                if active and active.lane != "Done":
+                                allow_self_dispatch = bool(
+                                    data.get("_self_dispatch")
+                                    and cell.id == agent_id
+                                )
+                                if _should_queue_existing_agent_dispatch(
+                                        active,
+                                        target_task_id=tid,
+                                        self_dispatch=allow_self_dispatch):
+                                    # Agent is busy — queue the task
                                     state.board_update_task(
                                         tid, agent_id=cell.id)
                                     state.board_move_task(tid, "To Do")
@@ -3120,65 +3145,70 @@ async def main(connection: iterm2.Connection):
                             _record_task_dispatch(
                                 cell, task, dispatch_lane)
 
-                            # Build loom context for template rendering
-                            loom_ctx = _build_loom_context(cell, task)
-
-                            # Compose prompt: action-aware
-                            prompt = None
-                            base_dir = ""
-                            if task.action_name \
-                                    and not data.get("force_no_action"):
-                                base_dir = cell.worktree_repo_root \
-                                    or cell.directory \
-                                    or await _resolve_base_dir(group)
-                                tvars = {"TASK": task.task,
-                                         **(task.action_vars or {})}
-                                rendered = action_mgr.render_prompt(
-                                    task.action_name, tvars,
-                                    base_dir=base_dir,
-                                    loom_context=loom_ctx)
-                                if rendered is None:
-                                    # Action deleted — warn frontend
-                                    result = {
-                                        "type":
-                                            "dispatch_action_missing",
-                                        "task_id": tid,
-                                        "action_name":
-                                            task.action_name}
-                                    prompt = None
-                                else:
-                                    prompt = rendered
-                            elif task.instructions or task.context \
-                                    or task.criteria:
-                                # Legacy fallback for old tasks
-                                parts = []
-                                if task.task:
-                                    parts.append(task.task)
-                                if task.instructions:
-                                    parts.append(task.instructions)
-                                if task.context:
-                                    parts.append(task.context)
-                                if task.criteria:
-                                    parts.append(task.criteria)
-                                prompt = "\n\n".join(parts)
+                            final_prompt = ""
+                            if data.get("_self_dispatch"):
+                                final_prompt = _build_self_dispatch_prompt()
                             else:
-                                prompt = task.task
+                                # Build loom context for template rendering
+                                loom_ctx = _build_loom_context(cell, task)
+                                # Compose prompt: action-aware
+                                prompt = None
+                                base_dir = ""
+                                if task.action_name \
+                                        and not data.get("force_no_action"):
+                                    base_dir = cell.worktree_repo_root \
+                                        or cell.directory \
+                                        or await _resolve_base_dir(group)
+                                    tvars = {"TASK": task.task,
+                                             **(task.action_vars or {})}
+                                    rendered = action_mgr.render_prompt(
+                                        task.action_name, tvars,
+                                        base_dir=base_dir,
+                                        loom_context=loom_ctx)
+                                    if rendered is None:
+                                        # Action deleted — warn frontend
+                                        result = {
+                                            "type":
+                                                "dispatch_action_missing",
+                                            "task_id": tid,
+                                            "action_name":
+                                                task.action_name}
+                                        prompt = None
+                                    else:
+                                        prompt = rendered
+                                elif task.instructions or task.context \
+                                        or task.criteria:
+                                    # Legacy fallback for old tasks
+                                    parts = []
+                                    if task.task:
+                                        parts.append(task.task)
+                                    if task.instructions:
+                                        parts.append(task.instructions)
+                                    if task.context:
+                                        parts.append(task.context)
+                                    if task.criteria:
+                                        parts.append(task.criteria)
+                                    prompt = "\n\n".join(parts)
+                                else:
+                                    prompt = task.task
 
-                            if prompt:
-                                prompt = _append_task_artifacts(
-                                    prompt,
-                                    task.attachments,
-                                    task.artifacts,
-                                )
-                                is_clean = loom_ctx["context"]["is_clean"]
-                                final_prompt = prompt
-                                final_prompt += _build_postscript(
-                                    task, action_mgr,
-                                    base_dir if task.action_name
-                                    else "",
-                                    is_clean=is_clean,
-                                    cell=cell)
+                                if prompt:
+                                    prompt = _append_task_artifacts(
+                                        prompt,
+                                        task.attachments,
+                                        task.artifacts,
+                                    )
+                                    is_clean = \
+                                        loom_ctx["context"]["is_clean"]
+                                    final_prompt = prompt
+                                    final_prompt += _build_postscript(
+                                        task, action_mgr,
+                                        base_dir if task.action_name
+                                        else "",
+                                        is_clean=is_clean,
+                                        cell=cell)
 
+                            if final_prompt:
                                 # Track dispatch count
                                 cell.tasks_dispatched += 1
                                 state._emit_agent(cell)
@@ -3413,6 +3443,58 @@ async def main(connection: iterm2.Connection):
                                 value=state.board_panel_height)
                     state._db_save_ui("board_panel_height",
                                       state.board_panel_height)
+
+            elif cmd == "board_set_filters":
+                raw_filters = data.get("filters_by_group", {})
+                if isinstance(raw_filters, dict):
+                    state.board_filters_by_group = raw_filters
+                else:
+                    state.board_filters_by_group = {}
+                state._emit("ui_update", key="board_filters_by_group",
+                            value=state.board_filters_by_group)
+                state._db_save_ui(
+                    "board_filters_by_group",
+                    json.dumps(state.board_filters_by_group),
+                )
+
+            elif cmd == "board_set_saved_views":
+                raw_views = data.get("saved_views_by_group", {})
+                if isinstance(raw_views, dict):
+                    state.board_saved_views_by_group = raw_views
+                else:
+                    state.board_saved_views_by_group = {}
+                state._emit("ui_update", key="board_saved_views_by_group",
+                            value=state.board_saved_views_by_group)
+                state._db_save_ui(
+                    "board_saved_views_by_group",
+                    json.dumps(state.board_saved_views_by_group),
+                )
+
+            elif cmd == "board_set_lane_sorts":
+                raw_sorts = data.get("lane_sorts_by_group", {})
+                if isinstance(raw_sorts, dict):
+                    state.board_lane_sorts_by_group = raw_sorts
+                else:
+                    state.board_lane_sorts_by_group = {}
+                state._emit("ui_update", key="board_lane_sorts_by_group",
+                            value=state.board_lane_sorts_by_group)
+                state._db_save_ui(
+                    "board_lane_sorts_by_group",
+                    json.dumps(state.board_lane_sorts_by_group),
+                )
+
+            elif cmd == "board_set_card_density":
+                raw_density = data.get("card_density_by_group", {})
+                if isinstance(raw_density, dict):
+                    state.board_card_density_by_group = raw_density
+                else:
+                    state.board_card_density_by_group = {}
+                state._emit("ui_update", key="board_card_density_by_group",
+                            value=state.board_card_density_by_group)
+                state._db_save_ui(
+                    "board_card_density_by_group",
+                    json.dumps(state.board_card_density_by_group),
+                )
 
             # -- Schedule commands ------------------------------------------
 
@@ -4097,37 +4179,29 @@ async def main(connection: iterm2.Connection):
                                                 == "error":
                                             pass  # skip dispatch
                                         elif target_id == cell.id:
-                                            # Self-dispatch: link task
-                                            # inline, skip prompt render
-                                            # and send_text entirely
-                                            dl = state.get_group_settings(
-                                                new_task.group
-                                            ).dispatch_lane \
-                                                or "In Progress"
-                                            _record_task_dispatch(
-                                                cell, new_task, dl)
-                                            cell.tasks_dispatched += 1
-                                            state._emit_agent(cell)
-                                            state._db_save_agent(cell)
-                                            _panel_event(
-                                                "task_dispatched",
-                                                cell.id, cell.name,
-                                                cell.group,
-                                                new_task.task[:80],
-                                                task_id=new_task.id)
+                                            # Self-dispatch through the
+                                            # normal delayed same-agent
+                                            # prompt path.
+                                            dispatch_data = {
+                                                "cmd": "dispatch_task",
+                                                "id": new_task.id,
+                                                "agent_id": cell.id,
+                                                "_self_dispatch": True,
+                                            }
                                             await state.broadcast()
-                                            result = {
-                                                "type": "ok",
-                                                "task_id":
-                                                    new_task.id,
-                                                "agent_id":
-                                                    cell.id,
-                                                "proceed": True,
-                                                "task":
-                                                    new_task.task,
-                                                "description":
-                                                    new_task.description
-                                                    or ""}
+                                            dr = await handle_command(
+                                                dispatch_data)
+                                            if dr and dr.get("type") \
+                                                    == "error":
+                                                result = dr
+                                            else:
+                                                result = {
+                                                    "type": "ok",
+                                                    "task_id":
+                                                        new_task.id,
+                                                    "agent_id":
+                                                        cell.id,
+                                                }
                                         elif target_id:
                                             # Dispatch to different
                                             # existing agent

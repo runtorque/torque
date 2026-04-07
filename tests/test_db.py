@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+import json
 
 try:
     from helpers import install_aiohttp_stub
@@ -157,6 +158,65 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertFalse(loaded["schedules"]["sched-1"]["enabled"])
         self.assertEqual(loaded["schedules"]["sched-1"]["labels"], ["ops"])
+
+    def test_load_all_restores_board_filters_by_group(self):
+        filters = {
+            "alpha": {
+                "search_query": "deploy",
+                "filter_labels": ["bug"],
+                "filter_actions": ["triage"],
+                "filter_agents": ["agent-1"],
+                "pre_filter_lane": "Backlog",
+            }
+        }
+        self.db.save_ui_state("board_filters_by_group", json.dumps(filters))
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["board_filters_by_group"], filters)
+
+    def test_load_all_restores_board_saved_views_by_group(self):
+        views = {
+            "alpha": [
+                {
+                    "name": "Review Queue",
+                    "search_query": "review",
+                    "filter_labels": ["loom:blocked"],
+                    "filter_actions": ["feature/review"],
+                    "filter_agents": [],
+                }
+            ]
+        }
+        self.db.save_ui_state("board_saved_views_by_group", json.dumps(views))
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["board_saved_views_by_group"], views)
+
+    def test_load_all_restores_board_lane_sorts_by_group(self):
+        sorts = {
+            "alpha": {
+                "Backlog": "due",
+                "Done": "oldest",
+            }
+        }
+        self.db.save_ui_state("board_lane_sorts_by_group", json.dumps(sorts))
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["board_lane_sorts_by_group"], sorts)
+
+    def test_load_all_restores_board_card_density_by_group(self):
+        density = {
+            "alpha": "compact",
+            "beta": "detailed",
+        }
+        self.db.save_ui_state("board_card_density_by_group",
+                              json.dumps(density))
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["board_card_density_by_group"], density)
 
     def test_panel_event_paging_and_trim_keep_recent_events(self):
         for i in range(1, 6):

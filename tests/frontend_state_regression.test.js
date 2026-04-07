@@ -211,17 +211,20 @@ function jsonValue(context, expression) {
   return JSON.parse(runInContext(context, `JSON.stringify(${expression})`));
 }
 
-function createBoardHarness() {
+function createBoardHarness(options = {}) {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/board.js');
-  runInContext(context, `
-    _renderBoardCard = function(t) { return '<div class="board-card">' + t.id + '</div>'; };
-    _renderBoardSelectionBar = function() { return ''; };
-    _boardScheduleCount = function() { return 0; };
-    boardUpdateScrollArrows = function() {};
-    boardAddTaskAutoResize = function() {};
-  `);
+  const boot = [
+    `_renderBoardSelectionBar = function() { return ''; };`,
+    `_boardScheduleCount = function() { return 0; };`,
+    `boardUpdateScrollArrows = function() {};`,
+    `boardAddTaskAutoResize = function() {};`,
+  ];
+  if (options.stubCards !== false) {
+    boot.unshift(`_renderBoardCard = function(t) { return '<div class="board-card">' + t.id + '</div>'; };`);
+  }
+  runInContext(context, boot.join('\n'));
   return { context, document };
 }
 
@@ -260,6 +263,9 @@ function createModalHarness() {
 
 test('board visible tasks combine group, search, label, action, and agent filters', () => {
   const { context } = createBoardHarness();
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Deploy Worker', slug: 'deploy-worker' },
+  };
   context.state.board_tasks = {
     'task-1': {
       id: 'task-1',
@@ -376,6 +382,91 @@ test('weaver task health summary prioritizes severe unhealthy tasks', () => {
   assert.deepEqual(summary.items.map((item) => item.id), ['blocked', 'stalled']);
 });
 
+test('board search matches title, description, labels, action, and linked agent fields', () => {
+  const { context } = createBoardHarness();
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alice Reviewer', slug: 'alice-reviewer' },
+    'agent-2': { id: 'agent-2', name: 'Bob Builder', slug: 'bob-builder' },
+  };
+  context.state.board_tasks = {
+    titleTask: {
+      id: 'titleTask',
+      group: 'alpha',
+      task: 'Release notes',
+      description: 'Prepare the changelog',
+      labels: ['docs'],
+      action_name: 'feature/docs',
+      agent_id: 'agent-2',
+      lane: 'Backlog',
+      position: 4,
+    },
+    descriptionTask: {
+      id: 'descriptionTask',
+      group: 'alpha',
+      task: 'Verify auth flow',
+      description: 'Check production smoke coverage',
+      labels: ['qa'],
+      action_name: 'feature/test',
+      agent_id: 'agent-2',
+      lane: 'Backlog',
+      position: 3,
+    },
+    labelTask: {
+      id: 'labelTask',
+      group: 'alpha',
+      task: 'Update handbook',
+      description: 'Internal docs refresh',
+      labels: ['compliance'],
+      action_name: 'feature/docs',
+      agent_id: 'agent-2',
+      lane: 'Backlog',
+      position: 2,
+    },
+    actionTask: {
+      id: 'actionTask',
+      group: 'alpha',
+      task: 'Review webhook retry logic',
+      description: 'Needs a second pass',
+      labels: ['review'],
+      action_name: 'feature/review',
+      agent_id: 'agent-2',
+      lane: 'Backlog',
+      position: 1,
+    },
+    agentTask: {
+      id: 'agentTask',
+      group: 'alpha',
+      task: 'Triage flaky spec',
+      description: 'Route to the reviewer',
+      labels: ['triage'],
+      action_name: 'feature/triage',
+      agent_id: 'agent-1',
+      lane: 'Backlog',
+      position: 0,
+    },
+  };
+
+  runInContext(context, `
+    _boardFilterLabels = [];
+    _boardFilterActions = [];
+    _boardFilterAgents = [];
+    _boardSearchQuery = 'release';
+  `);
+  assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks())'), ['titleTask']);
+
+  runInContext(context, `_boardSearchQuery = 'smoke coverage';`);
+  assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks())'), ['descriptionTask']);
+
+  runInContext(context, `_boardSearchQuery = 'compliance';`);
+  assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks())'), ['labelTask']);
+
+  runInContext(context, `_boardSearchQuery = 'feature/review';`);
+  assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks())'), ['actionTask']);
+
+  runInContext(context, `_boardSearchQuery = 'alice reviewer';`);
+  assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks())'), ['agentTask']);
+});
+
 test('board lane counts ignore subordinate tasks in the same lane', () => {
   const { context } = createBoardHarness();
   context.state.board_tasks = {
@@ -438,6 +529,109 @@ test('renderBoard preserves inline task drafts and restores the saved lane when 
   assert.equal(runInContext(context, '_boardCardsScrollTop'), 28);
 });
 
+test('board restores scroll state per lane and filter view', () => {
+  const { context, document } = createBoardHarness();
+  document.register('panel-board');
+  const cards = document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    backlogA: {
+      id: 'backlogA',
+      group: 'alpha',
+      task: 'Fix bug',
+      labels: ['bug'],
+      lane: 'Backlog',
+      position: 2,
+    },
+    backlogB: {
+      id: 'backlogB',
+      group: 'alpha',
+      task: 'Ship docs',
+      labels: ['docs'],
+      lane: 'Backlog',
+      position: 1,
+    },
+    doneTask: {
+      id: 'doneTask',
+      group: 'alpha',
+      task: 'Closed item',
+      lane: 'Done',
+      position: 0,
+    },
+  };
+
+  context.renderBoard();
+  runInContext(context, `_boardRenderLimit = 150;`);
+  cards.scrollTop = 120;
+  cards.listeners.scroll();
+
+  context.boardSelectLane('Done');
+  assert.equal(cards.scrollTop, 0);
+  assert.equal(runInContext(context, '_boardRenderLimit'), 50);
+
+  cards.scrollTop = 34;
+  cards.listeners.scroll();
+
+  context.boardSelectLane('Backlog');
+  assert.equal(cards.scrollTop, 120);
+  assert.equal(runInContext(context, '_boardRenderLimit'), 150);
+
+  context.boardUpdateSearch('bug');
+  assert.equal(cards.scrollTop, 0);
+  assert.equal(runInContext(context, '_boardRenderLimit'), 50);
+
+  cards.scrollTop = 52;
+  cards.listeners.scroll();
+
+  context.boardClearFilters();
+  assert.equal(cards.scrollTop, 120);
+  assert.equal(runInContext(context, '_boardRenderLimit'), 150);
+});
+
+test('board restores the selected lane scroll when toggling schedules', () => {
+  const { context, document } = createBoardHarness();
+  document.register('panel-board');
+  const cards = document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    doneTask: {
+      id: 'doneTask',
+      group: 'alpha',
+      task: 'Recently done',
+      lane: 'Done',
+      position: 1,
+    },
+  };
+  context.state.schedules = {
+    sched1: {
+      id: 'sched1',
+      name: 'Nightly docs',
+      enabled: true,
+      scheduled_at: '2026-04-07T00:00:00Z',
+    },
+  };
+
+  runInContext(context, `_boardSelectedLane = 'Done';`);
+  context.renderBoard();
+
+  cards.scrollTop = 44;
+  cards.listeners.scroll();
+
+  context.boardToggleSchedules();
+  assert.equal(runInContext(context, '_boardShowSchedules'), true);
+  assert.equal(cards.scrollTop, 0);
+
+  cards.scrollTop = 18;
+  cards.listeners.scroll();
+
+  context.boardToggleSchedules();
+  assert.equal(runInContext(context, '_boardShowSchedules'), false);
+  assert.equal(runInContext(context, '_boardSelectedLane'), 'Done');
+  assert.equal(cards.scrollTop, 44);
+});
+
 test('renderBoard switches to the first lane with matches when filters empty the current lane', () => {
   const { context, document } = createBoardHarness();
   document.register('panel-board');
@@ -477,6 +671,606 @@ test('renderBoard switches to the first lane with matches when filters empty the
   assert.equal(runInContext(context, '_boardSelectedLane'), 'In Progress');
   assert.equal(runInContext(context, `_boardLaneCount('Backlog')`), 0);
   assert.equal(runInContext(context, `_boardLaneCount('In Progress')`), 1);
+});
+
+test('board filters restore per group and persist updates independently', () => {
+  const { context, document } = createBoardHarness();
+  document.register('panel-board');
+  document.register('board-cards');
+
+  context.activeGroup = 'alpha';
+  runInContext(context, `
+    _currentGroup = function() { return activeGroup; };
+  `);
+
+  context.state.board_lanes = ['Backlog', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    alphaBug: {
+      id: 'alphaBug',
+      group: 'alpha',
+      task: 'Deploy fix',
+      labels: ['bug'],
+      action_name: 'triage',
+      agent_id: 'agent-1',
+      lane: 'Backlog',
+      position: 2,
+    },
+    betaDocs: {
+      id: 'betaDocs',
+      group: 'beta',
+      task: 'Write docs',
+      labels: ['docs'],
+      action_name: 'docs',
+      agent_id: 'agent-2',
+      lane: 'Backlog',
+      position: 1,
+    },
+  };
+  context.state.board_filters_by_group = {
+    alpha: {
+      search_query: 'deploy',
+      quick_view: 'touched',
+      filter_labels: ['bug'],
+      filter_actions: ['triage'],
+      filter_agents: ['agent-1'],
+      pre_filter_lane: 'Backlog',
+    },
+  };
+
+  context.renderBoard();
+
+  assert.equal(runInContext(context, '_boardSearchQuery'), 'deploy');
+  assert.equal(runInContext(context, '_boardQuickView'), 'touched');
+  assert.deepEqual(jsonValue(context, '_boardFilterLabels'), ['bug']);
+  assert.deepEqual(jsonValue(context, '_boardFilterActions'), ['triage']);
+  assert.deepEqual(jsonValue(context, '_boardFilterAgents'), ['agent-1']);
+  assert.equal(runInContext(context, '_boardPreFilterLane'), 'Backlog');
+
+  context.activeGroup = 'beta';
+  context.renderBoard();
+
+  assert.equal(runInContext(context, '_boardSearchQuery'), '');
+  assert.equal(runInContext(context, '_boardQuickView'), '');
+  assert.deepEqual(jsonValue(context, '_boardFilterLabels'), []);
+  assert.deepEqual(jsonValue(context, '_boardFilterActions'), []);
+  assert.deepEqual(jsonValue(context, '_boardFilterAgents'), []);
+  assert.equal(runInContext(context, '_boardPreFilterLane'), '');
+
+  runInContext(context, `boardToggleLabel('docs');`);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.at(-1))), {
+    cmd: 'board_set_filters',
+    filters_by_group: {
+      alpha: {
+        search_query: 'deploy',
+        quick_view: 'touched',
+        filter_labels: ['bug'],
+        filter_actions: ['triage'],
+        filter_agents: ['agent-1'],
+        filter_health: [],
+        pre_filter_lane: 'Backlog',
+      },
+      beta: {
+        search_query: '',
+        quick_view: '',
+        filter_labels: ['docs'],
+        filter_actions: [],
+        filter_agents: [],
+        filter_health: [],
+        pre_filter_lane: 'Backlog',
+      },
+    },
+  });
+
+  context.activeGroup = 'alpha';
+  context.renderBoard();
+
+  assert.equal(runInContext(context, '_boardSearchQuery'), 'deploy');
+  assert.equal(runInContext(context, '_boardQuickView'), 'touched');
+  assert.deepEqual(jsonValue(context, '_boardFilterLabels'), ['bug']);
+});
+
+test('board saved views persist per group and apply without extra hidden state', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.activeGroup = 'alpha';
+  context.window.prompt = () => 'Docs Tasks';
+  runInContext(context, `
+    _currentGroup = function() { return activeGroup; };
+  `);
+
+  context.state.board_lanes = ['Backlog', 'In Progress', 'Done'];
+  context.state.board_saved_views_by_group = {
+    alpha: [
+      {
+        name: 'Review Queue',
+        search_query: 'review',
+        quick_view: '',
+        filter_labels: ['loom:blocked'],
+        filter_actions: ['feature/review'],
+        filter_agents: [],
+        filter_health: [],
+      },
+    ],
+  };
+  context.state.board_tasks = {
+    alphaTask: {
+      id: 'alphaTask',
+      group: 'alpha',
+      task: 'Review auth flow',
+      labels: ['loom:blocked'],
+      action_name: 'feature/review',
+      lane: 'Backlog',
+      position: 2,
+    },
+    betaTask: {
+      id: 'betaTask',
+      group: 'beta',
+      task: 'Docs follow-up',
+      labels: ['docs'],
+      action_name: 'feature/docs',
+      lane: 'Backlog',
+      position: 1,
+    },
+  };
+
+  context.renderBoard();
+  assert.match(panel.innerHTML, /Review Queue/);
+
+  runInContext(context, `
+    _boardSearchQuery = 'docs';
+    _boardFilterLabels = ['docs'];
+    _boardFilterActions = ['feature/docs'];
+    _boardFilterAgents = [];
+  `);
+  context.boardSaveCurrentView();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.at(-1))), {
+    cmd: 'board_set_saved_views',
+    saved_views_by_group: {
+      alpha: [
+        {
+          name: 'Review Queue',
+          search_query: 'review',
+          quick_view: '',
+          filter_labels: ['loom:blocked'],
+          filter_actions: ['feature/review'],
+          filter_agents: [],
+          filter_health: [],
+        },
+        {
+          name: 'Docs Tasks',
+          search_query: 'docs',
+          quick_view: '',
+          filter_labels: ['docs'],
+          filter_actions: ['feature/docs'],
+          filter_agents: [],
+          filter_health: [],
+        },
+      ],
+    },
+  });
+
+  context.boardApplySavedView('Review Queue');
+  assert.equal(runInContext(context, '_boardSearchQuery'), 'review');
+  assert.equal(runInContext(context, '_boardQuickView'), '');
+  assert.deepEqual(jsonValue(context, '_boardFilterLabels'), ['loom:blocked']);
+  assert.deepEqual(jsonValue(context, '_boardFilterActions'), ['feature/review']);
+  assert.equal(
+    context.sendCalls.at(-1).cmd,
+    'board_set_filters',
+  );
+
+  context.boardDeleteSavedView('Docs Tasks');
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.at(-1))), {
+    cmd: 'board_set_saved_views',
+    saved_views_by_group: {
+      alpha: [
+        {
+          name: 'Review Queue',
+          search_query: 'review',
+          quick_view: '',
+          filter_labels: ['loom:blocked'],
+          filter_actions: ['feature/review'],
+          filter_agents: [],
+          filter_health: [],
+        },
+      ],
+    },
+  });
+
+  context.activeGroup = 'beta';
+  context.renderBoard();
+  assert.equal(runInContext(context, '_boardCurrentGroupSavedViews().length'), 0);
+});
+
+test('board quick views expose recent and recently touched tasks through the existing filter model', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.activeGroup = 'alpha';
+  runInContext(context, `
+    _currentGroup = function() { return activeGroup; };
+  `);
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    recentNew: {
+      id: 'recentNew',
+      group: 'alpha',
+      task: 'Investigate auth issue',
+      lane: 'Backlog',
+      position: 2,
+      created_at: '2026-04-04T00:00:00Z',
+      updated_at: '2026-04-01T00:00:00Z',
+    },
+    docsRecent: {
+      id: 'docsRecent',
+      group: 'alpha',
+      task: 'Docs follow-up',
+      lane: 'Backlog',
+      position: 1,
+      created_at: '2026-04-03T00:00:00Z',
+      updated_at: '2026-04-04T00:00:00Z',
+    },
+    touchedDone: {
+      id: 'touchedDone',
+      group: 'alpha',
+      task: 'Close review thread',
+      lane: 'Done',
+      position: 0,
+      created_at: '2026-04-01T00:00:00Z',
+      updated_at: '2026-04-05T00:00:00Z',
+    },
+  };
+
+  context.renderBoard();
+  assert.match(panel.innerHTML, /Recent/);
+  assert.match(panel.innerHTML, /Recently Touched/);
+
+  context.boardApplyQuickView('recent');
+  assert.equal(runInContext(context, '_boardQuickView'), 'recent');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.sendCalls.at(-1))),
+    {
+      cmd: 'board_set_filters',
+      filters_by_group: {
+        alpha: {
+          search_query: '',
+          quick_view: 'recent',
+          filter_labels: [],
+          filter_actions: [],
+          filter_agents: [],
+          filter_health: [],
+          pre_filter_lane: 'Backlog',
+        },
+      },
+    },
+  );
+  assert.deepEqual(
+    jsonValue(context, `_boardTasksInLane('Backlog').map(function(t) { return t.id; })`),
+    ['recentNew', 'docsRecent'],
+  );
+
+  context.boardApplyQuickView('touched');
+  assert.equal(runInContext(context, '_boardQuickView'), 'touched');
+  assert.deepEqual(
+    jsonValue(context, `_boardTasksInLane('Backlog').map(function(t) { return t.id; })`),
+    ['docsRecent', 'recentNew'],
+  );
+  assert.match(panel.innerHTML, /Recently Touched/);
+
+  runInContext(context, `_boardSearchQuery = 'docs';`);
+  assert.deepEqual(
+    jsonValue(context, 'Object.keys(_boardVisibleTasks())'),
+    ['docsRecent'],
+  );
+});
+
+test('board lane sort modes persist per group and render stable visible ordering', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.activeGroup = 'alpha';
+  runInContext(context, `
+    _currentGroup = function() { return activeGroup; };
+  `);
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_lane_sorts_by_group = {
+    alpha: {
+      Backlog: 'oldest',
+    },
+  };
+  context.state.board_tasks = {
+    manualTop: {
+      id: 'manualTop',
+      group: 'alpha',
+      task: 'Manual top',
+      lane: 'Backlog',
+      position: 4,
+      created_at: '2026-04-02T00:00:00Z',
+    },
+    newest: {
+      id: 'newest',
+      group: 'alpha',
+      task: 'Newest item',
+      lane: 'Backlog',
+      position: 3,
+      created_at: '2026-04-04T00:00:00Z',
+      scheduled_at: '2026-04-10T00:00:00Z',
+    },
+    dueSoon: {
+      id: 'dueSoon',
+      group: 'alpha',
+      task: 'Due first',
+      lane: 'Backlog',
+      position: 2,
+      created_at: '2026-04-03T00:00:00Z',
+      scheduled_at: '2026-04-07T00:00:00Z',
+    },
+    oldest: {
+      id: 'oldest',
+      group: 'alpha',
+      task: 'Oldest item',
+      lane: 'Backlog',
+      position: 1,
+      created_at: '2026-04-01T00:00:00Z',
+    },
+  };
+
+  context.renderBoard();
+
+  assert.deepEqual(
+    jsonValue(context, `_boardTasksInLane('Backlog').map(function(t) { return t.id; })`),
+    ['oldest', 'manualTop', 'dueSoon', 'newest'],
+  );
+  assert.match(panel.innerHTML, /<option value="oldest" selected>Oldest<\/option>/);
+
+  context.activeGroup = 'beta';
+  context.renderBoard();
+  assert.equal(runInContext(context, `_boardLaneSortMode('Backlog')`), 'manual');
+  assert.match(panel.innerHTML, /<option value="manual" selected>Manual<\/option>/);
+
+  context.activeGroup = 'alpha';
+  context.renderBoard();
+
+  context.boardSetLaneSort('manual');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.sendCalls.at(-1))),
+    {
+      cmd: 'board_set_lane_sorts',
+      lane_sorts_by_group: {},
+    },
+  );
+  assert.deepEqual(
+    jsonValue(context, `_boardTasksInLane('Backlog').map(function(t) { return t.id; })`),
+    ['manualTop', 'newest', 'dueSoon', 'oldest'],
+  );
+
+  context.boardSetLaneSort('newest');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.sendCalls.at(-1))),
+    {
+      cmd: 'board_set_lane_sorts',
+      lane_sorts_by_group: {
+        alpha: {
+          Backlog: 'newest',
+        },
+      },
+    },
+  );
+  assert.deepEqual(
+    jsonValue(context, `_boardTasksInLane('Backlog').map(function(t) { return t.id; })`),
+    ['newest', 'dueSoon', 'manualTop', 'oldest'],
+  );
+
+  context.boardSetLaneSort('due');
+  assert.deepEqual(
+    jsonValue(context, `_boardTasksInLane('Backlog').map(function(t) { return t.id; })`),
+    ['dueSoon', 'newest', 'manualTop', 'oldest'],
+  );
+  assert.match(panel.innerHTML, /<option value="due" selected>Due Soonest<\/option>/);
+});
+
+test('board card density persists per group and keeps key signals rendered', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.activeGroup = 'alpha';
+  runInContext(context, `
+    _currentGroup = function() { return activeGroup; };
+  `);
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_card_density_by_group = {
+    alpha: 'compact',
+  };
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alice Reviewer', slug: 'alice-reviewer' },
+  };
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Deploy fix',
+      labels: ['bug'],
+      action_name: 'feature/review',
+      agent_id: 'agent-1',
+      lane: 'Backlog',
+      position: 1,
+      messages: [{ action: 'progress', message: 'Waiting on review' }],
+    },
+  };
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-density-compact/);
+  assert.match(panel.innerHTML, /<option value="compact" selected>Compact<\/option>/);
+  assert.match(panel.innerHTML, /board-card-meta/);
+  assert.match(panel.innerHTML, /board-card-agent/);
+
+  context.activeGroup = 'beta';
+  context.renderBoard();
+  assert.match(panel.innerHTML, /board-density-normal/);
+  assert.match(panel.innerHTML, /<option value="normal" selected>Normal<\/option>/);
+
+  context.activeGroup = 'alpha';
+  context.renderBoard();
+  context.boardSetCardDensity('detailed');
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.sendCalls.at(-1))),
+    {
+      cmd: 'board_set_card_density',
+      card_density_by_group: {
+        alpha: 'detailed',
+      },
+    },
+  );
+  assert.match(panel.innerHTML, /board-density-detailed/);
+  assert.match(panel.innerHTML, /<option value="detailed" selected>Detailed<\/option>/);
+});
+
+test('renderBoard shows a compact sticky lane header with counts, filter summary, and quick actions', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alice Reviewer', slug: 'alice-reviewer' },
+  };
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Deploy fix',
+      labels: ['bug'],
+      action_name: 'feature/review',
+      agent_id: 'agent-1',
+      lane: 'Backlog',
+      position: 2,
+    },
+    child: {
+      id: 'child',
+      group: 'alpha',
+      task: 'Deploy follow-up',
+      labels: ['bug'],
+      action_name: 'feature/review',
+      agent_id: 'agent-1',
+      parent_task_id: 'root',
+      pipeline_depth: 1,
+      lane: 'Backlog',
+      position: 1,
+    },
+  };
+
+  runInContext(context, `
+    _boardSearchQuery = 'deploy';
+    _boardFilterLabels = ['bug'];
+    _boardFilterActions = ['feature/review'];
+    _boardFilterAgents = ['agent-1'];
+  `);
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-lane-header/);
+  assert.match(panel.innerHTML, /Backlog/);
+  assert.match(panel.innerHTML, /1 root · 2 total/);
+  assert.match(panel.innerHTML, /Search "deploy"/);
+  assert.match(panel.innerHTML, /Labels bug/);
+  assert.match(panel.innerHTML, /Actions feature\/review/);
+  assert.match(panel.innerHTML, /Agents Alice Reviewer/);
+  assert.match(panel.innerHTML, /\+ Task/);
+  assert.match(panel.innerHTML, /Clear Filters/);
+  assert.match(panel.innerHTML, /Save View/);
+});
+
+test('renderBoard explains filtered empty states with a clear recovery action', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Ship docs',
+      description: 'Publish the handbook',
+      lane: 'Backlog',
+      position: 1,
+    },
+  };
+
+  runInContext(context, `
+    _boardSearchQuery = 'no-such-task';
+    _boardFilterLabels = [];
+    _boardFilterActions = [];
+    _boardFilterAgents = [];
+  `);
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /No matching tasks/);
+  assert.match(panel.innerHTML, /hide everything in Backlog/);
+  assert.match(panel.innerHTML, /Clear Filters/);
+});
+
+test('renderBoard distinguishes empty, blocked, and no-ready backlog states', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'Done'];
+
+  context.renderBoard();
+  assert.match(panel.innerHTML, /No tasks in Backlog/);
+  assert.match(panel.innerHTML, /Add a task here or move existing work into this lane/);
+  assert.match(panel.innerHTML, /\+ Task/);
+
+  context.state.board_tasks = {
+    dep: {
+      id: 'dep',
+      group: 'alpha',
+      task: 'Finish auth review',
+      lane: 'To Do',
+      position: 1,
+    },
+    blocked: {
+      id: 'blocked',
+      group: 'alpha',
+      task: 'Dispatch fix',
+      lane: 'Backlog',
+      position: 0,
+      depends_on: ['dep'],
+    },
+  };
+
+  context.renderBoard();
+  assert.match(panel.innerHTML, /Everything in Backlog is blocked/);
+  assert.match(panel.innerHTML, /Resolve prerequisites to dispatch work/);
+
+  const futureIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  context.state.board_tasks = {
+    scheduled: {
+      id: 'scheduled',
+      group: 'alpha',
+      task: 'Dispatch later',
+      lane: 'Backlog',
+      position: 0,
+      scheduled_at: futureIso,
+    },
+  };
+
+  context.renderBoard();
+  assert.match(panel.innerHTML, /Nothing is ready to dispatch/);
+  assert.match(panel.innerHTML, /scheduled for later/);
 });
 
 test('events attention items include active asks and blocked agents for the current group', () => {

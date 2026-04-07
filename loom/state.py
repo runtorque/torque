@@ -313,6 +313,10 @@ class MatrixState:
         self.schedules: dict[str, Schedule] = {}
         self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
         self.board_panel_height: int = 0  # 0 = use CSS default
+        self.board_filters_by_group: dict[str, dict] = {}
+        self.board_saved_views_by_group: dict[str, list] = {}
+        self.board_lane_sorts_by_group: dict[str, dict] = {}
+        self.board_card_density_by_group: dict[str, str] = {}
         self.panel_log = None  # PanelEventLog, set from server.py
         # Weaver settings (per-group)
         self.weaver_settings: dict[str, WeaverSettings] = {}
@@ -359,6 +363,10 @@ class MatrixState:
             },
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
+            "board_filters_by_group": self.board_filters_by_group,
+            "board_saved_views_by_group": self.board_saved_views_by_group,
+            "board_lane_sorts_by_group": self.board_lane_sorts_by_group,
+            "board_card_density_by_group": self.board_card_density_by_group,
             "panel_events": self.panel_log.get_recent(50) if self.panel_log else [],
             "weaver_settings": {
                 n: asdict(ws) for n, ws in self.weaver_settings.items()
@@ -662,6 +670,18 @@ class MatrixState:
                 pa = "board"
             self.panel_active = pa
             self.board_panel_height = data.get("board_panel_height", 0)
+            self.board_filters_by_group = data.get(
+                "board_filters_by_group", {}
+            ) or {}
+            self.board_saved_views_by_group = data.get(
+                "board_saved_views_by_group", {}
+            ) or {}
+            self.board_lane_sorts_by_group = data.get(
+                "board_lane_sorts_by_group", {}
+            ) or {}
+            self.board_card_density_by_group = data.get(
+                "board_card_density_by_group", {}
+            ) or {}
             # Slug migration: generate slugs for resources that lack them.
             # Groups first (terminal slugs may reference group slugs),
             # then agents (terminal slugs reference parent agent slugs),
@@ -1037,6 +1057,38 @@ class MatrixState:
             del self.groups[name]
             self.group_slugs.pop(name, None)
             self.group_settings.pop(name, None)
+            if name in self.board_filters_by_group:
+                del self.board_filters_by_group[name]
+                self._emit("ui_update", key="board_filters_by_group",
+                           value=self.board_filters_by_group)
+                self._db_save_ui(
+                    "board_filters_by_group",
+                    json.dumps(self.board_filters_by_group),
+                )
+            if name in self.board_saved_views_by_group:
+                del self.board_saved_views_by_group[name]
+                self._emit("ui_update", key="board_saved_views_by_group",
+                           value=self.board_saved_views_by_group)
+                self._db_save_ui(
+                    "board_saved_views_by_group",
+                    json.dumps(self.board_saved_views_by_group),
+                )
+            if name in self.board_lane_sorts_by_group:
+                del self.board_lane_sorts_by_group[name]
+                self._emit("ui_update", key="board_lane_sorts_by_group",
+                           value=self.board_lane_sorts_by_group)
+                self._db_save_ui(
+                    "board_lane_sorts_by_group",
+                    json.dumps(self.board_lane_sorts_by_group),
+                )
+            if name in self.board_card_density_by_group:
+                del self.board_card_density_by_group[name]
+                self._emit("ui_update", key="board_card_density_by_group",
+                           value=self.board_card_density_by_group)
+                self._db_save_ui(
+                    "board_card_density_by_group",
+                    json.dumps(self.board_card_density_by_group),
+                )
             self.weaver_settings.pop(name, None)
             if self.db:
                 self.db.delete_weaver_settings(name)
@@ -1055,6 +1107,42 @@ class MatrixState:
             self.group_slugs[new] = self._unique_group_slug(new)
             if old in self.group_settings:
                 self.group_settings[new] = self.group_settings.pop(old)
+            if old in self.board_filters_by_group:
+                self.board_filters_by_group[new] = \
+                    self.board_filters_by_group.pop(old)
+                self._emit("ui_update", key="board_filters_by_group",
+                           value=self.board_filters_by_group)
+                self._db_save_ui(
+                    "board_filters_by_group",
+                    json.dumps(self.board_filters_by_group),
+                )
+            if old in self.board_saved_views_by_group:
+                self.board_saved_views_by_group[new] = \
+                    self.board_saved_views_by_group.pop(old)
+                self._emit("ui_update", key="board_saved_views_by_group",
+                           value=self.board_saved_views_by_group)
+                self._db_save_ui(
+                    "board_saved_views_by_group",
+                    json.dumps(self.board_saved_views_by_group),
+                )
+            if old in self.board_lane_sorts_by_group:
+                self.board_lane_sorts_by_group[new] = \
+                    self.board_lane_sorts_by_group.pop(old)
+                self._emit("ui_update", key="board_lane_sorts_by_group",
+                           value=self.board_lane_sorts_by_group)
+                self._db_save_ui(
+                    "board_lane_sorts_by_group",
+                    json.dumps(self.board_lane_sorts_by_group),
+                )
+            if old in self.board_card_density_by_group:
+                self.board_card_density_by_group[new] = \
+                    self.board_card_density_by_group.pop(old)
+                self._emit("ui_update", key="board_card_density_by_group",
+                           value=self.board_card_density_by_group)
+                self._db_save_ui(
+                    "board_card_density_by_group",
+                    json.dumps(self.board_card_density_by_group),
+                )
             for aid in self.groups[new]:
                 if aid in self.agents:
                     self.agents[aid].group = new
