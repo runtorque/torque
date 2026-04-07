@@ -46,6 +46,7 @@ nav:
   - Reference:
       - Reference Guide: reference-guide.md
       - CLI Reference: cli.md
+      - Testing: testing.md
   - Project:
       - Architecture: architecture.md
       - Roadmap: roadmap.md
