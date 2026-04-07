@@ -14,6 +14,9 @@ LOOM_HOOK_URL = "http://localhost:18932/events"
 # Marker comment for Loom-managed MCP config section
 _MCP_MARKER = "# -- Loom MCP server (managed by Loom, do not edit) --"
 _FEATURE_MARKER = "# -- Loom Codex hooks feature (managed by Loom, do not edit) --"
+_INSTRUCTIONS_MARKER = (
+    "# -- Loom Codex model instructions (managed by Loom, do not edit) --"
+)
 
 # Marker for Loom-managed AGENTS.md section (persistent system prompt)
 _LEGACY_AGENTS_MARKER = "<!-- Loom system prompt (managed by Loom, do not edit) -->"
@@ -42,6 +45,10 @@ _MANAGED_FEATURE_BLOCK_RE = re.compile(
 )
 _MANAGED_FEATURE_SECTION_RE = re.compile(
     r"\n?" + re.escape(_FEATURE_MARKER) + r"\n\[features\]\ncodex_hooks = true\n?"
+)
+_INSTRUCTIONS_BLOCK_RE = re.compile(
+    r"\n?" + re.escape(_INSTRUCTIONS_MARKER) + r"\n"
+    r'model_instructions_file = "(?:[^"\\]|\\.)*"\n?',
 )
 
 
@@ -152,6 +159,20 @@ def _remove_codex_hooks_enabled(content: str) -> str:
     return content
 
 
+def _set_model_instructions_file(content: str, path: str = "") -> str:
+    """Set or clear Loom-managed model instructions in config.toml."""
+    content = _INSTRUCTIONS_BLOCK_RE.sub("", content).lstrip("\n")
+    if not path:
+        return content
+    block = (
+        f"{_INSTRUCTIONS_MARKER}\n"
+        f"model_instructions_file = {json.dumps(path)}\n"
+    )
+    if not content:
+        return block
+    return block + "\n" + content
+
+
 class CodexAdapter(AgentAdapter):
     name = "codex"
     display_name = "Codex"
@@ -175,20 +196,57 @@ class CodexAdapter(AgentAdapter):
 
     def inject_persistent_prompt(self, working_dir: str,
                                  filename: str, text: str) -> str:
-        """Inject persistent prompt explicitly via CLI flags.
+        """Persist Loom instructions via model_instructions_file config."""
+        if not text or not working_dir or not filename:
+            return ""
+        try:
+            loom_dir = Path(working_dir) / ".loom"
+            loom_dir.mkdir(parents=True, exist_ok=True)
+            prompt_path = loom_dir / filename
+            prompt_path.write_text(text.rstrip() + "\n")
 
-        Loom must not rely on `.codex/AGENTS.md` discovery for correctness.
-        Older Loom versions wrote managed prompt blocks there; clean them up
-        if present so the prompt is sourced only from explicit launch flags.
-        """
-        if working_dir and filename:
-            self.uninstall_persistent_prompt(working_dir, filename)
-        return self.inject_system_prompt(working_dir, text)
+            config_dir = Path(working_dir) / ".codex"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_file = config_dir / "config.toml"
+            content = config_file.read_text() if config_file.exists() else ""
+            config_file.write_text(
+                _set_model_instructions_file(content, str(prompt_path))
+            )
+
+            # Clean up any stale Loom-managed AGENTS.md sections left by older
+            # versions so Codex only sees the configured instructions file.
+            agents_file = Path(working_dir) / ".codex" / "AGENTS.md"
+            if agents_file.exists():
+                cleaned = _remove_agents_section(agents_file.read_text(), "")
+                if cleaned.strip():
+                    agents_file.write_text(cleaned.strip() + "\n")
+                else:
+                    agents_file.unlink(missing_ok=True)
+        except Exception:
+            return ""
+        return ""
 
     def uninstall_persistent_prompt(self, working_dir: str,
                                     filename: str = "") -> None:
-        """Remove Loom-managed section from .codex/AGENTS.md."""
+        """Remove Loom-managed prompt file and stale AGENTS.md sections."""
         try:
+            loom_dir = Path(working_dir) / ".loom"
+            if filename:
+                (loom_dir / filename).unlink(missing_ok=True)
+            else:
+                for f in loom_dir.glob("loom-system-prompt-*.md"):
+                    f.unlink(missing_ok=True)
+
+            config_file = Path(working_dir) / ".codex" / "config.toml"
+            if config_file.exists():
+                updated = _set_model_instructions_file(
+                    config_file.read_text(), ""
+                ).strip()
+                if updated:
+                    config_file.write_text(updated + "\n")
+                else:
+                    config_file.unlink(missing_ok=True)
+
             agents_file = Path(working_dir) / ".codex" / "AGENTS.md"
             if not agents_file.exists():
                 return
