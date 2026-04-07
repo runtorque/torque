@@ -432,24 +432,6 @@ class WeaverEventBuffer:
                 for state_name, title in unhealthy_items[:3]
             ]
             parts.append("risk " + ", ".join(preview))
-        overlap = getattr(self._state, "dispatch_overlap_groups", {}).get(
-            group, {}
-        )
-        overlap_counts = overlap.get("counts", {})
-        if overlap.get("total", 0):
-            ordered = []
-            for level in ("conflict", "warning", "notice"):
-                count = overlap_counts.get(level, 0)
-                if count:
-                    ordered.append(f"{count} {level}")
-            if ordered:
-                parts.append("overlap " + ", ".join(ordered))
-            overlap_preview = [
-                f"{item['title'][:40]} ({item['level']})"
-                for item in overlap.get("items", [])[:3]
-            ]
-            if overlap_preview:
-                parts.append("surface " + ", ".join(overlap_preview))
         return " · ".join(parts) if parts else "empty"
 
     def _context_warning(self, weaver) -> str:

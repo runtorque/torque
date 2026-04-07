@@ -12,11 +12,6 @@ import json
 import logging
 from dataclasses import asdict
 
-from .dispatch_overlap import (
-    OVERLAP_CONFLICT,
-    OVERLAP_WARNING,
-    assess_dispatch_overlap,
-)
 from .task_health import HEALTH_SEVERITY
 
 log = logging.getLogger("loom")
@@ -445,12 +440,6 @@ WEAVER_TOOLS = [
                         "Only used when creating a new agent."
                     ),
                 },
-                "force": {
-                    "type": "boolean",
-                    "description": (
-                        "Proceed despite warning/conflict overlap checks."
-                    ),
-                },
             },
             "required": ["task"],
         },
@@ -498,12 +487,6 @@ WEAVER_TOOLS = [
                     "description": (
                         "Maximum number of active worker agents "
                         "allowed in the group after this call."
-                    ),
-                },
-                "force": {
-                    "type": "boolean",
-                    "description": (
-                        "Proceed despite warning/conflict overlap checks."
                     ),
                 },
             },
@@ -1000,12 +983,6 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         unhealthy = []
         pending_asks = []
         verification_items = []
-        overlap_summary = (
-            state.dispatch_overlap_groups.get(_weaver_group, {})
-            if hasattr(state, "dispatch_overlap_groups")
-            else {}
-        )
-
         for task in tasks:
             if task.lane in lane_counts:
                 lane_counts[task.lane] += 1
@@ -1138,14 +1115,6 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "items": verification_items[:10],
                 "truncated": len(verification_items) > 10,
             },
-            "dispatch_overlap": {
-                "counts": overlap_summary.get("counts", {
-                    "notice": 0, "warning": 0, "conflict": 0,
-                }),
-                "total": overlap_summary.get("total", 0),
-                "items": overlap_summary.get("items", []),
-                "truncated": overlap_summary.get("truncated", False),
-            },
             "agents": {
                 "total": total_agents,
                 "active_count": len(active_agents),
@@ -1184,11 +1153,6 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 agent = state.agents.get(t.agent_id)
                 if agent:
                     agent_name = agent.slug or agent.name
-            overlap = (
-                state.dispatch_overlap.get(t.id, {})
-                if hasattr(state, "dispatch_overlap")
-                else {}
-            )
             lane_tasks.append({
                 "id": t.id,
                 "slug": t.slug,
@@ -1210,8 +1174,6 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "external_url": t.external_url,
                 "health_since": getattr(t, "health_since", ""),
                 "parent_task_id": t.parent_task_id,
-                "overlap_level": overlap.get("level", ""),
-                "overlap_summary": overlap.get("summary", ""),
             })
 
         # Order lanes by board_lanes order
@@ -1267,11 +1229,6 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             "health_state": getattr(task, "health_state", "healthy"),
             "health_since": getattr(task, "health_since", ""),
             "health_details": getattr(task, "health_details", {}) or {},
-            "dispatch_overlap": (
-                state.dispatch_overlap.get(task.id, {})
-                if hasattr(state, "dispatch_overlap")
-                else {}
-            ),
         }
         # Include recent messages (last 10 only)
         if task.messages:
@@ -1556,8 +1513,6 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         agent_name = args.get("name", "")
         if agent_name:
             payload["name"] = agent_name
-        if "force" in args:
-            payload["force"] = bool(args.get("force"))
         result = await handle_command(payload)
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
@@ -1566,7 +1521,6 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
     if name == "weaver_batch_dispatch":
         raw_tasks = args.get("tasks", [])
         max_concurrent = args.get("max_concurrent", 0)
-        force_dispatch = bool(args.get("force"))
         if not isinstance(raw_tasks, list) or not raw_tasks:
             return "tasks must be a non-empty array", True
         if not isinstance(max_concurrent, int) or max_concurrent < 1:
@@ -1678,47 +1632,11 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 results.append(item)
                 continue
 
-            overlap = assess_dispatch_overlap(
-                state.board_tasks,
-                state.agents,
-                task,
-                db=state.db,
-                target_agent_id=target_agent_id,
-                create_agent=not bool(target_agent_id),
-            )
-            if (not force_dispatch
-                    and overlap.get("level") in {
-                        OVERLAP_WARNING,
-                        OVERLAP_CONFLICT,
-                    }):
-                item = {
-                    "index": idx,
-                    "task": task_ident,
-                    "task_id": tid,
-                    "status": "needs_confirmation",
-                    "reason": "dispatch_overlap",
-                    "level": overlap.get("level", ""),
-                    "message": overlap.get("summary", ""),
-                    "findings": overlap.get("findings", []),
-                    "mode": mode,
-                }
-                if agent_group:
-                    item["agent_group"] = agent_group
-                if target_agent_id:
-                    item["agent_id"] = target_agent_id
-                    agent = state.agents.get(target_agent_id)
-                    if agent:
-                        item["agent_name"] = agent.slug or agent.name
-                results.append(item)
-                continue
-
             payload = {"cmd": "dispatch_task", "id": tid}
             if target_agent_id:
                 payload["agent_id"] = target_agent_id
             else:
                 payload["create_agent"] = True
-            if force_dispatch:
-                payload["force"] = True
 
             result = await handle_command(payload)
             task_after = state.board_tasks.get(tid)
@@ -1737,22 +1655,6 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                     result.get("message", "Unknown error"),
                     tid,
                 )
-                continue
-            if result and result.get("type") == "dispatch_overlap_warning":
-                item = {
-                    "index": idx,
-                    "task": task_ident,
-                    "task_id": tid,
-                    "status": "needs_confirmation",
-                    "reason": "dispatch_overlap",
-                    "level": result.get("level", ""),
-                    "message": result.get("summary", ""),
-                    "findings": result.get("findings", []),
-                    "mode": mode,
-                }
-                if agent_group:
-                    item["agent_group"] = agent_group
-                results.append(item)
                 continue
             if result and result.get("type") == "dispatch_action_missing":
                 _fail(

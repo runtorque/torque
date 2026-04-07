@@ -1513,36 +1513,6 @@ test('backlog dispatch note ignores overlap warnings for ready work', () => {
   assert.equal(note, null);
 });
 
-test('dispatch overlap warnings auto-force dispatch without showing review copy', () => {
-  const { sandbox } = createSandbox({
-    showConfirm() {
-      throw new Error('showConfirm should not be called for dispatch overlap warnings');
-    },
-  });
-  const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
-
-  runInContext(context, `
-    _handleDispatchOverlapWarning({
-      task_id: 'task-1',
-      create_agent: true,
-      name: 'worker',
-      force_no_action: true,
-    });
-  `);
-
-  assert.deepEqual(jsonValue(context, 'sendCalls'), [
-    {
-      cmd: 'dispatch_task',
-      id: 'task-1',
-      force: true,
-      create_agent: true,
-      name: 'worker',
-      force_no_action: true,
-    },
-  ]);
-});
-
 test('renderBoard explains filtered empty states with a clear recovery action', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');

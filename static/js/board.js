@@ -3456,15 +3456,6 @@ function _handleDispatchActionMissing(msg) {
   });
 }
 
-function _handleDispatchOverlapWarning(msg) {
-  var cmd = { cmd: 'dispatch_task', id: msg.task_id, force: true };
-  if (msg.agent_id) cmd.agent_id = msg.agent_id;
-  else if (msg.create_agent) cmd.create_agent = true;
-  if (msg.name) cmd.name = msg.name;
-  if (msg.force_no_action) cmd.force_no_action = true;
-  send(cmd);
-}
-
 function _adjustCtxMenuOverflow() {
   var menu = document.getElementById('ctx-menu');
   if (!menu) return;

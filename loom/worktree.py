@@ -380,7 +380,7 @@ class WorktreeManager:
         """Return live changed file paths for the worktree vs its base branch.
 
         Includes committed branch diff plus staged/unstaged tracked changes
-        and untracked files so overlap warnings can fire before a checkpoint.
+        and untracked files so callers see the full working-tree surface.
         """
         if not cell.worktree_path or not cell.worktree_base_branch:
             return []
