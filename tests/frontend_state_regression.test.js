@@ -1486,6 +1486,93 @@ test('_renderBoardCard shows the lane-entry timestamp badge in the card header',
   assert.match(html, /\[5m ago\]/);
 });
 
+test('_boardTaskScheduleMeta distinguishes scheduled, due-soon, and overdue states', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  context.Date.now = () => Date.parse('2026-04-07T12:00:00Z');
+  loadScript(context, 'static/js/board.js');
+  context._schedFormatTime = (iso) => ({
+    '2026-04-10T09:30:00Z': 'Apr 10 09:30',
+    '2026-04-08T08:00:00Z': 'Apr 8 08:00',
+    '2026-04-07T09:00:00Z': 'Apr 7 09:00',
+  }[iso] || iso);
+
+  assert.equal(
+    runInContext(
+      context,
+      `JSON.stringify(_boardTaskScheduleMeta({
+        lane: 'In Progress',
+        scheduled_at: '2026-04-10T09:30:00Z'
+      }))`,
+    ),
+    JSON.stringify({
+      className: 'board-card-scheduled',
+      label: 'Scheduled Apr 10 09:30',
+    }),
+  );
+  assert.equal(
+    runInContext(
+      context,
+      `JSON.stringify(_boardTaskScheduleMeta({
+        lane: 'In Progress',
+        scheduled_at: '2026-04-08T08:00:00Z'
+      }))`,
+    ),
+    JSON.stringify({
+      className: 'board-card-scheduled board-card-due-soon',
+      label: 'Due Apr 8 08:00',
+    }),
+  );
+  assert.equal(
+    runInContext(
+      context,
+      `JSON.stringify(_boardTaskScheduleMeta({
+        lane: 'In Progress',
+        scheduled_at: '2026-04-07T09:00:00Z'
+      }))`,
+    ),
+    JSON.stringify({
+      className: 'board-card-scheduled board-card-overdue',
+      label: 'Overdue Apr 7 09:00',
+    }),
+  );
+});
+
+test('_renderBoardCard shows overdue and due-soon chips with distinct classes', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  context.Date.now = () => Date.parse('2026-04-07T12:00:00Z');
+  loadScript(context, 'static/js/board.js');
+  context._schedFormatTime = (iso) => ({
+    '2026-04-08T08:00:00Z': 'Apr 8 08:00',
+    '2026-04-07T09:00:00Z': 'Apr 7 09:00',
+  }[iso] || iso);
+
+  const overdueHtml = runInContext(context, `
+    _renderBoardCard({
+      id: 'overdue',
+      group: 'alpha',
+      task: 'Follow up on rollout',
+      lane: 'In Progress',
+      scheduled_at: '2026-04-07T09:00:00Z'
+    }, {}, 0)
+  `);
+  const dueSoonHtml = runInContext(context, `
+    _renderBoardCard({
+      id: 'soon',
+      group: 'alpha',
+      task: 'Draft notes for handoff',
+      lane: 'In Progress',
+      scheduled_at: '2026-04-08T08:00:00Z'
+    }, {}, 0)
+  `);
+
+  assert.match(overdueHtml, /board-card-overdue/);
+  assert.match(overdueHtml, /Overdue Apr 7 09:00/);
+  assert.match(dueSoonHtml, /board-card-due-soon/);
+  assert.match(dueSoonHtml, /Due Apr 8 08:00/);
+});
+
 test('renderBoardCard shows verification badges and preview text', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);

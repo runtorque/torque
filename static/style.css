@@ -3035,7 +3035,20 @@ body.diff-view-open #ctx-menu {
 .btn-green[disabled] { opacity: 0.4; pointer-events: none; }
 .modal-wide { max-width: 760px; }
 
-.board-card-scheduled { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+.board-card-scheduled {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+.board-card-due-soon {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--amber);
+  font-weight: 600;
+}
+.board-card-overdue {
+  background: rgba(248, 81, 73, 0.14);
+  color: var(--red);
+  font-weight: 600;
+}
 .board-label-dep-blocked {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 15%, transparent);

@@ -519,6 +519,36 @@ function _boardTaskTimestampMs(task) {
   return isNaN(stamp) ? 0 : stamp;
 }
 
+function _boardTaskScheduleMeta(task, nowMs) {
+  if (!task || !task.scheduled_at) return null;
+  var when = _boardTimestamp(task.scheduled_at);
+  var formatted = _schedFormatTime(task.scheduled_at) || task.scheduled_at;
+  if (Number.isNaN(when)) {
+    return {
+      className: 'board-card-scheduled',
+      label: 'Due ' + formatted,
+    };
+  }
+  var current = typeof nowMs === 'number' ? nowMs : Date.now();
+  var diffMs = when - current;
+  if (task.lane !== 'Done' && diffMs < 0) {
+    return {
+      className: 'board-card-scheduled board-card-overdue',
+      label: 'Overdue ' + formatted,
+    };
+  }
+  if (task.lane !== 'Done' && diffMs <= 86400000) {
+    return {
+      className: 'board-card-scheduled board-card-due-soon',
+      label: 'Due ' + formatted,
+    };
+  }
+  return {
+    className: 'board-card-scheduled',
+    label: (task.lane === 'Done' ? 'Due ' : 'Scheduled ') + formatted,
+  };
+}
+
 function _boardLaneEntryTimestampMs(task) {
   if (!task) return 0;
   var iso = task.lane_entered_at || task.created_at || '';
@@ -1474,8 +1504,10 @@ function _renderBoardCard(t, childrenOf, depth) {
   if (!isDone && _boardDepsBlocked(t)) {
     meta += '<span class="board-card-label board-label-dep-blocked" title="Blocked by dependencies">&#x1F512; deps</span>';
   }
-  if (t.scheduled_at) {
-    meta += '<span class="board-card-label board-card-scheduled">' + _schedFormatTime(t.scheduled_at) + '</span>';
+  var scheduleMeta = _boardTaskScheduleMeta(t);
+  if (scheduleMeta) {
+    meta += '<span class="board-card-label ' + esc(scheduleMeta.className)
+      + '" title="' + esc(scheduleMeta.label) + '">' + esc(scheduleMeta.label) + '</span>';
   }
   var artifactCount = typeof _artifactCountForTask === 'function'
     ? _artifactCountForTask(t)
