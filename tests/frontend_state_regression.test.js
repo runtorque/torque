@@ -1573,6 +1573,177 @@ test('_renderBoardCard shows overdue and due-soon chips with distinct classes', 
   assert.match(dueSoonHtml, /Due Apr 8 08:00/);
 });
 
+test('_boardTaskDispatchEligibility maps dispatch states onto compact card badges', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  context.Date.now = () => Date.parse('2026-04-07T12:00:00Z');
+  loadScript(context, 'static/js/board.js');
+  context._schedFormatTime = (iso) => ({
+    '2026-04-08T12:00:00Z': 'Apr 8 12:00',
+  }[iso] || iso);
+
+  context.state.board_tasks = {
+    dep: { id: 'dep', task: 'Dependency', lane: 'To Do', group: 'alpha' },
+  };
+  runInContext(context, `
+    _boardEligibilityActionsByGroup.alpha = [{ name: 'feature/impl' }];
+    _boardEligibilityTemplatesByGroup.alpha = [{ name: 'worker' }];
+  `);
+
+  assert.equal(
+    runInContext(
+      context,
+      `JSON.stringify(_boardTaskDispatchEligibility({
+        id: 'ready',
+        lane: 'Backlog',
+        group: 'alpha',
+        depends_on: [],
+        labels: []
+      }))`,
+    ),
+    JSON.stringify({
+      className: 'board-card-dispatch board-card-dispatch-ready',
+      label: 'Ready',
+      title: 'Ready to dispatch',
+    }),
+  );
+  assert.equal(
+    runInContext(
+      context,
+      `JSON.stringify(_boardTaskDispatchEligibility({
+        id: 'blocked',
+        lane: 'Backlog',
+        group: 'alpha',
+        depends_on: ['dep'],
+        labels: []
+      }))`,
+    ),
+    JSON.stringify({
+      className: 'board-card-dispatch board-card-dispatch-blocked',
+      label: 'Blocked by deps',
+      title: 'Waiting on: Dependency',
+    }),
+  );
+  assert.equal(
+    runInContext(
+      context,
+      `JSON.stringify(_boardTaskDispatchEligibility({
+        id: 'scheduled',
+        lane: 'Backlog',
+        group: 'alpha',
+        depends_on: [],
+        labels: [],
+        scheduled_at: '2026-04-08T12:00:00Z'
+      }))`,
+    ),
+    JSON.stringify({
+      className: 'board-card-dispatch board-card-dispatch-scheduled',
+      label: 'Scheduled later',
+      title: 'Dispatch window opens Apr 8 12:00',
+    }),
+  );
+  assert.equal(
+    runInContext(
+      context,
+      `JSON.stringify(_boardTaskDispatchEligibility({
+        id: 'missing',
+        lane: 'Backlog',
+        group: 'alpha',
+        depends_on: [],
+        labels: [],
+        action_name: 'missing/action',
+        agent_template: 'missing-template'
+      }))`,
+    ),
+    JSON.stringify({
+      className: 'board-card-dispatch board-card-dispatch-warning',
+      label: 'Missing refs',
+      title: 'Missing action "missing/action" and template "missing-template"',
+    }),
+  );
+  assert.equal(
+    runInContext(
+      context,
+      `JSON.stringify(_boardTaskDispatchEligibility({
+        id: 'queued',
+        lane: 'To Do',
+        group: 'alpha',
+        agent_id: 'agent-1'
+      }))`,
+    ),
+    JSON.stringify({
+      className: 'board-card-dispatch board-card-dispatch-queued',
+      label: 'Queued',
+      title: 'Already queued for dispatch',
+    }),
+  );
+});
+
+test('renderBoard requests action and template refs for dispatch eligibility badges', () => {
+  const { context, document } = createBoardHarness();
+  document.register('panel-board');
+  context.state.board_lanes = ['Backlog'];
+  context.state.groups = { alpha: [] };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      lane: 'Backlog',
+      action_name: 'feature/impl',
+      agent_template: 'worker',
+    },
+  };
+
+  runInContext(context, `
+    _activePanelApp = 'board';
+    _boardSelectedLane = 'Backlog';
+  `);
+
+  context.renderBoard();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    { cmd: 'list_actions', group: 'alpha' },
+    { cmd: 'list_templates', group: 'alpha' },
+  ]);
+});
+
+test('_renderBoardCard shows dispatch eligibility badges for ready and missing refs states', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+  runInContext(context, `
+    _boardEligibilityActionsByGroup.alpha = [{ name: 'feature/impl' }];
+    _boardEligibilityTemplatesByGroup.alpha = [{ name: 'worker' }];
+  `);
+
+  const readyHtml = runInContext(context, `
+    _renderBoardCard({
+      id: 'ready',
+      group: 'alpha',
+      task: 'Ship release',
+      lane: 'Backlog',
+      labels: []
+    }, {}, 0)
+  `);
+  const missingHtml = runInContext(context, `
+    _renderBoardCard({
+      id: 'missing',
+      group: 'alpha',
+      task: 'Backfill docs',
+      lane: 'Backlog',
+      labels: [],
+      action_name: 'missing/action',
+      agent_template: 'missing-template'
+    }, {}, 0)
+  `);
+
+  assert.match(readyHtml, /board-card-dispatch-ready/);
+  assert.match(readyHtml, />Ready</);
+  assert.match(missingHtml, /board-card-dispatch-warning/);
+  assert.match(missingHtml, />Missing refs</);
+});
+
 test('renderBoardCard shows verification badges and preview text', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);

@@ -66,6 +66,10 @@ var _boardBatchActionOptions = [];    // actions for batch edit action picker
 var _boardArchiveLabel = 'loom:archived';
 var _boardArchiveStaleDays = 7;
 var _boardLaneEntryRefreshTimer = 0;
+var _boardEligibilityActionsByGroup = {};
+var _boardEligibilityTemplatesByGroup = {};
+var _boardEligibilityActionWaiting = false;
+var _boardEligibilityTemplateWaiting = false;
 
 var _boardHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
 var _boardHealthLabels = {
@@ -984,9 +988,167 @@ function _boardTaskIsFutureScheduled(task) {
   return when > Date.now();
 }
 
+function _boardCacheDispatchActionList(msg) {
+  if (!msg || !msg.group) return;
+  _boardEligibilityActionsByGroup[msg.group] = msg.actions || [];
+  if (_boardEligibilityActionWaiting && msg.group === (_currentGroup() || '')) {
+    _boardEligibilityActionWaiting = false;
+  }
+}
+
+function _boardCacheDispatchTemplateList(msg) {
+  if (!msg || !msg.group) return;
+  _boardEligibilityTemplatesByGroup[msg.group] = msg.templates || [];
+  if (_boardEligibilityTemplateWaiting
+      && msg.group === (_currentGroup() || '')) {
+    _boardEligibilityTemplateWaiting = false;
+  }
+}
+
+function _boardHandleEligibilityActionList(msg) {
+  _boardCacheDispatchActionList(msg);
+  _boardEligibilityActionWaiting = false;
+  renderBoard();
+}
+
+function _boardHandleEligibilityTemplateList(msg) {
+  _boardCacheDispatchTemplateList(msg);
+  _boardEligibilityTemplateWaiting = false;
+  renderBoard();
+}
+
+function _boardEnsureDispatchEligibilityRefs(group) {
+  if (!group || typeof send !== 'function') return;
+  var tasks = _boardScopedTasks(_boardShowArchived);
+  var needsActions = false;
+  var needsTemplates = false;
+  for (var id in tasks) {
+    var task = tasks[id];
+    if (task.group !== group) continue;
+    if (task.action_name) needsActions = true;
+    if (task.agent_template) needsTemplates = true;
+  }
+  if (needsActions && !_boardEligibilityActionsByGroup[group]
+      && !_boardEligibilityActionWaiting) {
+    _boardEligibilityActionWaiting = true;
+    send({ cmd: 'list_actions', group: group });
+  }
+  if (needsTemplates && !_boardEligibilityTemplatesByGroup[group]
+      && !_boardEligibilityTemplateWaiting) {
+    _boardEligibilityTemplateWaiting = true;
+    send({ cmd: 'list_templates', group: group });
+  }
+}
+
+function _boardUnmetDependencyNames(task) {
+  if (!task || !Array.isArray(task.depends_on)) return [];
+  var tasks = _boardTasks();
+  var names = [];
+  for (var i = 0; i < task.depends_on.length; i++) {
+    var dep = tasks[task.depends_on[i]];
+    if (dep && dep.lane !== 'Done') names.push(dep.task || dep.id);
+  }
+  return names;
+}
+
+function _boardTaskHasMissingAction(task) {
+  if (!task || !task.action_name) return false;
+  var group = task.group || _currentGroup() || '';
+  var actions = _boardEligibilityActionsByGroup[group];
+  if (!actions) return false;
+  for (var i = 0; i < actions.length; i++) {
+    if (actions[i] && actions[i].name === task.action_name) return false;
+  }
+  return true;
+}
+
+function _boardTaskHasMissingTemplate(task) {
+  if (!task || !task.agent_template) return false;
+  var group = task.group || _currentGroup() || '';
+  var templates = _boardEligibilityTemplatesByGroup[group];
+  if (!templates) return false;
+  for (var i = 0; i < templates.length; i++) {
+    if (templates[i] && templates[i].name === task.agent_template) return false;
+  }
+  return true;
+}
+
+function _boardTaskNeedsEligibilityRefs(task) {
+  if (!task) return false;
+  var group = task.group || _currentGroup() || '';
+  return !!(
+    (task.action_name && !_boardEligibilityActionsByGroup[group])
+    || (task.agent_template && !_boardEligibilityTemplatesByGroup[group])
+  );
+}
+
 function _boardTaskIsDispatchBlocked(task) {
   return _boardDepsBlocked(task)
     || !!(task.labels && task.labels.indexOf('loom:blocked') >= 0);
+}
+
+function _boardTaskDispatchEligibility(task) {
+  if (!task) return null;
+  if (task.lane === 'To Do' && task.agent_id) {
+    return {
+      className: 'board-card-dispatch board-card-dispatch-queued',
+      label: 'Queued',
+      title: 'Already queued for dispatch',
+    };
+  }
+  if (task.lane !== 'Backlog') return null;
+  if (_boardTaskNeedsEligibilityRefs(task)) {
+    return {
+      className: 'board-card-dispatch board-card-dispatch-checking',
+      label: 'Checking refs',
+      title: 'Loading action/template availability',
+    };
+  }
+  var unmetDeps = _boardUnmetDependencyNames(task);
+  if (unmetDeps.length) {
+    var preview = unmetDeps.slice(0, 2).join(', ');
+    if (unmetDeps.length > 2) preview += ', +' + (unmetDeps.length - 2);
+    return {
+      className: 'board-card-dispatch board-card-dispatch-blocked',
+      label: 'Blocked by deps',
+      title: 'Waiting on: ' + preview,
+    };
+  }
+  if (task.labels && task.labels.indexOf('loom:blocked') >= 0) {
+    return {
+      className: 'board-card-dispatch board-card-dispatch-blocked',
+      label: 'Blocked',
+      title: 'Task is explicitly blocked',
+    };
+  }
+  if (_boardTaskIsFutureScheduled(task)) {
+    return {
+      className: 'board-card-dispatch board-card-dispatch-scheduled',
+      label: 'Scheduled later',
+      title: 'Dispatch window opens ' + _schedFormatTime(task.scheduled_at),
+    };
+  }
+  var missingAction = _boardTaskHasMissingAction(task);
+  var missingTemplate = _boardTaskHasMissingTemplate(task);
+  if (missingAction || missingTemplate) {
+    var missing = [];
+    if (missingAction) missing.push('action');
+    if (missingTemplate) missing.push('template');
+    return {
+      className: 'board-card-dispatch board-card-dispatch-warning',
+      label: missing.length === 2 ? 'Missing refs' : 'Missing ' + missing[0],
+      title: missingAction && missingTemplate
+        ? 'Missing action "' + task.action_name + '" and template "' + task.agent_template + '"'
+        : missingAction
+          ? 'Missing action "' + task.action_name + '"'
+          : 'Missing template "' + task.agent_template + '"',
+    };
+  }
+  return {
+    className: 'board-card-dispatch board-card-dispatch-ready',
+    label: 'Ready',
+    title: 'Ready to dispatch',
+  };
 }
 
 function _renderBoardMessageState(state, noteOnly) {
@@ -1463,6 +1625,12 @@ function _renderBoardCard(t, childrenOf, depth) {
   }
   cardHtml += '</div>';
   var meta = '';
+  var dispatchEligibility = _boardTaskDispatchEligibility(t);
+  if (dispatchEligibility) {
+    meta += '<span class="board-card-label ' + esc(dispatchEligibility.className)
+      + '" title="' + esc(dispatchEligibility.title) + '">'
+      + esc(dispatchEligibility.label) + '</span>';
+  }
   if (showExecutionState && t.status) meta += '<span class="board-card-label board-card-status">' + esc(t.status) + '</span>';
   if (showExecutionState && _boardTaskHealthState(t) !== 'healthy') {
     meta += '<span class="board-card-label board-card-health board-card-health-' + esc(_boardTaskHealthState(t))
@@ -1674,6 +1842,7 @@ function renderBoard() {
   _boardHydrateSavedViews();
   _boardHydrateLaneSorts();
   _boardHydrateCardDensity();
+  _boardEnsureDispatchEligibilityRefs(_currentGroup());
 
   // Preserve scroll + draft before DOM rebuild
   var _cardsEl = document.getElementById('board-cards');

@@ -1573,6 +1573,33 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   background: color-mix(in srgb, var(--green) 15%, transparent);
   font-weight: 600;
 }
+.board-card-dispatch {
+  font-weight: 600;
+}
+.board-card-dispatch-ready {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+}
+.board-card-dispatch-blocked {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+.board-card-dispatch-scheduled {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.board-card-dispatch-warning {
+  color: #ff7b72;
+  background: rgba(255, 123, 114, 0.14);
+}
+.board-card-dispatch-queued {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
+}
+.board-card-dispatch-checking {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 10%, transparent);
+}
 .board-card-health {
   font-weight: 600;
 }
