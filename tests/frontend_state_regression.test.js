@@ -292,8 +292,19 @@ function createModalHarness() {
   loadScript(context, 'static/js/modals.js');
   runInContext(context, `
     _renderTaskAttachments = function() {};
+    _renderTaskArtifacts = function() {};
+    _renderTaskArtifactEditor = function() {};
     taskAutoResize = function() {};
   `);
+  return { context, document };
+}
+
+function createDiffHarness() {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals.js');
+  loadScript(context, 'static/js/diff.js');
+  document.register('diff-view-root');
   return { context, document };
 }
 
@@ -2200,4 +2211,104 @@ test('openEditTask clears past scheduled times instead of showing stale dispatch
   context.openEditTask('task-2');
 
   assert.equal(document.getElementById('task-scheduled-input').value, '');
+});
+
+test('submitTask includes structured artifacts alongside attachments when editing a task', () => {
+  const { context, document } = createModalHarness();
+
+  document.register('task-task-input').value = 'Investigate flaky review run';
+  document.register('task-group-select').value = 'alpha';
+  document.register('task-description-input').value = 'Capture the failing logs';
+  document.register('task-template-select').value = '';
+  document.register('task-labels-input').value = '';
+  document.register('task-scheduled-input').value = '';
+  document.register('modal-task').dataset.lane = 'Backlog';
+
+  runInContext(context, `
+    _taskEditId = 'task-9';
+    _taskSelectedAction = 'feature/review';
+    _taskSelectedTemplate = '';
+    _taskAttachments = [{ filename: 'screenshot.png', path: '/tmp/screenshot.png', mime_type: 'image/png' }];
+    _taskArtifacts = [{
+      type: 'log',
+      title: 'pytest.log',
+      filename: 'pytest.log',
+      path: '/tmp/pytest.log',
+      summary: 'Last failing run',
+      content: 'E assert 1 == 2',
+      prompt: { mode: 'summary' },
+      storage: { kind: 'path', path: '/tmp/pytest.log', content: 'E assert 1 == 2' },
+      lifecycle: { owner: 'task', cleanup: 'delete_with_task' },
+    }];
+    _taskOriginalAttachments = [];
+    _taskOriginalArtifacts = [];
+  `);
+
+  context.submitTask();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
+    cmd: 'board_update_task',
+    id: 'task-9',
+    task: 'Investigate flaky review run',
+    group: 'alpha',
+    description: 'Capture the failing logs',
+    action_name: 'feature/review',
+    agent_template: '',
+    action_vars: {},
+    labels: [],
+    scheduled_at: '',
+    depends_on: [],
+    attachments: [{ filename: 'screenshot.png', path: '/tmp/screenshot.png', mime_type: 'image/png' }],
+    artifacts: [{
+      type: 'log',
+      title: 'pytest.log',
+      filename: 'pytest.log',
+      path: '/tmp/pytest.log',
+      summary: 'Last failing run',
+      content: 'E assert 1 == 2',
+      prompt: { mode: 'summary' },
+      storage: { kind: 'path', path: '/tmp/pytest.log', content: 'E assert 1 == 2' },
+      lifecycle: { owner: 'task', cleanup: 'delete_with_task' },
+    }],
+  });
+});
+
+test('diff review surfaces related task artifacts next to the synthesized diff artifact', () => {
+  const { context } = createDiffHarness();
+  context.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      current_task_id: 'task-1',
+    },
+  };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      task: 'Review auth patch',
+      agent_id: 'agent-1',
+      lane: 'In Progress',
+      updated_at: '2099-01-01T00:00:00Z',
+      artifacts: [{
+        type: 'test_report',
+        title: 'pytest report',
+        content: '2 failed, 18 passed',
+        prompt: { mode: 'summary' },
+      }],
+    },
+  };
+
+  runInContext(context, `
+    _diffViewAgentId = 'agent-1';
+    _diffViewData = {
+      stats: { files: 1, insertions: 4, deletions: 2 },
+      files: [{ path: 'auth.py', status: 'modified' }],
+    };
+  `);
+
+  assert.deepEqual(jsonValue(context, `_diffRelatedArtifacts().map(function(a) {
+    return { title: a.title, type: a.type, taskLabel: a.taskLabel || '' };
+  })`), [
+    { title: 'Worktree diff', type: 'diff', taskLabel: '' },
+    { title: 'pytest report', type: 'test_report', taskLabel: 'Review auth patch' },
+  ]);
 });

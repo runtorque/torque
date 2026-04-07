@@ -3337,7 +3337,7 @@ async def main(connection: iterm2.Connection):
                 task_text = data.get("task", "")
                 avars = data.get("action_vars", {})
                 act_group = data.get("group", "")
-                attachments = []
+                attachments = data.get("attachments", [])
                 artifacts = normalize_artifacts(data.get("artifacts", []))
 
                 if tid and not task_text:
@@ -4715,7 +4715,7 @@ async def main(connection: iterm2.Connection):
     # -- Attachment upload/serve endpoints -----------------------------------
 
     async def handle_upload(request):
-        """POST /api/upload — multipart file upload for task attachments."""
+        """POST /api/upload — multipart file upload for task images/artifacts."""
         reader = await request.multipart()
         task_id = ""
         saved = []
@@ -4730,7 +4730,7 @@ async def main(connection: iterm2.Connection):
                     return web.json_response(
                         {"ok": False, "error": "task_id must come before file parts"},
                         status=400)
-                fname = part.filename or "image"
+                fname = part.filename or "artifact.bin"
                 # Sanitize filename — no spaces (paths with spaces
                 # get lost during terminal paste to Claude Code)
                 fname = fname.replace("/", "_").replace("\\", "_")
@@ -4751,11 +4751,12 @@ async def main(connection: iterm2.Connection):
                 dest.write_bytes(fdata)
                 mime = part.headers.get(
                     aiohttp.hdrs.CONTENT_TYPE,
-                    mimetypes.guess_type(fname)[0] or "image/png")
+                    mimetypes.guess_type(fname)[0] or "application/octet-stream")
                 entry = {
                     "path": str(dest),
                     "filename": fname,
                     "mime_type": mime,
+                    "size_bytes": len(fdata),
                 }
                 saved.append(entry)
         if not task_id:
