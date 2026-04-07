@@ -1,7 +1,9 @@
 import importlib
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 
 
 def _install_aiohttp_stub():
@@ -121,6 +123,137 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(state.weaver_settings["g"].pending_note_kind, "")
         self.assertFalse(state.weaver_settings["g"].paused)
         self.assertEqual(state._delta_ops, [])
+
+    def test_cleanup_stale_boundary_successors_clears_merged_refs(self):
+        state = self.state_mod.MatrixState()
+        boundary = self.state_mod.BoardTask(
+            id="task-1",
+            task="Boundary task",
+            group="g",
+            lane="Done",
+            worktree_boundary={
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "merged",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+            },
+        )
+        queued = self.state_mod.BoardTask(
+            id="task-2",
+            task="Queued follow-up",
+            group="g",
+            lane="To Do",
+            resume_after_boundary_task_id=boundary.id,
+        )
+
+        state.board_tasks[boundary.id] = boundary
+        state.board_tasks[queued.id] = queued
+
+        cleaned = state.cleanup_stale_boundary_successors()
+
+        self.assertEqual(cleaned, 1)
+        self.assertEqual(
+            state.board_tasks[queued.id].resume_after_boundary_task_id, ""
+        )
+
+    def test_load_clears_stale_boundary_successors_and_keeps_open_ones(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": []}, {"g": "g"})
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-open",
+                task="Open boundary",
+                group="g",
+                lane="Done",
+                worktree_boundary={
+                    "repo_root": "/repo",
+                    "branch": "loom/worker",
+                    "status": "open",
+                    "recorded_at": "2026-04-07T10:00:00+00:00",
+                },
+            )
+        )
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-merged",
+                task="Merged boundary",
+                group="g",
+                lane="Done",
+                worktree_boundary={
+                    "repo_root": "/repo",
+                    "branch": "loom/worker",
+                    "status": "merged",
+                    "recorded_at": "2026-04-07T11:00:00+00:00",
+                },
+            )
+        )
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-valid",
+                task="Valid queued follow-up",
+                group="g",
+                lane="To Do",
+                resume_after_boundary_task_id="task-open",
+            )
+        )
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-stale",
+                task="Stale queued follow-up",
+                group="g",
+                lane="To Do",
+                resume_after_boundary_task_id="task-merged",
+            )
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertEqual(
+            state.board_tasks["task-valid"].resume_after_boundary_task_id,
+            "task-open",
+        )
+        self.assertEqual(
+            state.board_tasks["task-stale"].resume_after_boundary_task_id,
+            "",
+        )
+
+    def test_board_remove_task_clears_boundary_successor_links(self):
+        state = self.state_mod.MatrixState()
+        boundary = self.state_mod.BoardTask(
+            id="task-1",
+            task="Boundary task",
+            group="g",
+            lane="Done",
+            worktree_boundary={
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+            },
+        )
+        queued = self.state_mod.BoardTask(
+            id="task-2",
+            task="Queued follow-up",
+            group="g",
+            lane="To Do",
+            resume_after_boundary_task_id=boundary.id,
+        )
+
+        state.board_tasks[boundary.id] = boundary
+        state.board_tasks[queued.id] = queued
+
+        state.board_remove_task(boundary.id)
+
+        self.assertEqual(
+            state.board_tasks[queued.id].resume_after_boundary_task_id, ""
+        )
 
     def test_weaver_resume_semantics_preserve_non_blocking_notes(self):
         state = self.state_mod.MatrixState()

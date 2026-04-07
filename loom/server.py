@@ -33,6 +33,7 @@ from .worktree_boundaries import (
     latest_boundary_task,
     mark_branch_boundaries_merged,
     queued_successor_tasks,
+    retarget_queued_successor_tasks,
     started_successor_tasks,
     task_boundary,
 )
@@ -1226,8 +1227,8 @@ async def main(connection: iterm2.Connection):
     def _record_task_dispatch(cell, task, lane: str) -> None:
         """Link a task to an agent and persist dispatch history."""
         repo_root = cell.worktree_repo_root or cell.git_root or ""
-        if (not task.resume_after_boundary_task_id and cell.worktree_branch
-                and repo_root):
+        next_boundary_task_id = ""
+        if cell.worktree_branch and repo_root:
             latest = latest_boundary_task(
                 state.board_tasks.values(),
                 repo_root=repo_root,
@@ -1235,7 +1236,9 @@ async def main(connection: iterm2.Connection):
                 statuses={"open"},
             )
             if latest and latest.id != task.id:
-                task.resume_after_boundary_task_id = latest.id
+                next_boundary_task_id = latest.id
+        if task.resume_after_boundary_task_id != next_boundary_task_id:
+            task.resume_after_boundary_task_id = next_boundary_task_id
         state.board_update_task(task.id, agent_id=cell.id, lane=lane)
         cell.current_task_id = task.id
         state.history_record_dispatch(cell, task)
@@ -1457,14 +1460,11 @@ async def main(connection: iterm2.Connection):
         }
         _save_task_record(task)
 
-        for queued_task in state.board_tasks.values():
-            if queued_task.id == task.id:
-                continue
-            if queued_task.agent_id != cell.id:
-                continue
-            if queued_task.lane not in {"Backlog", "To Do"}:
-                continue
-            queued_task.resume_after_boundary_task_id = task.id
+        for queued_task in retarget_queued_successor_tasks(
+                state.board_tasks.values(),
+                agent_id=cell.id,
+                boundary_task_id=task.id,
+                exclude_task_id=task.id):
             _save_task_record(queued_task)
 
         return dict(task.worktree_boundary)
@@ -2941,6 +2941,7 @@ async def main(connection: iterm2.Connection):
                             _mark_branch_boundaries_merged(
                                 cell, merge_result["sha"]
                             )
+                            state.cleanup_stale_boundary_successors()
                             cell.worktree_checkpoints = 0
                             cell.worktree_merged = True
                             cell.worktree_changed_files = []
