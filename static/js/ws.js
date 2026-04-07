@@ -139,6 +139,9 @@ function connect() {
 
 function _handleFullState(msg) {
   const prevActive = state.active_session_id;
+  const shouldRestorePanel = typeof _panelStateRestored !== 'undefined'
+    ? !_panelStateRestored
+    : false;
   state = msg;
   if (typeof _boardFiltersByGroup !== 'undefined') _boardFiltersByGroup = null;
   if (typeof _boardSavedViewsByGroup !== 'undefined') _boardSavedViewsByGroup = null;
@@ -161,7 +164,12 @@ function _handleFullState(msg) {
     _syncSelectionToActiveSession();
   }
   _firstStateReceived = true;
-  if (!dragInProgress) render();
+  if (!dragInProgress) {
+    render();
+    if (!shouldRestorePanel && typeof renderActivePanel === 'function') {
+      renderActivePanel();
+    }
+  }
   // Restore board panel state on first load
   if (typeof _restorePanelState === 'function') _restorePanelState();
 }
@@ -169,6 +177,8 @@ function _handleFullState(msg) {
 /* -- Delta patching ------------------------------------------------------- */
 
 function _handleDelta(msg) {
+  const prevGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
+  const invalidations = _deltaSurfaceInvalidations(msg.ops);
   if (msg.seq !== _expectedSeq) {
     // Sequence gap — request full resync
     send({ cmd: 'resync' });
@@ -176,7 +186,92 @@ function _handleDelta(msg) {
   }
   _expectedSeq = msg.seq + 1;
   _applyDelta(msg.ops);
-  if (!dragInProgress) render();
+  const nextGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
+  if (prevGroup !== nextGroup) {
+    const activeSurface = typeof _activePanelSurface === 'function'
+      ? _activePanelSurface()
+      : '';
+    if (activeSurface) invalidations[activeSurface] = true;
+  }
+  if (!dragInProgress) {
+    if (typeof renderInvalidatedSurfaces === 'function') {
+      renderInvalidatedSurfaces(invalidations);
+    } else {
+      render();
+    }
+  }
+}
+
+function _blankSurfaceInvalidations() {
+  return {
+    main: false,
+    board: false,
+    events: false,
+    weaver: false,
+    templates: false,
+  };
+}
+
+function _markSurface(flags) {
+  for (let i = 1; i < arguments.length; i++) {
+    flags[arguments[i]] = true;
+  }
+}
+
+function _deltaSurfaceInvalidations(ops) {
+  const flags = _blankSurfaceInvalidations();
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    switch (op.op) {
+      case 'agent_upsert':
+      case 'agent_remove':
+        _markSurface(flags, 'main', 'events', 'weaver');
+        break;
+      case 'group_update':
+      case 'group_remove':
+      case 'group_rename':
+      case 'groups_reorder':
+      case 'group_settings_update':
+      case 'focus_update':
+      case 'global_settings_update':
+        _markSurface(flags, 'main', 'weaver');
+        break;
+      case 'task_upsert':
+      case 'task_remove':
+        _markSurface(flags, 'main', 'board', 'events', 'weaver');
+        break;
+      case 'lanes_update':
+      case 'schedule_upsert':
+      case 'schedule_remove':
+        _markSurface(flags, 'board');
+        break;
+      case 'event_append':
+        _markSurface(flags, 'events');
+        break;
+      case 'journal_append':
+      case 'journal_delete':
+      case 'weaver_buffer_stats':
+      case 'weaver_settings_update':
+        _markSurface(flags, 'weaver');
+        break;
+      case 'ui_update':
+        _applyUiSurfaceInvalidation(flags, op.key);
+        break;
+    }
+  }
+  return flags;
+}
+
+function _applyUiSurfaceInvalidation(flags, key) {
+  if (key === 'board_filters_by_group'
+      || key === 'board_saved_views_by_group'
+      || key === 'board_lane_sorts_by_group'
+      || key === 'board_card_density_by_group') {
+    _markSurface(flags, 'board');
+  }
+  if (key === 'dispatch_overlap_groups') {
+    _markSurface(flags, 'weaver');
+  }
 }
 
 function _applyDelta(ops) {

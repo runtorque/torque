@@ -166,6 +166,7 @@ function _eventsAskAgent(task) {
 function renderEvents() {
   var panel = document.getElementById('panel-events');
   if (!panel) return;
+  var panelState = _captureSurfaceState(panel);
 
   // Preserve scroll position and inline ask drafts before DOM rebuild
   var logEl = panel.querySelector('.events-log');
@@ -265,6 +266,7 @@ function renderEvents() {
     ta.style.height = 'auto';
     ta.style.height = ta.scrollHeight + 'px';
   });
+  _restoreSurfaceState(panel, panelState);
 }
 
 /* ---- Attention card rendering --------------------------------------- */
