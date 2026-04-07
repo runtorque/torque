@@ -322,9 +322,13 @@ A practical review sequence is:
 3. inspect specific risky paths with `weaver_diff(..., paths=[...])` if needed
 4. ask the agent for clarification with `weaver_agent_message` if the diff is unclear
 
+For shared same-agent branches, `weaver_agent_show` also exposes task-boundary metadata so the Weaver can tell which completed task is the latest clean mergeable boundary and which queued tasks resume after it.
+
 ### Merge flow
 
 `weaver_merge` is a server-side merge operation. If Loom detects conflicts, it returns an error and the Weaver should ask the human for permission before attempting a manual recovery plan.
+
+On shared sequential branches, `weaver_merge` also refuses to merge when the latest task boundary is no longer cleanly mergeable, for example because a queued follow-up already started or the branch tip moved after the boundary was recorded.
 
 Typical flow:
 

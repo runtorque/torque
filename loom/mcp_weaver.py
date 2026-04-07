@@ -1361,6 +1361,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
         # Worktree state
         if cell.worktree_path:
+            repo_root = cell.worktree_repo_root or cell.git_root or ""
             d["worktree"] = {
                 "path": cell.worktree_path,
                 "branch": cell.worktree_branch,
@@ -1372,6 +1373,32 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "behind": cell.worktree_behind,
                 "merged": cell.worktree_merged,
             }
+            boundary_tasks = []
+            for t in state.board_tasks.values():
+                boundary = getattr(t, "worktree_boundary", {}) or {}
+                if not isinstance(boundary, dict):
+                    continue
+                if boundary.get("repo_root", "") != repo_root:
+                    continue
+                if boundary.get("branch", "") != cell.worktree_branch:
+                    continue
+                boundary_tasks.append({
+                    "task_id": t.id,
+                    "task_title": t.task,
+                    "lane": t.lane,
+                    "boundary": boundary,
+                    "resume_after_boundary_task_id": (
+                        getattr(t, "resume_after_boundary_task_id", "") or ""
+                    ),
+                })
+            boundary_tasks.sort(
+                key=lambda item: (
+                    item["boundary"].get("recorded_at", ""),
+                    item["task_id"],
+                )
+            )
+            if boundary_tasks:
+                d["worktree"]["task_boundaries"] = boundary_tasks
 
         # Child terminals
         children_ids = state._children.get(agent_id, [])
@@ -1402,7 +1429,12 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "status": t.status,
                 "labels": t.labels or [],
                 "action": t.action_name,
+                "resume_after_boundary_task_id": (
+                    t.resume_after_boundary_task_id or ""
+                ),
             }
+            if t.worktree_boundary:
+                task_info["worktree_boundary"] = t.worktree_boundary
             if t.messages:
                 task_info["messages"] = t.messages
             tasks.append(task_info)
@@ -1962,14 +1994,16 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         if not cell or not cell.worktree_path:
             return "Agent has no worktree", True
 
-        # First check for conflicts
+        # First check for conflicts / merge boundary eligibility
         result = await handle_command({
-            "cmd": "worktree_check_conflicts",
+            "cmd": "worktree_check_merge",
             "id": agent_id,
         })
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         if result and not result.get("clean", True):
+            if result.get("error"):
+                return result.get("error", "Merge blocked"), True
             conflicts = result.get("conflicts", [])
             conflict_list = "\n".join(f"  - {c}" for c in conflicts)
             return (

@@ -67,6 +67,9 @@ class BoardTask:
     verification_updated_at: str = ""
     verification_updated_by: str = ""
     verification_summary: dict = field(default_factory=dict)
+    # Task-scoped shared-worktree merge boundary metadata.
+    worktree_boundary: dict = field(default_factory=dict)
+    resume_after_boundary_task_id: str = ""
 
 
 @dataclass
@@ -236,6 +239,38 @@ def _normalize_verification_fields(fields: dict) -> None:
         fields["verification_summary"] = _normalize_verification_summary(
             fields.get("verification_summary")
         )
+
+
+def _normalize_worktree_boundary(boundary) -> dict:
+    if not isinstance(boundary, dict):
+        return {}
+    out = {}
+    text_keys = (
+        "version",
+        "branch",
+        "repo_root",
+        "base_branch",
+        "commit_sha",
+        "kind",
+        "status",
+        "recorded_at",
+        "recorded_by_agent_id",
+        "message",
+        "superseded_by_task_id",
+        "merged_at",
+        "merge_commit_sha",
+        "reason",
+    )
+    for key in text_keys:
+        value = boundary.get(key, "")
+        if value is None:
+            value = ""
+        if not isinstance(value, str):
+            value = str(value)
+        value = value.strip()
+        if value:
+            out[key] = value
+    return out
 
 
 @dataclass
@@ -725,6 +760,15 @@ class MatrixState:
                 raw["artifacts"] = normalize_artifacts(
                     raw.get("artifacts", []))
                 _normalize_verification_fields(raw)
+                raw["worktree_boundary"] = _normalize_worktree_boundary(
+                    raw.get("worktree_boundary", {})
+                )
+                resume_after = raw.get("resume_after_boundary_task_id", "")
+                if resume_after is None:
+                    resume_after = ""
+                if not isinstance(resume_after, str):
+                    resume_after = str(resume_after)
+                raw["resume_after_boundary_task_id"] = resume_after.strip()
                 filtered = {k: v for k, v in raw.items() if k in bt_fields}
                 self.board_tasks[tid] = BoardTask(**filtered)
             # panel_active: new key; backward compat from board_panel_open

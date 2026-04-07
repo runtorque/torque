@@ -63,6 +63,25 @@ def ensure_git_exclude(directory: str) -> None:
 class WorktreeManager:
     """Manages git worktrees for agent isolation."""
 
+    async def rev_parse(self, directory: str, ref: str) -> Optional[str]:
+        """Resolve a git ref or object to a full SHA."""
+        if not directory or not ref:
+            return None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", directory, "rev-parse", ref,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return None
+            sha = stdout.decode().strip()
+            return sha or None
+        except Exception:
+            log.debug("rev_parse failed for %s @ %s", directory, ref)
+            return None
+
     async def get_repo_root(self, directory: str) -> Optional[str]:
         """Find the git repo root for a directory. Returns None if not a repo."""
         directory = os.path.expanduser(directory)
@@ -457,6 +476,12 @@ class WorktreeManager:
         except Exception:
             log.exception("Checkpoint failed for '%s'", cell.name)
             return None
+
+    async def current_head(self, cell) -> Optional[str]:
+        """Return the current HEAD SHA for a worktree."""
+        if not cell.worktree_path:
+            return None
+        return await self.rev_parse(cell.worktree_path, "HEAD")
 
     async def list_checkpoints(self, cell) -> list[dict]:
         """List commits on the worktree branch since the fork point.

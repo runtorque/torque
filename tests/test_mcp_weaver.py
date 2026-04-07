@@ -877,7 +877,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_handle_command(payload):
             calls.append(dict(payload))
-            if payload["cmd"] == "worktree_check_conflicts":
+            if payload["cmd"] == "worktree_check_merge":
                 return {"type": "ok", "clean": True}
             if payload["cmd"] == "worktree_merge":
                 return {
@@ -912,7 +912,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             calls,
             [
-                {"cmd": "worktree_check_conflicts", "id": cell.id},
+                {"cmd": "worktree_check_merge", "id": cell.id},
                 {
                     "cmd": "worktree_merge",
                     "id": cell.id,
@@ -938,7 +938,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
         state.groups["g"] = [cell.id]
 
         async def fake_handle_command(payload):
-            if payload["cmd"] == "worktree_check_conflicts":
+            if payload["cmd"] == "worktree_check_merge":
                 return {"type": "ok", "clean": True}
             if payload["cmd"] == "worktree_merge":
                 return {
@@ -990,7 +990,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_handle_command(payload):
             calls.append(dict(payload))
-            if payload["cmd"] == "worktree_check_conflicts":
+            if payload["cmd"] == "worktree_check_merge":
                 return {
                     "type": "ok",
                     "clean": False,
@@ -1011,8 +1011,47 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("README.md", text)
         self.assertEqual(
             calls,
-            [{"cmd": "worktree_check_conflicts", "id": cell.id}],
+            [{"cmd": "worktree_check_merge", "id": cell.id}],
         )
+
+    async def test_merge_reports_boundary_blockers_without_conflict_flow(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            cell_type="agent",
+            worktree_path="/tmp/worktree",
+            worktree_branch="loom/worker",
+            worktree_base_branch="main",
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+
+        async def fake_handle_command(payload):
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "clean": False,
+                    "error": "Latest task boundary is no longer cleanly mergeable because a follow-up task has already started.",
+                    "boundary": {
+                        "task_id": "task-1",
+                        "task_title": "Implement feature",
+                    },
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_merge",
+            {"agent": cell.id},
+            fake_handle_command,
+            state,
+            cell_id=cell.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("Latest task boundary", text)
 
 
 class WeaverAgentLifecycleToolTests(unittest.IsolatedAsyncioTestCase):
@@ -1114,6 +1153,15 @@ class WeaverRecoveryToolTests(unittest.IsolatedAsyncioTestCase):
             labels=["ready"],
             action_name="oneshot/feature",
             agent_id=agent.id,
+            worktree_boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "base_branch": "main",
+                "commit_sha": "abc123",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+            },
             messages=[{"action": "progress", "message": "Halfway there"}],
         )
 
@@ -1142,6 +1190,10 @@ class WeaverRecoveryToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["worktree"]["branch"], "loom/worker")
         self.assertEqual(data["worktree"]["diff"], agent.worktree_diff)
         self.assertEqual(
+            data["worktree"]["task_boundaries"][0]["boundary"]["commit_sha"],
+            "abc123",
+        )
+        self.assertEqual(
             data["terminals"],
             [{
                 "name": "Logs",
@@ -1161,6 +1213,16 @@ class WeaverRecoveryToolTests(unittest.IsolatedAsyncioTestCase):
                 "status": "On Review",
                 "labels": ["ready"],
                 "action": "oneshot/feature",
+                "worktree_boundary": {
+                    "version": "1",
+                    "repo_root": "/repo",
+                    "branch": "loom/worker",
+                    "base_branch": "main",
+                    "commit_sha": "abc123",
+                    "status": "open",
+                    "recorded_at": "2026-04-07T10:00:00+00:00",
+                },
+                "resume_after_boundary_task_id": "",
                 "messages": [{"action": "progress", "message": "Halfway there"}],
             }],
         )

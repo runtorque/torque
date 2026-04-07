@@ -180,6 +180,44 @@ function _renderDiffArtifacts() {
   return html;
 }
 
+function _boundaryShortSha(boundary) {
+  if (!boundary || !boundary.commit_sha) return '';
+  return String(boundary.commit_sha).slice(0, 8);
+}
+
+function _renderBoundarySummary() {
+  var boundary = (_diffMergeCheck && _diffMergeCheck.boundary)
+    || (_diffViewData && _diffViewData.boundary);
+  if (!boundary || !boundary.boundary) return '';
+  var meta = boundary.boundary || {};
+  var clean = !!((_diffMergeCheck && _diffMergeCheck.clean_boundary)
+    || (_diffViewData && _diffViewData.clean_boundary));
+  var html = '<section class="diff-boundary-section">';
+  html += '<div class="diff-boundary-title">Latest task boundary</div>';
+  html += '<div class="diff-boundary-row">';
+  html += '<span class="diff-boundary-task">' + esc(boundary.task_title || boundary.task_id || 'Task boundary') + '</span>';
+  html += '<span class="diff-boundary-badge ' + (clean ? 'clean' : 'blocked') + '">'
+    + esc(clean ? 'clean mergeable' : 'blocked') + '</span>';
+  html += '</div>';
+  html += '<div class="diff-boundary-meta">';
+  if (meta.kind) html += '<span>' + esc(meta.kind) + '</span>';
+  if (meta.status) html += '<span>' + esc(meta.status) + '</span>';
+  if (meta.commit_sha) html += '<span>' + esc(_boundaryShortSha(meta)) + '</span>';
+  html += '</div>';
+  if (boundary.queued_followers && boundary.queued_followers.length) {
+    html += '<div class="diff-boundary-followers">Queued after this boundary: '
+      + esc(boundary.queued_followers.map(function(f) { return f.task_title; }).join(', '))
+      + '</div>';
+  }
+  if (boundary.started_followers && boundary.started_followers.length) {
+    html += '<div class="diff-boundary-followers blocked">Started after this boundary: '
+      + esc(boundary.started_followers.map(function(f) { return f.task_title; }).join(', '))
+      + '</div>';
+  }
+  html += '</section>';
+  return html;
+}
+
 function _renderDiffLines(lines) {
   var html = '';
   for (var i = 0; i < lines.length; i++) {
@@ -367,6 +405,7 @@ function renderDiffView() {
   html += '<div class="diff-view-stats">' + esc(_diffStatsLabel(stats)) + '</div>';
   html += '</div>';
   html += '<div class="diff-view-content">';
+  html += _renderBoundarySummary();
   html += _renderDiffArtifacts();
   if (!files.length) {
     html += '<div class="diff-empty">No changes to review.</div>';
