@@ -14,6 +14,7 @@ Loom is an iTerm2 Toolbelt plugin for organizing AI agents and terminal sessions
 
 - [Getting Started](getting-started.md)
 - [Concepts](concepts.md)
+- [Sessions](sessions.md)
 - [Agents & Sessions](agents-and-sessions.md)
 - [Group Settings](group-settings.md)
 - [Keyboard Shortcuts](keyboard-shortcuts.md)
@@ -23,6 +24,7 @@ Loom is an iTerm2 Toolbelt plugin for organizing AI agents and terminal sessions
 - [Workflow Guide](workflow-guide.md) — follow the normal path from task creation to dispatch, handoffs, schedules, and completion
 - [Task Board](board.md) — create tasks, organize lanes, and dispatch work
 - [Task Lifecycle](task-lifecycle.md) — see how tasks move through Loom
+- [Schedules](schedules.md) — understand recurring and one-shot dispatch entry points
 - [Worktrees](worktrees.md) — isolate changes per agent in separate git worktrees
 
 ### I want reusable prompts, templates, or pipelines
@@ -39,6 +41,7 @@ Loom is an iTerm2 Toolbelt plugin for organizing AI agents and terminal sessions
 - [Reference Guide](reference-guide.md) — grouped operator reference for commands, shortcuts, settings, logs, and runtime paths
 - [CLI Reference](cli.md) — full command reference
 - [Troubleshooting](troubleshooting.md) — symptom-first recovery steps for startup, sessions, worktrees, merge issues, and stale state
+- [Operations](operations.md) — runtime modes, deploy/update, logs, notifications, and other operator guidance
 
 ## Documentation map
 
@@ -46,6 +49,7 @@ Loom is an iTerm2 Toolbelt plugin for organizing AI agents and terminal sessions
 
 - [Getting Started](getting-started.md)
 - [Concepts](concepts.md)
+- [Sessions](sessions.md)
 - [Agents & Sessions](agents-and-sessions.md)
 - [Group Settings](group-settings.md)
 - [Keyboard Shortcuts](keyboard-shortcuts.md)
@@ -59,10 +63,17 @@ Loom is an iTerm2 Toolbelt plugin for organizing AI agents and terminal sessions
 - [Agent Templates](agent-templates.md)
 - [Weaver](weaver.md)
 - [Worktrees](worktrees.md)
+- [Schedules](schedules.md)
 
-### Reference
+### Operate Loom
 
-- [CLI Reference](cli.md)
-- [Reference Guide](reference-guide.md)
+- [Operations](operations.md)
 - [Troubleshooting](troubleshooting.md)
+- [Reference Guide](reference-guide.md)
+- [CLI Reference](cli.md)
+
+### Architecture and internals
+
+- [Architecture](architecture.md)
 - [Roadmap](roadmap.md)
+- [Plans Archive](plans/index.md)
