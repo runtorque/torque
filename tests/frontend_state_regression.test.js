@@ -461,7 +461,7 @@ test('weaver task health summary prioritizes severe unhealthy tasks', () => {
   assert.deepEqual(summary.items.map((item) => item.id), ['blocked', 'stalled']);
 });
 
-test('weaver overlap summary prioritizes conflicts before warnings', () => {
+test('weaver journal does not render dispatch overlap summaries', () => {
   const { context } = createWeaverHarness();
   context.state.dispatch_overlap_groups = {
     alpha: {
@@ -474,10 +474,10 @@ test('weaver overlap summary prioritizes conflicts before warnings', () => {
     },
   };
 
-  const summary = jsonValue(context, `_weaverOverlapSummary('alpha')`);
+  const html = runInContext(context, `_weaverRenderJournal('alpha')`);
 
-  assert.equal(summary.total, 3);
-  assert.deepEqual(summary.items.map((item) => item.task_id), ['conflict', 'warn']);
+  assert.doesNotMatch(html, /Dispatch overlap/);
+  assert.doesNotMatch(html, /Same branch/);
 });
 
 test('board search matches title, description, labels, action, and linked agent fields', () => {
@@ -1436,7 +1436,7 @@ test('renderBoardCard shows verification badges and preview text', () => {
   assert.match(html, /Needs human validation: Confirm billing dashboard loads/);
 });
 
-test('renderBoardCard shows overlap badges and preview text for human-facing levels', () => {
+test('renderBoardCard does not render overlap badges or preview text', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/board.js');
@@ -1465,43 +1465,63 @@ test('renderBoardCard shows overlap badges and preview text for human-facing lev
     )
   `);
 
-  assert.match(html, /board-card-overlap-conflict/);
-  assert.match(html, /Overlap conflict/);
-  assert.match(html, /Shares the same worktree branch as another active agent/);
+  assert.doesNotMatch(html, /board-card-overlap-conflict/);
+  assert.doesNotMatch(html, /Overlap conflict/);
+  assert.doesNotMatch(html, /Shares the same worktree branch as another active agent/);
 });
 
-test('renderBoardCard hides overlap notice badges and preview text', () => {
-  const { sandbox } = createSandbox();
-  const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
-
-  context.state.dispatch_overlap = {
-    root: {
-      level: 'notice',
-      summary: 'May touch a related module based on recent branch history.',
-    },
-  };
+test('backlog dispatch note ignores overlap warnings for ready work', () => {
+  const { context } = createBoardHarness();
   context.state.board_tasks = {
-    root: {
-      id: 'root',
+    ready: {
+      id: 'ready',
       group: 'alpha',
       task: 'Implement auth flow',
-      lane: 'In Progress',
+      lane: 'Backlog',
       position: 1,
     },
   };
+  context.state.dispatch_overlap = {
+    ready: {
+      level: 'warning',
+      summary: 'Shares a module with active work.',
+    },
+  };
 
-  const html = runInContext(context, `
-    _renderBoardCard(
-      state.board_tasks.root,
-      {},
-      0
-    )
+  runInContext(context, `_boardSelectedLane = 'Backlog';`);
+  const note = runInContext(context, `_boardBacklogDispatchNote([state.board_tasks.ready])`);
+
+  assert.equal(note, null);
+});
+
+test('dispatch overlap warnings auto-force dispatch without showing review copy', () => {
+  const { sandbox } = createSandbox({
+    showConfirm() {
+      throw new Error('showConfirm should not be called for dispatch overlap warnings');
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/board.js');
+
+  runInContext(context, `
+    _handleDispatchOverlapWarning({
+      task_id: 'task-1',
+      create_agent: true,
+      name: 'worker',
+      force_no_action: true,
+    });
   `);
 
-  assert.doesNotMatch(html, /board-card-overlap-notice/);
-  assert.doesNotMatch(html, /Overlap notice/);
-  assert.doesNotMatch(html, /May touch a related module based on recent branch history/);
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    {
+      cmd: 'dispatch_task',
+      id: 'task-1',
+      force: true,
+      create_agent: true,
+      name: 'worker',
+      force_no_action: true,
+    },
+  ]);
 });
 
 test('renderBoard explains filtered empty states with a clear recovery action', () => {

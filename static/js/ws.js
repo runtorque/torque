@@ -269,9 +269,6 @@ function _applyUiSurfaceInvalidation(flags, key) {
       || key === 'board_card_density_by_group') {
     _markSurface(flags, 'board');
   }
-  if (key === 'dispatch_overlap_groups') {
-    _markSurface(flags, 'weaver');
-  }
 }
 
 function _applyDelta(ops) {

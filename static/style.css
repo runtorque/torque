@@ -1457,17 +1457,6 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   overflow: hidden;
   padding-left: 2px;
 }
-.board-card-overlap-note {
-  font-size: 9px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  padding-left: 2px;
-}
-.board-card-overlap-note-notice { color: var(--text-dim); }
-.board-card-overlap-note-warning { color: var(--amber); }
-.board-card-overlap-note-conflict { color: var(--red); }
 /* Pipeline chain indicator */
 .board-card-chain {
   font-size: 9px; color: var(--text-dim);
@@ -1536,21 +1525,6 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-card-health-idle-risk {
   color: #e3b341;
   background: rgba(227, 179, 65, 0.14);
-}
-.board-card-overlap {
-  font-weight: 600;
-}
-.board-card-overlap-notice {
-  color: var(--text-dim);
-  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
-}
-.board-card-overlap-warning {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 16%, transparent);
-}
-.board-card-overlap-conflict {
-  color: var(--red);
-  background: color-mix(in srgb, var(--red) 16%, transparent);
 }
 /* Subordinate (derived) cards */
 .board-card-subordinate {

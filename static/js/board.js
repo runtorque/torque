@@ -962,29 +962,12 @@ function _boardBacklogDispatchNote(rootTasks) {
   var blocked = 0;
   var scheduled = 0;
   var ready = 0;
-  var overlapWarnings = 0;
-  var overlapConflicts = 0;
   for (var i = 0; i < rootTasks.length; i++) {
     if (_boardTaskIsFutureScheduled(rootTasks[i])) scheduled += 1;
     else if (_boardTaskIsDispatchBlocked(rootTasks[i])) blocked += 1;
-    else {
-      ready += 1;
-      var overlapLevel = _boardOverlapLevel(rootTasks[i]);
-      if (overlapLevel === 'warning') overlapWarnings += 1;
-      else if (overlapLevel === 'conflict') overlapConflicts += 1;
-    }
+    else ready += 1;
   }
-  if (ready > 0) {
-    if (!overlapWarnings && !overlapConflicts) return null;
-    return {
-      title: 'Ready tasks need overlap review',
-      body: (overlapConflicts
-        ? overlapConflicts + ' conflict' + (overlapConflicts === 1 ? '' : 's')
-        : overlapWarnings + ' warning' + (overlapWarnings === 1 ? '' : 's'))
-        + ' on dispatch-ready work. Review overlap badges before widening the wave.',
-      actions: [],
-    };
-  }
+  if (ready > 0) return null;
   if (blocked && !scheduled) {
     return {
       title: 'Everything in Backlog is blocked',
@@ -1109,31 +1092,6 @@ function _boardVerificationPreview(task) {
   if (task.verification_notes) return task.verification_notes;
   if (summary.tests_run) return 'Tests: ' + summary.tests_run;
   return '';
-}
-
-function _boardOverlapInfo(task) {
-  if (!task || !state || !state.dispatch_overlap) return {};
-  return state.dispatch_overlap[task.id] || {};
-}
-
-function _boardOverlapLevel(task) {
-  var info = _boardOverlapInfo(task);
-  if (info.level === 'warning' || info.level === 'conflict') return info.level;
-  return '';
-}
-
-function _boardOverlapLabel(task) {
-  var level = _boardOverlapLevel(task);
-  if (level === 'conflict') return 'Overlap conflict';
-  if (level === 'warning') return 'Overlap warning';
-  if (level === 'notice') return 'Overlap notice';
-  return '';
-}
-
-function _boardOverlapPreview(task) {
-  var info = _boardOverlapInfo(task);
-  if (!_boardOverlapLevel(task)) return '';
-  return info.summary || '';
 }
 
 function _boardHealthDisplayName(stateName) {
@@ -1395,10 +1353,6 @@ function _renderBoardCard(t, childrenOf, depth) {
     meta += '<span class="board-card-label board-card-verification board-card-verification-' + esc(_boardVerificationState(t))
       + '">' + esc(_boardVerificationLabel(t)) + '</span>';
   }
-  if (_boardOverlapLevel(t)) {
-    meta += '<span class="board-card-label board-card-overlap board-card-overlap-' + esc(_boardOverlapLevel(t))
-      + '" title="' + esc(_boardOverlapPreview(t)) + '">' + esc(_boardOverlapLabel(t)) + '</span>';
-  }
   if (_boardVerificationMode(t)) {
     meta += '<span class="board-card-label board-card-verification-mode">' + esc(_boardVerificationMode(t)) + '</span>';
   }
@@ -1470,10 +1424,6 @@ function _renderBoardCard(t, childrenOf, depth) {
   var verificationPreview = _boardVerificationPreview(t);
   if (verificationPreview) {
     cardHtml += '<div class="board-card-verification-note">' + esc(verificationPreview) + '</div>';
-  }
-  var overlapPreview = _boardOverlapPreview(t);
-  if (overlapPreview) {
-    cardHtml += '<div class="board-card-overlap-note board-card-overlap-note-' + esc(_boardOverlapLevel(t)) + '">' + esc(overlapPreview) + '</div>';
   }
   // Last activity message
   if (t.messages && t.messages.length) {
@@ -3409,35 +3359,13 @@ function _handleDispatchActionMissing(msg) {
   });
 }
 
-function _dispatchOverlapConfirmMessage(msg) {
-  var lines = [];
-  var level = msg.level || 'warning';
-  lines.push((level === 'conflict' ? 'Conflict' : 'Warning') + ': dispatch overlaps active work.');
-  if (msg.summary) lines.push(msg.summary);
-  var findings = msg.findings || [];
-  for (var i = 0; i < findings.length && i < 3; i++) {
-    var item = findings[i];
-    var line = '- ' + (item.message || '');
-    if (item.task_title) line += ' [' + item.task_title + ']';
-    lines.push(line);
-  }
-  lines.push('Dispatch anyway?');
-  return lines.join('\n');
-}
-
 function _handleDispatchOverlapWarning(msg) {
-  showConfirm(_dispatchOverlapConfirmMessage(msg), {
-    label: 'Dispatch anyway',
-    variant: 'btn-primary',
-  }).then(function(yes) {
-    if (!yes) return;
-    var cmd = { cmd: 'dispatch_task', id: msg.task_id, force: true };
-    if (msg.agent_id) cmd.agent_id = msg.agent_id;
-    else cmd.create_agent = true;
-    if (msg.name) cmd.name = msg.name;
-    if (msg.force_no_action) cmd.force_no_action = true;
-    send(cmd);
-  });
+  var cmd = { cmd: 'dispatch_task', id: msg.task_id, force: true };
+  if (msg.agent_id) cmd.agent_id = msg.agent_id;
+  else if (msg.create_agent) cmd.create_agent = true;
+  if (msg.name) cmd.name = msg.name;
+  if (msg.force_no_action) cmd.force_no_action = true;
+  send(cmd);
 }
 
 function _adjustCtxMenuOverflow() {
