@@ -159,10 +159,14 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             result = adapter.inject_persistent_prompt(
                 tmp, "loom-system-prompt-agent-1.md", "First prompt."
             )
+            self.assertEqual(result, "")
             self.assertEqual(
-                result,
-                " 'First prompt.'",
+                (Path(tmp) / ".loom" / "loom-system-prompt-agent-1.md").read_text(),
+                "First prompt.\n",
             )
+            config = (Path(tmp) / ".codex" / "config.toml").read_text()
+            self.assertIn("model_instructions_file =", config)
+            self.assertIn("loom-system-prompt-agent-1.md", config)
             self.assertFalse(
                 (Path(tmp) / ".codex" / "AGENTS.md").exists()
             )
@@ -193,6 +197,22 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertNotIn("First prompt.", content)
             self.assertIn("User notes stay here.", content)
             self.assertIn("Second prompt.", content)
+
+    def test_codex_persistent_prompt_cleanup_removes_managed_prompt_file_and_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = CodexAdapter()
+            adapter.inject_persistent_prompt(
+                tmp, "loom-system-prompt-agent-1.md", "First prompt."
+            )
+
+            adapter.uninstall_persistent_prompt(tmp, "loom-system-prompt-agent-1.md")
+
+            self.assertFalse(
+                (Path(tmp) / ".loom" / "loom-system-prompt-agent-1.md").exists()
+            )
+            self.assertFalse(
+                (Path(tmp) / ".codex" / "config.toml").exists()
+            )
 
     def test_codex_resume_command_preserves_flags(self):
         adapter = CodexAdapter()
@@ -274,6 +294,21 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 config_file.read_text(),
                 "[profiles.default]\nmodel = \"gpt-5\"\n",
             )
+
+    def test_codex_mcp_config_preserves_model_instructions_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = CodexAdapter()
+            adapter.inject_persistent_prompt(
+                tmp, "loom-system-prompt-agent-1.md", "First prompt."
+            )
+
+            self.assertTrue(adapter.install_mcp_config(tmp))
+
+            installed = (Path(tmp) / ".codex" / "config.toml").read_text()
+            self.assertIn("model_instructions_file =", installed)
+            self.assertIn("loom-system-prompt-agent-1.md", installed)
+            self.assertIn("[mcp_servers.loom]", installed)
+            self.assertIn("codex_hooks = true", installed)
 
     def test_generic_adapter_is_noop_for_template_specific_flags(self):
         adapter = GenericAdapter()

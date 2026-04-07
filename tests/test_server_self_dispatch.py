@@ -4,7 +4,6 @@ import types
 import unittest
 from enum import Enum
 from pathlib import Path
-
 try:
     from helpers import install_aiohttp_stub
 except ModuleNotFoundError:
@@ -166,6 +165,11 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("blocking human decision or approval", prompt_source)
         self.assertIn("Do not use it for status updates or", prompt_source)
         self.assertIn("loom_context()", prompt_source)
+        self.assertEqual(
+            prompt_source.count("`loom_ask(question=\"question\", description=\"details\")`"),
+            1,
+        )
+        self.assertNotIn("loom_a-", prompt_source)
 
     def test_dispatch_postscript_prefers_mcp_reporting_tools(self):
         prompt_source = (Path(__file__).resolve().parents[1] / "loom" / "server.py").read_text()
@@ -175,6 +179,12 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("loom_derive(description=", prompt_source)
         self.assertIn("loom_verify(state=", prompt_source)
         self.assertIn("blocking human decision/approval only", prompt_source)
+        self.assertIn("loom_blocked(reason=", prompt_source)
+        self.assertEqual(
+            prompt_source.count("`loom_ask(question=\\\"title\\\", description=\\\"details\\\")`"),
+            1,
+        )
+        self.assertNotIn("loom_a-", prompt_source)
 
     def test_self_dispatch_bypasses_busy_agent_queue(self):
         active = self.state_mod.BoardTask(
