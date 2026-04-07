@@ -1065,6 +1065,9 @@ function _tplSubmit() {
   document.getElementById('task-submit-btn').textContent = 'Create';
   document.getElementById('task-task-input').value = vars['TASK'] || '';
   document.getElementById('task-description-input').value = '';
+  document.getElementById('task-external-provider-input').value = '';
+  document.getElementById('task-external-id-input').value = '';
+  document.getElementById('task-external-url-input').value = '';
   _setTaskLabels([]);
   _populateTaskGroupSelect(_tplGroup || _currentGroup());
   document.getElementById('modal-task').dataset.lane = _tplTaskLane || '';
@@ -1084,6 +1087,9 @@ function _handleActionRendered(msg) {
 
   document.getElementById('task-task-input').value = '';
   document.getElementById('task-description-input').value = '';
+  document.getElementById('task-external-provider-input').value = '';
+  document.getElementById('task-external-id-input').value = '';
+  document.getElementById('task-external-url-input').value = '';
   _setTaskLabels(msg.labels || []);
 
   _taskSelectedAction = msg.name || _tplName || '';
@@ -1123,6 +1129,9 @@ let _taskModalWaiting = false;  // waiting for action list to populate picker
 let _taskTemplateWaiting = false; // waiting for template list
 let _taskLabels = [];           // user-editable label chips
 let _taskSystemLabels = [];     // loom:* labels (read-only, preserved on save)
+let _taskExternalProvider = '';
+let _taskExternalId = '';
+let _taskExternalUrl = '';
 
 var _labelDropdownIdx = -1;
 
@@ -1444,6 +1453,9 @@ function openAddTask(lane) {
   _taskSelectedTemplate = '';
   _taskActionVars = [];
   _taskActionVarValues = {};
+  _taskExternalProvider = '';
+  _taskExternalId = '';
+  _taskExternalUrl = '';
 
   document.getElementById('task-modal-title').textContent = 'New Task';
   document.getElementById('task-submit-btn').textContent = 'Create';
@@ -1456,6 +1468,9 @@ function openAddTask(lane) {
   document.getElementById('task-labels-input').value = '';
   _setTaskDeps([]);
   document.getElementById('task-action-vars').innerHTML = '';
+  document.getElementById('task-external-provider-input').value = '';
+  document.getElementById('task-external-id-input').value = '';
+  document.getElementById('task-external-url-input').value = '';
   _renderTaskAttachments();
 
   _populateTaskGroupSelect(_currentGroup());
@@ -1486,6 +1501,9 @@ function openEditTask(taskId) {
   _taskSelectedTemplate = t.agent_template || '';
   _taskActionVars = [];
   _taskActionVarValues = t.action_vars || {};
+  _taskExternalProvider = t.provider || '';
+  _taskExternalId = t.external_id || '';
+  _taskExternalUrl = t.external_url || '';
 
   document.getElementById('task-modal-title').textContent = 'Edit Task';
   document.getElementById('task-submit-btn').textContent = 'Save';
@@ -1498,6 +1516,9 @@ function openEditTask(taskId) {
   document.getElementById('task-labels-input').value = '';
   _setTaskDeps(t.depends_on || []);
   document.getElementById('task-action-vars').innerHTML = '';
+  document.getElementById('task-external-provider-input').value = _taskExternalProvider;
+  document.getElementById('task-external-id-input').value = _taskExternalId;
+  document.getElementById('task-external-url-input').value = _taskExternalUrl;
   _renderTaskAttachments();
 
   // Scheduled dispatch
@@ -1553,6 +1574,9 @@ function submitTask() {
 
   var description = document.getElementById('task-description-input').value.trim();
   _taskSelectedTemplate = document.getElementById('task-template-select').value || '';
+  _taskExternalProvider = document.getElementById('task-external-provider-input').value.trim();
+  _taskExternalId = document.getElementById('task-external-id-input').value.trim();
+  _taskExternalUrl = document.getElementById('task-external-url-input').value.trim();
   // Include any text still in the input as a label
   var pendingLabel = document.getElementById('task-labels-input').value.trim();
   if (pendingLabel && _taskLabels.indexOf(pendingLabel) < 0) _taskLabels.push(pendingLabel);
@@ -1572,6 +1596,9 @@ function submitTask() {
     msg.scheduled_at = scheduledAt;
     msg.depends_on = _taskDeps.slice();
     msg.attachments = _taskAttachments.slice();
+    msg.provider = _taskExternalProvider;
+    msg.external_id = _taskExternalId;
+    msg.external_url = _taskExternalUrl;
     send(msg);
   } else {
     // Create mode
@@ -1586,6 +1613,9 @@ function submitTask() {
     if (scheduledAt) msg.scheduled_at = scheduledAt;
     if (_taskDeps.length) msg.depends_on = _taskDeps.slice();
     if (_taskAttachments.length) msg.attachments = _taskAttachments.slice();
+    if (_taskExternalProvider) msg.provider = _taskExternalProvider;
+    if (_taskExternalId) msg.external_id = _taskExternalId;
+    if (_taskExternalUrl) msg.external_url = _taskExternalUrl;
     send(msg);
   }
 

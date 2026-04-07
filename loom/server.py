@@ -35,6 +35,15 @@ from .artifacts import (
     task_artifacts,
 )
 from .templates import TemplateManager
+from .external_tickets import (
+    ExternalTicketError,
+    build_completion_comment,
+    import_ticket as import_external_ticket,
+    normalize_link as normalize_external_link,
+    open_ticket_url,
+    post_ticket_comment,
+    push_ticket_status,
+)
 from . import keybindings
 from .mcp import create_mcp_handler
 
@@ -2573,6 +2582,11 @@ async def main(connection: iterm2.Connection):
                 labels = data.get("labels", [])
                 if not labels and gs.board_default_labels:
                     labels = list(gs.board_default_labels)
+                ext_link = normalize_external_link(
+                    data.get("provider", ""),
+                    data.get("external_id", ""),
+                    data.get("external_url", ""),
+                )
                 add_kwargs = dict(
                     task=data.get("task", ""),
                     group=group,
@@ -2583,7 +2597,11 @@ async def main(connection: iterm2.Connection):
                     agent_template=data.get("agent_template", ""),
                     agent_id=data.get("agent_id", ""),
                     labels=labels,
+                    provider=ext_link["provider"],
+                    external_id=ext_link["external_id"],
+                    external_url=ext_link["external_url"],
                     depends_on=data.get("depends_on", []),
+                    scheduled_at=data.get("scheduled_at", ""),
                 )
                 # Pass client-provided ID (for pre-uploaded attachments)
                 if data.get("id"):
@@ -2597,11 +2615,27 @@ async def main(connection: iterm2.Connection):
                 if not bt:
                     result = {"type": "error",
                               "message": "Invalid lane, group, or empty task"}
+                else:
+                    result = {
+                        "type": "external_imported" if bt.external_id
+                        or bt.external_url else "board_task_added",
+                        "task_id": bt.id,
+                        "title": bt.task,
+                    }
 
             elif cmd == "board_update_task":
                 tid = _resolve_task_id(data.get("id", ""))
                 fields = {k: v for k, v in data.items()
                           if k not in ("cmd", "id")}
+                if {"provider", "external_id", "external_url"} & set(fields):
+                    link = normalize_external_link(
+                        fields.get("provider", ""),
+                        fields.get("external_id", ""),
+                        fields.get("external_url", ""),
+                    )
+                    fields["provider"] = link["provider"]
+                    fields["external_id"] = link["external_id"]
+                    fields["external_url"] = link["external_url"]
                 state.board_update_task(tid, **fields)
                 # Auto-dispatch if agent_id was set and agent is idle
                 _new_aid = fields.get("agent_id", "")
@@ -2616,6 +2650,153 @@ async def main(connection: iterm2.Connection):
                         await handle_command({
                             "cmd": "dispatch_task",
                             "id": tid, "agent_id": _new_aid})
+
+            elif cmd == "external_import_task":
+                group = data.get("group", "")
+                lane = data.get("lane", "") or "Backlog"
+                labels = data.get("labels", [])
+                try:
+                    imported = import_external_ticket(
+                        data.get("ref", ""),
+                        provider=data.get("provider", ""),
+                        title=data.get("title", ""),
+                        description=data.get("description", ""),
+                        external_id=data.get("external_id", ""),
+                        external_url=data.get("external_url", ""),
+                    )
+                    bt = state.board_add_task(
+                        task=imported.title,
+                        group=group,
+                        lane=lane,
+                        description=imported.description,
+                        labels=labels,
+                        provider=imported.provider,
+                        external_id=imported.external_id,
+                        external_url=imported.external_url,
+                    )
+                    if not bt:
+                        result = {"type": "error",
+                                  "message": "Invalid group, lane, or task"}
+                    else:
+                        result = {
+                            "type": "external_imported",
+                            "task_id": bt.id,
+                            "title": bt.task,
+                            "provider": bt.provider,
+                            "external_id": bt.external_id,
+                            "external_url": bt.external_url,
+                        }
+                except ExternalTicketError as exc:
+                    result = {"type": "error", "message": str(exc)}
+
+            elif cmd == "external_link_task":
+                tid = _resolve_task_id(data.get("id", ""))
+                task = state.board_tasks.get(tid)
+                if not task:
+                    result = {"type": "error",
+                              "message": "Task not found"}
+                else:
+                    link = normalize_external_link(
+                        data.get("provider", ""),
+                        data.get("external_id", ""),
+                        data.get("external_url", ""),
+                        ref=data.get("ref", ""),
+                    )
+                    state.board_update_task(
+                        tid,
+                        provider=link["provider"],
+                        external_id=link["external_id"],
+                        external_url=link["external_url"],
+                    )
+                    result = {
+                        "type": "external_unlinked"
+                        if not link["provider"]
+                        and not link["external_id"]
+                        and not link["external_url"]
+                        else "external_linked",
+                        "task_id": tid,
+                        **link,
+                    }
+
+            elif cmd == "external_open_task":
+                tid = _resolve_task_id(data.get("id", ""))
+                task = state.board_tasks.get(tid)
+                if not task:
+                    result = {"type": "error",
+                              "message": "Task not found"}
+                else:
+                    try:
+                        url = open_ticket_url(
+                            task.provider,
+                            task.external_id,
+                            task.external_url,
+                        )
+                        result = {
+                            "type": "external_open",
+                            "task_id": tid,
+                            "url": url,
+                        }
+                    except ExternalTicketError as exc:
+                        result = {"type": "error", "message": str(exc)}
+
+            elif cmd == "external_push_task_status":
+                tid = _resolve_task_id(data.get("id", ""))
+                task = state.board_tasks.get(tid)
+                if not task:
+                    result = {"type": "error",
+                              "message": "Task not found"}
+                else:
+                    try:
+                        pushed = push_ticket_status(
+                            task,
+                            status=data.get("status", "") or task.status
+                            or task.lane,
+                            note=data.get("note", ""),
+                        )
+                        task.messages.append({
+                            "timestamp": time.time(),
+                            "action": "external_status",
+                            "message": pushed,
+                            "agent_name": "loom",
+                        })
+                        state.board_update_task(tid, messages=task.messages)
+                        result = {
+                            "type": "external_status_pushed",
+                            "task_id": tid,
+                            "message": pushed,
+                        }
+                    except ExternalTicketError as exc:
+                        result = {"type": "error", "message": str(exc)}
+
+            elif cmd == "external_post_task_comment":
+                tid = _resolve_task_id(data.get("id", ""))
+                task = state.board_tasks.get(tid)
+                if not task:
+                    result = {"type": "error",
+                              "message": "Task not found"}
+                else:
+                    try:
+                        comment = (data.get("comment", "") or "").strip()
+                        if not comment:
+                            comment = build_completion_comment(
+                                task.task,
+                                data.get("summary", ""),
+                            )
+                        posted = post_ticket_comment(task, comment=comment)
+                        task.messages.append({
+                            "timestamp": time.time(),
+                            "action": "external_comment",
+                            "message": posted,
+                            "agent_name": "loom",
+                        })
+                        state.board_update_task(tid, messages=task.messages)
+                        result = {
+                            "type": "external_comment_posted",
+                            "task_id": tid,
+                            "message": posted,
+                        }
+                    except ExternalTicketError as exc:
+                        result = {"type": "error", "message": str(exc)}
 
             elif cmd == "board_remove_task":
                 tid = _resolve_task_id(data.get("id", ""))
@@ -3464,6 +3645,33 @@ async def main(connection: iterm2.Connection):
                         if task:
                             task.status = ""
                             _save_task(task)
+                            if data.get("push_external") \
+                                    and (task.provider or task.external_url):
+                                try:
+                                    posted = post_ticket_comment(
+                                        task,
+                                        comment=build_completion_comment(
+                                            task.task, message),
+                                    )
+                                    _append_task_msg(
+                                        task, "external_comment",
+                                        posted, "loom")
+                                    _save_task(task)
+                                    result = {
+                                        "type": "external_comment_posted",
+                                        "task_id": task.id,
+                                        "message": posted,
+                                    }
+                                except ExternalTicketError as exc:
+                                    _append_task_msg(
+                                        task, "external_error",
+                                        str(exc), "loom")
+                                    _save_task(task)
+                                    result = {
+                                        "type": "warning",
+                                        "message": str(exc),
+                                        "task_id": task.id,
+                                    }
                             _cascade_done(task.id)
                             # Notify dependents that are now unblocked
                             for _dt in state.board_get_dependents(

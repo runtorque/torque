@@ -487,6 +487,18 @@
             onkeydown="if(event.key==='Escape')closeModals();">
       <option value="">None</option>
     </select>
+    <label>External provider</label>
+    <input id="task-external-provider-input" autocomplete="off"
+           placeholder="e.g. github, jira, linear"
+           onkeydown="if(event.key==='Escape')closeModals();">
+    <label>External ID</label>
+    <input id="task-external-id-input" autocomplete="off"
+           placeholder="e.g. owner/repo#123 or PROJ-123"
+           onkeydown="if(event.key==='Escape')closeModals();">
+    <label>External URL</label>
+    <input id="task-external-url-input" autocomplete="off"
+           placeholder="https://…"
+           onkeydown="if(event.key==='Escape')closeModals();">
     <div id="task-action-vars"></div>
     <label>Schedule dispatch
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Set a date/time to auto-dispatch this task. Leave empty to dispatch manually.">?</span>
