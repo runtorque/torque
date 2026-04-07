@@ -39,5 +39,5 @@ class WeaverPromptTests(unittest.TestCase):
         self.assertIn("runtime-sensitive work", prompt)
         self.assertIn("pause before widening the wave", prompt)
         self.assertIn("deploy, restart, or smoke verification", prompt)
-        self.assertIn("multiple ready tasks touch the same product surface", prompt)
+        self.assertIn("multiple ready tasks touch the same product", prompt)
         self.assertIn("stop widening the", prompt)

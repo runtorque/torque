@@ -142,6 +142,13 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             id="task-1",
             labels=["loom:blocked", "keep"],
             depends_on=["dep-1", "missing-task"],
+            verification_mode="deploy",
+            verification_state="pending",
+            verification_notes="Need manual smoke on staging",
+            verification_summary={
+                "tests_run": "python3 -m unittest",
+                "deploy_needed": True,
+            },
             artifacts=[{
                 "type": "log",
                 "title": "build.log",
@@ -158,6 +165,12 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(task.depends_on, ["dep-1"])
         self.assertEqual(task.artifacts[0]["type"], "log")
         self.assertEqual(task.artifacts[0]["prompt"]["mode"], "summary")
+        self.assertEqual(task.verification_mode, "deploy")
+        self.assertEqual(task.verification_state, "pending")
+        self.assertEqual(
+            task.verification_summary["tests_run"],
+            "python3 -m unittest",
+        )
 
         original_slug = task.slug
         state.board_update_task(
@@ -166,6 +179,15 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
             description="Updated description",
             labels=["loom:error", "keep"],
             scheduled_at="2026-04-07T10:00:00+00:00",
+            verification_state="failed",
+            verification_notes="Smoke failed on login redirect",
+            verification_summary={
+                "tests_run": "python3 -m unittest tests.test_auth",
+                "manual_smoke_done": True,
+                "deploy_needed": True,
+                "deploy_attempted": True,
+                "human_validation_pending": "Confirm prod login redirect",
+            },
             artifacts=[{
                 "type": "snippet",
                 "title": "failing example",
@@ -180,6 +202,12 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(updated.scheduled_at, "2026-04-07T10:00:00+00:00")
         self.assertEqual(updated.artifacts[0]["type"], "snippet")
         self.assertEqual(updated.artifacts[0]["storage"]["kind"], "inline")
+        self.assertEqual(updated.verification_state, "failed")
+        self.assertTrue(updated.verification_summary["manual_smoke_done"])
+        self.assertEqual(
+            updated.verification_summary["human_validation_pending"],
+            "Confirm prod login redirect",
+        )
         self.assertNotEqual(updated.slug, original_slug)
 
         state.board_move_task(task.id, "Done")

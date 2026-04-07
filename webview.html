@@ -526,6 +526,52 @@
     <input type="datetime-local" id="task-scheduled-input"
            oninput="taskPersistDraft()"
            onkeydown="if(event.key==='Escape')closeModals();">
+    <label>Verification
+      <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Optional manual deploy/restart/smoke checkpoint summary for user-visible or runtime-affecting work.">?</span>
+    </label>
+    <select id="task-verification-mode-input"
+            onchange="taskPersistDraft()"
+            onkeydown="if(event.key==='Escape')closeModals();">
+      <option value="">None</option>
+      <option value="deploy">Deploy</option>
+      <option value="restart">Restart</option>
+    </select>
+    <select id="task-verification-state-input"
+            onchange="taskPersistDraft()"
+            onkeydown="if(event.key==='Escape')closeModals();">
+      <option value="">No state</option>
+      <option value="pending">Pending</option>
+      <option value="attempted">Attempted</option>
+      <option value="passed">Passed</option>
+      <option value="failed">Failed</option>
+    </select>
+    <input id="task-verification-tests-input" autocomplete="off"
+           placeholder="Tests run summary"
+           oninput="taskPersistDraft()"
+           onkeydown="if(event.key==='Escape')closeModals();">
+    <label class="gs-checkbox">
+      <input id="task-verification-smoke-input" type="checkbox"
+             onchange="taskPersistDraft()">
+      <span>Manual smoke done</span>
+    </label>
+    <label class="gs-checkbox">
+      <input id="task-verification-deploy-needed-input" type="checkbox"
+             onchange="taskPersistDraft()">
+      <span>Deploy needed</span>
+    </label>
+    <label class="gs-checkbox">
+      <input id="task-verification-deploy-attempted-input" type="checkbox"
+             onchange="taskPersistDraft()">
+      <span>Deploy/restart attempted</span>
+    </label>
+    <textarea id="task-verification-human-input" rows="2" autocomplete="off"
+              placeholder="What still needs human validation?"
+              oninput="taskAutoResize(this);taskPersistDraft()"
+              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+    <textarea id="task-verification-notes-input" rows="2" autocomplete="off"
+              placeholder="Verification notes..."
+              oninput="taskAutoResize(this);taskPersistDraft()"
+              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
     <label>Labels
       <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Type a label and press Enter to add it.">?</span>
     </label>

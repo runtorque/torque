@@ -607,6 +607,12 @@ function _boardVisibleTasks() {
     for (var id in out) {
       var t = out[id];
       var parts = [t.task, t.description, t.slug, t.action_name, t.agent_id];
+      parts.push(t.verification_mode || '');
+      parts.push(t.verification_state || '');
+      parts.push(t.verification_notes || '');
+      var verificationSummary = t.verification_summary || {};
+      parts.push(verificationSummary.tests_run || '');
+      parts.push(verificationSummary.human_validation_pending || '');
       if (t.labels && t.labels.length) {
         for (var li = 0; li < t.labels.length; li++) {
           parts.push(t.labels[li]);
@@ -1052,6 +1058,41 @@ function _boardTaskHealthState(task) {
   return task.health_state;
 }
 
+function _boardVerificationState(task) {
+  if (!task || !task.verification_state) return '';
+  return task.verification_state;
+}
+
+function _boardVerificationMode(task) {
+  if (!task || !task.verification_mode) return '';
+  return task.verification_mode;
+}
+
+function _boardVerificationSummary(task) {
+  return (task && task.verification_summary) || {};
+}
+
+function _boardVerificationLabel(task) {
+  var stateName = _boardVerificationState(task);
+  if (!stateName) return '';
+  if (stateName === 'pending') return 'Verify pending';
+  if (stateName === 'attempted') return 'Verify attempted';
+  if (stateName === 'passed') return 'Verified';
+  if (stateName === 'failed') return 'Verify failed';
+  return stateName;
+}
+
+function _boardVerificationPreview(task) {
+  if (!task) return '';
+  var summary = _boardVerificationSummary(task);
+  if (summary.human_validation_pending) {
+    return 'Needs human validation: ' + summary.human_validation_pending;
+  }
+  if (task.verification_notes) return task.verification_notes;
+  if (summary.tests_run) return 'Tests: ' + summary.tests_run;
+  return '';
+}
+
 function _boardHealthDisplayName(stateName) {
   return _boardHealthLabels[stateName] || stateName;
 }
@@ -1307,6 +1348,13 @@ function _renderBoardCard(t, childrenOf, depth) {
     meta += '<span class="board-card-label board-card-health board-card-health-' + esc(_boardTaskHealthState(t))
       + '" title="' + esc(_boardHealthTitle(t)) + '">' + esc(_boardHealthDisplayName(_boardTaskHealthState(t))) + '</span>';
   }
+  if (_boardVerificationState(t)) {
+    meta += '<span class="board-card-label board-card-verification board-card-verification-' + esc(_boardVerificationState(t))
+      + '">' + esc(_boardVerificationLabel(t)) + '</span>';
+  }
+  if (_boardVerificationMode(t)) {
+    meta += '<span class="board-card-label board-card-verification-mode">' + esc(_boardVerificationMode(t)) + '</span>';
+  }
   if (_boardHasActiveFilters() && t.lane) meta += '<span class="board-card-lane-badge">' + esc(t.lane) + '</span>';
   if (t.action_name) meta += '<span class="board-card-label board-card-template">' + esc(t.action_name) + '</span>';
   if (t.agent_template) meta += '<span class="board-card-label board-card-template">agent: ' + esc(t.agent_template) + '</span>';
@@ -1371,6 +1419,10 @@ function _renderBoardCard(t, childrenOf, depth) {
       cardHtml += '<div class="board-card-agent" onclick="event.stopPropagation();boardFocusAgent(\'' + t.agent_id + '\')">'
         + '&#x1F916; ' + esc(aName) + '</div>';
     }
+  }
+  var verificationPreview = _boardVerificationPreview(t);
+  if (verificationPreview) {
+    cardHtml += '<div class="board-card-verification-note">' + esc(verificationPreview) + '</div>';
   }
   // Last activity message
   if (t.messages && t.messages.length) {

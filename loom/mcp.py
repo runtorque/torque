@@ -110,6 +110,53 @@ TOOLS = [
         },
     },
     {
+        "name": "loom_verify",
+        "description": (
+            "Record manual verification metadata for the current task, "
+            "such as deploy/restart checkpoint state, tests run, "
+            "manual smoke completion, and remaining human validation."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "state": {
+                    "type": "string",
+                    "enum": ["pending", "attempted", "passed", "failed"],
+                    "description": "Verification state summary.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["deploy", "restart"],
+                    "description": "Whether verification is about deploy or restart.",
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Free-form verification notes.",
+                },
+                "tests_run": {
+                    "type": "string",
+                    "description": "Short summary of tests that were run.",
+                },
+                "manual_smoke_done": {
+                    "type": "boolean",
+                    "description": "Whether manual smoke testing was completed.",
+                },
+                "deploy_needed": {
+                    "type": "boolean",
+                    "description": "Whether a deploy is still required.",
+                },
+                "deploy_attempted": {
+                    "type": "boolean",
+                    "description": "Whether the deploy/restart was attempted.",
+                },
+                "human_validation_pending": {
+                    "type": "string",
+                    "description": "What still needs human validation.",
+                },
+            },
+        },
+    },
+    {
         "name": "loom_ready",
         "description": (
             "Signal that this agent is done and ready for the next task. "
@@ -407,6 +454,7 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
         "loom_blocked":  "blocked",
         "loom_error":    "error",
         "loom_progress": "progress",
+        "loom_verify":   "verify",
         "loom_ready":    "ready",
         "loom_name":     "name",
         "loom_derive":   "derive",
@@ -429,6 +477,22 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
         payload["message"] = args.get("message", "")
     elif action == "progress":
         payload["message"] = args.get("message", "")
+    elif action == "verify":
+        if "mode" in args:
+            payload["verification_mode"] = args.get("mode", "")
+        if "state" in args:
+            payload["verification_state"] = args.get("state", "")
+        if "notes" in args:
+            payload["verification_notes"] = args.get("notes", "")
+        for key in (
+            "tests_run",
+            "manual_smoke_done",
+            "deploy_needed",
+            "deploy_attempted",
+            "human_validation_pending",
+        ):
+            if key in args:
+                payload[key] = args[key]
     elif action == "ready":
         pass
     elif action == "name":

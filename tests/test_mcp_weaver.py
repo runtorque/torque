@@ -1278,3 +1278,52 @@ class WeaverEventAndInteractionToolTests(unittest.IsolatedAsyncioTestCase):
                 },
             ],
         )
+
+    async def test_board_summary_and_task_show_include_verification_metadata(self):
+        state, weaver = self._make_state()
+        state.board_add_task(
+            "Deploy billing changes",
+            "g",
+            id="task-1",
+            lane="In Progress",
+            verification_mode="deploy",
+            verification_state="pending",
+            verification_notes="Need manual smoke after deploy",
+            verification_summary={
+                "tests_run": "python3 -m unittest",
+                "deploy_needed": True,
+                "human_validation_pending": "Confirm billing dashboard loads",
+            },
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected command: {payload}")
+
+        summary_text, summary_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+        task_text, task_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_show",
+            {"task": "task-1"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(summary_error)
+        self.assertFalse(task_error)
+
+        summary = json.loads(summary_text)
+        task = json.loads(task_text)
+        self.assertEqual(summary["verification"]["counts"]["pending"], 1)
+        self.assertEqual(summary["verification"]["items"][0]["id"], "task-1")
+        self.assertEqual(task["verification_mode"], "deploy")
+        self.assertEqual(task["verification_state"], "pending")
+        self.assertEqual(
+            task["verification_summary"]["human_validation_pending"],
+            "Confirm billing dashboard loads",
+        )

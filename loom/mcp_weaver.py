@@ -167,8 +167,8 @@ WEAVER_TOOLS = [
         "description": (
             "Show full details for a task by slug or ID. "
             "Returns title, description, labels, action, action variables, "
-            "pipeline info, assigned agent, linked external ticket "
-            "metadata, and activity messages. "
+            "pipeline info, verification metadata, assigned agent, "
+            "linked external ticket metadata, and activity messages. "
             "For pipeline tasks, automatically includes the chain summary."
         ),
         "inputSchema": {
@@ -259,7 +259,8 @@ WEAVER_TOOLS = [
         "name": "weaver_task_create",
         "description": (
             "Create a new task on the board. Specify a title and "
-            "optionally attach an action, group, lane, and labels."
+            "optionally attach an action, group, lane, labels, and "
+            "verification metadata."
         ),
         "inputSchema": {
             "type": "object",
@@ -299,6 +300,24 @@ WEAVER_TOOLS = [
                     "items": {"type": "string"},
                     "description": "Labels to attach to the task.",
                 },
+                "verification_mode": {
+                    "type": "string",
+                    "enum": ["", "deploy", "restart"],
+                    "description": "Optional verification mode summary.",
+                },
+                "verification_state": {
+                    "type": "string",
+                    "enum": ["", "pending", "attempted", "passed", "failed"],
+                    "description": "Optional verification state summary.",
+                },
+                "verification_notes": {
+                    "type": "string",
+                    "description": "Optional verification notes.",
+                },
+                "verification_summary": {
+                    "type": "object",
+                    "description": "Optional structured verification summary.",
+                },
             },
             "required": ["title"],
         },
@@ -337,6 +356,24 @@ WEAVER_TOOLS = [
                     "type": "object",
                     "description": "New action variable values.",
                     "additionalProperties": {"type": "string"},
+                },
+                "verification_mode": {
+                    "type": "string",
+                    "enum": ["", "deploy", "restart"],
+                    "description": "New verification mode summary.",
+                },
+                "verification_state": {
+                    "type": "string",
+                    "enum": ["", "pending", "attempted", "passed", "failed"],
+                    "description": "New verification state summary.",
+                },
+                "verification_notes": {
+                    "type": "string",
+                    "description": "New verification notes.",
+                },
+                "verification_summary": {
+                    "type": "object",
+                    "description": "New structured verification summary.",
                 },
             },
             "required": ["task"],
@@ -906,8 +943,15 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             "stalled": 0,
             "thrashing": 0,
         }
+        verification_counts = {
+            "pending": 0,
+            "attempted": 0,
+            "passed": 0,
+            "failed": 0,
+        }
         unhealthy = []
         pending_asks = []
+        verification_items = []
 
         for task in tasks:
             if task.lane in lane_counts:
@@ -931,6 +975,22 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                     "health_state": health_state,
                     "health_since": getattr(task, "health_since", ""),
                 })
+
+            verification_state = getattr(task, "verification_state", "") or ""
+            if task.lane != "Done" and verification_state in verification_counts:
+                verification_counts[verification_state] += 1
+                if verification_state in {"pending", "failed"}:
+                    verification_items.append({
+                        "id": task.id,
+                        "title": task.task,
+                        "verification_state": verification_state,
+                        "verification_mode": getattr(
+                            task, "verification_mode", ""
+                        ) or "",
+                        "verification_notes": getattr(
+                            task, "verification_notes", ""
+                        ) or "",
+                    })
 
             if "loom:human" in labels and task.lane != "Done":
                 pending_asks.append({
@@ -998,6 +1058,12 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 item["title"].lower(),
             ),
         )
+        verification_items.sort(
+            key=lambda item: (
+                0 if item["verification_state"] == "failed" else 1,
+                item["title"].lower(),
+            ),
+        )
 
         summary = {
             "group": _weaver_group,
@@ -1013,6 +1079,11 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "count": len(pending_asks),
                 "items": pending_asks[:10],
                 "truncated": len(pending_asks) > 10,
+            },
+            "verification": {
+                "counts": verification_counts,
+                "items": verification_items[:10],
+                "truncated": len(verification_items) > 10,
             },
             "agents": {
                 "total": total_agents,
@@ -1062,6 +1133,12 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "agent": agent_name,
                 "status": t.status,
                 "health_state": health_state,
+                "verification_state": getattr(
+                    t, "verification_state", ""
+                ) or "",
+                "verification_mode": getattr(
+                    t, "verification_mode", ""
+                ) or "",
                 "provider": t.provider,
                 "external_id": t.external_id,
                 "external_url": t.external_url,
@@ -1106,6 +1183,18 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             "parent_task_id": task.parent_task_id,
             "pipeline_depth": task.pipeline_depth,
             "depends_on": task.depends_on or [],
+            "verification_mode": getattr(task, "verification_mode", "") or "",
+            "verification_state": getattr(task, "verification_state", "") or "",
+            "verification_notes": getattr(task, "verification_notes", "") or "",
+            "verification_updated_at": getattr(
+                task, "verification_updated_at", ""
+            ) or "",
+            "verification_updated_by": getattr(
+                task, "verification_updated_by", ""
+            ) or "",
+            "verification_summary": getattr(
+                task, "verification_summary", {}
+            ) or {},
             "created_at": task.created_at,
             "health_state": getattr(task, "health_state", "healthy"),
             "health_since": getattr(task, "health_since", ""),
@@ -1136,6 +1225,9 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                     "lane": ct.lane,
                     "status": ct.status,
                     "health_state": getattr(ct, "health_state", "healthy"),
+                    "verification_state": getattr(
+                        ct, "verification_state", ""
+                    ) or "",
                     "depth": ct.pipeline_depth,
                     "agent": agent_slug,
                 })
@@ -1281,6 +1373,10 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             "action_name": args.get("action", ""),
             "action_vars": args.get("action_vars", {}),
             "labels": args.get("labels", []),
+            "verification_mode": args.get("verification_mode", ""),
+            "verification_state": args.get("verification_state", ""),
+            "verification_notes": args.get("verification_notes", ""),
+            "verification_summary": args.get("verification_summary", {}),
         }
         result = await handle_command(payload)
         if result and result.get("type") == "error":
@@ -1302,6 +1398,14 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             payload["action_name"] = args["action"]
         if "action_vars" in args:
             payload["action_vars"] = args["action_vars"]
+        for key in (
+            "verification_mode",
+            "verification_state",
+            "verification_notes",
+            "verification_summary",
+        ):
+            if key in args:
+                payload[key] = args[key]
         result = await handle_command(payload)
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True

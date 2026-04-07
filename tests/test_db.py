@@ -85,6 +85,17 @@ class LoomDBTests(unittest.TestCase):
                 health_state="idle-risk",
                 health_since="2026-04-06T01:05:00+00:00",
                 health_details={"reasons": ["progress_silence_warning"]},
+                verification_mode="deploy",
+                verification_state="pending",
+                verification_notes="Need manual smoke after deploy",
+                verification_updated_at="2026-04-06T01:10:00+00:00",
+                verification_updated_by="worker",
+                verification_summary={
+                    "tests_run": "python3 -m unittest",
+                    "manual_smoke_done": False,
+                    "deploy_needed": True,
+                    "human_validation_pending": "Confirm dashboard loads",
+                },
                 artifacts=[{
                     "id": "artifact-1",
                     "type": "test_report",
@@ -155,6 +166,18 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["artifacts"][0]["type"],
             "test_report",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["verification_mode"],
+            "deploy",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["verification_state"],
+            "pending",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["verification_summary"]["tests_run"],
+            "python3 -m unittest",
         )
         self.assertFalse(loaded["schedules"]["sched-1"]["enabled"])
         self.assertEqual(loaded["schedules"]["sched-1"]["labels"], ["ops"])

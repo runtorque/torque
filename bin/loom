@@ -79,6 +79,11 @@ def db_read_board_tasks():
                 d["action_vars"] = json.loads(d.get("action_vars", "{}"))
             except (json.JSONDecodeError, TypeError):
                 d["action_vars"] = {}
+            try:
+                d["verification_summary"] = json.loads(
+                    d.get("verification_summary", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                d["verification_summary"] = {}
             tasks[d["id"]] = d
         return tasks
     return _db_read(_query)
@@ -168,6 +173,11 @@ def db_read_state():
                     d["action_vars"] = json.loads(d.get("action_vars", "{}"))
                 except (json.JSONDecodeError, TypeError):
                     d["action_vars"] = {}
+                try:
+                    d["verification_summary"] = json.loads(
+                        d.get("verification_summary", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    d["verification_summary"] = {}
                 tasks[d["id"]] = d
 
         # Schedules
@@ -1777,6 +1787,32 @@ def cmd_task_show(args):
                 print(f"      ref: {art['path']}")
             if art.get("summary"):
                 print(f"      summary: {art['summary']}")
+    if t.get("verification_state") or t.get("verification_mode") \
+            or t.get("verification_notes") \
+            or t.get("verification_summary"):
+        print()
+        print(f"  {_bold('Verification:')}")
+        if t.get("verification_state"):
+            print(f"  {'State:':<14} {t['verification_state']}")
+        if t.get("verification_mode"):
+            print(f"  {'Mode:':<14} {t['verification_mode']}")
+        summary = t.get("verification_summary") or {}
+        if summary.get("tests_run"):
+            print(f"  {'Tests run:':<14} {summary['tests_run']}")
+        if "manual_smoke_done" in summary:
+            print(f"  {'Manual smoke:':<14} {'yes' if summary['manual_smoke_done'] else 'no'}")
+        if "deploy_needed" in summary:
+            print(f"  {'Deploy needed:':<14} {'yes' if summary['deploy_needed'] else 'no'}")
+        if "deploy_attempted" in summary:
+            print(f"  {'Deploy tried:':<14} {'yes' if summary['deploy_attempted'] else 'no'}")
+        if summary.get("human_validation_pending"):
+            print(f"  {'Needs human:':<14} {summary['human_validation_pending']}")
+        if t.get("verification_notes"):
+            print(f"  {'Notes:':<14} {t['verification_notes']}")
+        if t.get("verification_updated_by"):
+            print(f"  {'Updated by:':<14} {t['verification_updated_by']}")
+        if t.get("verification_updated_at"):
+            print(f"  {'Updated at:':<14} {t['verification_updated_at']}")
 
     # Backward compat: show legacy fields if present on old tasks
     for field, label in [("instructions", "Instructions"),
@@ -1896,6 +1932,8 @@ _TASK_EDIT_FIELDS = [
     "task", "lane", "group", "labels",
     "action_name", "action_vars",
     "artifacts",
+    "verification_mode", "verification_state",
+    "verification_notes", "verification_summary",
 ]
 
 _TASK_EDIT_COMMENT = """\
@@ -2000,8 +2038,14 @@ def cmd_task_edit(args):
     # Check if any inline flags were provided
     has_flags = any(
         getattr(args, attr, None) is not None
-        for attr in ("task", "action", "labels", "group", "at", "depends_on")
+        for attr in (
+            "task", "action", "labels", "group", "at", "depends_on",
+            "verify_mode", "verify_state", "verify_note", "verify_tests",
+            "verify_human",
+        )
     ) or getattr(args, "var", None)
+    has_flags = has_flags or args.verify_smoke_done \
+        or args.verify_deploy_needed or args.verify_deploy_attempted
 
     if has_flags:
         # Inline flag mode (non-interactive)
@@ -2027,6 +2071,37 @@ def cmd_task_edit(args):
         if getattr(args, "depends_on", None) is not None:
             dep_ids = _resolve_dep_ids(st, args.depends_on)
             fields["depends_on"] = dep_ids
+        if args.verify_mode is not None:
+            fields["verification_mode"] = args.verify_mode
+        if args.verify_state is not None:
+            fields["verification_state"] = args.verify_state
+        if args.verify_note is not None:
+            fields["verification_notes"] = args.verify_note
+        summary = dict(t.get("verification_summary", {}) or {})
+        if args.verify_tests is not None:
+            if args.verify_tests:
+                summary["tests_run"] = args.verify_tests
+            else:
+                summary.pop("tests_run", None)
+        if args.verify_smoke_done:
+            summary["manual_smoke_done"] = True
+        if args.verify_deploy_needed:
+            summary["deploy_needed"] = True
+        if args.verify_deploy_attempted:
+            summary["deploy_attempted"] = True
+        if args.verify_human is not None:
+            if args.verify_human:
+                summary["human_validation_pending"] = args.verify_human
+            else:
+                summary.pop("human_validation_pending", None)
+        if any(
+            value is not None for value in (
+                args.verify_tests, args.verify_human,
+                args.verify_mode, args.verify_state, args.verify_note,
+            )
+        ) or args.verify_smoke_done or args.verify_deploy_needed \
+                or args.verify_deploy_attempted:
+            fields["verification_summary"] = summary
     else:
         # Interactive editor mode
         original_text = _task_to_yaml(t)
@@ -2502,6 +2577,32 @@ def cmd_ai_progress(args):
     resp = api_call("ai_report", port=args.port, **kwargs)
     check_ok(resp)
     print(f"Progress: {args.message}")
+
+
+def cmd_ai_verify(args):
+    cell, task = _resolve_self_and_task(args)
+    kwargs = {"cell_id": cell["id"], "action": "verify"}
+    if task:
+        kwargs["task_id"] = task["id"]
+    if args.state is not None:
+        kwargs["verification_state"] = args.state
+    if args.mode is not None:
+        kwargs["verification_mode"] = args.mode
+    if args.message is not None:
+        kwargs["verification_notes"] = args.message
+    if args.tests is not None:
+        kwargs["tests_run"] = args.tests
+    if args.smoke_done:
+        kwargs["manual_smoke_done"] = True
+    if args.deploy_needed:
+        kwargs["deploy_needed"] = True
+    if args.deploy_attempted:
+        kwargs["deploy_attempted"] = True
+    if args.human is not None:
+        kwargs["human_validation_pending"] = args.human
+    resp = api_call("ai_report", port=args.port, **kwargs)
+    data = check_ok(resp)
+    print(data.get("message", "Verification updated"))
 
 
 def cmd_ai_ready(args):
@@ -3466,6 +3567,21 @@ def build_parser():
     p.add_argument("--at", help="Schedule dispatch (ISO 8601, +2h, tomorrow 09:00)")
     p.add_argument("--depends-on",
                    help="Comma-separated task slugs/IDs this depends on")
+    p.add_argument("--verify-mode", choices=["deploy", "restart", ""],
+                   help="Verification mode summary")
+    p.add_argument("--verify-state",
+                   choices=["pending", "attempted", "passed", "failed", ""],
+                   help="Verification state summary")
+    p.add_argument("--verify-note", help="Verification notes")
+    p.add_argument("--verify-tests", help="Tests run summary")
+    p.add_argument("--verify-smoke-done", action="store_true",
+                   help="Mark manual smoke testing as done")
+    p.add_argument("--verify-deploy-needed", action="store_true",
+                   help="Mark that a deploy is still needed")
+    p.add_argument("--verify-deploy-attempted", action="store_true",
+                   help="Mark that deploy/restart was attempted")
+    p.add_argument("--verify-human",
+                   help="What still needs human validation")
     p.set_defaults(func=cmd_task_edit)
 
     p = tsk_sub.add_parser("move", aliases=["mv"],
@@ -3602,6 +3718,27 @@ def build_parser():
     p.add_argument("task_ref", nargs="?",
                    help="Task slug/ID (auto-detected)")
     p.set_defaults(func=cmd_ai_progress)
+
+    p = ai_sub.add_parser("verify",
+                          help="Record deploy/restart/smoke verification details")
+    p.add_argument("--state",
+                   choices=["pending", "attempted", "passed", "failed"],
+                   help="Verification state")
+    p.add_argument("--mode", choices=["deploy", "restart"],
+                   help="Verification mode")
+    p.add_argument("-m", "--message", help="Verification notes")
+    p.add_argument("--tests", help="Tests run summary")
+    p.add_argument("--smoke-done", action="store_true",
+                   help="Mark manual smoke testing as done")
+    p.add_argument("--deploy-needed", action="store_true",
+                   help="Mark that a deploy is still needed")
+    p.add_argument("--deploy-attempted", action="store_true",
+                   help="Mark that deploy/restart was attempted")
+    p.add_argument("--human",
+                   help="What still needs human validation")
+    p.add_argument("task_ref", nargs="?",
+                   help="Task slug/ID (auto-detected)")
+    p.set_defaults(func=cmd_ai_verify)
 
     p = ai_sub.add_parser("ready", help="Signal ready for next task")
     p.add_argument("task_ref", nargs="?",

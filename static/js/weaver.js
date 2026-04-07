@@ -11,6 +11,12 @@ var _weaverHealthLabels = {
   'thrashing': 'Thrashing',
   'idle-risk': 'Idle risk',
 };
+var _weaverVerificationLabels = {
+  'pending': 'Verify pending',
+  'attempted': 'Verify attempted',
+  'passed': 'Verified',
+  'failed': 'Verify failed',
+};
 var _weaverHealthSeverity = {
   'healthy': 0,
   'idle-risk': 1,
@@ -131,6 +137,7 @@ function _weaverRenderJournal(group) {
   }
 
   html += _weaverRenderTaskHealth(group);
+  html += _weaverRenderVerificationSummary(group);
 
   // Journal entries come from state.weaver_journal (populated by delta ops)
   var entries = (state.weaver_journal && state.weaver_journal[group]) || [];
@@ -196,6 +203,42 @@ function _weaverRenderTaskHealth(group) {
   return html;
 }
 
+function _weaverRenderVerificationSummary(group) {
+  var summary = _weaverVerificationSummary(group);
+  if (!summary.total) return '';
+
+  var html = '<div class="weaver-verification-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Verification</span>';
+  html += '<span class="weaver-health-total">' + summary.total + ' open checkpoint' + (summary.total === 1 ? '' : 's') + '</span>';
+  html += '</div>';
+  html += '<div class="weaver-health-counts">';
+  for (var i = 0; i < summary.order.length; i++) {
+    var stateName = summary.order[i];
+    var count = summary.counts[stateName] || 0;
+    if (!count) continue;
+    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(stateName) + '">'
+      + count + ' ' + _esc(_weaverVerificationLabels[stateName] || stateName) + '</span>';
+  }
+  html += '</div>';
+  for (var j = 0; j < summary.items.length; j++) {
+    var item = summary.items[j];
+    html += '<div class="weaver-verification-item">';
+    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(item.verification_state) + '">'
+      + _esc(_weaverVerificationLabels[item.verification_state] || item.verification_state) + '</span>';
+    html += '<span class="weaver-verification-item-title">' + _esc(item.title) + '</span>';
+    if (item.verification_mode) {
+      html += '<span class="weaver-verification-item-meta">' + _esc(item.verification_mode) + '</span>';
+    }
+    html += '</div>';
+    if (item.detail) {
+      html += '<div class="weaver-verification-item-meta">' + _esc(item.detail) + '</div>';
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
 function _weaverTaskHealthSummary(group) {
   var summary = {
     counts: { 'blocked': 0, 'stalled': 0, 'thrashing': 0, 'idle-risk': 0 },
@@ -224,6 +267,43 @@ function _weaverTaskHealthSummary(group) {
     if (sev) return sev;
     var timeCmp = (a.health_since || '').localeCompare(b.health_since || '');
     if (timeCmp) return timeCmp;
+    return (a.title || '').localeCompare(b.title || '');
+  });
+  summary.items = summary.items.slice(0, 5);
+  return summary;
+}
+
+function _weaverVerificationSummary(group) {
+  var summary = {
+    counts: { pending: 0, attempted: 0, passed: 0, failed: 0 },
+    order: ['failed', 'pending', 'attempted', 'passed'],
+    items: [],
+    total: 0,
+  };
+  var tasks = (state && state.board_tasks) || {};
+  for (var id in tasks) {
+    var task = tasks[id];
+    if (task.group !== group || task.lane === 'Done') continue;
+    var verificationState = task.verification_state || '';
+    if (!verificationState || !summary.counts.hasOwnProperty(verificationState)) continue;
+    summary.counts[verificationState] += 1;
+    summary.total += 1;
+    var verificationSummary = task.verification_summary || {};
+    summary.items.push({
+      id: task.id,
+      title: task.task || '',
+      verification_state: verificationState,
+      verification_mode: task.verification_mode || '',
+      detail: verificationSummary.human_validation_pending
+        || task.verification_notes
+        || verificationSummary.tests_run
+        || '',
+    });
+  }
+  summary.items.sort(function(a, b) {
+    var aRank = summary.order.indexOf(a.verification_state);
+    var bRank = summary.order.indexOf(b.verification_state);
+    if (aRank !== bRank) return aRank - bRank;
     return (a.title || '').localeCompare(b.title || '');
   });
   summary.items = summary.items.slice(0, 5);

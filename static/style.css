@@ -1380,6 +1380,26 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   color: var(--fg-dim); font-style: italic;
   background: color-mix(in srgb, var(--fg-dim) 12%, transparent);
 }
+.board-card-verification {
+  font-weight: 600;
+}
+.board-card-verification-pending,
+.board-card-verification-attempted {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+}
+.board-card-verification-passed {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+}
+.board-card-verification-failed {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+}
+.board-card-verification-mode {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
+}
 .board-card-priority {
   font-weight: 600;
 }
@@ -1419,6 +1439,15 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   cursor: pointer;
 }
 .board-card-agent:hover { text-decoration: underline; }
+.board-card-verification-note {
+  font-size: 9px;
+  color: var(--text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding-left: 2px;
+}
 /* Pipeline chain indicator */
 .board-card-chain {
   font-size: 9px; color: var(--text-dim);
@@ -3412,6 +3441,19 @@ body.diff-view-open #ctx-menu {
   color: #e3b341;
   background: rgba(227, 179, 65, 0.14);
 }
+.weaver-health-pill-pending,
+.weaver-health-pill-attempted {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+}
+.weaver-health-pill-passed {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+}
+.weaver-health-pill-failed {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+}
 .weaver-health-list {
   display: flex;
   flex-direction: column;
@@ -3433,6 +3475,34 @@ body.diff-view-open #ctx-menu {
   white-space: nowrap;
   font-size: 10px;
   color: var(--text);
+}
+.weaver-verification-summary {
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.weaver-verification-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.weaver-verification-item + .weaver-verification-item {
+  margin-top: 4px;
+}
+.weaver-verification-item-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text);
+}
+.weaver-verification-item-meta {
+  font-size: 9px;
+  color: var(--text-dim);
 }
 .weaver-health-item-via {
   min-width: 0;
