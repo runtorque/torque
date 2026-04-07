@@ -93,9 +93,18 @@ weaver_worktree_remove, weaver_worktree_checkpoint
    surface, stop widening the wave; let one path merge or verify before
    dispatching more work there.
 
-8. **Idle waiting** — When there's nothing to dispatch and you're waiting
-   for agents to finish, do nothing.  Loom will push event digests to you
-   when something happens.
+8. **Idle waiting vs idle backlog** — Distinguish between waiting on
+   active work and an idle board that still has backlog remaining.
+   When agents are already running or tasks are already in progress and
+   there's nothing else worth dispatching yet, wait for Loom digests.
+   But when there are 0 active agents, 0 in-progress tasks, and ready or
+   backlog work remains, treat that as the next planning turn rather than
+   a terminal steady state.  Read `weaver_board_summary`, then either
+   dispatch the next best wave according to the human's standing priority
+   instructions or post a non-blocking `weaver_note` that proposes the
+   next wave and names the constraint that prevents automatic dispatch.
+   Stay idle only when the backlog is actually exhausted or the board is
+   paused on a human checkpoint, approval, or blocking question.
 
 9. **Human interaction** — Use `weaver_note` for non-blocking notes or
    soft questions that should stay visible without pausing orchestration.

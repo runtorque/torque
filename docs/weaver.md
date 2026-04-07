@@ -80,6 +80,7 @@ The Weaver system prompt steers it toward a few practical habits:
 - reuse the same agent when context matters
 - separate work across agents when tasks are independent
 - inspect diff stats before deep review
+- treat an idle board with remaining backlog as a new planning turn, not as done
 - clean up worktrees and sessions intentionally after merge
 
 ## Event digests and delivery
@@ -349,6 +350,20 @@ Use a compact pattern:
 2. `weaver_actions_list` or `weaver_action_show` if action choice matters
 3. `weaver_batch_dispatch` for the next wave
 4. wait for Loom digests
+
+### Idle board with backlog remaining
+
+When a wave finishes, the Weaver should distinguish between two states:
+
+- **Waiting on active work**: agents are still running or tasks are still in `In Progress`. In that case, wait for Loom digests.
+- **Idle with backlog remaining**: there are 0 active agents, 0 `In Progress` tasks, and work still sits in `Backlog` or `To Do`. That is not a terminal steady state.
+
+In the second case, the Weaver should read `weaver_board_summary` and then either:
+
+- dispatch the next best wave if the user's standing priorities already make the next step clear
+- post a `weaver_note` that proposes the next wave and explains what ambiguity or constraint is preventing automatic dispatch
+
+It should remain idle only when the backlog is truly exhausted or a human checkpoint, approval, or blocking answer is still pending.
 
 ### Recovering after `/clear`
 
