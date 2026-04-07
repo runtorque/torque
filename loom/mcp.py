@@ -227,10 +227,12 @@ TOOLS = [
     {
         "name": "loom_ask",
         "description": (
-            "Pause for human input. Sets the parent task status to "
-            "'Awaiting Input' and creates a task in Backlog with the "
-            "'human' label. A human will resolve it with an answer "
-            "that is sent back to this agent."
+            "Pause for human input only when the current task cannot "
+            "proceed safely without a blocking human decision or "
+            "approval. Sets the parent task status to 'Awaiting "
+            "Input' and creates a task in Backlog with the 'human' "
+            "label. Do not use this for status updates, soft "
+            "suggestions, or optional follow-up ideas."
         ),
         "inputSchema": {
             "type": "object",

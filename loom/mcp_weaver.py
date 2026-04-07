@@ -705,11 +705,15 @@ WEAVER_TOOLS = [
         "description": (
             "Ask the human a question. The question is displayed in "
             "the Weaver panel and event pushes are automatically "
-            "paused until the human replies. Use this when you need "
-            "human guidance — prioritization, design decisions, "
-            "approval, or clarification. After the human responds "
-            "(via the panel or directly in your terminal), call "
-            "weaver_resume to unpause event delivery."
+            "paused until the human replies. Use this only when the "
+            "next orchestration step depends on a blocking human "
+            "decision — prioritization, design decisions, approval, "
+            "or clarification that should stop dispatch until "
+            "answered. Do not use this for status updates, soft "
+            "questions, or next-wave proposals; use weaver_note for "
+            "those. After the human responds (via the panel or "
+            "directly in your terminal), call weaver_resume to "
+            "unpause event delivery."
         ),
         "inputSchema": {
             "type": "object",
@@ -725,7 +729,9 @@ WEAVER_TOOLS = [
     {
         "name": "weaver_note",
         "description": (
-            "Post a non-blocking note or soft question for the human. "
+            "Post a non-blocking note or soft question for the human, "
+            "including next-wave proposals or status/context that "
+            "should stay visible without pausing orchestration. "
             "Unlike weaver_ask, this does not pause event delivery or "
             "put Loom into awaiting-input mode."
         ),

@@ -164,9 +164,11 @@ Once an agent is working on a task, the agent can report back to Loom with MCP t
 - `loom_done(message="summary")` completes the current task
 - `loom_ready()` completes the task and releases the agent for future work
 - `loom_verify(state="passed", tests_run="...", notes="...")` records deploy/restart/smoke verification status when relevant
-- `loom_ask(question="question", description="details")` creates a human-in-the-loop follow-up task in **Backlog**
+- `loom_ask(question="question", description="details")` creates a blocking human-in-the-loop follow-up task in **Backlog** when the agent cannot continue safely without a decision or approval
 
 These updates make the board readable without opening each agent session. A person scanning the board can see which tasks are moving, which are blocked, and which are waiting on a human decision.
+
+`loom_ask` is not a general status or suggestion channel. If the agent can keep moving, it should keep moving and report context through `loom_progress`, `loom_done`, `loom_blocked`, or derived-task context instead of pausing the task.
 
 For the lane and completion model, see [Task Lifecycle](task-lifecycle.md).
 
@@ -252,7 +254,7 @@ Here is a typical day-to-day flow:
 
 - calls `loom_done(message="summary")` if the work is good
 - calls `loom_derive(description="...", action="feature/fix-review")` if fixes are needed
-- calls `loom_ask(question="...", description="...")` if a human decision is required
+- calls `loom_ask(question="...", description="...")` if a blocking human decision or approval is required before work can continue
 
 6. Once the implementation chain reaches **Done**, the dependent deployment task can be dispatched.
 

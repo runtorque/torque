@@ -279,3 +279,12 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         parsed = json.loads(summary.payload["result"]["content"][0]["text"])
         self.assertEqual(parsed["group"], "g")
         self.assertEqual(calls, [])
+
+    def test_loom_ask_tool_description_marks_it_as_blocking(self):
+        ask_tool = next(
+            tool for tool in self.mcp_mod.TOOLS
+            if tool["name"] == "loom_ask"
+        )
+
+        self.assertIn("blocking human decision or approval", ask_tool["description"])
+        self.assertIn("Do not use this for status updates", ask_tool["description"])

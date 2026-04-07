@@ -48,3 +48,7 @@ class WeaverPromptTests(unittest.TestCase):
         self.assertIn("post a non-blocking `weaver_note`", prompt)
         self.assertIn("standing priority", prompt)
         self.assertIn("Stay idle only when the backlog is actually exhausted", prompt)
+        self.assertIn("proposed next-wave plans", prompt)
+        self.assertIn("board should stop widening work", prompt)
+        self.assertIn("use `weaver_note`", prompt)
+        self.assertIn("instead of `weaver_ask`", prompt)

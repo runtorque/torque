@@ -5,7 +5,7 @@ The Weaver is Loom's per-group orchestrator agent. It watches the board, receive
 The Weaver is deliberately semi-autonomous:
 
 - it can plan, dispatch, review, merge, and clean up on its own
-- it should use `weaver_ask` when priorities, approvals, or design choices need human input
+- it should use `weaver_ask` only when priorities, approvals, or design choices need a blocking human decision
 - it should recover from `/clear` or restart by reading the journal and current board state instead of relying on chat history
 
 ## What the Weaver does
@@ -176,10 +176,13 @@ The Journal tab in the UI shows entries newest-first, and entries can be deleted
 
 ## Asking the human
 
-`weaver_note` is the non-blocking path for notes or soft questions that
-should stay visible without pausing orchestration.
+`weaver_note` is the non-blocking path for notes, soft questions, status
+updates, or proposed next waves that should stay visible without pausing
+orchestration.
 
-`weaver_ask` is the Weaver's blocking human-in-the-loop mechanism.
+`weaver_ask` is the Weaver's blocking human-in-the-loop mechanism. Use
+it only when the next orchestration step should stop until the human
+answers.
 
 When the Weaver posts a non-blocking note:
 
@@ -194,6 +197,10 @@ When the Weaver asks a question:
 2. event pushes are automatically paused
 3. the Weaver agent shows an awaiting-input state
 4. the question is recorded in the journal as an observation
+
+If the board is idle with backlog remaining and the Weaver only needs to
+surface its recommended next wave or a soft preference question, it
+should use `weaver_note`, not `weaver_ask`.
 
 ### Reply paths
 
@@ -362,6 +369,10 @@ In the second case, the Weaver should read `weaver_board_summary` and then eithe
 
 - dispatch the next best wave if the user's standing priorities already make the next step clear
 - post a `weaver_note` that proposes the next wave and explains what ambiguity or constraint is preventing automatic dispatch
+
+Use `weaver_ask` in this state only if the missing information is a
+blocking human checkpoint and the board should pause until the answer
+arrives.
 
 It should remain idle only when the backlog is truly exhausted or a human checkpoint, approval, or blocking answer is still pending.
 

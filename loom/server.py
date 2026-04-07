@@ -1186,7 +1186,7 @@ async def main(connection: iterm2.Connection):
             - `loom_error(message="message")` — report an unrecoverable error
             - `loom_verify(state="passed", tests_run="...", notes="...")` — record manual deploy/restart/smoke verification details when relevant
             - `loom_derive(description="title", action="action-name", context="details")` — create a subtask and dispatch it according to the allowed transition
-            - `loom_ask(question="question", description="details")` — pause for human input
+            - `loom_ask(question="question", description="details")` — request a blocking human decision or approval when the task cannot continue safely without it
             - `loom_context()` — view your current task, agent info, and pipeline state
 
             ## Important
@@ -1194,6 +1194,12 @@ async def main(connection: iterm2.Connection):
             Always signal completion via one of the tools above.
             Your dispatch prompt specifies which transitions are available —
             use those to determine valid `derive` targets.
+            Use `loom_ask` only when a blocking human answer or approval is
+            required to continue safely. If you can keep moving, do so.
+            For status updates, non-blocking observations, or optional
+            follow-up ideas, continue working and report them via
+            `loom_progress`, `loom_done`, `loom_blocked`, or derived-task
+            context instead of pausing the task.
             When in doubt, call `loom_context()` to see your current state.
         """)
 
@@ -1526,9 +1532,11 @@ async def main(connection: iterm2.Connection):
             mandate = (
                 "\n\nIMPORTANT: When you are done, you MUST use one "
                 "of the Loom MCP tools below. Do NOT ask the "
-                "user directly — use `loom_ask(...)` instead so Loom "
-                "can track it. Do NOT just stop — always signal "
-                "completion via one of these tools.")
+                "user directly. Use `loom_ask(...)` only for a "
+                "blocking human decision or approval so Loom can "
+                "track it. Do not use it for status updates or "
+                "optional suggestions. Do NOT just stop — always "
+                "signal completion via one of these tools.")
 
         if not is_clean:
             abbrev = ("\n\n---" + mandate)
@@ -1540,7 +1548,7 @@ async def main(connection: iterm2.Connection):
                 if has_ask:
                     abbrev += ("\n- `loom_ask(question=\"title\", "
                                "description=\"details\")` "
-                              "— pause for human input")
+                              "— blocking human decision/approval only")
                 abbrev += ("\n- `loom_done(message=\"brief summary\")` "
                            "— task complete, no follow-up")
             else:
@@ -1564,8 +1572,9 @@ async def main(connection: iterm2.Connection):
         if has_ask:
             lines.append(
                 "- `loom_ask(question=\"title\", description=\"details\")` "
-                "— pause for human input (creates a task in "
-                "Backlog for review; `description` is optional)")
+                "— blocking human decision/approval only "
+                "(creates a task in Backlog for review; "
+                "`description` is optional)")
         lines.extend([
             "- `loom_blocked(reason=\"reason\")` — need user input",
             "- `loom_error(message=\"message\")` — unrecoverable error",

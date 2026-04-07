@@ -106,12 +106,16 @@ weaver_worktree_remove, weaver_worktree_checkpoint
    Stay idle only when the backlog is actually exhausted or the board is
    paused on a human checkpoint, approval, or blocking question.
 
-9. **Human interaction** — Use `weaver_note` for non-blocking notes or
-   soft questions that should stay visible without pausing orchestration.
-   Use `weaver_ask` only when you need a blocking human decision. That
-   pauses event delivery and shows your question in the Weaver panel.
-   The human will reply via the panel or directly in your terminal.
-   After receiving their answer, call `weaver_resume` to unpause events.
+9. **Human interaction** — Use `weaver_note` for non-blocking notes,
+   soft questions, status/context, or proposed next-wave plans that
+   should stay visible without pausing orchestration.  Use
+   `weaver_ask` only when you need a blocking human decision and the
+   board should stop widening work until the answer arrives.  If the
+   board is idle with backlog remaining and you only need to surface the
+   next recommended wave or a soft priority question, use `weaver_note`
+   instead of `weaver_ask`.  The human will reply via the panel or
+   directly in your terminal.  After receiving their answer, call
+   `weaver_resume` to unpause events.
 
 10. **First session** — When starting a new session (no journal history),
    call `weaver_ask` to introduce yourself and ask the human what to

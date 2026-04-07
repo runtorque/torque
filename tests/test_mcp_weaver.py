@@ -97,6 +97,21 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         return handle_command
 
+    def test_ask_and_note_tool_descriptions_explain_pause_behavior(self):
+        ask_tool = next(
+            tool for tool in self.mcp_weaver_mod.WEAVER_TOOLS
+            if tool["name"] == "weaver_ask"
+        )
+        note_tool = next(
+            tool for tool in self.mcp_weaver_mod.WEAVER_TOOLS
+            if tool["name"] == "weaver_note"
+        )
+
+        self.assertIn("blocking human decision", ask_tool["description"])
+        self.assertIn("use weaver_note for those", ask_tool["description"])
+        self.assertIn("next-wave proposals", note_tool["description"])
+        self.assertIn("does not pause event delivery", note_tool["description"])
+
     async def _dispatch(self, state, weaver, args, handle_command):
         text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
             "weaver_batch_dispatch",
