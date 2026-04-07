@@ -36,7 +36,14 @@ prompt: |
 
   ## When the plan is ready
 
-  Ask the user to review the plan using the `loom_ask` MCP tool. This notifies the user so they can review the plan in your output. Do NOT derive to implementation before the user approves the plan, only after the task has been approved.
+  Make the approval path explicit in your plan:
+
+  - **Weaver approval is enough** for bounded, low-risk implementation plans that stay within the approved product direction and do not expand scope, change architecture, introduce migrations, or require sensitive operational decisions
+  - **Human approval is required** for product behavior changes, scope expansion, architecture or API shifts, migrations, security/privacy implications, or anything else that needs product judgment
+
+  If the plan needs human approval, ask for it with the `loom_ask` MCP tool so the user can review the plan in your output. If the plan is Weaver-approvable, say so explicitly in your final plan so the Weaver can approve and advance it. Do NOT derive to implementation before the appropriate approval has happened.
+
+  If approval is granted and you transition or derive directly into implementation on the same agent, send an immediate `loom ai progress` update in the implementation task before doing more exploration so the board does not look idle.
 
   Do NOT write code, deploy anything, or make changes. Only research and plan.
 labels:

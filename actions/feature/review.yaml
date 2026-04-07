@@ -25,8 +25,11 @@ prompt: |
 
   1. **Read the full diff** — examine every changed file, not just the ones that look interesting
   2. **Check correctness** — does the code actually do what the task asked for? Are there edge cases that would break it?
-  3. **Check for regressions** — run the test suite and verify it passes
-  4. **Flag issues** using this format for each one:
+  3. **Check verification coverage** — run the narrowest relevant automated checks you can, add manual checks when practical, and note any deploy or live verification that still needs to happen
+  4. **Separate findings clearly**:
+     - **Blocking issues** — problems that must be fixed before merge
+     - **Follow-up suggestions** — worthwhile improvements that do not block merge
+  5. **Flag each blocking issue** using this format:
      - **File and line**: `path/to/file.py:42`
      - **Severity**: critical / warning / nit
      - **Problem**: what's wrong
@@ -39,9 +42,18 @@ prompt: |
   - Missing error handling at system boundaries
   - Dead code or unused imports introduced by the change
 
+  ## Review summary
+
+  Before your verdict, include:
+  - **Verification summary** — tests run, manual checks run, and deploy/live verification still needed
+  - **Merge-risk summary** — low / medium / high with brief rationale
+  - **Follow-up suggestions** — non-blocking improvements, or `None`
+
   ## Verdict
 
   End with one of:
   - **Ship** — no issues, ready to merge
   - **Ship with fixes** — minor issues that should be addressed first
   - **Needs rework** — fundamental problems requiring significant changes
+
+  If changes look correct but still require human sign-off before merging, use `loom ai ask` with the verdict, verification summary, and merge-risk summary.
