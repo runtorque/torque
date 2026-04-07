@@ -358,24 +358,40 @@ class WorktreeManager:
             return {}
 
     async def changed_files(self, cell) -> list[str]:
-        """Return changed file paths for the worktree vs its base branch."""
+        """Return live changed file paths for the worktree vs its base branch.
+
+        Includes committed branch diff plus staged/unstaged tracked changes
+        and untracked files so overlap warnings can fire before a checkpoint.
+        """
         if not cell.worktree_path or not cell.worktree_base_branch:
             return []
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", "-C", cell.worktree_path,
-                "diff", "--name-only",
-                f"{cell.worktree_base_branch}...HEAD",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            stdout, _ = await proc.communicate()
-            if proc.returncode != 0:
-                return []
-            return sorted({
-                line.strip() for line in stdout.decode().splitlines()
-                if line.strip()
-            })
+            changed = set()
+
+            async def _collect(*args):
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "-C", cell.worktree_path,
+                    *args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                stdout, _ = await proc.communicate()
+                if proc.returncode != 0:
+                    return
+                for line in stdout.decode().splitlines():
+                    path = line.strip()
+                    if path:
+                        changed.add(path)
+
+            # Committed work on the branch since it forked from base.
+            await _collect("diff", "--name-only",
+                           f"{cell.worktree_base_branch}...HEAD")
+            # Staged + unstaged tracked edits not yet committed.
+            await _collect("diff", "--name-only", "HEAD")
+            # Untracked files that would not appear in git diff.
+            await _collect("ls-files", "--others", "--exclude-standard")
+
+            return sorted(changed)
         except Exception:
             log.debug("changed_files failed for '%s'", cell.name)
             return []

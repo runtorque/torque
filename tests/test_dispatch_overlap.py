@@ -129,3 +129,48 @@ class DispatchOverlapTests(unittest.TestCase):
         )
 
         self.assertEqual(result["level"], "warning")
+
+    def test_compute_overlap_conflicts_on_dirty_shared_files(self):
+        active = self.state_mod.BoardTask(
+            id="task-1",
+            task="Auth flow implementation",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+        )
+        review = self.state_mod.BoardTask(
+            id="task-2",
+            task="Auth flow review",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-2",
+        )
+        agent_a = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker A",
+            group="g",
+            cell_type="agent",
+            worktree_branch="loom/auth-flow",
+            worktree_repo_root="/repo",
+            worktree_changed_files=["src/auth/login.py"],
+        )
+        agent_b = self.state_mod.AgentCell(
+            id="agent-2",
+            name="Worker B",
+            group="g",
+            cell_type="agent",
+            worktree_branch="loom/auth-review",
+            worktree_repo_root="/repo",
+            worktree_changed_files=["src/auth/login.py"],
+        )
+
+        snapshots, _ = self.overlap_mod.compute_dispatch_overlap(
+            {"task-1": active, "task-2": review},
+            {"agent-1": agent_a, "agent-2": agent_b},
+        )
+
+        self.assertEqual(snapshots["task-1"]["level"], "conflict")
+        self.assertEqual(
+            snapshots["task-1"]["findings"][0]["reason_code"],
+            "shared_files",
+        )
