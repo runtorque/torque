@@ -440,7 +440,8 @@ def _emit_task_health_alerts(state, event_bus: EventBus,
         if not task or task.lane == "Done":
             continue
         new_state = getattr(task, "health_state", "healthy") or "healthy"
-        if new_state not in {"idle-risk", "stalled", "thrashing"}:
+        if new_state not in {
+                "idle-risk", "stalled", "thrashing", "stale-in-progress"}:
             continue
         previous = old_task_health.get(tid, {})
         old_state = previous.get("state", "healthy") or "healthy"
@@ -488,6 +489,8 @@ def _task_health_alert_message(task) -> str:
     state_name = getattr(task, "health_state", "healthy") or "healthy"
     if state_name == "idle-risk":
         prefix = "idle risk"
+    elif state_name == "stale-in-progress":
+        prefix = "stale in progress"
     else:
         prefix = state_name
 

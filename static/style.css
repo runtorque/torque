@@ -3669,6 +3669,34 @@ body.diff-view-open #ctx-menu {
 }
 .weaver-dismiss-btn:hover { color: var(--text); border-color: var(--text-dim); }
 
+.weaver-note-banner {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.weaver-note-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+.weaver-note-text {
+  font-size: 11px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+.weaver-note-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
 .weaver-empty {
   font-size: 10px;
   color: var(--text-dim);

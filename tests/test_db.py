@@ -280,9 +280,12 @@ class LoomDBTests(unittest.TestCase):
                 "group": "g",
                 "push_interval": 30,
                 "max_interval": 120,
+                "heartbeat_interval": 180,
                 "paused": True,
                 "custom_instructions": "Focus on regressions.",
                 "pending_question": "Need approval",
+                "pending_note": "FYI: release notes are ready",
+                "pending_note_kind": "note",
                 "enabled_events": ["task_completed"],
                 "weaver_provider": "codex",
                 "weaver_boot_command": "codex --model gpt-5",
@@ -293,7 +296,10 @@ class LoomDBTests(unittest.TestCase):
 
         loaded = self.db.load_weaver_settings("g")
         self.assertEqual(loaded["pending_question"], "Need approval")
+        self.assertEqual(loaded["pending_note"], "FYI: release notes are ready")
+        self.assertEqual(loaded["pending_note_kind"], "note")
         self.assertEqual(loaded["enabled_events"], ["task_completed"])
+        self.assertEqual(loaded["heartbeat_interval"], 180)
         self.assertEqual(loaded["weaver_boot_command"], "codex --model gpt-5")
 
         entries = self.db.load_journal_entries("g", limit=10)
@@ -304,6 +310,34 @@ class LoomDBTests(unittest.TestCase):
             self.db.load_journal_entries("g", limit=10, entry_type="decision"),
             [entries[1]],
         )
+
+    def test_weaver_settings_load_backfills_heartbeat_from_legacy_rows(self):
+        self.db._conn.execute(
+            """
+            INSERT INTO weaver_settings
+                (group_name, push_interval, max_interval, paused,
+                 custom_instructions, pending_question, enabled_events,
+                 weaver_provider, weaver_boot_command)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy",
+                60,
+                240,
+                0,
+                "",
+                "",
+                '["task_completed"]',
+                "",
+                "",
+            ),
+        )
+        self.db._conn.commit()
+
+        loaded = self.db.load_weaver_settings("legacy")
+
+        self.assertEqual(loaded["max_interval"], 240)
+        self.assertEqual(loaded["heartbeat_interval"], 240)
 
     def test_playbook_candidates_roundtrip(self):
         candidate = {

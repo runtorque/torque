@@ -79,6 +79,55 @@ def _should_queue_existing_agent_dispatch(active_task, *,
     return active_task.lane != "Done"
 
 
+def _cells_share_worktree_context(a, b) -> bool:
+    """Return whether two agents point at the same branch/worktree context."""
+    if not a or not b or a.id == b.id:
+        return False
+    if a.worktree_path and b.worktree_path \
+            and a.worktree_path == b.worktree_path:
+        return True
+    if a.worktree_branch and b.worktree_branch \
+            and a.worktree_branch == b.worktree_branch \
+            and a.worktree_repo_root and b.worktree_repo_root \
+            and a.worktree_repo_root == b.worktree_repo_root:
+        return True
+    return False
+
+
+def _agent_has_active_worktree_context(cell) -> bool:
+    """Return whether an agent is actively working on a worktree task."""
+    return bool(
+        cell
+        and cell.cell_type == "agent"
+        and cell.current_task_id
+        and (cell.worktree_path or cell.worktree_branch)
+    )
+
+
+def _find_active_worktree_owner(state: MatrixState, cell):
+    """Return the active agent currently owning a shared worktree context."""
+    if not cell or not (cell.worktree_path or cell.worktree_branch):
+        return None
+    for other in state.agents.values():
+        if not _agent_has_active_worktree_context(other):
+            continue
+        if _cells_share_worktree_context(cell, other):
+            return other
+    return None
+
+
+def _should_handoff_shared_worktree(owner, *,
+                                    target_agent_id: str,
+                                    handoff_from: str) -> bool:
+    """Return whether an explicit handoff should transfer branch ownership."""
+    return bool(
+        owner
+        and handoff_from
+        and owner.id == handoff_from
+        and owner.id != target_agent_id
+    )
+
+
 async def _worktree_diff_updater(state: MatrixState,
                                  worktree_mgr: WorktreeManager):
     """Periodically update diff stats for cells with active worktrees."""
@@ -2135,110 +2184,127 @@ async def main(connection: iterm2.Connection):
             elif cmd == "relaunch_agent":
                 cell = state.agents.get(data["id"])
                 if cell and cell.status == "stopped":
-                    gs = state.get_group_settings(cell.group)
-                    base_dir = cell.worktree_repo_root or cell.directory \
-                        or await _resolve_base_dir(cell.group)
-                    launch_cfg = _resolve_agent_launch_config(
-                        cell.group,
-                        base_dir=base_dir,
-                        explicit_template=cell.template,
-                        overrides={},
-                    )
-                    cell.session_resume = bool(
-                        launch_cfg.get("session_resume", cell.session_resume))
-                    cell.idle_timeout = int(
-                        launch_cfg.get("idle_timeout", cell.idle_timeout) or 0)
-                    if cell.cell_type == "agent":
-                        cell.command = launch_cfg.get("command", cell.command)
-                        cell.profile = launch_cfg.get("profile", cell.profile)
-                        cell.tab_color = launch_cfg.get(
-                            "tab_color", cell.tab_color)
-                        cell.icon = launch_cfg.get("icon", cell.icon)
-                        cell.agent_type = launch_cfg.get(
-                            "agent_type", cell.agent_type)
-                        if not cell.worktree_path:
-                            cell.directory = launch_cfg.get(
-                                "directory", cell.directory)
-                    cell.worktree_base_dir = (
-                        launch_cfg.get("worktree_base_dir")
-                        or cell.worktree_base_dir
-                        or ".loom/worktrees")
-                    cell.worktree_auto_checkpoint = bool(
-                        launch_cfg.get(
-                            "worktree_auto_checkpoint",
-                            cell.worktree_auto_checkpoint))
-                    cell.checkpoint_on_progress = bool(
-                        launch_cfg.get(
-                            "checkpoint_on_progress",
-                            cell.checkpoint_on_progress))
-                    cell.worktree_merge_squash = bool(
-                        launch_cfg.get(
-                            "worktree_merge_squash",
-                            cell.worktree_merge_squash))
-                    state._emit_agent(cell)
-                    state._db_save_agent(cell)
-                    if cell.cell_type == "terminal":
-                        env = {**gs.env_vars, **gs.terminal_env_vars} or None
-                        ef = gs.terminal_env_file or gs.env_file
-                        shell = gs.terminal_shell or gs.shell or ""
-                        init = gs.terminal_init_script
+                    owner = _find_active_worktree_owner(state, cell)
+                    if owner:
+                        result = {
+                            "type": "error",
+                            "message":
+                                f"Cannot relaunch '{cell.name}' while "
+                                f"'{owner.name}' is active on "
+                                f"{owner.worktree_branch or owner.worktree_path}",
+                        }
                     else:
-                        env = launch_cfg.get("env_vars")
-                        ef = launch_cfg.get("env_file", "")
-                        shell = launch_cfg.get("shell", "")
-                        init = ""
-                        prev_directory = cell.directory
-                        # Worktree handling on relaunch
-                        if cell.worktree_path:
-                            if await worktree_mgr.validate(cell):
-                                # Reuse existing worktree
-                                cell.directory = cell.worktree_path
-                                log.info("Reusing worktree for '%s': %s",
-                                         cell.name, cell.worktree_path)
-                            else:
-                                # Worktree gone — clear and recreate if enabled
-                                log.warning("Worktree invalid for '%s', "
-                                            "clearing", cell.name)
-                                cell.worktree_path = ""
-                                cell.worktree_branch = ""
-                                cell.worktree_repo_root = ""
-                                cell.worktree_base_branch = ""
-                                state._emit_agent(cell)
-                                state._db_save_agent(cell)
-                        # Create new worktree if enabled and none exists
-                        if not cell.worktree_path and launch_cfg.get("worktree") \
-                                and cell.directory:
-                            repo_root = await worktree_mgr.get_repo_root(
-                                cell.directory)
-                            if repo_root:
-                                wt_path = await worktree_mgr.create(
-                                    cell, repo_root,
-                                    base_dir=cell.worktree_base_dir
-                                        or ".loom/worktrees",
-                                    base_branch=launch_cfg.get(
-                                        "worktree_base_branch", "")
-                                        or "",
-                                    symlinks=launch_cfg.get(
-                                        "worktree_symlinks", []))
-                                if wt_path:
-                                    cell.directory = wt_path
+                        gs = state.get_group_settings(cell.group)
+                        base_dir = cell.worktree_repo_root or cell.directory \
+                            or await _resolve_base_dir(cell.group)
+                        launch_cfg = _resolve_agent_launch_config(
+                            cell.group,
+                            base_dir=base_dir,
+                            explicit_template=cell.template,
+                            overrides={},
+                        )
+                        cell.session_resume = bool(
+                            launch_cfg.get(
+                                "session_resume", cell.session_resume))
+                        cell.idle_timeout = int(
+                            launch_cfg.get(
+                                "idle_timeout", cell.idle_timeout) or 0)
+                        if cell.cell_type == "agent":
+                            cell.command = launch_cfg.get(
+                                "command", cell.command)
+                            cell.profile = launch_cfg.get(
+                                "profile", cell.profile)
+                            cell.tab_color = launch_cfg.get(
+                                "tab_color", cell.tab_color)
+                            cell.icon = launch_cfg.get("icon", cell.icon)
+                            cell.agent_type = launch_cfg.get(
+                                "agent_type", cell.agent_type)
+                            if not cell.worktree_path:
+                                cell.directory = launch_cfg.get(
+                                    "directory", cell.directory)
+                        cell.worktree_base_dir = (
+                            launch_cfg.get("worktree_base_dir")
+                            or cell.worktree_base_dir
+                            or ".loom/worktrees")
+                        cell.worktree_auto_checkpoint = bool(
+                            launch_cfg.get(
+                                "worktree_auto_checkpoint",
+                                cell.worktree_auto_checkpoint))
+                        cell.checkpoint_on_progress = bool(
+                            launch_cfg.get(
+                                "checkpoint_on_progress",
+                                cell.checkpoint_on_progress))
+                        cell.worktree_merge_squash = bool(
+                            launch_cfg.get(
+                                "worktree_merge_squash",
+                                cell.worktree_merge_squash))
+                        state._emit_agent(cell)
+                        state._db_save_agent(cell)
+                        if cell.cell_type == "terminal":
+                            env = {**gs.env_vars, **gs.terminal_env_vars} \
+                                or None
+                            ef = gs.terminal_env_file or gs.env_file
+                            shell = gs.terminal_shell or gs.shell or ""
+                            init = gs.terminal_init_script
+                        else:
+                            env = launch_cfg.get("env_vars")
+                            ef = launch_cfg.get("env_file", "")
+                            shell = launch_cfg.get("shell", "")
+                            init = ""
+                            prev_directory = cell.directory
+                            # Worktree handling on relaunch
+                            if cell.worktree_path:
+                                if await worktree_mgr.validate(cell):
+                                    # Reuse existing worktree
+                                    cell.directory = cell.worktree_path
+                                    log.info("Reusing worktree for '%s': %s",
+                                             cell.name, cell.worktree_path)
+                                else:
+                                    # Worktree gone — clear and recreate if enabled
+                                    log.warning("Worktree invalid for '%s', "
+                                                "clearing", cell.name)
+                                    cell.worktree_path = ""
+                                    cell.worktree_branch = ""
+                                    cell.worktree_repo_root = ""
+                                    cell.worktree_base_branch = ""
                                     state._emit_agent(cell)
                                     state._db_save_agent(cell)
-                        if (cell.agent_type and prev_directory
-                                and prev_directory != cell.directory):
-                            get_adapter(cell.agent_type) \
-                                .uninstall_persistent_prompt(
-                                    os.path.expanduser(prev_directory),
-                                    _persistent_prompt_filename(cell))
-                    _apply_persistent_prompt(
-                        cell, launch_cfg,
-                        _build_cell_persistent_prompt(cell, launch_cfg))
-                    state._emit_agent(cell)
-                    state._db_save_agent(cell)
-                    await bridge.create_session(
-                        cell, env_vars=env, env_file=ef,
-                        init_script=init, shell=shell,
-                        system_prompt=launch_cfg.get("system_prompt", ""))
+                            # Create new worktree if enabled and none exists
+                            if not cell.worktree_path \
+                                    and launch_cfg.get("worktree") \
+                                    and cell.directory:
+                                repo_root = await worktree_mgr.get_repo_root(
+                                    cell.directory)
+                                if repo_root:
+                                    wt_path = await worktree_mgr.create(
+                                        cell, repo_root,
+                                        base_dir=cell.worktree_base_dir
+                                        or ".loom/worktrees",
+                                        base_branch=launch_cfg.get(
+                                            "worktree_base_branch", "")
+                                        or "",
+                                        symlinks=launch_cfg.get(
+                                            "worktree_symlinks", []))
+                                    if wt_path:
+                                        cell.directory = wt_path
+                                        state._emit_agent(cell)
+                                        state._db_save_agent(cell)
+                            if (cell.agent_type and prev_directory
+                                    and prev_directory != cell.directory):
+                                get_adapter(cell.agent_type) \
+                                    .uninstall_persistent_prompt(
+                                        os.path.expanduser(prev_directory),
+                                        _persistent_prompt_filename(cell))
+                        _apply_persistent_prompt(
+                            cell, launch_cfg,
+                            _build_cell_persistent_prompt(cell, launch_cfg))
+                        state._emit_agent(cell)
+                        state._db_save_agent(cell)
+                        await bridge.create_session(
+                            cell, env_vars=env, env_file=ef,
+                            init_script=init, shell=shell,
+                            system_prompt=launch_cfg.get(
+                                "system_prompt", ""))
 
             elif cmd == "move_group":
                 state.move_group(data["group"], data.get("before", ""))
@@ -3171,6 +3237,43 @@ async def main(connection: iterm2.Connection):
                                     await _create_child_terminals(
                                         group, cell, count=gs.auto_terminals)
 
+                        if cell:
+                            # Link task to agent and move to In Progress
+                            owner = _find_active_worktree_owner(state, cell)
+                            handoff_from = data.get(
+                                "handoff_worktree_from", "")
+                            if owner:
+                                if _should_handoff_shared_worktree(
+                                        owner,
+                                        target_agent_id=cell.id,
+                                        handoff_from=handoff_from):
+                                    owner.current_task_id = ""
+                                    owner.activity = ""
+                                    owner.activity_detail = ""
+                                    state._emit_agent(owner)
+                                    state._db_save_agent(owner)
+                                else:
+                                    state.board_update_task(
+                                        tid, agent_id=cell.id)
+                                    state.board_move_task(tid, "To Do")
+                                    _panel_event(
+                                        "task_queued", cell.id,
+                                        cell.name, cell.group,
+                                        f"{task.task[:80]} "
+                                        f"(waiting for {owner.name})",
+                                        task_id=tid)
+                                    result = {
+                                        "type": "queued",
+                                        "task_id": tid,
+                                        "agent_id": cell.id,
+                                        "reason":
+                                            "shared_worktree_busy",
+                                        "blocked_by_agent_id":
+                                            owner.id,
+                                        "blocked_by_task_id":
+                                            owner.current_task_id,
+                                    }
+                                    cell = None
                         if cell:
                             # Link task to agent and move to In Progress
                             dispatch_lane = \
@@ -4452,7 +4555,17 @@ async def main(connection: iterm2.Connection):
                                                     "inherit_worktree"
                                                     "_from"
                                                 ] = target_id
-                                            elif cell.worktree_path:
+                                            if cell.worktree_path:
+                                                dispatch_data[
+                                                    "handoff_worktree_from"
+                                                ] = cell.id
+                                            elif cell.worktree_branch:
+                                                dispatch_data[
+                                                    "handoff_worktree_from"
+                                                ] = cell.id
+                                            if not (tgt and
+                                                    tgt.worktree_path) \
+                                                    and cell.worktree_path:
                                                 dispatch_data[
                                                     "inherit_worktree"
                                                     "_from"
@@ -4481,6 +4594,9 @@ async def main(connection: iterm2.Connection):
                                                 dispatch_data[
                                                     "inherit_worktree"
                                                     "_from"
+                                                ] = cell.id
+                                                dispatch_data[
+                                                    "handoff_worktree_from"
                                                 ] = cell.id
                                             if cell.session_id:
                                                 dispatch_data[
@@ -4817,6 +4933,8 @@ async def main(connection: iterm2.Connection):
                 group = data.get("group", "")
                 fields = {}
                 for k in ("push_interval", "max_interval",
+                          "heartbeat_interval",
+                          "pending_note", "pending_note_kind",
                           "custom_instructions", "enabled_events",
                           "paused", "weaver_provider",
                           "weaver_boot_command"):
@@ -4841,6 +4959,35 @@ async def main(connection: iterm2.Connection):
                         group, "observation",
                         f"Asked human: {question}")
                     result = {"type": "ok"}
+
+            elif cmd == "weaver_note":
+                group = data.get("group", "")
+                message = data.get("message", "")
+                kind = data.get("kind", "note")
+                if not message:
+                    result = {"type": "error",
+                              "message": "Message is required"}
+                elif kind not in {"note", "question"}:
+                    result = {"type": "error",
+                              "message": "kind must be 'note' or 'question'"}
+                else:
+                    state.update_weaver_settings(
+                        group,
+                        pending_note=message,
+                        pending_note_kind=kind)
+                    prefix = "Soft question" if kind == "question" else "Note"
+                    state.journal_append(
+                        group, "observation",
+                        f"{prefix} for human: {message}")
+                    result = {"type": "ok"}
+
+            elif cmd == "weaver_dismiss_note":
+                group = data.get("group", "")
+                state.update_weaver_settings(
+                    group,
+                    pending_note="",
+                    pending_note_kind="")
+                result = {"type": "ok"}
 
             elif cmd == "weaver_reply":
                 group = data.get("group", "")

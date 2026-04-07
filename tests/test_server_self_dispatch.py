@@ -62,6 +62,20 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.server_mod = importlib.import_module("loom.server")
         self.server_mod = importlib.reload(self.server_mod)
 
+    def _make_agent(self, agent_id, *, current_task_id="",
+                    worktree_path="/repo/.loom/worktrees/shared",
+                    worktree_branch="loom/shared",
+                    worktree_repo_root="/repo"):
+        return self.state_mod.AgentCell(
+            id=agent_id,
+            name=agent_id,
+            group="g",
+            current_task_id=current_task_id,
+            worktree_path=worktree_path,
+            worktree_branch=worktree_branch,
+            worktree_repo_root=worktree_repo_root,
+        )
+
     def test_self_dispatch_prompt_is_minimal_hint(self):
         self.assertEqual(
             self.server_mod._build_self_dispatch_prompt(),
@@ -90,3 +104,86 @@ class ServerSelfDispatchTests(unittest.TestCase):
                 self_dispatch=True,
             )
         )
+
+    def test_existing_agent_dispatch_detects_active_shared_worktree_owner(self):
+        state = self.state_mod.MatrixState()
+        owner = self._make_agent("agent-1", current_task_id="task-1")
+        target = self._make_agent("agent-2")
+        state.agents = {owner.id: owner, target.id: target}
+
+        active_owner = self.server_mod._find_active_worktree_owner(
+            state, target
+        )
+
+        self.assertIs(active_owner, owner)
+        self.assertFalse(
+            self.server_mod._should_handoff_shared_worktree(
+                active_owner,
+                target_agent_id=target.id,
+                handoff_from="",
+            )
+        )
+
+    def test_self_dispatch_keeps_shared_worktree_owner(self):
+        state = self.state_mod.MatrixState()
+        owner = self._make_agent("agent-1", current_task_id="task-1")
+        state.agents = {owner.id: owner}
+
+        active_owner = self.server_mod._find_active_worktree_owner(
+            state, owner
+        )
+
+        self.assertIsNone(active_owner)
+
+    def test_review_handoff_allows_shared_worktree_reuse(self):
+        state = self.state_mod.MatrixState()
+        owner = self._make_agent("impl-1", current_task_id="task-impl")
+        reviewer = self._make_agent("review-1")
+        state.agents = {owner.id: owner, reviewer.id: reviewer}
+
+        active_owner = self.server_mod._find_active_worktree_owner(
+            state, reviewer
+        )
+
+        self.assertIs(active_owner, owner)
+        self.assertTrue(
+            self.server_mod._should_handoff_shared_worktree(
+                active_owner,
+                target_agent_id=reviewer.id,
+                handoff_from=owner.id,
+            )
+        )
+
+    def test_concurrent_dispatch_detects_shared_branch_context(self):
+        state = self.state_mod.MatrixState()
+        owner = self._make_agent(
+            "agent-1",
+            current_task_id="task-1",
+            worktree_path="/repo/.loom/worktrees/one",
+            worktree_branch="loom/shared-branch",
+        )
+        target = self._make_agent(
+            "agent-2",
+            worktree_path="/repo/.loom/worktrees/two",
+            worktree_branch="loom/shared-branch",
+        )
+        state.agents = {owner.id: owner, target.id: target}
+
+        active_owner = self.server_mod._find_active_worktree_owner(
+            state, target
+        )
+
+        self.assertIs(active_owner, owner)
+
+    def test_relaunch_is_blocked_while_other_agent_owns_shared_worktree(self):
+        state = self.state_mod.MatrixState()
+        owner = self._make_agent("agent-1", current_task_id="task-1")
+        stopped = self._make_agent("agent-2")
+        stopped.status = "stopped"
+        state.agents = {owner.id: owner, stopped.id: stopped}
+
+        active_owner = self.server_mod._find_active_worktree_owner(
+            state, stopped
+        )
+
+        self.assertIs(active_owner, owner)

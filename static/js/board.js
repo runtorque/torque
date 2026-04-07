@@ -65,9 +65,10 @@ var _boardBatchActionOptions = [];    // actions for batch edit action picker
 var _boardArchiveLabel = 'loom:archived';
 var _boardArchiveStaleDays = 7;
 
-var _boardHealthOrder = ['blocked', 'stalled', 'thrashing', 'idle-risk'];
+var _boardHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
 var _boardHealthLabels = {
   'blocked': 'Blocked',
+  'stale-in-progress': 'Stale in progress',
   'stalled': 'Stalled',
   'thrashing': 'Thrashing',
   'idle-risk': 'Idle risk',

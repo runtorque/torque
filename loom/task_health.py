@@ -9,6 +9,7 @@ from typing import Any
 
 HEALTH_HEALTHY = "healthy"
 HEALTH_BLOCKED = "blocked"
+HEALTH_STALE_IN_PROGRESS = "stale-in-progress"
 HEALTH_IDLE_RISK = "idle-risk"
 HEALTH_STALLED = "stalled"
 HEALTH_THRASHING = "thrashing"
@@ -18,7 +19,8 @@ HEALTH_SEVERITY = {
     HEALTH_IDLE_RISK: 1,
     HEALTH_THRASHING: 2,
     HEALTH_STALLED: 3,
-    HEALTH_BLOCKED: 4,
+    HEALTH_STALE_IN_PROGRESS: 4,
+    HEALTH_BLOCKED: 5,
 }
 
 IDLE_RISK_AFTER_SECS = 10 * 60
@@ -150,6 +152,15 @@ def _compute_local_health(task: Any, tasks_by_id: dict[str, Any],
     if reasons:
         return TaskHealthSnapshot(state=HEALTH_BLOCKED, details=details)
 
+    stale_reasons = _stale_in_progress_reasons(task, tasks_by_id, agents_by_id)
+    if stale_reasons:
+        details["reasons"] = stale_reasons
+        details["agent_idle"] = True
+        return TaskHealthSnapshot(
+            state=HEALTH_STALE_IN_PROGRESS,
+            details=details,
+        )
+
     if _is_thrashing(task, now_ts):
         details["reasons"] = ["message_churn"]
         return TaskHealthSnapshot(state=HEALTH_THRASHING, details=details)
@@ -185,6 +196,59 @@ def _has_unmet_dependencies(task: Any, tasks_by_id: dict[str, Any]) -> bool:
         dep = tasks_by_id.get(dep_id)
         if dep and getattr(dep, "lane", "") != "Done":
             return True
+    return False
+
+
+def _stale_in_progress_reasons(task: Any, tasks_by_id: dict[str, Any],
+                               agents_by_id: dict[str, Any]) -> list[str]:
+    if getattr(task, "lane", "") != "In Progress":
+        return []
+    agent_id = getattr(task, "agent_id", "") or ""
+    if not agent_id:
+        return []
+    agent = agents_by_id.get(agent_id)
+    if not agent or getattr(agent, "cell_type", "") != "agent":
+        return []
+    if getattr(agent, "status", "") != "running":
+        return []
+    if getattr(agent, "activity", ""):
+        return []
+    if _task_has_open_child(task, tasks_by_id):
+        return []
+    if _agent_has_other_open_work(agent_id, task.id, tasks_by_id):
+        return []
+
+    reasons = []
+    if getattr(agent, "worktree_checkpoints", 0) > 0:
+        reasons.append("checkpointed_worktree")
+    if getattr(agent, "worktree_ahead", 0) > 0:
+        reasons.append("branch_ahead_of_base")
+    if (not getattr(agent, "worktree_dirty", False)
+            and getattr(agent, "worktree_path", "")
+            and getattr(agent, "worktree_checkpoints", 0) > 0):
+        reasons.append("clean_checkpointed_branch")
+    return reasons
+
+
+def _task_has_open_child(task: Any, tasks_by_id: dict[str, Any]) -> bool:
+    for other in tasks_by_id.values():
+        if getattr(other, "parent_task_id", "") != getattr(task, "id", ""):
+            continue
+        if getattr(other, "lane", "") != "Done":
+            return True
+    return False
+
+
+def _agent_has_other_open_work(agent_id: str, task_id: str,
+                               tasks_by_id: dict[str, Any]) -> bool:
+    for other in tasks_by_id.values():
+        if getattr(other, "id", "") == task_id:
+            continue
+        if getattr(other, "agent_id", "") != agent_id:
+            continue
+        if getattr(other, "lane", "") in {"Done", "Backlog"}:
+            continue
+        return True
     return False
 
 

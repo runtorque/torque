@@ -289,9 +289,12 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     group_name         TEXT PRIMARY KEY,
     push_interval      INTEGER NOT NULL DEFAULT 60,
     max_interval       INTEGER NOT NULL DEFAULT 300,
+    heartbeat_interval INTEGER NOT NULL DEFAULT 300,
     paused             INTEGER NOT NULL DEFAULT 0,
     custom_instructions TEXT NOT NULL DEFAULT '',
     pending_question   TEXT NOT NULL DEFAULT '',
+    pending_note       TEXT NOT NULL DEFAULT '',
+    pending_note_kind  TEXT NOT NULL DEFAULT '',
     enabled_events     TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived"]',
     weaver_provider    TEXT NOT NULL DEFAULT '',
     weaver_boot_command TEXT NOT NULL DEFAULT ''
@@ -649,6 +652,18 @@ class LoomDB:
                 self._conn.commit()
             except sqlite3.OperationalError:
                 pass  # table may not exist yet
+        for col in ("pending_note", "pending_note_kind"):
+            try:
+                self._conn.execute(
+                    f"SELECT {col} FROM weaver_settings LIMIT 0")
+            except sqlite3.OperationalError:
+                try:
+                    self._conn.execute(
+                        f"ALTER TABLE weaver_settings ADD COLUMN "
+                        f"{col} TEXT NOT NULL DEFAULT ''")
+                    self._conn.commit()
+                except sqlite3.OperationalError:
+                    pass
         # Migrate: add weaver_provider and weaver_boot_command columns
         for col in ("weaver_provider", "weaver_boot_command"):
             try:
@@ -662,6 +677,20 @@ class LoomDB:
                     self._conn.commit()
                 except sqlite3.OperationalError:
                     pass
+        try:
+            self._conn.execute(
+                "SELECT heartbeat_interval FROM weaver_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            try:
+                self._conn.execute(
+                    "ALTER TABLE weaver_settings ADD COLUMN "
+                    "heartbeat_interval INTEGER NOT NULL DEFAULT 300")
+                self._conn.execute(
+                    "UPDATE weaver_settings "
+                    "SET heartbeat_interval = max_interval")
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass
         # Migrate: rename system labels with loom: prefix
         rows = self._conn.execute(
             "SELECT id, labels FROM board_tasks "
@@ -997,17 +1026,23 @@ class LoomDB:
                          ["agent_started", "task_dispatched", "task_derived"]))
         self._conn.execute("""
             INSERT OR REPLACE INTO weaver_settings
-                (group_name, push_interval, max_interval, paused,
-                 custom_instructions, pending_question, enabled_events,
+                (group_name, push_interval, max_interval, heartbeat_interval,
+                 paused,
+                 custom_instructions, pending_question, pending_note,
+                 pending_note_kind, enabled_events,
                  weaver_provider, weaver_boot_command)
-            VALUES (?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             group_name,
             settings.get("push_interval", 60),
             settings.get("max_interval", 300),
+            settings.get("heartbeat_interval",
+                         settings.get("max_interval", 300)),
             1 if settings.get("paused", False) else 0,
             settings.get("custom_instructions", ""),
             settings.get("pending_question", ""),
+            settings.get("pending_note", ""),
+            settings.get("pending_note_kind", ""),
             enabled_events,
             settings.get("weaver_provider", ""),
             settings.get("weaver_boot_command", ""),
@@ -1017,27 +1052,34 @@ class LoomDB:
     def load_weaver_settings(self, group_name: str) -> dict | None:
         """Load weaver settings for a group. Returns None if not set."""
         row = self._conn.execute(
-            "SELECT group_name, push_interval, max_interval, paused, "
-            "custom_instructions, pending_question, enabled_events, "
+            "SELECT group_name, push_interval, max_interval, heartbeat_interval, paused, "
+            "custom_instructions, pending_question, pending_note, pending_note_kind, enabled_events, "
             "weaver_provider, weaver_boot_command "
             "FROM weaver_settings "
             "WHERE group_name=?", (group_name,)).fetchone()
         if not row:
             return None
         try:
-            enabled = json.loads(row[6])
+            enabled = json.loads(row[9])
         except (json.JSONDecodeError, TypeError):
             enabled = ["agent_started", "task_dispatched", "task_derived"]
+        heartbeat_interval = row[3]
+        if heartbeat_interval is None or (
+                heartbeat_interval == 300 and row[2] != 300):
+            heartbeat_interval = row[2]
         return {
             "group": row[0],
             "push_interval": row[1],
             "max_interval": row[2],
-            "paused": bool(row[3]),
-            "custom_instructions": row[4],
-            "pending_question": row[5],
+            "heartbeat_interval": heartbeat_interval,
+            "paused": bool(row[4]),
+            "custom_instructions": row[5],
+            "pending_question": row[6],
+            "pending_note": row[7],
+            "pending_note_kind": row[8],
             "enabled_events": enabled,
-            "weaver_provider": row[7] if len(row) > 7 else "",
-            "weaver_boot_command": row[8] if len(row) > 8 else "",
+            "weaver_provider": row[10] if len(row) > 10 else "",
+            "weaver_boot_command": row[11] if len(row) > 11 else "",
         }
 
     def delete_weaver_settings(self, group_name: str):
@@ -1048,27 +1090,34 @@ class LoomDB:
     def load_all_weaver_settings(self) -> dict[str, dict]:
         """Load weaver settings for all groups. Returns {group: settings}."""
         rows = self._conn.execute(
-            "SELECT group_name, push_interval, max_interval, paused, "
-            "custom_instructions, pending_question, enabled_events, "
+            "SELECT group_name, push_interval, max_interval, heartbeat_interval, paused, "
+            "custom_instructions, pending_question, pending_note, pending_note_kind, enabled_events, "
             "weaver_provider, weaver_boot_command "
             "FROM weaver_settings"
         ).fetchall()
         result = {}
         for row in rows:
             try:
-                enabled = json.loads(row[6])
+                enabled = json.loads(row[9])
             except (json.JSONDecodeError, TypeError):
                 enabled = ["agent_started", "task_dispatched", "task_derived"]
+            heartbeat_interval = row[3]
+            if heartbeat_interval is None or (
+                    heartbeat_interval == 300 and row[2] != 300):
+                heartbeat_interval = row[2]
             result[row[0]] = {
                 "group": row[0],
                 "push_interval": row[1],
                 "max_interval": row[2],
-                "paused": bool(row[3]),
-                "custom_instructions": row[4],
-                "pending_question": row[5],
+                "heartbeat_interval": heartbeat_interval,
+                "paused": bool(row[4]),
+                "custom_instructions": row[5],
+                "pending_question": row[6],
+                "pending_note": row[7],
+                "pending_note_kind": row[8],
                 "enabled_events": enabled,
-                "weaver_provider": row[7] if len(row) > 7 else "",
-                "weaver_boot_command": row[8] if len(row) > 8 else "",
+                "weaver_provider": row[10] if len(row) > 10 else "",
+                "weaver_boot_command": row[11] if len(row) > 11 else "",
             }
         return result
 

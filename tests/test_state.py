@@ -56,6 +56,8 @@ class MatrixStateCleanupTests(unittest.TestCase):
         state.weaver_settings["g"] = self.state_mod.WeaverSettings(
             group="g",
             pending_question="Need review",
+            pending_note="FYI: tests are green",
+            pending_note_kind="note",
             paused=True,
         )
         state.board_tasks[parent.id] = parent
@@ -65,6 +67,8 @@ class MatrixStateCleanupTests(unittest.TestCase):
 
         self.assertEqual(state.group_settings["g"].weaver_agent_id, "")
         self.assertEqual(state.weaver_settings["g"].pending_question, "")
+        self.assertEqual(state.weaver_settings["g"].pending_note, "")
+        self.assertEqual(state.weaver_settings["g"].pending_note_kind, "")
         self.assertFalse(state.weaver_settings["g"].paused)
         self.assertEqual(state.board_tasks[parent.id].agent_id, "")
         self.assertEqual(state.board_tasks[parent.id].status, "")
@@ -102,6 +106,8 @@ class MatrixStateCleanupTests(unittest.TestCase):
         state.weaver_settings["g"] = self.state_mod.WeaverSettings(
             group="g",
             pending_question="Old question",
+            pending_note="Soft question",
+            pending_note_kind="question",
             paused=True,
         )
 
@@ -111,8 +117,28 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(state.board_tasks[parent.id].status, "")
         self.assertEqual(state.board_tasks[ask.id].lane, "Done")
         self.assertEqual(state.weaver_settings["g"].pending_question, "")
+        self.assertEqual(state.weaver_settings["g"].pending_note, "")
+        self.assertEqual(state.weaver_settings["g"].pending_note_kind, "")
         self.assertFalse(state.weaver_settings["g"].paused)
         self.assertEqual(state._delta_ops, [])
+
+    def test_weaver_resume_semantics_preserve_non_blocking_notes(self):
+        state = self.state_mod.MatrixState()
+        state.weaver_settings["g"] = self.state_mod.WeaverSettings(
+            group="g",
+            pending_question="Need review",
+            pending_note="FYI: branch is ready",
+            pending_note_kind="note",
+            paused=True,
+        )
+
+        state.update_weaver_settings("g", paused=False, pending_question="")
+
+        ws = state.weaver_settings["g"]
+        self.assertEqual(ws.pending_question, "")
+        self.assertFalse(ws.paused)
+        self.assertEqual(ws.pending_note, "FYI: branch is ready")
+        self.assertEqual(ws.pending_note_kind, "note")
 
 
 class MatrixStateBoardWorkflowTests(unittest.TestCase):
