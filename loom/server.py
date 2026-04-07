@@ -28,6 +28,12 @@ from .adapters import get_adapter, get_providers, get_default_command_for_provid
 from .notifications import NotificationManager
 from .worktree import WorktreeManager
 from .actions import ActionManager, LOOM_CONTEXT_STUB
+from .artifacts import (
+    artifact_prompt_block,
+    legacy_image_prompt_block,
+    normalize_artifacts,
+    task_artifacts,
+)
 from .templates import TemplateManager
 from . import keybindings
 from .mcp import create_mcp_handler
@@ -35,6 +41,14 @@ from .mcp import create_mcp_handler
 # Delay (seconds) before closing an agent after a successful merge.
 # TODO: make this a user-facing setting in global/group settings.
 CLOSE_AFTER_MERGE_DELAY = 5
+
+
+def _append_task_artifacts(prompt: str, attachments, artifacts) -> str:
+    """Append legacy image references plus structured artifact references."""
+    final_prompt = prompt
+    final_prompt += legacy_image_prompt_block(attachments, artifacts)
+    final_prompt += artifact_prompt_block(artifacts)
+    return final_prompt
 
 
 async def _worktree_diff_updater(state: MatrixState,
@@ -1339,6 +1353,8 @@ async def main(connection: iterm2.Connection):
                 {"path": a["path"], "filename": a["filename"]}
                 for a in (task.attachments or [])
             ],
+            "artifacts": task_artifacts(task.attachments or [],
+                                         task.artifacts or []),
         }
 
         # Child terminals of the target agent
@@ -2575,6 +2591,8 @@ async def main(connection: iterm2.Connection):
                 # Attachments from client (already uploaded to disk)
                 if data.get("attachments"):
                     add_kwargs["attachments"] = data["attachments"]
+                if data.get("artifacts"):
+                    add_kwargs["artifacts"] = data["artifacts"]
                 bt = state.board_add_task(**add_kwargs)
                 if not bt:
                     result = {"type": "error",
@@ -2860,14 +2878,11 @@ async def main(connection: iterm2.Connection):
                                 prompt = task.task
 
                             if prompt:
-                                # Append attachment paths
-                                if task.attachments:
-                                    att_lines = "\n".join(
-                                        "- `" + a["path"] + "`"
-                                        for a in task.attachments)
-                                    prompt += (
-                                        "\n\n## Attached images\n"
-                                        + att_lines)
+                                prompt = _append_task_artifacts(
+                                    prompt,
+                                    task.attachments,
+                                    task.artifacts,
+                                )
                                 is_clean = loom_ctx["context"]["is_clean"]
                                 final_prompt = prompt
                                 final_prompt += _build_postscript(
@@ -3005,6 +3020,8 @@ async def main(connection: iterm2.Connection):
                 task_text = data.get("task", "")
                 avars = data.get("action_vars", {})
                 act_group = data.get("group", "")
+                attachments = []
+                artifacts = normalize_artifacts(data.get("artifacts", []))
 
                 if tid and not task_text:
                     t = state.board_tasks.get(tid)
@@ -3013,6 +3030,8 @@ async def main(connection: iterm2.Connection):
                         act_name = act_name or t.action_name
                         avars = avars or t.action_vars or {}
                         act_group = act_group or t.group
+                        attachments = t.attachments or []
+                        artifacts = normalize_artifacts(t.artifacts or [])
 
                 task_desc = data.get("description", "")
                 if tid and not task_desc:
@@ -3029,6 +3048,15 @@ async def main(connection: iterm2.Connection):
                             "title": task_text,
                             "description": task_desc,
                             "group": act_group,
+                            "attachments": [
+                                {"path": a.get("path", ""),
+                                 "filename": a.get("filename", "")}
+                                for a in (attachments or [])
+                            ],
+                            "artifacts": task_artifacts(
+                                attachments or [],
+                                artifacts or [],
+                            ),
                         },
                     }
                     rendered = action_mgr.render_prompt(
@@ -3043,10 +3071,18 @@ async def main(connection: iterm2.Connection):
                                              f"\"{act_name}\" not found"}
                     else:
                         result = {"type": "prompt_preview",
-                                  "prompt": rendered}
+                                  "prompt": _append_task_artifacts(
+                                      rendered,
+                                      attachments,
+                                      artifacts,
+                                  )}
                 else:
                     result = {"type": "prompt_preview",
-                              "prompt": task_text}
+                              "prompt": _append_task_artifacts(
+                                  task_text,
+                                  attachments,
+                                  artifacts,
+                              )}
 
             elif cmd == "board_add_lane":
                 name = data.get("name", "").strip()

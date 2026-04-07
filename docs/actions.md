@@ -353,6 +353,8 @@ prompt: |
 | `loom.task.parent_task_id` | string | ID of the parent task (empty for root tasks). |
 | `loom.task.labels` | list | Task labels (e.g., `["derived", "feature"]`). |
 | `loom.task.group` | string | Task's group name. |
+| `loom.task.attachments` | list | Legacy image attachments with `path` and `filename`. |
+| `loom.task.artifacts` | list | Combined task artifacts, including synthetic image artifacts plus structured refs like logs, diffs, reports, snippets, docs, and file refs. |
 
 **Example --- pipeline-aware instructions:**
 
@@ -365,6 +367,31 @@ prompt: |
 
   {{ TASK }}
 ```
+
+### Task artifact prompt shaping
+
+Loom appends task-owned artifact references after the rendered action prompt. This stays additive to the legacy image-attachment flow:
+
+- legacy image attachments still render under `## Attached images`
+- structured non-image artifacts render under `## Task artifacts`
+
+Artifact prompt inclusion is explicit and type-aware:
+
+- `image` -> path only
+- `file_ref` -> file path, plus `:line` when present
+- `snippet` -> inline only when small or explicitly forced; otherwise summary/reference
+- `log` -> summary/reference by default; inline only when explicitly forced
+- `diff` -> summary/stats/reference by default; inline only when explicitly forced
+- `test_report` -> pass/fail summary/reference by default
+- `generated_doc` -> summary/reference by default; inline only when small or explicitly forced
+
+Each structured artifact record stores:
+
+- `type`, `title`, `summary`, `mime_type`, `metadata`
+- `storage` (`kind`, `path` or inline `content`, optional line range)
+- `prompt.mode` (`auto`, `none`, `path`, `summary`, `inline`)
+- `provenance` (`source`, timestamps, optional agent/task origin)
+- `lifecycle` (`owner`, `cleanup`)
 
 ### `loom.terminals` --- child terminal sessions
 

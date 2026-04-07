@@ -84,6 +84,17 @@ class LoomDBTests(unittest.TestCase):
                 health_state="idle-risk",
                 health_since="2026-04-06T01:05:00+00:00",
                 health_details={"reasons": ["progress_silence_warning"]},
+                artifacts=[{
+                    "id": "artifact-1",
+                    "type": "test_report",
+                    "title": "pytest",
+                    "path": "/tmp/pytest.txt",
+                    "summary": "2 failed, 18 passed",
+                    "prompt": {"mode": "summary"},
+                    "provenance": {"source": "agent", "agent_id": "agent-1"},
+                    "storage": {"kind": "path", "path": "/tmp/pytest.txt"},
+                    "lifecycle": {"owner": "task", "cleanup": "delete_with_task"},
+                }],
             )
         )
         self.db.save_schedule(
@@ -139,6 +150,10 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["health_details"]["reasons"],
             ["progress_silence_warning"],
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["artifacts"][0]["type"],
+            "test_report",
         )
         self.assertFalse(loaded["schedules"]["sched-1"]["enabled"])
         self.assertEqual(loaded["schedules"]["sched-1"]["labels"], ["ops"])

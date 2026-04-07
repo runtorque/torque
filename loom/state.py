@@ -9,6 +9,7 @@ from typing import Optional
 from aiohttp import web
 
 from .config import DEFAULT_COMMAND, log
+from .artifacts import normalize_artifacts, normalize_attachments
 from .db import LoomDB
 
 _RESERVED_LANES = {"Backlog", "To Do", "In Progress", "Done"}
@@ -49,12 +50,14 @@ class BoardTask:
     messages: list = field(default_factory=list)  # [{timestamp, action, message, agent_name}]
     # Explicit dependencies — task IDs that must be Done before dispatch
     depends_on: list = field(default_factory=list)  # [task_id, ...]
-    # Image attachments — [{path, filename, mime_type}]
+    # Legacy image attachments — [{path, filename, mime_type}]
     attachments: list = field(default_factory=list)
     # Derived task-health snapshot (advisory only; never drives lane/status)
     health_state: str = "healthy"
     health_since: str = ""
     health_details: dict = field(default_factory=dict)
+    # Structured task artifacts — logs, diffs, reports, snippets, docs, refs
+    artifacts: list = field(default_factory=list)
 
 
 @dataclass
@@ -646,6 +649,10 @@ class MatrixState:
                     raw["instructions"] = raw.pop("description")
                 if not raw.get("group"):
                     raw["group"] = first_group
+                raw["attachments"] = normalize_attachments(
+                    raw.get("attachments", []))
+                raw["artifacts"] = normalize_artifacts(
+                    raw.get("artifacts", []))
                 filtered = {k: v for k, v in raw.items() if k in bt_fields}
                 self.board_tasks[tid] = BoardTask(**filtered)
             # panel_active: new key; backward compat from board_panel_open
@@ -1438,6 +1445,11 @@ class MatrixState:
                                         if d in self.board_tasks]
             else:
                 kwargs.pop("depends_on", None)
+        if "attachments" in kwargs:
+            kwargs["attachments"] = normalize_attachments(
+                kwargs["attachments"])
+        if "artifacts" in kwargs:
+            kwargs["artifacts"] = normalize_artifacts(kwargs["artifacts"])
         # Position = end of lane
         max_pos = max(
             (t.position for t in self.board_tasks.values() if t.lane == lane),
@@ -1477,6 +1489,11 @@ class MatrixState:
             if self._board_check_dep_cycle(tid, deps):
                 return  # would create a cycle
             fields["depends_on"] = deps
+        if "attachments" in fields:
+            fields["attachments"] = normalize_attachments(
+                fields["attachments"])
+        if "artifacts" in fields:
+            fields["artifacts"] = normalize_artifacts(fields["artifacts"])
         valid = set(BoardTask.__dataclass_fields__) - {"id", "slug", "created_at"}
         old_lane = task.lane
         for key, value in fields.items():

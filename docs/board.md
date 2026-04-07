@@ -65,6 +65,8 @@ loom task create "Fix auth tests" -t oneshot/fix -v MODULE=auth -v TEST_CMD=pyte
 | **Assignee** | Optional assignee name. |
 | **Labels** | Tags for filtering and categorization. |
 | **Agent** | The concrete agent working on this task (set on dispatch). |
+| **Attachments** | Legacy image attachments included in prompts as file paths. |
+| **Artifacts** | Structured artifact metadata such as logs, diffs, reports, snippets, generated docs, and file references. |
 | **Dependencies** | Other tasks that must be in **Done** before this task can be dispatched. |
 | **Scheduled time** | Optional future time when Loom should auto-dispatch this task. |
 
@@ -140,7 +142,8 @@ loom dispatch "Fix the bug" -t oneshot/fix -g backend -w
 2. **Worktree** --- if the group has `git_worktree` enabled, an isolated worktree is created for the agent.
 3. **Task linking** --- the task's `agent_id` is set and its lane changes to the dispatch lane.
 4. **Prompt rendering** --- if the task has an action, Loom renders the prompt template with `{{ TASK }}`, action variables, and the [loom context namespace](actions.md#the-loom-context-namespace).
-5. **Prompt delivery** --- the rendered prompt is sent to the agent's terminal. New agents get a 2-second boot delay first.
+5. **Artifact shaping** --- Loom appends safe artifact references after the rendered task prompt. Images stay on the legacy `## Attached images` path, while structured artifacts are added with type-aware summaries or references.
+6. **Prompt delivery** --- the rendered prompt is sent to the agent's terminal. New agents get a 2-second boot delay first.
 
 ### Dispatching to an existing agent
 

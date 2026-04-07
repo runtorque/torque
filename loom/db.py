@@ -185,7 +185,8 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     attachments    TEXT NOT NULL DEFAULT '[]',
     health_state   TEXT NOT NULL DEFAULT 'healthy',
     health_since   TEXT NOT NULL DEFAULT '',
-    health_details TEXT NOT NULL DEFAULT '{}'
+    health_details TEXT NOT NULL DEFAULT '{}',
+    artifacts      TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -443,6 +444,15 @@ class LoomDB:
                     f"ALTER TABLE board_tasks ADD COLUMN {col} "
                     f"TEXT NOT NULL DEFAULT {default}")
                 self._conn.commit()
+        # Migrate: add artifacts column to board_tasks
+        try:
+            self._conn.execute(
+                "SELECT artifacts FROM board_tasks LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE board_tasks ADD COLUMN artifacts "
+                "TEXT NOT NULL DEFAULT '[]'")
+            self._conn.commit()
         # Migrate: drop assignee column from board_tasks
         try:
             self._conn.execute(
@@ -704,6 +714,7 @@ class LoomDB:
         depends_on = json.dumps(d.pop("depends_on", []))
         attachments = json.dumps(d.pop("attachments", []))
         health_details = json.dumps(d.pop("health_details", {}))
+        artifacts = json.dumps(d.pop("artifacts", []))
         # Map 'group' to 'group_name' for the DB column
         group_name = d.pop("group", "")
         self._conn.execute("""
@@ -715,8 +726,8 @@ class LoomDB:
                  updated_at, provider, external_id, external_url,
                  parent_task_id, pipeline_depth, pipeline_root_id, status,
                  scheduled_at, messages, depends_on, attachments,
-                 health_state, health_since, health_details)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 health_state, health_since, health_details, artifacts)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             d["id"], d["task"], d.get("description", ""),
             d["slug"], group_name,
@@ -734,6 +745,7 @@ class LoomDB:
             d.get("health_state", "healthy"),
             d.get("health_since", ""),
             health_details,
+            artifacts,
         ))
         self._conn.commit()
 
@@ -1258,6 +1270,7 @@ class LoomDB:
                 depends_on = json.dumps(d.pop("depends_on", []))
                 attachments = json.dumps(d.pop("attachments", []))
                 health_details = json.dumps(d.pop("health_details", {}))
+                artifacts = json.dumps(d.pop("artifacts", []))
                 group_name = d.pop("group", "")
                 c.execute("""
                     INSERT INTO board_tasks
@@ -1269,8 +1282,8 @@ class LoomDB:
                          external_url, parent_task_id, pipeline_depth,
                          pipeline_root_id, status, scheduled_at, messages,
                          depends_on, attachments, health_state, health_since,
-                         health_details)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         health_details, artifacts)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     d.get("id", tid), d.get("task", ""),
                     d.get("description", ""), d.get("slug", ""),
@@ -1288,6 +1301,7 @@ class LoomDB:
                     d.get("scheduled_at", ""), messages, depends_on,
                     attachments, d.get("health_state", "healthy"),
                     d.get("health_since", ""), health_details,
+                    artifacts,
                 ))
 
             # UI state
@@ -1403,6 +1417,12 @@ class LoomDB:
                         d.get("attachments", "[]"))
                 except (json.JSONDecodeError, TypeError):
                     d["attachments"] = []
+                # Decode artifacts JSON
+                try:
+                    d["artifacts"] = json.loads(
+                        d.get("artifacts", "[]"))
+                except (json.JSONDecodeError, TypeError):
+                    d["artifacts"] = []
                 # Decode depends_on JSON
                 try:
                     d["depends_on"] = json.loads(
