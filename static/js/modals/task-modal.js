@@ -392,8 +392,7 @@ function taskDepsSearch(e) {
     if (_taskEditId && id === _taskEditId) continue;
     var t = tasks[id];
     var title = (t.task || '').toLowerCase();
-    var slug = (t.slug || '').toLowerCase();
-    if (title.indexOf(val) >= 0 || slug.indexOf(val) >= 0 || id.indexOf(val) >= 0) {
+    if (title.indexOf(val) >= 0 || id.indexOf(val) >= 0) {
       var laneBadge = '<span class="board-card-lane-badge">' + esc(t.lane || '') + '</span>';
       html += '<div class="deps-option" onmousedown="event.preventDefault()" onclick="taskAddDep(\'' + id + '\')">'
         + esc((t.task || '').substring(0, 50)) + ' ' + laneBadge + '</div>';

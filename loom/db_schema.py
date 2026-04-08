@@ -327,6 +327,23 @@ CREATE TABLE IF NOT EXISTS auto_dispatch_queue (
 CREATE INDEX IF NOT EXISTS idx_auto_dispatch_queue_group
     ON auto_dispatch_queue(group_name, position);
 
+CREATE TABLE IF NOT EXISTS task_id_counters (
+    group_prefix     TEXT PRIMARY KEY,
+    next_root_number INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_task_counters (
+    root_task_id       TEXT PRIMARY KEY,
+    next_child_number  INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS task_id_aliases (
+    legacy_id TEXT PRIMARY KEY,
+    task_id   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_task_id_aliases_task
+    ON task_id_aliases(task_id);
+
 CREATE TABLE IF NOT EXISTS memory_entries (
     id          TEXT PRIMARY KEY,
     project_key TEXT NOT NULL DEFAULT '',

@@ -116,6 +116,36 @@ class ServerArtifactHelperTests(unittest.TestCase):
                 local_path="https://example.com/report.txt",
             )
 
+    def test_finalize_task_attachments_moves_draft_uploads_to_canonical_task_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_dir = self.helper.ATTACHMENTS_DIR
+            self.helper.ATTACHMENTS_DIR = Path(tmpdir)
+            try:
+                draft_artifact = self.helper.store_task_upload(
+                    task_id="draft-abcd1234",
+                    filename="pytest.log",
+                    content_text="ok\n",
+                )
+                attachments = [{
+                    "path": str(self.helper.ATTACHMENTS_DIR / "draft-abcd1234" / "image.png"),
+                    "filename": "image.png",
+                }]
+                (self.helper.ATTACHMENTS_DIR / "draft-abcd1234" / "image.png").write_text("img")
+
+                new_attachments, new_artifacts = self.helper.finalize_task_attachments(
+                    attachments,
+                    [draft_artifact],
+                    draft_task_id="draft-abcd1234",
+                    task_id="LOOM:7",
+                )
+            finally:
+                self.helper.ATTACHMENTS_DIR = original_dir
+
+        self.assertTrue(Path(new_attachments[0]["path"]).name == "image.png")
+        self.assertIn("/LOOM:7/", new_attachments[0]["path"])
+        self.assertIn("/LOOM:7/", new_artifacts[0]["path"])
+        self.assertEqual(new_artifacts[0]["provenance"]["task_id"], "LOOM:7")
+
 
 if __name__ == "__main__":
     unittest.main()

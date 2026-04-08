@@ -235,7 +235,7 @@ loom task create "Kick off release checklist" --at "tomorrow 09:00"
 | `-v, --var` | Action variables (`KEY=VALUE`, repeatable) |
 | `-l, --labels` | Comma-separated labels |
 | `--at` | Schedule dispatch for a future time |
-| `--depends-on` | Comma-separated task slugs or IDs that must finish first |
+| `--depends-on` | Comma-separated task IDs or legacy aliases that must finish first |
 
 Alias: `c`
 

@@ -642,6 +642,7 @@ function _renderBoardCard(t, childrenOf, depth) {
   }
   cardHtml += '</div>';
   var meta = '';
+  if (t.id) meta += '<span class="board-card-label board-card-template">' + esc(t.id) + '</span>';
   var dispatchEligibility = _boardTaskDispatchEligibility(t);
   if (dispatchEligibility) {
     meta += '<span class="board-card-label ' + esc(dispatchEligibility.className)

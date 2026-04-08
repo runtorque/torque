@@ -226,6 +226,18 @@ def db_read_state():
         except Exception:
             pass  # table may not exist yet
 
+        task_id_aliases = {}
+        try:
+            rows = c.execute(
+                "SELECT legacy_id, task_id FROM task_id_aliases"
+            ).fetchall()
+            task_id_aliases = {
+                legacy_id: task_id for legacy_id, task_id in rows
+                if legacy_id and task_id
+            }
+        except Exception:
+            task_id_aliases = {}
+
         return {
             "agents": agents,
             "groups": groups,
@@ -233,6 +245,7 @@ def db_read_state():
             "board_lanes": lanes,
             "board_tasks": tasks,
             "schedules": schedules,
+            "task_id_aliases": task_id_aliases,
         }
     return _db_read(_query)
 
@@ -378,29 +391,23 @@ def resolve_group(state_data, identifier):
 
 
 def resolve_task(state_data, identifier):
-    """Resolve a task by slug, ID prefix, or title match. Dies on ambiguity."""
+    """Resolve a task by ID, legacy alias, ID prefix, or title match."""
     tasks = state_data.get("board_tasks", {})
+    aliases = state_data.get("task_id_aliases", {})
 
     # Exact ID match
     if identifier in tasks:
         return tasks[identifier]
 
-    # Slug match (slugs are lowercase by construction)
+    # Exact legacy alias match
+    alias_target = aliases.get(identifier, "")
+    if alias_target and alias_target in tasks:
+        return tasks[alias_target]
+
     ident_lower = identifier.lower()
-    slug_matches = [t for t in tasks.values()
-                    if t.get("slug") and t["slug"] == ident_lower]
-    if len(slug_matches) == 1:
-        return slug_matches[0]
-    if len(slug_matches) > 1:
-        print(f"Ambiguous slug \"{identifier}\" matches {len(slug_matches)} tasks:",
-              file=sys.stderr)
-        for t in slug_matches:
-            print(f"  {t['id']}  {t.get('task', '')[:50]}", file=sys.stderr)
-        die("Use the ID instead")
 
     # ID prefix match
-    prefix_matches = [t for tid, t in tasks.items()
-                      if tid.startswith(ident_lower)]
+    prefix_matches = [t for tid, t in tasks.items() if tid.startswith(identifier)]
     if len(prefix_matches) == 1:
         return prefix_matches[0]
     if len(prefix_matches) > 1:
@@ -3189,8 +3196,9 @@ def cmd_pipeline_show(args):
 
 
 def _resolve_dep_ids(state_data, depends_on_str):
-    """Resolve comma-separated task slugs/IDs to a list of task IDs."""
+    """Resolve comma-separated task identifiers to a list of task IDs."""
     tasks = state_data.get("board_tasks", {})
+    aliases = state_data.get("task_id_aliases", {})
     ids = []
     for token in depends_on_str.split(","):
         token = token.strip()
@@ -3200,15 +3208,17 @@ def _resolve_dep_ids(state_data, depends_on_str):
         if token in tasks:
             ids.append(token)
             continue
-        # Slug match
-        slug_m = [t for t in tasks.values()
-                  if t.get("slug") and t["slug"] == token.lower()]
-        if len(slug_m) == 1:
-            ids.append(slug_m[0]["id"])
-        elif len(slug_m) > 1:
-            die(f"Ambiguous dependency slug \"{token}\"")
-        else:
-            die(f"Dependency task not found: \"{token}\"")
+        alias_target = aliases.get(token, "")
+        if alias_target and alias_target in tasks:
+            ids.append(alias_target)
+            continue
+        prefix_matches = [tid for tid in tasks if tid.startswith(token)]
+        if len(prefix_matches) == 1:
+            ids.append(prefix_matches[0])
+            continue
+        if len(prefix_matches) > 1:
+            die(f"Ambiguous dependency ID prefix \"{token}\"")
+        die(f"Dependency task not found: \"{token}\"")
     return ids
 
 

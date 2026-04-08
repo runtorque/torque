@@ -12,17 +12,18 @@ from ..worktree_boundaries import (
 
 
 def resolve_task(state, identifier: str) -> str | None:
-    """Resolve a task by ID, slug, or ID prefix. Returns task ID or None."""
+    """Resolve a task by ID, legacy alias, or ID prefix."""
     if not identifier:
         return None
     if identifier in state.board_tasks:
         return identifier
-    for task in state.board_tasks.values():
-        if task.slug == identifier:
-            return task.id
-    for task in state.board_tasks.values():
-        if task.id.startswith(identifier):
-            return task.id
+    aliased = state.resolve_task_alias(identifier)
+    if aliased in state.board_tasks:
+        return aliased
+    matches = [task.id for task in state.board_tasks.values()
+               if task.id.startswith(identifier)]
+    if len(matches) == 1:
+        return matches[0]
     return None
 
 

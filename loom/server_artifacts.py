@@ -8,6 +8,7 @@ import mimetypes
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import shutil
 from urllib.parse import quote
 
 from .artifacts import (
@@ -230,6 +231,67 @@ def remove_task_owned_artifacts_by_filename(artifacts, filename: str, *,
             continue
         keep.append(artifact)
     return keep
+
+
+def finalize_task_attachments(attachments, artifacts, *,
+                              draft_task_id: str = "",
+                              task_id: str = "") -> tuple[list[dict], list[dict]]:
+    """Move uploaded draft files under the final task directory and rewrite refs."""
+    normalized_attachments = normalize_attachments(attachments)
+    normalized_artifacts = normalize_artifacts(artifacts)
+    old_id = str(draft_task_id or "").strip()
+    new_id = str(task_id or "").strip()
+    if not old_id or not new_id or old_id == new_id:
+        return normalized_attachments, normalized_artifacts
+
+    old_dir = ATTACHMENTS_DIR / old_id
+    new_dir = ATTACHMENTS_DIR / new_id
+    if old_dir.exists():
+        new_dir.parent.mkdir(parents=True, exist_ok=True)
+        if new_dir.exists():
+            for child in old_dir.iterdir():
+                target = new_dir / child.name
+                if target.exists():
+                    target.unlink()
+                shutil.move(str(child), str(target))
+            shutil.rmtree(old_dir, ignore_errors=True)
+        else:
+            shutil.move(str(old_dir), str(new_dir))
+
+    def _rewrite_path(path_value: str) -> str:
+        path = str(path_value or "").strip()
+        if not path:
+            return path
+        try:
+            return str(new_dir / Path(path).name)
+        except Exception:
+            return path.replace(str(old_dir), str(new_dir))
+
+    attachments_out = []
+    for attachment in normalized_attachments:
+        item = dict(attachment)
+        if item.get("path"):
+            item["path"] = _rewrite_path(item.get("path", ""))
+        attachments_out.append(item)
+
+    artifacts_out = []
+    for artifact in normalized_artifacts:
+        item = dict(artifact)
+        if item.get("path"):
+            item["path"] = _rewrite_path(item.get("path", ""))
+        storage = item.get("storage")
+        if isinstance(storage, dict) and storage.get("path"):
+            storage = dict(storage)
+            storage["path"] = _rewrite_path(storage.get("path", ""))
+            item["storage"] = storage
+        provenance = item.get("provenance")
+        if isinstance(provenance, dict):
+            provenance = dict(provenance)
+            provenance["task_id"] = new_id
+            item["provenance"] = provenance
+        artifacts_out.append(item)
+
+    return attachments_out, artifacts_out
 
 
 def store_task_upload(

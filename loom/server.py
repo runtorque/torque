@@ -40,10 +40,12 @@ from .artifacts import (
     task_artifacts,
 )
 from .server_artifacts import (
+    finalize_task_attachments,
     remove_task_owned_artifacts_by_filename,
     serialize_task_artifact,
     store_task_upload,
 )
+from .task_ids import is_canonical_task_id, is_draft_task_token
 from .memory import (
     build_memory_entry,
     build_memory_link,
@@ -95,18 +97,21 @@ CLOSE_AFTER_MERGE_DELAY = 5
 
 
 def _resolve_task_id(state, identifier: str) -> str:
-    """Resolve a task by exact ID, slug, or ID prefix."""
+    """Resolve a task by exact canonical ID, legacy alias, or ID prefix."""
     ident = str(identifier or "").strip()
     if not ident:
         return ""
     if ident in state.board_tasks:
         return ident
-    for task in state.board_tasks.values():
-        if task.slug == ident:
-            return task.id
-    for task in state.board_tasks.values():
-        if task.id.startswith(ident):
-            return task.id
+    aliased = state.resolve_task_alias(ident)
+    if aliased in state.board_tasks:
+        return aliased
+    prefix_matches = [
+        task.id for task in state.board_tasks.values()
+        if task.id.startswith(ident)
+    ]
+    if len(prefix_matches) == 1:
+        return prefix_matches[0]
     return ident
 
 
@@ -146,7 +151,7 @@ def _resolve_memory_cell_and_task(state, cell_id: str = "",
 
     task_id = str(task_id or "").strip()
     if task_id:
-        resolved_task = state.board_tasks.get(task_id)
+        resolved_task = state.board_tasks.get(state.resolve_task_alias(task_id))
 
     cell_id = str(cell_id or "").strip()
     if cell_id:
@@ -1134,11 +1139,15 @@ async def main(connection: iterm2.Connection):
 
         # Current task metadata
         parent_agent_slug = ""
+        parent_agent_name = ""
+        parent_agent_id = ""
         if task.parent_task_id:
             pt = state.board_tasks.get(task.parent_task_id)
             if pt and pt.agent_id:
                 pa = state.agents.get(pt.agent_id)
                 if pa:
+                    parent_agent_id = pa.id
+                    parent_agent_name = pa.name
                     parent_agent_slug = pa.slug or pa.name
         task_ctx = {
             "id": task.id,
@@ -1148,6 +1157,8 @@ async def main(connection: iterm2.Connection):
             "depth": task.pipeline_depth,
             "is_derived": bool(task.parent_task_id),
             "parent_task_id": task.parent_task_id,
+            "parent_agent_id": parent_agent_id,
+            "parent_agent_name": parent_agent_name,
             "parent_agent_slug": parent_agent_slug,
             "labels": list(task.labels),
             "group": task.group,
@@ -2646,8 +2657,15 @@ async def main(connection: iterm2.Connection):
                         "verification_summary", {}),
                 )
                 # Pass client-provided ID (for pre-uploaded attachments)
-                if data.get("id"):
-                    add_kwargs["id"] = data["id"]
+                draft_upload_id = ""
+                incoming_id = str(data.get("id", "") or "").strip()
+                if incoming_id:
+                    if is_draft_task_token(incoming_id) or (
+                        not is_canonical_task_id(incoming_id)
+                    ):
+                        draft_upload_id = incoming_id
+                    else:
+                        add_kwargs["id"] = incoming_id
                 # Attachments from client (already uploaded to disk)
                 if data.get("attachments"):
                     add_kwargs["attachments"] = data["attachments"]
@@ -2658,6 +2676,19 @@ async def main(connection: iterm2.Connection):
                     result = {"type": "error",
                               "message": "Invalid lane, group, or empty task"}
                 else:
+                    if draft_upload_id:
+                        attachments, artifacts = finalize_task_attachments(
+                            bt.attachments,
+                            bt.artifacts,
+                            draft_task_id=draft_upload_id,
+                            task_id=bt.id,
+                        )
+                        state.board_update_task(
+                            bt.id,
+                            attachments=attachments,
+                            artifacts=artifacts,
+                        )
+                        bt = state.board_tasks.get(bt.id, bt)
                     result = {
                         "type": "external_imported" if bt.external_id
                         or bt.external_url else "board_task_added",
@@ -2956,10 +2987,11 @@ async def main(connection: iterm2.Connection):
                 tid = _resolve_task_id(state, data.get("task_id", ""))
                 fname = data.get("filename", "")
                 task = state.board_tasks.get(tid)
-                if task and fname:
+                if fname:
                     fpath = ATTACHMENTS_DIR / tid / fname
                     if fpath.is_file():
                         fpath.unlink()
+                if task and fname:
                     task.attachments = [
                         a for a in task.attachments
                         if a.get("filename") != fname]

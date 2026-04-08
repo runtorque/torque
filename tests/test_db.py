@@ -243,6 +243,213 @@ class LoomDBTests(unittest.TestCase):
 
         self.assertEqual(loaded["board_filters_by_group"], filters)
 
+    def test_init_migrates_legacy_task_ids_and_rewrites_references(self):
+        legacy_db = Path(self.tmp.name) / "legacy.db"
+        conn = sqlite3.connect(legacy_db)
+        conn.executescript(
+            """
+            CREATE TABLE groups (name TEXT PRIMARY KEY, slug TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE group_members (group_name TEXT NOT NULL, agent_id TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (group_name, agent_id));
+            CREATE TABLE board_tasks (
+                id TEXT PRIMARY KEY,
+                task TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                slug TEXT NOT NULL DEFAULT '',
+                group_name TEXT NOT NULL DEFAULT '',
+                action_name TEXT NOT NULL DEFAULT '',
+                action_vars TEXT NOT NULL DEFAULT '{}',
+                agent_template TEXT NOT NULL DEFAULT '',
+                instructions TEXT NOT NULL DEFAULT '',
+                context TEXT NOT NULL DEFAULT '',
+                criteria TEXT NOT NULL DEFAULT '',
+                lane TEXT NOT NULL DEFAULT 'Backlog',
+                position INTEGER NOT NULL DEFAULT 0,
+                agent_id TEXT NOT NULL DEFAULT '',
+                labels TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT '',
+                lane_entered_at TEXT NOT NULL DEFAULT '',
+                provider TEXT NOT NULL DEFAULT '',
+                external_id TEXT NOT NULL DEFAULT '',
+                external_url TEXT NOT NULL DEFAULT '',
+                parent_task_id TEXT NOT NULL DEFAULT '',
+                pipeline_depth INTEGER NOT NULL DEFAULT 0,
+                pipeline_root_id TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT '',
+                scheduled_at TEXT NOT NULL DEFAULT '',
+                messages TEXT NOT NULL DEFAULT '[]',
+                depends_on TEXT NOT NULL DEFAULT '[]',
+                attachments TEXT NOT NULL DEFAULT '[]',
+                health_state TEXT NOT NULL DEFAULT 'healthy',
+                health_since TEXT NOT NULL DEFAULT '',
+                health_details TEXT NOT NULL DEFAULT '{}',
+                artifacts TEXT NOT NULL DEFAULT '[]',
+                verification_mode TEXT NOT NULL DEFAULT '',
+                verification_state TEXT NOT NULL DEFAULT '',
+                verification_notes TEXT NOT NULL DEFAULT '',
+                verification_updated_at TEXT NOT NULL DEFAULT '',
+                verification_updated_by TEXT NOT NULL DEFAULT '',
+                verification_summary TEXT NOT NULL DEFAULT '{}',
+                worktree_boundary TEXT NOT NULL DEFAULT '{}',
+                resume_after_boundary_task_id TEXT NOT NULL DEFAULT '',
+                archived_at TEXT NOT NULL DEFAULT '',
+                archived_from_lane TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE auto_dispatch_queue (
+                group_name TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                task_id TEXT NOT NULL,
+                agent_group TEXT NOT NULL DEFAULT '',
+                max_concurrent INTEGER NOT NULL DEFAULT 1,
+                target_agent_id TEXT NOT NULL DEFAULT '',
+                enqueued_at TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (group_name, position)
+            );
+            CREATE TABLE panel_events (
+                id INTEGER PRIMARY KEY,
+                timestamp REAL NOT NULL,
+                kind TEXT NOT NULL,
+                cell_id TEXT NOT NULL DEFAULT '',
+                agent_name TEXT NOT NULL DEFAULT '',
+                group_name TEXT NOT NULL DEFAULT '',
+                message TEXT NOT NULL DEFAULT '',
+                task_id TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE schedules (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL DEFAULT '',
+                task_template TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '',
+                group_name TEXT NOT NULL DEFAULT '',
+                action_name TEXT NOT NULL DEFAULT '',
+                action_vars TEXT NOT NULL DEFAULT '{}',
+                agent_template TEXT NOT NULL DEFAULT '',
+                labels TEXT NOT NULL DEFAULT '[]',
+                cron_expr TEXT NOT NULL DEFAULT '',
+                scheduled_at TEXT NOT NULL DEFAULT '',
+                timezone TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                last_run_at TEXT NOT NULL DEFAULT '',
+                next_run_at TEXT NOT NULL DEFAULT '',
+                run_count INTEGER NOT NULL DEFAULT 0,
+                last_task_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE memory_entries (
+                id TEXT PRIMARY KEY,
+                project_key TEXT NOT NULL DEFAULT '',
+                group_name TEXT NOT NULL DEFAULT '',
+                scope_kind TEXT NOT NULL,
+                scope_ref TEXT NOT NULL DEFAULT '',
+                entry_type TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                pinned INTEGER NOT NULL DEFAULT 0,
+                task_id TEXT NOT NULL DEFAULT '',
+                source_kind TEXT NOT NULL DEFAULT '',
+                source_id TEXT NOT NULL DEFAULT '',
+                source_name TEXT NOT NULL DEFAULT '',
+                retention_kind TEXT NOT NULL DEFAULT 'durable',
+                expires_at REAL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            CREATE TABLE memory_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entry_id TEXT NOT NULL,
+                target_kind TEXT NOT NULL,
+                target_ref TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                UNIQUE(entry_id, target_kind, target_ref)
+            );
+            CREATE TABLE agent_history (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                slug TEXT DEFAULT '',
+                "group" TEXT DEFAULT '',
+                agent_type TEXT DEFAULT '',
+                template TEXT DEFAULT '',
+                created_at REAL NOT NULL,
+                removed_at REAL,
+                worktree_branch TEXT DEFAULT '',
+                total_tokens_in INTEGER DEFAULT 0,
+                total_tokens_out INTEGER DEFAULT 0,
+                total_tasks INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active'
+            );
+            CREATE TABLE agent_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                task_title TEXT NOT NULL,
+                started_at REAL NOT NULL,
+                completed_at REAL,
+                outcome TEXT DEFAULT ''
+            );
+            CREATE TABLE agent_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                task_id TEXT DEFAULT '',
+                timestamp REAL NOT NULL,
+                action TEXT NOT NULL,
+                message TEXT DEFAULT ''
+            );
+            """
+        )
+        conn.execute("INSERT INTO groups (name, slug, position) VALUES ('Loom', 'loom', 0)")
+        conn.execute(
+            "INSERT INTO board_tasks (id, task, group_name, created_at, updated_at, lane_entered_at) "
+            "VALUES ('task-root', 'Root', 'Loom', '2026-04-08T10:00:00+00:00', '2026-04-08T10:00:00+00:00', '2026-04-08T10:00:00+00:00')"
+        )
+        conn.execute(
+            "INSERT INTO board_tasks (id, task, group_name, parent_task_id, pipeline_depth, pipeline_root_id, depends_on, created_at, updated_at, lane_entered_at) "
+            "VALUES ('task-child', 'Child', 'Loom', 'task-root', 1, 'task-root', '[\"task-root\"]', '2026-04-08T10:10:00+00:00', '2026-04-08T10:10:00+00:00', '2026-04-08T10:10:00+00:00')"
+        )
+        conn.execute(
+            "INSERT INTO auto_dispatch_queue (group_name, position, task_id) VALUES ('Loom', 0, 'task-child')"
+        )
+        conn.execute(
+            "INSERT INTO panel_events (id, timestamp, kind, task_id) VALUES (1, 1.0, 'task_dispatched', 'task-child')"
+        )
+        conn.execute(
+            "INSERT INTO schedules (id, name, group_name, last_task_id, created_at, updated_at) VALUES ('sched', 'Nightly', 'Loom', 'task-root', '', '')"
+        )
+        conn.execute(
+            "INSERT INTO memory_entries (id, scope_kind, scope_ref, entry_type, content, task_id, created_at, updated_at) "
+            "VALUES ('mem-1', 'task', 'task-child', 'note', 'hello', 'task-child', 1, 1)"
+        )
+        conn.execute(
+            "INSERT INTO memory_links (entry_id, target_kind, target_ref, created_at) VALUES ('mem-1', 'task', 'task-root', 1)"
+        )
+        conn.execute(
+            "INSERT INTO agent_history (id, name, created_at) VALUES ('agent-1', 'Worker', 1)"
+        )
+        conn.execute(
+            "INSERT INTO agent_tasks (agent_id, task_id, task_title, started_at) VALUES ('agent-1', 'task-root', 'Root', 1)"
+        )
+        conn.execute(
+            "INSERT INTO agent_messages (agent_id, task_id, timestamp, action, message) VALUES ('agent-1', 'task-child', 1, 'progress', 'working')"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated_db = LoomDB(legacy_db)
+        migrated_db.init()
+        self.addCleanup(migrated_db.close)
+        loaded = migrated_db.load_all()
+
+        self.assertIn("LOOM:1", loaded["board_tasks"])
+        self.assertIn("LOOM:1:1", loaded["board_tasks"])
+        self.assertEqual(loaded["board_tasks"]["LOOM:1:1"]["parent_task_id"], "LOOM:1")
+        self.assertEqual(loaded["board_tasks"]["LOOM:1:1"]["pipeline_root_id"], "LOOM:1")
+        self.assertEqual(loaded["board_tasks"]["LOOM:1:1"]["depends_on"], ["LOOM:1"])
+        self.assertEqual(loaded["auto_dispatch_queues"]["Loom"][0]["task_id"], "LOOM:1:1")
+        self.assertEqual(loaded["schedules"]["sched"]["last_task_id"], "LOOM:1")
+        self.assertEqual(loaded["task_id_aliases"]["task-root"], "LOOM:1")
+        self.assertEqual(loaded["task_id_aliases"]["task-child"], "LOOM:1:1")
+
     def test_load_all_restores_board_saved_views_by_group(self):
         views = {
             "alpha": [

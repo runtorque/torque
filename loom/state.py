@@ -11,6 +11,13 @@ from aiohttp import web
 from .config import DEFAULT_COMMAND, log
 from .artifacts import normalize_artifacts, normalize_attachments
 from .db import LoomDB
+from .task_ids import (
+    format_derived_task_id,
+    format_root_task_id,
+    is_canonical_task_id,
+    normalize_group_prefix,
+    parse_task_id,
+)
 from .worktree_boundaries import clear_stale_successor_references
 
 ARCHIVED_LANE = "Archived"
@@ -458,6 +465,9 @@ class MatrixState:
         # Board (Phase 5)
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
+        self.task_id_aliases: dict[str, str] = {}
+        self.task_id_counters: dict[str, int] = {}
+        self.pipeline_task_counters: dict[str, int] = {}
         self.schedules: dict[str, Schedule] = {}
         self.auto_dispatch_queues: dict[str, list[AutoDispatchQueueEntry]] = {}
         self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
@@ -508,6 +518,9 @@ class MatrixState:
             "board_tasks": {
                 tid: asdict(t) for tid, t in self.board_tasks.items()
             },
+            "task_id_aliases": dict(self.task_id_aliases),
+            "task_id_counters": dict(self.task_id_counters),
+            "pipeline_task_counters": dict(self.pipeline_task_counters),
             "schedules": {
                 sid: asdict(s) for sid, s in self.schedules.items()
             },
@@ -586,6 +599,35 @@ class MatrixState:
                 self.db.delete_board_task(task_id)
             except Exception:
                 log.exception("Failed to delete task %s", task_id)
+
+    def _db_save_task_id_counter(self, group_prefix: str):
+        if self.db:
+            try:
+                self.db.save_task_id_counter(
+                    group_prefix,
+                    self.task_id_counters.get(group_prefix, 1),
+                )
+            except Exception:
+                log.exception("Failed to save task ID counter %s", group_prefix)
+
+    def _db_save_pipeline_task_counter(self, root_task_id: str):
+        if self.db:
+            try:
+                self.db.save_pipeline_task_counter(
+                    root_task_id,
+                    self.pipeline_task_counters.get(root_task_id, 1),
+                )
+            except Exception:
+                log.exception("Failed to save pipeline counter %s", root_task_id)
+
+    def _db_save_task_id_alias(self, legacy_id: str):
+        if self.db:
+            try:
+                task_id = self.task_id_aliases.get(legacy_id, "")
+                if task_id:
+                    self.db.save_task_id_alias(legacy_id, task_id)
+            except Exception:
+                log.exception("Failed to save task ID alias %s", legacy_id)
 
     def _db_save_schedule(self, sched: Schedule):
         if self.db:
@@ -957,6 +999,23 @@ class MatrixState:
                 raw["resume_after_boundary_task_id"] = resume_after.strip()
                 filtered = {k: v for k, v in raw.items() if k in bt_fields}
                 self.board_tasks[tid] = BoardTask(**filtered)
+            self.task_id_aliases = {
+                str(old_id or ""): str(new_id or "")
+                for old_id, new_id in (data.get("task_id_aliases", {}) or {}).items()
+                if old_id and new_id
+            }
+            self.task_id_counters = {
+                normalize_group_prefix(prefix): max(1, int(next_root or 1))
+                for prefix, next_root in (data.get("task_id_counters", {}) or {}).items()
+                if prefix
+            }
+            self.pipeline_task_counters = {
+                str(root_id or ""): max(1, int(next_child or 1))
+                for root_id, next_child in (
+                    data.get("pipeline_task_counters", {}) or {}
+                ).items()
+                if root_id
+            }
             self.cleanup_stale_boundary_successors(emit=False)
             # panel_active: new key; backward compat from board_panel_open
             pa = data.get("panel_active", "")
@@ -1350,10 +1409,49 @@ class MatrixState:
                     if t.id != exclude_id and t.slug}
         return _unique_slug(base, existing)
 
+    def normalized_group_prefix(self, group_name: str) -> str:
+        return normalize_group_prefix(group_name)
+
+    def group_prefix_conflict(self, group_name: str,
+                              exclude_name: str = "") -> str:
+        wanted = self.normalized_group_prefix(group_name)
+        for existing_name in self.groups:
+            if existing_name == exclude_name:
+                continue
+            if self.normalized_group_prefix(existing_name) == wanted:
+                return existing_name
+        return ""
+
+    def resolve_task_alias(self, task_id: str) -> str:
+        value = str(task_id or "").strip()
+        return self.task_id_aliases.get(value, value)
+
+    def _allocate_root_task_id(self, group_name: str) -> str:
+        prefix = self.normalized_group_prefix(group_name)
+        next_root = max(1, int(self.task_id_counters.get(prefix, 1) or 1))
+        self.task_id_counters[prefix] = next_root + 1
+        self._db_save_task_id_counter(prefix)
+        return format_root_task_id(prefix, next_root)
+
+    def _allocate_derived_task_id(self, group_name: str, root_task_id: str) -> str:
+        root_id = self.resolve_task_alias(root_task_id)
+        parsed = parse_task_id(root_id)
+        if not parsed:
+            raise ValueError(f"Cannot derive from non-canonical root ID: {root_task_id}")
+        prefix = self.normalized_group_prefix(group_name)
+        next_child = max(
+            1,
+            int(self.pipeline_task_counters.get(root_id, 1) or 1),
+        )
+        self.pipeline_task_counters[root_id] = next_child + 1
+        self._db_save_pipeline_task_counter(root_id)
+        return format_derived_task_id(prefix, parsed["root_number"], next_child)
+
     # -- Mutations ----------------------------------------------------------
 
     def add_group(self, name: str):
-        if name and name not in self.groups:
+        if name and name not in self.groups \
+                and not self.group_prefix_conflict(name):
             self.groups[name] = []
             self.group_slugs[name] = self._unique_group_slug(name)
             self._emit_group(name)
@@ -1423,7 +1521,8 @@ class MatrixState:
         return removed
 
     def rename_group(self, old: str, new: str):
-        if old in self.groups and new and new not in self.groups:
+        if old in self.groups and new and new not in self.groups \
+                and not self.group_prefix_conflict(new, exclude_name=old):
             self.groups[new] = self.groups.pop(old)
             self.group_slugs.pop(old, None)
             self.group_slugs[new] = self._unique_group_slug(new)
@@ -1884,14 +1983,38 @@ class MatrixState:
             return None
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
-        tid = kwargs.pop("id", None) or uuid.uuid4().hex[:8]
+        explicit_id = kwargs.pop("id", None)
+        parent_task_id = self.resolve_task_alias(
+            kwargs.get("parent_task_id", "") or ""
+        )
+        pipeline_root_id = self.resolve_task_alias(
+            kwargs.get("pipeline_root_id", "") or ""
+        )
+        if parent_task_id:
+            kwargs["parent_task_id"] = parent_task_id
+        if pipeline_root_id:
+            kwargs["pipeline_root_id"] = pipeline_root_id
+        if explicit_id:
+            tid = explicit_id
+        elif parent_task_id or pipeline_root_id:
+            root_id = pipeline_root_id or parent_task_id
+            try:
+                tid = self._allocate_derived_task_id(group, root_id)
+            except ValueError:
+                tid = uuid.uuid4().hex[:8]
+        else:
+            tid = self._allocate_root_task_id(group)
         task_slug = self._unique_task_slug(task)
         # Validate depends_on: strip non-existent IDs
         if "depends_on" in kwargs:
             deps = kwargs["depends_on"]
             if isinstance(deps, list):
-                kwargs["depends_on"] = [d for d in deps
-                                        if d in self.board_tasks]
+                normalized = []
+                for dep_id in deps:
+                    resolved_dep = self.resolve_task_alias(dep_id)
+                    if resolved_dep in self.board_tasks:
+                        normalized.append(resolved_dep)
+                kwargs["depends_on"] = normalized
             else:
                 kwargs.pop("depends_on", None)
         if "attachments" in kwargs:
@@ -1916,6 +2039,27 @@ class MatrixState:
                 "created_at", "updated_at", "lane_entered_at")},
         )
         self.board_tasks[tid] = bt
+        if explicit_id and explicit_id != tid:
+            self.task_id_aliases[explicit_id] = tid
+            self._db_save_task_id_alias(explicit_id)
+        if is_canonical_task_id(tid):
+            parsed = parse_task_id(tid)
+            if parsed:
+                prefix = parsed["prefix"]
+                self.task_id_counters[prefix] = max(
+                    self.task_id_counters.get(prefix, 1),
+                    parsed["root_number"] + 1,
+                )
+                self._db_save_task_id_counter(prefix)
+                if parsed["child_number"] is not None:
+                    root_id = kwargs.get("pipeline_root_id", "") or format_root_task_id(
+                        prefix, parsed["root_number"]
+                    )
+                    self.pipeline_task_counters[root_id] = max(
+                        self.pipeline_task_counters.get(root_id, 1),
+                        parsed["child_number"] + 1,
+                    )
+                    self._db_save_pipeline_task_counter(root_id)
         self._emit("task_upsert", **asdict(bt))
         self._db_save_task(bt)
         self.recompute_task_health()
@@ -1930,8 +2074,11 @@ class MatrixState:
             deps = fields["depends_on"]
             if not isinstance(deps, list):
                 deps = []
-            deps = [d for d in deps
-                    if d != tid and d in self.board_tasks]
+            deps = [
+                self.resolve_task_alias(d) for d in deps
+                if self.resolve_task_alias(d) != tid
+                and self.resolve_task_alias(d) in self.board_tasks
+            ]
             if self._board_check_dep_cycle(tid, deps):
                 return  # would create a cycle
             fields["depends_on"] = deps
