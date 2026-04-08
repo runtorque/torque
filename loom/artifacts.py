@@ -303,6 +303,21 @@ def _clip_text(text: str, limit: int) -> str:
     return body[: max(0, limit - 3)].rstrip() + "..."
 
 
+def _markdown_fenced_block(text: str, language: str = "text") -> str:
+    body = str(text or "")
+    longest = 0
+    current = 0
+    for ch in body:
+        if ch == "`":
+            current += 1
+            if current > longest:
+                longest = current
+        else:
+            current = 0
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}{language}\n{body}\n{fence}"
+
+
 def _artifact_reference(artifact: dict) -> str:
     storage = artifact.get("storage") or {}
     path = storage.get("path") or artifact.get("path") or ""
@@ -369,8 +384,9 @@ def artifact_prompt_blocks(artifacts) -> list[str]:
         if extras:
             line += " (" + "; ".join(extras) + ")"
         if effective_mode == PROMPT_MODE_INLINE and content:
-            line += "\n```text\n" + _clip_text(content, _INLINE_LIMITS.get(
-                atype, 1200)) + "\n```"
+            line += "\n" + _markdown_fenced_block(
+                _clip_text(content, _INLINE_LIMITS.get(atype, 1200))
+            )
         blocks.append(line)
     return blocks
 
