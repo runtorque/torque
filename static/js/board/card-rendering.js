@@ -414,15 +414,24 @@ function _boardSortTaskRefs(tasks) {
   });
 }
 
-function _boardUnmetDependencyTasks(task) {
+function _boardDependencyTasks(task) {
   if (!task || !Array.isArray(task.depends_on)) return [];
   var tasks = _boardTasks();
-  var unmet = [];
+  var deps = [];
   for (var i = 0; i < task.depends_on.length; i++) {
     var dep = tasks[task.depends_on[i]];
-    if (dep && dep.lane !== 'Done') unmet.push(dep);
+    if (dep) deps.push(dep);
   }
-  return _boardSortTaskRefs(unmet);
+  return _boardSortTaskRefs(deps);
+}
+
+function _boardUnmetDependencyTasks(task) {
+  var deps = _boardDependencyTasks(task);
+  var unmet = [];
+  for (var i = 0; i < deps.length; i++) {
+    if (deps[i].lane !== 'Done') unmet.push(deps[i]);
+  }
+  return unmet;
 }
 
 function _boardActiveDependentNames(task) {

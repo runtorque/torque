@@ -939,6 +939,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   box-shadow: 0 4px 12px rgba(0,0,0,.4);
   padding: 2px;
   min-width: 120px;
+  max-width: min(320px, calc(100vw - 8px));
 }
 #ctx-menu.open { display: block; }
 #ctx-menu button {
@@ -946,6 +947,16 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   padding: 5px 10px; font-size: 10px;
   color: var(--text-dim); text-align: left;
   border-radius: 3px; white-space: nowrap;
+}
+#ctx-menu button.ctx-button-wrap {
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: unset;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 #ctx-menu button:hover { background: var(--bg-hover); color: var(--text); }
 #ctx-menu button.danger:hover { background: var(--red); color: #fff; }
