@@ -4,7 +4,6 @@ import asyncio
 import json
 import mimetypes
 import os
-import shlex
 from textwrap import dedent
 import shutil
 import sys
@@ -16,15 +15,13 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 import iterm2
-import yaml
-
 from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, STANDALONE, BIND_HOST, ATTACHMENTS_DIR, log
 from .db import LoomDB
 from dataclasses import asdict
 from .state import ARCHIVED_LANE, MatrixState, task_counts_as_done, task_is_closed
 from .bridge import ITerm2Adapter
 from .events import EventLog, EventBus, PanelEventLog, health_check
-from .adapters import get_adapter, get_providers, get_default_command_for_provider
+from .adapters import get_adapter, get_providers
 from .notifications import NotificationManager
 from .worktree import WorktreeManager
 from .worktree_boundaries import (
@@ -39,8 +36,6 @@ from .worktree_boundaries import (
 )
 from .actions import ActionManager, LOOM_CONTEXT_STUB
 from .artifacts import (
-    artifact_prompt_block,
-    legacy_image_prompt_block,
     normalize_artifacts,
     task_artifacts,
 )
@@ -67,56 +62,30 @@ from .external_tickets import (
 from . import keybindings
 from .mcp import create_mcp_handler
 
+from .server_actions import _action_to_yaml
+from .server_agent import (
+    AgentLaunchService,
+    _append_task_artifacts,
+    _build_self_dispatch_prompt,
+    _new_agent_prompt_sequence,
+    _startup_prompt_for_new_agent,
+)
+from .server_dispatch import (
+    _find_active_worktree_owner,
+    _pump_auto_dispatch_queue,
+    _scheduler_loop,
+    _should_handoff_shared_worktree,
+    _should_queue_existing_agent_dispatch,
+)
+from .server_worktrees import (
+    _generate_merge_message,
+    _worktree_diff_updater,
+    _worktree_full_diff,
+)
+
 # Delay (seconds) before closing an agent after a successful merge.
 # TODO: make this a user-facing setting in global/group settings.
 CLOSE_AFTER_MERGE_DELAY = 5
-
-
-def _append_task_artifacts(prompt: str, attachments, artifacts) -> str:
-    """Append legacy image references plus structured artifact references."""
-    final_prompt = prompt
-    final_prompt += legacy_image_prompt_block(attachments, artifacts)
-    final_prompt += artifact_prompt_block(artifacts)
-    return final_prompt
-
-
-def _build_self_dispatch_prompt(shared_context_block: str = "") -> str:
-    """Return the minimal follow-up prompt for derive-to-self."""
-    prompt = "Proceed with the derived task you just created."
-    if shared_context_block:
-        prompt += shared_context_block
-    return prompt
-
-
-def _startup_prompt_for_new_agent(*, agent_type: str = "",
-                                  persistent_prompt_text: str = "",
-                                  is_weaver: bool = False) -> str:
-    """Return the first interactive prompt for a newly created agent."""
-    if not persistent_prompt_text:
-        return ""
-    if is_weaver:
-        return persistent_prompt_text
-    adapter = get_adapter(agent_type) if agent_type else None
-    if not adapter:
-        return ""
-    return adapter.startup_prompt_from_persistent_prompt(
-        persistent_prompt_text
-    )
-
-
-def _new_agent_prompt_sequence(launch_cfg: dict, *,
-                               startup_prompt: str = "",
-                               final_prompt: str = "") -> list[tuple[str, dict]]:
-    """Return prompts to send to a brand-new agent in order."""
-    prompts = []
-    if startup_prompt:
-        prompts.append((startup_prompt, {}))
-    initial_prompt = launch_cfg.get("initial_prompt", "")
-    if initial_prompt:
-        prompts.append((initial_prompt, {}))
-    if final_prompt:
-        prompts.append((final_prompt, {"background": True}))
-    return prompts
 
 
 def _apply_verification_report(task, payload, actor_name, save_task,
@@ -232,616 +201,6 @@ def _apply_verification_report(task, payload, actor_name, save_task,
     return msg, root_task
 
 
-def _should_queue_existing_agent_dispatch(active_task, *,
-                                          target_task_id: str,
-                                          self_dispatch: bool) -> bool:
-    """Return whether an existing-agent dispatch should be queued."""
-    if self_dispatch:
-        return False
-    if not active_task:
-        return False
-    if active_task.id == target_task_id:
-        return False
-    return not task_is_closed(active_task)
-
-
-def _cells_share_worktree_context(a, b) -> bool:
-    """Return whether two agents point at the same branch/worktree context."""
-    if not a or not b or a.id == b.id:
-        return False
-    if a.worktree_path and b.worktree_path \
-            and a.worktree_path == b.worktree_path:
-        return True
-    if a.worktree_branch and b.worktree_branch \
-            and a.worktree_branch == b.worktree_branch \
-            and a.worktree_repo_root and b.worktree_repo_root \
-            and a.worktree_repo_root == b.worktree_repo_root:
-        return True
-    return False
-
-
-def _is_busy_agent(state: MatrixState, agent_id: str) -> bool:
-    cell = state.agents.get(agent_id)
-    if not cell or cell.cell_type != "agent":
-        return False
-    return state.agent_is_busy(agent_id)
-
-
-def _active_worker_ids(state: MatrixState, group: str) -> set[str]:
-    active = set()
-    weaver_id = state.get_group_settings(group).weaver_agent_id
-    for cell in state.agents.values():
-        if cell.cell_type != "agent":
-            continue
-        if cell.group != group:
-            continue
-        if cell.id == weaver_id:
-            continue
-        if _is_busy_agent(state, cell.id):
-            active.add(cell.id)
-    return active
-
-
-def _agent_has_active_worktree_context(state: MatrixState, cell) -> bool:
-    """Return whether an agent is actively working on a worktree task."""
-    return bool(
-        cell
-        and cell.cell_type == "agent"
-        and state.agent_is_busy(cell.id)
-        and (cell.worktree_path or cell.worktree_branch)
-    )
-
-
-def _find_active_worktree_owner(state: MatrixState, cell):
-    """Return the active agent currently owning a shared worktree context."""
-    if not cell or not (cell.worktree_path or cell.worktree_branch):
-        return None
-    for other in state.agents.values():
-        if not _agent_has_active_worktree_context(state, other):
-            continue
-        if _cells_share_worktree_context(cell, other):
-            return other
-    return None
-
-
-async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
-                                    panel_event, *, group: str = "") -> list:
-    """Dispatch queued tasks when concurrency allows.
-
-    Preserves queue ordering. Stale entries are dropped. Agent-group
-    follow-ups keep a resolved target agent once the first entry dispatches.
-    """
-    dispatched = []
-    groups = [group] if group else list(state.auto_dispatch_queues)
-    for group_name in groups:
-        while True:
-            queue = state.auto_dispatch_queues.get(group_name, [])
-            if not queue:
-                break
-            entry = queue[0]
-            task = state.board_tasks.get(entry.task_id)
-            if not task or task.group != group_name or task_is_closed(task) \
-                    or task.agent_id:
-                state.auto_dispatch_queue_remove_task(entry.task_id)
-                continue
-            if not state.board_deps_met(task):
-                break
-            if task.scheduled_at:
-                now_iso = datetime.now(timezone.utc).isoformat()
-                if task.scheduled_at > now_iso:
-                    break
-            target_agent_id = entry.target_agent_id
-            if target_agent_id:
-                target = state.agents.get(target_agent_id)
-                if not target or target.cell_type != "agent" \
-                        or target.group != group_name:
-                    entry.target_agent_id = ""
-                    state._db_save_auto_dispatch_queue(group_name)
-                    target_agent_id = ""
-            active_agents = _active_worker_ids(state, group_name)
-            needs_capacity = not target_agent_id
-            if target_agent_id:
-                needs_capacity = not _is_busy_agent(state, target_agent_id)
-            if needs_capacity and len(active_agents) >= entry.max_concurrent:
-                break
-
-            payload = {"cmd": "dispatch_task", "id": task.id}
-            if target_agent_id:
-                payload["agent_id"] = target_agent_id
-            else:
-                payload["create_agent"] = True
-            result = await handle_command(payload)
-            if result and result.get("type") in {
-                    "error", "dispatch_action_missing"}:
-                state.auto_dispatch_queue_remove_task(task.id)
-                continue
-
-            task_after = state.board_tasks.get(task.id)
-            resolved_agent_id = task_after.agent_id if task_after else ""
-            if entry.agent_group and resolved_agent_id:
-                state.auto_dispatch_queue_bind_agent_group(
-                    group_name,
-                    entry.agent_group,
-                    resolved_agent_id,
-                )
-            state.auto_dispatch_queue_remove_task(task.id)
-            if resolved_agent_id:
-                agent = state.agents.get(resolved_agent_id)
-                panel_event(
-                    "task_auto_dispatched",
-                    resolved_agent_id,
-                    agent.name if agent else "",
-                    group_name,
-                    task.task[:80],
-                    task_id=task.id,
-                )
-            dispatched.append({
-                "group": group_name,
-                "task_id": task.id,
-                "agent_id": resolved_agent_id,
-            })
-    return dispatched
-
-
-def _should_handoff_shared_worktree(owner, *,
-                                    target_agent_id: str,
-                                    handoff_from: str) -> bool:
-    """Return whether an explicit handoff should transfer branch ownership."""
-    return bool(
-        owner
-        and handoff_from
-        and owner.id == handoff_from
-        and owner.id != target_agent_id
-    )
-
-
-async def _worktree_diff_updater(state: MatrixState,
-                                 worktree_mgr: WorktreeManager):
-    """Periodically update diff stats for cells with active worktrees."""
-    while True:
-        await asyncio.sleep(60)
-        changed = False
-        for cell in state.agents.values():
-            if not cell.worktree_path:
-                continue
-            diff = await worktree_mgr.diff_summary(cell)
-            changed_files = await worktree_mgr.changed_files(cell)
-            dirty = await worktree_mgr.has_uncommitted_changes(cell)
-            checkpoints = await worktree_mgr.count_commits(cell)
-            ahead = checkpoints
-            behind = await worktree_mgr.count_behind(cell)
-            merged = await worktree_mgr.is_merged(cell)
-            if diff != cell.worktree_diff \
-                    or changed_files != cell.worktree_changed_files \
-                    or dirty != cell.worktree_dirty \
-                    or checkpoints != cell.worktree_checkpoints \
-                    or behind != cell.worktree_behind \
-                    or ahead != cell.worktree_ahead \
-                    or merged != cell.worktree_merged:
-                cell.worktree_diff = diff
-                cell.worktree_changed_files = changed_files
-                cell.worktree_dirty = dirty
-                cell.worktree_checkpoints = checkpoints
-                cell.worktree_behind = behind
-                cell.worktree_ahead = ahead
-                cell.worktree_merged = merged
-                state._emit_agent(cell)
-                changed = True
-        if changed:
-            await state.broadcast()
-
-
-def _parse_diff_git_paths(line: str) -> tuple[str, str]:
-    """Extract old/new paths from a ``diff --git`` header."""
-    try:
-        parts = shlex.split(line)
-    except ValueError:
-        return "", ""
-    if len(parts) < 4 or parts[0] != "diff" or parts[1] != "--git":
-        return "", ""
-    old_path = parts[2][2:] if parts[2].startswith("a/") else parts[2]
-    new_path = parts[3][2:] if parts[3].startswith("b/") else parts[3]
-    return old_path, new_path
-
-
-def _finalize_worktree_diff_file(file_info: dict) -> dict:
-    """Normalize a parsed diff file record for the frontend."""
-    path = file_info.get("new_path") or file_info.get("old_path") or ""
-    if file_info.get("status") == "deleted":
-        path = file_info.get("old_path") or path
-    file_info["path"] = path
-    file_info["insertions"] = 0
-    file_info["deletions"] = 0
-    for hunk in file_info.get("hunks", []):
-        for line in hunk.get("lines", []):
-            if line["type"] == "add":
-                file_info["insertions"] += 1
-            elif line["type"] == "del":
-                file_info["deletions"] += 1
-    return {
-        "path": file_info["path"],
-        "status": file_info.get("status") or "modified",
-        "insertions": file_info["insertions"],
-        "deletions": file_info["deletions"],
-        "binary": bool(file_info.get("binary")),
-        "hunks": file_info.get("hunks", []),
-    }
-
-
-def _parse_unified_diff(diff_text: str) -> list[dict]:
-    """Parse ``git diff`` unified output into structured file hunks."""
-    files: list[dict] = []
-    current_file = None
-    current_hunk = None
-
-    def finish_current():
-        nonlocal current_file, current_hunk
-        if not current_file:
-            return
-        if current_hunk:
-            current_file["hunks"].append(current_hunk)
-        files.append(_finalize_worktree_diff_file(current_file))
-        current_file = None
-        current_hunk = None
-
-    for raw_line in diff_text.splitlines():
-        if raw_line.startswith("diff --git "):
-            finish_current()
-            old_path, new_path = _parse_diff_git_paths(raw_line)
-            status = "renamed" if old_path and new_path and old_path != new_path else "modified"
-            current_file = {
-                "old_path": old_path,
-                "new_path": new_path,
-                "status": status,
-                "binary": False,
-                "hunks": [],
-            }
-            continue
-        if current_file is None:
-            continue
-        if raw_line.startswith("new file mode "):
-            current_file["status"] = "added"
-            continue
-        if raw_line.startswith("deleted file mode "):
-            current_file["status"] = "deleted"
-            continue
-        if raw_line.startswith("rename from "):
-            current_file["old_path"] = raw_line[len("rename from "):]
-            current_file["status"] = "renamed"
-            continue
-        if raw_line.startswith("rename to "):
-            current_file["new_path"] = raw_line[len("rename to "):]
-            current_file["status"] = "renamed"
-            continue
-        if raw_line.startswith("copy from "):
-            current_file["old_path"] = raw_line[len("copy from "):]
-            current_file["status"] = "copied"
-            continue
-        if raw_line.startswith("copy to "):
-            current_file["new_path"] = raw_line[len("copy to "):]
-            current_file["status"] = "copied"
-            continue
-        if raw_line.startswith("Binary files ") or raw_line == "GIT binary patch":
-            current_file["binary"] = True
-            current_hunk = None
-            continue
-        if raw_line.startswith("@@ "):
-            if current_hunk:
-                current_file["hunks"].append(current_hunk)
-            current_hunk = {"header": raw_line, "lines": []}
-            continue
-        if not current_hunk:
-            continue
-        if raw_line.startswith("+") and not raw_line.startswith("+++ "):
-            current_hunk["lines"].append({"type": "add", "text": raw_line[1:]})
-        elif raw_line.startswith("-") and not raw_line.startswith("--- "):
-            current_hunk["lines"].append({"type": "del", "text": raw_line[1:]})
-        elif raw_line.startswith(" "):
-            current_hunk["lines"].append({"type": "context", "text": raw_line[1:]})
-        elif raw_line.startswith("\\ No newline at end of file"):
-            current_hunk["lines"].append({"type": "context", "text": raw_line})
-
-    finish_current()
-    return files
-
-
-async def _worktree_full_diff(cell, worktree_mgr: WorktreeManager) -> dict:
-    """Build the structured diff payload for the worktree review view."""
-    if not cell or not cell.worktree_path:
-        return {"error": "Agent has no worktree."}
-    base_branch = cell.worktree_base_branch or "main"
-    try:
-        stats = await worktree_mgr.diff_summary(cell)
-        proc = await asyncio.create_subprocess_exec(
-            "git", "-C", cell.worktree_path,
-            "diff", "--no-color", "--find-renames", "--binary", "--unified=3",
-            f"{base_branch}...HEAD",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            err = stderr.decode().strip() or "Failed to load worktree diff."
-            return {"error": err}
-        files = _parse_unified_diff(stdout.decode())
-        if not stats:
-            stats = {
-                "files": len(files),
-                "insertions": sum(f.get("insertions", 0) for f in files),
-                "deletions": sum(f.get("deletions", 0) for f in files),
-            }
-        return {
-            "agent_name": cell.name,
-            "branch": cell.worktree_branch or "",
-            "base_branch": base_branch,
-            "stats": stats,
-            "files": files,
-        }
-    except Exception:
-        log.exception("Failed to build full diff for '%s'", cell.name)
-        return {"error": "Failed to load worktree diff."}
-
-
-async def _generate_merge_message(cell, worktree_mgr, squash: bool,
-                                  state=None) -> str:
-    """Build a default merge commit message from completed tasks and commits.
-
-    Priority: completed board tasks with done messages > git commit history.
-    """
-    branch = cell.worktree_branch or cell.name
-    if squash:
-        header = f"Squash merge: {branch}"
-    else:
-        header = f"Merge branch '{branch}'"
-
-    # 1. Collect completed boundary tasks on this branch
-    task_lines = []
-    if state:
-        branch_tasks = branch_boundary_tasks(
-            state.board_tasks.values(),
-            repo_root=cell.worktree_repo_root or cell.git_root or "",
-            branch=cell.worktree_branch,
-            statuses={"open", "superseded"},
-        )
-        for t in branch_tasks:
-            if not task_counts_as_done(t):
-                continue
-            # Find the done message from task activity log
-            done_msg = ""
-            for m in reversed(t.messages):
-                if m.get("action") in {"done", "ready"} and m.get("message"):
-                    done_msg = m["message"]
-                    break
-            line = f"- {t.task}"
-            if done_msg and done_msg != "Done":
-                line += f"\n  {done_msg}"
-            task_lines.append(line)
-
-    if task_lines:
-        return header + "\n\n" + "\n".join(task_lines)
-
-    # 2. Fallback: git commit messages from the branch
-    commits = await worktree_mgr.list_checkpoints(cell)
-    if commits:
-        lines = [header, ""]
-        for c in commits:
-            msg = c["message"]
-            # Skip generic checkpoint messages, but keep their body
-            if msg.startswith("loom: checkpoint") \
-                    or msg.startswith("loom: task boundary"):
-                body = c.get("body", "").strip()
-                if body:
-                    lines.append(f"- {body.splitlines()[0]}")
-                continue
-            lines.append(f"- {msg}")
-        if len(lines) > 2:  # has non-checkpoint commits
-            return "\n".join(lines)
-
-    return header
-
-
-async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
-    """Periodically check for due schedules and scheduled tasks.
-
-    Runs every 30 seconds.
-    """
-    from datetime import datetime, timezone as dt_tz
-    from .cron import next_run as cron_next_run
-
-    while True:
-        await asyncio.sleep(30)
-        now = datetime.now(dt_tz.utc)
-        now_iso = now.isoformat()
-
-        # Check for tasks with scheduled_at that are due
-        task_changed = False
-        for task in list(state.board_tasks.values()):
-            if not task.scheduled_at or task.scheduled_at > now_iso:
-                continue
-            if task.agent_id:
-                continue
-            if task.lane in ("In Progress", "Done", ARCHIVED_LANE):
-                continue
-            log.info("Scheduled task '%s' (%s) is due — dispatching",
-                     task.task, task.id)
-            task.scheduled_at = ""
-            state._emit("task_upsert", **asdict(task))
-            state._db_save_task(task)
-            task_changed = True
-            try:
-                await handle_command({
-                    "cmd": "dispatch_task",
-                    "id": task.id,
-                    "create_agent": True,
-                })
-                _panel_event("task_scheduled_dispatch", "", "",
-                             task.group, task.task[:80],
-                             task_id=task.id)
-            except Exception:
-                log.exception("Failed to dispatch scheduled task '%s'",
-                              task.id)
-        if task_changed:
-            await state.broadcast()
-
-        # Check for due recurring/one-shot schedules
-        due = state.schedule_get_due(now_iso)
-        if not due:
-            continue
-
-        for sched in due:
-            try:
-                title = sched.task_template or sched.name
-                title = (title
-                         .replace("{date}", now.strftime("%Y-%m-%d"))
-                         .replace("{time}", now.strftime("%H:%M"))
-                         .replace("{datetime}",
-                                  now.strftime("%Y-%m-%d %H:%M")))
-
-                if sched.group not in state.groups:
-                    log.warning("Schedule '%s': group '%s' no longer exists"
-                                " — skipping", sched.name, sched.group)
-                    continue
-
-                task = state.board_add_task(
-                    task=title,
-                    group=sched.group,
-                    lane="Backlog",
-                    description=sched.description,
-                    action_name=sched.action_name,
-                    action_vars=dict(sched.action_vars),
-                    agent_template=sched.agent_template,
-                    labels=list(sched.labels),
-                )
-                if not task:
-                    log.warning("Schedule '%s': failed to create task",
-                                sched.name)
-                    continue
-
-                log.info("Schedule '%s' fired — created task '%s' (%s)",
-                         sched.name, task.task, task.id)
-
-                await handle_command({
-                    "cmd": "dispatch_task",
-                    "id": task.id,
-                    "create_agent": True,
-                })
-
-                sched.last_run_at = now_iso
-                sched.run_count += 1
-                sched.last_task_id = task.id
-
-                if sched.cron_expr:
-                    try:
-                        nxt = cron_next_run(sched.cron_expr, now,
-                                            tz=sched.timezone)
-                        sched.next_run_at = nxt.isoformat()
-                    except ValueError:
-                        log.error("Schedule '%s': invalid cron '%s'"
-                                  " — disabling", sched.name,
-                                  sched.cron_expr)
-                        sched.enabled = False
-                        sched.next_run_at = ""
-                else:
-                    sched.enabled = False
-                    sched.next_run_at = ""
-
-                state._emit("schedule_upsert", **asdict(sched))
-                state._db_save_schedule(sched)
-
-                _panel_event("schedule_fired", "", sched.name,
-                             sched.group, title, task_id=task.id)
-
-            except Exception:
-                log.exception("Schedule '%s' failed to fire", sched.name)
-
-        await state.broadcast()
-
-
-class _BlockStr(str):
-    """Tagged string subclass so the YAML representer emits block scalar."""
-
-_ACTION_KEY_ORDER = [
-    "name", "description", "agent", "group", "worktree",
-    "prompt", "labels", "transitions", "terminals",
-]
-
-class _ActionDumper(yaml.SafeDumper):
-    pass
-
-_ActionDumper.add_representer(
-    _BlockStr,
-    lambda d, s: d.represent_scalar("tag:yaml.org,2002:str", s, style="|"),
-)
-
-def _action_to_yaml(name: str, data: dict) -> str:
-    """Convert an action data dict to YAML text."""
-    doc = {"name": name}
-    if data.get("description"):
-        doc["description"] = data["description"]
-
-    agent = data.get("agent", {})
-    if isinstance(agent, str):
-        if agent:
-            doc["agent"] = agent
-    else:
-        agent_keys = ("name_prefix", "command", "directory", "profile",
-                      "shell", "tab_color")
-        agent_block = {k: agent[k] for k in agent_keys if agent.get(k)}
-        if agent_block:
-            doc["agent"] = agent_block
-
-    if data.get("group"):
-        doc["group"] = data["group"]
-    if data.get("worktree"):
-        doc["worktree"] = True
-
-    prompt = data.get("prompt", "")
-    if prompt:
-        doc["prompt"] = _BlockStr(prompt.rstrip("\n") + "\n")
-
-    labels = data.get("labels", [])
-    if labels:
-        doc["labels"] = labels
-
-    transitions = data.get("transitions", [])
-    if transitions:
-        clean = []
-        for tr in transitions:
-            if isinstance(tr, dict):
-                if tr.get("ask"):
-                    entry = {"ask": True}
-                    if tr.get("when"):
-                        entry["when"] = tr["when"]
-                    clean.append(entry)
-                elif tr.get("action"):
-                    entry = {"action": tr["action"]}
-                    if tr.get("when"):
-                        entry["when"] = tr["when"]
-                    if tr.get("status"):
-                        entry["status"] = tr["status"]
-                    if tr.get("target"):
-                        entry["target"] = tr["target"]
-                    clean.append(entry)
-        if clean:
-            doc["transitions"] = clean
-
-    terminals = data.get("terminals", [])
-    if terminals:
-        clean = []
-        for t in terminals:
-            entry = {"name": t.get("name", "shell")}
-            if t.get("command"):
-                entry["command"] = t["command"]
-            clean.append(entry)
-        doc["terminals"] = clean
-
-    # Sort keys in the canonical action order
-    ordered = {k: doc[k] for k in _ACTION_KEY_ORDER if k in doc}
-    return yaml.dump(ordered, Dumper=_ActionDumper,
-                     default_flow_style=False, sort_keys=False,
-                     allow_unicode=True)
-
-
 async def main(connection: iterm2.Connection):
     log.info("Loom starting (port=%d)", WS_PORT)
     db = LoomDB(DB_FILE)
@@ -867,6 +226,13 @@ async def main(connection: iterm2.Connection):
     worktree_mgr = WorktreeManager()
     action_mgr = ActionManager()
     template_mgr = TemplateManager()
+    agent_launch = AgentLaunchService(
+        state=state,
+        connection=connection,
+        bridge=bridge,
+        worktree_mgr=worktree_mgr,
+        template_mgr=template_mgr,
+    )
 
     from .weaver import WeaverEventBuffer
     weaver_buffer = WeaverEventBuffer(state, bridge)
@@ -1058,220 +424,45 @@ async def main(connection: iterm2.Connection):
     _displaced = [displaced_bindings]
 
     async def _resolve_base_dir(group: str = "") -> str:
-        """Resolve a base directory for action discovery."""
-        if group:
-            gs = state.get_group_settings(group)
-            d = gs.agent_directory or gs.default_directory
-            if d:
-                return os.path.expanduser(d)
-        try:
-            app = await iterm2.async_get_app(connection)
-            win = app.current_terminal_window
-            if win and win.current_tab and win.current_tab.current_session:
-                p = await win.current_tab.current_session.async_get_variable(
-                    "path")
-                if p:
-                    return p
-        except Exception:
-            pass
-        return ""
+        return await agent_launch.resolve_base_dir(group)
 
     def _resolve_provider_command(
         provider: str, boot_command: str, default_command: str,
     ) -> tuple[str, str]:
-        """Resolve (command, agent_type) from provider + boot_command.
-
-        When *provider* names a known adapter, the agent_type is set
-        explicitly and the command defaults to the adapter's default.
-        When *provider* is empty, auto-detection in bridge.py takes over.
-        """
-        if provider:
-            adapter_cmd = get_default_command_for_provider(provider)
-            if adapter_cmd:  # known provider
-                return (boot_command or adapter_cmd, provider)
-        # No provider — fall through to boot_command / global default
-        return (boot_command or default_command, "")
+        return agent_launch.resolve_provider_command(
+            provider, boot_command, default_command
+        )
 
     def _suggest_template_agent_name(group: str, template_name: str,
                                      base_dir: str = "") -> str:
-        tpl = template_mgr.load_template(template_name, base_dir) or {}
-        base = (tpl.get("display_name")
-                or tpl.get("name", "").split("/")[-1].replace("-", " ")
-                or "Agent")
-        base = " ".join(w.capitalize() for w in base.split()) or "Agent"
-        existing = {
-            a.name for a in state.agents.values()
-            if a.group == group and a.cell_type == "agent"
-        }
-        if base not in existing:
-            return base
-        i = 2
-        while f"{base} {i}" in existing:
-            i += 1
-        return f"{base} {i}"
+        return agent_launch.suggest_template_agent_name(
+            group, template_name, base_dir
+        )
 
     def _resolve_agent_launch_config(group: str, *,
                                      base_dir: str = "",
                                      explicit_template: str = "",
                                      overrides: dict | None = None) -> dict:
-        gs = state.get_group_settings(group)
-        resolved = template_mgr.resolve_agent_config(
-            explicit_template, gs, overrides or {}, base_dir=base_dir)
-
-        provider = resolved.get("provider", "") or gs.agent_provider
-        raw_command = resolved.get("command", "") or gs.agent_boot_command
-        command, agent_type = _resolve_provider_command(
-            provider, raw_command, state.get_default_command())
-        adapter = get_adapter(agent_type or provider)
-        if not raw_command:
-            command += adapter.resolve_model_flags(resolved.get("model", ""))
-        max_turns = resolved.get("max_turns", 0)
-        if max_turns:
-            command += f" --max-turns {int(max_turns)}"
-        permissions = resolved.get("permissions", "")
-        if agent_type == "claude-code" and permissions:
-            if permissions == "skip":
-                command += " --dangerously-skip-permissions"
-            else:
-                command += f" --allowed-tools {shlex.quote(permissions)}"
-
-        tab_color = resolved.get("tab_color", "")
-        if tab_color == "none":
-            tab_color = ""
-        if not tab_color:
-            _ac = gs.agent_tab_color
-            if _ac == "none":
-                tab_color = ""
-            else:
-                tab_color = _ac or gs.tab_color or ""
-
-        directory = (resolved.get("directory", "")
-                     or gs.agent_directory or gs.default_directory or "")
-        profile = (resolved.get("profile", "")
-                   or gs.agent_profile or gs.profile or "Default")
-        shell = (resolved.get("shell", "")
-                 or gs.agent_shell or gs.shell or "")
-        env = {**gs.env_vars, **(resolved.get("env_vars") or {})} or None
-        env_file = (resolved.get("env_file", "")
-                    or gs.agent_env_file or gs.env_file)
-
-        return {
-            "provider": provider,
-            "agent_type": agent_type,
-            "command": command.strip(),
-            "profile": profile,
-            "directory": directory,
-            "shell": shell,
-            "tab_color": tab_color,
-            "icon": resolved.get("icon", ""),
-            "env_vars": env,
-            "env_file": env_file,
-            "system_prompt": resolved.get("system_prompt", ""),
-            "initial_prompt": resolved.get("initial_prompt", ""),
-            "template": resolved.get("template", ""),
-            "session_resume": resolved.get(
-                "session_resume", gs.agent_session_resume),
-            "idle_timeout": resolved.get(
-                "idle_timeout", gs.agent_idle_timeout),
-            "worktree": resolved.get("worktree", gs.git_worktree),
-            "worktree_base_dir": resolved.get(
-                "worktree_base_dir", gs.worktree_base_dir),
-            "worktree_base_branch": resolved.get(
-                "worktree_base_branch", gs.worktree_base_branch),
-            "worktree_auto_checkpoint": resolved.get(
-                "worktree_auto_checkpoint", gs.worktree_auto_checkpoint),
-            "checkpoint_on_progress": resolved.get(
-                "checkpoint_on_progress", gs.checkpoint_on_progress),
-            "worktree_merge_squash": resolved.get(
-                "worktree_merge_squash", gs.worktree_merge_squash),
-            "worktree_symlinks": resolved.get(
-                "worktree_symlinks", gs.worktree_symlinks),
-            "terminals": resolved.get("terminals", []),
-        }
+        return agent_launch.resolve_agent_launch_config(
+            group,
+            base_dir=base_dir,
+            explicit_template=explicit_template,
+            overrides=overrides,
+        )
 
     async def _create_child_terminals(group: str, parent_cell,
                                       terminals: list[dict] | None = None,
                                       count: int = 0):
-        gs = state.get_group_settings(group)
-        created = []
-        if terminals:
-            for tterm in terminals:
-                t_name = tterm.get("name") or state.next_cell_name(
-                    group, "terminal")
-                t = state.add_terminal(
-                    name=t_name,
-                    group=group,
-                    profile=gs.terminal_profile or gs.profile or "Default",
-                    command=tterm.get("command") or "",
-                    directory=tterm.get("directory") or parent_cell.directory,
-                    tab_color=gs.terminal_tab_color or gs.tab_color or "",
-                    parent_id=parent_cell.id,
-                )
-                if t:
-                    await bridge.create_session(
-                        t,
-                        env_vars={**gs.env_vars, **gs.terminal_env_vars} or None,
-                        env_file=gs.terminal_env_file or gs.env_file,
-                        init_script=tterm.get("init_script")
-                        or gs.terminal_init_script,
-                        shell=gs.terminal_shell or gs.shell or "",
-                    )
-                    created.append(t)
-            return created
-
-        if count <= 0:
-            return created
-        t_profile = gs.terminal_profile or gs.profile or "Default"
-        t_dir = gs.terminal_directory or gs.default_directory or ""
-        _ttc = gs.terminal_tab_color
-        t_color = (_ttc if _ttc != "none" else "") or gs.tab_color or ""
-        t_shell = gs.terminal_shell or gs.shell or ""
-        t_env = {**gs.env_vars, **gs.terminal_env_vars} or None
-        t_cmd = gs.terminal_boot_command or ""
-        if gs.terminal_command_args and t_cmd:
-            t_cmd = (t_cmd + " " + gs.terminal_command_args).strip()
-        for _ in range(count):
-            t_name = state.next_cell_name(group, "terminal")
-            t = state.add_terminal(
-                name=t_name,
-                group=group,
-                profile=t_profile,
-                command=t_cmd,
-                directory=t_dir or parent_cell.directory,
-                tab_color=t_color,
-                parent_id=parent_cell.id,
-            )
-            if t:
-                await bridge.create_session(
-                    t,
-                    env_vars=t_env,
-                    env_file=gs.terminal_env_file or gs.env_file,
-                    init_script=gs.terminal_init_script,
-                    shell=t_shell,
-                )
-                created.append(t)
-        return created
+        return await agent_launch.create_child_terminals(
+            group, parent_cell, terminals=terminals, count=count
+        )
 
     def _persistent_prompt_filename(cell) -> str:
-        return f"loom-system-prompt-{cell.id}.md"
+        return agent_launch.persistent_prompt_filename(cell)
 
     def _apply_persistent_prompt(cell, launch_cfg: dict,
                                  prompt_text: str = "") -> None:
-        agent_type = launch_cfg.get("agent_type", "") or cell.agent_type
-        if not prompt_text or not agent_type:
-            return
-        adapter = get_adapter(agent_type)
-        if not adapter or adapter.name == "generic":
-            return
-        working_dir = os.path.expanduser(
-            cell.directory or launch_cfg.get("directory", "") or os.getcwd())
-        prompt_flags = adapter.inject_persistent_prompt(
-            working_dir, _persistent_prompt_filename(cell), prompt_text)
-        if prompt_flags:
-            launch_cfg["command"] = (
-                launch_cfg.get("command", "") + prompt_flags).strip()
-        launch_cfg["system_prompt"] = ""
-        cell.command = launch_cfg.get("command", cell.command)
+        agent_launch.apply_persistent_prompt(cell, launch_cfg, prompt_text)
 
     async def _create_agent_with_config(group: str, name: str,
                                         launch_cfg: dict, *,
@@ -1279,184 +470,27 @@ async def main(connection: iterm2.Connection):
                                         target_session_id: str = "",
                                         target_window_id: str = "",
                                         persistent_prompt_text: str = ""):
-        cell = state.add_agent(
-            name=name, group=group,
-            profile=launch_cfg["profile"],
-            command=launch_cfg["command"],
-            directory=launch_cfg["directory"],
-            tab_color=launch_cfg["tab_color"],
-            icon=launch_cfg.get("icon", ""),
-        )
-        if not cell:
-            return None
-        cell.session_resume = bool(launch_cfg.get("session_resume", True))
-        cell.idle_timeout = int(launch_cfg.get("idle_timeout", 5) or 0)
-        cell.worktree_base_dir = (
-            launch_cfg.get("worktree_base_dir") or ".loom/worktrees")
-        cell.worktree_auto_checkpoint = bool(
-            launch_cfg.get("worktree_auto_checkpoint", False))
-        cell.checkpoint_on_progress = bool(
-            launch_cfg.get("checkpoint_on_progress", False))
-        cell.worktree_merge_squash = bool(
-            launch_cfg.get("worktree_merge_squash", True))
-        cell.template = explicit_template or launch_cfg.get("template", "")
-        if launch_cfg.get("agent_type"):
-            cell.agent_type = launch_cfg["agent_type"]
-        state._emit_agent(cell)
-        state._db_save_agent(cell)
-        state.history_record_agent(cell)
-
-        if launch_cfg.get("worktree") and cell.directory:
-            repo_root = await worktree_mgr.get_repo_root(cell.directory)
-            if repo_root:
-                wt_path = await worktree_mgr.create(
-                    cell, repo_root,
-                    base_dir=cell.worktree_base_dir or ".loom/worktrees",
-                    base_branch=launch_cfg.get("worktree_base_branch", ""),
-                    symlinks=launch_cfg.get("worktree_symlinks", []),
-                )
-                if wt_path:
-                    cell.directory = wt_path
-                    state._emit_agent(cell)
-                    state._db_save_agent(cell)
-                    state.history_update_agent(
-                        cell,
-                        worktree_branch=cell.worktree_branch)
-
-        _apply_persistent_prompt(cell, launch_cfg, persistent_prompt_text)
-        state._emit_agent(cell)
-        state._db_save_agent(cell)
-
-        await bridge.create_session(
-            cell,
-            env_vars=launch_cfg.get("env_vars"),
-            env_file=launch_cfg.get("env_file", ""),
-            shell=launch_cfg.get("shell", ""),
-            system_prompt=launch_cfg.get("system_prompt", ""),
+        return await agent_launch.create_agent_with_config(
+            group,
+            name,
+            launch_cfg,
+            explicit_template=explicit_template,
             target_session_id=target_session_id,
             target_window_id=target_window_id,
+            persistent_prompt_text=persistent_prompt_text,
         )
-        return cell
-
-    def _resolve_agent_id(identifier: str) -> str | None:
-        """Resolve an agent by slug, name (case-insensitive), ID, or prefix.
-
-        Returns the agent ID or None if not found.  Only matches
-        top-level agents (cell_type == 'agent'), not terminals.
-        """
-        if not identifier:
-            return None
-        # Exact ID
-        if identifier in state.agents:
-            c = state.agents[identifier]
-            if c.cell_type == "agent":
-                return c.id
-        # Slug match
-        ident_lower = identifier.lower()
-        for c in state.agents.values():
-            if c.cell_type != "agent":
-                continue
-            if c.slug and c.slug == identifier:
-                return c.id
-        # Name match (case-insensitive)
-        for c in state.agents.values():
-            if c.cell_type != "agent":
-                continue
-            if c.name.lower() == ident_lower:
-                return c.id
-        # ID prefix match
-        for c in state.agents.values():
-            if c.cell_type != "agent":
-                continue
-            if c.id.startswith(identifier):
-                return c.id
-        return None
-
-    def _resolve_task_id(identifier: str) -> str:
-        """Resolve a task by ID or slug, return as-is if not found."""
-        if not identifier:
-            return identifier
-        if identifier in state.board_tasks:
-            return identifier
-        for t in state.board_tasks.values():
-            if t.slug == identifier:
-                return t.id
-        return identifier
-
-    def _resolve_memory_cell_and_task(cell_id: str = "",
-                                      task_id: str = ""):
-        """Resolve agent/task context for memory commands."""
-        cell = state.agents.get(cell_id) if cell_id else None
-        task = None
-        if task_id:
-            task = state.board_tasks.get(_resolve_task_id(task_id))
-        if not task and cell:
-            task = detect_current_task(state, cell.id)
-        return cell, task
-
-    def _resolve_memory_scope_ref(scope_kind: str, scope_ref: str) -> str:
-        """Normalize task/pipeline scope refs to canonical persisted IDs."""
-        ref = (scope_ref or "").strip()
-        if not ref:
-            return ref
-        if scope_kind == "task":
-            return _resolve_task_id(ref)
-        if scope_kind == "pipeline":
-            resolved_task_id = _resolve_task_id(ref)
-            task = state.board_tasks.get(resolved_task_id)
-            if task:
-                return task.pipeline_root_id or task.id
-        return ref
-
-    def _resolve_memory_link_ref(target_kind: str, target_ref: str,
-                                 *, cell=None, task=None) -> str:
-        """Normalize memory-link refs to canonical persisted IDs."""
-        kind = normalize_link_target_kind(target_kind)
-        ref = (target_ref or "").strip()
-        if kind == "task":
-            if ref:
-                return _resolve_task_id(ref)
-            if task:
-                return task.id
-            return ref
-        if kind == "agent":
-            if ref:
-                return _resolve_agent_id(ref) or ref
-            if cell:
-                return cell.id
-            return ref
-        if ref:
-            resolved_task_id = _resolve_task_id(ref)
-            linked_task = state.board_tasks.get(resolved_task_id)
-            if linked_task:
-                return linked_task.pipeline_root_id or linked_task.id
-        if task:
-            return task.pipeline_root_id or task.id
-        return ref
 
     async def _send_agent_prompt(cell, prompt: str, *,
                                  delay: float = 0,
                                  persist: bool = False,
                                  background: bool = False):
-        """Send a prompt to an agent session, optionally delayed."""
-        payload = prompt if prompt.endswith("\r") else prompt + "\r"
-
-        async def _run():
-            if delay:
-                await asyncio.sleep(delay)
-            if not cell.session_id:
-                return
-            await bridge.send_text(cell.session_id, payload)
-            cell.status = "running"
-            state._emit_agent(cell)
-            if persist:
-                state._db_save_agent(cell)
-            await state.broadcast()
-
-        if background:
-            asyncio.create_task(_run())
-        else:
-            await _run()
+        return await agent_launch.send_agent_prompt(
+            cell,
+            prompt,
+            delay=delay,
+            persist=persist,
+            background=background,
+        )
 
     # -- Persistent system prompt ---------------------------------------------
 
