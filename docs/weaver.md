@@ -23,16 +23,18 @@ The journal belongs to the group, not the individual agent. If you recreate the 
 
 ## Creating and configuring the Weaver
 
-Open the **Weaver** panel, switch to **Settings**, and click **+ Create Weaver**.
+Open **Group Settings** for the target group and switch to the **Weaver** tab.
 
-The Weaver must be created through this flow because Loom needs to boot it with a persistent system prompt. You cannot turn an existing agent into a Weaver after the fact.
+Create the Weaver there if the group does not already have one, and use the same tab to manage provider overrides, custom instructions, and digest settings.
+
+The Weaver must be created through Loom's dedicated Weaver flow because Loom needs to boot it with a persistent system prompt. You cannot turn an existing agent into a Weaver after the fact.
 
 ### Weaver panel
 
 The panel has two tabs:
 
 - **Journal** shows the persistent journal, blocking asks, and non-blocking notes/questions from the Weaver.
-- **Settings** controls the Weaver agent, backend override, custom instructions, and notification settings.
+- **Settings** summarizes the current Weaver configuration and links you to **Group Settings → Weaver**.
 
 The panel header also shows:
 
@@ -40,14 +42,14 @@ The panel header also shows:
 - time until the next digest push
 - a pause/resume toggle for event delivery
 
-### Settings tab
+### Group Settings → Weaver
 
-The current product behavior is:
+The Weaver tab in group settings contains the editable Weaver configuration:
 
 - **Agent** section shows the current Weaver agent or the create button.
 - **Backend** lets you override the provider and boot command just for the Weaver. If empty, the Weaver uses the group's defaults.
 - **Custom Instructions** appends extra operating rules to the Weaver system prompt.
-- **Notifications** configures push interval, max interval, and which optional event types appear in digests.
+- **Notifications** configures push interval, max interval, heartbeat interval, and which optional event types appear in digests.
 
 ### Agent cell behavior
 

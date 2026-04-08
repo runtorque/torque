@@ -262,6 +262,8 @@ let _settingsGroup = null;
 let _gsColor = '';
 let _gsAgentColor = '';
 let _gsTerminalColor = '';
+let _gsInitialTab = 'group';
+let _gsInitialSubtab = '';
 
 function switchGsTab(name) {
   document.querySelectorAll('.gs-tab').forEach(t =>
@@ -285,8 +287,10 @@ function switchGsSubTab(pane, btn) {
     p.classList.toggle('active', p.dataset.subpane === target));
 }
 
-function openGroupSettings(group) {
+function openGroupSettings(group, initialTab, initialSubtab) {
   _settingsGroup = group;
+  _gsInitialTab = initialTab || 'group';
+  _gsInitialSubtab = initialSubtab || '';
   send({ cmd: 'get_group_settings', group });
 }
 
@@ -334,9 +338,59 @@ function _textToEnv(id) {
   return env;
 }
 
+function _setSelectValue(id, value, fallback) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.value = value != null && value !== '' ? String(value) : String(fallback);
+}
+
+function _setWeaverEventCheckboxes(enabled) {
+  const current = new Set(enabled || []);
+  document.getElementById('gs-weaver-event-agent-started').checked = current.has('agent_started');
+  document.getElementById('gs-weaver-event-task-dispatched').checked = current.has('task_dispatched');
+  document.getElementById('gs-weaver-event-task-derived').checked = current.has('task_derived');
+  document.getElementById('gs-weaver-event-agent-progress').checked = current.has('agent_progress');
+  document.getElementById('gs-weaver-event-task-health-alert').checked = current.has('task_health_alert');
+}
+
+function _getWeaverEnabledEvents() {
+  const events = [];
+  if (document.getElementById('gs-weaver-event-agent-started').checked) events.push('agent_started');
+  if (document.getElementById('gs-weaver-event-task-dispatched').checked) events.push('task_dispatched');
+  if (document.getElementById('gs-weaver-event-task-derived').checked) events.push('task_derived');
+  if (document.getElementById('gs-weaver-event-agent-progress').checked) events.push('agent_progress');
+  if (document.getElementById('gs-weaver-event-task-health-alert').checked) events.push('task_health_alert');
+  return events;
+}
+
+function _renderGsWeaverSummary(group, weaver, ws) {
+  const nameEl = document.getElementById('gs-weaver-agent-name');
+  const metaEl = document.getElementById('gs-weaver-agent-meta');
+  const createBtn = document.getElementById('gs-weaver-create-btn');
+  if (!nameEl || !metaEl || !createBtn) return;
+  if (weaver) {
+    nameEl.textContent = weaver.name;
+    const parts = [];
+    if (weaver.status) parts.push(weaver.status);
+    if (ws && ws.paused) parts.push('event delivery paused');
+    metaEl.textContent = parts.length ? parts.join(' • ') : 'Weaver agent configured for this group.';
+    createBtn.textContent = 'Recreate Weaver';
+    createBtn.style.display = 'none';
+    createBtn.disabled = false;
+  } else {
+    nameEl.textContent = 'No weaver agent';
+    metaEl.textContent = 'Create a Weaver for this group to enable orchestration.';
+    createBtn.textContent = '+ Create Weaver';
+    createBtn.style.display = '';
+    createBtn.disabled = false;
+  }
+}
+
 function _showGroupSettings(group, data) {
   _settingsGroup = group;
   const s = data.settings;
+  const ws = data.weaver_settings || {};
+  const weaver = s.weaver_agent_id && state.agents ? state.agents[s.weaver_agent_id] : null;
 
   document.getElementById('gs-title').textContent = group + ' Settings';
 
@@ -384,7 +438,7 @@ function _showGroupSettings(group, data) {
   _gsAgentColor = s.agent_tab_color || '';
   _renderSwatches('gs-agent-color-swatches', _gsAgentColor, 'selectGsAgentColor', true);
 
-  /* -- Terminals tab -- */
+  /* -- Terminals sub-tab -- */
   document.getElementById('gs-terminal-prefix').value = s.terminal_name_prefix || '';
   document.getElementById('gs-terminal-boot-cmd').value = s.terminal_boot_command || '';
   document.getElementById('gs-terminal-cmd-args').value = s.terminal_command_args || '';
@@ -399,9 +453,33 @@ function _showGroupSettings(group, data) {
   _gsTerminalColor = s.terminal_tab_color || '';
   _renderSwatches('gs-terminal-color-swatches', _gsTerminalColor, 'selectGsTerminalColor', true);
 
-  switchGsTab('group');
+  /* -- Weaver tab -- */
+  _populateProviderSelect('gs-weaver-provider', ws.weaver_provider || '', true);
+  document.getElementById('gs-weaver-boot-cmd').value = ws.weaver_boot_command || '';
+  document.getElementById('gs-weaver-custom-instructions').value = ws.custom_instructions || '';
+  _setSelectValue('gs-weaver-push-interval', ws.push_interval, 60);
+  _setSelectValue('gs-weaver-max-interval', ws.max_interval, 300);
+  _setSelectValue(
+    'gs-weaver-heartbeat-interval',
+    ws.heartbeat_interval,
+    ws.max_interval || 300
+  );
+  _setWeaverEventCheckboxes(ws.enabled_events || []);
+  _renderGsWeaverSummary(group, weaver, ws);
+
+  const initialTab = _gsInitialTab || 'group';
+  const initialSubtab = _gsInitialSubtab || '';
+  switchGsTab(initialTab);
+  if (initialSubtab) {
+    const btn = document.querySelector(`.gs-pane[data-pane="${initialTab}"] .gs-subtab[data-subtab="${initialSubtab}"]`);
+    if (btn) switchGsSubTab(initialTab, btn);
+  }
+  _gsInitialTab = 'group';
+  _gsInitialSubtab = '';
   document.getElementById('modal-group-settings').classList.add('visible');
-  document.getElementById('gs-directory').focus();
+  const focusId = initialTab === 'weaver' ? 'gs-weaver-provider' : 'gs-directory';
+  const focusEl = document.getElementById(focusId);
+  if (focusEl) focusEl.focus();
 }
 
 function selectGsColor(hex) {
@@ -478,10 +556,36 @@ function submitGroupSettings() {
     terminal_always_custom_dialog: document.getElementById('gs-terminal-always-custom').checked,
     terminal_close_on_disconnect: document.getElementById('gs-terminal-close-on-disconnect').checked,
   };
+  const weaverSettings = {
+    weaver_provider: _getProviderValue('gs-weaver-provider'),
+    weaver_boot_command: document.getElementById('gs-weaver-boot-cmd').value.trim(),
+    custom_instructions: document.getElementById('gs-weaver-custom-instructions').value,
+    push_interval: parseInt(document.getElementById('gs-weaver-push-interval').value, 10) || 60,
+    max_interval: parseInt(document.getElementById('gs-weaver-max-interval').value, 10) || 300,
+    heartbeat_interval: parseInt(document.getElementById('gs-weaver-heartbeat-interval').value, 10),
+    enabled_events: _getWeaverEnabledEvents(),
+  };
 
   send({ cmd: 'update_group_settings', group: _settingsGroup, settings });
+  send({ cmd: 'weaver_update_settings', group: _settingsGroup, ...weaverSettings });
   _settingsGroup = null;
   closeModals();
+}
+
+function gsCreateWeaver() {
+  if (!_settingsGroup) return;
+  const nameEl = document.getElementById('gs-weaver-agent-name');
+  const metaEl = document.getElementById('gs-weaver-agent-meta');
+  const createBtn = document.getElementById('gs-weaver-create-btn');
+  if (nameEl) nameEl.textContent = 'Creating Weaver…';
+  if (metaEl) metaEl.textContent = 'Loom is booting the Weaver agent for this group.';
+  if (createBtn) createBtn.disabled = true;
+  send({
+    cmd: 'add_agent',
+    name: 'Weaver',
+    group: _settingsGroup,
+    is_weaver: true,
+  });
 }
 
 function _toggleWorktreeFields() {

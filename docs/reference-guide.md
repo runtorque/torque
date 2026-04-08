@@ -51,7 +51,7 @@ Loom has a few settings surfaces. The details live in the linked pages; this sec
 
 | Surface | Use it for |
 |---|---|
-| [Group Settings](group-settings.md) | Defaults for directories, boot commands, shells, windows, worktrees, resume behavior, and notifications |
+| [Group Settings](group-settings.md) | Defaults for directories, boot commands, shells, windows, worktrees, terminal defaults, and Weaver behavior |
 | [Agent Templates](agent-templates.md) | Reusable launch presets with provider, model, prompt, worktree, and child terminal defaults |
 | [Actions & Templates](actions.md) | Prompt rendering, variables, transitions, and pipelines used by dispatch and derive |
 | Top-level README environment variable reference | Runtime defaults like `LOOM_PORT`, `LOOM_DEFAULT_CMD`, `LOOM_STANDALONE`, and `LOOM_BIND_ALL` |

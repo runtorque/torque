@@ -2,7 +2,7 @@
 
 Each group has configurable settings that act as defaults when creating agents and terminals. Open the settings modal by clicking the gear icon (++2699++) on the group header, or right-click the header and select **Settings...**.
 
-Settings are organized into three tabs: **Group**, **Agents**, and **Terminals**.
+Settings are organized into three tabs: **Group**, **Agents**, and **Weaver**.
 
 ## Group tab
 
@@ -79,9 +79,9 @@ See [Agents & Sessions](agents-and-sessions.md) for the end-to-end runtime model
 
 When enabled, clicking the "+ New" button always opens the full creation dialog instead of instantly creating an agent with defaults.
 
-## Terminals tab
+## Agents → Terminals
 
-These settings override the group defaults when creating terminals specifically.
+These settings override the group defaults when creating terminals specifically. They live inside the **Agents** tab, immediately after **General**.
 
 | Setting | Description |
 |---------|-------------|
@@ -98,6 +98,19 @@ These settings override the group defaults when creating terminals specifically.
 ### Always open custom dialog
 
 Same as the agent version, but applies to the "+ New terminal" button.
+
+## Weaver tab
+
+The **Weaver** tab owns per-group Weaver configuration.
+
+| Setting | Description |
+|---------|-------------|
+| **Agent** | Shows the current Weaver agent for the group, or lets you create one if none exists yet. |
+| **Provider** | Optional backend override just for the Weaver. Leave empty to inherit the group default. |
+| **Command override** | Optional boot command override for the Weaver. |
+| **Custom Instructions** | Extra instructions appended to the Weaver system prompt. |
+| **Push / Max / Heartbeat intervals** | Controls digest cadence and idle heartbeat behavior. |
+| **Events** | Choose which optional event types appear in Weaver digests. Mandatory event types are always enabled. |
 
 ## How defaults are resolved
 

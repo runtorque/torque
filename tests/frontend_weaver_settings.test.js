@@ -36,40 +36,42 @@ function loadWeaver(context) {
   vm.runInContext(source, context, { filename });
 }
 
-test('weaver settings render separate idle heartbeat controls', () => {
+test('weaver settings render group-settings handoff', () => {
   const sandbox = createSandbox();
   const context = vm.createContext(sandbox);
   loadWeaver(context);
 
   const html = vm.runInContext(
     `_weaverRenderSettings("alpha", {
-      push_interval: 60,
-      max_interval: 300,
-      heartbeat_interval: 0,
-      enabled_events: []
+      weaver_provider: "codex",
+      weaver_boot_command: "codex --model gpt-5",
+      custom_instructions: "Watch for regressions."
     }, { name: "Weaver", status: "running" })`,
     context,
   );
 
-  assert.match(html, /<label>Push interval<\/label>/);
-  assert.match(html, /<label>Max interval<\/label>/);
-  assert.match(html, /<label>Idle heartbeat<\/label>/);
-  assert.match(html, /Send idle heartbeat if no digest was sent for:/);
-  assert.match(html, /option value="0" selected>Off<\/option>/);
+  assert.match(html, /Weaver configuration now lives in Group Settings → Weaver/);
+  assert.match(html, /Open Group Settings/);
+  assert.match(html, /Provider override/);
+  assert.match(html, /codex/);
+  assert.match(html, /Watch for regressions\./);
 });
 
-test('weaverUpdateSetting sends heartbeat interval payload', () => {
+test('weaverOpenSettings opens group settings on the weaver tab', () => {
   const sandbox = createSandbox();
+  sandbox.openGroupSettingsCalls = [];
+  sandbox.openGroupSettings = function(group, tab) {
+    sandbox.openGroupSettingsCalls.push({ group, tab });
+  };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
 
-  vm.runInContext(`weaverUpdateSetting("heartbeat_interval", 600)`, context);
+  vm.runInContext(`weaverOpenSettings()`, context);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.openGroupSettingsCalls)), [
     {
-      cmd: 'weaver_update_settings',
       group: 'alpha',
-      heartbeat_interval: 600,
+      tab: 'weaver',
     },
   ]);
 });
@@ -104,33 +106,6 @@ test('weaverDismissNote clears the non-blocking banner without resuming', () => 
     {
       cmd: 'weaver_dismiss_note',
       group: 'alpha',
-    },
-  ]);
-});
-
-test('weaverCreate prefers the focused group over a stale selected group', () => {
-  const sandbox = createSandbox();
-  sandbox.selectedAgentId = 'agent-alpha';
-  sandbox.state.groups = { alpha: ['agent-alpha'], beta: [] };
-  sandbox.state.agents = {
-    'agent-alpha': { id: 'agent-alpha', group: 'alpha' },
-  };
-  sandbox.state.group_settings = {
-    alpha: { weaver_agent_id: 'weaver-alpha' },
-    beta: {},
-  };
-  sandbox._focusedGroup = function() { return 'beta'; };
-  const context = vm.createContext(sandbox);
-  loadWeaver(context);
-
-  vm.runInContext('weaverCreate()', context);
-
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
-    {
-      cmd: 'add_agent',
-      name: 'Weaver',
-      group: 'beta',
-      is_weaver: true,
     },
   ]);
 });
