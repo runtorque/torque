@@ -116,6 +116,18 @@ function _contextPreview(content) {
   return text.slice(0, 177).trimEnd() + '...';
 }
 
+function _contextRetentionLabel(entry) {
+  var kind = entry && entry.retention_kind ? String(entry.retention_kind) : '';
+  if (kind === 'durable') return 'Durable';
+  if (kind === 'transient') return 'Transient';
+  if (kind === 'summary' || (entry && entry.synthetic)) return 'Summary';
+  return '';
+}
+
+function _contextCanMutate(entry) {
+  return !!(entry && !entry.synthetic);
+}
+
 function _contextDefaultScopeRef(kind) {
   var task = _contextCurrentTask();
   if (kind === 'group') return _contextCurrentGroup();
@@ -267,12 +279,18 @@ function _renderContextEntryCard(entry) {
   html += '<div class="context-card-head">';
   html += '<span class="context-entry-type context-entry-type-' + esc(entry.entry_type || 'note') + '">'
     + esc(entry.entry_type || 'note') + '</span>';
+  var retentionLabel = _contextRetentionLabel(entry);
+  if (retentionLabel) {
+    html += '<span class="context-retention-pill">' + esc(retentionLabel) + '</span>';
+  }
   html += '<span class="context-entry-time">' + esc(_contextFormatTime(entry.updated_at || entry.created_at)) + '</span>';
-  html += '<button class="context-pin-btn' + (entry.pinned ? ' pinned' : '')
-    + '" onclick="event.stopPropagation();contextTogglePin(\'' + entry.id + '\',' + (entry.pinned ? 'false' : 'true') + ')"'
-    + ' title="' + (entry.pinned ? 'Unpin entry' : 'Pin entry') + '">'
-    + (entry.pinned ? '&#9733;' : '&#9734;')
-    + '</button>';
+  if (_contextCanMutate(entry)) {
+    html += '<button class="context-pin-btn' + (entry.pinned ? ' pinned' : '')
+      + '" onclick="event.stopPropagation();contextTogglePin(\'' + entry.id + '\',' + (entry.pinned ? 'false' : 'true') + ')"'
+      + ' title="' + (entry.pinned ? 'Unpin entry' : 'Pin entry') + '">'
+      + (entry.pinned ? '&#9733;' : '&#9734;')
+      + '</button>';
+  }
   html += '</div>';
   html += '<div class="context-card-title">' + esc(title) + '</div>';
   html += '<div class="context-card-preview">' + esc(_contextPreview(entry.content)) + '</div>';
@@ -342,13 +360,17 @@ function _renderContextDetail(entry) {
   html += '<span class="context-entry-type context-entry-type-' + esc(entry.entry_type || 'note') + '">'
     + esc(entry.entry_type || 'note') + '</span>';
   html += '<span class="context-scope-pill">' + esc(_contextScopeLabel(entry.scope_kind, entry.scope_ref)) + '</span>';
+  var retentionLabel = _contextRetentionLabel(entry);
+  if (retentionLabel) html += '<span class="context-retention-pill">' + esc(retentionLabel) + '</span>';
   if (entry.pinned) html += '<span class="context-pinned-pill">Pinned</span>';
   html += '</div>';
-  html += '<button class="context-pin-btn' + (entry.pinned ? ' pinned' : '')
-    + '" onclick="contextTogglePin(\'' + entry.id + '\',' + (entry.pinned ? 'false' : 'true') + ')"'
-    + ' title="' + (entry.pinned ? 'Unpin entry' : 'Pin entry') + '">'
-    + (entry.pinned ? '&#9733;' : '&#9734;')
-    + '</button>';
+  if (_contextCanMutate(entry)) {
+    html += '<button class="context-pin-btn' + (entry.pinned ? ' pinned' : '')
+      + '" onclick="contextTogglePin(\'' + entry.id + '\',' + (entry.pinned ? 'false' : 'true') + ')"'
+      + ' title="' + (entry.pinned ? 'Unpin entry' : 'Pin entry') + '">'
+      + (entry.pinned ? '&#9733;' : '&#9734;')
+      + '</button>';
+  }
   html += '</div>';
   html += '<div class="context-detail-title">' + esc(title) + '</div>';
   html += '<div class="context-detail-meta">' + esc(sourceLabel) + '</div>';
@@ -360,7 +382,9 @@ function _renderContextDetail(entry) {
   html += '<div class="context-detail-section-title">Links</div>';
   html += _contextRenderLinks(entry);
   html += '<div class="context-detail-actions">';
-  html += '<button class="btn-secondary btn-sm" onclick="contextEditEntry(\'' + entry.id + '\')">Edit</button>';
+  if (_contextCanMutate(entry)) {
+    html += '<button class="btn-secondary btn-sm" onclick="contextEditEntry(\'' + entry.id + '\')">Edit</button>';
+  }
   html += '</div>';
   html += '</div>';
   return html;

@@ -49,6 +49,8 @@ class MemoryHelpersTests(unittest.TestCase):
         self.assertEqual(entry["group_name"], "g")
         self.assertEqual(entry["project_key"], "/repo")
         self.assertEqual(entry["entry_type"], "decision")
+        self.assertEqual(entry["retention_kind"], "durable")
+        self.assertIsNone(entry["expires_at"])
 
     def test_build_memory_entry_defaults_to_group_without_task(self):
         state = self.state_mod.MatrixState()
@@ -81,6 +83,22 @@ class MemoryHelpersTests(unittest.TestCase):
                 scope_kind="group",
                 scope_ref="g",
             )
+
+    def test_build_memory_entry_marks_notes_transient_by_default(self):
+        state = self.state_mod.MatrixState()
+        entry = self.memory_mod.build_memory_entry(
+            state,
+            entry_type="note",
+            content="Scratch note for the current task.",
+            scope_kind="group",
+            scope_ref="g",
+        )
+
+        self.assertEqual(entry["retention_kind"], "transient")
+        self.assertAlmostEqual(
+            entry["expires_at"],
+            entry["created_at"] + self.memory_mod.TRANSIENT_RETENTION_SECS,
+        )
 
     def test_build_memory_link_defaults_from_current_context(self):
         state = self.state_mod.MatrixState()
@@ -290,3 +308,46 @@ class MemoryHelpersTests(unittest.TestCase):
         self.assertIn("pinned", block)
         self.assertLessEqual(len(block), 220)
         self.assertEqual(block.count("\n- "), 1)
+
+    def test_compact_memory_entries_summarizes_old_transient_batches(self):
+        now = 1_000_000.0
+        entries = [
+            {
+                "id": "mem-decision",
+                "entry_type": "decision",
+                "title": "Keep DB-backed memory",
+                "content": "Persist durable choices.",
+                "pinned": False,
+                "retention_kind": "durable",
+                "created_at": now - 20,
+                "updated_at": now - 20,
+            },
+            {
+                "id": "mem-note-1",
+                "entry_type": "note",
+                "title": "Old scratch",
+                "content": "Remove after rollout.",
+                "pinned": False,
+                "retention_kind": "transient",
+                "created_at": now - self.memory_mod.TRANSIENT_SUMMARY_AFTER_SECS - 10,
+                "updated_at": now - 10,
+            },
+            {
+                "id": "mem-note-2",
+                "entry_type": "handoff",
+                "title": "Old handoff",
+                "content": "Reviewed by worker 2.",
+                "pinned": False,
+                "retention_kind": "transient",
+                "created_at": now - self.memory_mod.TRANSIENT_SUMMARY_AFTER_SECS - 20,
+                "updated_at": now - 5,
+            },
+        ]
+
+        compacted = self.memory_mod.compact_memory_entries(entries, now=now)
+
+        self.assertEqual(compacted[0]["id"], "mem-decision")
+        self.assertEqual(compacted[1]["entry_type"], "summary")
+        self.assertTrue(compacted[1]["synthetic"])
+        self.assertEqual(compacted[1]["summary_entry_count"], 2)
+        self.assertIn("older transient entries", compacted[1]["title"])

@@ -2332,6 +2332,7 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 }
 .context-entry-type,
 .context-scope-pill,
+.context-retention-pill,
 .context-pinned-pill,
 .context-link-chip {
   font-size: 8px;
@@ -2366,13 +2367,22 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   background: color-mix(in srgb, var(--text) 10%, transparent);
 }
 .context-scope-pill,
+.context-retention-pill,
 .context-link-chip {
   color: var(--text-dim);
   background: color-mix(in srgb, var(--text-dim) 10%, transparent);
 }
+.context-retention-pill {
+  color: #8b949e;
+  background: color-mix(in srgb, #8b949e 12%, transparent);
+}
 .context-pinned-pill {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+.context-entry-type-summary {
+  color: #79c0ff;
+  background: rgba(121, 192, 255, 0.14);
 }
 .context-pin-btn {
   width: 26px;

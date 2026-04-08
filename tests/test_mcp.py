@@ -148,6 +148,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 "scope_kind": "task",
                 "scope_ref": "task-1",
                 "pinned": True,
+                "retention_kind": "durable",
             },
             cell.id,
             fake_handle_command,
@@ -220,6 +221,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "scope_kind": "task",
                     "scope_ref": "task-1",
                     "pinned": True,
+                    "retention_kind": "durable",
                 },
                 {
                     "cmd": "memory_list",

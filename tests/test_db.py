@@ -496,6 +496,8 @@ class LoomDBTests(unittest.TestCase):
                 "source_kind": "agent",
                 "source_id": "agent-1",
                 "source_name": "Worker",
+                "retention_kind": "durable",
+                "expires_at": None,
                 "created_at": 10.0,
                 "updated_at": 10.0,
             }
@@ -515,6 +517,8 @@ class LoomDBTests(unittest.TestCase):
                 "source_kind": "agent",
                 "source_id": "agent-2",
                 "source_name": "Reviewer",
+                "retention_kind": "transient",
+                "expires_at": 4_102_444_800.0,
                 "created_at": 20.0,
                 "updated_at": 20.0,
             }
@@ -574,6 +578,8 @@ class LoomDBTests(unittest.TestCase):
         self.db.set_memory_entry_pinned("mem-2", True, 30.0)
         entry = self.db.load_memory_entry("mem-2")
         self.assertTrue(entry["pinned"])
+        self.assertEqual(entry["retention_kind"], "durable")
+        self.assertIsNone(entry["expires_at"])
         self.assertEqual(entry["updated_at"], 30.0)
         self.assertEqual(
             entry["links"],
@@ -586,3 +592,52 @@ class LoomDBTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_memory_entries_purge_expired_transient_rows_on_read(self):
+        self.db.save_memory_entry(
+            {
+                "id": "mem-active",
+                "project_key": "/repo",
+                "group_name": "g",
+                "scope_kind": "group",
+                "scope_ref": "g",
+                "entry_type": "decision",
+                "title": "Keep it",
+                "content": "Durable decisions survive retention cleanup.",
+                "pinned": False,
+                "task_id": "",
+                "source_kind": "agent",
+                "source_id": "agent-1",
+                "source_name": "Worker",
+                "retention_kind": "durable",
+                "expires_at": None,
+                "created_at": 10.0,
+                "updated_at": 10.0,
+            }
+        )
+        self.db.save_memory_entry(
+            {
+                "id": "mem-expired",
+                "project_key": "/repo",
+                "group_name": "g",
+                "scope_kind": "group",
+                "scope_ref": "g",
+                "entry_type": "note",
+                "title": "Stale scratch note",
+                "content": "Safe to remove.",
+                "pinned": False,
+                "task_id": "",
+                "source_kind": "agent",
+                "source_id": "agent-2",
+                "source_name": "Worker 2",
+                "retention_kind": "transient",
+                "expires_at": 15.0,
+                "created_at": 11.0,
+                "updated_at": 11.0,
+            }
+        )
+
+        entries = self.db.load_memory_entries(group_name="g", limit=10, now=20.0)
+
+        self.assertEqual([entry["id"] for entry in entries], ["mem-active"])
+        self.assertIsNone(self.db.load_memory_entry("mem-expired", now=20.0))
