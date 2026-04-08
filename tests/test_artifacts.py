@@ -69,6 +69,21 @@ class TaskArtifactTests(unittest.TestCase):
                       artifact_block)
         self.assertNotIn("/tmp/auth.diff\n```", artifact_block)
 
+    def test_inline_prompt_blocks_use_safe_markdown_fences(self):
+        artifact_block = artifact_prompt_block([
+            {
+                "type": "snippet",
+                "title": "prompt-shaped note",
+                "content": "before\n```\nafter",
+                "prompt": {"mode": "inline"},
+            },
+        ])
+
+        self.assertIn("inline excerpt follows", artifact_block)
+        self.assertIn("````text", artifact_block)
+        self.assertIn("\n````", artifact_block)
+        self.assertIn("before\n```\nafter", artifact_block)
+
 
 if __name__ == "__main__":
     unittest.main()
