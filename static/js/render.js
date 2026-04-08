@@ -536,8 +536,10 @@ function renderAgentCell(a) {
   // Check if weaver is awaiting human input
   const _weaverWs = _isWeaver && state.weaver_settings
     ? state.weaver_settings[a.group] : null;
+  const _weaverPaused = !!(_weaverWs && _weaverWs.paused);
   const _weaverAsking = _weaverWs && _weaverWs.pending_question;
   if (_weaverAsking) cls.push('weaver-asking');
+  if (_isWeaver) cls.push(_weaverPaused ? 'weaver-paused' : 'weaver-running');
 
   const statusCls = agentStatusClass(a);
   const titleParts = [a.name, `(${a.status})`];
@@ -547,6 +549,10 @@ function renderAgentCell(a) {
   let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" oncontextmenu="onCellContextMenu(event,'${a.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${a.id}')}" title="${esc(titleParts.join(' '))}">`;
   h += `<div class="cell-status ${statusCls}"${statusCls === 'attention' ? ' title="' + esc(a.error_message || 'Needs attention') + '"' : ''}>${statusCls === 'attention' ? '!' : ''}</div>`;
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
+  if (_isWeaver) {
+    const weaverGroupArg = encodeURIComponent(a.group || '');
+    h += `<button class="cell-weaver-toggle ${_weaverPaused ? 'paused' : 'running'}" draggable="false" onclick="event.stopPropagation();weaverTogglePauseForGroup(decodeURIComponent('${weaverGroupArg}'))" title="${_weaverPaused ? 'Resume Weaver event delivery' : 'Pause Weaver event delivery'}">${_weaverPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
+  }
   h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
   if (_weaverAsking) {

@@ -272,8 +272,10 @@ function _deltaSurfaceInvalidations(ops) {
       case 'journal_append':
       case 'journal_delete':
       case 'weaver_buffer_stats':
-      case 'weaver_settings_update':
         _markSurface(flags, 'weaver');
+        break;
+      case 'weaver_settings_update':
+        _markSurface(flags, 'main', 'weaver');
         break;
       case 'ui_update':
         _applyUiSurfaceInvalidation(flags, op.key);

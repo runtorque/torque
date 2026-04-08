@@ -3308,6 +3308,54 @@ test('renderWeaverPanel preserves focused reply draft across rerenders', () => {
   assert.equal(input.selectionEnd, 13);
 });
 
+test('renderAgentCell shows a weaver-only pause control with state-driven classes', () => {
+  const { context } = createWeaverHarness();
+  context.state.group_settings = {
+    alpha: { weaver_agent_id: 'weaver-1' },
+  };
+  context.state.children = {};
+  context.state.weaver_settings = {
+    alpha: { paused: false },
+  };
+  runInContext(context, `focusedItemId = ''; selectedAgentId = '';`);
+
+  const runningHtml = context.renderAgentCell({
+    id: 'weaver-1',
+    name: 'Weaver',
+    icon: '🧶',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+  });
+  const workerHtml = context.renderAgentCell({
+    id: 'agent-1',
+    name: 'Worker',
+    icon: '🤖',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+  });
+
+  assert.match(runningHtml, /class="cell weaver weaver-running"/);
+  assert.match(runningHtml, /class="cell-weaver-toggle running"/);
+  assert.match(runningHtml, /Pause Weaver event delivery/);
+  assert.doesNotMatch(workerHtml, /cell-weaver-toggle/);
+
+  context.state.weaver_settings.alpha.paused = true;
+  const pausedHtml = context.renderAgentCell({
+    id: 'weaver-1',
+    name: 'Weaver',
+    icon: '🧶',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+  });
+
+  assert.match(pausedHtml, /class="cell weaver weaver-paused"/);
+  assert.match(pausedHtml, /class="cell-weaver-toggle paused"/);
+  assert.match(pausedHtml, /Resume Weaver event delivery/);
+});
+
 test('renderWeaverPanel shows branch review-point summary', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-weaver');
@@ -3385,6 +3433,27 @@ test('task deltas do not rerender the templates panel when it is active', () => 
     seq: 1,
     ops: [
       { op: 'task_upsert', id: 'task-1', group: 'alpha', task: 'Ship docs', lane: 'Backlog', position: 1 },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('weaver settings deltas rerender the main grid for card pause state updates', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'board';
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      { op: 'weaver_settings_update', group: 'alpha', paused: true },
     ],
   });
 
