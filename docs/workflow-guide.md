@@ -147,7 +147,7 @@ Dispatch is the moment a task becomes active. Loom:
 You can dispatch from the board UI or with the CLI:
 
 ```bash
-loom dispatch "Add dark mode" -t feature/implement -g frontend
+loom task dispatch "Add dark mode" -t feature/implement -g frontend
 ```
 
 If the task depends on unfinished tasks, dispatch is blocked. If the task is scheduled, Loom performs the same dispatch automatically when the scheduled time arrives.

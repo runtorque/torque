@@ -46,7 +46,7 @@ These settings override the group defaults when creating agents specifically. Le
 
 ### Git worktree per agent
 
-When enabled, creating an agent automatically creates a new git worktree branched from the directory's repository. Each agent gets its own branch (`loom/{id}-{name}`) and worktree path, so multiple agents can work on the same repo in parallel without conflicts. The worktree is cleaned up when the agent is removed.
+When enabled, creating an agent automatically creates a new git worktree branched from the directory's repository. Each agent gets its own branch (`loom/{slug}-{short-id}`) and worktree path, so multiple agents can work on the same repo in parallel without conflicts. The worktree is cleaned up when the agent is removed.
 
 See [Worktrees](worktrees.md) for the full guide on checkpoints, rollback, and merge.
 
