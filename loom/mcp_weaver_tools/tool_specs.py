@@ -55,7 +55,8 @@ WEAVER_TOOLS = [
             "Show full details for a task by slug or ID. "
             "Returns title, description, labels, action, action variables, "
             "pipeline info, verification metadata, assigned agent, "
-            "linked external ticket metadata, and activity messages. "
+            "linked external ticket metadata, attachments/artifacts, "
+            "and activity messages. "
             "For pipeline tasks, automatically includes the chain summary."
         ),
         "inputSchema": {
@@ -261,6 +262,70 @@ WEAVER_TOOLS = [
                 "verification_summary": {
                     "type": "object",
                     "description": "New structured verification summary.",
+                },
+            },
+            "required": ["task"],
+        },
+    },
+    {
+        "name": "weaver_task_upload_artifact",
+        "description": (
+            "Upload and attach an image or other artifact to a specific board "
+            "task. Provide a local_path or inline content, and Loom stores the "
+            "file on the task and returns normalized artifact metadata."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Task slug or ID to attach the artifact to.",
+                },
+                "local_path": {
+                    "type": "string",
+                    "description": "Local filesystem path to upload from.",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": (
+                        "Optional filename override. Required for inline uploads."
+                    ),
+                },
+                "content_base64": {
+                    "type": "string",
+                    "description": (
+                        "Base64-encoded file content for binary inline uploads."
+                    ),
+                },
+                "content_text": {
+                    "type": "string",
+                    "description": (
+                        "Plain-text inline content to write as a task artifact."
+                    ),
+                },
+                "artifact_type": {
+                    "type": "string",
+                    "description": (
+                        "Optional artifact type override such as image, diff, log, "
+                        "test_report, generated_doc, or file_ref."
+                    ),
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Optional display title for the artifact.",
+                },
+                "mime_type": {
+                    "type": "string",
+                    "description": "Optional MIME type override.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Optional human-readable summary.",
+                },
+                "prompt_mode": {
+                    "type": "string",
+                    "enum": ["auto", "none", "path", "summary", "inline"],
+                    "description": "Optional prompt shaping mode.",
                 },
             },
             "required": ["task"],

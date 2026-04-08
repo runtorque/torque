@@ -39,6 +39,11 @@ from .artifacts import (
     normalize_artifacts,
     task_artifacts,
 )
+from .server_artifacts import (
+    remove_task_owned_artifacts_by_filename,
+    serialize_task_artifact,
+    store_task_upload,
+)
 from .memory import (
     build_memory_entry,
     build_memory_link,
@@ -2957,8 +2962,79 @@ async def main(connection: iterm2.Connection):
                     task.attachments = [
                         a for a in task.attachments
                         if a.get("filename") != fname]
+                    task.artifacts = remove_task_owned_artifacts_by_filename(
+                        task.artifacts,
+                        fname,
+                        task_id=tid,
+                    )
                     state.board_update_task(
-                        tid, attachments=task.attachments)
+                        tid,
+                        attachments=task.attachments,
+                        artifacts=task.artifacts,
+                    )
+
+            elif cmd == "task_upload_artifact":
+                tid = _resolve_task_id(state, data.get("task_id", ""))
+                cell_id = data.get("cell_id", "")
+                if not tid and cell_id:
+                    current_task = state.agent_current_task(cell_id)
+                    if current_task:
+                        tid = current_task.id
+                task = state.board_tasks.get(tid)
+                if not task:
+                    result = {
+                        "type": "error",
+                        "message": (
+                            "Task not found"
+                            if data.get("task_id")
+                            else "No active task available for this agent"
+                        ),
+                    }
+                else:
+                    actor = state.agents.get(cell_id) if cell_id else None
+                    provenance = {
+                        "source": (
+                            "weaver"
+                            if actor and actor.id == state.get_group_settings(
+                                task.group
+                            ).weaver_agent_id
+                            else "agent"
+                        ),
+                        "agent_id": actor.id if actor else "",
+                        "agent_name": (actor.slug or actor.name) if actor else "",
+                    }
+                    try:
+                        artifact = store_task_upload(
+                            task_id=tid,
+                            local_path=data.get("local_path", ""),
+                            filename=data.get("filename", ""),
+                            content_base64=data.get("content_base64", ""),
+                            content_text=data.get("content_text", ""),
+                            artifact_type=data.get("artifact_type", ""),
+                            title=data.get("title", ""),
+                            mime_type=data.get("mime_type", ""),
+                            summary=data.get("summary", ""),
+                            prompt_mode=data.get("prompt_mode", ""),
+                            provenance=provenance,
+                        )
+                    except FileNotFoundError as exc:
+                        result = {"type": "error", "message": str(exc)}
+                    except ValueError as exc:
+                        result = {"type": "error", "message": str(exc)}
+                    else:
+                        artifacts = normalize_artifacts(task.artifacts or [])
+                        artifacts.append(artifact)
+                        state.board_update_task(tid, artifacts=artifacts)
+                        refreshed = state.board_tasks.get(tid)
+                        result = {
+                            "type": "task_artifact_uploaded",
+                            "task_id": tid,
+                            "artifact": serialize_task_artifact(
+                                artifact,
+                                task_id=tid,
+                                task_label=refreshed.task if refreshed else task.task,
+                            ),
+                        }
 
             elif cmd == "board_move_task":
                 _mv_id = _resolve_task_id(state, data.get("id", ""))

@@ -15,6 +15,7 @@ import logging
 from aiohttp import web
 
 from .mcp_weaver import WEAVER_TOOLS, _dispatch_weaver_tool
+from .server_artifacts import serialize_task_for_mcp
 
 log = logging.getLogger("loom")
 
@@ -40,6 +41,65 @@ TOOLS = [
             "this to understand your current assignment before starting work."
         ),
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "loom_task_upload_artifact",
+        "description": (
+            "Upload and attach an image or other artifact to the agent's "
+            "current task. Provide a local_path or inline content, and Loom "
+            "stores the file on the task and returns normalized artifact metadata."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "local_path": {
+                    "type": "string",
+                    "description": "Local filesystem path to upload from.",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": (
+                        "Optional filename override. Required for inline uploads."
+                    ),
+                },
+                "content_base64": {
+                    "type": "string",
+                    "description": (
+                        "Base64-encoded file content for binary inline uploads."
+                    ),
+                },
+                "content_text": {
+                    "type": "string",
+                    "description": (
+                        "Plain-text inline content to write as a task artifact."
+                    ),
+                },
+                "artifact_type": {
+                    "type": "string",
+                    "description": (
+                        "Optional artifact type override such as image, diff, log, "
+                        "test_report, generated_doc, or file_ref."
+                    ),
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Optional display title for the artifact.",
+                },
+                "mime_type": {
+                    "type": "string",
+                    "description": "Optional MIME type override.",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Optional human-readable summary.",
+                },
+                "prompt_mode": {
+                    "type": "string",
+                    "enum": ["auto", "none", "path", "summary", "inline"],
+                    "description": "Optional prompt shaping mode.",
+                },
+            },
+        },
     },
     {
         "name": "loom_done",
@@ -463,10 +523,30 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
         if not cell:
             return f"Agent {cell_id} not found", True
         from dataclasses import asdict
-        tasks = {tid: asdict(t) for tid, t in state.board_tasks.items()
+        tasks = {tid: serialize_task_for_mcp(t) for tid, t in state.board_tasks.items()
                  if t.agent_id == cell_id}
         return json.dumps({"agent": asdict(cell), "tasks": tasks},
                           indent=2), False
+
+    if name == "loom_task_upload_artifact":
+        payload = {"cmd": "task_upload_artifact", "cell_id": cell_id}
+        for key in (
+            "local_path",
+            "filename",
+            "content_base64",
+            "content_text",
+            "artifact_type",
+            "title",
+            "mime_type",
+            "summary",
+            "prompt_mode",
+        ):
+            if key in args:
+                payload[key] = args[key]
+        result = await handle_command(payload)
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
 
     if name in {
         "loom_memory_publish",

@@ -225,7 +225,7 @@ All Weaver tools are available through the same `/mcp` endpoint as agent tools, 
 |------|-----------------|
 | `weaver_board_summary` | Compact overview of lanes, asks, labels, and agent state |
 | `weaver_board_list` | Full lane-grouped task list with optional filters |
-| `weaver_task_show` | Full details for one task, including pipeline chain when relevant |
+| `weaver_task_show` | Full details for one task, including pipeline chain plus task artifact metadata when relevant |
 | `weaver_agents_list` | Quick view of all agents in the group |
 | `weaver_agent_show` | Deep inspection of one agent: session, worktree, tasks, terminals |
 | `weaver_actions_list` | Discover available actions and their variables |
@@ -237,6 +237,7 @@ All Weaver tools are available through the same `/mcp` endpoint as agent tools, 
 |------|-----------------|
 | `weaver_task_create` | Create a board task |
 | `weaver_task_edit` | Change task title, description, labels, action, or action vars |
+| `weaver_task_upload_artifact` | Upload and attach an image or other artifact directly to a task |
 | `weaver_task_verify` | Record deploy/restart attempted, smoke passed/failed, and verification notes |
 | `weaver_task_move` | Move a task between lanes |
 | `weaver_task_dispatch` | Dispatch one task to a new or existing agent |

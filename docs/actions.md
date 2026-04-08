@@ -356,6 +356,8 @@ prompt: |
 | `loom.task.attachments` | list | Legacy image attachments with `path` and `filename`. |
 | `loom.task.artifacts` | list | Combined task artifacts, including synthetic image artifacts plus structured refs like logs, diffs, reports, snippets, docs, and file refs. |
 
+When you inspect tasks through MCP (`loom_context` or `weaver_task_show`), Loom also returns a `task_artifacts` combined view with task linkage and derived file URLs for task-owned uploads.
+
 **Example --- pipeline-aware instructions:**
 
 ```yaml

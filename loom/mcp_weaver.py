@@ -22,6 +22,7 @@ from .mcp_weaver_tools.shared import (
     is_busy_agent as _is_busy_agent,
 )
 from .mcp_weaver_tools.tool_specs import WEAVER_TOOLS
+from .server_artifacts import serialize_task_for_mcp
 from .state import ARCHIVED_LANE, board_task_is_closed
 from .task_health import HEALTH_SEVERITY
 
@@ -328,41 +329,9 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         task = state.board_tasks.get(tid)
         if not task:
             return "Task not found", True
-        d = {
-            "id": task.id,
-            "slug": task.slug,
-            "title": task.task,
-            "description": task.description,
-            "group": task.group,
-            "lane": task.lane,
-            "status": task.status,
-            "labels": task.labels or [],
-            "action": task.action_name,
-            "action_vars": task.action_vars or {},
-            "agent_id": task.agent_id,
-            "provider": task.provider,
-            "external_id": task.external_id,
-            "external_url": task.external_url,
-            "parent_task_id": task.parent_task_id,
-            "pipeline_depth": task.pipeline_depth,
-            "depends_on": task.depends_on or [],
-            "verification_mode": getattr(task, "verification_mode", "") or "",
-            "verification_state": getattr(task, "verification_state", "") or "",
-            "verification_notes": getattr(task, "verification_notes", "") or "",
-            "verification_updated_at": getattr(
-                task, "verification_updated_at", ""
-            ) or "",
-            "verification_updated_by": getattr(
-                task, "verification_updated_by", ""
-            ) or "",
-            "verification_summary": getattr(
-                task, "verification_summary", {}
-            ) or {},
-            "created_at": task.created_at,
-            "health_state": getattr(task, "health_state", "healthy"),
-            "health_since": getattr(task, "health_since", ""),
-            "health_details": getattr(task, "health_details", {}) or {},
-        }
+        d = serialize_task_for_mcp(task)
+        d["title"] = task.task
+        d["action"] = task.action_name
         # Include recent messages (last 10 only)
         if task.messages:
             d["messages"] = task.messages[-10:]
@@ -609,6 +578,31 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             "verification_state",
             "verification_notes",
             "verification_summary",
+        ):
+            if key in args:
+                payload[key] = args[key]
+        result = await handle_command(payload)
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if name == "weaver_task_upload_artifact":
+        tid = _resolve_task(state, args.get("task", ""))
+        if not tid:
+            return "Task not found", True
+        payload = {"cmd": "task_upload_artifact", "task_id": tid}
+        if cell_id:
+            payload["cell_id"] = cell_id
+        for key in (
+            "local_path",
+            "filename",
+            "content_base64",
+            "content_text",
+            "artifact_type",
+            "title",
+            "mime_type",
+            "summary",
+            "prompt_mode",
         ):
             if key in args:
                 payload[key] = args[key]

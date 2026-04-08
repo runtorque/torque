@@ -207,12 +207,15 @@ Once an agent is working on a task, it can report status back to Loom using Loom
 | `loom_error(message="message")` | Adds `error` label, flags agent as needing attention. |
 | `loom_progress(message="message")` | Updates the activity detail shown in the UI. |
 | `loom_verify(state="passed", tests_run="...", notes="...")` | Records deploy/restart/smoke verification metadata for the task. |
+| `loom_task_upload_artifact(...)` | Uploads and attaches an image or other artifact to the agent's current task. |
 | `loom_derive(description="desc", action="action")` | Keeps the parent task in **In Progress**, creates a derived task, and dispatches it. |
 | `loom_ask(question="question", description="details")` | Creates a blocking human-review task in Backlog when the agent cannot continue safely without a decision or approval. |
 
 When a task is dispatched with an action that has [transitions](actions.md#pipelines), the available Loom MCP tools are appended to the prompt as a postscript so the agent knows what reporting options it has.
 
 For board-level checkpoint updates outside an agent session, use `loom task verify ...` from the CLI or `weaver_task_verify(...)` from the Weaver. Those paths stamp verification audit fields and emit a `task_verification_updated` event so pending or failed checkpoints stay visible at the orchestration layer.
+
+For board-level task artifact uploads outside the active worker session, use `weaver_task_upload_artifact(...)`. Uploaded files reuse Loom's existing task artifact storage and immediately show up in the board's artifact browser/count badge for that task.
 
 ### The `done` vs `ready` distinction
 

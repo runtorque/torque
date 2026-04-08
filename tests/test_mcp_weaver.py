@@ -112,6 +112,12 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("next-wave proposals", note_tool["description"])
         self.assertIn("does not pause event delivery", note_tool["description"])
 
+        upload_tool = next(
+            tool for tool in self.mcp_weaver_mod.WEAVER_TOOLS
+            if tool["name"] == "weaver_task_upload_artifact"
+        )
+        self.assertIn("Upload and attach an image or other artifact", upload_tool["description"])
+
     async def _dispatch(self, state, weaver, args, handle_command):
         text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
             "weaver_batch_dispatch",
@@ -1141,6 +1147,105 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             lanes["Backlog"][0]["external_id"],
             "openai/example#7",
+        )
+
+    async def test_task_show_includes_combined_task_artifacts(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        task = state.board_add_task(
+            "Investigate upload support",
+            "g",
+            id="task-1",
+            attachments=[{
+                "path": "/tmp/task-1/image.png",
+                "filename": "image.png",
+            }],
+            artifacts=[{
+                "type": "log",
+                "title": "pytest.log",
+                "path": "/tmp/task-1/pytest.log",
+            }],
+        )
+        self.assertIsNotNone(task)
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_show",
+            {"task": "task-1"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        shown = json.loads(text)
+        self.assertEqual(len(shown["task_artifacts"]), 2)
+        self.assertEqual(shown["task_artifacts"][0]["url"], "/attachments/task-1/image.png")
+        self.assertEqual(shown["task_artifacts"][1]["task_label"], "Investigate upload support")
+
+    async def test_task_upload_artifact_forwards_payload(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        state.board_add_task("Attach evidence", "g", id="task-1")
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {
+                "type": "task_artifact_uploaded",
+                "task_id": "task-1",
+                "artifact": {"filename": "evidence.png"},
+            }
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_upload_artifact",
+            {
+                "task": "task-1",
+                "filename": "evidence.png",
+                "content_base64": "aGVsbG8=",
+                "artifact_type": "image",
+            },
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(text)["artifact"]["filename"], "evidence.png")
+        self.assertEqual(
+            calls,
+            [{
+                "cmd": "task_upload_artifact",
+                "task_id": "task-1",
+                "cell_id": "weaver-1",
+                "filename": "evidence.png",
+                "content_base64": "aGVsbG8=",
+                "artifact_type": "image",
+            }],
         )
 
 

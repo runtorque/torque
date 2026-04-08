@@ -121,6 +121,53 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_dispatch_tool_forwards_task_artifact_uploads(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {
+                "type": "task_artifact_uploaded",
+                "task_id": "task-1",
+                "artifact": {"filename": "report.txt"},
+            }
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "loom_task_upload_artifact",
+            {
+                "filename": "report.txt",
+                "content_text": "hello",
+                "artifact_type": "generated_doc",
+                "summary": "test upload",
+            },
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(text)["artifact"]["filename"], "report.txt")
+        self.assertEqual(
+            calls,
+            [{
+                "cmd": "task_upload_artifact",
+                "cell_id": "agent-1",
+                "filename": "report.txt",
+                "content_text": "hello",
+                "artifact_type": "generated_doc",
+                "summary": "test upload",
+            }],
+        )
+
     async def test_dispatch_tool_maps_memory_commands(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(
@@ -286,6 +333,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         tool_names = [tool["name"] for tool in listed.payload["result"]["tools"]]
         self.assertIn("loom_progress", tool_names)
         self.assertIn("loom_verify", tool_names)
+        self.assertIn("loom_task_upload_artifact", tool_names)
         self.assertIn("loom_memory_publish", tool_names)
         self.assertIn("loom_memory_read", tool_names)
         self.assertIn("loom_memory_link", tool_names)
@@ -331,3 +379,40 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("blocking human decision or approval", ask_tool["description"])
         self.assertIn("Do not use this for status updates", ask_tool["description"])
+
+    async def test_loom_context_includes_combined_task_artifacts(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+        task = state.board_add_task(
+            "Review artifact uploads",
+            "g",
+            lane="In Progress",
+            id="task-1",
+            agent_id=cell.id,
+            attachments=[{"path": "/tmp/task-1/image.png", "filename": "image.png"}],
+            artifacts=[{"type": "log", "title": "pytest", "path": "/tmp/task-1/pytest.log"}],
+        )
+        self.assertIsNotNone(task)
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "loom_context",
+            {},
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+
+        self.assertFalse(is_error)
+        payload = json.loads(text)
+        self.assertEqual(len(payload["tasks"]["task-1"]["task_artifacts"]), 2)
+        self.assertEqual(payload["tasks"]["task-1"]["task_artifacts"][0]["url"], "/attachments/task-1/image.png")
