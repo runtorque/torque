@@ -74,7 +74,8 @@ function connect() {
       } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
         tplEditorReceiveList(msg);
       } else {
-        _showActionList(msg);
+        // Ignore unsolicited action lists instead of reopening the
+        // "Task from Action" modal after reconnect/startup.
       }
     } else if (msg.type === 'templates') {
       _cachedAgentTemplates = msg.templates || [];

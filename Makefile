@@ -58,10 +58,17 @@ install:
 	@# -- Copy source files --
 	cp loom.py "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
 	cp webview.html "$(SCRIPT_DIR)/webview.html"
-	find loom -maxdepth 1 -type f -name '*.py' -exec cp {} "$(SCRIPT_DIR)/loom/" \;
-	find loom/adapters -maxdepth 1 -type f -name '*.py' -exec cp {} "$(SCRIPT_DIR)/loom/adapters/" \;
+	@find loom -type f -name '*.py' -print0 | while IFS= read -r -d '' src; do \
+		dest="$(SCRIPT_DIR)/$$src"; \
+		mkdir -p "$$(dirname "$$dest")"; \
+		cp "$$src" "$$dest"; \
+	done
 	cp static/style.css "$(SCRIPT_DIR)/static/"
-	cp static/js/*.js   "$(SCRIPT_DIR)/static/js/"
+	@find static/js -type f -name '*.js' -print0 | while IFS= read -r -d '' src; do \
+		dest="$(SCRIPT_DIR)/$$src"; \
+		mkdir -p "$$(dirname "$$dest")"; \
+		cp "$$src" "$$dest"; \
+	done
 	@# -- Install dependencies --
 	@PYTHON="$(or $(PROJECT_PYTHON),$(shell ls "$(ITERM2_PROJECT)"/iterm2env/versions/3.*/bin/python3 \
 	    2>/dev/null | sort -V | tail -1))"; \

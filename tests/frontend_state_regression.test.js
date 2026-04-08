@@ -1735,6 +1735,35 @@ test('renderBoard requests action and template refs for dispatch eligibility bad
   ]);
 });
 
+test('ws ignores unsolicited action lists instead of reopening task-from-action modal', () => {
+  const { sandbox, document } = createSandbox({
+    WebSocket: function FakeWebSocket() {
+      this.readyState = 1;
+      this.close = function() {};
+    },
+  });
+  sandbox._showActionListCalls = 0;
+  const actionModal = document.register('modal-action');
+  document.register('conn-dot');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  runInContext(context, `
+    _showActionList = function() { _showActionListCalls++; };
+    connect();
+  `);
+
+  runInContext(context, `
+    ws.onmessage({ data: JSON.stringify({
+      seq: 1,
+      type: 'actions',
+      actions: [{ name: 'feature/implement' }]
+    }) });
+  `);
+
+  assert.equal(jsonValue(context, '_showActionListCalls'), 0);
+  assert.equal(actionModal.classList.contains('visible'), false);
+});
+
 test('_renderBoardCard shows dispatch eligibility badges for ready and missing refs states', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
