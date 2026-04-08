@@ -188,6 +188,18 @@ def db_read_state():
                 except (json.JSONDecodeError, TypeError):
                     d["messages"] = []
                 try:
+                    d["depends_on"] = json.loads(d.get("depends_on", "[]"))
+                except (json.JSONDecodeError, TypeError):
+                    d["depends_on"] = []
+                try:
+                    d["attachments"] = json.loads(d.get("attachments", "[]"))
+                except (json.JSONDecodeError, TypeError):
+                    d["attachments"] = []
+                try:
+                    d["artifacts"] = json.loads(d.get("artifacts", "[]"))
+                except (json.JSONDecodeError, TypeError):
+                    d["artifacts"] = []
+                try:
                     d["action_vars"] = json.loads(d.get("action_vars", "{}"))
                 except (json.JSONDecodeError, TypeError):
                     d["action_vars"] = {}
@@ -1779,7 +1791,13 @@ def cmd_task_show(args):
     if t.get("depends_on"):
         tasks = st.get("board_tasks", {})
         dep_strs = []
-        for dep_id in t["depends_on"]:
+        deps = t["depends_on"]
+        if isinstance(deps, str):
+            try:
+                deps = json.loads(deps)
+            except (json.JSONDecodeError, TypeError):
+                deps = [deps]
+        for dep_id in deps:
             dep_t = tasks.get(dep_id)
             if dep_t:
                 dep_lane = dep_t.get("lane", "?")
@@ -1801,15 +1819,34 @@ def cmd_task_show(args):
                 print(f"    {k}: {v}")
     if t.get("attachments"):
         print(f"  {'Attachments:':<14}")
-        for att in t["attachments"]:
-            path = att.get("path", "")
-            name = att.get("filename", "")
+        attachments = t["attachments"]
+        if isinstance(attachments, str):
+            try:
+                attachments = json.loads(attachments)
+            except (json.JSONDecodeError, TypeError):
+                attachments = [attachments]
+        for att in attachments:
+            if isinstance(att, str):
+                path = att
+                name = Path(att).name
+            else:
+                path = att.get("path", "")
+                name = att.get("filename", "")
             print(f"    {name or path}")
             if path and path != name:
                 print(f"      path: {path}")
     if t.get("artifacts"):
         print(f"  {'Artifacts:':<14}")
-        for art in t["artifacts"]:
+        artifacts = t["artifacts"]
+        if isinstance(artifacts, str):
+            try:
+                artifacts = json.loads(artifacts)
+            except (json.JSONDecodeError, TypeError):
+                artifacts = []
+        for art in artifacts:
+            if not isinstance(art, dict):
+                print(f"    {art}")
+                continue
             atype = art.get("type", "artifact")
             title = art.get("title") or art.get("filename") or atype
             print(f"    [{atype}] {title}")

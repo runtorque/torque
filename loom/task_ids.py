@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
 
 DRAFT_TASK_PREFIX = "draft-"
@@ -13,7 +14,9 @@ _TASK_ID_RE = re.compile(
 
 def normalize_group_prefix(group_name: str) -> str:
     """Return the canonical uppercase task-ID prefix for a group name."""
-    value = re.sub(r"[^A-Za-z0-9]+", "_", str(group_name or "").strip().upper())
+    normalized = unicodedata.normalize("NFKD", str(group_name or "").strip())
+    asciiish = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    value = re.sub(r"[^A-Za-z0-9]+", "_", asciiish.upper())
     value = re.sub(r"_+", "_", value).strip("_")
     if not value:
         value = "GROUP"
@@ -61,4 +64,3 @@ def root_task_number(task_id: str) -> int | None:
     if not parsed:
         return None
     return parsed["root_number"]
-

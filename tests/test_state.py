@@ -427,6 +427,14 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(second.id, "LOOM_TEAM:2")
         self.assertEqual(third.id, "OPS:1")
 
+    def test_board_add_task_transliterates_accented_group_names(self):
+        state = self.state_mod.MatrixState()
+        state.groups["Atlas Público"] = []
+
+        task = state.board_add_task("Localization", "Atlas Público")
+
+        self.assertEqual(task.id, "ATLAS_PUBLICO:1")
+
     def test_board_add_task_allocates_pipeline_scoped_child_ids_across_groups(self):
         state = self.state_mod.MatrixState()
         state.groups["Loom"] = []
