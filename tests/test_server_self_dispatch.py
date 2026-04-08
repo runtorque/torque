@@ -90,6 +90,27 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("Proceed with the derived task you just created.", prompt)
         self.assertIn("Relevant shared context", prompt)
 
+    def test_resolve_memory_cell_and_task_recovers_task_from_active_agent(self):
+        state = self.state_mod.MatrixState()
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Document the context flow",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+        )
+        agent = self._make_agent("agent-1", current_task_id="task-1")
+        state.agents[agent.id] = agent
+        state.board_tasks[task.id] = task
+
+        cell, resolved_task = self.server_mod._resolve_memory_cell_and_task(
+            state,
+            cell_id="agent-1",
+        )
+
+        self.assertIs(cell, agent)
+        self.assertIs(resolved_task, task)
+
     def test_apply_verification_report_marks_attempted(self):
         task = self.state_mod.BoardTask(
             id="task-1",

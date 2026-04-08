@@ -88,6 +88,34 @@ from .server_worktrees import (
 CLOSE_AFTER_MERGE_DELAY = 5
 
 
+def _resolve_memory_cell_and_task(state, cell_id: str = "",
+                                  task_id: str = ""):
+    """Resolve best-effort agent/task context for memory commands."""
+    resolved_task = None
+    resolved_cell = None
+
+    task_id = str(task_id or "").strip()
+    if task_id:
+        resolved_task = state.board_tasks.get(task_id)
+
+    cell_id = str(cell_id or "").strip()
+    if cell_id:
+        resolved_cell = state.agents.get(cell_id)
+        if resolved_task is None:
+            resolved_task = detect_current_task(
+                state,
+                cell_id,
+                explicit_task_id=task_id,
+            )
+
+    if resolved_cell is None and resolved_task and getattr(
+        resolved_task, "agent_id", ""
+    ):
+        resolved_cell = state.agents.get(resolved_task.agent_id)
+
+    return resolved_cell, resolved_task
+
+
 def _apply_verification_report(task, payload, actor_name, save_task,
                                *, root_task=None, timestamp=None):
     """Apply a verification checkpoint update to a task and optional root."""
@@ -3358,6 +3386,7 @@ async def main(connection: iterm2.Connection):
                     }
                 else:
                     cell, task = _resolve_memory_cell_and_task(
+                        state,
                         data.get("cell_id", ""),
                         data.get("task_id", ""),
                     )
@@ -4535,6 +4564,7 @@ async def main(connection: iterm2.Connection):
                     }
                 else:
                     cell, task = _resolve_memory_cell_and_task(
+                        state,
                         data.get("cell_id", ""),
                         data.get("task_id", ""),
                     )
@@ -4686,6 +4716,7 @@ async def main(connection: iterm2.Connection):
                         }
                     else:
                         cell, task = _resolve_memory_cell_and_task(
+                            state,
                             data.get("cell_id", ""),
                             data.get("task_id", ""),
                         )
