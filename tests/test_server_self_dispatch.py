@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import sys
 import types
@@ -600,3 +601,65 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
                 ("Dispatch task body", {"background": True}),
             ],
         )
+
+
+class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        install_iterm2_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_agent_mod = importlib.import_module("loom.server_agent")
+        self.server_agent_mod = importlib.reload(self.server_agent_mod)
+
+    async def test_background_prompt_task_is_retained_until_send_completes(self):
+        state = self.state_mod.MatrixState()
+        bridge_started = asyncio.Event()
+        bridge_release = asyncio.Event()
+
+        class FakeBridge:
+            def __init__(self):
+                self.sent = []
+
+            async def send_text(self, session_id, payload):
+                self.sent.append((session_id, payload))
+                bridge_started.set()
+                await bridge_release.wait()
+
+        class FakeTemplateManager:
+            pass
+
+        bridge = FakeBridge()
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=bridge,
+            worktree_mgr=None,
+            template_mgr=FakeTemplateManager(),
+        )
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="agent",
+            group="g",
+            cell_type="agent",
+            session_id="session-1",
+        )
+
+        task = await service.send_agent_prompt(
+            cell,
+            "Proceed with the derived task you just created.\n\nContext",
+            background=True,
+        )
+
+        self.assertIn(task, service._background_prompt_tasks)
+        await bridge_started.wait()
+        self.assertIn(task, service._background_prompt_tasks)
+        self.assertEqual(
+            bridge.sent,
+            [("session-1",
+              "Proceed with the derived task you just created.\n\nContext\r")],
+        )
+
+        bridge_release.set()
+        await task
+        self.assertNotIn(task, service._background_prompt_tasks)

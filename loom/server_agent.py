@@ -70,6 +70,7 @@ class AgentLaunchService:
         self.bridge = bridge
         self.worktree_mgr = worktree_mgr
         self.template_mgr = template_mgr
+        self._background_prompt_tasks: set[asyncio.Task] = set()
 
     async def resolve_base_dir(self, group: str = "") -> str:
         """Resolve a base directory for action and template discovery."""
@@ -395,18 +396,25 @@ class AgentLaunchService:
         payload = prompt if prompt.endswith("\r") else prompt + "\r"
 
         async def _run():
-            if delay:
-                await asyncio.sleep(delay)
-            if not cell.session_id:
-                return
-            await self.bridge.send_text(cell.session_id, payload)
-            cell.status = "running"
-            self.state._emit_agent(cell)
-            if persist:
-                self.state._db_save_agent(cell)
-            await self.state.broadcast()
+            try:
+                if delay:
+                    await asyncio.sleep(delay)
+                if not cell.session_id:
+                    return
+                await self.bridge.send_text(cell.session_id, payload)
+                cell.status = "running"
+                self.state._emit_agent(cell)
+                if persist:
+                    self.state._db_save_agent(cell)
+                await self.state.broadcast()
+            finally:
+                if task_ref is not None:
+                    self._background_prompt_tasks.discard(task_ref)
 
         if background:
-            asyncio.create_task(_run())
+            task_ref = asyncio.create_task(_run())
+            self._background_prompt_tasks.add(task_ref)
+            return task_ref
         else:
+            task_ref = None
             await _run()
