@@ -182,7 +182,10 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("You are the Weaver", text)
         self.assertIn("First session", text)
+        self.assertIn("do a short reconnaissance pass before dispatching", text)
+        self.assertIn("inspect the action catalog", text)
         self.assertIn("call `weaver_ask`", text)
+        self.assertNotIn("Don't start dispatching tasks without human guidance.", text)
 
     async def test_idle_heartbeat_surfaces_stale_in_progress_attention(self):
         state, group, _ = self._make_state()
