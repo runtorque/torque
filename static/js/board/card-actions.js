@@ -58,16 +58,29 @@ function _boardQuickEditAgents(task) {
   return out;
 }
 
-function boardCardMenu(evt, taskId) {
-  evt.preventDefault();
+function _boardCtxTaskTitle(task) {
+  if (!task) return '';
+  return task.task || task.id || '';
+}
+
+function _boardCtxTaskJumpButton(label, task) {
+  if (!task || !task.id) return '';
+  return '<button class="ctx-button-wrap"'
+    + ' title="' + esc(label) + '"'
+    + ' onclick="event.stopPropagation();boardJumpToTask(\'' + task.id + '\')">'
+    + esc(label) + '</button>';
+}
+
+function _boardRenderCardMenu(taskId) {
   var tasks = _boardTasks();
   var task = tasks[taskId];
-  if (!task) return;
-
   var menu = document.getElementById('ctx-menu');
-  var lanes = _boardVisibleLanes();
+  if (!task || !menu) return;
 
+  var lanes = _boardVisibleLanes();
   var isDerived = !!task.parent_task_id;
+  var dependencies = _boardDependencyTasks(task);
+  var dependents = _boardActiveDependents(task);
   var html = '';
   html += '<button onclick="event.stopPropagation();boardEditTask(\'' + taskId + '\')">Edit</button>';
   html += '<button onclick="event.stopPropagation();boardDuplicateTask(\'' + taskId + '\')">Duplicate</button>';
@@ -106,20 +119,16 @@ function boardCardMenu(evt, taskId) {
   html += '<button onclick="boardPreviewPrompt(\'' + taskId + '\')">Preview prompt</button>';
   html += '<button onclick="openTaskArtifactBrowser(\'' + taskId + '\')">Artifacts...</button>';
 
-  var blockers = _boardUnmetDependencyTasks(task);
-  var dependents = _boardActiveDependents(task);
-  if (blockers.length || dependents.length) {
+  if (dependencies.length || dependents.length) {
     html += '<div class="ctx-sep"></div>';
-    for (var bi = 0; bi < Math.min(blockers.length, 5); bi++) {
-      html += '<button onclick="event.stopPropagation();boardJumpToTask(\'' + blockers[bi].id + '\')">'
-        + 'Jump to blocker: ' + esc(blockers[bi].task || blockers[bi].id) + '</button>';
-    }
-    if (blockers.length > 5) {
-      html += '<button disabled>+' + (blockers.length - 5) + ' more blockers</button>';
+    if (dependencies.length) {
+      html += '<button onclick="event.stopPropagation();boardShowDependencyPicker(\'' + taskId + '\')">Jump to dependency...</button>';
     }
     for (var di = 0; di < Math.min(dependents.length, 5); di++) {
-      html += '<button onclick="event.stopPropagation();boardJumpToTask(\'' + dependents[di].id + '\')">'
-        + 'Jump to dependent: ' + esc(dependents[di].task || dependents[di].id) + '</button>';
+      html += _boardCtxTaskJumpButton(
+        'Jump to dependent: ' + _boardCtxTaskTitle(dependents[di]),
+        dependents[di]
+      );
     }
     if (dependents.length > 5) {
       html += '<button disabled>+' + (dependents.length - 5) + ' more dependents</button>';
@@ -162,14 +171,42 @@ function boardCardMenu(evt, taskId) {
   html += '<button class="danger" onclick="boardDeleteTask(\'' + taskId + '\')">Delete</button>';
 
   menu.innerHTML = html;
-  menu.style.top = evt.clientY + 'px';
-  menu.style.left = Math.min(evt.clientX, window.innerWidth - 140) + 'px';
   menu.classList.add('open');
   _adjustCtxMenuOverflow();
 }
 
+function boardCardMenu(evt, taskId) {
+  evt.preventDefault();
+  var menu = document.getElementById('ctx-menu');
+  if (!menu) return;
+  menu.style.top = evt.clientY + 'px';
+  menu.style.left = Math.min(evt.clientX, window.innerWidth - 140) + 'px';
+  _boardRenderCardMenu(taskId);
+}
+
 function boardCopyTaskId(taskId) {
   navigator.clipboard.writeText(taskId).then(function() { _closeCtxMenu(); });
+}
+
+function boardShowDependencyPicker(taskId) {
+  var task = _boardTasks()[taskId];
+  var menu = document.getElementById('ctx-menu');
+  if (!task || !menu) return;
+
+  var dependencies = _boardDependencyTasks(task);
+  var html = '<button onclick="event.stopPropagation();_boardRenderCardMenu(\'' + taskId + '\')">\u25C2 Back</button>';
+  html += '<button class="ctx-label" disabled>Jump to dependency</button>';
+  html += '<div class="ctx-sep"></div>';
+  if (!dependencies.length) {
+    html += '<button disabled>No dependencies</button>';
+  } else {
+    for (var i = 0; i < dependencies.length; i++) {
+      html += _boardCtxTaskJumpButton(_boardCtxTaskTitle(dependencies[i]), dependencies[i]);
+    }
+  }
+  menu.innerHTML = html;
+  menu.classList.add('open');
+  _adjustCtxMenuOverflow();
 }
 
 function boardJumpToTask(taskId) {

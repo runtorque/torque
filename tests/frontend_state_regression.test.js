@@ -1909,7 +1909,7 @@ test('_renderBoardCard shows inline dependency badges instead of the old generic
   assert.doesNotMatch(html, /&#x1F512; deps/);
 });
 
-test('boardCardMenu exposes jump actions for blockers and dependents', () => {
+test('boardCardMenu uses a dependency picker instead of inline blocker rows', () => {
   const { sandbox, document } = createSandbox();
   sandbox.window.innerWidth = 1200;
   const context = vm.createContext(sandbox);
@@ -1943,10 +1943,20 @@ test('boardCardMenu exposes jump actions for blockers and dependents', () => {
   }, 'task-1');
 
   assert.equal(menu.classList.contains('open'), true);
-  assert.match(menu.innerHTML, /Jump to blocker: API contract/);
-  assert.match(menu.innerHTML, /boardJumpToTask\('depA'\)/);
+  assert.match(menu.innerHTML, /Jump to dependency\.\.\./);
+  assert.doesNotMatch(menu.innerHTML, /Jump to blocker:/);
   assert.match(menu.innerHTML, /Jump to dependent: Rollout docs/);
   assert.match(menu.innerHTML, /boardJumpToTask\('blocked1'\)/);
+
+  context.boardShowDependencyPicker('task-1');
+
+  assert.match(menu.innerHTML, /◂ Back/);
+  assert.match(menu.innerHTML, /Jump to dependency/);
+  assert.match(menu.innerHTML, /API contract/);
+  assert.match(menu.innerHTML, /Schema migration/);
+  assert.match(menu.innerHTML, /boardJumpToTask\('depA'\)/);
+  assert.match(menu.innerHTML, /boardJumpToTask\('depB'\)/);
+  assert.match(menu.innerHTML, /ctx-button-wrap/);
 });
 
 test('renderBoardCard shows verification badges and preview text', () => {
@@ -3708,6 +3718,13 @@ test('task modal keeps external and verification collapsed by default with respo
   assert.match(css, /\.task-modal-section\s*\{/);
   assert.match(css, /\.task-modal-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(120px,\s*1fr\)\);/);
   assert.match(css, /\.task-modal-check-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(160px,\s*1fr\)\);/);
+});
+
+test('context menu constrains width and clamps wrapped task-title rows', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /#ctx-menu\s*\{[^}]*max-width:\s*min\(320px,\s*calc\(100vw - 8px\)\);/);
+  assert.match(css, /#ctx-menu button\.ctx-button-wrap\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;[^}]*-webkit-line-clamp:\s*2;/);
 });
 
 test('submitTask includes structured artifacts alongside attachments when editing a task', () => {
