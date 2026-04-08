@@ -6,7 +6,7 @@ For the day-to-day narrative from task creation through completion, start with t
 
 ## Lanes
 
-Lanes are columns on the board. Tasks move between lanes as their status changes. Loom ships with four default lanes:
+Lanes are columns on the board. Tasks move between lanes as their status changes. Loom's active workflow centers on four default lanes:
 
 | Lane | Purpose |
 |------|---------|
@@ -15,7 +15,7 @@ Lanes are columns on the board. Tasks move between lanes as their status changes
 | **In Progress** | Actively assigned to an agent. Tasks move here on dispatch. |
 | **Done** | Completed tasks. |
 
-**Backlog** and **In Progress** are reserved --- they can't be renamed or deleted. You can add, rename, reorder, and remove other lanes freely.
+The system lanes **Backlog**, **To Do**, **In Progress**, **Done**, and **Archived** are reserved --- they can't be renamed or deleted. `Archived` is used for archive and restore flows rather than normal active work.
 
 ### Managing lanes
 
@@ -130,10 +130,10 @@ Right-click a task card and select **Dispatch**. Loom creates a new agent in the
 
 ```bash
 # Create and dispatch in one step
-loom dispatch "Add dark mode" -t feature/implement -g frontend
+loom task dispatch "Add dark mode" -t feature/implement -g frontend
 
 # Dispatch and wait for completion
-loom dispatch "Fix the bug" -t oneshot/fix -g backend -w
+loom task dispatch "Fix the bug" -t oneshot/fix -g backend -w
 ```
 
 ### What happens during dispatch
@@ -203,13 +203,13 @@ Once an agent is working on a task, it can report status back to Loom using Loom
 |------|--------|
 | `loom_done(message="summary")` | Moves task to **Done**. Agent stays linked. |
 | `loom_ready()` | Moves task to **Done** and unlinks the agent (available for new tasks). |
-| `loom_blocked(reason="reason")` | Adds `blocked` label, flags agent as needing attention. |
-| `loom_error(message="message")` | Adds `error` label, flags agent as needing attention. |
+| `loom_blocked(reason="reason")` | Adds `loom:blocked`, flags the agent as needing attention. |
+| `loom_error(message="message")` | Adds `loom:error`, flags the agent as needing attention. |
 | `loom_progress(message="message")` | Updates the activity detail shown in the UI. |
 | `loom_verify(state="passed", tests_run="...", notes="...")` | Records deploy/restart/smoke verification metadata for the task. |
 | `loom_task_upload_artifact(...)` | Uploads and attaches an image or other artifact to the agent's current task. |
 | `loom_derive(description="desc", action="action")` | Keeps the parent task in **In Progress**, creates a derived task, and dispatches it. |
-| `loom_ask(question="question", description="details")` | Creates a blocking human-review task in Backlog when the agent cannot continue safely without a decision or approval. |
+| `loom_ask(question="question", description="details")` | Creates a blocking human-review task in Backlog with the `loom:human` label when the agent cannot continue safely without a decision or approval. |
 
 When a task is dispatched with an action that has [transitions](actions.md#pipelines), the available Loom MCP tools are appended to the prompt as a postscript so the agent knows what reporting options it has.
 
@@ -248,11 +248,11 @@ Loom applies labels automatically during pipeline operations:
 
 | Label | Meaning |
 |-------|---------|
-| `derived` | Task was created via `loom_derive(...)`. |
-| `human` | Task requires human review (from `loom_ask(...)`). |
-| `blocked` | Agent is blocked and needs input. |
-| `error` | Agent encountered an unrecoverable error. |
-| `depth-limit` | Pipeline depth limit was reached. |
+| `loom:derived` | Task was created via `loom_derive(...)`. |
+| `loom:human` | Task requires human review (from `loom_ask(...)`). |
+| `loom:blocked` | Active work reported a blocking issue. |
+| `loom:error` | Active work reported an unrecoverable error. |
+| `loom:depth-limit` | A derive attempt hit the configured pipeline depth limit. |
 
 ## Inline task creation
 

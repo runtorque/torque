@@ -244,9 +244,9 @@ Alias: `c`
 Create a task, launch an agent, and send the prompt --- all in one command.
 
 ```bash
-loom dispatch "Add dark mode" -t feature/implement -g frontend
-loom dispatch "Fix flaky test" -t oneshot/fix -v MODULE=auth -w
-loom dispatch "Quick fix" -g backend                          # no action, raw task text
+loom task dispatch "Add dark mode" -t feature/implement -g frontend
+loom task dispatch "Fix flaky test" -t oneshot/fix -v MODULE=auth -w
+loom task dispatch "Quick fix" -g backend                     # no action, raw task text
 ```
 
 | Flag | Description |
@@ -408,6 +408,18 @@ loom board add "Quick fix needed" -g backend -l "In Progress"
 
 ```bash
 loom board move fix-login -l Done
+```
+
+### board archive
+
+```bash
+loom board archive fix-login
+```
+
+### board unarchive
+
+```bash
+loom board unarchive fix-login
 ```
 
 ### board remove
@@ -581,7 +593,7 @@ loom ai context
 
 ### ai derive
 
-Create a derived task and dispatch it. See [Actions & Templates](actions.md#derive-to-agent) for details on `--agent` and `--self`.
+Create a derived task and dispatch it. See [Actions & Templates](actions.md#transition-targeted-routing) for details on `--agent` and `--self`.
 
 ```bash
 loom ai derive "Review the implementation" -t feature/review

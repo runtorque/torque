@@ -37,7 +37,7 @@ Example:
 2. Dispatch it from the board UI, or create and dispatch in one CLI step:
 
    ```bash
-   loom dispatch "Add auth middleware" -g backend -t feature/implement
+   loom task dispatch "Add auth middleware" -g backend -t feature/implement
    ```
 
 3. Loom launches the agent, renders the action prompt, and sends the result.
@@ -433,10 +433,10 @@ Loom creates a new agent, renders the prompt, and sends it after the agent boots
 
 ```bash
 # One-liner: create + dispatch
-loom dispatch "Add dark mode" -t feature/implement
+loom task dispatch "Add dark mode" -t feature/implement
 
 # With variables
-loom dispatch "Fix the flaky test" -t oneshot/fix -v MODULE=auth -v TEST_COMMAND="pytest tests/auth"
+loom task dispatch "Fix the flaky test" -t oneshot/fix -v MODULE=auth -v TEST_COMMAND="pytest tests/auth"
 ```
 
 ### From an agent (pipeline derivation)
@@ -500,11 +500,11 @@ Report your progress with these Loom MCP tools:
 - `loom_verify(state="passed", tests_run="...", notes="...")` — record manual deploy/restart/smoke verification details when relevant
 ```
 
-The agent reads these instructions and calls the appropriate MCP tool when it's done. The server validates that the transition is allowed before dispatching. The dedicated [CLI reference](cli.md#agent-reporting) still documents the equivalent `loom ai ...` commands for manual workflows and debugging.
+The agent reads these instructions and calls the appropriate MCP tool when it's done. The server validates that the transition is allowed before dispatching. The dedicated [CLI reference](cli.md#ai) still documents the equivalent `loom ai ...` commands for manual workflows and debugging.
 
 ### The `ask` transition
 
-The `ask` transition is a blocking human-in-the-loop gate, not a general notification path. Use it only when the agent cannot responsibly continue without a human decision or approval. When an agent calls `loom_ask(question="question")`, the derived task lands in the **Backlog** lane with a `human` label instead of being dispatched automatically. A human reviews the question, optionally edits the task, and dispatches it manually.
+The `ask` transition is a blocking human-in-the-loop gate, not a general notification path. Use it only when the agent cannot responsibly continue without a human decision or approval. When an agent calls `loom_ask(question="question")`, the derived task lands in the **Backlog** lane with a `loom:human` label instead of being dispatched automatically. A human reviews the question, optionally edits the task, and dispatches it manually.
 
 ```yaml
 transitions:
@@ -520,7 +520,7 @@ Pipelines have a depth limit to prevent runaway chains. The default is 10 (confi
 max_depth: 5
 ```
 
-When the limit is reached, the agent gets an error and the task is flagged with `needs_attention`.
+When the limit is reached, the agent gets an error, the agent is flagged for attention, and the task is labeled `loom:depth-limit`.
 
 ### Viewing pipelines
 
@@ -587,7 +587,7 @@ loom_derive(
 )
 ```
 
-The new prompt is rendered with `loom.context.is_clean = False` since the target agent has processed tasks before. If you need an explicit one-off override to a named agent outside normal worker prompts, the CLI `loom ai derive --agent ...` and `--self` forms remain available; see [CLI Reference](cli.md#agent-reporting).
+The new prompt is rendered with `loom.context.is_clean = False` since the target agent has processed tasks before. If you need an explicit one-off override to a named agent outside normal worker prompts, the CLI `loom ai derive --agent ...` and `--self` forms remain available; see [CLI Reference](cli.md#ai).
 
 ### Worktree inheritance
 
@@ -929,7 +929,7 @@ Usage:
 
 ```text
 # First dispatch — full instructions
-loom dispatch "Add the User model with email and name fields" -t iterative
+loom task dispatch "Add the User model with email and name fields" -t iterative
 
 # Agent finishes, then derives the next routed step
 loom_derive(description="Add the API endpoints for CRUD operations", action="iterative")

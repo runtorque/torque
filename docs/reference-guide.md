@@ -24,7 +24,7 @@ The full command surface lives in [CLI Reference](cli.md). This table groups the
 | Install or update Loom | `make deps`, `make install`, `make deploy`, `make stop` |
 | Start or open the UI | `make run`, `make standalone`, `make open` |
 | Create or inspect agents | `loom agent add`, `loom agent relaunch`, `loom agent remove`, `loom status <agent>` |
-| Work with tasks | `loom task create`, `loom dispatch`, `loom task list`, `loom task show`, `loom task move`, `loom task resolve` |
+| Work with tasks | `loom task create`, `loom task dispatch`, `loom task list`, `loom task show`, `loom task move`, `loom task resolve` |
 | Inspect board state | `loom board list`, `loom board lanes` |
 | Manage actions and pipelines | `loom action list`, `loom action show`, `loom pipeline list`, `loom pipeline show` |
 | Manage schedules | `loom schedule list`, `loom schedule show`, `loom schedule run` |

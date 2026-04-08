@@ -64,7 +64,8 @@ Loom also adds its own injected runtime files to the repo's git exclude list so 
 - `.claude/skills/loom-*/`
 - `.codex/config.toml`
 - `.codex/hooks.json`
-- `.codex/AGENTS.md`
+
+For Codex, Loom may also clean up old Loom-managed sections in `.codex/AGENTS.md` left behind by earlier versions, but the current integration uses `.codex/config.toml` plus prompt files under `.loom/`.
 
 !!! note
     The group's working directory must be inside a git repository for worktrees to work. If it's not, the setting is silently ignored.

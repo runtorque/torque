@@ -157,7 +157,7 @@ In Progress                        Done
 └──────────────────────────────┘
 ```
 
-**Step 3** --- Agent B reviews and finds issues. Calls `loom_derive(description="Fix null check in auth.py", action="fix")`. T2 moves to Done (subordinate card grays out or gets a checkmark). T3 (fix) appears as a new subordinate card. The root task's status changes to "Fixing".
+**Step 3** --- Agent B reviews and finds issues. Calls `loom_derive(description="Fix null check in auth.py", action="fix")`. T2 stays in **In Progress** as the parent of the new fix task, its status changes to "Fixing", and T3 (fix) appears as a new subordinate card. The root task's status also changes to "Fixing".
 
 ```
 In Progress                        Done
@@ -166,7 +166,8 @@ In Progress                        Done
 │ Fixing · implement            │
 │                               │
 │   ┌──────────────────────────┐│
-│   │ ✓ Review auth impl.     ││
+│   │ Review auth impl.       ││
+│   │ Fixing · Agent B        ││
 │   └──────────────────────────┘│
 │   ┌──────────────────────────┐│
 │   │ Fix null check           ││
@@ -175,7 +176,7 @@ In Progress                        Done
 └──────────────────────────────┘
 ```
 
-**Step 4** --- Agent C fixes the issue. Calls `loom_derive(description="Re-review after fix", action="review")`. T3 moves to Done. T4 (review) appears.
+**Step 4** --- Agent C fixes the issue. Calls `loom_derive(description="Re-review after fix", action="review")`. T3 stays in **In Progress** as the parent of the new review task, its status changes to "On Review", and T4 (review) appears.
 
 ```
 In Progress                        Done
@@ -184,10 +185,12 @@ In Progress                        Done
 │ On Review · implement         │
 │                               │
 │   ┌──────────────────────────┐│
-│   │ ✓ Review auth impl.     ││
+│   │ Review auth impl.       ││
+│   │ Fixing · Agent B        ││
 │   └──────────────────────────┘│
 │   ┌──────────────────────────┐│
-│   │ ✓ Fix null check        ││
+│   │ Fix null check          ││
+│   │ On Review · Agent C     ││
 │   └──────────────────────────┘│
 │   ┌──────────────────────────┐│
 │   │ Re-review after fix      ││
