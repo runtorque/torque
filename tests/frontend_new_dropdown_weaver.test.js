@@ -1,0 +1,74 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const repoRoot = path.resolve(__dirname, '..');
+
+function createSandbox() {
+  const sandbox = {
+    console,
+    AGENT_ICONS: ['🤖'],
+    PROCESS_MAP: {},
+    state: {
+      group_settings: {},
+      agents: {},
+    },
+    sendCalls: [],
+    esc(value) { return String(value); },
+    _cachedAgentTemplates: [],
+  };
+  sandbox.send = function(message) {
+    sandbox.sendCalls.push(message);
+  };
+  sandbox.global = sandbox;
+  sandbox.globalThis = sandbox;
+  return sandbox;
+}
+
+function loadScript(context, relPath) {
+  const filename = path.join(repoRoot, relPath);
+  const source = fs.readFileSync(filename, 'utf8');
+  vm.runInContext(source, context, { filename });
+}
+
+test('new dropdown renders Weaver entry only when a group has no weaver', () => {
+  const sandbox = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+
+  const htmlWithoutWeaver = vm.runInContext(`_renderWeaverMenuItem('alpha', {})`, context);
+  const htmlWithWeaver = vm.runInContext(`_renderWeaverMenuItem('alpha', { weaver_agent_id: 'weaver-1' })`, context);
+
+  assert.match(htmlWithoutWeaver, />Weaver<\/button>/);
+  assert.equal(htmlWithWeaver, '');
+});
+
+test('newWeaver sends add_agent with is_weaver', () => {
+  const sandbox = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/commands.js');
+
+  vm.runInContext(`newWeaver('alpha')`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    {
+      cmd: 'add_agent',
+      name: 'Weaver',
+      group: 'alpha',
+      is_weaver: true,
+    },
+  ]);
+});
+
+test('newWeaver is a no-op when the group already has a weaver', () => {
+  const sandbox = createSandbox();
+  sandbox.state.group_settings.alpha = { weaver_agent_id: 'weaver-1' };
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/commands.js');
+
+  vm.runInContext(`newWeaver('alpha')`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
+});

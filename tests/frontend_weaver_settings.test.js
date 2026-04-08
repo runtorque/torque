@@ -50,7 +50,7 @@ test('weaver settings render group-settings handoff', () => {
     context,
   );
 
-  assert.match(html, /Weaver configuration now lives in Group Settings → Weaver/);
+  assert.match(html, /Create a Weaver from the group’s \+ New dropdown\. Configure it in Group Settings → Weaver\./);
   assert.match(html, /Open Group Settings/);
   assert.match(html, /Provider override/);
   assert.match(html, /codex/);

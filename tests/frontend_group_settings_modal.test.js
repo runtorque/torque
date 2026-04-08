@@ -214,19 +214,18 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[1].enabled_events)), ['agent_started', 'agent_progress']);
 });
 
-test('gsCreateWeaver keeps a temporary create affordance in group settings', () => {
-  const { sandbox } = createSandbox();
+test('group settings points Weaver creation to the + New dropdown when absent', () => {
+  const { sandbox, ensure } = createSandbox();
   const context = vm.createContext(sandbox);
   loadModals(context);
 
-  vm.runInContext('_settingsGroup = "alpha"; gsCreateWeaver()', context);
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {},
+    weaver_settings: {},
+    profiles: ["Default"]
+  })`, context);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
-    {
-      cmd: 'add_agent',
-      name: 'Weaver',
-      group: 'alpha',
-      is_weaver: true,
-    },
-  ]);
+  assert.equal(ensure('gs-weaver-agent-name').textContent, 'No weaver agent');
+  assert.match(ensure('gs-weaver-agent-meta').textContent, /\+ New dropdown/);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
 });

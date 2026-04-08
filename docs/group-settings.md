@@ -105,7 +105,7 @@ The **Weaver** tab owns per-group Weaver configuration.
 
 | Setting | Description |
 |---------|-------------|
-| **Agent** | Shows the current Weaver agent for the group, or lets you create one if none exists yet. |
+| **Agent** | Shows the current Weaver agent for the group. Create a Weaver from the group’s **+ New** dropdown, then manage it here. |
 | **Provider** | Optional backend override just for the Weaver. Leave empty to inherit the group default. |
 | **Command override** | Optional boot command override for the Weaver. |
 | **Custom Instructions** | Extra instructions appended to the Weaver system prompt. |

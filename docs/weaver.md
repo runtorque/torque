@@ -23,9 +23,9 @@ The journal belongs to the group, not the individual agent. If you recreate the 
 
 ## Creating and configuring the Weaver
 
-Open **Group Settings** for the target group and switch to the **Weaver** tab.
+Use the target group's **+ New** dropdown and choose **Weaver**.
 
-Create the Weaver there if the group does not already have one, and use the same tab to manage provider overrides, custom instructions, and digest settings.
+After the Weaver exists, open **Group Settings** for that group and switch to the **Weaver** tab to manage provider overrides, custom instructions, and digest settings.
 
 The Weaver must be created through Loom's dedicated Weaver flow because Loom needs to boot it with a persistent system prompt. You cannot turn an existing agent into a Weaver after the fact.
 
