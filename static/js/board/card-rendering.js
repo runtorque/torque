@@ -636,13 +636,19 @@ function _renderBoardCard(t, childrenOf, depth) {
   var laneEntryText = _boardLaneEntryText(t);
   cardHtml += '<div class="board-card-heading">';
   cardHtml += '<div class="board-card-title">' + titlePrefix + formatCode(t.task || '') + '</div>';
-  if (laneEntryText) {
-    cardHtml += '<div class="board-card-lane-entered" title="Entered current lane ' + esc(laneEntryText.slice(1, -1)) + '">'
-      + esc(laneEntryText) + '</div>';
+  if (t.id || laneEntryText) {
+    cardHtml += '<div class="board-card-heading-meta">';
+    if (t.id) {
+      cardHtml += '<div class="board-card-task-id">' + esc(t.id) + '</div>';
+    }
+    if (laneEntryText) {
+      cardHtml += '<div class="board-card-lane-entered" title="Entered current lane ' + esc(laneEntryText.slice(1, -1)) + '">'
+        + esc(laneEntryText) + '</div>';
+    }
+    cardHtml += '</div>';
   }
   cardHtml += '</div>';
   var meta = '';
-  if (t.id) meta += '<span class="board-card-label board-card-template">' + esc(t.id) + '</span>';
   var dispatchEligibility = _boardTaskDispatchEligibility(t);
   if (dispatchEligibility) {
     meta += '<span class="board-card-label ' + esc(dispatchEligibility.className)

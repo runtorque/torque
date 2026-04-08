@@ -1392,6 +1392,13 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   align-items: flex-start;
   gap: 6px;
 }
+.board-card-heading-meta {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+}
 .board-card-title {
   flex: 1 1 auto;
   min-width: 0;
@@ -1400,12 +1407,19 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
   display: -webkit-box; -webkit-line-clamp: 4;
   -webkit-box-orient: vertical; overflow: hidden;
 }
+.board-card-task-id {
+  font-size: 8px;
+  line-height: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace);
+}
 .board-card-lane-entered {
-  flex: 0 0 auto;
   font-size: 8px;
   line-height: 14px;
   color: var(--text-dim);
   white-space: nowrap;
+  text-align: right;
 }
 .board-card-meta {
   display: flex; flex-wrap: wrap; gap: 3px; margin-top: 1px;

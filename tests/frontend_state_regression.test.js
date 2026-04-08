@@ -1529,8 +1529,11 @@ test('_renderBoardCard shows the lane-entry timestamp badge in the card header',
   `);
 
   assert.match(html, /board-card-heading/);
+  assert.match(html, /board-card-task-id/);
+  assert.match(html, /root/);
   assert.match(html, /board-card-lane-entered/);
   assert.match(html, /\[5m ago\]/);
+  assert.match(html, /board-card-heading-meta/);
 });
 
 test('_boardTaskScheduleMeta distinguishes scheduled, due-soon, and overdue states', () => {
