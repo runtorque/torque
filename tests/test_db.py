@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 import json
+import sqlite3
 
 try:
     from helpers import install_aiohttp_stub
@@ -641,3 +642,50 @@ class LoomDBTests(unittest.TestCase):
 
         self.assertEqual([entry["id"] for entry in entries], ["mem-active"])
         self.assertIsNone(self.db.load_memory_entry("mem-expired", now=20.0))
+
+    def test_init_upgrades_legacy_memory_entries_before_retention_indexes(self):
+        legacy_path = Path(self.tmp.name) / "legacy-memory.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.executescript("""
+            CREATE TABLE memory_entries (
+                id TEXT PRIMARY KEY,
+                project_key TEXT NOT NULL DEFAULT '',
+                group_name TEXT NOT NULL DEFAULT '',
+                scope_kind TEXT NOT NULL,
+                scope_ref TEXT NOT NULL DEFAULT '',
+                entry_type TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                pinned INTEGER NOT NULL DEFAULT 0,
+                task_id TEXT NOT NULL DEFAULT '',
+                source_kind TEXT NOT NULL DEFAULT '',
+                source_id TEXT NOT NULL DEFAULT '',
+                source_name TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
+            INSERT INTO memory_entries (
+                id, project_key, group_name, scope_kind, scope_ref,
+                entry_type, title, content, pinned, task_id,
+                source_kind, source_id, source_name, created_at, updated_at
+            ) VALUES (
+                'mem-1', '/repo', 'g', 'group', 'g',
+                'note', 'Legacy note', 'Migrated safely.', 0, '',
+                'agent', 'agent-1', 'Worker', 1.0, 1.0
+            );
+        """)
+        conn.commit()
+        conn.close()
+
+        upgraded = LoomDB(legacy_path)
+        self.addCleanup(upgraded.close)
+
+        upgraded.init()
+
+        entry = upgraded.load_memory_entry("mem-1")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["retention_kind"], "durable")
+        cols = upgraded._conn.execute(
+            "PRAGMA table_info(memory_entries)"
+        ).fetchall()
+        self.assertIn("retention_kind", [row[1] for row in cols])

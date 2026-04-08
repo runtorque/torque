@@ -398,15 +398,13 @@ CREATE TABLE IF NOT EXISTS memory_entries (
     updated_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_memory_entries_scope
-    ON memory_entries(scope_kind, scope_ref, pinned, retention_kind, created_at DESC);
+    ON memory_entries(scope_kind, scope_ref, pinned, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_entries_group
-    ON memory_entries(group_name, pinned, retention_kind, created_at DESC);
+    ON memory_entries(group_name, pinned, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_entries_project
-    ON memory_entries(project_key, pinned, retention_kind, created_at DESC);
+    ON memory_entries(project_key, pinned, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_entries_type
     ON memory_entries(entry_type, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_memory_entries_expiry
-    ON memory_entries(retention_kind, expires_at);
 
 CREATE TABLE IF NOT EXISTS memory_links (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -490,6 +488,7 @@ class LoomDB:
             self._conn.execute(
                 "ALTER TABLE memory_entries ADD COLUMN expires_at REAL")
             self._conn.commit()
+        self._rebuild_memory_retention_indexes()
         # Migrate: add action_name and action_vars columns to board_tasks
         for col, default in [("action_name", "''"),
                              ("action_vars", "'{}'"),
@@ -787,6 +786,41 @@ class LoomDB:
             self._conn.execute(
                 "INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
                 (SCHEMA_VERSION,))
+        self._conn.commit()
+
+    def _rebuild_memory_retention_indexes(self):
+        """Ensure memory-entry indexes match the current retention schema."""
+        for name in (
+            "idx_memory_entries_scope",
+            "idx_memory_entries_group",
+            "idx_memory_entries_project",
+            "idx_memory_entries_type",
+            "idx_memory_entries_expiry",
+        ):
+            self._conn.execute(f"DROP INDEX IF EXISTS {name}")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_entries_scope "
+            "ON memory_entries("
+            "scope_kind, scope_ref, pinned, retention_kind, created_at DESC)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_entries_group "
+            "ON memory_entries("
+            "group_name, pinned, retention_kind, created_at DESC)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_entries_project "
+            "ON memory_entries("
+            "project_key, pinned, retention_kind, created_at DESC)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_entries_type "
+            "ON memory_entries(entry_type, created_at DESC)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memory_entries_expiry "
+            "ON memory_entries(retention_kind, expires_at)"
+        )
         self._conn.commit()
 
     def close(self):
