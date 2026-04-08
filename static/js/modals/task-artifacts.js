@@ -589,7 +589,7 @@ function openTaskArtifactBrowser(taskId) {
 function _generateDraftId() {
   var hex = '';
   for (var i = 0; i < 8; i++) hex += Math.floor(Math.random() * 16).toString(16);
-  return hex;
+  return 'draft-' + hex;
 }
 
 function _taskAttId() {

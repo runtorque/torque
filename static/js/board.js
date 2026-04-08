@@ -230,7 +230,7 @@ function _boardVisibleTasks() {
     var filtered = {};
     for (var id in out) {
       var t = out[id];
-      var parts = [t.task, t.description, t.slug, t.action_name, t.agent_id];
+      var parts = [t.task, t.description, t.id, t.action_name, t.agent_id];
       parts.push(t.verification_mode || '');
       parts.push(t.verification_state || '');
       parts.push(t.verification_notes || '');

@@ -414,6 +414,53 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         state.groups["g"] = []
         return state
 
+    def test_board_add_task_allocates_group_scoped_root_ids(self):
+        state = self.state_mod.MatrixState()
+        state.groups["Loom Team"] = []
+        state.groups["Ops"] = []
+
+        first = state.board_add_task("First task", "Loom Team")
+        second = state.board_add_task("Second task", "Loom Team")
+        third = state.board_add_task("Ops task", "Ops")
+
+        self.assertEqual(first.id, "LOOM_TEAM:1")
+        self.assertEqual(second.id, "LOOM_TEAM:2")
+        self.assertEqual(third.id, "OPS:1")
+
+    def test_board_add_task_allocates_pipeline_scoped_child_ids_across_groups(self):
+        state = self.state_mod.MatrixState()
+        state.groups["Loom"] = []
+        state.groups["Review Team"] = []
+
+        root = state.board_add_task("Root", "Loom")
+        child = state.board_add_task(
+            "Implement",
+            "Loom",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+        )
+        cross_group = state.board_add_task(
+            "Review",
+            "Review Team",
+            parent_task_id=child.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+        )
+
+        self.assertEqual(root.id, "LOOM:1")
+        self.assertEqual(child.id, "LOOM:1:1")
+        self.assertEqual(cross_group.id, "REVIEW_TEAM:1:2")
+
+    def test_add_group_rejects_prefix_collisions(self):
+        state = self.state_mod.MatrixState()
+
+        state.add_group("Foo Bar")
+        state.add_group("Foo-Bar")
+
+        self.assertIn("Foo Bar", state.groups)
+        self.assertNotIn("Foo-Bar", state.groups)
+
     def test_board_task_lifecycle_covers_creation_editing_and_cleanup(self):
         state = self._make_state()
         dep = state.board_add_task(

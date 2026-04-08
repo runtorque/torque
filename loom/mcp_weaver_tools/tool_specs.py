@@ -52,7 +52,7 @@ WEAVER_TOOLS = [
     {
         "name": "weaver_task_show",
         "description": (
-            "Show full details for a task by slug or ID. "
+            "Show full details for a task by ID or legacy alias. "
             "Returns title, description, labels, action, action variables, "
             "pipeline info, verification metadata, assigned agent, "
             "linked external ticket metadata, attachments/artifacts, "
@@ -64,7 +64,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task slug or ID.",
+                    "description": "Task ID or legacy alias.",
                 },
             },
             "required": ["task"],
@@ -221,7 +221,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task slug or ID to edit.",
+                    "description": "Task ID or legacy alias to edit.",
                 },
                 "title": {
                     "type": "string",
@@ -279,7 +279,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task slug or ID to attach the artifact to.",
+                    "description": "Task ID or legacy alias to attach the artifact to.",
                 },
                 "local_path": {
                     "type": "string",
@@ -343,7 +343,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task slug or ID to update.",
+                    "description": "Task ID or legacy alias to update.",
                 },
                 "mode": {
                     "type": "string",
@@ -392,7 +392,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task slug or ID.",
+                    "description": "Task ID or legacy alias.",
                 },
                 "lane": {
                     "type": "string",
@@ -415,12 +415,12 @@ WEAVER_TOOLS = [
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Task slug or ID to dispatch.",
+                    "description": "Task ID or legacy alias to dispatch.",
                 },
                 "agent": {
                     "type": "string",
                     "description": (
-                        "Existing agent slug or ID to dispatch to. "
+                        "Existing agent ID or name to dispatch to. "
                         "If omitted, a new agent is created."
                     ),
                 },
@@ -466,7 +466,7 @@ WEAVER_TOOLS = [
                     "type": "array",
                     "description": (
                         "Ordered task entries. Each item must include "
-                        "a task slug or ID and may include an "
+                        "a task ID or legacy alias and may include an "
                         "agent_group string to keep related tasks on "
                         "the same agent. Deferred entries keep their "
                         "order across restart."
@@ -476,7 +476,7 @@ WEAVER_TOOLS = [
                         "properties": {
                             "task": {
                                 "type": "string",
-                                "description": "Task slug or ID.",
+                                "description": "Task ID or legacy alias.",
                             },
                             "agent_group": {
                                 "type": "string",
@@ -697,7 +697,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent slug or ID.",
+                    "description": "Agent ID or name.",
                 },
                 "message": {
                     "type": "string",
@@ -772,7 +772,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent slug or ID to close.",
+                    "description": "Agent ID or name to close.",
                 },
             },
             "required": ["agent"],
@@ -791,7 +791,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent slug or ID to relaunch.",
+                    "description": "Agent ID or name to relaunch.",
                 },
             },
             "required": ["agent"],
@@ -811,7 +811,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent slug or ID with a worktree.",
+                    "description": "Agent ID or name with a worktree.",
                 },
                 "message": {
                     "type": "string",
@@ -849,7 +849,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent slug or ID with a worktree.",
+                    "description": "Agent ID or name with a worktree.",
                 },
             },
             "required": ["agent"],
@@ -867,7 +867,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent slug or ID with a worktree.",
+                    "description": "Agent ID or name with a worktree.",
                 },
                 "title": {
                     "type": "string",
@@ -898,7 +898,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent slug or ID with a worktree.",
+                    "description": "Agent ID or name with a worktree.",
                 },
                 "stat_only": {
                     "type": "boolean",
@@ -941,7 +941,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent slug or ID with a worktree.",
+                    "description": "Agent ID or name with a worktree.",
                 },
             },
             "required": ["agent"],
@@ -960,7 +960,7 @@ WEAVER_TOOLS = [
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Agent slug or ID with a worktree.",
+                    "description": "Agent ID or name with a worktree.",
                 },
             },
             "required": ["agent"],

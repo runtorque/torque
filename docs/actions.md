@@ -346,8 +346,7 @@ prompt: |
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `loom.task.id` | string | Task ID. |
-| `loom.task.slug` | string | Task slug. |
+| `loom.task.id` | string | Canonical task ID (`GROUP:<n>` or `GROUP:<root_n>:<child_n>`). |
 | `loom.task.depth` | int | Pipeline depth (0 for root tasks, increments per derivation). |
 | `loom.task.is_derived` | bool | Whether this task was created by `loom_derive(...)`. |
 | `loom.task.parent_task_id` | string | ID of the parent task (empty for root tasks). |

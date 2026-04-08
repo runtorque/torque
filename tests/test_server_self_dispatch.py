@@ -149,23 +149,23 @@ class ServerSelfDispatchTests(unittest.TestCase):
             "g",
         )
 
-    def test_resolve_task_id_accepts_slug_and_prefix(self):
+    def test_resolve_task_id_accepts_alias_and_prefix(self):
         state = self.state_mod.MatrixState()
         task = self.state_mod.BoardTask(
-            id="task-1234abcd",
+            id="LOOM:12",
             task="Document the context flow",
             group="g",
             lane="Backlog",
-            slug="document-context-flow",
         )
         state.board_tasks[task.id] = task
+        state.task_id_aliases["task-1234abcd"] = task.id
 
         self.assertEqual(
-            self.server_mod._resolve_task_id(state, "document-context-flow"),
+            self.server_mod._resolve_task_id(state, "task-1234abcd"),
             task.id,
         )
         self.assertEqual(
-            self.server_mod._resolve_task_id(state, "task-1234"),
+            self.server_mod._resolve_task_id(state, "LOOM:1"),
             task.id,
         )
 

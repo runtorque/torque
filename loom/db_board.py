@@ -65,7 +65,7 @@ def _json_loads(value, default):
 
 
 def _serialize_board_task(task):
-    d = asdict(task)
+    d = asdict(task) if not isinstance(task, dict) else dict(task)
     labels = json.dumps(d.pop("labels", []))
     action_vars = json.dumps(d.pop("action_vars", {}))
     messages = json.dumps(d.pop("messages", []))

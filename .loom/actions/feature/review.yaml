@@ -15,7 +15,7 @@ transitions:
     target: parent
 
 prompt: |
-  A previous agent (`{{ loom.task.parent_agent_slug }}`) implemented changes and your job is to check whether the work is correct, complete, and safe to merge.
+  A previous agent (`{{ loom.task.parent_agent_name or loom.task.parent_agent_slug }}`) implemented changes and your job is to check whether the work is correct, complete, and safe to merge.
 
   ## What was implemented
 
