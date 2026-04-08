@@ -217,7 +217,15 @@ If the Weaver becomes active again after being idle with a pending question, Loo
 
 ## MCP tool surface
 
-All Weaver tools are available through the same `/mcp` endpoint as agent tools, using the `weaver_` prefix. They are scoped to the Weaver's group.
+All Weaver tools are available through the same `/mcp` endpoint as agent tools, using the `weaver_` prefix.
+
+However, they are **only** visible and callable from the designated Weaver agent session for that group. Loom authorizes them using the caller's `X-Loom-Cell-Id` header:
+
+- the designated Weaver sees both `loom_*` and `weaver_*` tools
+- regular agents only see `loom_*` tools
+- direct calls to `weaver_*` from non-Weaver agents are rejected
+
+In other words, Weaver tools are group-scoped **and** Weaver-only.
 
 ### Board and planning
 

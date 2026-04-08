@@ -394,7 +394,7 @@ Reply to a message from the weaver. Only works when the agent has a pending weav
 
 ### Weaver-side: final tool list
 
-Tools are served from the same `/mcp` endpoint. The `weaver_` prefix provides namespace separation. Weaver tools don't require `X-Loom-Cell-Id` (though they accept it for audit logging).
+Tools are served from the same `/mcp` endpoint. The `weaver_` prefix provides namespace separation. Access is authorized by `X-Loom-Cell-Id`: only the designated Weaver agent for a group can list or call `weaver_*` tools. Regular agents only see the `loom_*` surface.
 
 #### Read tools
 
