@@ -36,44 +36,23 @@ function loadWeaver(context) {
   vm.runInContext(source, context, { filename });
 }
 
-test('weaver settings render group-settings handoff', () => {
+test('renderWeaverPanel shows journal only without settings tabs', () => {
   const sandbox = createSandbox();
-  const context = vm.createContext(sandbox);
-  loadWeaver(context);
-
-  const html = vm.runInContext(
-    `_weaverRenderSettings("alpha", {
-      weaver_provider: "codex",
-      weaver_boot_command: "codex --model gpt-5",
-      custom_instructions: "Watch for regressions."
-    }, { name: "Weaver", status: "running" })`,
-    context,
-  );
-
-  assert.match(html, /Create a Weaver from the group’s \+ New dropdown\. Configure it in Group Settings → Weaver\./);
-  assert.match(html, /Open Group Settings/);
-  assert.match(html, /Provider override/);
-  assert.match(html, /codex/);
-  assert.match(html, /Watch for regressions\./);
-});
-
-test('weaverOpenSettings opens group settings on the weaver tab', () => {
-  const sandbox = createSandbox();
-  sandbox.openGroupSettingsCalls = [];
-  sandbox.openGroupSettings = function(group, tab) {
-    sandbox.openGroupSettingsCalls.push({ group, tab });
+  const panel = {
+    innerHTML: '',
+    querySelector() { return null; },
+  };
+  sandbox.document.getElementById = function(id) {
+    return id === 'panel-weaver' ? panel : null;
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
 
-  vm.runInContext(`weaverOpenSettings()`, context);
+  vm.runInContext('renderWeaverPanel()', context);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.openGroupSettingsCalls)), [
-    {
-      group: 'alpha',
-      tab: 'weaver',
-    },
-  ]);
+  assert.match(panel.innerHTML, /Weaver — alpha/);
+  assert.doesNotMatch(panel.innerHTML, />Settings</);
+  assert.doesNotMatch(panel.innerHTML, /weaver-tabs/);
 });
 
 test('weaver journal distinguishes blocking asks from non-blocking notes', () => {
@@ -138,10 +117,9 @@ test('renderWeaverPanel uses the focused group in multi-project workspaces', () 
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
-  vm.runInContext(`_weaverTab = 'settings'`, context);
 
   vm.runInContext('renderWeaverPanel()', context);
 
   assert.match(panel.innerHTML, /Weaver — beta/);
-  assert.match(panel.innerHTML, /No weaver agent/);
+  assert.match(panel.innerHTML, /No journal entries yet/);
 });

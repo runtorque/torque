@@ -31,10 +31,7 @@ The Weaver must be created through Loom's dedicated Weaver flow because Loom nee
 
 ### Weaver panel
 
-The panel has two tabs:
-
-- **Journal** shows the persistent journal, blocking asks, and non-blocking notes/questions from the Weaver.
-- **Settings** summarizes the current Weaver configuration and links you to **Group Settings → Weaver**.
+For now, the panel shows only the **Journal** view with the persistent journal, blocking asks, and non-blocking notes/questions from the Weaver.
 
 The panel header also shows:
 

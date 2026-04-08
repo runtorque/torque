@@ -1,8 +1,5 @@
-/* Weaver panel — Journal / Settings tabs */
+/* Weaver panel — journal */
 
-var _weaverTab = 'journal';  // 'journal' | 'settings'
-var _weaverCustomInstrDirty = false;
-var _weaverCustomInstrDraft = '';
 var _weaverReplyDraft = '';
 var _weaverHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
 var _weaverHealthLabels = {
@@ -83,30 +80,12 @@ function renderWeaverPanel() {
   }
   html += '</div>';
 
-  // Tabs
-  html += '<div class="weaver-tabs">';
-  html += '<button class="weaver-tab' + (_weaverTab === 'journal' ? ' active' : '') + '" '
-       + 'onclick="weaverSwitchTab(\'journal\')">Journal</button>';
-  html += '<button class="weaver-tab' + (_weaverTab === 'settings' ? ' active' : '') + '" '
-       + 'onclick="weaverSwitchTab(\'settings\')">Settings</button>';
-  html += '</div>';
-
-  // Tab content
   html += '<div class="weaver-content">';
-  if (_weaverTab === 'journal') {
-    html += _weaverRenderJournal(group);
-  } else {
-    html += _weaverRenderSettings(group, ws, weaver);
-  }
+  html += _weaverRenderJournal(group);
   html += '</div>';
   html += '</div>';
   el.innerHTML = html;
   _restoreSurfaceState(el, panelState);
-}
-
-function weaverSwitchTab(tab) {
-  _weaverTab = tab;
-  renderWeaverPanel();
 }
 
 function weaverTogglePause() {
@@ -400,41 +379,6 @@ function _weaverVerificationSummary(group) {
   return summary;
 }
 
-// -- Settings tab ----------------------------------------------------------
-
-function _weaverRenderSettings(group, ws, weaver) {
-  var html = '';
-  if (!group) {
-    return '<div class="weaver-empty">Create a group first.</div>';
-  }
-
-  html += '<div class="weaver-section">';
-  html += '<div class="weaver-section-title">Settings moved</div>';
-  html += '<div class="weaver-empty-inline">Create a Weaver from the group’s + New dropdown. Configure it in Group Settings → Weaver.</div>';
-  html += '<button class="weaver-create-btn" onclick="weaverOpenSettings()">Open Group Settings</button>';
-  html += '</div>';
-
-  html += '<div class="weaver-section">';
-  html += '<div class="weaver-section-title">Current configuration</div>';
-  if (weaver) {
-    html += '<div class="weaver-agent-row">';
-    html += '<span class="weaver-agent-name">' + _esc(weaver.name) + '</span>';
-    html += '<span class="weaver-agent-status status-' + (weaver.status || 'stopped') + '">'
-         + _esc(weaver.status || 'stopped') + '</span>';
-    html += '</div>';
-  } else {
-    html += '<div class="weaver-empty-inline">No weaver agent configured for this group yet.</div>';
-  }
-  html += '<div class="weaver-field"><label>Provider override</label><div class="weaver-field-note">'
-       + _esc((ws && ws.weaver_provider) || 'Group default') + '</div></div>';
-  html += '<div class="weaver-field"><label>Command override</label><div class="weaver-field-note">'
-       + _esc((ws && ws.weaver_boot_command) || 'Use provider default') + '</div></div>';
-  html += '<div class="weaver-field"><label>Custom instructions</label><div class="weaver-field-note">'
-       + _esc((ws && ws.custom_instructions) || 'None') + '</div></div>';
-  html += '</div>';
-  return html;
-}
-
 // -- Journal context menu --------------------------------------------------
 
 function weaverEntryCtx(e, entryId) {
@@ -483,12 +427,6 @@ function weaverDismissNote() {
   var group = _weaverCurrentGroup();
   if (!group) return;
   send({ cmd: 'weaver_dismiss_note', group: group });
-}
-
-function weaverOpenSettings() {
-  var group = _weaverCurrentGroup();
-  if (!group || typeof openGroupSettings !== 'function') return;
-  openGroupSettings(group, 'weaver');
 }
 
 // -- Event handlers --------------------------------------------------------
