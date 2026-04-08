@@ -17,6 +17,7 @@ LOOM_EXCLUDE_ENTRIES = [
     ".codex/config.toml",
     ".codex/hooks.json",
     ".codex/AGENTS.md",
+    ".loom/loom-system-prompt-*.md",
 ]
 
 _HIGH_CHURN_THRESHOLD = 200
