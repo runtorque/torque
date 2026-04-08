@@ -339,7 +339,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         if not tid:
             return "Task not found", True
         task = state.board_tasks.get(tid)
-        if not task:
+        if not task or task.group != _weaver_group:
             return "Task not found", True
         d = serialize_task_for_mcp(task)
         d["title"] = task.task
@@ -358,6 +358,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             chain = state.board_get_chain(tid)
             d["pipeline_chain"] = []
             for ct in chain:
+                if ct.group != _weaver_group:
+                    continue
                 agent_slug = ""
                 if ct.agent_id:
                     a = state.agents.get(ct.agent_id)
@@ -404,6 +406,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         if not agent_id:
             return f"Agent not found: {agent_ident}", True
         cell = state.agents[agent_id]
+        if cell.group != _weaver_group:
+            return f"Agent not found: {agent_ident}", True
 
         d = {
             "id": cell.id,
@@ -442,6 +446,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             }
             boundary_tasks = []
             for t in state.board_tasks.values():
+                if t.group != _weaver_group:
+                    continue
                 boundary = getattr(t, "worktree_boundary", {}) or {}
                 if not isinstance(boundary, dict):
                     continue
@@ -473,6 +479,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             )
             if overview:
                 current_task = state.agent_current_task(agent_id)
+                if current_task and current_task.group != _weaver_group:
+                    current_task = None
                 overview["current_task_id"] = (
                     current_task.id if current_task else ""
                 )
@@ -500,6 +508,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         # Task history — all tasks ever assigned to this agent
         tasks = []
         for t in state.board_tasks.values():
+            if t.group != _weaver_group:
+                continue
             if t.agent_id != agent_id:
                 continue
             task_info = {
@@ -524,7 +534,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
         # Current task (may differ from tasks list if unlinked)
         current_task = state.agent_current_task(agent_id)
-        if current_task:
+        if current_task and current_task.group == _weaver_group:
             d["current_task_id"] = current_task.id
 
         return json.dumps(d), False

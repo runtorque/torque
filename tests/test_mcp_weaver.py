@@ -1064,6 +1064,45 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
             ["no_progress_timeout"],
         )
 
+    async def test_task_show_hides_other_group_task(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.groups["other"] = []
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+
+        other_task = state.board_add_task(
+            "Other group task",
+            "other",
+            lane="Backlog",
+            id="task-other",
+        )
+        self.assertIsNotNone(other_task)
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_show",
+            {"task": "task-other"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "Task not found")
+
     async def test_board_list_can_filter_by_health_state(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(
@@ -1972,28 +2011,93 @@ class WeaverRecoveryToolTests(unittest.IsolatedAsyncioTestCase):
                 "current_path": "/repo/logs",
             }],
         )
+
+    async def test_agent_show_hides_other_group_agent(self):
+        state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
+        other_agent = self.state_mod.AgentCell(
+            id="agent-2",
+            name="Other Worker",
+            slug="other-worker",
+            group="other",
+            cell_type="agent",
+        )
+        state.agents[other_agent.id] = other_agent
+        state.groups["other"] = [other_agent.id]
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_agent_show",
+            {"agent": other_agent.slug},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, f"Agent not found: {other_agent.slug}")
+
+    async def test_agent_show_filters_cross_group_task_history_and_current_task(self):
+        state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
+        agent = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            slug="worker",
+            group="g",
+            cell_type="agent",
+            current_task_id="task-other",
+            worktree_path="/tmp/worktree",
+            worktree_branch="loom/worker",
+            worktree_repo_root="/repo",
+        )
+        state.agents[agent.id] = agent
+        state.groups["g"].append(agent.id)
+        state.board_tasks["task-g"] = self.state_mod.BoardTask(
+            id="task-g",
+            task="Same group task",
+            group="g",
+            lane="Done",
+            agent_id=agent.id,
+            worktree_boundary={
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+            },
+        )
+        state.board_tasks["task-other"] = self.state_mod.BoardTask(
+            id="task-other",
+            task="Other group task",
+            group="other",
+            lane="In Progress",
+            agent_id=agent.id,
+            worktree_boundary={
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "recorded_at": "2026-04-07T11:00:00+00:00",
+            },
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_agent_show",
+            {"agent": agent.slug},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        data = json.loads(text)
+        self.assertNotIn("current_task_id", data)
+        self.assertEqual([task["id"] for task in data["tasks"]], ["task-g"])
         self.assertEqual(
-            data["tasks"],
-            [{
-                "id": "task-1",
-                "slug": "investigate-regression",
-                "title": "Investigate regression",
-                "lane": "In Progress",
-                "status": "On Review",
-                "labels": ["ready"],
-                "action": "oneshot/feature",
-                "worktree_boundary": {
-                    "version": "1",
-                    "repo_root": "/repo",
-                    "branch": "loom/worker",
-                    "base_branch": "main",
-                    "commit_sha": "abc123",
-                    "status": "open",
-                    "recorded_at": "2026-04-07T10:00:00+00:00",
-                },
-                "resume_after_boundary_task_id": "",
-                "messages": [{"action": "progress", "message": "Halfway there"}],
-            }],
+            [item["task_id"] for item in data["worktree"]["task_boundaries"]],
+            ["task-g"],
         )
 
     async def test_journal_append_and_read_forward_group_and_filters(self):
