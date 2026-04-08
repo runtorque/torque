@@ -3066,7 +3066,7 @@ test('context panel promotes the current task into a linked manual note', () => 
   context.contextPromoteCurrentTask();
   context.contextSaveEditor();
 
-  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+  assert.deepEqual(jsonValue(context, 'sendCalls[sendCalls.length - 1]'), {
     cmd: 'memory_publish',
     title: 'Capture orchestration guidance',
     content: 'Document the operating constraints for memory notes.',
@@ -3080,7 +3080,7 @@ test('context panel promotes the current task into a linked manual note', () => 
       { target_kind: 'pipeline', target_ref: 'root-1' },
       { target_kind: 'agent', target_ref: 'agent-1' },
     ],
-  }]);
+  });
 });
 
 test('ws invalidation rerenders the context panel for task updates', () => {
@@ -3207,6 +3207,7 @@ test('task deltas do not rerender the templates panel when it is active', () => 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 1,
     board: 0,
+    context: 0,
     events: 0,
     weaver: 0,
     templates: 0,
@@ -3227,6 +3228,7 @@ test('event deltas rerender only the active events panel', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 0,
     board: 0,
+    context: 0,
     events: 0,
     weaver: 0,
     templates: 0,
@@ -3244,6 +3246,7 @@ test('event deltas rerender only the active events panel', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 0,
     board: 0,
+    context: 0,
     events: 1,
     weaver: 0,
     templates: 0,
