@@ -402,6 +402,20 @@ CREATE INDEX IF NOT EXISTS idx_memory_entries_project
     ON memory_entries(project_key, pinned, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_entries_type
     ON memory_entries(entry_type, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS memory_links (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id    TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    target_ref  TEXT NOT NULL,
+    created_at  REAL NOT NULL,
+    UNIQUE(entry_id, target_kind, target_ref),
+    FOREIGN KEY(entry_id) REFERENCES memory_entries(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_memory_links_entry
+    ON memory_links(entry_id, target_kind, target_ref);
+CREATE INDEX IF NOT EXISTS idx_memory_links_target
+    ON memory_links(target_kind, target_ref, created_at DESC, entry_id);
 """
 
 
@@ -1219,11 +1233,26 @@ class LoomDB:
     def save_memory_entry(self, entry: dict):
         """Insert or replace a shared memory entry."""
         self._conn.execute("""
-            INSERT OR REPLACE INTO memory_entries
+            INSERT INTO memory_entries
                 (id, project_key, group_name, scope_kind, scope_ref,
                  entry_type, title, content, pinned, task_id,
                  source_kind, source_id, source_name, created_at, updated_at)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                project_key=excluded.project_key,
+                group_name=excluded.group_name,
+                scope_kind=excluded.scope_kind,
+                scope_ref=excluded.scope_ref,
+                entry_type=excluded.entry_type,
+                title=excluded.title,
+                content=excluded.content,
+                pinned=excluded.pinned,
+                task_id=excluded.task_id,
+                source_kind=excluded.source_kind,
+                source_id=excluded.source_id,
+                source_name=excluded.source_name,
+                created_at=excluded.created_at,
+                updated_at=excluded.updated_at
         """, (
             entry["id"],
             entry.get("project_key", ""),
@@ -1240,6 +1269,21 @@ class LoomDB:
             entry.get("source_name", ""),
             float(entry.get("created_at", 0)),
             float(entry.get("updated_at", 0)),
+        ))
+        self._conn.commit()
+
+    def save_memory_link(self, link: dict):
+        """Insert or keep an existing memory-entry link."""
+        self._conn.execute("""
+            INSERT INTO memory_links
+                (entry_id, target_kind, target_ref, created_at)
+            VALUES (?,?,?,?)
+            ON CONFLICT(entry_id, target_kind, target_ref) DO NOTHING
+        """, (
+            link["entry_id"],
+            link["target_kind"],
+            link.get("target_ref", ""),
+            float(link.get("created_at", 0)),
         ))
         self._conn.commit()
 
@@ -1264,6 +1308,65 @@ class LoomDB:
         if not row:
             return None
         return {
+            **self._row_to_memory_entry(row),
+            "links": self.load_memory_links(entry_id=entry_id),
+        }
+
+    def load_memory_links(self, *, entry_id: str = "",
+                          target_kind: str = "", target_ref: str = "",
+                          limit: int = 100, offset: int = 0) -> list[dict]:
+        """List memory-entry links by entry or target."""
+        sql = (
+            "SELECT entry_id, target_kind, target_ref, created_at "
+            "FROM memory_links WHERE 1=1"
+        )
+        params = []
+        if entry_id:
+            sql += " AND entry_id=?"
+            params.append(entry_id)
+        if target_kind:
+            sql += " AND target_kind=?"
+            params.append(target_kind)
+        if target_ref:
+            sql += " AND target_ref=?"
+            params.append(target_ref)
+        sql += (
+            " ORDER BY created_at ASC, entry_id ASC, target_kind ASC, target_ref ASC "
+            "LIMIT ? OFFSET ?"
+        )
+        params.extend([max(1, int(limit)), max(0, int(offset))])
+        rows = self._conn.execute(sql, params).fetchall()
+        return [self._row_to_memory_link(row) for row in rows]
+
+    def _load_memory_links_map(self, entry_ids: list[str]) -> dict[str, list[dict]]:
+        """Return {entry_id: [link, ...]} for the provided entry IDs."""
+        if not entry_ids:
+            return {}
+        placeholders = ",".join("?" for _ in entry_ids)
+        rows = self._conn.execute(
+            "SELECT entry_id, target_kind, target_ref, created_at "
+            f"FROM memory_links WHERE entry_id IN ({placeholders}) "
+            "ORDER BY created_at ASC, entry_id ASC, target_kind ASC, target_ref ASC",
+            entry_ids,
+        ).fetchall()
+        links_by_entry: dict[str, list[dict]] = {entry_id: [] for entry_id in entry_ids}
+        for row in rows:
+            link = self._row_to_memory_link(row)
+            links_by_entry.setdefault(link["entry_id"], []).append(link)
+        return links_by_entry
+
+    @staticmethod
+    def _row_to_memory_link(row) -> dict:
+        return {
+            "entry_id": row[0],
+            "target_kind": row[1],
+            "target_ref": row[2],
+            "created_at": row[3],
+        }
+
+    @staticmethod
+    def _row_to_memory_entry(row) -> dict:
+        return {
             "id": row[0],
             "project_key": row[1],
             "group_name": row[2],
@@ -1285,7 +1388,8 @@ class LoomDB:
                             project_key: str = "", scope_kind: str = "",
                             scope_ref: str = "", entry_type: str = "",
                             task_id: str = "", pinned_only: bool = False,
-                            search: str = "", limit: int = 20,
+                            search: str = "", linked_target_kind: str = "",
+                            linked_target_ref: str = "", limit: int = 20,
                             offset: int = 0) -> list[dict]:
         """List memory entries with deterministic filtering and ordering."""
         sql = (
@@ -1319,31 +1423,31 @@ class LoomDB:
             sql += " AND (title LIKE ? OR content LIKE ?)"
             like = f"%{search}%"
             params.extend([like, like])
+        if linked_target_kind or linked_target_ref:
+            sql += (
+                " AND EXISTS ("
+                "SELECT 1 FROM memory_links ml "
+                "WHERE ml.entry_id=memory_entries.id"
+            )
+            if linked_target_kind:
+                sql += " AND ml.target_kind=?"
+                params.append(linked_target_kind)
+            if linked_target_ref:
+                sql += " AND ml.target_ref=?"
+                params.append(linked_target_ref)
+            sql += ")"
         sql += (
             " ORDER BY pinned DESC, created_at DESC, id DESC "
             "LIMIT ? OFFSET ?"
         )
         params.extend([max(1, int(limit)), max(0, int(offset))])
         rows = self._conn.execute(sql, params).fetchall()
-        entries = []
-        for row in rows:
-            entries.append({
-                "id": row[0],
-                "project_key": row[1],
-                "group_name": row[2],
-                "scope_kind": row[3],
-                "scope_ref": row[4],
-                "entry_type": row[5],
-                "title": row[6],
-                "content": row[7],
-                "pinned": bool(row[8]),
-                "task_id": row[9],
-                "source_kind": row[10],
-                "source_id": row[11],
-                "source_name": row[12],
-                "created_at": row[13],
-                "updated_at": row[14],
-            })
+        entries = [self._row_to_memory_entry(row) for row in rows]
+        links_by_entry = self._load_memory_links_map(
+            [entry["id"] for entry in entries]
+        )
+        for entry in entries:
+            entry["links"] = links_by_entry.get(entry["id"], [])
         return entries
 
     # -- Agent history -------------------------------------------------------
