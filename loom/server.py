@@ -21,7 +21,7 @@ import yaml
 from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, STANDALONE, BIND_HOST, ATTACHMENTS_DIR, log
 from .db import LoomDB
 from dataclasses import asdict
-from .state import MatrixState, task_counts_as_done, task_is_closed
+from .state import ARCHIVED_LANE, MatrixState, task_counts_as_done, task_is_closed
 from .bridge import ITerm2Adapter
 from .events import EventLog, EventBus, PanelEventLog, health_check
 from .adapters import get_adapter, get_providers, get_default_command_for_provider
@@ -617,7 +617,7 @@ async def _scheduler_loop(state: MatrixState, handle_command, _panel_event):
                 continue
             if task.agent_id:
                 continue
-            if task.lane in ("In Progress", "Done", "Archived"):
+            if task.lane in ("In Progress", "Done", ARCHIVED_LANE):
                 continue
             log.info("Scheduled task '%s' (%s) is due — dispatching",
                      task.task, task.id)
@@ -3683,6 +3683,18 @@ async def main(connection: iterm2.Connection):
                 if att_dir.is_dir():
                     shutil.rmtree(att_dir, ignore_errors=True)
 
+            elif cmd == "board_archive_task":
+                tid = _resolve_task_id(data.get("id", ""))
+                state.board_archive_task(tid)
+
+            elif cmd == "board_unarchive_task":
+                tid = _resolve_task_id(data.get("id", ""))
+                state.board_unarchive_task(
+                    tid,
+                    lane=data.get("lane", ""),
+                    position=data.get("position"),
+                )
+
             elif cmd == "remove_attachment":
                 tid = _resolve_task_id(data.get("task_id", ""))
                 fname = data.get("filename", "")
@@ -3704,9 +3716,9 @@ async def main(connection: iterm2.Connection):
                 _mv_new = data.get("lane", "")
                 state.board_move_task(
                     _mv_id, _mv_new, data.get("position"))
+                _mv_task_after = state.board_tasks.get(_mv_id)
                 # Moving out of Done may re-block dependents
-                _mv_after = state.board_tasks.get(_mv_id)
-                if _mv_done_before and not task_counts_as_done(_mv_after):
+                if _mv_done_before and not task_counts_as_done(_mv_task_after):
                     for _dt in state.board_get_dependents(_mv_id):
                         if not task_is_closed(_dt):
                             _panel_event(
@@ -4094,7 +4106,7 @@ async def main(connection: iterm2.Connection):
 
                             # Move ask task to Done (no cascade)
                             from datetime import datetime, timezone
-                            if not task_counts_as_done(task):
+                            if not task_is_closed(task):
                                 state.board_move_task(
                                     task.id, "Done")
                             task.status = ""
@@ -4579,7 +4591,7 @@ async def main(connection: iterm2.Connection):
                         linked = [
                             t for t in state.board_tasks.values()
                             if t.agent_id == cell_id
-                            and t.lane not in ("Done", "Backlog", "Archived")]
+                            and t.lane not in ("Done", "Backlog", ARCHIVED_LANE)]
                         if len(linked) == 1:
                             task = linked[0]
 

@@ -224,6 +224,73 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "",
         )
 
+    def test_load_migrates_legacy_archived_label_to_archived_lane(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": []}, {"g": "g"})
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-1",
+                task="Old archived task",
+                group="g",
+                lane="Done",
+                labels=["loom:archived", "bug"],
+                updated_at="2026-04-07T10:00:00+00:00",
+            )
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        task = state.board_tasks["task-1"]
+        self.assertEqual(task.lane, "Archived")
+        self.assertEqual(task.archived_from_lane, "Done")
+        self.assertEqual(task.archived_at, "2026-04-07T10:00:00+00:00")
+        self.assertEqual(task.labels, ["bug"])
+
+    def test_load_migrates_legacy_non_done_archives_without_done_semantics(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": []}, {"g": "g"})
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="dep-1",
+                task="Legacy archived child",
+                group="g",
+                lane="In Progress",
+                labels=["loom:archived"],
+                updated_at="2026-04-07T10:00:00+00:00",
+            )
+        )
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-1",
+                task="Blocked follow-up",
+                group="g",
+                lane="Backlog",
+                depends_on=["dep-1"],
+            )
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        dep = state.board_tasks["dep-1"]
+        self.assertEqual(dep.lane, "Archived")
+        self.assertEqual(dep.archived_from_lane, "In Progress")
+        self.assertEqual(dep.archived_at, "2026-04-07T10:00:00+00:00")
+        self.assertFalse(state.board_deps_met(state.board_tasks["task-1"]))
+
     def test_load_restores_auto_dispatch_queue_and_busy_agents(self):
         from loom.db import LoomDB
 
@@ -477,6 +544,82 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
 
         state.board_move_task(task_b.id, "Done")
         self.assertTrue(state.board_deps_met(state.board_tasks[task_a.id]))
+
+    def test_archive_and_restore_preserve_source_lane_and_done_dependencies(self):
+        state = self._make_state()
+        dep = state.board_add_task("Dependency", "g", id="dep-1")
+        task = state.board_add_task(
+            "Follow-up",
+            "g",
+            id="task-1",
+            depends_on=["dep-1"],
+        )
+
+        self.assertIsNotNone(dep)
+        self.assertIsNotNone(task)
+
+        state.board_move_task(dep.id, "Done")
+        self.assertTrue(state.board_deps_met(state.board_tasks[task.id]))
+
+        state.board_archive_task(dep.id)
+
+        archived = state.board_tasks[dep.id]
+        self.assertEqual(archived.lane, "Archived")
+        self.assertEqual(archived.archived_from_lane, "Done")
+        self.assertTrue(archived.archived_at)
+        self.assertTrue(state.board_deps_met(state.board_tasks[task.id]))
+
+        state.board_unarchive_task(dep.id)
+
+        restored = state.board_tasks[dep.id]
+        self.assertEqual(restored.lane, "Done")
+        self.assertEqual(restored.archived_at, "")
+        self.assertEqual(restored.archived_from_lane, "")
+        self.assertTrue(state.board_deps_met(state.board_tasks[task.id]))
+
+    def test_archiving_active_task_unlinks_agent_and_clears_busy_state(self):
+        state = self._make_state()
+        agent = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            current_task_id="task-1",
+        )
+        state.agents[agent.id] = agent
+        state.groups["g"] = [agent.id]
+        task = state.board_add_task(
+            "In-flight work",
+            "g",
+            lane="In Progress",
+            id="task-1",
+            agent_id=agent.id,
+        )
+
+        self.assertIsNotNone(task)
+        self.assertTrue(state.agent_is_busy(agent.id))
+
+        state.board_archive_task(task.id)
+
+        archived = state.board_tasks[task.id]
+        self.assertEqual(archived.lane, "Archived")
+        self.assertEqual(archived.archived_from_lane, "In Progress")
+        self.assertEqual(archived.agent_id, "")
+        self.assertFalse(state.agent_is_busy(agent.id))
+        self.assertIsNone(state.agent_current_task(agent.id))
+
+    def test_board_update_task_routes_archived_lane_through_archive_semantics(self):
+        state = self._make_state()
+        task = state.board_add_task("Ship release", "g", lane="Done", id="task-1")
+
+        self.assertIsNotNone(task)
+
+        state.board_update_task(task.id, lane="Archived", description="Keep for reference")
+
+        archived = state.board_tasks[task.id]
+        self.assertEqual(archived.lane, "Archived")
+        self.assertEqual(archived.archived_from_lane, "Done")
+        self.assertEqual(archived.description, "Keep for reference")
 
     def test_lane_transition_timestamp_tracks_update_and_remove_lane_moves(self):
         state = self._make_state()

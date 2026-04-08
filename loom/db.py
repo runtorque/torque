@@ -195,7 +195,9 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     verification_updated_by TEXT NOT NULL DEFAULT '',
     verification_summary TEXT NOT NULL DEFAULT '{}',
     worktree_boundary TEXT NOT NULL DEFAULT '{}',
-    resume_after_boundary_task_id TEXT NOT NULL DEFAULT ''
+    resume_after_boundary_task_id TEXT NOT NULL DEFAULT '',
+    archived_at    TEXT NOT NULL DEFAULT '',
+    archived_from_lane TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS schedules (
@@ -564,6 +566,8 @@ class LoomDB:
             ("verification_summary", "'{}'"),
             ("worktree_boundary", "'{}'"),
             ("resume_after_boundary_task_id", "''"),
+            ("archived_at", "''"),
+            ("archived_from_lane", "''"),
         ]:
             try:
                 self._conn.execute(
@@ -892,6 +896,8 @@ class LoomDB:
             verification_summary,
             worktree_boundary,
             d.get("resume_after_boundary_task_id", ""),
+            d.get("archived_at", ""),
+            d.get("archived_from_lane", ""),
         )
         self._conn.execute("""
             INSERT OR REPLACE INTO board_tasks
@@ -906,7 +912,8 @@ class LoomDB:
                  verification_mode, verification_state, verification_notes,
                  verification_updated_at, verification_updated_by,
                  verification_summary, worktree_boundary,
-                 resume_after_boundary_task_id)
+                 resume_after_boundary_task_id, archived_at,
+                 archived_from_lane)
             VALUES ({placeholders})
         """.format(placeholders=",".join(["?"] * len(values))), values)
         self._conn.commit()
@@ -1857,6 +1864,8 @@ class LoomDB:
                     d.get("verification_updated_at", ""),
                     d.get("verification_updated_by", ""),
                     verification_summary,
+                    d.get("archived_at", ""),
+                    d.get("archived_from_lane", ""),
                 )
                 c.execute("""
                     INSERT INTO board_tasks
@@ -1871,7 +1880,8 @@ class LoomDB:
                          health_details, artifacts, verification_mode,
                          verification_state, verification_notes,
                          verification_updated_at, verification_updated_by,
-                         verification_summary)
+                         verification_summary, archived_at,
+                         archived_from_lane)
                     VALUES ({placeholders})
                 """.format(placeholders=",".join(["?"] * len(values))), values)
 
