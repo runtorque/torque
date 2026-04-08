@@ -245,6 +245,16 @@ function loadScript(context, relativePath) {
   vm.runInContext(source, context, { filename });
 }
 
+function loadModalScripts(context) {
+  [
+    'static/js/modals.js',
+    'static/js/modals/add-cell.js',
+    'static/js/modals/task-artifacts.js',
+    'static/js/modals/task-modal.js',
+    'static/js/modals/action-picker.js',
+  ].forEach((file) => loadScript(context, file));
+}
+
 function runInContext(context, code) {
   return vm.runInContext(code, context);
 }
@@ -350,7 +360,7 @@ function createWsRenderHarness() {
 function createModalHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/modals.js');
+  loadModalScripts(context);
   runInContext(context, `
     _renderTaskAttachments = function() {};
     _renderTaskArtifacts = function() {};
@@ -363,7 +373,7 @@ function createModalHarness() {
 function createDiffHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/modals.js');
+  loadModalScripts(context);
   loadScript(context, 'static/js/diff.js');
   document.register('diff-view-root');
   return { context, document };
