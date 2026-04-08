@@ -1,0 +1,9 @@
+name: fixer
+display_name: fixer
+description: Fixes stuff
+max_turns: 0
+session_resume: true
+idle_timeout: 0
+worktree: false
+worktree_auto_checkpoint: false
+worktree_merge_squash: true

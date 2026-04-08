@@ -194,6 +194,24 @@ class ServerSelfDispatchTests(unittest.TestCase):
         )
         self.assertNotIn("loom_a-", prompt_source)
 
+    def test_startup_prompt_for_new_codex_worker_uses_persistent_prompt(self):
+        self.assertEqual(
+            self.server_mod._startup_prompt_for_new_agent(
+                agent_type="codex",
+                persistent_prompt_text="Persistent worker prompt",
+            ),
+            "Persistent worker prompt",
+        )
+
+    def test_startup_prompt_for_new_claude_worker_does_not_duplicate_persistent_prompt(self):
+        self.assertEqual(
+            self.server_mod._startup_prompt_for_new_agent(
+                agent_type="claude-code",
+                persistent_prompt_text="Persistent worker prompt",
+            ),
+            "",
+        )
+
     def test_self_dispatch_bypasses_busy_agent_queue(self):
         active = self.state_mod.BoardTask(
             id="task-1",
@@ -427,3 +445,21 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.board_tasks["task-2"].agent_id, "agent-1")
         self.assertEqual(state.board_tasks["task-2"].lane, "To Do")
         self.assertNotIn("g", state.auto_dispatch_queues)
+
+    async def test_new_agent_prompt_sequence_preserves_old_codex_order(self):
+        prompts = self.server_mod._new_agent_prompt_sequence(
+            {
+                "initial_prompt": "Template intro",
+            },
+            startup_prompt="Persistent worker prompt",
+            final_prompt="Dispatch task body",
+        )
+
+        self.assertEqual(
+            prompts,
+            [
+                ("Persistent worker prompt", {}),
+                ("Template intro", {}),
+                ("Dispatch task body", {"background": True}),
+            ],
+        )

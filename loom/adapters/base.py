@@ -95,6 +95,17 @@ class AgentAdapter:
         """Remove persistent prompts installed by inject_persistent_prompt."""
         pass
 
+    def startup_prompt_from_persistent_prompt(self, text: str) -> str:
+        """Return a startup message that preserves old prompt semantics.
+
+        Most adapters deliver persistent prompts out-of-band (for example via
+        provider-specific instructions files), so they should return ``""``.
+        Adapters that historically exposed the persistent prompt as the first
+        conversation turn can override this to keep launch behavior stable.
+        """
+        del text
+        return ""
+
     def resolve_model_flags(self, model: str) -> str:
         """Return provider-specific CLI flags for the selected model."""
         if not model:

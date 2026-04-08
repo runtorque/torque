@@ -437,7 +437,7 @@ def _emit_task_health_alerts(state, event_bus: EventBus,
     pending_by_source: dict[str, object] = {}
     for tid in changed_task_ids:
         task = state.board_tasks.get(tid)
-        if not task or task.lane == "Done":
+        if not task or task.lane in {"Done", "Archived"}:
             continue
         new_state = getattr(task, "health_state", "healthy") or "healthy"
         if new_state not in {

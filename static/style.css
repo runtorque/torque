@@ -2161,6 +2161,385 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 /* ------------------------------------------------------------------ */
 .panel-hidden { display: none !important; }
 
+/* Shared context panel */
+.context-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.context-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.context-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.context-subtitle {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.context-header-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.context-focus-row,
+.context-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 12px 0;
+}
+.context-focus-btn,
+.context-filter-select,
+.context-search-input,
+.context-field-input,
+.context-field-select,
+.context-field-textarea {
+  font: inherit;
+}
+.context-focus-btn {
+  font-size: 9px;
+  line-height: 18px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-cell);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.context-focus-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.context-focus-btn.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-cell));
+}
+.context-focus-btn.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.context-search-input,
+.context-filter-select,
+.context-field-input,
+.context-field-select,
+.context-field-textarea {
+  color: var(--text);
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.context-search-input {
+  min-width: 240px;
+  flex: 1 1 240px;
+  padding: 6px 9px;
+}
+.context-filter-select,
+.context-field-select,
+.context-field-input {
+  padding: 6px 9px;
+}
+.context-search-input:focus,
+.context-filter-select:focus,
+.context-field-input:focus,
+.context-field-select:focus,
+.context-field-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.context-summary {
+  padding: 8px 12px 10px;
+  font-size: 10px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+.context-browser {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.95fr) minmax(320px, 1.25fr);
+  gap: 0;
+}
+.context-list,
+.context-detail {
+  min-height: 0;
+  overflow: auto;
+}
+.context-list {
+  padding: 10px 12px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.context-detail {
+  padding: 10px 12px;
+}
+.context-empty,
+.context-detail-empty {
+  padding: 16px;
+  color: var(--text-dim);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-cell) 80%, transparent);
+}
+.context-card,
+.context-detail-card,
+.context-editor {
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.context-card {
+  padding: 10px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.context-card:hover { background: var(--bg-hover); }
+.context-card.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-cell));
+}
+.context-card.pinned {
+  box-shadow: inset 2px 0 0 0 var(--amber);
+}
+.context-card-head,
+.context-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.context-card-head {
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.context-detail-head {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.context-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.context-entry-type,
+.context-scope-pill,
+.context-pinned-pill,
+.context-link-chip {
+  font-size: 8px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.context-entry-type {
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+.context-entry-type-decision {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.context-entry-type-warning {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+}
+.context-entry-type-handoff {
+  color: #ff7b72;
+  background: rgba(255, 123, 114, 0.14);
+}
+.context-entry-type-finding {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+}
+.context-entry-type-note {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+.context-scope-pill,
+.context-link-chip {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 10%, transparent);
+}
+.context-pinned-pill {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+.context-pin-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.context-pin-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.context-pin-btn.pinned {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 45%, var(--border));
+}
+.context-entry-time {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.context-card-title,
+.context-detail-title {
+  font-weight: 650;
+  color: var(--text);
+  word-break: break-word;
+}
+.context-card-title {
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.context-detail-title {
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+.context-card-preview,
+.context-card-meta,
+.context-detail-meta,
+.context-field-note {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.context-card-preview {
+  color: var(--text);
+  line-height: 1.45;
+  margin-bottom: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.context-card-links {
+  margin-top: 7px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.context-detail-card,
+.context-editor {
+  padding: 14px;
+}
+.context-detail-content {
+  margin: 12px 0 14px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.context-detail-section-title,
+.context-field-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.context-detail-section-title {
+  margin: 14px 0 8px;
+}
+.context-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.context-field-label { margin: 12px 0 6px; }
+.context-field-textarea {
+  width: 100%;
+  min-height: 180px;
+  padding: 10px;
+  resize: vertical;
+}
+.context-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text);
+  margin-top: 10px;
+}
+.context-check.compact {
+  margin-top: 0;
+  padding-left: 2px;
+}
+.context-link-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.context-link-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+}
+.context-link-row:hover {
+  border-color: var(--text-dim);
+}
+.context-link-kind {
+  flex: 0 0 auto;
+  font-size: 8px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.context-link-name {
+  min-width: 0;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.context-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+@media (max-width: 900px) {
+  .context-browser {
+    grid-template-columns: 1fr;
+  }
+  .context-list {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    max-height: 42%;
+  }
+  .context-editor-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Actions panel                                                       */
 /* ------------------------------------------------------------------ */

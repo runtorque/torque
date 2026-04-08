@@ -134,6 +134,13 @@ function connect() {
       if (typeof tplReceivePipelines !== 'undefined') tplReceivePipelines(msg);
     } else if (msg.type === 'global_settings') {
       _showGlobalSettingsModal(msg);
+    } else if (msg.type === 'memory_entries') {
+      if (typeof handleContextEntries === 'function') handleContextEntries(msg);
+    } else if (msg.type === 'memory_entry') {
+      if (typeof handleContextEntry === 'function') handleContextEntry(msg);
+    } else if (msg.type === 'error') {
+      if (typeof handleContextError === 'function') handleContextError(msg);
+      else if (typeof _showToast === 'function' && msg.message) _showToast(msg.message, 'error');
     } else if (msg.type === 'events_page') {
       if (typeof handleEventsPage === 'function') handleEventsPage(msg);
     } else if (msg.type === 'agent_history_list') {
@@ -218,6 +225,7 @@ function _blankSurfaceInvalidations() {
   return {
     main: false,
     board: false,
+    context: false,
     events: false,
     weaver: false,
     templates: false,
@@ -237,7 +245,7 @@ function _deltaSurfaceInvalidations(ops) {
     switch (op.op) {
       case 'agent_upsert':
       case 'agent_remove':
-        _markSurface(flags, 'main', 'events', 'weaver');
+        _markSurface(flags, 'main', 'context', 'events', 'weaver');
         break;
       case 'group_update':
       case 'group_remove':
@@ -246,11 +254,11 @@ function _deltaSurfaceInvalidations(ops) {
       case 'group_settings_update':
       case 'focus_update':
       case 'global_settings_update':
-        _markSurface(flags, 'main', 'weaver');
+        _markSurface(flags, 'main', 'context', 'weaver');
         break;
       case 'task_upsert':
       case 'task_remove':
-        _markSurface(flags, 'main', 'board', 'events', 'weaver');
+        _markSurface(flags, 'main', 'board', 'context', 'events', 'weaver');
         break;
       case 'lanes_update':
       case 'schedule_upsert':

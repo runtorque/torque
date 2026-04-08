@@ -28,6 +28,7 @@ STALLED_AFTER_SECS = 20 * 60
 THRASH_WINDOW_SECS = 30 * 60
 THRASH_MIN_MESSAGES = 6
 THRASH_MIN_TRANSITIONS = 3
+ARCHIVED_LANE = "Archived"
 
 _PROGRESS_ACTIONS = {"progress", "derive", "ask"}
 _BLOCKED_ACTIONS = {"blocked", "error"}
@@ -70,7 +71,7 @@ def compute_task_health(tasks_by_id: dict[str, Any], agents_by_id: dict[str, Any
             task,
             locals_by_id[task.id],
             [_compute_effective(child) for child in children_by_id.get(task.id, [])
-             if getattr(child, "lane", "") != "Done"],
+             if getattr(child, "lane", "") not in {"Done", ARCHIVED_LANE}],
             tasks_by_id,
         )
         effective[task.id] = snapshot
@@ -113,11 +114,11 @@ def _roll_up_health(task: Any, local: TaskHealthSnapshot,
 def _compute_local_health(task: Any, tasks_by_id: dict[str, Any],
                           agents_by_id: dict[str, Any],
                           now_ts: float) -> TaskHealthSnapshot:
-    if getattr(task, "lane", "") == "Done":
+    if _task_counts_as_done(task) or getattr(task, "lane", "") == ARCHIVED_LANE:
         return TaskHealthSnapshot(
             state=HEALTH_HEALTHY,
             details={
-                "reasons": ["task_done"],
+                "reasons": ["task_done" if _task_counts_as_done(task) else "task_archived"],
                 "aggregate": False,
                 "source_task_id": task.id,
                 "last_activity_at": _iso_or_empty(
@@ -194,7 +195,7 @@ def _is_monitored_task(task: Any) -> bool:
 def _has_unmet_dependencies(task: Any, tasks_by_id: dict[str, Any]) -> bool:
     for dep_id in getattr(task, "depends_on", []) or []:
         dep = tasks_by_id.get(dep_id)
-        if dep and getattr(dep, "lane", "") != "Done":
+        if dep and not _task_counts_as_done(dep):
             return True
     return False
 
@@ -234,7 +235,7 @@ def _task_has_open_child(task: Any, tasks_by_id: dict[str, Any]) -> bool:
     for other in tasks_by_id.values():
         if getattr(other, "parent_task_id", "") != getattr(task, "id", ""):
             continue
-        if getattr(other, "lane", "") != "Done":
+        if getattr(other, "lane", "") not in {"Done", ARCHIVED_LANE}:
             return True
     return False
 
@@ -246,10 +247,17 @@ def _agent_has_other_open_work(agent_id: str, task_id: str,
             continue
         if getattr(other, "agent_id", "") != agent_id:
             continue
-        if getattr(other, "lane", "") in {"Done", "Backlog"}:
+        if getattr(other, "lane", "") in {"Done", "Backlog", ARCHIVED_LANE}:
             continue
         return True
     return False
+
+
+def _task_counts_as_done(task: Any) -> bool:
+    lane = getattr(task, "lane", "")
+    if lane == "Done":
+        return True
+    return lane == ARCHIVED_LANE and getattr(task, "archived_from_lane", "") == "Done"
 
 
 def _task_last_activity_ts(task: Any, agent: Any | None) -> float | None:

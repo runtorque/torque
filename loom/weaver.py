@@ -167,11 +167,6 @@ def build_weaver_system_prompt(group: str, weaver_settings=None,
     return "\n\n".join(parts) + "\n"
 
 
-def build_weaver_startup_digest(state, group: str, weaver=None) -> str:
-    """Build the initial zero-event digest sent to a fresh Weaver session."""
-    buffer = WeaverEventBuffer(state, bridge=None)
-    board_summary = buffer._board_summary(group)
-    return buffer._format_digest(group, [], board_summary, weaver)
 
 
 # ---------------------------------------------------------------------------

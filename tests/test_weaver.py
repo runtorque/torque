@@ -177,22 +177,12 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("health 1 stalled", summary)
         self.assertIn("Investigate stalled dispatch (stalled)", summary)
 
-    def test_build_startup_digest_uses_zero_event_digest_format(self):
-        state, group, weaver = self._make_state()
-        task = state.board_add_task(
-            "Review launch path",
-            group,
-            lane="Backlog",
-            id="task-1",
-        )
-        self.assertIsNotNone(task)
+    def test_build_weaver_system_prompt_contains_first_session_guidance(self):
+        text = self.weaver_mod.build_weaver_system_prompt("g")
 
-        text = self.weaver_mod.build_weaver_startup_digest(
-            state, group, weaver)
-
-        self.assertIn("── Loom Digest (0 events)", text)
-        self.assertIn("No new events since last digest.", text)
-        self.assertIn("Board: 1 Backlog", text)
+        self.assertIn("You are the Weaver", text)
+        self.assertIn("First session", text)
+        self.assertIn("call `weaver_ask`", text)
 
     async def test_idle_heartbeat_surfaces_stale_in_progress_attention(self):
         state, group, _ = self._make_state()

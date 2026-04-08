@@ -284,6 +284,14 @@ function createEventsHarness() {
   return { context, document };
 }
 
+function createContextHarness() {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/context.js');
+  return { context, document };
+}
+
 function createWeaverHarness() {
   const { sandbox, document } = createSandbox({
     _cachedProviders: [],
@@ -316,6 +324,7 @@ function createWsRenderHarness() {
   sandbox.renderCalls = {
     main: 0,
     board: 0,
+    context: 0,
     events: 0,
     weaver: 0,
     templates: 0,
@@ -328,6 +337,7 @@ function createWsRenderHarness() {
   runInContext(context, `
     render = function() { renderCalls.main++; };
     renderBoard = function() { renderCalls.board++; };
+    renderContextPanel = function() { renderCalls.context++; };
     renderEvents = function() { renderCalls.events++; };
     renderWeaverPanel = function() { renderCalls.weaver++; };
     renderAgentTemplatesPanel = function() { renderCalls.templates++; };
@@ -2972,6 +2982,123 @@ test('renderEvents restores focused search input value and caret across rerender
   assert.equal(input.value, 'stuck');
   assert.equal(input.selectionStart, 2);
   assert.equal(input.selectionEnd, 5);
+});
+
+test('context panel requests scoped memory and renders provenance details', () => {
+  const { context, document } = createContextHarness();
+  const panel = document.register('panel-context');
+  const list = new FakeElement('context-list');
+  panel.setQuerySelector('#context-list', list);
+
+  context.selectedAgentId = 'agent-1';
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Worker', group: 'alpha', cell_type: 'agent' },
+  };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      task: 'Ship the context browser',
+      group: 'alpha',
+      lane: 'In Progress',
+      agent_id: 'agent-1',
+      pipeline_root_id: 'root-1',
+    },
+    'root-1': {
+      id: 'root-1',
+      task: 'Release memory tools',
+      group: 'alpha',
+      lane: 'In Progress',
+    },
+  };
+  runInContext(context, `
+    _contextEntries = [{
+      id: 'mem-1',
+      title: 'Keep pinned entries visible',
+      content: 'Pin major decisions so orchestrators can see them first.',
+      entry_type: 'decision',
+      pinned: true,
+      scope_kind: 'task',
+      scope_ref: 'task-1',
+      source_kind: 'agent',
+      source_id: 'agent-1',
+      source_name: 'Worker',
+      created_at: 100,
+      updated_at: 120,
+      links: [
+        { target_kind: 'task', target_ref: 'task-1' },
+        { target_kind: 'agent', target_ref: 'agent-1' },
+      ],
+    }];
+    _contextSelectedId = 'mem-1';
+    _contextLastQueryKey = JSON.stringify(_contextBuildListQuery());
+  `);
+
+  context.renderContextPanel();
+
+  assert.match(panel.innerHTML, /Context/);
+  assert.match(panel.innerHTML, /Keep pinned entries visible/);
+  assert.match(panel.innerHTML, /Pinned/);
+  assert.match(panel.innerHTML, /Task: Ship the context browser/);
+  assert.match(panel.innerHTML, /Source: Worker/);
+  assert.match(panel.innerHTML, /agent-1/);
+  assert.match(panel.innerHTML, /task: Ship the context browser/);
+});
+
+test('context panel promotes the current task into a linked manual note', () => {
+  const { context, document } = createContextHarness();
+  document.register('panel-context');
+  context.selectedAgentId = 'agent-1';
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Worker', group: 'alpha', cell_type: 'agent' },
+  };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      task: 'Capture orchestration guidance',
+      description: 'Document the operating constraints for memory notes.',
+      group: 'alpha',
+      lane: 'In Progress',
+      agent_id: 'agent-1',
+      pipeline_root_id: 'root-1',
+    },
+  };
+
+  context.contextPromoteCurrentTask();
+  context.contextSaveEditor();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'memory_publish',
+    title: 'Capture orchestration guidance',
+    content: 'Document the operating constraints for memory notes.',
+    entry_type: 'note',
+    scope_kind: 'task',
+    scope_ref: 'task-1',
+    pinned: false,
+    source_kind: 'manual',
+    link_targets: [
+      { target_kind: 'task', target_ref: 'task-1' },
+      { target_kind: 'pipeline', target_ref: 'root-1' },
+      { target_kind: 'agent', target_ref: 'agent-1' },
+    ],
+  }]);
+});
+
+test('ws invalidation rerenders the context panel for task updates', () => {
+  const { context } = createWsRenderHarness();
+  runInContext(context, `_activePanelApp = 'context';`);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-1',
+      task: 'Sync memory',
+      group: 'alpha',
+      lane: 'In Progress',
+    }],
+  });
+
+  assert.equal(jsonValue(context, 'renderCalls.context'), 1);
 });
 
 test('renderWeaverPanel preserves focused reply draft across rerenders', () => {

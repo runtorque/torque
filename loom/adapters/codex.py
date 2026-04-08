@@ -258,6 +258,10 @@ class CodexAdapter(AgentAdapter):
         except Exception:
             pass
 
+    def startup_prompt_from_persistent_prompt(self, text: str) -> str:
+        """Codex historically saw Loom's persistent prompt as the first turn."""
+        return text or ""
+
     def resolve_model_flags(self, model: str) -> str:
         if not model:
             return ""

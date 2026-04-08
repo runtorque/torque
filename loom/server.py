@@ -86,6 +86,37 @@ def _build_self_dispatch_prompt(shared_context_block: str = "") -> str:
     return prompt
 
 
+def _startup_prompt_for_new_agent(*, agent_type: str = "",
+                                  persistent_prompt_text: str = "",
+                                  is_weaver: bool = False) -> str:
+    """Return the first interactive prompt for a newly created agent."""
+    if not persistent_prompt_text:
+        return ""
+    if is_weaver:
+        return persistent_prompt_text
+    adapter = get_adapter(agent_type) if agent_type else None
+    if not adapter:
+        return ""
+    return adapter.startup_prompt_from_persistent_prompt(
+        persistent_prompt_text
+    )
+
+
+def _new_agent_prompt_sequence(launch_cfg: dict, *,
+                               startup_prompt: str = "",
+                               final_prompt: str = "") -> list[tuple[str, dict]]:
+    """Return prompts to send to a brand-new agent in order."""
+    prompts = []
+    if startup_prompt:
+        prompts.append((startup_prompt, {}))
+    initial_prompt = launch_cfg.get("initial_prompt", "")
+    if initial_prompt:
+        prompts.append((initial_prompt, {}))
+    if final_prompt:
+        prompts.append((final_prompt, {"background": True}))
+    return prompts
+
+
 def _apply_verification_report(task, payload, actor_name, save_task,
                                *, root_task=None, timestamp=None):
     """Apply a verification checkpoint update to a task and optional root."""
@@ -2529,20 +2560,19 @@ async def main(connection: iterm2.Connection):
                     )
 
                     persistent_prompt_text = ""
-                    weaver_bootstrap_prompt = ""
                     # Weaver: build persistent prompt and skip worktree
                     if is_weaver:
-                        from .weaver import (
-                            build_weaver_startup_digest,
-                            build_weaver_system_prompt,
-                        )
+                        from .weaver import build_weaver_system_prompt
                         ws = state.get_weaver_settings(group)
                         action_sp = launch_cfg.get("system_prompt", "")
                         persistent_prompt_text = build_weaver_system_prompt(
                             group, ws, action_sp)
-                        weaver_bootstrap_prompt = build_weaver_startup_digest(
-                            state, group)
                         launch_cfg["worktree"] = False
+                    startup_prompt = _startup_prompt_for_new_agent(
+                        agent_type=launch_cfg.get("agent_type", ""),
+                        persistent_prompt_text=persistent_prompt_text,
+                        is_weaver=is_weaver,
+                    )
 
                     name = (data.get("name", "") or "").strip()
                     if not name:
@@ -2576,16 +2606,13 @@ async def main(connection: iterm2.Connection):
                                 await _create_child_terminals(
                                     group, cell,
                                     count=gs.auto_terminals)
-                        if launch_cfg.get("initial_prompt") \
-                                and cell.session_id:
-                            await _send_agent_prompt(
-                                cell, launch_cfg["initial_prompt"],
-                                background=True)
-                        elif is_weaver and weaver_bootstrap_prompt \
-                                and cell.session_id:
-                            await _send_agent_prompt(
-                                cell, weaver_bootstrap_prompt,
-                                background=True)
+                        if cell.session_id:
+                            for prompt_text, send_kwargs in \
+                                    _new_agent_prompt_sequence(
+                                        launch_cfg,
+                                        startup_prompt=startup_prompt):
+                                await _send_agent_prompt(
+                                    cell, prompt_text, **send_kwargs)
 
             elif cmd == "add_terminal":
                 group = data.get("group", "")
@@ -3880,10 +3907,17 @@ async def main(connection: iterm2.Connection):
                                 overrides=launch_overrides,
                             )
                             persistent_prompt_text = ""
+                            startup_prompt = ""
                             if launch_cfg.get("agent_type"):
                                 persistent_prompt_text = \
                                     _build_dispatch_persistent_prompt(
                                         launch_cfg.get("system_prompt", ""))
+                                startup_prompt = _startup_prompt_for_new_agent(
+                                    agent_type=launch_cfg.get(
+                                        "agent_type", ""),
+                                    persistent_prompt_text=
+                                    persistent_prompt_text,
+                                )
                             cell = await _create_agent_with_config(
                                 group, agent_name, launch_cfg,
                                 explicit_template=explicit_template,
@@ -4109,11 +4143,16 @@ async def main(connection: iterm2.Connection):
                                         await _send_agent_prompt(cell, final_prompt)
                                 elif data.get("create_agent") \
                                         and cell.session_id:
-                                    if launch_cfg.get("initial_prompt"):
+                                    for prompt_text, send_kwargs in \
+                                            _new_agent_prompt_sequence(
+                                                launch_cfg,
+                                                startup_prompt=
+                                                startup_prompt,
+                                                final_prompt=final_prompt):
                                         await _send_agent_prompt(
-                                            cell, launch_cfg["initial_prompt"])
-                                    await _send_agent_prompt(
-                                        cell, final_prompt, background=True)
+                                            cell,
+                                            prompt_text,
+                                            **send_kwargs)
 
             elif cmd == "resolve_ask":
                 # Resolve an ask task: send answer to parent's agent
@@ -5460,30 +5499,105 @@ async def main(connection: iterm2.Connection):
                         data.get("cell_id", ""),
                         data.get("task_id", ""),
                     )
+                    existing = None
+                    entry_id = (data.get("entry_id", "") or "").strip()
+                    if entry_id:
+                        existing = state.db.load_memory_entry(entry_id)
+                        if not existing:
+                            result = {
+                                "type": "error",
+                                "message": "Memory entry not found",
+                            }
                     try:
-                        scope_kind = data.get("scope_kind", "")
+                        if result is not None:
+                            raise RuntimeError("__skip_memory_publish__")
+                        scope_kind = (data.get("scope_kind", "") or "").strip()
+                        if not scope_kind and existing:
+                            scope_kind = existing.get("scope_kind", "")
                         scope_ref = _resolve_memory_scope_ref(
                             scope_kind,
-                            data.get("scope_ref", ""),
+                            data.get("scope_ref", "")
+                            if "scope_ref" in data
+                            else (existing.get("scope_ref", "") if existing else ""),
                         )
+                        entry_type = data.get("entry_type", "")
+                        if not entry_type and existing:
+                            entry_type = existing.get("entry_type", "")
+                        title = data.get("title", "")
+                        if "title" not in data and existing:
+                            title = existing.get("title", "")
+                        content = data.get("content", "")
+                        if "content" not in data and existing:
+                            content = existing.get("content", "")
+                        pinned = (
+                            bool(data.get("pinned", False))
+                            if "pinned" in data
+                            else bool(existing.get("pinned", False))
+                            if existing
+                            else False
+                        )
+                        source_kind = data.get("source_kind", "")
+                        if not source_kind and existing:
+                            source_kind = existing.get("source_kind", "agent")
+                        pending_links = []
+                        for raw_link in (data.get("link_targets", []) or []):
+                            if not isinstance(raw_link, dict):
+                                raise ValueError("Each link target must be an object")
+                            target_kind = normalize_link_target_kind(
+                                raw_link.get("target_kind", "")
+                            )
+                            pending_links.append(
+                                build_memory_link(
+                                    state,
+                                    entry_id=entry_id or "__pending__",
+                                    target_kind=target_kind,
+                                    target_ref=_resolve_memory_link_ref(
+                                        target_kind,
+                                        raw_link.get("target_ref", ""),
+                                        cell=cell,
+                                        task=task,
+                                    ),
+                                    cell=cell,
+                                    task=task,
+                                )
+                            )
                         entry = build_memory_entry(
                             state,
                             cell=cell,
                             task=task,
-                            entry_type=normalize_entry_type(
-                                data.get("entry_type", "")
-                            ),
-                            title=data.get("title", ""),
-                            content=data.get("content", ""),
+                            entry_type=normalize_entry_type(entry_type),
+                            title=title,
+                            content=content,
                             scope_kind=scope_kind,
                             scope_ref=scope_ref,
-                            pinned=bool(data.get("pinned", False)),
-                            source_kind=data.get("source_kind", "agent"),
+                            pinned=pinned,
+                            source_kind=source_kind or "agent",
                         )
+                    except RuntimeError as exc:
+                        if str(exc) != "__skip_memory_publish__":
+                            raise
                     except ValueError as exc:
                         result = {"type": "error", "message": str(exc)}
-                    else:
+                    elif result is None:
+                        if existing:
+                            entry["id"] = existing["id"]
+                            entry["created_at"] = existing.get(
+                                "created_at", entry["created_at"]
+                            )
+                            entry["source_kind"] = existing.get(
+                                "source_kind", entry["source_kind"]
+                            )
+                            entry["source_id"] = existing.get(
+                                "source_id", entry["source_id"]
+                            )
+                            entry["source_name"] = existing.get(
+                                "source_name", entry["source_name"]
+                            )
                         state.db.save_memory_entry(entry)
+                        for link in pending_links:
+                            link["entry_id"] = entry["id"]
+                            state.db.save_memory_link(link)
+                        entry = state.db.load_memory_entry(entry["id"]) or entry
                         result = {"type": "memory_entry", "entry": entry}
 
             elif cmd == "memory_pin":

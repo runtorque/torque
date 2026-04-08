@@ -171,6 +171,14 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 (Path(tmp) / ".codex" / "AGENTS.md").exists()
             )
 
+    def test_codex_persistent_prompt_bootstraps_startup_prompt(self):
+        adapter = CodexAdapter()
+
+        self.assertEqual(
+            adapter.startup_prompt_from_persistent_prompt("First prompt."),
+            "First prompt.",
+        )
+
     def test_codex_persistent_prompt_cleanup_removes_only_targeted_section(self):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = CodexAdapter()
