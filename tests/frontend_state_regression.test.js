@@ -255,6 +255,13 @@ function loadModalScripts(context) {
   ].forEach((file) => loadScript(context, file));
 }
 
+function loadBoardScripts(context) {
+  loadScript(context, 'static/js/board.js');
+  loadScript(context, 'static/js/board/view-state.js');
+  loadScript(context, 'static/js/board/card-rendering.js');
+  loadScript(context, 'static/js/board/card-actions.js');
+}
+
 function runInContext(context, code) {
   return vm.runInContext(code, context);
 }
@@ -267,7 +274,7 @@ function createBoardHarness(options = {}) {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
   const boot = [
     `_renderBoardSelectionBar = function() { return ''; };`,
     `_boardScheduleCount = function() { return 0; };`,
@@ -317,7 +324,7 @@ function createAgentHistoryHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
   loadScript(context, 'static/js/templates.js');
   runInContext(context, `
     _renderBoardSelectionBar = function() { return ''; };
@@ -1399,7 +1406,7 @@ test('renderBoard relies on the filter toolbar and lane tabs instead of a duplic
 test('_renderBoardCard hides redundant group chips and only shows execution badges on derived cards', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
 
   context.state.board_tasks = {
     root: {
@@ -1442,7 +1449,7 @@ test('_renderBoardCard hides redundant group chips and only shows execution badg
 test('_boardLaneEntryText and refresh delay track the current lane age', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
 
   assert.equal(
     runInContext(
@@ -1480,7 +1487,7 @@ test('_renderBoardCard shows the lane-entry timestamp badge in the card header',
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   context.Date.now = () => Date.parse('2026-04-07T12:05:00Z');
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
 
   context.state.board_tasks = {
     root: {
@@ -1510,7 +1517,7 @@ test('_boardTaskScheduleMeta distinguishes scheduled, due-soon, and overdue stat
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   context.Date.now = () => Date.parse('2026-04-07T12:00:00Z');
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
   context._schedFormatTime = (iso) => ({
     '2026-04-10T09:30:00Z': 'Apr 10 09:30',
     '2026-04-08T08:00:00Z': 'Apr 8 08:00',
@@ -1562,7 +1569,7 @@ test('_renderBoardCard shows overdue and due-soon chips with distinct classes', 
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   context.Date.now = () => Date.parse('2026-04-07T12:00:00Z');
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
   context._schedFormatTime = (iso) => ({
     '2026-04-08T08:00:00Z': 'Apr 8 08:00',
     '2026-04-07T09:00:00Z': 'Apr 7 09:00',
@@ -1597,7 +1604,7 @@ test('_boardTaskDispatchEligibility maps dispatch states onto compact card badge
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   context.Date.now = () => Date.parse('2026-04-07T12:00:00Z');
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
   context._schedFormatTime = (iso) => ({
     '2026-04-08T12:00:00Z': 'Apr 8 12:00',
   }[iso] || iso);
@@ -1731,7 +1738,7 @@ test('renderBoard requests action and template refs for dispatch eligibility bad
 test('_renderBoardCard shows dispatch eligibility badges for ready and missing refs states', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
   runInContext(context, `
     _boardEligibilityActionsByGroup.alpha = [{ name: 'feature/impl' }];
     _boardEligibilityTemplatesByGroup.alpha = [{ name: 'worker' }];
@@ -1767,7 +1774,7 @@ test('_renderBoardCard shows dispatch eligibility badges for ready and missing r
 test('_boardTaskDependencyBadges exposes blocked and blocking counts compactly', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
 
   context.state.board_tasks = {
     depA: { id: 'depA', task: 'API contract', lane: 'To Do', group: 'alpha' },
@@ -1819,7 +1826,7 @@ test('_boardTaskDependencyBadges exposes blocked and blocking counts compactly',
 test('_renderBoardCard shows inline dependency badges instead of the old generic deps pill', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
 
   context.state.board_tasks = {
     dep: { id: 'dep', task: 'API contract', lane: 'To Do', group: 'alpha' },
@@ -1857,7 +1864,7 @@ test('boardCardMenu exposes jump actions for blockers and dependents', () => {
   const { sandbox, document } = createSandbox();
   sandbox.window.innerWidth = 1200;
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
 
   context.state.board_lanes = ['Backlog', 'In Progress', 'Done'];
   context.state.board_tasks = {
@@ -1896,7 +1903,7 @@ test('boardCardMenu exposes jump actions for blockers and dependents', () => {
 test('renderBoardCard shows verification badges and preview text', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
 
   context.state.board_tasks = {
     root: {
@@ -1933,7 +1940,7 @@ test('renderBoardCard shows branch boundary review notes', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
 
   context.state.board_tasks = {
     boundary: {
@@ -1981,7 +1988,7 @@ test('renderBoardCard shows branch boundary review notes', () => {
 test('renderBoardCard does not render overlap badges or preview text', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
 
   context.state.dispatch_overlap = {
     root: {
@@ -2436,7 +2443,7 @@ test('boardQuickAddLabel and boardQuickRemoveLabel preserve unrelated labels', (
 test('_renderBoardCard includes compact quick-edit controls for focused root cards', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
 
   context.state.agents = {
     'agent-1': { id: 'agent-1', name: 'worker', group: 'alpha', cell_type: 'agent' },
@@ -2658,7 +2665,7 @@ test('boardBulkRestoreSelected restores archived tasks and descendants', () => {
 test('_renderBoardSelectionBar explains mixed-group limits when batch edit is open', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
   context.state.board_tasks = {
     'task-1': { id: 'task-1', group: 'alpha', task: 'Ship release', lane: 'Backlog', position: 1 },
     'task-2': { id: 'task-2', group: 'beta', task: 'Write docs', lane: 'Backlog', position: 0 },
@@ -2677,7 +2684,7 @@ test('_renderBoardSelectionBar explains mixed-group limits when batch edit is op
 test('_renderBoardSelectionBar shows archive and restore actions for eligible selections', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/board.js');
+  loadBoardScripts(context);
   context.state.board_tasks = {
     done: {
       id: 'done',
