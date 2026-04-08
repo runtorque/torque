@@ -89,7 +89,10 @@ function renderWeaverPanel() {
 }
 
 function weaverTogglePause() {
-  var group = _weaverCurrentGroup();
+  weaverTogglePauseForGroup(_weaverCurrentGroup());
+}
+
+function weaverTogglePauseForGroup(group) {
   if (!group) return;
   var ws = _weaverGetSettings(group);
   var cmd = (ws && ws.paused) ? 'weaver_resume' : 'weaver_pause';

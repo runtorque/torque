@@ -89,6 +89,22 @@ test('weaverDismissNote clears the non-blocking banner without resuming', () => 
   ]);
 });
 
+test('weaverTogglePauseForGroup reuses the normal pause and resume commands', () => {
+  const sandbox = createSandbox();
+  sandbox.state.weaver_settings.alpha = { paused: false };
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+
+  vm.runInContext(`weaverTogglePauseForGroup('alpha')`, context);
+  sandbox.state.weaver_settings.alpha.paused = true;
+  vm.runInContext(`weaverTogglePauseForGroup('alpha')`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'weaver_pause', group: 'alpha' },
+    { cmd: 'weaver_resume', group: 'alpha' },
+  ]);
+});
+
 test('renderWeaverPanel uses the focused group in multi-project workspaces', () => {
   const sandbox = createSandbox();
   sandbox.document.getElementById = function(id) {
