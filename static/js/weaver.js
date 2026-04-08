@@ -404,121 +404,34 @@ function _weaverVerificationSummary(group) {
 
 function _weaverRenderSettings(group, ws, weaver) {
   var html = '';
+  if (!group) {
+    return '<div class="weaver-empty">Create a group first.</div>';
+  }
 
-  // Agent section
   html += '<div class="weaver-section">';
-  html += '<div class="weaver-section-title">Agent</div>';
+  html += '<div class="weaver-section-title">Settings moved</div>';
+  html += '<div class="weaver-empty-inline">Weaver configuration now lives in Group Settings → Weaver.</div>';
+  html += '<button class="weaver-create-btn" onclick="weaverOpenSettings()">Open Group Settings</button>';
+  html += '</div>';
+
+  html += '<div class="weaver-section">';
+  html += '<div class="weaver-section-title">Current configuration</div>';
   if (weaver) {
     html += '<div class="weaver-agent-row">';
     html += '<span class="weaver-agent-name">' + _esc(weaver.name) + '</span>';
     html += '<span class="weaver-agent-status status-' + (weaver.status || 'stopped') + '">'
          + _esc(weaver.status || 'stopped') + '</span>';
     html += '</div>';
-  } else if (group) {
-    html += '<div class="weaver-create-row">';
-    html += '<span class="weaver-empty-inline">No weaver agent.</span>';
-    html += '<button class="weaver-create-btn" onclick="weaverCreate()">'
-         + '+ Create Weaver</button>';
-    html += '</div>';
   } else {
-    html += '<div class="weaver-empty">Create a group first.</div>';
+    html += '<div class="weaver-empty-inline">No weaver agent configured for this group.</div>';
   }
+  html += '<div class="weaver-field"><label>Provider override</label><div class="weaver-field-note">'
+       + _esc((ws && ws.weaver_provider) || 'Group default') + '</div></div>';
+  html += '<div class="weaver-field"><label>Command override</label><div class="weaver-field-note">'
+       + _esc((ws && ws.weaver_boot_command) || 'Use provider default') + '</div></div>';
+  html += '<div class="weaver-field"><label>Custom instructions</label><div class="weaver-field-note">'
+       + _esc((ws && ws.custom_instructions) || 'None') + '</div></div>';
   html += '</div>';
-
-  // Backend section
-  html += '<div class="weaver-section">';
-  html += '<div class="weaver-section-title">Backend</div>';
-  var wprov = (ws && ws.weaver_provider) || '';
-  html += '<div class="weaver-field"><label>Provider</label>';
-  html += '<select onchange="weaverUpdateSetting(\'weaver_provider\', this.value)">';
-  html += '<option value=""' + (wprov === '' ? ' selected' : '') + '>Group default</option>';
-  for (var i = 0; i < _cachedProviders.length; i++) {
-    var p = _cachedProviders[i];
-    var sel = wprov === p.name ? ' selected' : '';
-    html += '<option value="' + _esc(p.name) + '"' + sel + '>' + _esc(p.display_name) + '</option>';
-  }
-  html += '</select></div>';
-  var wbootcmd = (ws && ws.weaver_boot_command) || '';
-  html += '<div class="weaver-field"><label>Command override</label>';
-  html += '<input type="text" value="' + _esc(wbootcmd) + '" '
-       + 'placeholder="Use provider default" '
-       + 'onchange="weaverUpdateSetting(\'weaver_boot_command\', this.value.trim())">';
-  html += '</div>';
-  html += '</div>';
-
-  // Custom Instructions section
-  html += '<div class="weaver-section">';
-  html += '<div class="weaver-section-title">Custom Instructions</div>';
-  var ci = _weaverCustomInstrDirty
-    ? _weaverCustomInstrDraft
-    : (ws ? ws.custom_instructions || '' : '');
-  html += '<textarea class="weaver-instructions" '
-       + 'placeholder="Instructions appended to the weaver system prompt..." '
-       + 'oninput="weaverInstrInput(this)">' + _esc(ci) + '</textarea>';
-  if (_weaverCustomInstrDirty) {
-    html += '<button class="weaver-save-btn" onclick="weaverSaveInstructions()">Save</button>';
-  }
-  html += '</div>';
-
-  // Notifications section
-  html += '<div class="weaver-section">';
-  html += '<div class="weaver-section-title">Notifications</div>';
-
-  var pushInt = (ws && ws.push_interval) || 60;
-  var maxInt = (ws && ws.max_interval) || 300;
-  var heartbeatInt = ws && typeof ws.heartbeat_interval === 'number'
-    ? ws.heartbeat_interval
-    : maxInt;
-  html += '<div class="weaver-field"><label>Push interval</label>';
-  html += '<select onchange="weaverUpdateSetting(\'push_interval\', +this.value)">';
-  [10, 30, 60, 120, 300].forEach(function(v) {
-    var sel = v === pushInt ? ' selected' : '';
-    html += '<option value="' + v + '"' + sel + '>' + v + 's</option>';
-  });
-  html += '</select></div>';
-
-  html += '<div class="weaver-field"><label>Max interval</label>';
-  html += '<select onchange="weaverUpdateSetting(\'max_interval\', +this.value)">';
-  [60, 120, 300, 600].forEach(function(v) {
-    var sel = v === maxInt ? ' selected' : '';
-    html += '<option value="' + v + '"' + sel + '>' + v + 's</option>';
-  });
-  html += '</select></div>';
-
-  html += '<div class="weaver-field"><label>Idle heartbeat</label>';
-  html += '<div class="weaver-field-note">Send idle heartbeat if no digest was sent for:</div>';
-  html += '<select onchange="weaverUpdateSetting(\'heartbeat_interval\', +this.value)">';
-  [[0, 'Off'], [60, '1 min'], [120, '2 min'], [300, '5 min'], [600, '10 min']].forEach(function(opt) {
-    var v = opt[0];
-    var label = opt[1];
-    var sel = v === heartbeatInt ? ' selected' : '';
-    html += '<option value="' + v + '"' + sel + '>' + label + '</option>';
-  });
-  html += '</select></div>';
-
-  // Event checkboxes
-  var mandatory = ['task_completed', 'agent_error', 'agent_reply',
-                   'agent_blocked', 'ask_created'];
-  var optional = ['agent_started', 'task_dispatched', 'task_derived',
-                  'agent_progress', 'task_health_alert'];
-  var enabled = (ws && ws.enabled_events) || [];
-
-  html += '<div class="weaver-events-list">';
-  mandatory.forEach(function(evt) {
-    html += '<label class="weaver-event-check mandatory">'
-         + '<input type="checkbox" checked disabled>'
-         + '<span>' + evt + ' (mandatory)</span></label>';
-  });
-  optional.forEach(function(evt) {
-    var checked = enabled.indexOf(evt) >= 0 ? ' checked' : '';
-    html += '<label class="weaver-event-check">'
-         + '<input type="checkbox"' + checked
-         + ' onchange="weaverToggleEvent(\'' + evt + '\', this.checked)">'
-         + '<span>' + evt + '</span></label>';
-  });
-  html += '</div>';
-  html += '</div>';
-
   return html;
 }
 
@@ -570,6 +483,12 @@ function weaverDismissNote() {
   var group = _weaverCurrentGroup();
   if (!group) return;
   send({ cmd: 'weaver_dismiss_note', group: group });
+}
+
+function weaverOpenSettings() {
+  var group = _weaverCurrentGroup();
+  if (!group || typeof openGroupSettings !== 'function') return;
+  openGroupSettings(group, 'weaver');
 }
 
 // -- Create weaver ---------------------------------------------------------

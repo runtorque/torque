@@ -152,7 +152,7 @@
     <div class="gs-tabs">
       <button class="gs-tab active" data-tab="group" onclick="switchGsTab('group')">Group</button>
       <button class="gs-tab" data-tab="agents" onclick="switchGsTab('agents')">Agents</button>
-      <button class="gs-tab" data-tab="terminals" onclick="switchGsTab('terminals')">Terminals</button>
+      <button class="gs-tab" data-tab="weaver" onclick="switchGsTab('weaver')">Weaver</button>
     </div>
 
     <!-- Group tab -->
@@ -192,6 +192,7 @@
     <div class="gs-pane" data-pane="agents">
       <div class="gs-subtabs">
         <button class="gs-subtab active" data-subtab="agent-general" onclick="switchGsSubTab('agents',this)">General</button>
+        <button class="gs-subtab" data-subtab="agent-terminals" onclick="switchGsSubTab('agents',this)">Terminals</button>
         <button class="gs-subtab" data-subtab="agent-worktree" onclick="switchGsSubTab('agents',this)">Worktree</button>
         <button class="gs-subtab" data-subtab="agent-notifications" onclick="switchGsSubTab('agents',this)">Notifications</button>
       </div>
@@ -236,6 +237,43 @@
         <label class="gs-checkbox">
           <input id="gs-dispatch-auto-terminals" type="checkbox"> Create terminals on dispatch
           <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Auto-create child terminals when dispatching a task. By default, dispatched agents launch without terminals.">?</span>
+        </label>
+      </div>
+
+      <!-- Terminals sub-tab -->
+      <div class="gs-subpane" data-subpane="agent-terminals">
+        <label>Name prefix</label>
+        <input id="gs-terminal-prefix" placeholder="e.g. Shell" autocomplete="off">
+        <label>Boot command</label>
+        <input id="gs-terminal-boot-cmd" placeholder="e.g. npm run dev" autocomplete="off">
+        <label>Arguments</label>
+        <input id="gs-terminal-cmd-args" placeholder="e.g. --watch" autocomplete="off">
+        <label>Init script</label>
+        <input id="gs-terminal-init-script" placeholder="/path/to/script.sh" autocomplete="off">
+        <label>Directory</label>
+        <input id="gs-terminal-directory" placeholder="Same as group" autocomplete="off">
+        <label>Profile</label>
+        <select id="gs-terminal-profile"></select>
+        <label>Shell</label>
+        <select id="gs-terminal-shell">
+          <option value="">Same as group</option>
+          <option value="zsh">zsh</option>
+          <option value="bash">bash</option>
+          <option value="fish">fish</option>
+        </select>
+        <label>Tab color</label>
+        <div class="color-swatches" id="gs-terminal-color-swatches"></div>
+        <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
+        <textarea id="gs-terminal-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+        <label>Env file</label>
+        <input id="gs-terminal-env-file" placeholder="Inherits from group" autocomplete="off">
+        <label class="gs-checkbox">
+          <input id="gs-terminal-always-custom" type="checkbox"> Always open custom dialog
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating a terminal with default settings.">?</span>
+        </label>
+        <label class="gs-checkbox">
+          <input id="gs-terminal-close-on-disconnect" type="checkbox"> Close on disconnect
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically remove the terminal from Loom when its iTerm2 tab is closed.">?</span>
         </label>
       </div>
 
@@ -302,41 +340,77 @@
       </div>
     </div>
 
-    <!-- Terminals tab -->
-    <div class="gs-pane" data-pane="terminals">
-      <label>Name prefix</label>
-      <input id="gs-terminal-prefix" placeholder="e.g. Shell" autocomplete="off">
-      <label>Boot command</label>
-      <input id="gs-terminal-boot-cmd" placeholder="e.g. npm run dev" autocomplete="off">
-      <label>Arguments</label>
-      <input id="gs-terminal-cmd-args" placeholder="e.g. --watch" autocomplete="off">
-      <label>Init script</label>
-      <input id="gs-terminal-init-script" placeholder="/path/to/script.sh" autocomplete="off">
-      <label>Directory</label>
-      <input id="gs-terminal-directory" placeholder="Same as group" autocomplete="off">
-      <label>Profile</label>
-      <select id="gs-terminal-profile"></select>
-      <label>Shell</label>
-      <select id="gs-terminal-shell">
-        <option value="">Same as group</option>
-        <option value="zsh">zsh</option>
-        <option value="bash">bash</option>
-        <option value="fish">fish</option>
-      </select>
-      <label>Tab color</label>
-      <div class="color-swatches" id="gs-terminal-color-swatches"></div>
-      <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
-      <textarea id="gs-terminal-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
-      <label>Env file</label>
-      <input id="gs-terminal-env-file" placeholder="Inherits from group" autocomplete="off">
-      <label class="gs-checkbox">
-        <input id="gs-terminal-always-custom" type="checkbox"> Always open custom dialog
-        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Show the full creation dialog when clicking New, instead of instantly creating a terminal with default settings.">?</span>
-      </label>
-      <label class="gs-checkbox">
-        <input id="gs-terminal-close-on-disconnect" type="checkbox"> Close on disconnect
-        <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Automatically remove the terminal from Loom when its iTerm2 tab is closed.">?</span>
-      </label>
+    <!-- Weaver tab -->
+    <div class="gs-pane" data-pane="weaver">
+      <div class="task-modal-section">
+        <div class="task-modal-section-body">
+          <label>Agent</label>
+          <div id="gs-weaver-agent-summary" class="gs-inline-card">
+            <div class="gs-inline-card-main">
+              <div id="gs-weaver-agent-name">No weaver agent</div>
+              <div id="gs-weaver-agent-meta" class="label-hint">Create a Weaver for this group to enable orchestration.</div>
+            </div>
+            <button class="btn btn-sm" id="gs-weaver-create-btn" onclick="gsCreateWeaver()">+ Create Weaver</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="task-modal-section">
+        <div class="task-modal-section-body">
+          <label>Provider</label>
+          <select id="gs-weaver-provider"></select>
+          <label>Command override</label>
+          <input id="gs-weaver-boot-cmd" placeholder="Use provider default" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="task-modal-section">
+        <div class="task-modal-section-body">
+          <label>Custom Instructions</label>
+          <textarea id="gs-weaver-custom-instructions" rows="5" placeholder="Instructions appended to the weaver system prompt..."></textarea>
+        </div>
+      </div>
+
+      <div class="task-modal-section">
+        <div class="task-modal-section-body">
+          <label>Push interval</label>
+          <select id="gs-weaver-push-interval">
+            <option value="10">10s</option>
+            <option value="30">30s</option>
+            <option value="60">60s</option>
+            <option value="120">120s</option>
+            <option value="300">300s</option>
+          </select>
+          <label>Max interval</label>
+          <select id="gs-weaver-max-interval">
+            <option value="60">60s</option>
+            <option value="120">120s</option>
+            <option value="300">300s</option>
+            <option value="600">600s</option>
+          </select>
+          <label>Idle heartbeat</label>
+          <select id="gs-weaver-heartbeat-interval">
+            <option value="0">Off</option>
+            <option value="60">1 min</option>
+            <option value="120">2 min</option>
+            <option value="300">5 min</option>
+            <option value="600">10 min</option>
+          </select>
+          <label>Events</label>
+          <div class="task-modal-check-grid">
+            <label class="gs-checkbox"><input type="checkbox" checked disabled> task_completed <span class="label-hint">(mandatory)</span></label>
+            <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_error <span class="label-hint">(mandatory)</span></label>
+            <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_reply <span class="label-hint">(mandatory)</span></label>
+            <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_blocked <span class="label-hint">(mandatory)</span></label>
+            <label class="gs-checkbox"><input type="checkbox" checked disabled> ask_created <span class="label-hint">(mandatory)</span></label>
+            <label class="gs-checkbox"><input id="gs-weaver-event-agent-started" type="checkbox"> agent_started</label>
+            <label class="gs-checkbox"><input id="gs-weaver-event-task-dispatched" type="checkbox"> task_dispatched</label>
+            <label class="gs-checkbox"><input id="gs-weaver-event-task-derived" type="checkbox"> task_derived</label>
+            <label class="gs-checkbox"><input id="gs-weaver-event-agent-progress" type="checkbox"> agent_progress</label>
+            <label class="gs-checkbox"><input id="gs-weaver-event-task-health-alert" type="checkbox"> task_health_alert</label>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="modal-actions">

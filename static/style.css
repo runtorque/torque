@@ -771,6 +771,19 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
   margin-top: 8px !important; cursor: pointer;
 }
 .gs-checkbox input[type="checkbox"] { width: auto; margin: 0; }
+.gs-inline-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+  padding: 10px;
+}
+.gs-inline-card-main {
+  min-width: 0;
+}
 .hint-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 14px; height: 14px; border-radius: 50%;

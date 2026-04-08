@@ -1278,6 +1278,7 @@ async def main(connection: iterm2.Connection):
                 "type": "group_settings",
                 "group": group,
                 "settings": asdict(gs),
+                "weaver_settings": asdict(state.get_weaver_settings(group)),
                 "resolved_agent_defaults": template_mgr.resolve_agent_config(
                     "", gs, {}, base_dir=base_dir),
                 "profiles": pnames,
