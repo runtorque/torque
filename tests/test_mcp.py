@@ -304,7 +304,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_create_mcp_handler_lists_tools_and_enforces_agent_header(self):
+    async def test_create_mcp_handler_hides_weaver_tools_from_regular_agents(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(
             id="weaver-1",
@@ -312,8 +312,15 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             cell_type="agent",
         )
+        worker = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
         state.agents[weaver.id] = weaver
-        state.groups["g"] = [weaver.id]
+        state.agents[worker.id] = worker
+        state.groups["g"] = [weaver.id, worker.id]
         state.group_settings["g"] = self.state_mod.GroupSettings(
             weaver_agent_id=weaver.id
         )
@@ -327,18 +334,45 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         handler = self.mcp_mod.create_mcp_handler(fake_handle_command, state)
 
-        listed = await handler(
+        listed_missing_header = await handler(
             FakeRequest({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         )
-        tool_names = [tool["name"] for tool in listed.payload["result"]["tools"]]
+        tool_names = [
+            tool["name"]
+            for tool in listed_missing_header.payload["result"]["tools"]
+        ]
         self.assertIn("loom_progress", tool_names)
         self.assertIn("loom_verify", tool_names)
         self.assertIn("loom_task_upload_artifact", tool_names)
         self.assertIn("loom_memory_publish", tool_names)
         self.assertIn("loom_memory_read", tool_names)
         self.assertIn("loom_memory_link", tool_names)
-        self.assertIn("weaver_board_summary", tool_names)
-        self.assertIn("weaver_task_verify", tool_names)
+        self.assertNotIn("weaver_board_summary", tool_names)
+        self.assertNotIn("weaver_task_verify", tool_names)
+
+        listed_worker = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 11, "method": "tools/list"},
+                headers={"X-Loom-Cell-Id": worker.id},
+            )
+        )
+        worker_tool_names = [
+            tool["name"] for tool in listed_worker.payload["result"]["tools"]
+        ]
+        self.assertIn("loom_progress", worker_tool_names)
+        self.assertNotIn("weaver_board_summary", worker_tool_names)
+
+        listed_weaver = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 12, "method": "tools/list"},
+                headers={"X-Loom-Cell-Id": weaver.id},
+            )
+        )
+        weaver_tool_names = [
+            tool["name"] for tool in listed_weaver.payload["result"]["tools"]
+        ]
+        self.assertIn("weaver_board_summary", weaver_tool_names)
+        self.assertIn("weaver_task_verify", weaver_tool_names)
 
         missing_header = await handler(
             FakeRequest(
@@ -356,7 +390,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             missing_header.payload["result"]["content"][0]["text"],
         )
 
-        summary = await handler(
+        denied_summary = await handler(
             FakeRequest(
                 {
                     "jsonrpc": "2.0",
@@ -364,6 +398,40 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "method": "tools/call",
                     "params": {"name": "weaver_board_summary", "arguments": {}},
                 }
+            )
+        )
+        self.assertTrue(denied_summary.payload["result"]["isError"])
+        self.assertIn(
+            "X-Loom-Cell-Id header is required",
+            denied_summary.payload["result"]["content"][0]["text"],
+        )
+
+        denied_worker_summary = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {"name": "weaver_board_summary", "arguments": {}},
+                },
+                headers={"X-Loom-Cell-Id": worker.id},
+            )
+        )
+        self.assertTrue(denied_worker_summary.payload["result"]["isError"])
+        self.assertIn(
+            "only available to the designated Weaver agent",
+            denied_worker_summary.payload["result"]["content"][0]["text"],
+        )
+
+        summary = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "tools/call",
+                    "params": {"name": "weaver_board_summary", "arguments": {}},
+                },
+                headers={"X-Loom-Cell-Id": weaver.id},
             )
         )
         self.assertFalse(summary.payload["result"]["isError"])

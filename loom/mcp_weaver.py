@@ -1,8 +1,8 @@
 """Weaver MCP tools — board-wide project management for orchestrator agents.
 
 Weaver tools operate across the entire task board, not scoped to a single
-agent's task.  They don't require ``X-Loom-Cell-Id`` (though they accept
-it for audit logging).
+agent's task. They are only available to the designated Weaver agent for
+the caller's group, as determined from ``X-Loom-Cell-Id``.
 
 Tools are served from the same ``/mcp`` endpoint as agent tools — the
 ``weaver_`` prefix provides namespace separation.
@@ -30,27 +30,39 @@ from .task_health import HEALTH_SEVERITY
 # Tool dispatch
 # ---------------------------------------------------------------------------
 
+def _authorize_weaver_cell(state, cell_id: str):
+    """Return ``(cell, group, error_text)`` for an authorized Weaver caller."""
+    if not cell_id:
+        return None, "", (
+            "X-Loom-Cell-Id header is required — weaver tools only work "
+            "inside the designated Weaver agent session"
+        )
+    cell = state.agents.get(cell_id)
+    if not cell or cell.cell_type != "agent":
+        return None, "", f"Agent {cell_id} not found"
+    group = cell.group or ""
+    if not group:
+        return None, "", "Caller is not assigned to a group"
+    weaver_id = state.get_group_settings(group).weaver_agent_id or ""
+    if not weaver_id:
+        return None, "", f"No weaver configured for group {group}"
+    if cell.id != weaver_id:
+        return None, "", (
+            "Weaver tools are only available to the designated Weaver "
+            f"agent for group {group}"
+        )
+    return cell, group, ""
+
+
 async def _dispatch_weaver_tool(name, args, handle_command, state,
                                 cell_id=""):
     """Execute a weaver tool call and return (content_text, is_error)."""
 
-    # Resolve the weaver's group — all tools are scoped to this group.
-    # Prefer the caller's group (from X-Loom-Cell-Id) for multi-group setups.
-    _weaver_group = ""
-    _weaver_cell = None
-    if cell_id:
-        _weaver_cell = state.agents.get(cell_id)
-        if _weaver_cell:
-            _weaver_group = _weaver_cell.group
-    if not _weaver_group:
-        for gn, gs in state.group_settings.items():
-            if gs.weaver_agent_id:
-                _weaver_group = gn
-                if not _weaver_cell:
-                    _weaver_cell = state.agents.get(gs.weaver_agent_id)
-                break
-    if not _weaver_group:
-        return "No weaver configured for any group", True
+    _weaver_cell, _weaver_group, auth_error = _authorize_weaver_cell(
+        state, cell_id
+    )
+    if auth_error:
+        return auth_error, True
 
     # -- Read tools ---------------------------------------------------------
 

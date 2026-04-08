@@ -118,6 +118,48 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("Upload and attach an image or other artifact", upload_tool["description"])
 
+    async def test_non_weaver_agent_cannot_call_weaver_tools(self):
+        state, weaver = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+
+        async def fake_handle_command(_payload):
+            self.fail("non-weaver agent should be denied before dispatch")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=worker.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("designated Weaver agent", text)
+
+    async def test_missing_cell_header_cannot_call_weaver_tools(self):
+        state, _weaver = self._make_state()
+
+        async def fake_handle_command(_payload):
+            self.fail("missing header should be denied before dispatch")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id="",
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("X-Loom-Cell-Id header is required", text)
+
     async def _dispatch(self, state, weaver, args, handle_command):
         text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
             "weaver_batch_dispatch",
@@ -398,8 +440,7 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
         self.mcp_weaver_mod = importlib.import_module("loom.mcp_weaver")
         self.mcp_weaver_mod = importlib.reload(self.mcp_weaver_mod)
 
-    async def test_dispatch_forwards_caller_window_context_when_creating_agent(self):
-        state = self.state_mod.MatrixState()
+    def _add_weaver(self, state):
         weaver = self.state_mod.AgentCell(
             id="weaver-1",
             name="Weaver",
@@ -410,6 +451,14 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
         )
         state.agents[weaver.id] = weaver
         state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        return weaver
+
+    async def test_dispatch_forwards_caller_window_context_when_creating_agent(self):
+        state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         task = state.board_add_task("Investigate bug", "g")
 
         self.assertIsNotNone(task)
@@ -436,16 +485,7 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_dispatch_forwards_agent_type_and_command_for_new_agent(self):
         state = self.state_mod.MatrixState()
-        weaver = self.state_mod.AgentCell(
-            id="weaver-1",
-            name="Weaver",
-            group="g",
-            cell_type="agent",
-            session_id="session-123",
-            window_id="window-abc",
-        )
-        state.agents[weaver.id] = weaver
-        state.groups["g"] = [weaver.id]
+        weaver = self._add_weaver(state)
         task = state.board_add_task("Investigate bug", "g")
 
         self.assertIsNotNone(task)
@@ -473,14 +513,7 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_dispatch_to_existing_agent_forwards_agent_id_only(self):
         state = self.state_mod.MatrixState()
-        weaver = self.state_mod.AgentCell(
-            id="weaver-1",
-            name="Weaver",
-            group="g",
-            cell_type="agent",
-            session_id="session-123",
-            window_id="window-abc",
-        )
+        weaver = self._add_weaver(state)
         worker = self.state_mod.AgentCell(
             id="worker-1",
             name="Worker One",
@@ -488,9 +521,8 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
             slug="worker-one",
             cell_type="agent",
         )
-        state.agents[weaver.id] = weaver
         state.agents[worker.id] = worker
-        state.groups["g"] = [weaver.id, worker.id]
+        state.groups["g"].append(worker.id)
         task = state.board_add_task("Investigate bug", "g")
 
         self.assertIsNotNone(task)
@@ -516,14 +548,7 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_dispatch_ignores_legacy_force_flag(self):
         state = self.state_mod.MatrixState()
-        weaver = self.state_mod.AgentCell(
-            id="weaver-1",
-            name="Weaver",
-            group="g",
-            cell_type="agent",
-        )
-        state.agents[weaver.id] = weaver
-        state.groups["g"] = [weaver.id]
+        weaver = self._add_weaver(state)
         task = state.board_add_task("Investigate overlap", "g")
 
         self.assertIsNotNone(task)
@@ -1257,8 +1282,23 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
         self.mcp_weaver_mod = importlib.import_module("loom.mcp_weaver")
         self.mcp_weaver_mod = importlib.reload(self.mcp_weaver_mod)
 
+    def _add_weaver(self, state):
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        return weaver
+
     async def test_merge_forwards_cleanup_flags_only_when_enabled(self):
         state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         cell = self.state_mod.AgentCell(
             id="agent-1",
             name="Worker",
@@ -1270,7 +1310,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
             worktree_base_branch="main",
         )
         state.agents[cell.id] = cell
-        state.groups["g"] = [cell.id]
+        state.groups["g"].append(cell.id)
 
         calls = []
 
@@ -1302,7 +1342,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
             },
             fake_handle_command,
             state,
-            cell_id=cell.id,
+            cell_id=weaver.id,
         )
 
         self.assertFalse(is_error)
@@ -1323,6 +1363,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_merge_reports_cleanup_errors_clearly(self):
         state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         cell = self.state_mod.AgentCell(
             id="agent-1",
             name="Worker",
@@ -1334,7 +1375,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
             worktree_base_branch="main",
         )
         state.agents[cell.id] = cell
-        state.groups["g"] = [cell.id]
+        state.groups["g"].append(cell.id)
 
         async def fake_handle_command(payload):
             if payload["cmd"] == "worktree_check_merge":
@@ -1363,7 +1404,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
             },
             fake_handle_command,
             state,
-            cell_id=cell.id,
+            cell_id=weaver.id,
         )
 
         self.assertTrue(is_error)
@@ -1372,6 +1413,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_merge_stops_when_conflicts_are_detected(self):
         state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         cell = self.state_mod.AgentCell(
             id="agent-1",
             name="Worker",
@@ -1383,7 +1425,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
             worktree_base_branch="main",
         )
         state.agents[cell.id] = cell
-        state.groups["g"] = [cell.id]
+        state.groups["g"].append(cell.id)
 
         calls = []
 
@@ -1402,7 +1444,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
             {"agent": cell.id},
             fake_handle_command,
             state,
-            cell_id=cell.id,
+            cell_id=weaver.id,
         )
 
         self.assertTrue(is_error)
@@ -1416,6 +1458,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_merge_reports_boundary_blockers_without_conflict_flow(self):
         state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         cell = self.state_mod.AgentCell(
             id="agent-1",
             name="Worker",
@@ -1427,7 +1470,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
             worktree_base_branch="main",
         )
         state.agents[cell.id] = cell
-        state.groups["g"] = [cell.id]
+        state.groups["g"].append(cell.id)
 
         async def fake_handle_command(payload):
             if payload["cmd"] == "worktree_check_merge":
@@ -1447,7 +1490,7 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
             {"agent": cell.id},
             fake_handle_command,
             state,
-            cell_id=cell.id,
+            cell_id=weaver.id,
         )
 
         self.assertTrue(is_error)
@@ -1462,8 +1505,23 @@ class WeaverDiffToolTests(unittest.IsolatedAsyncioTestCase):
         self.mcp_weaver_mod = importlib.import_module("loom.mcp_weaver")
         self.mcp_weaver_mod = importlib.reload(self.mcp_weaver_mod)
 
+    def _add_weaver(self, state):
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        return weaver
+
     async def test_diff_summary_forwards_filters_and_returns_json(self):
         state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         cell = self.state_mod.AgentCell(
             id="agent-1",
             name="Worker",
@@ -1475,7 +1533,7 @@ class WeaverDiffToolTests(unittest.IsolatedAsyncioTestCase):
             worktree_base_branch="main",
         )
         state.agents[cell.id] = cell
-        state.groups["g"] = [cell.id]
+        state.groups["g"].append(cell.id)
         captured = {}
 
         async def fake_handle_command(payload):
@@ -1509,7 +1567,7 @@ class WeaverDiffToolTests(unittest.IsolatedAsyncioTestCase):
             },
             fake_handle_command,
             state,
-            cell_id=cell.id,
+            cell_id=weaver.id,
         )
 
         self.assertFalse(is_error)
@@ -1536,6 +1594,20 @@ class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
         self.mcp_weaver_mod = importlib.import_module("loom.mcp_weaver")
         self.mcp_weaver_mod = importlib.reload(self.mcp_weaver_mod)
 
+    def _add_weaver(self, state):
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        return weaver
+
     def test_rebase_tool_is_registered(self):
         tool = next(
             t for t in self.mcp_weaver_mod.WEAVER_TOOLS
@@ -1557,9 +1629,10 @@ class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rebase_returns_post_rebase_merge_readiness(self):
         state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         cell = self._make_cell()
         state.agents[cell.id] = cell
-        state.groups["g"] = [cell.id]
+        state.groups["g"].append(cell.id)
 
         calls = []
 
@@ -1590,7 +1663,7 @@ class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
             {"agent": cell.slug},
             fake_handle_command,
             state,
-            cell_id=cell.id,
+            cell_id=weaver.id,
         )
 
         self.assertFalse(is_error)
@@ -1613,9 +1686,10 @@ class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rebase_reports_conflict_context_when_rebase_fails(self):
         state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         cell = self._make_cell()
         state.agents[cell.id] = cell
-        state.groups["g"] = [cell.id]
+        state.groups["g"].append(cell.id)
 
         async def fake_handle_command(payload):
             if payload["cmd"] == "worktree_check_merge":
@@ -1640,7 +1714,7 @@ class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
             {"agent": cell.id},
             fake_handle_command,
             state,
-            cell_id=cell.id,
+            cell_id=weaver.id,
         )
 
         self.assertTrue(is_error)
@@ -1651,9 +1725,10 @@ class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rebase_preserves_merge_safety_checks(self):
         state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         cell = self._make_cell()
         state.agents[cell.id] = cell
-        state.groups["g"] = [cell.id]
+        state.groups["g"].append(cell.id)
 
         calls = []
 
@@ -1672,7 +1747,7 @@ class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
             {"agent": cell.id},
             fake_handle_command,
             state,
-            cell_id=cell.id,
+            cell_id=weaver.id,
         )
 
         self.assertTrue(is_error)
@@ -1684,9 +1759,10 @@ class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rebase_surfaces_command_errors(self):
         state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         cell = self._make_cell()
         state.agents[cell.id] = cell
-        state.groups["g"] = [cell.id]
+        state.groups["g"].append(cell.id)
 
         async def fake_handle_command(payload):
             if payload["cmd"] == "worktree_check_merge":
@@ -1703,7 +1779,7 @@ class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
             {"agent": cell.id},
             fake_handle_command,
             state,
-            cell_id=cell.id,
+            cell_id=weaver.id,
         )
 
         self.assertTrue(is_error)
@@ -1718,8 +1794,23 @@ class WeaverAgentLifecycleToolTests(unittest.IsolatedAsyncioTestCase):
         self.mcp_weaver_mod = importlib.import_module("loom.mcp_weaver")
         self.mcp_weaver_mod = importlib.reload(self.mcp_weaver_mod)
 
+    def _add_weaver(self, state):
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        return weaver
+
     async def test_agent_relaunch_forwards_to_handle_command(self):
         state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         cell = self.state_mod.AgentCell(
             id="agent-1",
             name="Worker",
@@ -1728,7 +1819,7 @@ class WeaverAgentLifecycleToolTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
         )
         state.agents[cell.id] = cell
-        state.groups["g"] = [cell.id]
+        state.groups["g"].append(cell.id)
 
         captured = {}
 
@@ -1741,7 +1832,7 @@ class WeaverAgentLifecycleToolTests(unittest.IsolatedAsyncioTestCase):
             {"agent": cell.slug},
             fake_handle_command,
             state,
-            cell_id=cell.id,
+            cell_id=weaver.id,
         )
 
         self.assertFalse(is_error)
@@ -1757,8 +1848,23 @@ class WeaverRecoveryToolTests(unittest.IsolatedAsyncioTestCase):
         self.mcp_weaver_mod = importlib.import_module("loom.mcp_weaver")
         self.mcp_weaver_mod = importlib.reload(self.mcp_weaver_mod)
 
+    def _add_weaver(self, state):
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        return weaver
+
     async def test_agent_show_includes_worktree_terminals_and_task_history(self):
         state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
         agent = self.state_mod.AgentCell(
             id="agent-1",
             name="Worker",
@@ -1823,7 +1929,7 @@ class WeaverRecoveryToolTests(unittest.IsolatedAsyncioTestCase):
 
         state.agents[agent.id] = agent
         state.agents[terminal.id] = terminal
-        state.groups["g"] = [agent.id, terminal.id]
+        state.groups["g"].extend([agent.id, terminal.id])
         state._children[agent.id] = [terminal.id]
         state.board_tasks[task.id] = task
 
@@ -1835,7 +1941,7 @@ class WeaverRecoveryToolTests(unittest.IsolatedAsyncioTestCase):
             {"agent": agent.slug},
             fake_handle_command,
             state,
-            cell_id=agent.id,
+            cell_id=weaver.id,
         )
 
         self.assertFalse(is_error)

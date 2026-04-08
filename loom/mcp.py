@@ -14,7 +14,7 @@ import logging
 
 from aiohttp import web
 
-from .mcp_weaver import WEAVER_TOOLS, _dispatch_weaver_tool
+from .mcp_weaver import WEAVER_TOOLS, _authorize_weaver_cell, _dispatch_weaver_tool
 from .server_artifacts import serialize_task_for_mcp
 
 log = logging.getLogger("loom")
@@ -511,6 +511,15 @@ ALL_TOOLS = TOOLS + WEAVER_TOOLS
 _ALL_TOOL_MAP = {t["name"]: t for t in ALL_TOOLS}
 
 
+def _visible_tools(state, cell_id: str):
+    """Return the MCP tool list visible to the caller."""
+    tools = list(TOOLS)
+    _, _, auth_error = _authorize_weaver_cell(state, cell_id)
+    if not auth_error:
+        tools.extend(WEAVER_TOOLS)
+    return tools
+
+
 # ---------------------------------------------------------------------------
 # Tool dispatch
 # ---------------------------------------------------------------------------
@@ -730,7 +739,7 @@ def create_mcp_handler(handle_command, state):
 
         if method == "tools/list":
             return web.json_response(
-                _jsonrpc_ok(req_id, {"tools": ALL_TOOLS}))
+                _jsonrpc_ok(req_id, {"tools": _visible_tools(state, cell_id)}))
 
         if method == "tools/call":
             tool_name = params.get("name", "")
@@ -742,7 +751,6 @@ def create_mcp_handler(handle_command, state):
                                    f"Unknown tool: {tool_name}"))
 
             # Weaver tools don't require X-Loom-Cell-Id but use it
-            # to resolve the caller's group in multi-group setups
             if tool_name.startswith("weaver_"):
                 text, is_error = await _dispatch_weaver_tool(
                     tool_name, arguments, handle_command, state,
