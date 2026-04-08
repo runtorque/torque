@@ -153,7 +153,7 @@ Templates integrate in four places:
 
 ### 1. New agent creation
 
-The `+ New` dropdown shows saved templates. Choosing one creates a new agent with that template applied. If the group has `agent_always_custom_dialog` enabled, the custom dialog opens with the template pre-filled instead.
+The `+ New` dropdown shows saved templates and, when the group does not already have one, a **Weaver** entry. Choosing a template creates a new agent with that template applied. Choosing **Weaver** creates the group's orchestrator agent. If the group has `agent_always_custom_dialog` enabled, the custom dialog opens with the template pre-filled instead.
 
 ### 2. Task dispatch
 

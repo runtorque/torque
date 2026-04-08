@@ -41,6 +41,11 @@ function _renderAgentTemplateMenuItems(group) {
   return html;
 }
 
+function _renderWeaverMenuItem(group, groupSettings) {
+  if ((groupSettings || {}).weaver_agent_id) return '';
+  return `<button onclick="event.stopPropagation();closeMenus();newWeaver('${esc(group)}')">Weaver</button>`;
+}
+
 function toggleMenu(chevron) {
   const menu = chevron.nextElementSibling;
   const wasOpen = menu.classList.contains('open');
@@ -357,6 +362,7 @@ function render() {
       html += `  <div class="cell-name">New</div>`;
       html += `  <button class="cell-add-drop" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>`;
       html += `  <div class="split-menu">`;
+      html += _renderWeaverMenuItem(gname, gsLocal);
       html += _renderAgentTemplateMenuItems(gname);
       html += `<button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button>`;
       html += `</div>`;

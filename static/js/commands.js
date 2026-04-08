@@ -143,6 +143,12 @@ function newAgentFromTemplate(group, templateName) {
   send({ cmd: 'add_agent', group, template: templateName || '' });
 }
 
+function newWeaver(group) {
+  const gs = (state.group_settings || {})[group] || {};
+  if (gs.weaver_agent_id) return;
+  send({ cmd: 'add_agent', name: 'Weaver', group, is_weaver: true });
+}
+
 function quickAddTerminal(group, parentId) {
   const gs = (state.group_settings || {})[group] || {};
   if (gs.terminal_always_custom_dialog) { openAddTerminal(group, parentId); return; }

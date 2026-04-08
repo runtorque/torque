@@ -410,7 +410,7 @@ function _weaverRenderSettings(group, ws, weaver) {
 
   html += '<div class="weaver-section">';
   html += '<div class="weaver-section-title">Settings moved</div>';
-  html += '<div class="weaver-empty-inline">Weaver configuration now lives in Group Settings → Weaver.</div>';
+  html += '<div class="weaver-empty-inline">Create a Weaver from the group’s + New dropdown. Configure it in Group Settings → Weaver.</div>';
   html += '<button class="weaver-create-btn" onclick="weaverOpenSettings()">Open Group Settings</button>';
   html += '</div>';
 
@@ -423,7 +423,7 @@ function _weaverRenderSettings(group, ws, weaver) {
          + _esc(weaver.status || 'stopped') + '</span>';
     html += '</div>';
   } else {
-    html += '<div class="weaver-empty-inline">No weaver agent configured for this group.</div>';
+    html += '<div class="weaver-empty-inline">No weaver agent configured for this group yet.</div>';
   }
   html += '<div class="weaver-field"><label>Provider override</label><div class="weaver-field-note">'
        + _esc((ws && ws.weaver_provider) || 'Group default') + '</div></div>';
@@ -489,22 +489,6 @@ function weaverOpenSettings() {
   var group = _weaverCurrentGroup();
   if (!group || typeof openGroupSettings !== 'function') return;
   openGroupSettings(group, 'weaver');
-}
-
-// -- Create weaver ---------------------------------------------------------
-
-function weaverCreate() {
-  var group = _weaverCurrentGroup();
-  // Check if group already has a weaver
-  var gs = state.group_settings && state.group_settings[group];
-  if (gs && gs.weaver_agent_id) return;
-
-  send({
-    cmd: 'add_agent',
-    name: 'Weaver',
-    group: group,
-    is_weaver: true,
-  });
 }
 
 // -- Event handlers --------------------------------------------------------

@@ -366,23 +366,16 @@ function _getWeaverEnabledEvents() {
 function _renderGsWeaverSummary(group, weaver, ws) {
   const nameEl = document.getElementById('gs-weaver-agent-name');
   const metaEl = document.getElementById('gs-weaver-agent-meta');
-  const createBtn = document.getElementById('gs-weaver-create-btn');
-  if (!nameEl || !metaEl || !createBtn) return;
+  if (!nameEl || !metaEl) return;
   if (weaver) {
     nameEl.textContent = weaver.name;
     const parts = [];
     if (weaver.status) parts.push(weaver.status);
     if (ws && ws.paused) parts.push('event delivery paused');
     metaEl.textContent = parts.length ? parts.join(' • ') : 'Weaver agent configured for this group.';
-    createBtn.textContent = 'Recreate Weaver';
-    createBtn.style.display = 'none';
-    createBtn.disabled = false;
   } else {
     nameEl.textContent = 'No weaver agent';
-    metaEl.textContent = 'Create a Weaver for this group to enable orchestration.';
-    createBtn.textContent = '+ Create Weaver';
-    createBtn.style.display = '';
-    createBtn.disabled = false;
+    metaEl.textContent = 'Create a Weaver from the group’s + New dropdown, then configure it here.';
   }
 }
 
@@ -570,22 +563,6 @@ function submitGroupSettings() {
   send({ cmd: 'weaver_update_settings', group: _settingsGroup, ...weaverSettings });
   _settingsGroup = null;
   closeModals();
-}
-
-function gsCreateWeaver() {
-  if (!_settingsGroup) return;
-  const nameEl = document.getElementById('gs-weaver-agent-name');
-  const metaEl = document.getElementById('gs-weaver-agent-meta');
-  const createBtn = document.getElementById('gs-weaver-create-btn');
-  if (nameEl) nameEl.textContent = 'Creating Weaver…';
-  if (metaEl) metaEl.textContent = 'Loom is booting the Weaver agent for this group.';
-  if (createBtn) createBtn.disabled = true;
-  send({
-    cmd: 'add_agent',
-    name: 'Weaver',
-    group: _settingsGroup,
-    is_weaver: true,
-  });
 }
 
 function _toggleWorktreeFields() {
