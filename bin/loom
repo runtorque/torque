@@ -2866,6 +2866,8 @@ def cmd_memory_add(args):
         "content": args.content,
         "pinned": bool(args.pin),
     }
+    if getattr(args, "retention", ""):
+        kwargs["retention_kind"] = args.retention
     if cell_id:
         kwargs["cell_id"] = cell_id
     if args.title:
@@ -2916,6 +2918,8 @@ def cmd_memory_list(args):
         title = entry.get("title", "") or entry.get("content", "")[:60]
         print(f"{star} {entry.get('id', '')} [{entry.get('entry_type', '')}] {scope}")
         print(f"  {title}")
+        if entry.get("retention_kind"):
+            print(f"  retention: {entry['retention_kind']}")
         if entry.get("source_name"):
             print(f"  source: {entry['source_name']}")
         links = entry.get("links", [])
@@ -2940,6 +2944,8 @@ def cmd_memory_show(args):
     if entry.get("title"):
         print(f"title: {entry['title']}")
     print(f"content: {entry.get('content', '')}")
+    if entry.get("retention_kind"):
+        print(f"retention: {entry['retention_kind']}")
     if entry.get("source_name"):
         print(f"source: {entry['source_name']}")
     links = entry.get("links", [])
@@ -4015,6 +4021,8 @@ def build_parser():
                    choices=["task", "pipeline", "group", "project"],
                    help="Scope kind (defaults from current agent/task context)")
     p.add_argument("--ref", help="Explicit scope reference")
+    p.add_argument("--retention", choices=["durable", "transient"],
+                   help="Override retention behavior (defaults from entry type)")
     p.add_argument("--pin", action="store_true", help="Pin this entry")
     p.set_defaults(func=cmd_memory_add)
 

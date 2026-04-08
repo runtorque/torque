@@ -3044,6 +3044,40 @@ test('context panel requests scoped memory and renders provenance details', () =
   assert.match(panel.innerHTML, /task: Ship the context browser/);
 });
 
+test('context panel renders compacted summaries as read-only entries', () => {
+  const { context, document } = createContextHarness();
+  const panel = document.register('panel-context');
+  const list = new FakeElement('context-list');
+  panel.setQuerySelector('#context-list', list);
+
+  runInContext(context, `
+    _contextEntries = [{
+      id: 'summary:mem-1,mem-2',
+      title: '2 older transient entries',
+      content: 'Covers 2 older transient entries (note×2).',
+      entry_type: 'summary',
+      retention_kind: 'summary',
+      synthetic: true,
+      pinned: false,
+      scope_kind: 'group',
+      scope_ref: 'alpha',
+      source_kind: 'system',
+      source_name: 'Loom',
+      created_at: 100,
+      updated_at: 120,
+      links: [],
+    }];
+    _contextSelectedId = 'summary:mem-1,mem-2';
+    _contextLastQueryKey = JSON.stringify(_contextBuildListQuery());
+  `);
+
+  context.renderContextPanel();
+
+  assert.match(panel.innerHTML, /Summary/);
+  assert.doesNotMatch(panel.innerHTML, /contextTogglePin/);
+  assert.doesNotMatch(panel.innerHTML, /contextEditEntry/);
+});
+
 test('context panel promotes the current task into a linked manual note', () => {
   const { context, document } = createContextHarness();
   document.register('panel-context');

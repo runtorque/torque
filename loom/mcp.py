@@ -276,8 +276,8 @@ TOOLS = [
         "name": "loom_memory_publish",
         "description": (
             "Publish an explicit shared memory entry for the current "
-            "task, pipeline, group, or project. Use this for durable "
-            "findings, decisions, warnings, handoffs, and pinned notes."
+            "task, pipeline, group, or project. Durable decisions/warnings "
+            "are preserved automatically; transient notes can decay over time."
         ),
         "inputSchema": {
             "type": "object",
@@ -289,7 +289,7 @@ TOOLS = [
                 },
                 "content": {
                     "type": "string",
-                    "description": "The durable memory content.",
+                    "description": "The shared memory content.",
                 },
                 "title": {
                     "type": "string",
@@ -310,6 +310,14 @@ TOOLS = [
                 "pinned": {
                     "type": "boolean",
                     "description": "Whether to pin this entry.",
+                },
+                "retention_kind": {
+                    "type": "string",
+                    "enum": ["durable", "transient"],
+                    "description": (
+                        "Optional retention override. Defaults from entry "
+                        "type; pinned entries always become durable."
+                    ),
                 },
             },
             "required": ["entry_type", "content"],
@@ -481,6 +489,8 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
                 payload["scope_ref"] = args["scope_ref"]
             if "pinned" in args:
                 payload["pinned"] = bool(args["pinned"])
+            if args.get("retention_kind"):
+                payload["retention_kind"] = args["retention_kind"]
         elif name == "loom_memory_list":
             payload["cmd"] = "memory_list"
             for key in (

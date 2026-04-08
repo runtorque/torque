@@ -1,26 +1,29 @@
 """Shared context memory helpers for Loom.
 
-This module intentionally keeps v1 simple:
-- explicit, durable entries only
-- deterministic scope resolution
-- deterministic list ordering/filtering
-- no implicit auto-memory or semantic search
+Shared context intentionally stays explicit and deterministic, but it now
+distinguishes durable memory from transient notes so prompt/context views can
+retain high-signal decisions without accumulating stale noise forever.
 """
 
 from __future__ import annotations
 
 import time
 import uuid
+from collections import Counter
 
 
 ENTRY_TYPES = ("finding", "decision", "warning", "handoff", "note")
 SCOPE_KINDS = ("task", "pipeline", "group", "project")
 LINK_TARGET_KINDS = ("task", "agent", "pipeline")
+RETENTION_KINDS = ("durable", "transient")
 
 PROMPT_QUERY_LIMIT = 8
 PROMPT_MAX_ENTRIES = 4
 PROMPT_MAX_CHARS = 1200
 PROMPT_ITEM_MAX_CHARS = 220
+
+TRANSIENT_RETENTION_SECS = 14 * 24 * 60 * 60
+TRANSIENT_SUMMARY_AFTER_SECS = 3 * 24 * 60 * 60
 
 _PROMPT_REASON_WEIGHTS = {
     "scope_task": 4000,
@@ -75,11 +78,159 @@ def normalize_link_target_kind(value: str) -> str:
     return value
 
 
+def normalize_retention_kind(value: str) -> str:
+    value = (value or "").strip().lower()
+    if value not in RETENTION_KINDS:
+        raise ValueError(
+            f"Invalid retention kind '{value}'. "
+            f"Expected one of: {', '.join(RETENTION_KINDS)}"
+        )
+    return value
+
+
 def clamp_text(value: str, max_len: int) -> str:
     value = (value or "").strip()
     if len(value) > max_len:
         value = value[:max_len].rstrip()
     return value
+
+
+def infer_retention_kind(entry_type: str, *, pinned: bool = False,
+                         retention_kind: str = "") -> str:
+    """Resolve the normalized retention kind for an entry."""
+    if pinned:
+        return "durable"
+    if retention_kind:
+        return normalize_retention_kind(retention_kind)
+    if entry_type in {"decision", "warning"}:
+        return "durable"
+    return "transient"
+
+
+def expires_at_for_retention(retention_kind: str, *, created_at: float,
+                             pinned: bool = False) -> float | None:
+    """Return the expiry timestamp for the given retention class."""
+    if pinned or retention_kind == "durable":
+        return None
+    return float(created_at) + TRANSIENT_RETENTION_SECS
+
+
+def is_entry_expired(entry: dict, *, now: float | None = None) -> bool:
+    """Return True when a transient entry is past its retention window."""
+    expiry = entry.get("expires_at")
+    if expiry in (None, "", 0):
+        return False
+    if now is None:
+        now = time.time()
+    return float(expiry) <= float(now)
+
+
+def _summarize_transient_batch(entries: list[dict]) -> dict | None:
+    """Build a synthetic summary entry for a compacted transient batch."""
+    if len(entries) < 2:
+        return entries[0] if entries else None
+
+    type_counts = Counter(
+        clamp_text(entry.get("entry_type", "") or "note", 24) or "note"
+        for entry in entries
+    )
+    type_summary = ", ".join(
+        f"{kind}×{count}" for kind, count in sorted(type_counts.items())
+    )
+    highlights = []
+    for entry in entries[:3]:
+        highlight = clamp_text(
+            entry.get("title") or entry.get("content") or "",
+            60,
+        )
+        if highlight:
+            highlights.append(highlight)
+    content = f"Covers {len(entries)} older transient entries ({type_summary})."
+    if highlights:
+        content += " Highlights: " + "; ".join(highlights) + "."
+    newest = max(float(entry.get("created_at", 0) or 0) for entry in entries)
+    updated = max(float(entry.get("updated_at", 0) or 0) for entry in entries)
+    first = entries[0]
+    return {
+        "id": "summary:" + ",".join(entry.get("id", "") for entry in entries[:4]),
+        "project_key": first.get("project_key", ""),
+        "group_name": first.get("group_name", ""),
+        "scope_kind": first.get("scope_kind", ""),
+        "scope_ref": first.get("scope_ref", ""),
+        "entry_type": "summary",
+        "title": f"{len(entries)} older transient entries",
+        "content": content,
+        "pinned": False,
+        "task_id": first.get("task_id", ""),
+        "source_kind": "system",
+        "source_id": "",
+        "source_name": "Loom",
+        "created_at": newest,
+        "updated_at": updated,
+        "retention_kind": "summary",
+        "expires_at": None,
+        "links": [],
+        "synthetic": True,
+        "summary_entry_count": len(entries),
+        "summarized_entry_ids": [entry.get("id", "") for entry in entries],
+    }
+
+
+def compact_memory_entries(entries: list[dict], *,
+                           now: float | None = None) -> list[dict]:
+    """Compact older transient entries into synthetic summaries.
+
+    Durable entries and pinned entries are preserved as-is. Older transient
+    entries are summarized in-place so list/prompt views stay bounded while
+    keeping recent detail accessible.
+    """
+    if now is None:
+        now = time.time()
+
+    compacted: list[dict] = []
+    pending: list[dict] = []
+
+    def flush_pending():
+        if not pending:
+            return
+        summary = _summarize_transient_batch(list(pending))
+        if summary is not None:
+            if summary.get("synthetic"):
+                compacted.append(summary)
+            else:
+                compacted.extend(list(pending))
+        pending.clear()
+
+    for raw_entry in entries:
+        entry = dict(raw_entry)
+        retention_kind = (entry.get("retention_kind", "") or "").strip().lower()
+        if retention_kind == "summary":
+            flush_pending()
+            compacted.append(entry)
+            continue
+        age = max(0.0, float(now) - float(entry.get("created_at", 0) or 0))
+        should_compact = (
+            entry.get("pinned") is not True
+            and retention_kind == "transient"
+            and age >= TRANSIENT_SUMMARY_AFTER_SECS
+        )
+        if should_compact:
+            pending.append(entry)
+            continue
+        flush_pending()
+        compacted.append(entry)
+
+    flush_pending()
+    return compacted
+
+
+def load_visible_memory_entries(db, *, now: float | None = None,
+                                compact: bool = True, **filters) -> list[dict]:
+    """Load non-expired entries from storage and optionally compact them."""
+    entries = db.load_memory_entries(now=now, **filters)
+    if not compact:
+        return entries
+    return compact_memory_entries(entries, now=now)
 
 
 def detect_current_task(state, cell_id: str, explicit_task_id: str = ""):
@@ -173,7 +324,8 @@ def resolve_scope(state, cell=None, task=None, *,
 def build_memory_entry(state, *, cell=None, task=None,
                        entry_type: str, content: str, title: str = "",
                        scope_kind: str = "", scope_ref: str = "",
-                       pinned: bool = False, source_kind: str = "agent") -> dict:
+                       pinned: bool = False, source_kind: str = "agent",
+                       retention_kind: str = "") -> dict:
     """Build a normalized memory entry record ready for persistence."""
     kind, ref = resolve_scope(
         state, cell=cell, task=task, scope_kind=scope_kind, scope_ref=scope_ref
@@ -186,6 +338,7 @@ def build_memory_entry(state, *, cell=None, task=None,
                 task = candidate
                 break
     now = time.time()
+    entry_type = normalize_entry_type(entry_type)
 
     content = clamp_text(content, MAX_CONTENT_LEN)
     if not content:
@@ -206,6 +359,16 @@ def build_memory_entry(state, *, cell=None, task=None,
         project_key = infer_project_key(cell=state.agents.get(task.agent_id))
     if not project_key and kind == "project":
         project_key = ref
+    retention_kind = infer_retention_kind(
+        entry_type,
+        pinned=bool(pinned),
+        retention_kind=retention_kind,
+    )
+    expires_at = expires_at_for_retention(
+        retention_kind,
+        created_at=now,
+        pinned=bool(pinned),
+    )
 
     return {
         "id": uuid.uuid4().hex[:12],
@@ -213,7 +376,7 @@ def build_memory_entry(state, *, cell=None, task=None,
         "group_name": group_name,
         "scope_kind": kind,
         "scope_ref": ref,
-        "entry_type": normalize_entry_type(entry_type),
+        "entry_type": entry_type,
         "title": title,
         "content": content,
         "pinned": bool(pinned),
@@ -221,6 +384,8 @@ def build_memory_entry(state, *, cell=None, task=None,
         "source_kind": source_kind or "agent",
         "source_id": cell_id,
         "source_name": cell_name,
+        "retention_kind": retention_kind,
+        "expires_at": expires_at,
         "created_at": now,
         "updated_at": now,
     }
@@ -335,7 +500,8 @@ def select_relevant_prompt_entries(db, *, cell=None, task=None,
 
     candidates = {}
     for reason, filters in queries:
-        entries = db.load_memory_entries(
+        entries = load_visible_memory_entries(
+            db,
             limit=max(1, int(query_limit)),
             **filters,
         )

@@ -12,6 +12,7 @@ than json.dumps() + write_text().
 import json
 import logging
 import sqlite3
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
@@ -391,17 +392,21 @@ CREATE TABLE IF NOT EXISTS memory_entries (
     source_kind TEXT NOT NULL DEFAULT '',
     source_id   TEXT NOT NULL DEFAULT '',
     source_name TEXT NOT NULL DEFAULT '',
+    retention_kind TEXT NOT NULL DEFAULT 'durable',
+    expires_at  REAL,
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_memory_entries_scope
-    ON memory_entries(scope_kind, scope_ref, pinned, created_at DESC);
+    ON memory_entries(scope_kind, scope_ref, pinned, retention_kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_entries_group
-    ON memory_entries(group_name, pinned, created_at DESC);
+    ON memory_entries(group_name, pinned, retention_kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_entries_project
-    ON memory_entries(project_key, pinned, created_at DESC);
+    ON memory_entries(project_key, pinned, retention_kind, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_entries_type
     ON memory_entries(entry_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_entries_expiry
+    ON memory_entries(retention_kind, expires_at);
 
 CREATE TABLE IF NOT EXISTS memory_links (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -468,6 +473,22 @@ class LoomDB:
             self._conn.execute(
                 "ALTER TABLE group_settings ADD COLUMN "
                 "terminal_close_on_disconnect INTEGER NOT NULL DEFAULT 0")
+            self._conn.commit()
+        # Migrate: add memory retention columns
+        try:
+            self._conn.execute(
+                "SELECT retention_kind FROM memory_entries LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE memory_entries ADD COLUMN "
+                "retention_kind TEXT NOT NULL DEFAULT 'durable'")
+            self._conn.commit()
+        try:
+            self._conn.execute(
+                "SELECT expires_at FROM memory_entries LIMIT 0")
+        except sqlite3.OperationalError:
+            self._conn.execute(
+                "ALTER TABLE memory_entries ADD COLUMN expires_at REAL")
             self._conn.commit()
         # Migrate: add action_name and action_vars columns to board_tasks
         for col, default in [("action_name", "''"),
@@ -1236,8 +1257,9 @@ class LoomDB:
             INSERT INTO memory_entries
                 (id, project_key, group_name, scope_kind, scope_ref,
                  entry_type, title, content, pinned, task_id,
-                 source_kind, source_id, source_name, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 source_kind, source_id, source_name, retention_kind,
+                 expires_at, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
                 project_key=excluded.project_key,
                 group_name=excluded.group_name,
@@ -1251,6 +1273,8 @@ class LoomDB:
                 source_kind=excluded.source_kind,
                 source_id=excluded.source_id,
                 source_name=excluded.source_name,
+                retention_kind=excluded.retention_kind,
+                expires_at=excluded.expires_at,
                 created_at=excluded.created_at,
                 updated_at=excluded.updated_at
         """, (
@@ -1267,6 +1291,11 @@ class LoomDB:
             entry.get("source_kind", ""),
             entry.get("source_id", ""),
             entry.get("source_name", ""),
+            entry.get("retention_kind", "durable"),
+            (
+                None if entry.get("expires_at") in ("", 0)
+                else entry.get("expires_at")
+            ),
             float(entry.get("created_at", 0)),
             float(entry.get("updated_at", 0)),
         ))
@@ -1290,18 +1319,43 @@ class LoomDB:
     def set_memory_entry_pinned(self, entry_id: str, pinned: bool,
                                 updated_at: float):
         """Update the pinned state of a memory entry."""
-        self._conn.execute(
-            "UPDATE memory_entries SET pinned=?, updated_at=? WHERE id=?",
-            (1 if pinned else 0, float(updated_at), entry_id),
-        )
+        if pinned:
+            self._conn.execute(
+                "UPDATE memory_entries "
+                "SET pinned=1, retention_kind='durable', expires_at=NULL, "
+                "updated_at=? WHERE id=?",
+                (float(updated_at), entry_id),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE memory_entries "
+                "SET pinned=0, updated_at=? WHERE id=?",
+                (float(updated_at), entry_id),
+            )
         self._conn.commit()
 
-    def load_memory_entry(self, entry_id: str) -> dict | None:
+    def purge_expired_memory_entries(self, now: float | None = None) -> int:
+        """Delete transient memory entries whose retention window has elapsed."""
+        if now is None:
+            now = time.time()
+        cur = self._conn.execute(
+            "DELETE FROM memory_entries "
+            "WHERE retention_kind='transient' AND expires_at IS NOT NULL "
+            "AND expires_at<=?",
+            (float(now),),
+        )
+        self._conn.commit()
+        return int(cur.rowcount or 0)
+
+    def load_memory_entry(self, entry_id: str, *,
+                          now: float | None = None) -> dict | None:
         """Load a memory entry by ID."""
+        self.purge_expired_memory_entries(now=now)
         row = self._conn.execute(
             "SELECT id, project_key, group_name, scope_kind, scope_ref, "
             "entry_type, title, content, pinned, task_id, source_kind, "
-            "source_id, source_name, created_at, updated_at "
+            "source_id, source_name, retention_kind, expires_at, "
+            "created_at, updated_at "
             "FROM memory_entries WHERE id=?",
             (entry_id,),
         ).fetchone()
@@ -1380,8 +1434,10 @@ class LoomDB:
             "source_kind": row[10],
             "source_id": row[11],
             "source_name": row[12],
-            "created_at": row[13],
-            "updated_at": row[14],
+            "retention_kind": row[13] or "durable",
+            "expires_at": row[14],
+            "created_at": row[15],
+            "updated_at": row[16],
         }
 
     def load_memory_entries(self, *, group_name: str = "",
@@ -1390,12 +1446,15 @@ class LoomDB:
                             task_id: str = "", pinned_only: bool = False,
                             search: str = "", linked_target_kind: str = "",
                             linked_target_ref: str = "", limit: int = 20,
-                            offset: int = 0) -> list[dict]:
+                            offset: int = 0, now: float | None = None
+                            ) -> list[dict]:
         """List memory entries with deterministic filtering and ordering."""
+        self.purge_expired_memory_entries(now=now)
         sql = (
             "SELECT id, project_key, group_name, scope_kind, scope_ref, "
             "entry_type, title, content, pinned, task_id, source_kind, "
-            "source_id, source_name, created_at, updated_at "
+            "source_id, source_name, retention_kind, expires_at, "
+            "created_at, updated_at "
             "FROM memory_entries WHERE 1=1"
         )
         params = []
@@ -1437,7 +1496,12 @@ class LoomDB:
                 params.append(linked_target_ref)
             sql += ")"
         sql += (
-            " ORDER BY pinned DESC, created_at DESC, id DESC "
+            " ORDER BY pinned DESC, "
+            "CASE retention_kind "
+            "WHEN 'durable' THEN 0 "
+            "WHEN 'transient' THEN 1 "
+            "ELSE 2 END, "
+            "created_at DESC, id DESC "
             "LIMIT ? OFFSET ?"
         )
         params.extend([max(1, int(limit)), max(0, int(offset))])

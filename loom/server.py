@@ -49,8 +49,10 @@ from .memory import (
     build_memory_link,
     build_prompt_memory_block,
     detect_current_task,
+    load_visible_memory_entries,
     normalize_entry_type,
     normalize_link_target_kind,
+    normalize_retention_kind,
 )
 from .templates import TemplateManager
 from .external_tickets import (
@@ -4372,7 +4374,9 @@ async def main(connection: iterm2.Connection):
                                 group_name = scope_ref
                             elif cell and cell.group and not project_key:
                                 group_name = cell.group
-                        entries = state.db.load_memory_entries(
+                        search_text = (data.get("search", "") or "").strip()
+                        entries = load_visible_memory_entries(
+                            state.db,
                             group_name=group_name,
                             project_key=project_key,
                             scope_kind=scope_kind,
@@ -4382,11 +4386,12 @@ async def main(connection: iterm2.Connection):
                                 (data.get("filter_task_id", "") or "").strip()
                             ),
                             pinned_only=bool(data.get("pinned_only", False)),
-                            search=(data.get("search", "") or "").strip(),
+                            search=search_text,
                             linked_target_kind=linked_target_kind,
                             linked_target_ref=linked_target_ref,
                             limit=int(data.get("limit", 20) or 20),
                             offset=int(data.get("offset", 0) or 0),
+                            compact=not bool(search_text),
                         )
                         result = {
                             "type": "memory_entries",
@@ -5508,95 +5513,108 @@ async def main(connection: iterm2.Connection):
                                 "type": "error",
                                 "message": "Memory entry not found",
                             }
-                    if result is None:
-                        try:
-                            scope_kind = (data.get("scope_kind", "") or "").strip()
-                            if not scope_kind and existing:
-                                scope_kind = existing.get("scope_kind", "")
-                            scope_ref = _resolve_memory_scope_ref(
-                                scope_kind,
-                                data.get("scope_ref", "")
-                                if "scope_ref" in data
-                                else (existing.get("scope_ref", "") if existing else ""),
-                            )
-                            entry_type = data.get("entry_type", "")
-                            if not entry_type and existing:
-                                entry_type = existing.get("entry_type", "")
-                            title = data.get("title", "")
-                            if "title" not in data and existing:
-                                title = existing.get("title", "")
-                            content = data.get("content", "")
-                            if "content" not in data and existing:
-                                content = existing.get("content", "")
-                            pinned = (
-                                bool(data.get("pinned", False))
-                                if "pinned" in data
-                                else bool(existing.get("pinned", False))
-                                if existing
-                                else False
-                            )
-                            source_kind = data.get("source_kind", "")
-                            if not source_kind and existing:
-                                source_kind = existing.get("source_kind", "agent")
-                            pending_links = []
-                            for raw_link in (data.get("link_targets", []) or []):
-                                if not isinstance(raw_link, dict):
-                                    raise ValueError(
-                                        "Each link target must be an object"
-                                    )
-                                target_kind = normalize_link_target_kind(
-                                    raw_link.get("target_kind", "")
+                    try:
+                        if result is not None:
+                            raise RuntimeError("__skip_memory_publish__")
+                        scope_kind = (data.get("scope_kind", "") or "").strip()
+                        if not scope_kind and existing:
+                            scope_kind = existing.get("scope_kind", "")
+                        scope_ref = _resolve_memory_scope_ref(
+                            scope_kind,
+                            data.get("scope_ref", "")
+                            if "scope_ref" in data
+                            else (existing.get("scope_ref", "") if existing else ""),
+                        )
+                        entry_type = data.get("entry_type", "")
+                        if not entry_type and existing:
+                            entry_type = existing.get("entry_type", "")
+                        title = data.get("title", "")
+                        if "title" not in data and existing:
+                            title = existing.get("title", "")
+                        content = data.get("content", "")
+                        if "content" not in data and existing:
+                            content = existing.get("content", "")
+                        pinned = (
+                            bool(data.get("pinned", False))
+                            if "pinned" in data
+                            else bool(existing.get("pinned", False))
+                            if existing
+                            else False
+                        )
+                        retention_kind = (
+                            (data.get("retention_kind", "") or "").strip()
+                            if "retention_kind" in data
+                            else (existing.get("retention_kind", "") if existing else "")
+                        )
+                        if retention_kind:
+                            retention_kind = normalize_retention_kind(retention_kind)
+                        source_kind = data.get("source_kind", "")
+                        if not source_kind and existing:
+                            source_kind = existing.get("source_kind", "agent")
+                        pending_links = []
+                        for raw_link in (data.get("link_targets", []) or []):
+                            if not isinstance(raw_link, dict):
+                                raise ValueError(
+                                    "Each link target must be an object"
                                 )
-                                pending_links.append(
-                                    build_memory_link(
-                                        state,
-                                        entry_id=entry_id or "__pending__",
-                                        target_kind=target_kind,
-                                        target_ref=_resolve_memory_link_ref(
-                                            target_kind,
-                                            raw_link.get("target_ref", ""),
-                                            cell=cell,
-                                            task=task,
-                                        ),
+                            target_kind = normalize_link_target_kind(
+                                raw_link.get("target_kind", "")
+                            )
+                            pending_links.append(
+                                build_memory_link(
+                                    state,
+                                    entry_id=entry_id or "__pending__",
+                                    target_kind=target_kind,
+                                    target_ref=_resolve_memory_link_ref(
+                                        target_kind,
+                                        raw_link.get("target_ref", ""),
                                         cell=cell,
                                         task=task,
-                                    )
+                                    ),
+                                    cell=cell,
+                                    task=task,
                                 )
-                            entry = build_memory_entry(
-                                state,
-                                cell=cell,
-                                task=task,
-                                entry_type=normalize_entry_type(entry_type),
-                                title=title,
-                                content=content,
-                                scope_kind=scope_kind,
-                                scope_ref=scope_ref,
-                                pinned=pinned,
-                                source_kind=source_kind or "agent",
                             )
-                        except ValueError as exc:
-                            result = {"type": "error", "message": str(exc)}
-                    elif result is None:
-                        if existing:
-                            entry["id"] = existing["id"]
-                            entry["created_at"] = existing.get(
-                                "created_at", entry["created_at"]
-                            )
-                            entry["source_kind"] = existing.get(
-                                "source_kind", entry["source_kind"]
-                            )
-                            entry["source_id"] = existing.get(
-                                "source_id", entry["source_id"]
-                            )
-                            entry["source_name"] = existing.get(
-                                "source_name", entry["source_name"]
-                            )
-                        state.db.save_memory_entry(entry)
-                        for link in pending_links:
-                            link["entry_id"] = entry["id"]
-                            state.db.save_memory_link(link)
-                        entry = state.db.load_memory_entry(entry["id"]) or entry
-                        result = {"type": "memory_entry", "entry": entry}
+                        entry = build_memory_entry(
+                            state,
+                            cell=cell,
+                            task=task,
+                            entry_type=normalize_entry_type(entry_type),
+                            title=title,
+                            content=content,
+                            scope_kind=scope_kind,
+                            scope_ref=scope_ref,
+                            pinned=pinned,
+                            source_kind=source_kind or "agent",
+                            retention_kind=retention_kind,
+                        )
+                    except RuntimeError as exc:
+                        if str(exc) != "__skip_memory_publish__":
+                            raise
+                    except ValueError as exc:
+                        result = {"type": "error", "message": str(exc)}
+                    else:
+                        if result is None:
+                            if existing:
+                                entry["id"] = existing["id"]
+                                entry["created_at"] = existing.get(
+                                    "created_at", entry["created_at"]
+                                )
+                                entry["source_kind"] = existing.get(
+                                    "source_kind", entry["source_kind"]
+                                )
+                                entry["source_id"] = existing.get(
+                                    "source_id", entry["source_id"]
+                                )
+                                entry["source_name"] = existing.get(
+                                    "source_name", entry["source_name"]
+                                )
+                            state.db.save_memory_entry(entry)
+                            for link in pending_links:
+                                link["entry_id"] = entry["id"]
+                                state.db.save_memory_link(link)
+                            entry = state.db.load_memory_entry(entry["id"]) or entry
+                            result = {"type": "memory_entry", "entry": entry}
 
             elif cmd == "memory_pin":
                 if not state.db:
@@ -5615,8 +5633,7 @@ async def main(connection: iterm2.Connection):
                     else:
                         now = time.time()
                         state.db.set_memory_entry_pinned(entry_id, True, now)
-                        entry["pinned"] = True
-                        entry["updated_at"] = now
+                        entry = state.db.load_memory_entry(entry_id) or entry
                         result = {"type": "memory_entry", "entry": entry}
 
             elif cmd == "memory_link":
@@ -5679,8 +5696,7 @@ async def main(connection: iterm2.Connection):
                     else:
                         now = time.time()
                         state.db.set_memory_entry_pinned(entry_id, False, now)
-                        entry["pinned"] = False
-                        entry["updated_at"] = now
+                        entry = state.db.load_memory_entry(entry_id) or entry
                         result = {"type": "memory_entry", "entry": entry}
 
             elif cmd == "task_chain":
