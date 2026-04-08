@@ -15,6 +15,9 @@ var _contextScrollTop = 0;
 var _contextLastQueryKey = '';
 var _contextSearchHadFocus = false;
 var _contextEditor = null;
+var _contextSplitRatio = 0.38;
+var _contextResizeDrag = null;
+var _contextCompactDetailOpen = false;
 
 function _contextCurrentAgent() {
   if (selectedAgentId && state && state.agents && state.agents[selectedAgentId]) {
@@ -148,6 +151,27 @@ function _contextCanFocus(kind) {
   return false;
 }
 
+function _contextClampSplitRatio(value) {
+  var ratio = Number(value);
+  if (!isFinite(ratio)) return 0.38;
+  return Math.min(0.62, Math.max(0.28, ratio));
+}
+
+function _contextPanelWidth(panel) {
+  if (!panel) return 0;
+  if (panel.clientWidth) return panel.clientWidth;
+  if (panel.offsetWidth) return panel.offsetWidth;
+  if (panel.getBoundingClientRect) {
+    var rect = panel.getBoundingClientRect();
+    if (rect && rect.width) return rect.width;
+  }
+  return 0;
+}
+
+function _contextUseCompactLayout(panel) {
+  return _contextPanelWidth(panel) > 0 && _contextPanelWidth(panel) <= 900;
+}
+
 function _contextBuildListQuery() {
   var group = _contextCurrentGroup();
   var query = {
@@ -223,6 +247,9 @@ function handleContextEntries(msg) {
   if (!_contextSelectedId && _contextEntries.length) {
     _contextSelectedId = _contextEntries[0].id;
   }
+  if (!_contextEditor && !_contextSelectedId) {
+    _contextCompactDetailOpen = false;
+  }
   if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'context') {
     renderContextPanel();
   }
@@ -235,6 +262,7 @@ function handleContextEntry(msg) {
   _contextListError = '';
   _contextListLoading = false;
   _contextEditor = null;
+  _contextCompactDetailOpen = true;
   _contextRequestEntries(true);
   if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'context') {
     renderContextPanel();
@@ -454,12 +482,24 @@ function _renderContextEditor() {
   return html;
 }
 
+function _renderContextDetailPane(compact) {
+  var html = '';
+  if (compact) {
+    html += '<div class="context-detail-nav">';
+    html += '<button class="btn-secondary btn-sm" onclick="contextShowList()">Back to List</button>';
+    html += '</div>';
+  }
+  html += _renderContextDetail(_contextSelectedEntry());
+  return html;
+}
+
 function renderContextPanel() {
   var panel = document.getElementById('panel-context');
   if (!panel) return;
   var panelState = _captureSurfaceState(panel, {
     scrollSelectors: ['#context-list'],
   });
+  var compact = _contextUseCompactLayout(panel);
   var queryKey = JSON.stringify(_contextBuildListQuery());
   if (!_contextListLoading && queryKey !== _contextLastQueryKey) {
     _contextRequestEntries(false);
@@ -474,12 +514,9 @@ function renderContextPanel() {
 
   var html = '<div class="context-panel">';
   html += '<div class="context-header">';
-  html += '<div><div class="context-title">Context</div><div class="context-subtitle">Shared memory for the current flow</div></div>';
+  html += '<div class="context-header-copy"><div class="context-title">Context</div><div class="context-subtitle">Shared memory for the current flow</div></div>';
   html += '<div class="context-header-actions">';
-  html += '<button class="btn-secondary btn-sm" onclick="contextRefresh(true)">Refresh</button>';
-  html += '<button class="btn-secondary btn-sm" onclick="contextOpenCreate()">New Note</button>';
-  html += '<button class="btn-primary btn-sm"' + (task ? ' onclick="contextPromoteCurrentTask()"' : ' disabled')
-    + '>Promote Task</button>';
+  html += '<button class="btn-primary btn-sm" onclick="contextOpenCreate()">New Note</button>';
   html += '</div></div>';
   html += '<div class="context-focus-row">';
   html += _contextRenderFocusButton('group', 'Group', _contextCanFocus('group'));
@@ -503,9 +540,20 @@ function renderContextPanel() {
     + ' onchange="contextSetPinnedOnly(this.checked)"><span>Pinned only</span></label>';
   html += '</div>';
   html += '<div class="context-summary">' + esc(summary.join(' · ') || 'No active group or task context') + '</div>';
-  html += '<div class="context-browser">';
-  html += '<div class="context-list" id="context-list">' + _renderContextList() + '</div>';
-  html += '<div class="context-detail">' + _renderContextDetail(_contextSelectedEntry()) + '</div>';
+  html += '<div class="context-browser' + (compact ? ' compact' : ' split') + '" id="context-browser"'
+    + (compact ? '' : ' style="--context-list-width:' + Math.round(_contextClampSplitRatio(_contextSplitRatio) * 100) + '%;"')
+    + '>';
+  if (compact) {
+    if (_contextEditor || (_contextCompactDetailOpen && _contextSelectedEntry())) {
+      html += '<div class="context-detail context-detail-compact" id="context-detail">' + _renderContextDetailPane(true) + '</div>';
+    } else {
+      html += '<div class="context-list context-list-compact" id="context-list">' + _renderContextList() + '</div>';
+    }
+  } else {
+    html += '<div class="context-list" id="context-list">' + _renderContextList() + '</div>';
+    html += '<div class="context-splitter" onmousedown="contextStartResize(event)" title="Resize context panes"></div>';
+    html += '<div class="context-detail" id="context-detail">' + _renderContextDetailPane(false) + '</div>';
+  }
   html += '</div></div>';
   panel.innerHTML = html;
 
@@ -538,24 +586,30 @@ function contextSetFocus(kind) {
   _contextSelectedId = '';
   _contextScrollTop = 0;
   _contextLastQueryKey = '';
+  _contextCompactDetailOpen = false;
   contextRefresh(true);
 }
 
 function contextSelectEntry(entryId) {
   _contextSelectedId = entryId;
   _contextEditor = null;
+  if (_contextUseCompactLayout(document.getElementById('panel-context'))) {
+    _contextCompactDetailOpen = true;
+  }
   renderContextPanel();
 }
 
 function contextSetEntryType(value) {
   _contextEntryType = value || '';
   _contextLastQueryKey = '';
+  _contextCompactDetailOpen = false;
   contextRefresh(true);
 }
 
 function contextSetPinnedOnly(checked) {
   _contextPinnedOnly = !!checked;
   _contextLastQueryKey = '';
+  _contextCompactDetailOpen = false;
   contextRefresh(true);
 }
 
@@ -565,6 +619,7 @@ function contextSearchInput(value) {
     _contextSearchQuery = value || '';
     _contextSearchHadFocus = true;
     _contextLastQueryKey = '';
+    _contextCompactDetailOpen = false;
     contextRefresh(true);
   }, 150);
 }
@@ -576,6 +631,7 @@ function contextTogglePin(entryId, shouldPin) {
 
 function _contextOpenEditor(editor) {
   _contextEditor = editor;
+  _contextCompactDetailOpen = true;
   renderContextPanel();
 }
 
@@ -593,25 +649,6 @@ function contextOpenCreate() {
     pinned: false,
     link_task: !!task,
     link_pipeline: false,
-    link_agent: !!agent,
-  });
-}
-
-function contextPromoteCurrentTask() {
-  var task = _contextCurrentTask();
-  var agent = _contextCurrentAgent();
-  if (!task) return;
-  _contextOpenEditor({
-    mode: 'create',
-    entry_id: '',
-    title: task.task || '',
-    content: task.description || task.task || '',
-    entry_type: 'note',
-    scope_kind: 'task',
-    scope_ref: task.id,
-    pinned: false,
-    link_task: true,
-    link_pipeline: true,
     link_agent: !!agent,
   });
 }
@@ -642,6 +679,7 @@ function contextEditEntry(entryId) {
 
 function contextCancelEditor() {
   _contextEditor = null;
+  if (!_contextSelectedEntry()) _contextCompactDetailOpen = false;
   renderContextPanel();
 }
 
@@ -710,4 +748,53 @@ function contextJumpToTask(taskId) {
   if (typeof boardNavigateToTask === 'function') {
     boardNavigateToTask(taskId);
   }
+}
+
+function contextShowList() {
+  _contextCompactDetailOpen = false;
+  _contextEditor = null;
+  renderContextPanel();
+}
+
+function contextStartResize(event) {
+  var panel = document.getElementById('panel-context');
+  var browser = document.getElementById('context-browser');
+  if (!panel || !browser || _contextUseCompactLayout(panel)) return;
+  var rect = browser.getBoundingClientRect ? browser.getBoundingClientRect() : null;
+  _contextResizeDrag = {
+    left: rect && isFinite(rect.left) ? rect.left : 0,
+    width: Math.max(1, rect && isFinite(rect.width) && rect.width ? rect.width : (_contextPanelWidth(browser) || _contextPanelWidth(panel) || 1)),
+  };
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (document && typeof document.addEventListener === 'function') {
+    document.addEventListener('mousemove', contextDragResize);
+    document.addEventListener('mouseup', contextStopResize);
+  }
+  contextDragResize(event);
+}
+
+function contextDragResize(event) {
+  if (!_contextResizeDrag) return;
+  var clientX = event && typeof event.clientX === 'number'
+    ? event.clientX
+    : (_contextResizeDrag.left + (_contextResizeDrag.width * _contextSplitRatio));
+  _contextSplitRatio = _contextClampSplitRatio((clientX - _contextResizeDrag.left) / _contextResizeDrag.width);
+  var browser = document.getElementById('context-browser');
+  if (browser && browser.style) {
+    var width = Math.round(_contextSplitRatio * 100) + '%';
+    if (typeof browser.style.setProperty === 'function') {
+      browser.style.setProperty('--context-list-width', width);
+    } else {
+      browser.style['--context-list-width'] = width;
+    }
+  }
+}
+
+function contextStopResize() {
+  if (!_contextResizeDrag) return;
+  if (document && typeof document.removeEventListener === 'function') {
+    document.removeEventListener('mousemove', contextDragResize);
+    document.removeEventListener('mouseup', contextStopResize);
+  }
+  _contextResizeDrag = null;
 }

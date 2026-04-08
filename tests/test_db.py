@@ -286,6 +286,20 @@ class LoomDBTests(unittest.TestCase):
 
         self.assertEqual(loaded["board_card_density_by_group"], density)
 
+    def test_load_all_restores_events_dismissed_attention(self):
+        dismissed = {
+            "ask-1": 123.0,
+            "agent-1": 456.0,
+        }
+        self.db.save_ui_state(
+            "events_dismissed_attention",
+            json.dumps(dismissed),
+        )
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["events_dismissed_attention"], dismissed)
+
     def test_panel_event_paging_and_trim_keep_recent_events(self):
         for i in range(1, 6):
             self.db.save_panel_event(

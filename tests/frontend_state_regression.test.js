@@ -288,6 +288,26 @@ function createBoardHarness(options = {}) {
   return { context, document };
 }
 
+function createSelectionHarness() {
+  const { sandbox, document } = createSandbox();
+  sandbox.renderCalls = { main: 0, board: 0 };
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/commands.js');
+  runInContext(context, `
+    render = function() { renderCalls.main++; };
+    renderBoard = function() { renderCalls.board++; };
+    _activePanelApp = 'board';
+    _currentGroup = function() {
+      if (selectedAgentId && state && state.agents && state.agents[selectedAgentId]) {
+        return state.agents[selectedAgentId].group || '';
+      }
+      return '';
+    };
+  `);
+  return { context, document };
+}
+
 function createEventsHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -3033,6 +3053,7 @@ test('renderEvents restores focused search input value and caret across rerender
 test('context panel requests scoped memory and renders provenance details', () => {
   const { context, document } = createContextHarness();
   const panel = document.register('panel-context');
+  panel.clientWidth = 1100;
   const list = new FakeElement('context-list');
   panel.setQuerySelector('#context-list', list);
 
@@ -3082,6 +3103,10 @@ test('context panel requests scoped memory and renders provenance details', () =
   context.renderContextPanel();
 
   assert.match(panel.innerHTML, /Context/);
+  assert.match(panel.innerHTML, /btn-primary btn-sm" onclick="contextOpenCreate\(\)">New Note/);
+  assert.doesNotMatch(panel.innerHTML, />Refresh</);
+  assert.doesNotMatch(panel.innerHTML, />Promote Task</);
+  assert.match(panel.innerHTML, /context-splitter/);
   assert.match(panel.innerHTML, /Keep pinned entries visible/);
   assert.match(panel.innerHTML, /Pinned/);
   assert.match(panel.innerHTML, /Task: Ship the context browser/);
@@ -3093,6 +3118,7 @@ test('context panel requests scoped memory and renders provenance details', () =
 test('context panel renders compacted summaries as read-only entries', () => {
   const { context, document } = createContextHarness();
   const panel = document.register('panel-context');
+  panel.clientWidth = 1100;
   const list = new FakeElement('context-list');
   panel.setQuerySelector('#context-list', list);
 
@@ -3124,7 +3150,7 @@ test('context panel renders compacted summaries as read-only entries', () => {
   assert.doesNotMatch(panel.innerHTML, /contextEditEntry/);
 });
 
-test('context panel promotes the current task into a linked manual note', () => {
+test('context panel opens a new linked manual note for the current task', () => {
   const { context, document } = createContextHarness();
   document.register('panel-context');
   context.selectedAgentId = 'agent-1';
@@ -3143,7 +3169,11 @@ test('context panel promotes the current task into a linked manual note', () => 
     },
   };
 
-  context.contextPromoteCurrentTask();
+  context.contextOpenCreate();
+  runInContext(context, `
+    contextUpdateEditor('title', 'Capture orchestration guidance');
+    contextUpdateEditor('content', 'Document the operating constraints for memory notes.');
+  `);
   context.contextSaveEditor();
 
   assert.deepEqual(jsonValue(context, 'sendCalls[sendCalls.length - 1]'), {
@@ -3157,10 +3187,71 @@ test('context panel promotes the current task into a linked manual note', () => 
     source_kind: 'manual',
     link_targets: [
       { target_kind: 'task', target_ref: 'task-1' },
-      { target_kind: 'pipeline', target_ref: 'root-1' },
       { target_kind: 'agent', target_ref: 'agent-1' },
     ],
   });
+});
+
+test('context panel uses a compact master-detail flow on narrow panels', () => {
+  const { context, document } = createContextHarness();
+  const panel = document.register('panel-context');
+  panel.clientWidth = 420;
+
+  runInContext(context, `
+    _contextEntries = [{
+      id: 'mem-1',
+      title: 'Keep the detail pane readable',
+      content: 'Use a separate detail view on narrow widths.',
+      entry_type: 'note',
+      pinned: false,
+      scope_kind: 'group',
+      scope_ref: 'alpha',
+      source_kind: 'manual',
+      source_id: 'note-1',
+      created_at: 100,
+      updated_at: 120,
+      links: [],
+    }];
+    _contextSelectedId = 'mem-1';
+    _contextLastQueryKey = JSON.stringify(_contextBuildListQuery());
+    _contextCompactDetailOpen = false;
+  `);
+
+  context.renderContextPanel();
+  assert.match(panel.innerHTML, /context-list-compact/);
+  assert.doesNotMatch(panel.innerHTML, /Back to List/);
+
+  context.contextSelectEntry('mem-1');
+  assert.match(panel.innerHTML, /context-detail-compact/);
+  assert.match(panel.innerHTML, /Back to List/);
+  assert.match(panel.innerHTML, /Keep the detail pane readable/);
+
+  context.contextShowList();
+  assert.match(panel.innerHTML, /context-list-compact/);
+});
+
+test('agent clicks rescope the board to the clicked agent group immediately', () => {
+  const { context } = createSelectionHarness();
+
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent' },
+    'agent-2': { id: 'agent-2', name: 'Beta', group: 'beta', cell_type: 'agent' },
+    'term-2': { id: 'term-2', name: 'Beta term', group: 'beta', cell_type: 'terminal', parent_id: 'agent-2' },
+  };
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    focusedItemId = 'agent-1';
+  `);
+
+  context.onAgentClick('agent-2');
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-2');
+  assert.equal(jsonValue(context, '_currentGroup()'), 'beta');
+  assert.equal(jsonValue(context, 'renderCalls.board'), 1);
+
+  context.focusAgent('term-2');
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-2');
+  assert.equal(jsonValue(context, '_currentGroup()'), 'beta');
+  assert.equal(jsonValue(context, 'renderCalls.board'), 1);
 });
 
 test('ws invalidation rerenders the context panel for task updates', () => {
@@ -3359,7 +3450,41 @@ test('eventsDismiss clears drafts and hides dismissed attention items from the b
 
   assert.deepEqual(jsonValue(context, '_eventsResolveDrafts'), {});
   assert.equal(runInContext(context, `_eventsDismissedIds.has('ask')`), true);
+  assert.equal(jsonValue(context, `state.events_dismissed_attention.ask`), 4070908800);
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    { cmd: 'events_dismiss', id: 'ask', timestamp: 4070908800 },
+  ]);
   assert.equal(badge.classList.contains('panel-attention'), false);
+});
+
+test('persisted dismissed attention stays hidden until a newer timestamp appears', () => {
+  const { context, document } = createEventsHarness();
+  const panel = document.register('panel-events');
+  panel.setQuerySelector('.events-log', null);
+  panel.setQuerySelectorAll('.events-resolve-textarea', []);
+  panel.setQuerySelector('.events-search-input', null);
+  const badge = new FakeElement('events-badge');
+  document.setSelector('.taskbar-app[data-app="events"]', badge);
+
+  context.state.events_dismissed_attention = { 'agent-1': 100 };
+  context.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      needs_attention: true,
+      error_message: 'Still blocked',
+      last_event_at: 100,
+    },
+  };
+
+  context.updateEventsAttentionBadge();
+  assert.equal(badge.classList.contains('panel-attention'), false);
+
+  context.state.agents['agent-1'].last_event_at = 101;
+  context.updateEventsAttentionBadge();
+  assert.equal(badge.classList.contains('panel-attention'), true);
 });
 
 test('openEditTask populates modal state from the task and preserves editable versus system labels', () => {

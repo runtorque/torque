@@ -111,6 +111,122 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIs(cell, agent)
         self.assertIs(resolved_task, task)
 
+    def test_resolve_memory_scope_ref_defaults_from_context(self):
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Document the context flow",
+            group="g",
+            lane="In Progress",
+            pipeline_root_id="root-1",
+        )
+        agent = self._make_agent("agent-1", current_task_id="task-1")
+
+        self.assertEqual(
+            self.server_mod._resolve_memory_scope_ref(
+                "task",
+                "",
+                cell=agent,
+                task=task,
+            ),
+            "task-1",
+        )
+        self.assertEqual(
+            self.server_mod._resolve_memory_scope_ref(
+                "pipeline",
+                "",
+                cell=agent,
+                task=task,
+            ),
+            "root-1",
+        )
+        self.assertEqual(
+            self.server_mod._resolve_memory_scope_ref(
+                "group",
+                "",
+                cell=agent,
+                task=task,
+            ),
+            "g",
+        )
+
+    def test_resolve_task_id_accepts_slug_and_prefix(self):
+        state = self.state_mod.MatrixState()
+        task = self.state_mod.BoardTask(
+            id="task-1234abcd",
+            task="Document the context flow",
+            group="g",
+            lane="Backlog",
+            slug="document-context-flow",
+        )
+        state.board_tasks[task.id] = task
+
+        self.assertEqual(
+            self.server_mod._resolve_task_id(state, "document-context-flow"),
+            task.id,
+        )
+        self.assertEqual(
+            self.server_mod._resolve_task_id(state, "task-1234"),
+            task.id,
+        )
+
+    def test_resolve_agent_id_accepts_slug_name_and_prefix(self):
+        state = self.state_mod.MatrixState()
+        agent = self._make_agent("agent-1234abcd")
+        agent.name = "Worker One"
+        agent.slug = "worker-one"
+        state.agents[agent.id] = agent
+
+        self.assertEqual(
+            self.server_mod._resolve_agent_id(state, "worker-one"),
+            agent.id,
+        )
+        self.assertEqual(
+            self.server_mod._resolve_agent_id(state, "worker one"),
+            agent.id,
+        )
+        self.assertEqual(
+            self.server_mod._resolve_agent_id(state, "agent-1234"),
+            agent.id,
+        )
+
+    def test_resolve_memory_link_ref_defaults_from_context(self):
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Document the context flow",
+            group="g",
+            lane="In Progress",
+            pipeline_root_id="root-1",
+        )
+        agent = self._make_agent("agent-1", current_task_id="task-1")
+
+        self.assertEqual(
+            self.server_mod._resolve_memory_link_ref(
+                "task",
+                "",
+                cell=agent,
+                task=task,
+            ),
+            "task-1",
+        )
+        self.assertEqual(
+            self.server_mod._resolve_memory_link_ref(
+                "pipeline",
+                "",
+                cell=agent,
+                task=task,
+            ),
+            "root-1",
+        )
+        self.assertEqual(
+            self.server_mod._resolve_memory_link_ref(
+                "agent",
+                "",
+                cell=agent,
+                task=task,
+            ),
+            "agent-1",
+        )
+
     def test_apply_verification_report_marks_attempted(self):
         task = self.state_mod.BoardTask(
             id="task-1",

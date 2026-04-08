@@ -205,7 +205,11 @@ function moveFocusHorizontal(delta) {
   const nextAgentId = groupAgents[nextIdx];
 
   // Open the target agent's drawer
-  selectedAgentId = nextAgentId;
+  if (typeof _updateSelectedAgentContext === 'function') {
+    _updateSelectedAgentContext(nextAgentId);
+  } else {
+    selectedAgentId = nextAgentId;
+  }
 
   if (onTerminal) {
     // Was on a terminal — focus the first child terminal of the new agent
@@ -233,7 +237,11 @@ function moveFocusDown() {
   const cell = state.agents[focusedItemId];
   // If focused on an agent that isn't selected yet, open its drawer first
   if (cell && cell.cell_type !== 'terminal' && selectedAgentId !== focusedItemId) {
-    selectedAgentId = focusedItemId;
+    if (typeof _updateSelectedAgentContext === 'function') {
+      _updateSelectedAgentContext(focusedItemId);
+    } else {
+      selectedAgentId = focusedItemId;
+    }
     render();
     const el = document.querySelector('.focused');
     if (el) el.scrollIntoView({ block: 'nearest' });

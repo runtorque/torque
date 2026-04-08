@@ -677,7 +677,15 @@
   <button class="taskbar-app" data-app="board" onclick="togglePanel('board')">&#9776; Board</button>
   <button class="taskbar-app" data-app="actions" onclick="togglePanel('actions')">&#9998; Actions</button>
   <button class="taskbar-app" data-app="templates" onclick="togglePanel('templates')">&#9823; Agents</button>
-  <button class="taskbar-app" data-app="context" onclick="togglePanel('context')">&#128214; Context</button>
+  <button class="taskbar-app" data-app="context" onclick="togglePanel('context')">
+    <span class="taskbar-app-icon" aria-hidden="true">
+      <svg viewBox="0 0 16 16">
+        <path d="M2.5 3.5c0-.83.67-1.5 1.5-1.5h3.25c1.03 0 2.03.33 2.85.94L10.5 3.5v9.5l-.4-.29A4.82 4.82 0 0 0 7.25 12H4a1.5 1.5 0 0 1-1.5-1.5z"/>
+        <path d="M13.5 3.5c0-.83-.67-1.5-1.5-1.5H8.75c-1.03 0-2.03.33-2.85.94L5.5 3.5v9.5l.4-.29A4.82 4.82 0 0 1 8.75 12H12a1.5 1.5 0 0 0 1.5-1.5z"/>
+      </svg>
+    </span>
+    <span>Context</span>
+  </button>
   <button class="taskbar-app" data-app="weaver" onclick="togglePanel('weaver')">&#x2696; Weaver</button>
   <button class="taskbar-app" data-app="events" onclick="togglePanel('events')">&#x26A0; Events</button>
 </div>

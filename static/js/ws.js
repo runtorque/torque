@@ -284,6 +284,9 @@ function _deltaSurfaceInvalidations(ops) {
 }
 
 function _applyUiSurfaceInvalidation(flags, key) {
+  if (key === 'events_dismissed_attention') {
+    _markSurface(flags, 'events');
+  }
   if (key === 'board_filters_by_group'
       || key === 'board_saved_views_by_group'
       || key === 'board_lane_sorts_by_group'

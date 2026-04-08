@@ -44,6 +44,7 @@ from .memory import (
     build_memory_link,
     build_prompt_memory_block,
     detect_current_task,
+    infer_project_key,
     load_visible_memory_entries,
     normalize_entry_type,
     normalize_link_target_kind,
@@ -88,6 +89,50 @@ from .server_worktrees import (
 CLOSE_AFTER_MERGE_DELAY = 5
 
 
+def _resolve_task_id(state, identifier: str) -> str:
+    """Resolve a task by exact ID, slug, or ID prefix."""
+    ident = str(identifier or "").strip()
+    if not ident:
+        return ""
+    if ident in state.board_tasks:
+        return ident
+    for task in state.board_tasks.values():
+        if task.slug == ident:
+            return task.id
+    for task in state.board_tasks.values():
+        if task.id.startswith(ident):
+            return task.id
+    return ident
+
+
+def _resolve_agent_id(state, identifier: str) -> str:
+    """Resolve an agent by exact ID, slug, name, or ID prefix."""
+    ident = str(identifier or "").strip()
+    if not ident:
+        return ""
+    if ident in state.agents:
+        cell = state.agents[ident]
+        if cell.cell_type == "agent":
+            return cell.id
+    ident_lower = ident.lower()
+    for cell in state.agents.values():
+        if cell.cell_type != "agent":
+            continue
+        if cell.slug == ident_lower:
+            return cell.id
+    for cell in state.agents.values():
+        if cell.cell_type != "agent":
+            continue
+        if cell.name.lower() == ident_lower:
+            return cell.id
+    for cell in state.agents.values():
+        if cell.cell_type != "agent":
+            continue
+        if cell.id.startswith(ident):
+            return cell.id
+    return ""
+
+
 def _resolve_memory_cell_and_task(state, cell_id: str = "",
                                   task_id: str = ""):
     """Resolve best-effort agent/task context for memory commands."""
@@ -114,6 +159,71 @@ def _resolve_memory_cell_and_task(state, cell_id: str = "",
         resolved_cell = state.agents.get(resolved_task.agent_id)
 
     return resolved_cell, resolved_task
+
+
+def _resolve_memory_scope_ref(scope_kind: str, scope_ref: str = "",
+                              *, cell=None, task=None) -> str:
+    """Resolve memory scope refs from explicit values or active context."""
+    kind = str(scope_kind or "").strip()
+    ref = str(scope_ref or "").strip()
+    if ref or not kind:
+        return ref
+
+    if kind == "task":
+        if task and getattr(task, "id", ""):
+            return task.id
+        raise ValueError("Task scope requires an active task or scope_ref")
+
+    if kind == "pipeline":
+        if task:
+            return getattr(task, "pipeline_root_id", "") or task.id
+        raise ValueError("Pipeline scope requires an active task or scope_ref")
+
+    if kind == "group":
+        group_name = ""
+        if task:
+            group_name = getattr(task, "group", "") or ""
+        if not group_name and cell:
+            group_name = getattr(cell, "group", "") or ""
+        if group_name:
+            return group_name
+        raise ValueError("Group scope requires a group or scope_ref")
+
+    if kind == "project":
+        project_key = infer_project_key(cell=cell, task=task)
+        if project_key:
+            return project_key
+        raise ValueError(
+            "Project scope requires a repo/worktree context or explicit scope_ref"
+        )
+
+    return ref
+
+
+def _resolve_memory_link_ref(target_kind: str, target_ref: str = "",
+                             *, cell=None, task=None) -> str:
+    """Resolve memory-link target refs from explicit values or active context."""
+    kind = str(target_kind or "").strip()
+    ref = str(target_ref or "").strip()
+    if ref:
+        return ref
+
+    if kind == "task":
+        if task and getattr(task, "id", ""):
+            return task.id
+        raise ValueError("Task link requires an active task or target_ref")
+
+    if kind == "agent":
+        if cell and getattr(cell, "id", ""):
+            return cell.id
+        raise ValueError("Agent link requires an active agent or target_ref")
+
+    if kind == "pipeline":
+        if task:
+            return getattr(task, "pipeline_root_id", "") or task.id
+        raise ValueError("Pipeline link requires an active task or target_ref")
+
+    return ref
 
 
 def _apply_verification_report(task, payload, actor_name, save_task,
@@ -2550,7 +2660,7 @@ async def main(connection: iterm2.Connection):
                     }
 
             elif cmd == "board_archive_task":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 changed = state.board_archive_task(
                     tid,
                     include_descendants=bool(
@@ -2567,7 +2677,7 @@ async def main(connection: iterm2.Connection):
                     }
 
             elif cmd == "board_unarchive_task":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 changed = state.board_unarchive_task(
                     tid,
                     lane=data.get("lane", ""),
@@ -2585,7 +2695,7 @@ async def main(connection: iterm2.Connection):
                     }
 
             elif cmd == "board_update_task":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 fields = {k: v for k, v in data.items()
                           if k not in ("cmd", "id")}
                 if {"provider", "external_id", "external_url"} & set(fields):
@@ -2613,7 +2723,7 @@ async def main(connection: iterm2.Connection):
                             "id": tid, "agent_id": _new_aid})
 
             elif cmd == "board_verify_task":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 task = state.board_tasks.get(tid)
                 if not task:
                     result = {"type": "error", "message": "Task not found"}
@@ -2708,7 +2818,7 @@ async def main(connection: iterm2.Connection):
                     result = {"type": "error", "message": str(exc)}
 
             elif cmd == "external_link_task":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 task = state.board_tasks.get(tid)
                 if not task:
                     result = {"type": "error",
@@ -2737,7 +2847,7 @@ async def main(connection: iterm2.Connection):
                     }
 
             elif cmd == "external_open_task":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 task = state.board_tasks.get(tid)
                 if not task:
                     result = {"type": "error",
@@ -2758,7 +2868,7 @@ async def main(connection: iterm2.Connection):
                         result = {"type": "error", "message": str(exc)}
 
             elif cmd == "external_push_task_status":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 task = state.board_tasks.get(tid)
                 if not task:
                     result = {"type": "error",
@@ -2787,7 +2897,7 @@ async def main(connection: iterm2.Connection):
                         result = {"type": "error", "message": str(exc)}
 
             elif cmd == "external_post_task_comment":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 task = state.board_tasks.get(tid)
                 if not task:
                     result = {"type": "error",
@@ -2817,7 +2927,7 @@ async def main(connection: iterm2.Connection):
                         result = {"type": "error", "message": str(exc)}
 
             elif cmd == "board_remove_task":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 state.board_remove_task(tid)
                 # Clean up attachment files
                 att_dir = ATTACHMENTS_DIR / tid
@@ -2825,11 +2935,11 @@ async def main(connection: iterm2.Connection):
                     shutil.rmtree(att_dir, ignore_errors=True)
 
             elif cmd == "board_archive_task":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 state.board_archive_task(tid)
 
             elif cmd == "board_unarchive_task":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 state.board_unarchive_task(
                     tid,
                     lane=data.get("lane", ""),
@@ -2837,7 +2947,7 @@ async def main(connection: iterm2.Connection):
                 )
 
             elif cmd == "remove_attachment":
-                tid = _resolve_task_id(data.get("task_id", ""))
+                tid = _resolve_task_id(state, data.get("task_id", ""))
                 fname = data.get("filename", "")
                 task = state.board_tasks.get(tid)
                 if task and fname:
@@ -2851,7 +2961,7 @@ async def main(connection: iterm2.Connection):
                         tid, attachments=task.attachments)
 
             elif cmd == "board_move_task":
-                _mv_id = _resolve_task_id(data.get("id", ""))
+                _mv_id = _resolve_task_id(state, data.get("id", ""))
                 _mv_task = state.board_tasks.get(_mv_id)
                 _mv_done_before = task_counts_as_done(_mv_task)
                 _mv_new = data.get("lane", "")
@@ -2876,7 +2986,7 @@ async def main(connection: iterm2.Connection):
                     data.get("position", 0))
 
             elif cmd == "dispatch_task":
-                tid = _resolve_task_id(data.get("id", ""))
+                tid = _resolve_task_id(state, data.get("id", ""))
                 task = state.board_tasks.get(tid)
                 if not task:
                     result = {"type": "error",
@@ -3391,10 +3501,19 @@ async def main(connection: iterm2.Connection):
                         data.get("task_id", ""),
                     )
                     scope_kind = (data.get("scope_kind", "") or "").strip()
-                    scope_ref = _resolve_memory_scope_ref(
-                        scope_kind,
-                        (data.get("scope_ref", "") or "").strip(),
-                    )
+                    try:
+                        scope_ref = _resolve_memory_scope_ref(
+                            scope_kind,
+                            (data.get("scope_ref", "") or "").strip(),
+                            cell=cell,
+                            task=task,
+                        )
+                    except ValueError as exc:
+                        result = {
+                            "type": "error",
+                            "message": str(exc),
+                        }
+                        scope_ref = ""
                     group_name = (data.get("group_name", "") or "").strip()
                     project_key = (data.get("project_key", "") or "").strip()
                     linked_target_kind = (
@@ -3415,12 +3534,18 @@ async def main(connection: iterm2.Connection):
                             }
                             linked_target_kind = ""
                     if result is None and linked_target_kind:
-                        linked_target_ref = _resolve_memory_link_ref(
-                            linked_target_kind,
-                            linked_target_ref,
-                            cell=cell,
-                            task=task,
-                        )
+                        try:
+                            linked_target_ref = _resolve_memory_link_ref(
+                                linked_target_kind,
+                                linked_target_ref,
+                                cell=cell,
+                                task=task,
+                            )
+                        except ValueError as exc:
+                            result = {
+                                "type": "error",
+                                "message": str(exc),
+                            }
                     if result is None:
                         if not scope_kind and not scope_ref and not group_name:
                             if task:
@@ -3446,6 +3571,7 @@ async def main(connection: iterm2.Connection):
                             scope_ref=scope_ref,
                             entry_type=(data.get("entry_type", "") or "").strip(),
                             task_id=_resolve_task_id(
+                                state,
                                 (data.get("filter_task_id", "") or "").strip()
                             ),
                             pinned_only=bool(data.get("pinned_only", False)),
@@ -3526,6 +3652,28 @@ async def main(connection: iterm2.Connection):
                                 value=state.board_panel_height)
                     state._db_save_ui("board_panel_height",
                                       state.board_panel_height)
+
+            elif cmd == "events_dismiss":
+                item_id = str(data.get("id", "") or "").strip()
+                if not item_id:
+                    result = {"type": "error", "message": "Missing event id"}
+                else:
+                    try:
+                        timestamp = float(data.get("timestamp", 0) or 0)
+                    except (TypeError, ValueError):
+                        timestamp = 0.0
+                    if timestamp <= 0:
+                        timestamp = time.time()
+                    state.events_dismissed_attention[item_id] = timestamp
+                    state._emit(
+                        "ui_update",
+                        key="events_dismissed_attention",
+                        value=state.events_dismissed_attention,
+                    )
+                    state._db_save_ui(
+                        "events_dismissed_attention",
+                        json.dumps(state.events_dismissed_attention),
+                    )
 
             elif cmd == "board_set_filters":
                 raw_filters = data.get("filters_by_group", {})
@@ -4312,6 +4460,7 @@ async def main(connection: iterm2.Connection):
                                         elif target_agent:
                                             target_id = \
                                                 _resolve_agent_id(
+                                                    state,
                                                     target_agent)
                                             if not target_id:
                                                 result = {
@@ -4588,6 +4737,8 @@ async def main(connection: iterm2.Connection):
                             data.get("scope_ref", "")
                             if "scope_ref" in data
                             else (existing.get("scope_ref", "") if existing else ""),
+                            cell=cell,
+                            task=task,
                         )
                         entry_type = data.get("entry_type", "")
                         if not entry_type and existing:
@@ -4799,7 +4950,7 @@ async def main(connection: iterm2.Connection):
             elif cmd == "weaver_message":
                 agent_ident = data.get("agent_id", "")
                 msg_text = data.get("message", "")
-                agent_id = _resolve_agent_id(agent_ident)
+                agent_id = _resolve_agent_id(state, agent_ident)
                 if not agent_id:
                     result = {"type": "error",
                               "message": f"Agent not found: {agent_ident}"}

@@ -23,28 +23,64 @@ function _worktreeSharedWith(cell) {
   return names.length ? '"' + names.join('", "') + '"' : '';
 }
 
-function focusAgent(id) { focusedItemId = id; send({ cmd: 'focus_agent', id }); }
+function _selectionAgentRootId(id) {
+  if (!state || !state.agents || !id || !state.agents[id]) return '';
+  var cell = state.agents[id];
+  if (cell.cell_type === 'terminal') {
+    if (cell.parent_id && state.agents[cell.parent_id]) return cell.parent_id;
+    return '';
+  }
+  return cell.id || '';
+}
+
+function _syncPanelsAfterSelectionChange(prevSelectedId) {
+  if (prevSelectedId === selectedAgentId) return;
+  if (typeof renderActivePanel === 'function'
+      && typeof _activePanelApp !== 'undefined'
+      && _activePanelApp) {
+    renderActivePanel();
+  }
+}
+
+function _updateSelectedAgentContext(id) {
+  var nextSelectedId = _selectionAgentRootId(id);
+  var changed = selectedAgentId !== nextSelectedId;
+  if (nextSelectedId) selectedAgentId = nextSelectedId;
+  return changed;
+}
+
+function focusAgent(id) {
+  var prevSelectedId = selectedAgentId;
+  focusedItemId = id;
+  _updateSelectedAgentContext(id);
+  _syncPanelsAfterSelectionChange(prevSelectedId);
+  send({ cmd: 'focus_agent', id });
+}
 
 function onAgentClick(id) {
+  var prevSelectedId = selectedAgentId;
   focusedItemId = id;
   if (selectedAgentId === id) {
     // Already selected → focus the agent's iTerm2 session
     send({ cmd: 'focus_agent', id });
   } else {
     // Select this agent → show its terminal drawer
-    selectedAgentId = id;
+    _updateSelectedAgentContext(id);
     if (state.global_settings && state.global_settings.focus_on_click) {
       send({ cmd: 'focus_agent', id });
     }
     render();
+    _syncPanelsAfterSelectionChange(prevSelectedId);
   }
 }
 
 function onAgentDblClick(id) {
+  var prevSelectedId = selectedAgentId;
   focusedItemId = id;
-  selectedAgentId = id;
+  _updateSelectedAgentContext(id);
   send({ cmd: 'focus_agent', id });
   render();
+  _syncPanelsAfterSelectionChange(prevSelectedId);
 }
 
 async function removeAgent(id) {

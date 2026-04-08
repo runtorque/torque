@@ -1015,6 +1015,15 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     c.execute(
                         "INSERT INTO ui_state (key, value) VALUES (?,?)",
                         (key, str(val)))
+            if state_dict.get("events_dismissed_attention") is not None:
+                c.execute(
+                    "INSERT INTO ui_state (key, value) VALUES (?,?)",
+                    (
+                        "events_dismissed_attention",
+                        json.dumps(state_dict.get("events_dismissed_attention")
+                                   or {}),
+                    ),
+                )
             if state_dict.get("board_filters_by_group") is not None:
                 c.execute(
                     "INSERT INTO ui_state (key, value) VALUES (?,?)",
@@ -1225,6 +1234,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 or ("board" if ui.get("board_panel_open", "False") == "True"
                     else ""),
             "board_panel_height": int(ui.get("board_panel_height", "0")),
+            "events_dismissed_attention": (
+                json.loads(ui.get("events_dismissed_attention", "{}"))
+                if ui.get("events_dismissed_attention") else {}
+            ),
             "board_filters_by_group": board_filters_by_group,
             "board_saved_views_by_group": board_saved_views_by_group,
             "board_lane_sorts_by_group": board_lane_sorts_by_group,

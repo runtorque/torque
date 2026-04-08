@@ -15,6 +15,30 @@ var _eventsSearchDebounce = null;
 var _eventsSearchHadFocus = false;
 var _eventsResolveDrafts = {};
 
+function _eventsDismissedMap() {
+  if (!state.events_dismissed_attention
+      || typeof state.events_dismissed_attention !== 'object') {
+    state.events_dismissed_attention = {};
+  }
+  return state.events_dismissed_attention;
+}
+
+function _eventsDismissedTimestamp(id) {
+  var dismissed = _eventsDismissedMap()[id];
+  if (dismissed !== undefined && dismissed !== null && dismissed !== '') {
+    return Number(dismissed) || 0;
+  }
+  return _eventsDismissedIds.has(id) ? Number.MAX_SAFE_INTEGER : 0;
+}
+
+function _eventsIsDismissed(item) {
+  var dismissedAt = _eventsDismissedTimestamp(item.id);
+  if (!dismissedAt) return false;
+  var itemTs = Number(item.timestamp || 0);
+  if (!itemTs) return true;
+  return itemTs <= dismissedAt;
+}
+
 /* ---- Helpers -------------------------------------------------------- */
 
 function _eventsCurrentGroup() {
@@ -198,7 +222,7 @@ function renderEvents() {
   var allAttention = _eventsGetAttentionItems();
   var attention = [];
   for (var ai = 0; ai < allAttention.length; ai++) {
-    if (!_eventsDismissedIds.has(allAttention[ai].id)) attention.push(allAttention[ai]);
+    if (!_eventsIsDismissed(allAttention[ai])) attention.push(allAttention[ai]);
   }
   var attCount = attention.length;
   html += '<div class="events-attention">';
@@ -394,8 +418,20 @@ function eventsOnSearchInput(value) {
 }
 
 function eventsDismiss(id) {
+  var items = _eventsGetAttentionItems();
+  var current = null;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].id === id) {
+      current = items[i];
+      break;
+    }
+  }
+  var timestamp = current ? Number(current.timestamp || 0) : 0;
+  if (timestamp <= 0) timestamp = Math.floor(Date.now() / 1000);
   delete _eventsResolveDrafts[id];
   _eventsDismissedIds.add(id);
+  _eventsDismissedMap()[id] = timestamp;
+  send({ cmd: 'events_dismiss', id: id, timestamp: timestamp });
   renderEvents();
   updateEventsAttentionBadge();
 }
@@ -414,7 +450,7 @@ function updateEventsAttentionBadge() {
   var items = _eventsGetAttentionItems();
   var visible = 0;
   for (var i = 0; i < items.length; i++) {
-    if (!_eventsDismissedIds.has(items[i].id)) visible++;
+    if (!_eventsIsDismissed(items[i])) visible++;
   }
   btn.classList.toggle('panel-attention', visible > 0);
 }
