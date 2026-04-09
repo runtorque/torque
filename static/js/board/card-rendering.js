@@ -299,11 +299,7 @@ function _boardTaskDispatchEligibility(task) {
           : 'Missing template "' + task.agent_template + '"',
     };
   }
-  return {
-    className: 'board-card-dispatch board-card-dispatch-ready',
-    label: 'Ready',
-    title: 'Ready to dispatch',
-  };
+  return null;
 }
 
 function _boardTaskHealthState(task) {

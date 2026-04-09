@@ -1033,8 +1033,12 @@ function renderBoard() {
     }
   }
 
-  _boardAfterRenderLayout();
   if (!skipRestoreFocus) _restoreSurfaceState(panel, panelState);
+  if (_boardAddingTask) {
+    var addTaskInput = document.getElementById('board-add-task-input');
+    if (addTaskInput) boardAddTaskAutoResize(addTaskInput);
+  }
+  _boardAfterRenderLayout();
 }
 
 /* ---- Virtual scroll ------------------------------------------------- */

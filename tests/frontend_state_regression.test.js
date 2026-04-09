@@ -1654,7 +1654,7 @@ test('_renderBoardCard shows overdue and due-soon chips with distinct classes', 
   assert.match(dueSoonHtml, /Due Apr 8 08:00/);
 });
 
-test('_boardTaskDispatchEligibility maps dispatch states onto compact card badges', () => {
+test('_boardTaskDispatchEligibility only surfaces non-default dispatch states on cards', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   context.Date.now = () => Date.parse('2026-04-07T12:00:00Z');
@@ -1682,11 +1682,7 @@ test('_boardTaskDispatchEligibility maps dispatch states onto compact card badge
         labels: []
       }))`,
     ),
-    JSON.stringify({
-      className: 'board-card-dispatch board-card-dispatch-ready',
-      label: 'Ready',
-      title: 'Ready to dispatch',
-    }),
+    'null',
   );
   assert.equal(
     runInContext(
@@ -1818,7 +1814,7 @@ test('ws ignores unsolicited action lists instead of reopening task-from-action 
   assert.equal(actionModal.classList.contains('visible'), false);
 });
 
-test('_renderBoardCard shows dispatch eligibility badges for ready and missing refs states', () => {
+test('_renderBoardCard omits the default dispatch badge while keeping warning states', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   loadBoardScripts(context);
@@ -1848,8 +1844,8 @@ test('_renderBoardCard shows dispatch eligibility badges for ready and missing r
     }, {}, 0)
   `);
 
-  assert.match(readyHtml, /board-card-dispatch-ready/);
-  assert.match(readyHtml, />Ready</);
+  assert.doesNotMatch(readyHtml, /board-card-dispatch-/);
+  assert.doesNotMatch(readyHtml, /Ready to dispatch/);
   assert.match(missingHtml, /board-card-dispatch-warning/);
   assert.match(missingHtml, />Missing refs</);
 });
@@ -3005,6 +3001,45 @@ test('renderBoard restores focused input value and caret across rerenders', () =
   assert.equal(input.selectionEnd, 11);
 });
 
+test('renderBoard keeps the inline add-task composer expanded across rerenders', () => {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadBoardScripts(context);
+  runInContext(context, `
+    _renderBoardSelectionBar = function() { return ''; };
+    _renderBoardCard = function(t) { return '<div class="board-card">' + t.id + '</div>'; };
+    _boardScheduleCount = function() { return 0; };
+    boardUpdateScrollArrows = function() {};
+  `);
+
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  const input = document.register('board-add-task-input');
+  input.value = 'Whenever the user is writing a task in-line and it wraps onto a second line';
+  input.scrollHeight = 72;
+  input.style.height = '18px';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  panel.appendChild(input);
+  document.activeElement = input;
+
+  context.state.board_lanes = ['Backlog'];
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardAddingTask = true;
+    _boardAddingTaskDraft = '';
+  `);
+
+  context.renderBoard();
+
+  assert.equal(runInContext(context, '_boardAddingTaskDraft'), input.value);
+  assert.equal(input.focused, true);
+  assert.equal(input.selectionStart, input.value.length);
+  assert.equal(input.selectionEnd, input.value.length);
+  assert.equal(input.style.height, '72px');
+});
+
 test('agent history task links open the board and focus the selected task', () => {
   const { context, document } = createAgentHistoryHarness();
   document.register('panel-board');
@@ -3368,6 +3403,7 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
   });
 
   assert.match(runningHtml, /class="cell weaver weaver-running"/);
+  assert.match(runningHtml, /class="cell-header-controls">/);
   assert.match(runningHtml, /class="cell-weaver-toggle running"/);
   assert.match(runningHtml, /Pause Weaver event delivery/);
   assert.doesNotMatch(workerHtml, /cell-weaver-toggle/);
@@ -3387,11 +3423,17 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
   assert.match(pausedHtml, /Resume Weaver event delivery/);
 });
 
-test('weaver agent card toggle shares the close control hover and focus reveal affordances', () => {
+test('weaver agent card toggle shares the close control reveal affordances and icon-only default chrome', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
+  assert.match(css, /\.cell-header-controls\s*\{[^}]*position:\s*absolute;[^}]*display:\s*flex;[^}]*align-items:\s*center;/);
   assert.match(css, /\.cell-weaver-toggle\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/);
+  assert.match(css, /\.cell-weaver-toggle\s*\{[^}]*border:\s*1px solid transparent;[^}]*background:\s*transparent;/);
   assert.match(css, /\.cell:hover \.cell-close,\s*\.cell:hover \.cell-weaver-toggle,\s*\.cell:hover \.cell-relaunch,\s*\.cell.focused \.cell-close,\s*\.cell.focused \.cell-weaver-toggle,\s*\.cell.focused \.cell-relaunch,\s*\.cell:focus-within \.cell-close,\s*\.cell:focus-within \.cell-weaver-toggle,\s*\.cell:focus-within \.cell-relaunch\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/);
+  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{/);
+  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*background:/);
+  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*border-color:/);
+  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*outline:\s*none;/);
 });
 
 test('renderWeaverPanel shows branch review-point summary', () => {
