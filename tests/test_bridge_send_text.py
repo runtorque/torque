@@ -222,3 +222,42 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first_reads, 3)
         self.assertEqual(session.screen_reads, first_reads)
         self.assertEqual(delays, [0.25, 0.25, 0.3])
+
+    async def test_send_text_claude_does_not_release_on_startup_banner(self):
+        session = FakeSession(
+            "session-3",
+            screen_snapshots=[
+                ["Claude Code", "claude.ai/code", "Starting..."],
+                ["Claude Code", "claude.ai/code", "Starting..."],
+            ],
+        )
+        bridge, state = await self._make_bridge(session)
+        cell = self.state_mod.AgentCell(
+            id="agent-3",
+            name="weaver",
+            group="g",
+            cell_type="agent",
+            session_id="session-3",
+            agent_type="claude-code",
+            command="claude",
+        )
+        state.agents[cell.id] = cell
+
+        timeouts = []
+
+        async def fake_wait_for(awaitable, timeout):
+            timeouts.append(timeout)
+            if hasattr(awaitable, "close"):
+                awaitable.close()
+            raise self.bridge_mod.asyncio.TimeoutError
+
+        orig_wait_for = self.bridge_mod.asyncio.wait_for
+        self.bridge_mod.asyncio.wait_for = fake_wait_for
+        try:
+            await bridge.send_text("session-3", "hello weaver\r")
+        finally:
+            self.bridge_mod.asyncio.wait_for = orig_wait_for
+
+        self.assertEqual(session.sent, ["hello weaver", "\r"])
+        self.assertEqual(session.screen_reads, 0)
+        self.assertEqual(timeouts, [30.0])

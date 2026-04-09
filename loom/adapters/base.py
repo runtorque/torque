@@ -32,6 +32,7 @@ class InputReadyPolicy:
 
     enabled: bool = False
     hook_event: bool = False
+    screen_fallback: bool = False
     timeout_seconds: float = 0.0
     poll_interval_seconds: float = 0.25
     stable_polls: int = 1

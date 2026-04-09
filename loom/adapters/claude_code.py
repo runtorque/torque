@@ -187,7 +187,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         return f"{boot_cmd} --resume {shlex.quote(session_id)}"
 
     def get_input_ready_policy(self) -> InputReadyPolicy:
-        """Wait for the SessionStart hook, with screen-polling fallback."""
+        """Wait for the SessionStart hook before releasing the first send."""
         return InputReadyPolicy(
             enabled=True,
             hook_event=True,
@@ -198,7 +198,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         )
 
     def is_input_ready_screen(self, screen_text: str) -> bool:
-        """Detect Claude Code's startup banner as a fallback for the hook."""
+        """Retained for optional screen-based fallback policies."""
         lower = screen_text.lower()
         return "claude code" in lower or "claude.ai/code" in lower
 
