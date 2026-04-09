@@ -334,6 +334,8 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         self.assertEqual(get_default_command_for_provider("gemini-cli"), "gemini")
         self.assertEqual(get_default_command_for_provider("missing"), "")
         self.assertEqual(detect_by_command("claude --model sonnet").name, "claude-code")
+        self.assertEqual(detect_by_command("claude-gateway").name, "claude-code")
         self.assertEqual(detect_by_command("codex --model gpt-5").name, "codex")
+        self.assertEqual(detect_by_command("codex-gateway").name, "codex")
         self.assertEqual(detect_by_command("gemini --model pro").name, "gemini-cli")
         self.assertIsNone(detect_by_command("python app.py"))

@@ -1,6 +1,7 @@
 """Claude Code adapter — full integration via HTTP hooks."""
 
 import json
+import os
 import time
 from pathlib import Path
 import shlex
@@ -108,6 +109,19 @@ def _basename(path: str) -> str:
     return path.rsplit("/", 1)[-1] if "/" in path else path
 
 
+def _matches_claude_token(value: str) -> bool:
+    token = os.path.basename((value or "").strip().lower())
+    return (
+        token in ("claude", "claude-code")
+        or token.startswith("claude-")
+        or token.startswith("claude_")
+        or token.endswith("-claude")
+        or token.endswith("_claude")
+        or token.endswith("-claude-code")
+        or token.endswith("_claude_code")
+    )
+
+
 def _is_loom_hook_entry(entry: dict) -> bool:
     """Check if a hook entry was installed by Loom (by URL marker)."""
     for hook in entry.get("hooks", []):
@@ -125,12 +139,12 @@ class ClaudeCodeAdapter(AgentAdapter):
     default_command = "claude"
 
     def match_process(self, process_name: str) -> bool:
-        return process_name.lower() in ("claude", "claude-code")
+        return _matches_claude_token(process_name)
 
     def match_command(self, command: str) -> bool:
         """Match against the boot command (e.g. 'claude', 'claude --model ...')."""
         first = command.strip().split()[0] if command.strip() else ""
-        return first.lower() in ("claude", "claude-code")
+        return _matches_claude_token(first)
 
     def get_env_vars(self, cell) -> dict[str, str]:
         return {"LOOM_CELL_ID": cell.id}

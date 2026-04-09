@@ -1,6 +1,7 @@
 """Codex CLI adapter — full integration via command hooks and MCP."""
 
 import json
+import os
 import re
 import shlex
 import time
@@ -76,6 +77,17 @@ def _remove_agents_section(content: str, filename: str = "") -> str:
 
 def _truncate(s: str, n: int) -> str:
     return s[:n] + "..." if len(s) > n else s
+
+
+def _matches_codex_token(value: str) -> bool:
+    token = os.path.basename((value or "").strip().lower())
+    return (
+        token == "codex"
+        or token.startswith("codex-")
+        or token.startswith("codex_")
+        or token.endswith("-codex")
+        or token.endswith("_codex")
+    )
 
 
 _VALUE_OPTS = {
@@ -179,11 +191,11 @@ class CodexAdapter(AgentAdapter):
     default_command = "codex"
 
     def match_process(self, process_name: str) -> bool:
-        return process_name.lower() == "codex"
+        return _matches_codex_token(process_name)
 
     def match_command(self, command: str) -> bool:
         first = command.strip().split()[0] if command.strip() else ""
-        return first.lower() == "codex"
+        return _matches_codex_token(first)
 
     def get_env_vars(self, cell) -> dict[str, str]:
         return {"LOOM_CELL_ID": cell.id}
