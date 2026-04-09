@@ -1,6 +1,7 @@
 """iTerm2 bridge — translates matrix commands into iTerm2 Python API calls."""
 
 import asyncio
+import contextlib
 import os
 import re
 import shlex
@@ -56,6 +57,26 @@ class ITerm2Adapter:
                     self.state.active_session_id = tab.current_session.session_id
         except Exception:
             log.debug("Could not seed current_window/session at startup")
+
+    async def shutdown(self) -> None:
+        tasks = []
+        for task in (self._term_task, self._focus_task):
+            if task:
+                task.cancel()
+                tasks.append(task)
+        for task in self._prompt_tasks.values():
+            task.cancel()
+            tasks.append(task)
+        for task in self._job_tasks.values():
+            task.cancel()
+            tasks.append(task)
+        self._prompt_tasks.clear()
+        self._job_tasks.clear()
+        self._term_task = None
+        self._focus_task = None
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     async def reconnect_orphans(self):
         """Re-link persisted cells to existing iTerm2 sessions after restart."""

@@ -63,6 +63,17 @@ class LocalPtyAdapter:
     async def start(self) -> None:
         self.state.current_window_id = "standalone"
 
+    async def shutdown(self) -> None:
+        reader_tasks = []
+        for session in list(self._sessions.values()):
+            if session.reader_task:
+                reader_tasks.append(session.reader_task)
+        for session_id in list(self._sessions.keys()):
+            await self.close_session(session_id)
+        for task in reader_tasks:
+            with contextlib.suppress(asyncio.CancelledError, OSError):
+                await task
+
     async def reconnect_orphans(self) -> None:
         cleared = 0
         for cell in self.state.agents.values():

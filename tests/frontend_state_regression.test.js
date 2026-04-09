@@ -4099,3 +4099,55 @@ test('embedded runtime renders standalone sidebar and nested child terminals', (
   assert.match(main.innerHTML, /openAddTerminal\('alpha','agent-1'\)/);
   assert.equal(sandbox.renderTerminalWorkspaceCalls, 1);
 });
+
+test('standalone sidebar formats repo and home paths compactly', () => {
+  const { context, document, sandbox } = createStandaloneRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox._cachedAgentTemplates = [];
+  sandbox.state.runtime = { home_directory: '/Users/aleks' };
+  sandbox.state.groups = { alpha: ['agent-1', 'term-1'] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Runner',
+      group: 'alpha',
+      cell_type: 'agent',
+      icon: 'A',
+      command: 'codex',
+      status: 'idle',
+      session_id: 'sess-1',
+      directory: '/Users/aleks/dev/personal/gh/iterm2-loom',
+      current_path: '/Users/aleks/dev/personal/gh/iterm2-loom/docs',
+      git_root: '/Users/aleks/dev/personal/gh/iterm2-loom',
+    },
+    'term-1': {
+      id: 'term-1',
+      name: 'Shell Root',
+      group: 'alpha',
+      cell_type: 'terminal',
+      current_process: 'bash',
+      current_path: '/Users/aleks/dev/personal/scratch',
+      status: 'idle',
+      session_id: 'sess-2',
+    },
+  };
+
+  runInContext(context, `
+    var selectedTerminalId = '';
+    render();
+  `);
+
+  assert.match(main.innerHTML, /iterm2-loom\/docs/);
+  assert.doesNotMatch(main.innerHTML, /\/Users\/aleks\/dev\/personal\/gh\/iterm2-loom\/docs/);
+  assert.match(main.innerHTML, /~\/dev\/personal\/scratch/);
+  assert.equal(
+    jsonValue(
+      context,
+      `_formatDisplayPath('/Users/aleks/dev/personal/gh/iterm2-loom/docs', '/Users/aleks/dev/personal/gh/iterm2-loom')`
+    ),
+    'iterm2-loom/docs'
+  );
+});

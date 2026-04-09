@@ -559,6 +559,7 @@ async def main(connection=None):
             "embedded_terminal": bridge.capabilities.supports_embedded_terminal,
             "layout": "ide" if bridge.capabilities.supports_embedded_terminal else "classic",
             "terminal_backend": "pty" if STANDALONE else "iterm2",
+            "home_directory": str(Path.home()),
         }
 
     def _state_payload() -> dict:
@@ -5573,34 +5574,57 @@ async def main(connection=None):
 
     runner = web.AppRunner(app_server)
     log.info("Startup checkpoint: AppRunner created")
-    await runner.setup()
-    log.info("Startup checkpoint: runner setup complete")
-    site = web.TCPSite(runner, BIND_HOST, WS_PORT, reuse_address=True)
-    log.info("Startup checkpoint: TCPSite created")
     try:
-        await site.start()
-    except OSError as exc:
-        log.error("Cannot bind port %d: %s — is another instance running?",
-                  WS_PORT, exc)
-        raise
-    log.info("Startup checkpoint: site start complete")
-    log.info("HTTP/WS server listening on %s:%d", BIND_HOST, WS_PORT)
+        await runner.setup()
+        log.info("Startup checkpoint: runner setup complete")
+        site = web.TCPSite(runner, BIND_HOST, WS_PORT, reuse_address=True)
+        log.info("Startup checkpoint: TCPSite created")
+        try:
+            await site.start()
+        except OSError as exc:
+            log.error("Cannot bind port %d: %s — is another instance running?",
+                      WS_PORT, exc)
+            raise
+        log.info("Startup checkpoint: site start complete")
+        log.info("HTTP/WS server listening on %s:%d", BIND_HOST, WS_PORT)
 
-    # -- Register toolbelt (skipped in standalone-only mode) ----------------
+        # -- Register toolbelt (skipped in standalone-only mode) ----------------
 
-    if not STANDALONE:
-        registered = await bridge.register_web_view_tool(
-            display_name="Loom",
-            identifier="com.loom.toolbelt",
-            reveal_if_already_registered=True,
-            url=f"http://127.0.0.1:{WS_PORT}/",
-        )
-        if registered:
-            log.info("Toolbelt webview registered — Loom ready")
+        if not STANDALONE:
+            registered = await bridge.register_web_view_tool(
+                display_name="Loom",
+                identifier="com.loom.toolbelt",
+                reveal_if_already_registered=True,
+                url=f"http://127.0.0.1:{WS_PORT}/",
+            )
+            if registered:
+                log.info("Toolbelt webview registered — Loom ready")
+            else:
+                log.warning("Toolbelt webview registration unavailable")
         else:
-            log.warning("Toolbelt webview registration unavailable")
-    else:
-        log.info("Standalone mode — toolbelt registration skipped")
-        log.info("Open http://127.0.0.1:%d/ in a browser", WS_PORT)
+            log.info("Standalone mode — toolbelt registration skipped")
+            log.info("Open http://127.0.0.1:%d/ in a browser", WS_PORT)
 
-    await asyncio.Future()
+        await asyncio.Future()
+    finally:
+        for ws_clients in terminal_clients.values():
+            for ws_client in list(ws_clients):
+                try:
+                    await ws_client.close()
+                except Exception:
+                    pass
+        terminal_clients.clear()
+        for ws_client in list(state._ws_clients):
+            try:
+                await ws_client.close()
+            except Exception:
+                pass
+        state._ws_clients.clear()
+        try:
+            await bridge.shutdown()
+        except Exception:
+            log.exception("Terminal adapter shutdown failed")
+        try:
+            await runner.cleanup()
+        except Exception:
+            log.exception("HTTP runner cleanup failed")

@@ -87,6 +87,29 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
 
             await adapter.close_session(cell.session_id)
 
+    async def test_shutdown_closes_live_sessions(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Loom")
+        cell = state.add_terminal(
+            name="Terminal 1",
+            group="Loom",
+            terminal_backend="pty",
+            command="sleep 30",
+        )
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        await adapter.start()
+        await adapter.create_session(cell)
+
+        self.assertIsNotNone(cell.session_id)
+        self.assertEqual(cell.status, "running")
+
+        await adapter.shutdown()
+
+        self.assertIsNone(cell.session_id)
+        self.assertEqual(cell.status, "stopped")
+        self.assertEqual(adapter._sessions, {})
+
 
 if __name__ == "__main__":
     unittest.main()

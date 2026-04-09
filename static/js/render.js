@@ -22,6 +22,48 @@ function formatCode(s) {
   return esc(s).replace(/`([^`]+)`/g, '<span class="code-inline">$1</span>');
 }
 
+function _trimTrailingSlash(path) {
+  const text = String(path || '');
+  if (!text || text === '/') return text;
+  return text.replace(/\/+$/, '');
+}
+
+function _pathBaseName(path) {
+  const text = _trimTrailingSlash(path);
+  if (!text) return '';
+  const parts = text.split('/');
+  return parts[parts.length - 1] || '';
+}
+
+function _homeDirectoryPrefix() {
+  return _trimTrailingSlash(
+    (state && state.runtime && state.runtime.home_directory) || ''
+  );
+}
+
+function _formatDisplayPath(path, repoRoot) {
+  const fullPath = _trimTrailingSlash(path);
+  if (!fullPath) return '';
+
+  const root = _trimTrailingSlash(repoRoot);
+  if (root && (fullPath === root || fullPath.startsWith(root + '/'))) {
+    const repoName = _pathBaseName(root);
+    if (!repoName) return fullPath;
+    const rel = fullPath === root ? '' : fullPath.slice(root.length + 1);
+    return repoName + (rel ? '/' + rel : '');
+  }
+
+  const home = _homeDirectoryPrefix();
+  if (home && (fullPath === home || fullPath.startsWith(home + '/'))) {
+    const rel = fullPath === home ? '' : fullPath.slice(home.length + 1);
+    return '~' + (rel ? '/' + rel : '');
+  }
+
+  return fullPath
+    .replace(/^\/Users\/[^/]+(?=\/|$)/, '~')
+    .replace(/^\/home\/[^/]+(?=\/|$)/, '~');
+}
+
 function renderSplitBtn(quickAction, customAction) {
   return `<div class="split-btn">`
     + `<button class="split-main" onclick="${quickAction}">+ New</button>`
@@ -783,9 +825,10 @@ function renderAgentDetails(a) {
   }
 
   /* Directory */
-  if (a.directory) {
-    const dir = a.directory.replace(/^\/Users\/[^/]+/, '~');
-    h += `<div class="detail-row"><span class="detail-label">Directory</span><span class="detail-val detail-dir" title="${esc(a.directory)}">${esc(dir)}</span></div>`;
+  const directoryPath = a.current_path || a.directory || '';
+  if (directoryPath) {
+    const dir = _formatDisplayPath(directoryPath, a.git_root || a.worktree_repo_root || '');
+    h += `<div class="detail-row"><span class="detail-label">Directory</span><span class="detail-val detail-dir" title="${esc(directoryPath)}">${esc(dir)}</span></div>`;
   }
 
   /* Last event */
@@ -834,25 +877,15 @@ function renderTerminalRow(t) {
     : processInfo(t.current_process);
 
   const darkCls = proc.dark ? ' dark-text' : '';
-  let pathDisplay = '';
-  if (t.current_branch && t.git_root) {
-    const repoName = t.git_root.split('/').pop();
-    let rel = t.current_path || '';
-    if (rel.startsWith(t.git_root)) {
-      rel = rel.slice(t.git_root.length);
-      if (rel.startsWith('/')) rel = rel.slice(1);
-    }
-    pathDisplay = t.current_branch + ' | ' + repoName + (rel ? '/' + rel : '');
-  } else if (t.current_path) {
-    pathDisplay = t.current_path.replace(/^\/Users\/[^/]+/, '~');
-  }
+  const fullPath = t.current_path || t.directory || '';
+  const pathDisplay = _formatDisplayPath(fullPath, t.git_root || t.worktree_repo_root || '');
 
   let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${t.id}" data-drag-type="terminal" data-drag-group="${esc(t.group)}" onclick="focusAgent('${t.id}')" oncontextmenu="onCellContextMenu(event,'${t.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${t.id}')}">`;
   h += `<div class="term-badge${darkCls}" style="background:${proc.color}">${proc.label}</div>`;
   h += `<div class="term-info">`;
   h += `  <div class="term-name">${esc(t.name)}</div>`;
   if (pathDisplay) {
-    h += `<div class="term-path" title="${esc(t.current_path)}">${esc(pathDisplay)}</div>`;
+    h += `<div class="term-path" title="${esc(fullPath)}">${esc(pathDisplay)}</div>`;
   }
   h += `</div>`;
   h += `<div class="term-status ${t.status}"></div>`;
@@ -876,9 +909,20 @@ function renderStandaloneCellRow(cell, depth) {
   let subtitle = '';
   if (cell.cell_type === 'agent') {
     const task = _getAgentTask(cell.id);
-    subtitle = task ? task.task : (cell.activity_detail || cell.command || '');
+    subtitle = task
+      ? task.task
+      : (cell.activity_detail
+        || _formatDisplayPath(
+          cell.current_path || cell.directory || '',
+          cell.git_root || cell.worktree_repo_root || ''
+        )
+        || cell.command
+        || '');
   } else {
-    subtitle = cell.current_path || cell.directory || cell.command || '';
+    subtitle = _formatDisplayPath(
+      cell.current_path || cell.directory || '',
+      cell.git_root || cell.worktree_repo_root || ''
+    ) || cell.command || '';
   }
 
   let html = '<div class="sidebar-cell-row'

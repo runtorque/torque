@@ -130,3 +130,7 @@ class TerminalAdapter(Protocol):
     def get_terminal_buffer(self, session_id: str) -> str:
         """Return the recent output buffer for an embedded terminal session."""
         ...
+
+    async def shutdown(self) -> None:
+        """Release backend resources before the Loom daemon exits."""
+        ...

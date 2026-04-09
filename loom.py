@@ -20,8 +20,16 @@ init_paths(SCRIPT_DIR)
 
 from loom.server import main        # noqa: E402
 
+
+def _run_standalone() -> None:
+    try:
+        asyncio.run(main(None))
+    except KeyboardInterrupt:
+        pass
+
+
 if STANDALONE:
-    asyncio.run(main(None))
+    _run_standalone()
 else:
     import iterm2  # noqa: E402
 

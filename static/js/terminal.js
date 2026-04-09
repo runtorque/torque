@@ -289,5 +289,11 @@ function renderTerminalWorkspace() {
     _connectEmbeddedTerminal(cell, dom.stage.querySelector('.terminal-surface'));
   }
 
-  dom.statusbar.textContent = (cell.current_path || cell.directory || '') + '  |  ' + _terminalStatusLabel(cell);
+  const fullPath = cell.current_path || cell.directory || '';
+  const displayPath = _formatDisplayPath(
+    fullPath,
+    cell.git_root || cell.worktree_repo_root || ''
+  );
+  dom.statusbar.textContent = (displayPath || 'No directory') + '  |  ' + _terminalStatusLabel(cell);
+  dom.statusbar.title = fullPath || '';
 }

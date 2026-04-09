@@ -191,12 +191,15 @@ body.runtime-embedded #terminal-workspace {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+  overflow-x: hidden;
 }
 .sidebar-group {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: rgba(13, 17, 23, 0.44);
   overflow: hidden;
+  min-width: 0;
 }
 .sidebar-group-hdr {
   display: flex;
@@ -247,6 +250,7 @@ body.runtime-embedded #terminal-workspace {
   display: grid;
   gap: 2px;
   padding: 8px 6px 8px 8px;
+  min-width: 0;
 }
 .sidebar-group.collapsed .sidebar-group-body { display: none; }
 .sidebar-empty-group {
@@ -262,6 +266,9 @@ body.runtime-embedded #terminal-workspace {
   border: 1px solid transparent;
   cursor: pointer;
   transition: background .15s, border-color .15s, transform .15s;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 .sidebar-cell-row:hover {
   background: rgba(255,255,255,.04);
@@ -307,8 +314,10 @@ body.runtime-embedded #terminal-workspace {
   flex-direction: column;
   gap: 1px;
   flex: 1;
+  overflow: hidden;
 }
 .sidebar-cell-name {
+  display: block;
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
@@ -316,6 +325,8 @@ body.runtime-embedded #terminal-workspace {
   text-overflow: ellipsis;
 }
 .sidebar-cell-subtitle {
+  display: block;
+  max-width: 100%;
   font-size: 9px;
   color: var(--text-dim);
   white-space: nowrap;
@@ -334,6 +345,7 @@ body.runtime-embedded #terminal-workspace {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 .sidebar-cell-btn:hover {
   background: var(--bg-hover);
@@ -368,6 +380,11 @@ body.runtime-embedded #terminal-workspace {
   border-bottom: none;
   font-size: 10px;
   color: var(--text-dim);
+  justify-content: flex-start;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .terminal-topbar-left,
 .terminal-topbar-right {
