@@ -28,6 +28,15 @@ function _terminalCurrentGroupName() {
   return groups.length ? groups[0] : '';
 }
 
+function _terminalTargetAgent(cell) {
+  if (!cell || !state || !state.agents) return null;
+  if (cell.cell_type === 'agent') return cell;
+  if (cell.parent_id && state.agents[cell.parent_id]) {
+    return state.agents[cell.parent_id];
+  }
+  return null;
+}
+
 function _terminalGroupCells(group) {
   const out = [];
   if (!group || !state || !state.groups || !state.agents) return out;
@@ -236,6 +245,7 @@ function renderTerminalWorkspace() {
   const group = _terminalCurrentGroupName();
   const cells = _terminalGroupCells(group);
   const cell = _resolveTerminalWorkspaceCell();
+  const agentTarget = _terminalTargetAgent(cell);
   const dom = _ensureTerminalWorkspaceDom(root);
   const groupLabel = group || '';
   dom.topbar.innerHTML = ''
@@ -247,6 +257,9 @@ function renderTerminalWorkspace() {
     + '  <button class="terminal-topbar-btn" onclick="togglePanel(\'board\')">Board</button>'
     + (groupLabel
       ? '  <button class="terminal-topbar-btn" onclick="openAddAgent(\'' + esc(groupLabel) + '\')">New Agent</button>'
+      : '')
+    + (agentTarget
+      ? '  <button class="terminal-topbar-btn" onclick="quickAddTerminal(\'' + esc(agentTarget.group) + '\',\'' + esc(agentTarget.id) + '\')">New Terminal</button>'
       : '')
     + '</div>';
   dom.tabs.innerHTML = _renderTerminalTabs(cells, cell ? cell.id : '');

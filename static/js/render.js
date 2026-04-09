@@ -46,6 +46,22 @@ function _renderWeaverMenuItem(group, groupSettings) {
   return `<button onclick="event.stopPropagation();closeMenus();newWeaver('${esc(group)}')">Weaver</button>`;
 }
 
+function _renderStandaloneAgentMenu(gname, groupSettings) {
+  let html = '<div class="split-menu">';
+  html += _renderWeaverMenuItem(gname, groupSettings);
+  html += _renderAgentTemplateMenuItems(gname);
+  html += `<button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button>`;
+  html += '</div>';
+  return html;
+}
+
+function _renderStandaloneTerminalMenu(gname, parentId) {
+  const pid = parentId ? esc(parentId) : '';
+  return '<div class="split-menu">'
+    + `<button onclick="event.stopPropagation();closeMenus();openAddTerminal('${esc(gname)}','${pid}')">Custom terminal\u2026</button>`
+    + '</div>';
+}
+
 function toggleMenu(chevron) {
   const menu = chevron.nextElementSibling;
   const wasOpen = menu.classList.contains('open');
@@ -250,6 +266,11 @@ function renderStandaloneSidebar(main, groupNames) {
     const gname = groupNames[gi];
     const aids = state.groups[gname] || [];
     const gs = (state.group_settings || {})[gname] || {};
+    const agentCount = aids.filter(id => {
+      const cell = state.agents[id];
+      return cell && cell.cell_type !== 'terminal';
+    }).length;
+    const atCap = gs.max_agents > 0 && agentCount >= gs.max_agents;
     if (!_collapsedInitialized.has(gname)) {
       _collapsedInitialized.add(gname);
       if (gs.collapsed_default) collapsedGroups.add(gname);
@@ -263,8 +284,16 @@ function renderStandaloneSidebar(main, groupNames) {
     html += '  <button class="sidebar-group-toggle" onclick="event.stopPropagation();toggleGroup(\'' + esc(gname) + '\')">\u25BE</button>';
     html += '  <span class="sidebar-group-name">' + esc(gname) + '</span>';
     html += '  <span class="sidebar-group-count">' + aids.length + '</span>';
-    html += '  <button class="sidebar-group-btn" title="New agent" onclick="event.stopPropagation();quickAddAgent(\'' + esc(gname) + '\')">+</button>';
+    html += '  <span class="sidebar-group-actions">';
+    if (atCap) {
+      html += '  <button class="sidebar-group-btn" title="Group is at max agents" disabled>+</button>';
+    } else {
+      html += '  <button class="sidebar-group-btn" title="New agent" onclick="event.stopPropagation();quickAddAgent(\'' + esc(gname) + '\')">+</button>';
+      html += '  <button class="sidebar-group-btn" title="Agent options" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>';
+      html += _renderStandaloneAgentMenu(gname, gs);
+    }
     html += '  <button class="sidebar-group-btn" title="Settings" onclick="event.stopPropagation();openGroupSettings(\'' + esc(gname) + '\')">\u2699</button>';
+    html += '  </span>';
     html += '</div>';
     html += '<div class="sidebar-group-body">';
 
@@ -874,10 +903,17 @@ function renderStandaloneCellRow(cell, depth) {
     html += '  <span class="sidebar-cell-subtitle" title="' + esc(subtitle) + '">' + esc(subtitle) + '</span>';
   }
   html += '</span>';
+  html += '<span class="sidebar-cell-actions">';
+  if (cell.cell_type === 'agent') {
+    html += '<button class="sidebar-cell-btn" onclick="event.stopPropagation();quickAddTerminal(\'' + esc(cell.group) + '\',\'' + esc(cell.id) + '\')" title="New terminal">+</button>';
+    html += '<button class="sidebar-cell-btn" onclick="event.stopPropagation();toggleMenu(this)" title="Terminal options">\u25BE</button>';
+    html += _renderStandaloneTerminalMenu(cell.group, cell.id);
+  }
   if (cell.status === 'stopped') {
     html += '<button class="sidebar-cell-btn" onclick="event.stopPropagation();relaunchAgent(\'' + esc(cell.id) + '\')" title="Relaunch">\u21BB</button>';
   }
   html += '<button class="sidebar-cell-btn danger" onclick="event.stopPropagation();removeAgent(\'' + esc(cell.id) + '\')" title="Remove">\u2715</button>';
+  html += '</span>';
   html += '</div>';
   return html;
 }

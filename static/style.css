@@ -16,6 +16,7 @@
   --font:        ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
                  "Liberation Mono", Menlo, Consolas, monospace;
   --radius:      6px;
+  --standalone-sidebar-width: 320px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -86,13 +87,36 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
 
 body.runtime-embedded #workspace-shell {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: var(--standalone-sidebar-width) 8px minmax(0, 1fr);
   min-height: 0;
 }
 body.runtime-embedded main {
   padding: 0;
   background: var(--bg-surface);
-  border-right: 1px solid var(--border);
+}
+#workspace-resize-handle {
+  display: none;
+}
+body.runtime-embedded #workspace-resize-handle {
+  display: block;
+  cursor: col-resize;
+  position: relative;
+  background: rgba(255,255,255,.02);
+}
+body.runtime-embedded #workspace-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 3px;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 90%, transparent);
+  transition: background .15s ease;
+}
+body.runtime-embedded #workspace-resize-handle:hover::before,
+body.workspace-resizing #workspace-resize-handle::before {
+  background: color-mix(in srgb, var(--accent) 60%, var(--border));
 }
 body.runtime-embedded #terminal-workspace {
   display: block;
@@ -191,10 +215,20 @@ body.runtime-embedded #terminal-workspace {
   border-radius: 5px;
   color: var(--text-dim);
 }
+.sidebar-group-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
 .sidebar-group-toggle:hover,
 .sidebar-group-btn:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+.sidebar-group-btn:disabled {
+  opacity: .45;
+  cursor: default;
 }
 .sidebar-group.collapsed .sidebar-group-toggle { transform: rotate(-90deg); }
 .sidebar-group-name {
@@ -293,6 +327,12 @@ body.runtime-embedded #terminal-workspace {
   height: 20px;
   border-radius: 5px;
   color: var(--text-dim);
+  flex-shrink: 0;
+}
+.sidebar-cell-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
 }
 .sidebar-cell-btn:hover {

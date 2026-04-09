@@ -136,6 +136,84 @@ function _restorePanelState() {
   });
 })();
 
+/* -- Standalone workspace resize handle ---------------------------------- */
+
+var _workspaceSidebarWidth = 320;
+
+function _workspaceSidebarWidthBounds() {
+  var maxWidth = Math.max(320, Math.floor(window.innerWidth * 0.62));
+  return { min: 240, max: maxWidth };
+}
+
+function _persistWorkspaceSidebarWidth(width) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('loom.ide.sidebar_width', String(width));
+    }
+  } catch (_) {}
+}
+
+function _applyWorkspaceSidebarWidth(width) {
+  var bounds = _workspaceSidebarWidthBounds();
+  var next = parseInt(width, 10);
+  if (!Number.isFinite(next)) next = 320;
+  next = Math.max(bounds.min, Math.min(bounds.max, next));
+  _workspaceSidebarWidth = next;
+  var root = document.documentElement || document.body;
+  if (root && root.style) {
+    root.style.setProperty('--standalone-sidebar-width', next + 'px');
+  }
+}
+
+(function() {
+  var handle = document.getElementById('workspace-resize-handle');
+  var shell = document.getElementById('workspace-shell');
+  if (!handle || !shell) return;
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      var saved = parseInt(localStorage.getItem('loom.ide.sidebar_width') || '', 10);
+      if (Number.isFinite(saved) && saved > 0) _workspaceSidebarWidth = saved;
+    }
+  } catch (_) {}
+  _applyWorkspaceSidebarWidth(_workspaceSidebarWidth);
+
+  var dragging = false;
+
+  handle.addEventListener('mousedown', function(e) {
+    if (!document.body.classList.contains('runtime-embedded')) return;
+    e.preventDefault();
+    dragging = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.classList.add('workspace-resizing');
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    var rect = shell.getBoundingClientRect();
+    _applyWorkspaceSidebarWidth(e.clientX - rect.left);
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = '';
+    document.body.classList.remove('workspace-resizing');
+    _persistWorkspaceSidebarWidth(_workspaceSidebarWidth);
+  });
+
+  handle.addEventListener('dblclick', function() {
+    _applyWorkspaceSidebarWidth(320);
+    _persistWorkspaceSidebarWidth(_workspaceSidebarWidth);
+  });
+
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('resize', function() {
+      _applyWorkspaceSidebarWidth(_workspaceSidebarWidth);
+    });
+  }
+})();
+
 /* -- Keyboard navigation helpers ----------------------------------------- */
 
 function _focusedGroup() {

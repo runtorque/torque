@@ -4045,6 +4045,7 @@ test('embedded runtime renders standalone sidebar and nested child terminals', (
   const { context, document, sandbox } = createStandaloneRenderHarness();
   const main = document.getElementById('main');
 
+  sandbox._cachedAgentTemplates = [{ name: 'fixer', display_name: 'Fixer', shadowed: false }];
   sandbox.state.groups = { alpha: ['agent-1', 'term-root'] };
   sandbox.state.group_settings = { alpha: { collapsed_default: false } };
   sandbox.state.children = { 'agent-1': ['term-child'] };
@@ -4092,5 +4093,9 @@ test('embedded runtime renders standalone sidebar and nested child terminals', (
   assert.match(main.innerHTML, /Shell Child/);
   assert.match(main.innerHTML, /Shell Root/);
   assert.match(main.innerHTML, /sidebar-cell-row[^"]*child/);
+  assert.match(main.innerHTML, /newWeaver\('alpha'\)/);
+  assert.match(main.innerHTML, /openAddAgent\('alpha'\)/);
+  assert.match(main.innerHTML, /quickAddTerminal\('alpha','agent-1'\)/);
+  assert.match(main.innerHTML, /openAddTerminal\('alpha','agent-1'\)/);
   assert.equal(sandbox.renderTerminalWorkspaceCalls, 1);
 });
