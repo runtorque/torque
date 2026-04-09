@@ -169,6 +169,70 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current_agent.id, "agent-1")
         self.assertTrue(is_on_terminal)
 
+    async def test_weaver_is_pinned_first_in_navigation_order(self):
+        state = self.state_mod.MatrixState()
+        state.groups = {"g": ["agent-1", "weaver-1", "agent-2"]}
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id="weaver-1"
+        )
+        state._children = {"agent-1": ["term-1"], "weaver-1": [], "agent-2": []}
+
+        first = self.state_mod.AgentCell(
+            id="agent-1",
+            name="One",
+            group="g",
+            slug="one",
+            cell_type="agent",
+            session_id="session-1",
+            window_id="window-a",
+        )
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            session_id="session-weaver",
+            window_id="window-a",
+        )
+        second = self.state_mod.AgentCell(
+            id="agent-2",
+            name="Two",
+            group="g",
+            slug="two",
+            cell_type="agent",
+            session_id="session-2",
+            window_id="window-a",
+        )
+        terminal = self.state_mod.AgentCell(
+            id="term-1",
+            name="Logs",
+            group="g",
+            slug="one:logs",
+            cell_type="terminal",
+            session_id="session-term",
+            window_id="window-a",
+            parent_id="agent-1",
+        )
+        state.agents = {
+            first.id: first,
+            weaver.id: weaver,
+            second.id: second,
+            terminal.id: terminal,
+        }
+
+        ordered_agents = self.keybindings_mod.get_ordered_agents(state, "window-a")
+        ordered_cells = self.keybindings_mod.get_ordered_cells(state, "window-a")
+
+        self.assertEqual(
+            [cell.id for cell in ordered_agents],
+            ["weaver-1", "agent-1", "agent-2"],
+        )
+        self.assertEqual(
+            [cell.id for cell in ordered_cells],
+            ["weaver-1", "agent-1", "term-1", "agent-2"],
+        )
+
     async def test_install_and_remove_preserve_displaced_bindings(self):
         displaced = self.binding_mod.KeyBinding(
             character=0xF701,
@@ -318,3 +382,80 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
                 ("close_cell", "agent-1"),
             ],
         )
+
+    async def test_navigation_rpcs_follow_weaver_first_order(self):
+        state = self.state_mod.MatrixState()
+        state.groups = {"g": ["agent-1", "weaver-1", "agent-2"]}
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id="weaver-1"
+        )
+        state._children = {"agent-1": ["term-1"], "weaver-1": [], "agent-2": []}
+
+        agent = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Agent 1",
+            group="g",
+            slug="agent-1",
+            cell_type="agent",
+            session_id="session-1",
+            window_id="window-a",
+        )
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            session_id="session-weaver",
+            window_id="window-a",
+        )
+        other = self.state_mod.AgentCell(
+            id="agent-2",
+            name="Agent 2",
+            group="g",
+            slug="agent-2",
+            cell_type="agent",
+            session_id="session-2",
+            window_id="window-a",
+        )
+        terminal = self.state_mod.AgentCell(
+            id="term-1",
+            name="Logs",
+            group="g",
+            slug="agent-1:logs",
+            cell_type="terminal",
+            session_id="session-term",
+            window_id="window-a",
+            parent_id="agent-1",
+        )
+        state.agents = {
+            agent.id: agent,
+            weaver.id: weaver,
+            other.id: other,
+            terminal.id: terminal,
+        }
+        state.current_window_id = "window-a"
+
+        focused = []
+
+        class Bridge:
+            async def focus_session(self, session_id):
+                focused.append(session_id)
+
+        await self.keybindings_mod.setup(object(), state, Bridge())
+
+        state.active_session_id = agent.session_id
+        await self.stored["rpcs"]["loom_focus_prev"]()
+        self.assertEqual(focused.pop(), weaver.session_id)
+
+        state.active_session_id = agent.session_id
+        await self.stored["rpcs"]["loom_focus_next"]()
+        self.assertEqual(focused.pop(), terminal.session_id)
+
+        state.active_session_id = terminal.session_id
+        await self.stored["rpcs"]["loom_prev_agent"]()
+        self.assertEqual(focused.pop(), weaver.session_id)
+
+        state.active_session_id = terminal.session_id
+        await self.stored["rpcs"]["loom_next_agent"]()
+        self.assertEqual(focused.pop(), other.session_id)
