@@ -46,6 +46,7 @@ function _updateSelectedAgentContext(id) {
   var nextSelectedId = _selectionAgentRootId(id);
   var changed = selectedAgentId !== nextSelectedId;
   if (nextSelectedId) selectedAgentId = nextSelectedId;
+  else if (typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) selectedAgentId = '';
   return changed;
 }
 

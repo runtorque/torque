@@ -1,0 +1,158 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic "Connected" [ref=e3]
+    - heading "LOOM" [level=1] [ref=e4]
+    - button "↻" [ref=e5] [cursor=pointer]
+    - button "⚙" [ref=e6] [cursor=pointer]
+    - button "+ Group" [ref=e7] [cursor=pointer]
+  - generic [ref=e8]:
+    - main [ref=e9]:
+      - generic [ref=e203]:
+        - generic [ref=e204]:
+          - button "▾" [ref=e205] [cursor=pointer]
+          - generic "alpha" [ref=e206]
+          - generic [ref=e207]: "1"
+          - button "⚙" [ref=e208] [cursor=pointer]
+          - button "⌘" [ref=e209] [cursor=pointer]
+          - button "✕" [ref=e210] [cursor=pointer]
+        - generic [ref=e212]:
+          - generic [ref=e213]:
+            - generic "Runner (running)" [ref=e214]:
+              - button "✕" [ref=e217] [cursor=pointer]
+              - generic [ref=e218]: ◆
+              - generic [ref=e219]: Runner
+              - generic "294d0def" [ref=e220]
+              - generic [ref=e221]: "1"
+            - generic [ref=e222] [cursor=pointer]:
+              - generic [ref=e223]: +
+              - generic [ref=e224]: New
+              - button "▾" [ref=e225]
+          - generic [ref=e226]:
+            - generic [ref=e227]:
+              - generic [ref=e228]: Runner
+              - generic [ref=e229]: Working
+            - generic [ref=e230]:
+              - generic [ref=e231]: Branch
+              - generic [ref=e232]: ⎇ loom/unify-standalone-left-rail-wit-294d0de
+            - generic [ref=e233]:
+              - generic [ref=e234]: Directory
+              - generic "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/294d0def" [ref=e235]: 294d0def
+          - generic [ref=e236]:
+            - generic [ref=e237]:
+              - generic [ref=e238]: Runner terminals
+              - generic [ref=e239]: "1"
+            - generic [ref=e241]:
+              - generic [ref=e242]: SLE
+              - generic [ref=e243]:
+                - generic [ref=e244]: Shell Child
+                - generic "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/294d0def" [ref=e245]: 294d0def
+              - button "✕" [ref=e248] [cursor=pointer]
+            - generic [ref=e249] [cursor=pointer]:
+              - generic [ref=e250]: +
+              - generic [ref=e252]: New terminal
+              - button "▾" [ref=e253]
+          - generic [ref=e254]: Terminals
+          - generic [ref=e256]:
+            - generic [ref=e257]: SLE
+            - generic [ref=e258]:
+              - generic [ref=e259]: Shell Root
+              - generic "/tmp" [ref=e260]
+            - button "✕" [ref=e263] [cursor=pointer]
+          - generic [ref=e264] [cursor=pointer]:
+            - generic [ref=e265]: +
+            - generic [ref=e267]: New terminal
+            - button "▾" [ref=e268]
+    - generic "Resize sidebar" [ref=e47]
+    - generic [ref=e49]:
+      - generic [ref=e50]:
+        - generic [ref=e269]:
+          - generic [ref=e270]: Terminal
+          - generic [ref=e271]: alpha
+        - generic [ref=e272]:
+          - button "Board" [ref=e273] [cursor=pointer]
+          - button "New Agent" [ref=e274] [cursor=pointer]
+          - button "New Terminal" [ref=e275] [cursor=pointer]
+      - generic [ref=e57]:
+        - button "Runner" [ref=e276] [cursor=pointer]:
+          - generic [ref=e278]: Runner
+        - button "Shell Child term" [ref=e279] [cursor=pointer]:
+          - generic [ref=e281]: Shell Child
+          - generic [ref=e282]: term
+        - button "Shell Root term" [ref=e283] [cursor=pointer]:
+          - generic [ref=e285]: Shell Root
+          - generic [ref=e286]: term
+      - generic [ref=e290]:
+        - textbox "Terminal input" [ref=e291]
+        - generic [ref=e292]:
+          - generic [ref=e294]: "autoload -Uz add-zsh-hook >/dev/null 2>&1; function _loom_precmd(){ printf '\\033]7;file://%s%s\\007' \"${HOST:-localhost}\" \"$P"
+          - generic [ref=e296]: "WD\"; }; add-zsh-hook precmd _loom_precmd >/dev/null 2>&1"
+          - generic [ref=e298]: "printf '\\033]7;file://%s%s\\007' \"${HOSTNAME:-localhost}\" \"$PWD\""
+          - generic [ref=e300]: cd /Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/294d0def
+          - generic [ref=e302]: sleep 300
+          - generic [ref=e303]:
+            - generic [ref=e304]: 294d0def
+            - generic [ref=e305]: "on"
+            - generic [ref=e306]:  loom/unify-standalone-left-rail-wit-294d0de
+            - generic [ref=e308]: "[$!]"
+            - generic [ref=e309]: via
+            - generic [ref=e310]: 🐍
+            - generic [ref=e311]: v3.14.3
+          - generic [ref=e313]: "alhost}\" \"$PWD\"; }; add-zsh-hook precmd _loom_precmd >/dev/null 2>&1"
+          - generic [ref=e314]:
+            - generic [ref=e315]: 294d0def
+            - generic [ref=e316]: "on"
+            - generic [ref=e317]:  loom/unify-standalone-left-rail-wit-294d0de
+            - generic [ref=e319]: "[$!]"
+            - generic [ref=e320]: via
+            - generic [ref=e321]: 🐍
+            - generic [ref=e322]: v3.14.3
+          - generic [ref=e323]:
+            - generic [ref=e324]: ➜
+            - generic [ref=e325]: "printf '\\033]7;file://%s%s\\007' \"${HOSTNAME:-localhost}\" \"$PWD\""
+          - generic [ref=e326]:
+            - generic [ref=e327]: 294d0def
+            - generic [ref=e328]: "on"
+            - generic [ref=e329]:  loom/unify-standalone-left-rail-wit-294d0de
+            - generic [ref=e331]: "[$!]"
+            - generic [ref=e332]: via
+            - generic [ref=e333]: 🐍
+            - generic [ref=e334]: v3.14.3
+          - generic [ref=e335]:
+            - generic [ref=e336]: ➜
+            - generic [ref=e337]: cd /Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/294d0def
+          - generic [ref=e338]:
+            - generic [ref=e339]: 294d0def
+            - generic [ref=e340]: "on"
+            - generic [ref=e341]:  loom/unify-standalone-left-rail-wit-294d0de
+            - generic [ref=e343]: "[$!]"
+            - generic [ref=e344]: via
+            - generic [ref=e345]: 🐍
+            - generic [ref=e346]: v3.14.3
+          - generic [ref=e347]:
+            - generic [ref=e348]: ➜
+            - generic [ref=e349]: sleep 300
+      - generic "/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/294d0def" [ref=e357]: 294d0def | sleep
+  - generic [ref=e99]:
+    - generic [ref=e359]:
+      - button "Backlog0" [ref=e360] [cursor=pointer]
+      - button "To Do0" [ref=e361] [cursor=pointer]
+      - button "In Progress0" [ref=e362] [cursor=pointer]
+      - button "Done0" [ref=e363] [cursor=pointer]
+      - button "Schedules" [ref=e364] [cursor=pointer]
+    - generic [ref=e365]:
+      - generic [ref=e366] [cursor=pointer]:
+        - generic [ref=e367]: + Add task
+        - button "From action ▾" [ref=e368]
+      - generic [ref=e369]:
+        - generic [ref=e370]: No tasks in Backlog
+        - generic [ref=e371]: Add a task here or move existing work into this lane.
+        - button "+ Task" [ref=e373] [cursor=pointer]
+  - generic [ref=e116]:
+    - button "☰ Board" [ref=e117] [cursor=pointer]
+    - button "✎ Actions" [ref=e118] [cursor=pointer]
+    - button "♟ Agents" [ref=e119] [cursor=pointer]
+    - button "Context" [ref=e120] [cursor=pointer]:
+      - img [ref=e122]
+      - generic [ref=e125]: Context
+    - button "⚖ Weaver" [ref=e126] [cursor=pointer]
+    - button "⚠ Events" [ref=e127] [cursor=pointer]

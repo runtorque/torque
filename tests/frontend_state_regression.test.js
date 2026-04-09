@@ -3333,6 +3333,27 @@ test('agent clicks rescope the board to the clicked agent group immediately', ()
   assert.equal(jsonValue(context, 'renderCalls.board'), 1);
 });
 
+test('embedded terminal selection clears stale agent selection for standalone terminals', () => {
+  const { context } = createSelectionHarness();
+  context.isEmbeddedTerminalMode = function() { return true; };
+
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent' },
+    'term-root': { id: 'term-root', name: 'Shell Root', group: 'alpha', cell_type: 'terminal' },
+  };
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+  `);
+
+  context.focusAgent('term-root');
+
+  assert.equal(jsonValue(context, 'selectedAgentId'), '');
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'term-root');
+  assert.equal(jsonValue(context, 'focusedItemId'), 'term-root');
+});
+
 test('ws invalidation rerenders the context panel for task updates', () => {
   const { context } = createWsRenderHarness();
   runInContext(context, `_activePanelApp = 'context';`);
@@ -4184,7 +4205,7 @@ test('full state toggles embedded runtime body class', () => {
   assert.equal(document.body.classList.contains('runtime-embedded'), false);
 });
 
-test('embedded runtime renders standalone sidebar and nested child terminals', () => {
+test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   const { context, document, sandbox } = createStandaloneRenderHarness();
   const main = document.getElementById('main');
 
@@ -4209,6 +4230,7 @@ test('embedded runtime renders standalone sidebar and nested child terminals', (
       name: 'Shell Child',
       group: 'alpha',
       cell_type: 'terminal',
+      parent_id: 'agent-1',
       current_process: 'zsh',
       current_path: '/tmp/child',
       status: 'idle',
@@ -4227,20 +4249,67 @@ test('embedded runtime renders standalone sidebar and nested child terminals', (
   };
 
   runInContext(context, `
+    selectedAgentId = 'agent-1';
     selectedTerminalId = 'term-child';
     render();
   `);
 
-  assert.match(main.innerHTML, /sidebar-group/);
+  assert.match(main.innerHTML, /class="group/);
+  assert.doesNotMatch(main.innerHTML, /sidebar-group/);
   assert.match(main.innerHTML, /Runner/);
+  assert.match(main.innerHTML, /Reviewing patch/);
+  assert.match(main.innerHTML, /Runner terminals/);
   assert.match(main.innerHTML, /Shell Child/);
   assert.match(main.innerHTML, /Shell Root/);
-  assert.match(main.innerHTML, /sidebar-cell-row[^"]*child/);
+  assert.match(main.innerHTML, /class="cell[^"]*selected/);
+  assert.match(main.innerHTML, /class="term-row/);
   assert.match(main.innerHTML, /newWeaver\('alpha'\)/);
+  assert.match(main.innerHTML, /quickAddAgent\('alpha'\)/);
   assert.match(main.innerHTML, /openAddAgent\('alpha'\)/);
   assert.match(main.innerHTML, /quickAddTerminal\('alpha','agent-1'\)/);
   assert.match(main.innerHTML, /openAddTerminal\('alpha','agent-1'\)/);
   assert.equal(sandbox.renderTerminalWorkspaceCalls, 1);
+});
+
+test('embedded runtime hides stale agent details when a standalone terminal is selected', () => {
+  const { context, document, sandbox } = createStandaloneRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox._cachedAgentTemplates = [];
+  sandbox.state.groups = { alpha: ['agent-1', 'term-root'] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Runner',
+      group: 'alpha',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'idle',
+      session_id: 'sess-1',
+    },
+    'term-root': {
+      id: 'term-root',
+      name: 'Shell Root',
+      group: 'alpha',
+      cell_type: 'terminal',
+      current_process: 'bash',
+      current_path: '/tmp/root',
+      status: 'idle',
+      session_id: 'sess-2',
+    },
+  };
+
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'term-root';
+    render();
+  `);
+
+  assert.doesNotMatch(main.innerHTML, /Runner terminals/);
+  assert.doesNotMatch(main.innerHTML, /class="agent-details"/);
+  assert.match(main.innerHTML, /Shell Root/);
 });
 
 test('standalone sidebar formats repo and home paths compactly', () => {

@@ -1,0 +1,85 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic "Connected" [ref=e3]
+    - heading "LOOM" [level=1] [ref=e4]
+    - button "↻" [ref=e5] [cursor=pointer]
+    - button "⚙" [ref=e6] [cursor=pointer]
+    - button "+ Group" [ref=e7] [cursor=pointer]
+  - generic [ref=e8]:
+    - main [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]:
+          - button "▾" [ref=e12] [cursor=pointer]
+          - generic "alpha" [ref=e13]
+          - generic [ref=e14]: "1"
+          - button "⚙" [ref=e15] [cursor=pointer]
+          - button "⌘" [ref=e16] [cursor=pointer]
+          - button "✕" [ref=e17] [cursor=pointer]
+        - generic [ref=e19]:
+          - generic [ref=e20]:
+            - generic "Runner (running)" [ref=e21]:
+              - generic [ref=e23]:
+                - button "✕"
+              - generic [ref=e24]: ◆
+              - generic [ref=e25]: Runner
+              - generic "294d0def" [ref=e26]
+              - generic [ref=e27]: "1"
+            - generic [ref=e28] [cursor=pointer]:
+              - generic [ref=e29]: +
+              - generic [ref=e30]: New
+              - button "▾" [ref=e31]
+          - generic [ref=e32]: Terminals
+          - generic [ref=e34]:
+            - generic [ref=e35]: SLE
+            - generic [ref=e36]:
+              - generic [ref=e37]: Shell Root
+              - generic "/tmp" [ref=e38]
+            - button "✕" [ref=e41] [cursor=pointer]
+          - generic [ref=e42] [cursor=pointer]:
+            - generic [ref=e43]: +
+            - generic [ref=e45]: New terminal
+            - button "▾" [ref=e46]
+    - generic "Resize sidebar" [ref=e47]
+    - generic [ref=e49]:
+      - generic [ref=e50]:
+        - generic [ref=e51]:
+          - generic [ref=e52]: Terminal
+          - generic [ref=e53]: alpha
+        - generic [ref=e54]:
+          - button "Board" [ref=e55] [cursor=pointer]
+          - button "New Agent" [ref=e56] [cursor=pointer]
+      - generic [ref=e57]:
+        - button "Runner" [ref=e58] [cursor=pointer]:
+          - generic [ref=e60]: Runner
+        - button "Shell Child term" [ref=e61] [cursor=pointer]:
+          - generic [ref=e63]: Shell Child
+          - generic [ref=e64]: term
+        - button "Shell Root term" [ref=e65] [cursor=pointer]:
+          - generic [ref=e67]: Shell Root
+          - generic [ref=e68]: term
+      - textbox "Terminal input" [ref=e74]
+      - generic "/tmp" [ref=e96]: /tmp | sleep
+  - generic [ref=e99]:
+    - generic [ref=e101]:
+      - button "Backlog0" [ref=e102] [cursor=pointer]
+      - button "To Do0" [ref=e103] [cursor=pointer]
+      - button "In Progress0" [ref=e104] [cursor=pointer]
+      - button "Done0" [ref=e105] [cursor=pointer]
+      - button "Schedules" [ref=e106] [cursor=pointer]
+    - generic [ref=e107]:
+      - generic [ref=e108] [cursor=pointer]:
+        - generic [ref=e109]: + Add task
+        - button "From action ▾" [ref=e110]
+      - generic [ref=e111]:
+        - generic [ref=e112]: No tasks in Backlog
+        - generic [ref=e113]: Add a task here or move existing work into this lane.
+        - button "+ Task" [ref=e115] [cursor=pointer]
+  - generic [ref=e116]:
+    - button "☰ Board" [ref=e117] [cursor=pointer]
+    - button "✎ Actions" [ref=e118] [cursor=pointer]
+    - button "♟ Agents" [ref=e119] [cursor=pointer]
+    - button "Context" [ref=e120] [cursor=pointer]:
+      - img [ref=e122]
+      - generic [ref=e125]: Context
+    - button "⚖ Weaver" [ref=e126] [cursor=pointer]
+    - button "⚠ Events" [ref=e127] [cursor=pointer]

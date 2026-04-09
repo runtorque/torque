@@ -1,0 +1,106 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic "Connected" [ref=e3]
+    - heading "LOOM" [level=1] [ref=e4]
+    - button "↻" [ref=e5] [cursor=pointer]
+    - button "⚙" [ref=e6] [cursor=pointer]
+    - button "+ Group" [ref=e7] [cursor=pointer]
+  - generic [ref=e8]:
+    - main [ref=e9]:
+      - generic [ref=e662]:
+        - generic [ref=e663]:
+          - button "▾" [ref=e664] [cursor=pointer]
+          - generic "alpha" [ref=e665]
+          - generic [ref=e666]: "1"
+          - button "⚙" [ref=e667] [cursor=pointer]
+          - button "⌘" [ref=e668] [cursor=pointer]
+          - button "✕" [ref=e669] [cursor=pointer]
+        - generic [ref=e671]:
+          - generic [ref=e672]:
+            - generic "Runner (running)" [ref=e673]:
+              - generic [ref=e675]:
+                - button "✕"
+              - generic [ref=e676]: ◆
+              - generic [ref=e677]: Runner
+              - generic "294d0def" [ref=e678]
+              - generic [ref=e679]: "1"
+            - generic [ref=e680] [cursor=pointer]:
+              - generic [ref=e681]: +
+              - generic [ref=e682]: New
+              - button "▾" [ref=e683]
+          - generic [ref=e684]: Terminals
+          - generic [ref=e686]:
+            - generic [ref=e687]: SLE
+            - generic [ref=e688]:
+              - generic [ref=e689]: Shell Root
+              - generic "/tmp" [ref=e690]
+            - button "✕" [ref=e693] [cursor=pointer]
+          - generic [ref=e694] [cursor=pointer]:
+            - generic [ref=e695]: +
+            - generic [ref=e697]: New terminal
+            - button "▾" [ref=e698]
+    - generic "Resize sidebar" [ref=e47]
+    - generic [ref=e49]:
+      - generic [ref=e50]:
+        - generic [ref=e699]:
+          - generic [ref=e700]: Terminal
+          - generic [ref=e701]: alpha
+        - generic [ref=e702]:
+          - button "Board" [ref=e703] [cursor=pointer]
+          - button "New Agent" [ref=e704] [cursor=pointer]
+      - generic [ref=e57]:
+        - button "Runner" [ref=e705] [cursor=pointer]:
+          - generic [ref=e707]: Runner
+        - button "Shell Child term" [ref=e708] [cursor=pointer]:
+          - generic [ref=e710]: Shell Child
+          - generic [ref=e711]: term
+        - button "Shell Root term" [ref=e712] [cursor=pointer]:
+          - generic [ref=e714]: Shell Root
+          - generic [ref=e715]: term
+      - generic [ref=e719]:
+        - textbox "Terminal input" [ref=e720]
+        - generic [ref=e721]:
+          - generic [ref=e723]: "autoload -Uz add-zsh-hook >/dev/null 2>&1; function _loom_precmd(){ printf '\\033]7;file://%s%s\\007' \"${HOST:-localhost}\" \"$P"
+          - generic [ref=e725]: "WD\"; }; add-zsh-hook precmd _loom_precmd >/dev/null 2>&1"
+          - generic [ref=e727]: "printf '\\033]7;file://%s%s\\007' \"${HOSTNAME:-localhost}\" \"$PWD\""
+          - generic [ref=e729]: cd /tmp
+          - generic [ref=e731]: sleep 300
+          - generic [ref=e733]: /private/tmp
+          - generic [ref=e736]: "alhost}\" \"$PWD\"; }; add-zsh-hook precmd _loom_precmd >/dev/null 2>&1"
+          - generic [ref=e738]: /private/tmp
+          - generic [ref=e740]:
+            - generic [ref=e741]: ➜
+            - generic [ref=e742]: "printf '\\033]7;file://%s%s\\007' \"${HOSTNAME:-localhost}\" \"$PWD\""
+          - generic [ref=e744]: /private/tmp
+          - generic [ref=e746]:
+            - generic [ref=e747]: ➜
+            - generic [ref=e748]: cd /tmp
+          - generic [ref=e750]: /tmp
+          - generic [ref=e752]:
+            - generic [ref=e753]: ➜
+            - generic [ref=e754]: sleep 300
+      - generic "/tmp" [ref=e762]: /tmp | sleep
+  - generic [ref=e99]:
+    - generic [ref=e764]:
+      - button "Backlog0" [ref=e765] [cursor=pointer]
+      - button "To Do0" [ref=e766] [cursor=pointer]
+      - button "In Progress0" [ref=e767] [cursor=pointer]
+      - button "Done0" [ref=e768] [cursor=pointer]
+      - button "Schedules" [ref=e769] [cursor=pointer]
+    - generic [ref=e770]:
+      - generic [ref=e771] [cursor=pointer]:
+        - generic [ref=e772]: + Add task
+        - button "From action ▾" [ref=e773]
+      - generic [ref=e774]:
+        - generic [ref=e775]: No tasks in Backlog
+        - generic [ref=e776]: Add a task here or move existing work into this lane.
+        - button "+ Task" [ref=e778] [cursor=pointer]
+  - generic [ref=e116]:
+    - button "☰ Board" [ref=e117] [cursor=pointer]
+    - button "✎ Actions" [ref=e118] [cursor=pointer]
+    - button "♟ Agents" [ref=e119] [cursor=pointer]
+    - button "Context" [ref=e120] [cursor=pointer]:
+      - img [ref=e122]
+      - generic [ref=e125]: Context
+    - button "⚖ Weaver" [ref=e126] [cursor=pointer]
+    - button "⚠ Events" [ref=e127] [cursor=pointer]
