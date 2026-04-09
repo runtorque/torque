@@ -700,11 +700,13 @@ function renderAgentCell(a) {
 
   let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" oncontextmenu="onCellContextMenu(event,'${a.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${a.id}')}" title="${esc(titleParts.join(' '))}">`;
   h += `<div class="cell-status ${statusCls}"${statusCls === 'attention' ? ' title="' + esc(a.error_message || 'Needs attention') + '"' : ''}>${statusCls === 'attention' ? '!' : ''}</div>`;
+  h += `<div class="cell-header-controls">`;
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   if (_isWeaver) {
     const weaverGroupArg = encodeURIComponent(a.group || '');
     h += `<button class="cell-weaver-toggle ${_weaverPaused ? 'paused' : 'running'}" draggable="false" onclick="event.stopPropagation();weaverTogglePauseForGroup(decodeURIComponent('${weaverGroupArg}'))" title="${_weaverPaused ? 'Resume Weaver event delivery' : 'Pause Weaver event delivery'}">${_weaverPaused ? '&#x25B6;' : '&#x23F8;'}</button>`;
   }
+  h += `</div>`;
   h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
   if (_weaverAsking) {

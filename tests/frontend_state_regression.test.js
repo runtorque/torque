@@ -3403,6 +3403,7 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
   });
 
   assert.match(runningHtml, /class="cell weaver weaver-running"/);
+  assert.match(runningHtml, /class="cell-header-controls">/);
   assert.match(runningHtml, /class="cell-weaver-toggle running"/);
   assert.match(runningHtml, /Pause Weaver event delivery/);
   assert.doesNotMatch(workerHtml, /cell-weaver-toggle/);
@@ -3422,11 +3423,17 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
   assert.match(pausedHtml, /Resume Weaver event delivery/);
 });
 
-test('weaver agent card toggle shares the close control hover and focus reveal affordances', () => {
+test('weaver agent card toggle shares the close control reveal affordances and icon-only default chrome', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
+  assert.match(css, /\.cell-header-controls\s*\{[^}]*position:\s*absolute;[^}]*display:\s*flex;[^}]*align-items:\s*center;/);
   assert.match(css, /\.cell-weaver-toggle\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/);
+  assert.match(css, /\.cell-weaver-toggle\s*\{[^}]*border:\s*1px solid transparent;[^}]*background:\s*transparent;/);
   assert.match(css, /\.cell:hover \.cell-close,\s*\.cell:hover \.cell-weaver-toggle,\s*\.cell:hover \.cell-relaunch,\s*\.cell.focused \.cell-close,\s*\.cell.focused \.cell-weaver-toggle,\s*\.cell.focused \.cell-relaunch,\s*\.cell:focus-within \.cell-close,\s*\.cell:focus-within \.cell-weaver-toggle,\s*\.cell:focus-within \.cell-relaunch\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/);
+  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{/);
+  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*background:/);
+  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*border-color:/);
+  assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*outline:\s*none;/);
 });
 
 test('renderWeaverPanel shows branch review-point summary', () => {
