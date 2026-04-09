@@ -158,6 +158,61 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(bridge.sent, [])
 
+    async def test_compact_digest_verbosity_truncates_event_list(self):
+        state, group, _ = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            digest_verbosity="compact",
+        )
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        for idx in range(7):
+            buffer.on_panel_event({
+                "group": group,
+                "kind": "task_completed",
+                "message": f"done {idx}",
+            })
+
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("── Loom Digest (7 events)", bridge.sent[0])
+        self.assertIn("… 2 more events", bridge.sent[0])
+
+    async def test_detailed_digest_verbosity_includes_attention_even_with_events(self):
+        state, group, _ = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            digest_verbosity="detailed",
+        )
+        task = state.board_add_task(
+            "Investigate blocked release",
+            group,
+            lane="In Progress",
+            id="task-1",
+        )
+        self.assertIsNotNone(task)
+        task.health_state = "blocked"
+
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer.on_panel_event({
+            "group": group,
+            "kind": "task_completed",
+            "message": "done",
+        })
+
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn(
+            "Attention: blocked: Investigate blocked release",
+            bridge.sent[0],
+        )
+
     async def test_board_summary_in_digest_mentions_task_health(self):
         state, group, _ = self._make_state()
         task = state.board_add_task(

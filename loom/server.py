@@ -721,6 +721,17 @@ async def main(connection=None):
             overrides=overrides,
         )
 
+    def _resolve_weaver_launch_config(group: str, *,
+                                      base_dir: str = "",
+                                      explicit_template: str = "",
+                                      overrides: dict | None = None) -> dict:
+        return agent_launch.resolve_weaver_launch_config(
+            group,
+            base_dir=base_dir,
+            explicit_template=explicit_template,
+            overrides=overrides,
+        )
+
     async def _create_child_terminals(group: str, parent_cell,
                                       terminals: list[dict] | None = None,
                                       count: int = 0):
@@ -826,6 +837,12 @@ async def main(connection=None):
                 group_settings=gs)
         return _build_dispatch_persistent_prompt(
             launch_cfg.get("system_prompt", ""))
+
+    def _is_designated_weaver(cell) -> bool:
+        if not cell or cell.cell_type != "agent":
+            return False
+        gs = state.get_group_settings(cell.group)
+        return bool(gs and gs.weaver_agent_id == cell.id)
 
     def _record_task_dispatch(cell, task, lane: str) -> None:
         """Link a task to an agent and persist dispatch history."""
@@ -1833,16 +1850,12 @@ async def main(connection=None):
                 if data:
                     base_dir = await _resolve_base_dir(group)
                     explicit_template = data.get("template", "").strip()
-                    # Weaver: apply provider override from WeaverSettings
                     _overrides = dict(data)
-                    if is_weaver:
-                        _ws_pre = state.get_weaver_settings(group)
-                        if _ws_pre.weaver_provider:
-                            _overrides["provider"] = _ws_pre.weaver_provider
-                        if _ws_pre.weaver_boot_command:
-                            _overrides["command"] = \
-                                _ws_pre.weaver_boot_command
-                    launch_cfg = _resolve_agent_launch_config(
+                    resolver = (
+                        _resolve_weaver_launch_config
+                        if is_weaver else _resolve_agent_launch_config
+                    )
+                    launch_cfg = resolver(
                         group,
                         base_dir=base_dir,
                         explicit_template=explicit_template,
@@ -2033,7 +2046,12 @@ async def main(connection=None):
                         gs = state.get_group_settings(cell.group)
                         base_dir = cell.worktree_repo_root or cell.directory \
                             or await _resolve_base_dir(cell.group)
-                        launch_cfg = _resolve_agent_launch_config(
+                        resolver = (
+                            _resolve_weaver_launch_config
+                            if _is_designated_weaver(cell)
+                            else _resolve_agent_launch_config
+                        )
+                        launch_cfg = resolver(
                             cell.group,
                             base_dir=base_dir,
                             explicit_template=cell.template,
@@ -5164,6 +5182,10 @@ async def main(connection=None):
                           "heartbeat_interval",
                           "default_worker_concurrency",
                           "autonomy_mode",
+                          "wave_size_preference",
+                          "same_agent_follow_up_preference",
+                          "digest_verbosity",
+                          "escalation_style",
                           "pending_note", "pending_note_kind",
                           "custom_instructions", "enabled_events",
                           "paused", "weaver_provider",

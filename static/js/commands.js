@@ -126,7 +126,15 @@ async function removeAgent(id) {
   }
 }
 
-function relaunchAgent(id) { send({ cmd: 'relaunch_agent', id }); }
+function relaunchAgent(id) {
+  const cell = state.agents ? state.agents[id] : null;
+  const gs = cell && state.group_settings ? state.group_settings[cell.group] : null;
+  if (cell && cell.status === 'stopped' && gs && gs.weaver_agent_id === id) {
+    openWeaverLaunchDialog(cell.group, id);
+    return;
+  }
+  send({ cmd: 'relaunch_agent', id });
+}
 
 async function clearAgentContext(id) {
   if (await showConfirm("Clear this agent's context? This resets the conversation and the agent will receive full instructions on its next task.")) {
@@ -160,7 +168,7 @@ function newAgentFromTemplate(group, templateName) {
 function newWeaver(group) {
   const gs = (state.group_settings || {})[group] || {};
   if (gs.weaver_agent_id) return;
-  send({ cmd: 'add_agent', name: 'Weaver', group, is_weaver: true });
+  openWeaverLaunchDialog(group);
 }
 
 function quickAddTerminal(group, parentId) {

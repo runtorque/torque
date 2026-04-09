@@ -561,6 +561,10 @@ class LoomDBTests(unittest.TestCase):
                 "heartbeat_interval": 180,
                 "default_worker_concurrency": 4,
                 "autonomy_mode": "aggressive_auto_continue",
+                "wave_size_preference": "large",
+                "same_agent_follow_up_preference": "prefer_same_agent",
+                "digest_verbosity": "detailed",
+                "escalation_style": "keep_moving",
                 "paused": True,
                 "custom_instructions": "Focus on regressions.",
                 "pending_question": "Need approval",
@@ -582,6 +586,12 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["heartbeat_interval"], 180)
         self.assertEqual(loaded["default_worker_concurrency"], 4)
         self.assertEqual(loaded["autonomy_mode"], "aggressive_auto_continue")
+        self.assertEqual(loaded["wave_size_preference"], "large")
+        self.assertEqual(
+            loaded["same_agent_follow_up_preference"], "prefer_same_agent"
+        )
+        self.assertEqual(loaded["digest_verbosity"], "detailed")
+        self.assertEqual(loaded["escalation_style"], "keep_moving")
         self.assertEqual(loaded["weaver_boot_command"], "codex --model gpt-5")
 
         entries = self.db.load_journal_entries("g", limit=10)
@@ -622,6 +632,12 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["heartbeat_interval"], 240)
         self.assertEqual(loaded["default_worker_concurrency"], 2)
         self.assertEqual(loaded["autonomy_mode"], "dispatch_when_clear")
+        self.assertEqual(loaded["wave_size_preference"], "small")
+        self.assertEqual(
+            loaded["same_agent_follow_up_preference"], "balanced"
+        )
+        self.assertEqual(loaded["digest_verbosity"], "balanced")
+        self.assertEqual(loaded["escalation_style"], "note_then_ask")
 
     def test_playbook_candidates_roundtrip(self):
         candidate = {

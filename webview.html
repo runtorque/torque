@@ -130,6 +130,81 @@
   </div>
 </div>
 
+<!-- Weaver launch / relaunch modal -->
+<div class="overlay" id="modal-weaver-launch">
+  <div class="modal modal-tall">
+    <h2 id="weaver-launch-title">Launch Weaver</h2>
+    <div class="task-modal-section">
+      <div class="task-modal-section-body">
+        <label>Group</label>
+        <div id="weaver-launch-group" class="label-hint"></div>
+      </div>
+    </div>
+    <div class="task-modal-section">
+      <div class="task-modal-section-body">
+        <label>Provider</label>
+        <select id="weaver-launch-provider" onchange="onWeaverLaunchProviderChange()"></select>
+        <label>Boot command</label>
+        <input id="weaver-launch-boot-cmd" placeholder="Use provider default" autocomplete="off">
+        <label>Custom instructions</label>
+        <textarea id="weaver-launch-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Weaver policy..."></textarea>
+      </div>
+    </div>
+    <div class="task-modal-section">
+      <div class="task-modal-section-body">
+        <label>Autonomy mode</label>
+        <select id="weaver-launch-autonomy-mode">
+          <option value="suggest_only">Suggest only</option>
+          <option value="dispatch_when_clear">Dispatch when clear</option>
+          <option value="aggressive_auto_continue">Aggressive auto-continue</option>
+        </select>
+        <label>Default worker concurrency</label>
+        <select id="weaver-launch-default-worker-concurrency">
+          <option value="1">1 worker</option>
+          <option value="2">2 workers</option>
+          <option value="3">3 workers</option>
+          <option value="4">4 workers</option>
+          <option value="5">5 workers</option>
+          <option value="6">6 workers</option>
+          <option value="8">8 workers</option>
+        </select>
+      </div>
+    </div>
+    <div class="task-modal-section">
+      <div class="task-modal-section-body">
+        <label>Wave size preference</label>
+        <select id="weaver-launch-wave-size-preference">
+          <option value="small">Small reviewable waves</option>
+          <option value="balanced">Balanced waves</option>
+          <option value="large">Fill available capacity</option>
+        </select>
+        <label>Same-agent follow-up preference</label>
+        <select id="weaver-launch-same-agent-follow-up-preference">
+          <option value="balanced">Balanced</option>
+          <option value="prefer_same_agent">Prefer same agent</option>
+          <option value="prefer_fresh_agent">Prefer fresh agent</option>
+        </select>
+        <label>Digest verbosity</label>
+        <select id="weaver-launch-digest-verbosity">
+          <option value="compact">Compact</option>
+          <option value="balanced">Balanced</option>
+          <option value="detailed">Detailed</option>
+        </select>
+        <label>Escalation style</label>
+        <select id="weaver-launch-escalation-style">
+          <option value="ask_early">Ask early</option>
+          <option value="note_then_ask">Note first, ask when blocked</option>
+          <option value="keep_moving">Keep moving unless blocked</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" id="weaver-launch-submit-btn" onclick="submitWeaverLaunchDialog()">Create Weaver</button>
+    </div>
+  </div>
+</div>
+
 <!-- Edit Agent/Terminal modal -->
 <div class="overlay" id="modal-edit">
   <div class="modal">
@@ -389,6 +464,30 @@
             <option value="5">5 workers</option>
             <option value="6">6 workers</option>
             <option value="8">8 workers</option>
+          </select>
+          <label>Wave size preference</label>
+          <select id="gs-weaver-wave-size-preference">
+            <option value="small">Small reviewable waves</option>
+            <option value="balanced">Balanced waves</option>
+            <option value="large">Fill available capacity</option>
+          </select>
+          <label>Same-agent follow-up preference</label>
+          <select id="gs-weaver-same-agent-follow-up-preference">
+            <option value="balanced">Balanced</option>
+            <option value="prefer_same_agent">Prefer same agent</option>
+            <option value="prefer_fresh_agent">Prefer fresh agent</option>
+          </select>
+          <label>Digest verbosity</label>
+          <select id="gs-weaver-digest-verbosity">
+            <option value="compact">Compact</option>
+            <option value="balanced">Balanced</option>
+            <option value="detailed">Detailed</option>
+          </select>
+          <label>Escalation style</label>
+          <select id="gs-weaver-escalation-style">
+            <option value="ask_early">Ask early</option>
+            <option value="note_then_ask">Note first, ask when blocked</option>
+            <option value="keep_moving">Keep moving unless blocked</option>
           </select>
         </div>
       </div>
@@ -907,6 +1006,7 @@
 <script src="/static/vendor/xterm/addon-fit.js"></script>
 <script src="/static/js/terminal.js"></script>
 <script src="/static/js/modals.js"></script>
+<script src="/static/js/modals/weaver-launch.js"></script>
 <script src="/static/js/modals/add-cell.js"></script>
 <script src="/static/js/modals/task-artifacts.js"></script>
 <script src="/static/js/modals/task-modal.js"></script>

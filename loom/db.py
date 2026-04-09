@@ -775,11 +775,13 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             INSERT OR REPLACE INTO weaver_settings
                 (group_name, push_interval, max_interval, heartbeat_interval,
                  default_worker_concurrency, autonomy_mode,
+                 wave_size_preference, same_agent_follow_up_preference,
+                 digest_verbosity, escalation_style,
                  paused,
                  custom_instructions, pending_question, pending_note,
                  pending_note_kind, enabled_events,
                  weaver_provider, weaver_boot_command)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             group_name,
             settings.get("push_interval", 60),
@@ -788,6 +790,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                          settings.get("max_interval", 300)),
             settings.get("default_worker_concurrency", 2),
             settings.get("autonomy_mode", "dispatch_when_clear"),
+            settings.get("wave_size_preference", "small"),
+            settings.get("same_agent_follow_up_preference", "balanced"),
+            settings.get("digest_verbosity", "balanced"),
+            settings.get("escalation_style", "note_then_ask"),
             1 if settings.get("paused", False) else 0,
             settings.get("custom_instructions", ""),
             settings.get("pending_question", ""),
@@ -803,7 +809,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         """Load weaver settings for a group. Returns None if not set."""
         row = self._conn.execute(
             "SELECT group_name, push_interval, max_interval, heartbeat_interval, "
-            "default_worker_concurrency, autonomy_mode, paused, "
+            "default_worker_concurrency, autonomy_mode, "
+            "wave_size_preference, same_agent_follow_up_preference, "
+            "digest_verbosity, escalation_style, paused, "
             "custom_instructions, pending_question, pending_note, pending_note_kind, enabled_events, "
             "weaver_provider, weaver_boot_command "
             "FROM weaver_settings "
@@ -811,7 +819,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not row:
             return None
         try:
-            enabled = json.loads(row[11])
+            enabled = json.loads(row[15])
         except (json.JSONDecodeError, TypeError):
             enabled = ["agent_started", "task_dispatched", "task_derived"]
         heartbeat_interval = row[3]
@@ -825,14 +833,20 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "heartbeat_interval": heartbeat_interval,
             "default_worker_concurrency": row[4],
             "autonomy_mode": row[5],
-            "paused": bool(row[6]),
-            "custom_instructions": row[7],
-            "pending_question": row[8],
-            "pending_note": row[9],
-            "pending_note_kind": row[10],
+            "wave_size_preference": row[6] if len(row) > 6 else "small",
+            "same_agent_follow_up_preference": (
+                row[7] if len(row) > 7 else "balanced"
+            ),
+            "digest_verbosity": row[8] if len(row) > 8 else "balanced",
+            "escalation_style": row[9] if len(row) > 9 else "note_then_ask",
+            "paused": bool(row[10]),
+            "custom_instructions": row[11],
+            "pending_question": row[12],
+            "pending_note": row[13],
+            "pending_note_kind": row[14],
             "enabled_events": enabled,
-            "weaver_provider": row[12] if len(row) > 12 else "",
-            "weaver_boot_command": row[13] if len(row) > 13 else "",
+            "weaver_provider": row[16] if len(row) > 16 else "",
+            "weaver_boot_command": row[17] if len(row) > 17 else "",
         }
 
     def delete_weaver_settings(self, group_name: str):
@@ -844,7 +858,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         """Load weaver settings for all groups. Returns {group: settings}."""
         rows = self._conn.execute(
             "SELECT group_name, push_interval, max_interval, heartbeat_interval, "
-            "default_worker_concurrency, autonomy_mode, paused, "
+            "default_worker_concurrency, autonomy_mode, "
+            "wave_size_preference, same_agent_follow_up_preference, "
+            "digest_verbosity, escalation_style, paused, "
             "custom_instructions, pending_question, pending_note, pending_note_kind, enabled_events, "
             "weaver_provider, weaver_boot_command "
             "FROM weaver_settings"
@@ -852,7 +868,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         result = {}
         for row in rows:
             try:
-                enabled = json.loads(row[11])
+                enabled = json.loads(row[15])
             except (json.JSONDecodeError, TypeError):
                 enabled = ["agent_started", "task_dispatched", "task_derived"]
             heartbeat_interval = row[3]
@@ -866,14 +882,20 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "heartbeat_interval": heartbeat_interval,
                 "default_worker_concurrency": row[4],
                 "autonomy_mode": row[5],
-                "paused": bool(row[6]),
-                "custom_instructions": row[7],
-                "pending_question": row[8],
-                "pending_note": row[9],
-                "pending_note_kind": row[10],
+                "wave_size_preference": row[6] if len(row) > 6 else "small",
+                "same_agent_follow_up_preference": (
+                    row[7] if len(row) > 7 else "balanced"
+                ),
+                "digest_verbosity": row[8] if len(row) > 8 else "balanced",
+                "escalation_style": row[9] if len(row) > 9 else "note_then_ask",
+                "paused": bool(row[10]),
+                "custom_instructions": row[11],
+                "pending_question": row[12],
+                "pending_note": row[13],
+                "pending_note_kind": row[14],
                 "enabled_events": enabled,
-                "weaver_provider": row[12] if len(row) > 12 else "",
-                "weaver_boot_command": row[13] if len(row) > 13 else "",
+                "weaver_provider": row[16] if len(row) > 16 else "",
+                "weaver_boot_command": row[17] if len(row) > 17 else "",
             }
         return result
 
