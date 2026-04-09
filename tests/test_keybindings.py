@@ -4,6 +4,11 @@ import sys
 import types
 import unittest
 
+try:
+    from helpers import install_aiohttp_stub
+except ModuleNotFoundError:
+    from tests.helpers import install_aiohttp_stub
+
 
 def _install_iterm2_stub():
     stored = {
@@ -77,6 +82,10 @@ def _install_iterm2_stub():
             })
             return stored["alert_result"]
 
+    class Reference:
+        def __init__(self, name):
+            self.name = name
+
     def RPC(fn):
         async def async_register(_connection, timeout=None):
             stored["rpcs"][fn.__name__] = fn
@@ -92,6 +101,7 @@ def _install_iterm2_stub():
     iterm2.binding = binding
     iterm2.keyboard = keyboard
     iterm2.Alert = Alert
+    iterm2.Reference = Reference
     iterm2.RPC = RPC
     iterm2.Connection = object
 
@@ -103,6 +113,7 @@ def _install_iterm2_stub():
 
 class KeybindingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        install_aiohttp_stub()
         self.stored, self.binding_mod, self.keyboard_mod = _install_iterm2_stub()
         self.state_mod = importlib.import_module("loom.state")
         self.state_mod = importlib.reload(self.state_mod)
@@ -352,8 +363,8 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
 
         calls = []
 
-        async def add_agent_handler(*, group, name=""):
-            calls.append(("add_agent", group, name))
+        async def add_agent_handler(*, group, name="", target_session_id=""):
+            calls.append(("add_agent", group, name, target_session_id))
 
         async def add_terminal_handler(*, group, parent_id, name=""):
             calls.append(("add_terminal", group, parent_id, name))
@@ -377,9 +388,71 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             calls,
             [
-                ("add_agent", "g", "Agent 2"),
+                ("add_agent", "g", "Agent 2", ""),
                 ("add_terminal", "g", "agent-1", "Terminal 1"),
                 ("close_cell", "agent-1"),
+            ],
+        )
+
+    async def test_action_shortcuts_use_invocation_session_not_stale_active_session(self):
+        state = self.state_mod.MatrixState()
+        state.groups = {"loom": ["loom-agent"], "other": ["other-agent"]}
+        loom_agent = self.state_mod.AgentCell(
+            id="loom-agent",
+            name="Loom Agent",
+            group="loom",
+            slug="loom-agent",
+            cell_type="agent",
+            session_id="session-loom",
+            window_id="window-loom",
+        )
+        other_agent = self.state_mod.AgentCell(
+            id="other-agent",
+            name="Other Agent",
+            group="other",
+            slug="other-agent",
+            cell_type="agent",
+            session_id="session-other",
+            window_id="window-other",
+        )
+        state.agents = {loom_agent.id: loom_agent, other_agent.id: other_agent}
+        state.active_session_id = other_agent.session_id
+        state.current_window_id = other_agent.window_id
+
+        class Bridge:
+            async def focus_session(self, _session_id):
+                return None
+
+        calls = []
+
+        async def add_agent_handler(*, group, name="", target_session_id=""):
+            calls.append(("add_agent", group, name, target_session_id))
+
+        async def add_terminal_handler(*, group, parent_id, name=""):
+            calls.append(("add_terminal", group, parent_id, name))
+
+        async def close_cell_handler(cell):
+            calls.append(("close_cell", cell.id))
+
+        await self.keybindings_mod.setup(
+            object(),
+            state,
+            Bridge(),
+            add_agent_handler=add_agent_handler,
+            add_terminal_handler=add_terminal_handler,
+            close_cell_handler=close_cell_handler,
+        )
+
+        await self.stored["rpcs"]["loom_add_agent"](session_id=loom_agent.session_id)
+        await self.stored["rpcs"]["loom_add_terminal"](session_id=loom_agent.session_id)
+        await self.stored["rpcs"]["loom_close_cell"](session_id=loom_agent.session_id)
+
+        self.assertEqual(
+            calls,
+            [
+                ("add_agent", "loom", "Agent 1", "session-loom"),
+                ("add_terminal", "loom", "loom-agent", "Terminal 1"),
+                ("close_cell", "loom-agent"),
             ],
         )
 

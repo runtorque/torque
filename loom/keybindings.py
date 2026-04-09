@@ -169,6 +169,22 @@ def _next_name(state, prefix):
     return f"{prefix} {i}"
 
 
+def _normalize_session_id(session_id):
+    """Return a usable RPC/session context id when one is available."""
+    return session_id if isinstance(session_id, str) and session_id else ""
+
+
+def _find_cell_for_session(state, session_id=""):
+    """Find the Loom cell for an invocation or active session."""
+    sid = _normalize_session_id(session_id) or state.active_session_id or ""
+    if not sid:
+        return None
+    for cell in state.agents.values():
+        if cell.session_id == sid:
+            return cell
+    return None
+
+
 def build_close_cell_confirmation_message(state, cell):
     """Build the close/remove confirmation message for shortcut-triggered closes."""
     child_count = len(state._children.get(cell.id, []))
@@ -245,23 +261,22 @@ def get_ordered_agents(state, window_id=None):
     return ordered
 
 
-def _find_current_agent(state):
+def _find_current_agent(state, session_id=""):
     """Find the agent associated with the active session.
 
     If the active session is a terminal, returns its parent agent.
     Returns (agent_cell, is_on_terminal).
     """
-    for cell in state.agents.values():
-        if cell.session_id != state.active_session_id:
-            continue
-        if cell.cell_type == 'agent':
-            return cell, False
-        elif cell.parent_id:
-            parent = state.agents.get(cell.parent_id)
-            if parent:
-                return parent, True
-        return None, True
-    return None, False
+    cell = _find_cell_for_session(state, session_id)
+    if not cell:
+        return None, False
+    if cell.cell_type == 'agent':
+        return cell, False
+    if cell.parent_id:
+        parent = state.agents.get(cell.parent_id)
+        if parent:
+            return parent, True
+    return None, True
 
 
 async def install(connection, specs=None):
@@ -415,37 +430,29 @@ async def setup(connection, state, bridge, overrides=None, *,
         state._ws_clients -= dead
 
     @iterm2.RPC
-    async def loom_toggle_broadcast():
-        # Find the group of the currently active session
-        group = None
-        for cell in state.agents.values():
-            if cell.session_id == state.active_session_id:
-                group = cell.group
-                break
+    async def loom_toggle_broadcast(session_id=iterm2.Reference("id")):
+        source_cell = _find_cell_for_session(state, session_id)
+        group = source_cell.group if source_cell else None
         if not group:
             return
         await _send_action("toggle_broadcast", group=group)
 
     @iterm2.RPC
-    async def loom_close_cell():
-        for cell in state.agents.values():
-            if cell.session_id == state.active_session_id:
-                if close_cell_handler:
-                    await close_cell_handler(cell)
-                else:
-                    await _send_action("close_cell", cell_id=cell.id)
-                return
-        log.info("Close-cell shortcut ignored — no active Loom cell for session %s",
-                 state.active_session_id)
+    async def loom_close_cell(session_id=iterm2.Reference("id")):
+        cell = _find_cell_for_session(state, session_id)
+        if cell:
+            if close_cell_handler:
+                await close_cell_handler(cell)
+            else:
+                await _send_action("close_cell", cell_id=cell.id)
+            return
+        log.info("Close-cell shortcut ignored — no Loom cell for invocation session %s",
+                 _normalize_session_id(session_id) or state.active_session_id)
 
     @iterm2.RPC
-    async def loom_add_agent():
-        # Find the group of the currently active session
-        group = None
-        for cell in state.agents.values():
-            if cell.session_id == state.active_session_id:
-                group = cell.group
-                break
+    async def loom_add_agent(session_id=iterm2.Reference("id")):
+        source_cell = _find_cell_for_session(state, session_id)
+        group = source_cell.group if source_cell else None
         if not group:
             # Fall back to first group
             groups = list(state.groups.keys())
@@ -453,16 +460,18 @@ async def setup(connection, state, bridge, overrides=None, *,
         if group:
             if add_agent_handler:
                 await add_agent_handler(group=group,
-                                        name=_next_name(state, "Agent"))
+                                        name=_next_name(state, "Agent"),
+                                        target_session_id=(
+                                            _normalize_session_id(session_id)))
             else:
                 await _send_action("add_agent", group=group)
         else:
             log.info("Add-agent shortcut ignored — no Loom group available")
 
     @iterm2.RPC
-    async def loom_add_terminal():
+    async def loom_add_terminal(session_id=iterm2.Reference("id")):
         # Find the agent associated with the active session
-        current_agent, _ = _find_current_agent(state)
+        current_agent, _ = _find_current_agent(state, session_id)
         if current_agent:
             if add_terminal_handler:
                 gs = state.get_group_settings(current_agent.group)
@@ -476,8 +485,8 @@ async def setup(connection, state, bridge, overrides=None, *,
                                    group=current_agent.group,
                                    parent_id=current_agent.id)
         else:
-            log.info("Add-terminal shortcut ignored — no active Loom agent for session %s",
-                     state.active_session_id)
+            log.info("Add-terminal shortcut ignored — no Loom agent for invocation session %s",
+                     _normalize_session_id(session_id) or state.active_session_id)
 
     # Register all RPCs
     await loom_focus_next.async_register(connection, timeout=10)
