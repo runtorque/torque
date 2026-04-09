@@ -3001,6 +3001,45 @@ test('renderBoard restores focused input value and caret across rerenders', () =
   assert.equal(input.selectionEnd, 11);
 });
 
+test('renderBoard keeps the inline add-task composer expanded across rerenders', () => {
+  const { sandbox, document } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadBoardScripts(context);
+  runInContext(context, `
+    _renderBoardSelectionBar = function() { return ''; };
+    _renderBoardCard = function(t) { return '<div class="board-card">' + t.id + '</div>'; };
+    _boardScheduleCount = function() { return 0; };
+    boardUpdateScrollArrows = function() {};
+  `);
+
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  const input = document.register('board-add-task-input');
+  input.value = 'Whenever the user is writing a task in-line and it wraps onto a second line';
+  input.scrollHeight = 72;
+  input.style.height = '18px';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  panel.appendChild(input);
+  document.activeElement = input;
+
+  context.state.board_lanes = ['Backlog'];
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardAddingTask = true;
+    _boardAddingTaskDraft = '';
+  `);
+
+  context.renderBoard();
+
+  assert.equal(runInContext(context, '_boardAddingTaskDraft'), input.value);
+  assert.equal(input.focused, true);
+  assert.equal(input.selectionStart, input.value.length);
+  assert.equal(input.selectionEnd, input.value.length);
+  assert.equal(input.style.height, '72px');
+});
+
 test('agent history task links open the board and focus the selected task', () => {
   const { context, document } = createAgentHistoryHarness();
   document.register('panel-board');
