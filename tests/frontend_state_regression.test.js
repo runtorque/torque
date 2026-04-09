@@ -3373,6 +3373,13 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
   assert.match(pausedHtml, /Resume Weaver event delivery/);
 });
 
+test('weaver agent card toggle shares the close control hover and focus reveal affordances', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /\.cell-weaver-toggle\s*\{[^}]*opacity:\s*0;[^}]*pointer-events:\s*none;/);
+  assert.match(css, /\.cell:hover \.cell-close,\s*\.cell:hover \.cell-weaver-toggle,\s*\.cell:hover \.cell-relaunch,\s*\.cell.focused \.cell-close,\s*\.cell.focused \.cell-weaver-toggle,\s*\.cell.focused \.cell-relaunch,\s*\.cell:focus-within \.cell-close,\s*\.cell:focus-within \.cell-weaver-toggle,\s*\.cell:focus-within \.cell-relaunch\s*\{[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/);
+});
+
 test('renderWeaverPanel shows branch review-point summary', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-weaver');
