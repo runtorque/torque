@@ -84,6 +84,50 @@ class ServerModuleExtractionTests(unittest.TestCase):
         finally:
             self.server_mod.STANDALONE = old
 
+    def test_board_archive_command_ignores_include_descendants_and_archives_one_task(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        parent = state.board_add_task('Done parent', 'g', lane='Done', id='task-1')
+        child = state.board_add_task(
+            'Done child',
+            'g',
+            lane='Done',
+            id='task-2',
+            parent_task_id='task-1',
+        )
+
+        result = self.server_mod._handle_board_archive_command(
+            state,
+            {'id': parent.id, 'include_descendants': True},
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(state.board_tasks[parent.id].lane, 'Archived')
+        self.assertEqual(state.board_tasks[child.id].lane, 'Done')
+
+    def test_board_unarchive_command_ignores_include_descendants_and_restores_one_task(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        parent = state.board_add_task('Done parent', 'g', lane='Done', id='task-1')
+        child = state.board_add_task(
+            'Done child',
+            'g',
+            lane='Done',
+            id='task-2',
+            parent_task_id='task-1',
+        )
+        state.board_archive_task(parent.id)
+        state.board_archive_task(child.id)
+
+        result = self.server_mod._handle_board_unarchive_command(
+            state,
+            {'id': parent.id, 'lane': 'Done', 'include_descendants': True},
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(state.board_tasks[parent.id].lane, 'Done')
+        self.assertEqual(state.board_tasks[child.id].lane, 'Archived')
+
 
 class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

@@ -147,6 +147,39 @@ def _resolve_agent_id(state, identifier: str) -> str:
     return ""
 
 
+def _handle_board_archive_command(state: MatrixState, data: dict) -> dict | None:
+    """Archive one board task.
+
+    Batch UI actions expand descendants on the client before sending commands,
+    so the state-layer archive API intentionally remains single-task here.
+    """
+    tid = _resolve_task_id(state, data.get("id", ""))
+    if tid not in state.board_tasks:
+        return {"type": "error", "message": "Task not found"}
+    state.board_archive_task(
+        tid,
+        position=data.get("position"),
+    )
+    return None
+
+
+def _handle_board_unarchive_command(state: MatrixState, data: dict) -> dict | None:
+    """Unarchive one board task.
+
+    Descendant restoration is expanded by the board client in the same way as
+    archive operations.
+    """
+    tid = _resolve_task_id(state, data.get("id", ""))
+    if tid not in state.board_tasks:
+        return {"type": "error", "message": "Task not found"}
+    state.board_unarchive_task(
+        tid,
+        lane=data.get("lane", ""),
+        position=data.get("position"),
+    )
+    return None
+
+
 def _resolve_memory_cell_and_task(state, cell_id: str = "",
                                   task_id: str = ""):
     """Resolve best-effort agent/task context for memory commands."""
@@ -2725,39 +2758,10 @@ async def main(connection=None):
                     }
 
             elif cmd == "board_archive_task":
-                tid = _resolve_task_id(state, data.get("id", ""))
-                changed = state.board_archive_task(
-                    tid,
-                    include_descendants=bool(
-                        data.get("include_descendants", True)
-                    ),
-                )
-                if not changed:
-                    result = {"type": "error", "message": "Task not found"}
-                else:
-                    result = {
-                        "type": "board_task_archived",
-                        "task_id": tid,
-                        "changed_ids": changed,
-                    }
+                result = _handle_board_archive_command(state, data)
 
             elif cmd == "board_unarchive_task":
-                tid = _resolve_task_id(state, data.get("id", ""))
-                changed = state.board_unarchive_task(
-                    tid,
-                    lane=data.get("lane", ""),
-                    include_descendants=bool(
-                        data.get("include_descendants", True)
-                    ),
-                )
-                if not changed:
-                    result = {"type": "error", "message": "Task not found"}
-                else:
-                    result = {
-                        "type": "board_task_unarchived",
-                        "task_id": tid,
-                        "changed_ids": changed,
-                    }
+                result = _handle_board_unarchive_command(state, data)
 
             elif cmd == "board_update_task":
                 tid = _resolve_task_id(state, data.get("id", ""))
@@ -3000,16 +3004,10 @@ async def main(connection=None):
                     shutil.rmtree(att_dir, ignore_errors=True)
 
             elif cmd == "board_archive_task":
-                tid = _resolve_task_id(state, data.get("id", ""))
-                state.board_archive_task(tid)
+                result = _handle_board_archive_command(state, data)
 
             elif cmd == "board_unarchive_task":
-                tid = _resolve_task_id(state, data.get("id", ""))
-                state.board_unarchive_task(
-                    tid,
-                    lane=data.get("lane", ""),
-                    position=data.get("position"),
-                )
+                result = _handle_board_unarchive_command(state, data)
 
             elif cmd == "remove_attachment":
                 tid = _resolve_task_id(state, data.get("task_id", ""))
