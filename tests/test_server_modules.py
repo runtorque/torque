@@ -18,6 +18,8 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.server_worktrees = importlib.reload(self.server_worktrees)
         self.state_mod = importlib.import_module('loom.state')
         self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.reload(self.server_mod)
 
     def test_parse_unified_diff_summarizes_added_file(self):
         diff_text = (
@@ -69,6 +71,17 @@ class ServerModuleExtractionTests(unittest.TestCase):
             target_task_id='task-2',
             self_dispatch=True,
         ))
+
+    def test_standalone_mode_skips_keybinding_installation(self):
+        self.assertFalse(self.server_mod.STANDALONE)
+        self.assertTrue(self.server_mod._should_install_keybindings())
+
+        old = self.server_mod.STANDALONE
+        try:
+            self.server_mod.STANDALONE = True
+            self.assertFalse(self.server_mod._should_install_keybindings())
+        finally:
+            self.server_mod.STANDALONE = old
 
 
 if __name__ == '__main__':

@@ -93,6 +93,11 @@ from .server_worktrees import (
 CLOSE_AFTER_MERGE_DELAY = 5
 
 
+def _should_install_keybindings() -> bool:
+    """Keybindings/RPCs are only installed in iTerm2-hosted mode."""
+    return not STANDALONE
+
+
 def _resolve_task_id(state, identifier: str) -> str:
     """Resolve a task by exact canonical ID, legacy alias, or ID prefix."""
     ident = str(identifier or "").strip()
@@ -560,17 +565,29 @@ async def main(connection):
 
     bridge.on_terminal_disconnected = _on_terminal_disconnected
     await bridge.start()
+    log.info("Startup checkpoint: bridge started")
     await bridge.reconnect_orphans()
+    log.info("Startup checkpoint: orphan reconnect complete")
     asyncio.create_task(_worktree_diff_updater(state, worktree_mgr))
+    log.info("Startup checkpoint: worktree diff updater scheduled")
 
-    # Register RPCs and install global key bindings
-    _kb_overrides = state.global_settings.keybindings or None
-    from . import keybindings
+    # Register iTerm2 RPCs and global key bindings only when Loom is
+    # running as an iTerm2-hosted script. External standalone mode still
+    # controls sessions through the adapter, but it should not try to
+    # register iTerm2-global shortcuts before the HTTP server binds.
+    _displaced = [[]]
+    if _should_install_keybindings():
+        _kb_overrides = state.global_settings.keybindings or None
+        from . import keybindings
 
-    displaced_bindings = await keybindings.setup(
-        connection, state, bridge, overrides=_kb_overrides)
-    # Mutable container so nested closures can reassign on keybinding change
-    _displaced = [displaced_bindings]
+        displaced_bindings = await keybindings.setup(
+            connection, state, bridge, overrides=_kb_overrides)
+        # Mutable container so nested closures can reassign on keybinding change
+        _displaced = [displaced_bindings]
+        log.info("Startup checkpoint: keybindings installed")
+    else:
+        log.info("Standalone mode — iTerm2 keybindings skipped")
+    log.info("Startup checkpoint: post-keybinding setup")
 
     async def _resolve_base_dir(group: str = "") -> str:
         return await agent_launch.resolve_base_dir(group)
@@ -5283,6 +5300,7 @@ async def main(connection):
     asyncio.create_task(
         _scheduler_loop(state, handle_command, _panel_event))
     log.info("Task scheduler and auto-dispatch queue pump started")
+    log.info("Startup checkpoint: scheduler tasks scheduled")
 
     # -- HTTP / WS routes ---------------------------------------------------
 
@@ -5459,16 +5477,21 @@ async def main(connection):
         "/attachments/{task_id}/{filename}", handle_serve_attachment)
     from .config import SCRIPT_DIR
     app_server.router.add_static("/static", SCRIPT_DIR / "static")
+    log.info("Startup checkpoint: routes registered")
 
     runner = web.AppRunner(app_server)
+    log.info("Startup checkpoint: AppRunner created")
     await runner.setup()
+    log.info("Startup checkpoint: runner setup complete")
     site = web.TCPSite(runner, BIND_HOST, WS_PORT, reuse_address=True)
+    log.info("Startup checkpoint: TCPSite created")
     try:
         await site.start()
     except OSError as exc:
         log.error("Cannot bind port %d: %s — is another instance running?",
                   WS_PORT, exc)
         raise
+    log.info("Startup checkpoint: site start complete")
     log.info("HTTP/WS server listening on %s:%d", BIND_HOST, WS_PORT)
 
     # -- Register toolbelt (skipped in standalone-only mode) ----------------

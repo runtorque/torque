@@ -15,7 +15,7 @@ GLOBAL_PYTHON  := $(shell ls $(HOME)/.config/iterm2/AppSupport/iterm2env*/versio
                     2>/dev/null | sort -V | tail -1)
 ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
 
-.PHONY: install uninstall run deps check stop deploy autolaunch cli standalone open test
+.PHONY: install uninstall run deps check stop deploy autolaunch cli standalone standalone-bg open test
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
@@ -110,18 +110,23 @@ run:
 		echo "Error: iTerm2 Python not found. Run make install first."; \
 		exit 1; \
 	fi
-	@nohup "$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
-		>> "$(SCRIPT_DIR)/loom/loom.log" 2>&1 &
-	@echo "Loom started (PID $$!). Logs: $(SCRIPT_DIR)/loom/loom.log"
+	@pid_file="$(SCRIPT_DIR)/loom.pid"; \
+	nohup env LOOM_PORT="$(or $(LOOM_PORT),18932)" \
+		"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
+		>> "$(SCRIPT_DIR)/loom.log" 2>&1 < /dev/null & \
+	pid=$$!; \
+	echo "$$pid" > "$$pid_file"; \
+	echo "Loom started (PID $$pid). Logs: $(SCRIPT_DIR)/loom.log"
 
 ## stop: Kill any running loom instance (by port)
 stop:
-	@pid=$$(lsof -ti TCP:18932 -sTCP:LISTEN 2>/dev/null); \
+	@port="$(or $(LOOM_PORT),18932)"; \
+	pid=$$(lsof -ti TCP:$$port -sTCP:LISTEN 2>/dev/null); \
 	if [ -n "$$pid" ]; then \
 		kill $$pid 2>/dev/null; \
-		echo "Killed PID $$pid (port 18932)"; \
+		echo "Killed PID $$pid (port $$port)"; \
 	else \
-		echo "No process on port 18932."; \
+		echo "No process on port $$port."; \
 	fi
 
 ## deploy: Stop old instance, install new files, prompt to restart
@@ -145,16 +150,31 @@ cli:
 		echo "    export PATH=\"\$$HOME/.local/bin:\$$PATH\"";; \
 	esac
 
-## standalone: Run Loom in standalone-only mode (no toolbelt, connects to iTerm2 externally)
+## standalone: Run Loom in standalone-only mode in the foreground
 standalone: install
 	@if [ -z "$(ITERM2_PYTHON)" ]; then \
 		echo "Error: iTerm2 Python not found. Run make install first."; \
 		exit 1; \
 	fi
-	@LOOM_STANDALONE=1 nohup "$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
-		>> "$(SCRIPT_DIR)/loom/loom.log" 2>&1 &
-	@echo "Loom standalone started (PID $$!). Logs: $(SCRIPT_DIR)/loom/loom.log"
-	@echo "Open http://127.0.0.1:$(or $(LOOM_PORT),18932)/ in a browser"
+	@echo "Starting Loom standalone on http://127.0.0.1:$(or $(LOOM_PORT),18932)/"
+	@echo "Running in the foreground. Keep this shell open; press Ctrl-C to stop."
+	@env LOOM_STANDALONE=1 LOOM_PORT="$(or $(LOOM_PORT),18932)" \
+		"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
+
+## standalone-bg: Best-effort detached standalone launch
+standalone-bg: install
+	@if [ -z "$(ITERM2_PYTHON)" ]; then \
+		echo "Error: iTerm2 Python not found. Run make install first."; \
+		exit 1; \
+	fi
+	@pid_file="$(SCRIPT_DIR)/standalone.pid"; \
+	nohup env LOOM_STANDALONE=1 LOOM_PORT="$(or $(LOOM_PORT),18932)" \
+		"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
+		>> "$(SCRIPT_DIR)/loom.log" 2>&1 < /dev/null & \
+	pid=$$!; \
+	echo "$$pid" > "$$pid_file"; \
+	echo "Loom standalone launch requested (PID $$pid). Logs: $(SCRIPT_DIR)/loom.log"; \
+	echo "Open http://127.0.0.1:$(or $(LOOM_PORT),18932)/ in a browser"
 
 ## open: Open the Loom UI in the default browser (works in dual or standalone mode)
 open:
