@@ -199,11 +199,28 @@ def build_close_cell_confirmation_message(state, cell):
     return msg
 
 
+def _get_group_display_ids(state, group_name):
+    """Return top-level cell ids in the same effective order as the UI.
+
+    The rendered grid pins the configured weaver agent first within its group.
+    Keyboard navigation should follow that same top-level order while still
+    letting child terminals stay adjacent to their parent agent during
+    traversal.
+    """
+    ordered_ids = list(state.groups.get(group_name, []))
+    if not ordered_ids:
+        return ordered_ids
+    weaver_id = state.get_group_settings(group_name).weaver_agent_id or ""
+    if not weaver_id or weaver_id not in ordered_ids:
+        return ordered_ids
+    return [weaver_id] + [aid for aid in ordered_ids if aid != weaver_id]
+
+
 def get_ordered_cells(state, window_id=None):
     """Return all cells with a live session, in group/position order."""
     ordered = []
     for gname in state.groups:
-        for aid in state.groups[gname]:
+        for aid in _get_group_display_ids(state, gname):
             cell = state.agents.get(aid)
             if cell and cell.session_id:
                 if not window_id or cell.window_id == window_id:
@@ -220,7 +237,7 @@ def get_ordered_agents(state, window_id=None):
     """Return only agent cells (not terminals) with a live session."""
     ordered = []
     for gname in state.groups:
-        for aid in state.groups[gname]:
+        for aid in _get_group_display_ids(state, gname):
             cell = state.agents.get(aid)
             if cell and cell.cell_type == 'agent' and cell.session_id:
                 if not window_id or cell.window_id == window_id:

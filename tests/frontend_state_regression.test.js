@@ -401,6 +401,20 @@ function createStandaloneRenderHarness() {
   return { context, document, sandbox };
 }
 
+function createMainRenderHarness() {
+  const { sandbox, document } = createSandbox();
+  document.register('main');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    var _cachedAgentTemplates = [];
+    var focusedItemId = null;
+    var selectedTerminalId = null;
+    getFilterByWindow = function() { return false; };
+  `);
+  return { context, document, sandbox };
+}
+
 function createModalHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -4157,4 +4171,53 @@ test('standalone sidebar formats repo and home paths compactly', () => {
     ),
     'iterm2-loom/docs'
   );
+});
+
+test('main render pins the weaver first in the visible and navigable agent order', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { alpha: ['agent-1', 'weaver-1', 'agent-2'] };
+  sandbox.state.group_settings = {
+    alpha: { collapsed_default: false, weaver_agent_id: 'weaver-1' },
+  };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Worker One',
+      group: 'alpha',
+      cell_type: 'agent',
+      icon: '1',
+      status: 'running',
+      session_id: 'sess-1',
+    },
+    'weaver-1': {
+      id: 'weaver-1',
+      name: 'Weaver Prime',
+      group: 'alpha',
+      cell_type: 'agent',
+      icon: 'W',
+      status: 'running',
+      session_id: 'sess-weaver',
+    },
+    'agent-2': {
+      id: 'agent-2',
+      name: 'Worker Two',
+      group: 'alpha',
+      cell_type: 'agent',
+      icon: '2',
+      status: 'running',
+      session_id: 'sess-2',
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'weaver-1',
+    'agent-1',
+    'agent-2',
+  ]);
+  assert.match(main.innerHTML, /Weaver Prime[\s\S]*Worker One[\s\S]*Worker Two/);
 });
