@@ -179,7 +179,7 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             session.sent,
-            ["line one", "\\", "\r", "line two", "\r"],
+            ["line one", "\n", "line two", "\r"],
         )
         self.assertEqual(delays, [0.3])
 

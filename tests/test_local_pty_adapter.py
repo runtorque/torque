@@ -180,8 +180,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             writes,
             [
                 ("session-1", "line one"),
-                ("session-1", "\\"),
-                ("session-1", "\r"),
+                ("session-1", "\n"),
                 ("session-1", "line two"),
                 ("session-1", "\r"),
             ],
