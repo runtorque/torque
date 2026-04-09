@@ -1149,10 +1149,14 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         msg = args.get("message", "")
         if msg:
             payload["message"] = msg
-        if args.get("close_agent_on_merge"):
-            payload["close_agent_on_merge"] = True
-        if args.get("remove_worktree_on_merge"):
-            payload["remove_worktree_on_merge"] = True
+        if "close_agent_on_merge" in args:
+            payload["close_agent_on_merge"] = bool(
+                args.get("close_agent_on_merge")
+            )
+        if "remove_worktree_on_merge" in args:
+            payload["remove_worktree_on_merge"] = bool(
+                args.get("remove_worktree_on_merge")
+            )
         result = await handle_command(payload)
         if result and result.get("ok") is False:
             error = result.get("error", "Merge failed")

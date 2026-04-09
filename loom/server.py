@@ -353,6 +353,43 @@ def _apply_verification_report(task, payload, actor_name, save_task,
     return msg, root_task
 
 
+async def _relaunch_agent_after_worktree_removal(
+        cell, *,
+        bridge,
+        state,
+        resolve_base_dir,
+        resolve_agent_launch_config,
+        apply_persistent_prompt,
+        build_cell_persistent_prompt):
+    """Reset an agent session after its worktree is removed."""
+    if cell.cell_type != "agent":
+        return
+    if cell.session_id:
+        await bridge.close_session(cell.session_id)
+    cell.status = "stopped"
+    cell.session_id = None
+    cell.agent_session_id = ""
+    base_dir = cell.worktree_repo_root or cell.directory \
+        or await resolve_base_dir(cell.group)
+    launch_cfg = resolve_agent_launch_config(
+        cell.group,
+        base_dir=base_dir,
+        explicit_template=cell.template,
+        overrides={},
+    )
+    apply_persistent_prompt(
+        cell, launch_cfg,
+        build_cell_persistent_prompt(cell, launch_cfg))
+    state._emit_agent(cell)
+    state._db_save_agent(cell)
+    await bridge.create_session(
+        cell,
+        env_vars=launch_cfg.get("env_vars"),
+        env_file=launch_cfg.get("env_file", ""),
+        shell=launch_cfg.get("shell", ""),
+        system_prompt=launch_cfg.get("system_prompt", ""))
+
+
 async def main(connection=None):
     log.info("Loom starting (port=%d)", WS_PORT)
     db = LoomDB(DB_FILE)
@@ -488,8 +525,19 @@ async def main(connection=None):
             )
         if repo_root:
             cell.directory = repo_root
-        state._emit_agent(cell)
-        state._db_save_agent(cell)
+        if ok and cell.cell_type == "agent" and cell.session_id:
+            await _relaunch_agent_after_worktree_removal(
+                cell,
+                bridge=bridge,
+                state=state,
+                resolve_base_dir=_resolve_base_dir,
+                resolve_agent_launch_config=_resolve_agent_launch_config,
+                apply_persistent_prompt=_apply_persistent_prompt,
+                build_cell_persistent_prompt=_build_cell_persistent_prompt,
+            )
+        else:
+            state._emit_agent(cell)
+            state._db_save_agent(cell)
         return cleanup
 
     def _checkpoint_message(cell) -> str:
@@ -2173,34 +2221,20 @@ async def main(connection=None):
                     await _safe_remove_worktree(cell)
                     if repo_root:
                         cell.directory = repo_root
-                    state._emit_agent(cell)
-                    state._db_save_agent(cell)
                     # Relaunch if requested by the UI
                     if data.get("relaunch") and cell.cell_type == "agent":
-                        if cell.session_id:
-                            await bridge.close_session(cell.session_id)
-                        cell.status = "stopped"
-                        cell.session_id = None
-                        cell.agent_session_id = ""
-                        base_dir = cell.worktree_repo_root or cell.directory \
-                            or await _resolve_base_dir(cell.group)
-                        launch_cfg = _resolve_agent_launch_config(
-                            cell.group,
-                            base_dir=base_dir,
-                            explicit_template=cell.template,
-                            overrides={},
+                        await _relaunch_agent_after_worktree_removal(
+                            cell,
+                            bridge=bridge,
+                            state=state,
+                            resolve_base_dir=_resolve_base_dir,
+                            resolve_agent_launch_config=_resolve_agent_launch_config,
+                            apply_persistent_prompt=_apply_persistent_prompt,
+                            build_cell_persistent_prompt=_build_cell_persistent_prompt,
                         )
-                        _apply_persistent_prompt(
-                            cell, launch_cfg,
-                            _build_cell_persistent_prompt(cell, launch_cfg))
+                    else:
                         state._emit_agent(cell)
                         state._db_save_agent(cell)
-                        await bridge.create_session(
-                            cell,
-                            env_vars=launch_cfg.get("env_vars"),
-                            env_file=launch_cfg.get("env_file", ""),
-                            shell=launch_cfg.get("shell", ""),
-                            system_prompt=launch_cfg.get("system_prompt", ""))
 
             elif cmd == "worktree_checkpoint":
                 cell = state.agents.get(data["id"])

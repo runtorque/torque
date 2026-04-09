@@ -1,4 +1,5 @@
 import importlib
+import types
 import unittest
 
 try:
@@ -82,6 +83,134 @@ class ServerModuleExtractionTests(unittest.TestCase):
             self.assertFalse(self.server_mod._should_install_keybindings())
         finally:
             self.server_mod.STANDALONE = old
+
+
+class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.reload(self.server_mod)
+
+    async def test_relaunch_after_worktree_removal_resets_live_agent_session(self):
+        cell = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            session_id='session-old',
+            agent_session_id='resume-token',
+            status='running',
+            directory='/repo',
+            template='default',
+        )
+        emitted = []
+        saved = []
+        launch_calls = []
+        prompt_calls = []
+        closed = []
+        created = []
+
+        async def fake_resolve_base_dir(_group):
+            return '/fallback'
+
+        def fake_resolve_agent_launch_config(group, *, base_dir,
+                                             explicit_template, overrides):
+            launch_calls.append({
+                'group': group,
+                'base_dir': base_dir,
+                'explicit_template': explicit_template,
+                'overrides': overrides,
+            })
+            return {
+                'env_vars': {'LOOM_ENV': '1'},
+                'env_file': '/tmp/loom.env',
+                'shell': 'zsh',
+                'system_prompt': 'system prompt',
+            }
+
+        def fake_apply_persistent_prompt(cell, launch_cfg, prompt):
+            prompt_calls.append({
+                'directory': cell.directory,
+                'prompt': prompt,
+                'env_file': launch_cfg.get('env_file'),
+            })
+
+        def fake_build_cell_persistent_prompt(cell, launch_cfg):
+            return f"{launch_cfg.get('system_prompt')} @ {cell.directory}"
+
+        class FakeBridge:
+            async def close_session(self, session_id):
+                closed.append(session_id)
+
+            async def create_session(self, cell, **kwargs):
+                cell.session_id = 'session-new'
+                created.append({
+                    'directory': cell.directory,
+                    'kwargs': kwargs,
+                })
+
+        fake_state = types.SimpleNamespace(
+            _emit_agent=lambda cell: emitted.append(
+                (cell.status, cell.directory, cell.session_id)
+            ),
+            _db_save_agent=lambda cell: saved.append(
+                (cell.status, cell.directory, cell.session_id)
+            ),
+        )
+
+        await self.server_mod._relaunch_agent_after_worktree_removal(
+            cell,
+            bridge=FakeBridge(),
+            state=fake_state,
+            resolve_base_dir=fake_resolve_base_dir,
+            resolve_agent_launch_config=fake_resolve_agent_launch_config,
+            apply_persistent_prompt=fake_apply_persistent_prompt,
+            build_cell_persistent_prompt=fake_build_cell_persistent_prompt,
+        )
+
+        self.assertEqual(closed, ['session-old'])
+        self.assertEqual(cell.session_id, 'session-new')
+        self.assertEqual(cell.agent_session_id, '')
+        self.assertEqual(cell.status, 'stopped')
+        self.assertEqual(
+            launch_calls,
+            [{
+                'group': 'g',
+                'base_dir': '/repo',
+                'explicit_template': 'default',
+                'overrides': {},
+            }],
+        )
+        self.assertEqual(
+            prompt_calls,
+            [{
+                'directory': '/repo',
+                'prompt': 'system prompt @ /repo',
+                'env_file': '/tmp/loom.env',
+            }],
+        )
+        self.assertEqual(
+            created,
+            [{
+                'directory': '/repo',
+                'kwargs': {
+                    'env_vars': {'LOOM_ENV': '1'},
+                    'env_file': '/tmp/loom.env',
+                    'shell': 'zsh',
+                    'system_prompt': 'system prompt',
+                },
+            }],
+        )
+        self.assertEqual(
+            emitted,
+            [('stopped', '/repo', None)],
+        )
+        self.assertEqual(
+            saved,
+            [('stopped', '/repo', None)],
+        )
 
 
 if __name__ == '__main__':
