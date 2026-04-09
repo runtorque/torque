@@ -608,24 +608,8 @@ async def main(connection=None):
     asyncio.create_task(_worktree_diff_updater(state, worktree_mgr))
     log.info("Startup checkpoint: worktree diff updater scheduled")
 
-    # Register iTerm2 RPCs and global key bindings only when Loom is
-    # running as an iTerm2-hosted script. External standalone mode still
-    # controls sessions through the adapter, but it should not try to
-    # register iTerm2-global shortcuts before the HTTP server binds.
     keybindings = None
     _displaced = [[]]
-    if _should_install_keybindings():
-        _kb_overrides = state.global_settings.keybindings or None
-        from . import keybindings
-
-        displaced_bindings = await keybindings.setup(
-            connection, state, bridge, overrides=_kb_overrides)
-        # Mutable container so nested closures can reassign on keybinding change
-        _displaced = [displaced_bindings]
-        log.info("Startup checkpoint: keybindings installed")
-    else:
-        log.info("Standalone mode — iTerm2 keybindings skipped")
-    log.info("Startup checkpoint: post-keybinding setup")
 
     async def _resolve_base_dir(group: str = "") -> str:
         return await agent_launch.resolve_base_dir(group)
@@ -5286,6 +5270,84 @@ async def main(connection=None):
 
         await state.broadcast()
         return result
+
+    async def _confirm_keybinding_close(cell) -> bool:
+        if not keybindings:
+            return False
+        try:
+            import iterm2
+            message = keybindings.build_close_cell_confirmation_message(
+                state, cell)
+            alert = iterm2.Alert(
+                "Close cell?",
+                message,
+                window_id=state.current_window_id or cell.window_id or None,
+            )
+            alert.add_button("Cancel")
+            alert.add_button("Remove")
+            return await alert.async_run(connection) == 1001
+        except Exception:
+            log.exception("Failed to confirm close-cell keybinding for '%s'",
+                          cell.name)
+            return False
+
+    async def _run_keybinding_command(payload: dict,
+                                      description: str) -> dict | None:
+        result = await handle_command(payload)
+        if result and result.get("type") == "error":
+            log.warning("Keybinding command '%s' failed: %s",
+                        description, result.get("message", "unknown error"))
+        return result
+
+    async def _handle_keybinding_add_agent(*, group: str, name: str = ""):
+        payload = {"cmd": "add_agent", "group": group}
+        if name:
+            payload["name"] = name
+        await _run_keybinding_command(payload, "add_agent")
+
+    async def _handle_keybinding_add_terminal(*,
+                                              group: str,
+                                              parent_id: str,
+                                              name: str = ""):
+        payload = {
+            "cmd": "add_terminal",
+            "group": group,
+            "parent_id": parent_id,
+        }
+        if name:
+            payload["name"] = name
+        await _run_keybinding_command(payload, "add_terminal")
+
+    async def _handle_keybinding_close_cell(cell):
+        if await _confirm_keybinding_close(cell):
+            await _run_keybinding_command(
+                {"cmd": "remove_agent", "id": cell.id},
+                "remove_agent",
+            )
+
+    # Register iTerm2 RPCs and global key bindings only when Loom is
+    # running as an iTerm2-hosted script. External standalone mode still
+    # controls sessions through the adapter, but it should not try to
+    # register iTerm2-global shortcuts before the HTTP server binds.
+    if _should_install_keybindings():
+        _kb_overrides = state.global_settings.keybindings or None
+        from . import keybindings
+
+        displaced_bindings = await keybindings.setup(
+            connection,
+            state,
+            bridge,
+            overrides=_kb_overrides,
+            add_agent_handler=_handle_keybinding_add_agent,
+            add_terminal_handler=_handle_keybinding_add_terminal,
+            close_cell_handler=_handle_keybinding_close_cell,
+        )
+        # Mutable container so nested closures can reassign on keybinding change
+        _displaced = [displaced_bindings]
+        log.info("Startup checkpoint: keybindings installed")
+    else:
+        log.info("Standalone mode — iTerm2 keybindings skipped")
+    log.info("Startup checkpoint: post-keybinding setup")
 
     # -- Events endpoint (agent hooks) ----------------------------------------
 
