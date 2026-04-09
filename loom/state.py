@@ -32,6 +32,30 @@ _WEAVER_AUTONOMY_MODES = {
 }
 _DEFAULT_WEAVER_AUTONOMY_MODE = "dispatch_when_clear"
 _DEFAULT_WEAVER_DEFAULT_WORKER_CONCURRENCY = 2
+_WEAVER_WAVE_SIZE_PREFERENCES = {
+    "small",
+    "balanced",
+    "large",
+}
+_DEFAULT_WEAVER_WAVE_SIZE_PREFERENCE = "small"
+_WEAVER_SAME_AGENT_FOLLOW_UP_PREFERENCES = {
+    "balanced",
+    "prefer_same_agent",
+    "prefer_fresh_agent",
+}
+_DEFAULT_WEAVER_SAME_AGENT_FOLLOW_UP_PREFERENCE = "balanced"
+_WEAVER_DIGEST_VERBOSITIES = {
+    "compact",
+    "balanced",
+    "detailed",
+}
+_DEFAULT_WEAVER_DIGEST_VERBOSITY = "balanced"
+_WEAVER_ESCALATION_STYLES = {
+    "ask_early",
+    "note_then_ask",
+    "keep_moving",
+}
+_DEFAULT_WEAVER_ESCALATION_STYLE = "note_then_ask"
 _WORKTREE_MERGE_CLEANUP_MODES = {
     "keep",
     "close",
@@ -54,6 +78,34 @@ def normalize_default_worker_concurrency(value) -> int:
     except (TypeError, ValueError):
         return _DEFAULT_WEAVER_DEFAULT_WORKER_CONCURRENCY
     return max(1, value)
+
+
+def normalize_weaver_wave_size_preference(value) -> str:
+    value = str(value or "").strip()
+    if value in _WEAVER_WAVE_SIZE_PREFERENCES:
+        return value
+    return _DEFAULT_WEAVER_WAVE_SIZE_PREFERENCE
+
+
+def normalize_weaver_same_agent_follow_up_preference(value) -> str:
+    value = str(value or "").strip()
+    if value in _WEAVER_SAME_AGENT_FOLLOW_UP_PREFERENCES:
+        return value
+    return _DEFAULT_WEAVER_SAME_AGENT_FOLLOW_UP_PREFERENCE
+
+
+def normalize_weaver_digest_verbosity(value) -> str:
+    value = str(value or "").strip()
+    if value in _WEAVER_DIGEST_VERBOSITIES:
+        return value
+    return _DEFAULT_WEAVER_DIGEST_VERBOSITY
+
+
+def normalize_weaver_escalation_style(value) -> str:
+    value = str(value or "").strip()
+    if value in _WEAVER_ESCALATION_STYLES:
+        return value
+    return _DEFAULT_WEAVER_ESCALATION_STYLE
 
 
 def normalize_worktree_merge_cleanup(value) -> str:
@@ -457,6 +509,10 @@ class WeaverSettings:
     heartbeat_interval: int = 300        # quiet seconds before idle heartbeat digest (0 = off)
     default_worker_concurrency: int = 2  # default max_concurrent for dispatch waves
     autonomy_mode: str = "dispatch_when_clear"  # suggest_only | dispatch_when_clear | aggressive_auto_continue
+    wave_size_preference: str = "small"  # small | balanced | large
+    same_agent_follow_up_preference: str = "balanced"  # balanced | prefer_same_agent | prefer_fresh_agent
+    digest_verbosity: str = "balanced"   # compact | balanced | detailed
+    escalation_style: str = "note_then_ask"  # ask_early | note_then_ask | keep_moving
     paused: bool = False                 # user paused event pushes
     custom_instructions: str = ""        # user-defined instructions appended to weaver system prompt
     pending_question: str = ""           # question awaiting human reply (non-empty = awaiting input)
@@ -1174,6 +1230,26 @@ class MatrixState:
                             normalize_default_worker_concurrency(
                                 filtered["default_worker_concurrency"])
                         )
+                    if "wave_size_preference" in filtered:
+                        filtered["wave_size_preference"] = (
+                            normalize_weaver_wave_size_preference(
+                                filtered["wave_size_preference"])
+                        )
+                    if "same_agent_follow_up_preference" in filtered:
+                        filtered["same_agent_follow_up_preference"] = (
+                            normalize_weaver_same_agent_follow_up_preference(
+                                filtered["same_agent_follow_up_preference"])
+                        )
+                    if "digest_verbosity" in filtered:
+                        filtered["digest_verbosity"] = (
+                            normalize_weaver_digest_verbosity(
+                                filtered["digest_verbosity"])
+                        )
+                    if "escalation_style" in filtered:
+                        filtered["escalation_style"] = (
+                            normalize_weaver_escalation_style(
+                                filtered["escalation_style"])
+                        )
                     self.weaver_settings[gname] = WeaverSettings(**filtered)
             cleaned = self.cleanup_orphaned_attention(emit=False)
             self.recompute_task_health(emit=False, persist=False)
@@ -1245,6 +1321,15 @@ class MatrixState:
                     value = normalize_weaver_autonomy_mode(value)
                 elif key == "default_worker_concurrency":
                     value = normalize_default_worker_concurrency(value)
+                elif key == "wave_size_preference":
+                    value = normalize_weaver_wave_size_preference(value)
+                elif key == "same_agent_follow_up_preference":
+                    value = normalize_weaver_same_agent_follow_up_preference(
+                        value)
+                elif key == "digest_verbosity":
+                    value = normalize_weaver_digest_verbosity(value)
+                elif key == "escalation_style":
+                    value = normalize_weaver_escalation_style(value)
                 setattr(ws, key, value)
         d = asdict(ws)
         d.pop("group", None)

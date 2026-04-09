@@ -86,6 +86,10 @@ class WeaverPromptTests(unittest.TestCase):
             SimpleNamespace(
                 autonomy_mode="suggest_only",
                 default_worker_concurrency=4,
+                wave_size_preference="large",
+                same_agent_follow_up_preference="prefer_same_agent",
+                digest_verbosity="detailed",
+                escalation_style="keep_moving",
                 custom_instructions="",
             ),
             group_settings=SimpleNamespace(
@@ -96,8 +100,17 @@ class WeaverPromptTests(unittest.TestCase):
         self.assertIn("Operating Policy", prompt)
         self.assertIn("Autonomy mode: Suggest only", prompt)
         self.assertIn("Default worker concurrency: 4", prompt)
+        self.assertIn("Wave size preference: Fill available capacity", prompt)
+        self.assertIn(
+            "Same-agent follow-up preference: Prefer same agent", prompt
+        )
+        self.assertIn("Digest verbosity: Detailed", prompt)
+        self.assertIn(
+            "Escalation style: Keep moving unless blocked", prompt
+        )
         self.assertIn(
             "Default post-merge cleanup: Close agent session and remove worktree",
             prompt,
         )
         self.assertIn("prefer `weaver_note` with a proposed wave", prompt)
+        self.assertIn("Shape Loom digests as detailed by default.", prompt)

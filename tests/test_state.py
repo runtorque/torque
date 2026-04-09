@@ -410,6 +410,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
             "g",
             autonomy_mode="not-a-real-mode",
             default_worker_concurrency=0,
+            wave_size_preference="gigantic",
+            same_agent_follow_up_preference="always",
+            digest_verbosity="wall-of-text",
+            escalation_style="shrug",
         )
         state.update_group_settings(
             "g",
@@ -420,6 +424,10 @@ class MatrixStateCleanupTests(unittest.TestCase):
         gs = state.group_settings["g"]
         self.assertEqual(ws.autonomy_mode, "dispatch_when_clear")
         self.assertEqual(ws.default_worker_concurrency, 1)
+        self.assertEqual(ws.wave_size_preference, "small")
+        self.assertEqual(ws.same_agent_follow_up_preference, "balanced")
+        self.assertEqual(ws.digest_verbosity, "balanced")
+        self.assertEqual(ws.escalation_style, "note_then_ask")
         self.assertEqual(gs.worktree_merge_cleanup, "keep")
 
 

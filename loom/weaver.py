@@ -13,6 +13,10 @@ from .state import (
     WEAVER_MANDATORY_EVENTS,
     normalize_default_worker_concurrency,
     normalize_weaver_autonomy_mode,
+    normalize_weaver_digest_verbosity,
+    normalize_weaver_escalation_style,
+    normalize_weaver_same_agent_follow_up_preference,
+    normalize_weaver_wave_size_preference,
     normalize_worktree_merge_cleanup,
 )
 from .task_health import HEALTH_SEVERITY
@@ -199,7 +203,43 @@ def _merge_cleanup_label(mode: str) -> str:
     return labels.get(mode, "Keep agent session and worktree")
 
 
-def _policy_lines(mode: str) -> list[str]:
+def _wave_size_preference_label(mode: str) -> str:
+    labels = {
+        "small": "Small reviewable waves",
+        "balanced": "Balanced waves",
+        "large": "Fill available capacity",
+    }
+    return labels.get(mode, "Small reviewable waves")
+
+
+def _same_agent_follow_up_preference_label(mode: str) -> str:
+    labels = {
+        "balanced": "Balanced",
+        "prefer_same_agent": "Prefer same agent",
+        "prefer_fresh_agent": "Prefer fresh agent",
+    }
+    return labels.get(mode, "Balanced")
+
+
+def _digest_verbosity_label(mode: str) -> str:
+    labels = {
+        "compact": "Compact",
+        "balanced": "Balanced",
+        "detailed": "Detailed",
+    }
+    return labels.get(mode, "Balanced")
+
+
+def _escalation_style_label(mode: str) -> str:
+    labels = {
+        "ask_early": "Ask early",
+        "note_then_ask": "Note first, ask when blocked",
+        "keep_moving": "Keep moving unless blocked",
+    }
+    return labels.get(mode, "Note first, ask when blocked")
+
+
+def _autonomy_policy_lines(mode: str) -> list[str]:
     if mode == "suggest_only":
         return [
             "- Do not widen the wave automatically just because work exists.",
@@ -219,12 +259,70 @@ def _policy_lines(mode: str) -> list[str]:
     ]
 
 
+def _wave_size_policy_lines(mode: str) -> list[str]:
+    if mode == "large":
+        return [
+            "- When risk is modest, fill available worker slots instead of waiting for perfectly tiny slices.",
+            "- Prefer bundling multiple clearly related ready tasks into the same dispatch wave when review boundaries still look manageable.",
+        ]
+    if mode == "balanced":
+        return [
+            "- Prefer medium-sized waves that keep workers busy without widening across the same risky surface too quickly.",
+        ]
+    return [
+        "- Prefer the smallest wave that can still produce a reviewable result.",
+        "- Pause sooner before widening work on user-visible, runtime-sensitive, or shared-surface changes.",
+    ]
+
+
+def _same_agent_policy_lines(mode: str) -> list[str]:
+    if mode == "prefer_same_agent":
+        return [
+            "- Bias toward same-agent queued follow-ups when context continuity clearly outweighs the cost of a longer shared branch.",
+        ]
+    if mode == "prefer_fresh_agent":
+        return [
+            "- Bias toward fresh agents and cleaner review boundaries unless the follow-up is truly trivial or tightly coupled.",
+        ]
+    return [
+        "- Reuse the same agent for short tightly coupled follow-ups, but prefer a fresh agent when you want a cleaner merge boundary.",
+    ]
+
+
+def _escalation_policy_lines(mode: str) -> list[str]:
+    if mode == "ask_early":
+        return [
+            "- Escalate sooner when priorities, approvals, or product intent are even moderately ambiguous.",
+            "- Prefer `weaver_ask` over prolonged autonomous interpretation when a human decision could materially change the plan.",
+        ]
+    if mode == "keep_moving":
+        return [
+            "- Keep moving through soft ambiguity when the likely next step is low-risk and reversible.",
+            "- Prefer `weaver_note` for visibility and reserve `weaver_ask` for true blockers or approvals.",
+        ]
+    return [
+        "- Prefer `weaver_note` for soft ambiguity and use `weaver_ask` only when the board should genuinely pause for a human decision.",
+    ]
+
+
 def _build_policy_section(weaver_settings=None, group_settings=None) -> str:
     mode = normalize_weaver_autonomy_mode(
         getattr(weaver_settings, "autonomy_mode", "")
     )
     concurrency = normalize_default_worker_concurrency(
         getattr(weaver_settings, "default_worker_concurrency", 2)
+    )
+    wave_size = normalize_weaver_wave_size_preference(
+        getattr(weaver_settings, "wave_size_preference", "small")
+    )
+    same_agent = normalize_weaver_same_agent_follow_up_preference(
+        getattr(weaver_settings, "same_agent_follow_up_preference", "balanced")
+    )
+    digest_verbosity = normalize_weaver_digest_verbosity(
+        getattr(weaver_settings, "digest_verbosity", "balanced")
+    )
+    escalation_style = normalize_weaver_escalation_style(
+        getattr(weaver_settings, "escalation_style", "note_then_ask")
     )
     cleanup_mode = normalize_worktree_merge_cleanup(
         getattr(group_settings, "worktree_merge_cleanup", "keep")
@@ -234,13 +332,25 @@ def _build_policy_section(weaver_settings=None, group_settings=None) -> str:
         "──────────────────────────",
         f"Autonomy mode: {_autonomy_mode_label(mode)}",
         f"Default worker concurrency: {concurrency}",
+        f"Wave size preference: {_wave_size_preference_label(wave_size)}",
+        "Same-agent follow-up preference: "
+        f"{_same_agent_follow_up_preference_label(same_agent)}",
+        f"Digest verbosity: {_digest_verbosity_label(digest_verbosity)}",
+        f"Escalation style: {_escalation_style_label(escalation_style)}",
         f"Default post-merge cleanup: {_merge_cleanup_label(cleanup_mode)}",
         "",
         "Apply these policy defaults when the more general guidance above leaves room for judgment:",
-        *_policy_lines(mode),
+        *_autonomy_policy_lines(mode),
+        *_wave_size_policy_lines(wave_size),
+        *_same_agent_policy_lines(same_agent),
+        *_escalation_policy_lines(escalation_style),
         (
             "- When calling `weaver_batch_dispatch` without `max_concurrent`, "
             f"use {concurrency} as the default limit."
+        ),
+        (
+            "- Shape Loom digests as "
+            f"{_digest_verbosity_label(digest_verbosity).lower()} by default."
         ),
         (
             "- After a successful merge with no explicit cleanup flags, "
@@ -478,30 +588,56 @@ class WeaverEventBuffer:
 
     def _format_digest(self, group: str, events: list[dict], board_summary: str,
                        weaver=None) -> str:
+        verbosity = normalize_weaver_digest_verbosity(
+            getattr(
+                self._state.get_weaver_settings(group),
+                "digest_verbosity",
+                "balanced",
+            )
+        )
+        event_limit = 5 if verbosity == "compact" else None
         lines = [f"── Loom Digest ({len(events)} event"
                  f"{'s' if len(events) != 1 else ''}) "
                  f"──────────────────────────"]
         if events:
-            for evt in events:
+            visible_events = events[:event_limit] if event_limit else events
+            for evt in visible_events:
                 kind = evt.get("kind", "")
-                agent = evt.get("agent_name", "")
-                msg = evt.get("message", "")
+                agent = self._truncate_digest_text(
+                    evt.get("agent_name", ""),
+                    limit=24 if verbosity == "compact" else 80,
+                )
+                msg = self._truncate_digest_text(
+                    evt.get("message", ""),
+                    limit=72 if verbosity == "compact" else 240,
+                )
                 if agent and msg:
                     lines.append(f"  {kind}: {agent} — {msg}")
                 elif msg:
                     lines.append(f"  {kind}: {msg}")
                 else:
                     lines.append(f"  {kind}: {agent}")
+            hidden = len(events) - len(visible_events)
+            if hidden > 0:
+                lines.append(
+                    f"  … {hidden} more event{'s' if hidden != 1 else ''}"
+                )
         else:
             lines.append("  No new events since last digest.")
 
         lines.append("")
         lines.append(f"Board: {board_summary}")
-        if not events:
+        include_active = verbosity == "detailed" or not events
+        include_attention = verbosity == "detailed" or not events
+        if include_active:
             active_summary = self._active_agents_summary()
             if active_summary:
                 lines.append(f"Active: {active_summary}")
-            attention = self._quiet_attention_summary(group)
+        if include_attention:
+            attention = self._attention_summary(
+                group,
+                limit=5 if verbosity == "detailed" else 3,
+            )
             if attention:
                 lines.append(attention)
 
@@ -521,8 +657,8 @@ class WeaverEventBuffer:
                 actives.append(f"{c.slug or c.name} ({c.activity})")
         return " · ".join(actives)
 
-    def _quiet_attention_summary(self, group: str) -> str:
-        """Summarize blocked/unhealthy tasks for quiet-period heartbeats."""
+    def _attention_summary(self, group: str, *, limit: int = 3) -> str:
+        """Summarize blocked/unhealthy tasks for digests and heartbeats."""
         items = []
         for task in self._state.board_tasks.values():
             if task.group != group or task.lane == "Done":
@@ -541,12 +677,19 @@ class WeaverEventBuffer:
         )
         preview = [
             f"{state_name}: {title[:40]}"
-            for state_name, title in items[:3]
+            for state_name, title in items[:limit]
         ]
         return "Attention: " + " · ".join(preview)
 
     def _board_summary(self, group: str) -> str:
         """Count tasks per lane for a group, including unhealthy rollups."""
+        verbosity = normalize_weaver_digest_verbosity(
+            getattr(
+                self._state.get_weaver_settings(group),
+                "digest_verbosity",
+                "balanced",
+            )
+        )
         counts: dict[str, int] = {}
         unhealthy_counts: dict[str, int] = {}
         unhealthy_items: list[tuple[str, str]] = []
@@ -569,18 +712,26 @@ class WeaverEventBuffer:
             ):
                 ordered.append(f"{count} {state_name}")
             parts.append("health " + ", ".join(ordered))
-            unhealthy_items.sort(
-                key=lambda item: (
-                    -HEALTH_SEVERITY.get(item[0], 0),
-                    item[1].lower(),
-                ),
-            )
-            preview = [
-                f"{title[:40]} ({state_name})"
-                for state_name, title in unhealthy_items[:3]
-            ]
-            parts.append("risk " + ", ".join(preview))
+            if verbosity != "compact":
+                unhealthy_items.sort(
+                    key=lambda item: (
+                        -HEALTH_SEVERITY.get(item[0], 0),
+                        item[1].lower(),
+                    ),
+                )
+                preview = [
+                    f"{title[:40]} ({state_name})"
+                    for state_name, title in unhealthy_items[:3]
+                ]
+                parts.append("risk " + ", ".join(preview))
         return " · ".join(parts) if parts else "empty"
+
+    @staticmethod
+    def _truncate_digest_text(text: str, *, limit: int) -> str:
+        text = str(text or "")
+        if limit <= 0 or len(text) <= limit:
+            return text
+        return text[:max(limit - 1, 0)] + "…"
 
     def _context_warning(self, weaver) -> str:
         """Return a warning string if weaver context is getting large."""

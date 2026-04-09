@@ -250,6 +250,10 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     heartbeat_interval INTEGER NOT NULL DEFAULT 300,
     default_worker_concurrency INTEGER NOT NULL DEFAULT 2,
     autonomy_mode      TEXT NOT NULL DEFAULT 'dispatch_when_clear',
+    wave_size_preference TEXT NOT NULL DEFAULT 'small',
+    same_agent_follow_up_preference TEXT NOT NULL DEFAULT 'balanced',
+    digest_verbosity   TEXT NOT NULL DEFAULT 'balanced',
+    escalation_style   TEXT NOT NULL DEFAULT 'note_then_ask',
     paused             INTEGER NOT NULL DEFAULT 0,
     custom_instructions TEXT NOT NULL DEFAULT '',
     pending_question   TEXT NOT NULL DEFAULT '',
@@ -733,6 +737,10 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     for col, default in (
         ("default_worker_concurrency", "2"),
         ("autonomy_mode", "'dispatch_when_clear'"),
+        ("wave_size_preference", "'small'"),
+        ("same_agent_follow_up_preference", "'balanced'"),
+        ("digest_verbosity", "'balanced'"),
+        ("escalation_style", "'note_then_ask'"),
     ):
         try:
             conn.execute(

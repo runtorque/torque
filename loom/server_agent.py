@@ -217,6 +217,24 @@ class AgentLaunchService:
             "terminals": resolved.get("terminals", []),
         }
 
+    def resolve_weaver_launch_config(self, group: str, *,
+                                     base_dir: str = "",
+                                     explicit_template: str = "",
+                                     overrides: dict[str, Any] | None = None) -> dict:
+        """Resolve launch config for the designated Weaver in a group."""
+        merged = dict(overrides or {})
+        ws = self.state.get_weaver_settings(group)
+        if getattr(ws, "weaver_provider", ""):
+            merged["provider"] = ws.weaver_provider
+        if getattr(ws, "weaver_boot_command", ""):
+            merged["command"] = ws.weaver_boot_command
+        return self.resolve_agent_launch_config(
+            group,
+            base_dir=base_dir,
+            explicit_template=explicit_template,
+            overrides=merged,
+        )
+
     async def create_child_terminals(self, group: str, parent_cell,
                                      terminals: list[dict] | None = None,
                                      count: int = 0):

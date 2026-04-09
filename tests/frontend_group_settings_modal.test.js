@@ -165,6 +165,10 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
       custom_instructions: "Watch for regressions.",
       autonomy_mode: "aggressive_auto_continue",
       default_worker_concurrency: 4,
+      wave_size_preference: "large",
+      same_agent_follow_up_preference: "prefer_same_agent",
+      digest_verbosity: "detailed",
+      escalation_style: "keep_moving",
       push_interval: 120,
       max_interval: 600,
       heartbeat_interval: 60,
@@ -178,6 +182,10 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
   assert.equal(ensure('gs-weaver-custom-instructions').value, 'Watch for regressions.');
   assert.equal(ensure('gs-weaver-autonomy-mode').value, 'aggressive_auto_continue');
   assert.equal(ensure('gs-weaver-default-worker-concurrency').value, '4');
+  assert.equal(ensure('gs-weaver-wave-size-preference').value, 'large');
+  assert.equal(ensure('gs-weaver-same-agent-follow-up-preference').value, 'prefer_same_agent');
+  assert.equal(ensure('gs-weaver-digest-verbosity').value, 'detailed');
+  assert.equal(ensure('gs-weaver-escalation-style').value, 'keep_moving');
   assert.equal(ensure('gs-wt-merge-cleanup').value, 'close_remove');
   assert.equal(ensure('gs-weaver-agent-name').textContent, 'Weaver');
   assert.equal(ensure('gs-weaver-event-agent-started').checked, true);
@@ -202,6 +210,10 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   ensure('gs-weaver-custom-instructions').value = 'Stay focused';
   ensure('gs-weaver-autonomy-mode').value = 'suggest_only';
   ensure('gs-weaver-default-worker-concurrency').value = '3';
+  ensure('gs-weaver-wave-size-preference').value = 'small';
+  ensure('gs-weaver-same-agent-follow-up-preference').value = 'prefer_fresh_agent';
+  ensure('gs-weaver-digest-verbosity').value = 'compact';
+  ensure('gs-weaver-escalation-style').value = 'ask_early';
   ensure('gs-weaver-push-interval').value = '120';
   ensure('gs-weaver-max-interval').value = '600';
   ensure('gs-weaver-heartbeat-interval').value = '60';
@@ -223,6 +235,10 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   assert.equal(sandbox.sendCalls[1].custom_instructions, 'Stay focused');
   assert.equal(sandbox.sendCalls[1].autonomy_mode, 'suggest_only');
   assert.equal(sandbox.sendCalls[1].default_worker_concurrency, 3);
+  assert.equal(sandbox.sendCalls[1].wave_size_preference, 'small');
+  assert.equal(sandbox.sendCalls[1].same_agent_follow_up_preference, 'prefer_fresh_agent');
+  assert.equal(sandbox.sendCalls[1].digest_verbosity, 'compact');
+  assert.equal(sandbox.sendCalls[1].escalation_style, 'ask_early');
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[1].enabled_events)), ['agent_started', 'agent_progress']);
 });
 

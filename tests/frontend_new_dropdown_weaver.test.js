@@ -16,11 +16,15 @@ function createSandbox() {
       agents: {},
     },
     sendCalls: [],
+    modalCalls: [],
     esc(value) { return String(value); },
     _cachedAgentTemplates: [],
   };
   sandbox.send = function(message) {
     sandbox.sendCalls.push(message);
+  };
+  sandbox.openWeaverLaunchDialog = function(group, agentId) {
+    sandbox.modalCalls.push({ group, agentId: agentId || '' });
   };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
@@ -45,21 +49,20 @@ test('new dropdown renders Weaver entry only when a group has no weaver', () => 
   assert.equal(htmlWithWeaver, '');
 });
 
-test('newWeaver sends add_agent with is_weaver', () => {
+test('newWeaver opens the dedicated Weaver launch dialog', () => {
   const sandbox = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/commands.js');
 
   vm.runInContext(`newWeaver('alpha')`, context);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.modalCalls)), [
     {
-      cmd: 'add_agent',
-      name: 'Weaver',
       group: 'alpha',
-      is_weaver: true,
+      agentId: '',
     },
   ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
 });
 
 test('newWeaver is a no-op when the group already has a weaver', () => {
@@ -71,4 +74,42 @@ test('newWeaver is a no-op when the group already has a weaver', () => {
   vm.runInContext(`newWeaver('alpha')`, context);
 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
+});
+
+test('relaunchAgent routes stopped designated weavers through the launch dialog', () => {
+  const sandbox = createSandbox();
+  sandbox.state.group_settings.alpha = { weaver_agent_id: 'weaver-1' };
+  sandbox.state.agents['weaver-1'] = {
+    id: 'weaver-1',
+    group: 'alpha',
+    status: 'stopped',
+  };
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/commands.js');
+
+  vm.runInContext(`relaunchAgent('weaver-1')`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.modalCalls)), [
+    { group: 'alpha', agentId: 'weaver-1' },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
+});
+
+test('relaunchAgent keeps normal agents on the plain relaunch path', () => {
+  const sandbox = createSandbox();
+  sandbox.state.group_settings.alpha = { weaver_agent_id: 'weaver-1' };
+  sandbox.state.agents['agent-1'] = {
+    id: 'agent-1',
+    group: 'alpha',
+    status: 'stopped',
+  };
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/commands.js');
+
+  vm.runInContext(`relaunchAgent('agent-1')`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.modalCalls)), []);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'relaunch_agent', id: 'agent-1' },
+  ]);
 });

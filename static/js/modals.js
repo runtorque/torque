@@ -457,6 +457,26 @@ function _showGroupSettings(group, data) {
     ws.default_worker_concurrency,
     2
   );
+  _setSelectValue(
+    'gs-weaver-wave-size-preference',
+    ws.wave_size_preference,
+    'small'
+  );
+  _setSelectValue(
+    'gs-weaver-same-agent-follow-up-preference',
+    ws.same_agent_follow_up_preference,
+    'balanced'
+  );
+  _setSelectValue(
+    'gs-weaver-digest-verbosity',
+    ws.digest_verbosity,
+    'balanced'
+  );
+  _setSelectValue(
+    'gs-weaver-escalation-style',
+    ws.escalation_style,
+    'note_then_ask'
+  );
   _setSelectValue('gs-weaver-push-interval', ws.push_interval, 60);
   _setSelectValue('gs-weaver-max-interval', ws.max_interval, 300);
   _setSelectValue(
@@ -563,6 +583,10 @@ function submitGroupSettings() {
     custom_instructions: document.getElementById('gs-weaver-custom-instructions').value,
     autonomy_mode: document.getElementById('gs-weaver-autonomy-mode').value,
     default_worker_concurrency: parseInt(document.getElementById('gs-weaver-default-worker-concurrency').value, 10) || 2,
+    wave_size_preference: document.getElementById('gs-weaver-wave-size-preference').value,
+    same_agent_follow_up_preference: document.getElementById('gs-weaver-same-agent-follow-up-preference').value,
+    digest_verbosity: document.getElementById('gs-weaver-digest-verbosity').value,
+    escalation_style: document.getElementById('gs-weaver-escalation-style').value,
     push_interval: parseInt(document.getElementById('gs-weaver-push-interval').value, 10) || 60,
     max_interval: parseInt(document.getElementById('gs-weaver-max-interval').value, 10) || 300,
     heartbeat_interval: parseInt(document.getElementById('gs-weaver-heartbeat-interval').value, 10),
