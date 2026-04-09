@@ -25,6 +25,53 @@ _RESERVED_LANES = ("Backlog", "To Do", "In Progress", "Done", ARCHIVED_LANE)
 _DEFAULT_LANES = list(_RESERVED_LANES)
 _VERIFICATION_MODES = {"", "deploy", "restart"}
 _VERIFICATION_STATES = {"", "pending", "attempted", "passed", "failed"}
+_WEAVER_AUTONOMY_MODES = {
+    "suggest_only",
+    "dispatch_when_clear",
+    "aggressive_auto_continue",
+}
+_DEFAULT_WEAVER_AUTONOMY_MODE = "dispatch_when_clear"
+_DEFAULT_WEAVER_DEFAULT_WORKER_CONCURRENCY = 2
+_WORKTREE_MERGE_CLEANUP_MODES = {
+    "keep",
+    "close",
+    "remove",
+    "close_remove",
+}
+_DEFAULT_WORKTREE_MERGE_CLEANUP = "keep"
+
+
+def normalize_weaver_autonomy_mode(value) -> str:
+    value = str(value or "").strip()
+    if value in _WEAVER_AUTONOMY_MODES:
+        return value
+    return _DEFAULT_WEAVER_AUTONOMY_MODE
+
+
+def normalize_default_worker_concurrency(value) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return _DEFAULT_WEAVER_DEFAULT_WORKER_CONCURRENCY
+    return max(1, value)
+
+
+def normalize_worktree_merge_cleanup(value) -> str:
+    value = str(value or "").strip()
+    if value in _WORKTREE_MERGE_CLEANUP_MODES:
+        return value
+    return _DEFAULT_WORKTREE_MERGE_CLEANUP
+
+
+def merge_cleanup_flags(mode: str) -> tuple[bool, bool]:
+    mode = normalize_worktree_merge_cleanup(mode)
+    if mode == "close":
+        return (True, False)
+    if mode == "remove":
+        return (False, True)
+    if mode == "close_remove":
+        return (True, True)
+    return (False, False)
 
 
 @dataclass
@@ -368,6 +415,7 @@ class GroupSettings:
     checkpoint_on_progress: bool = False  # auto-checkpoint on loom ai progress/done
     worktree_merge_squash: bool = True  # squash commits when merging to main
     worktree_merge_instructions: str = ""  # additional instructions appended to merge prompt
+    worktree_merge_cleanup: str = "keep"  # keep | close | remove | close_remove
     worktree_symlinks: list[str] = field(default_factory=list)  # paths to symlink from repo root
     agent_session_resume: bool = True  # resume session on relaunch
     agent_idle_timeout: int = 5  # minutes before flagging agent as stuck (0=disable)
@@ -407,6 +455,8 @@ class WeaverSettings:
     push_interval: int = 60              # seconds between digest pushes (min: 10)
     max_interval: int = 300              # max seconds between normal digest pushes
     heartbeat_interval: int = 300        # quiet seconds before idle heartbeat digest (0 = off)
+    default_worker_concurrency: int = 2  # default max_concurrent for dispatch waves
+    autonomy_mode: str = "dispatch_when_clear"  # suggest_only | dispatch_when_clear | aggressive_auto_continue
     paused: bool = False                 # user paused event pushes
     custom_instructions: str = ""        # user-defined instructions appended to weaver system prompt
     pending_question: str = ""           # question awaiting human reply (non-empty = awaiting input)
@@ -940,6 +990,11 @@ class MatrixState:
             for gname, raw in data.get("group_settings", {}).items():
                 if gname in self.groups:
                     filtered = {k: v for k, v in raw.items() if k in gs_fields}
+                    if "worktree_merge_cleanup" in filtered:
+                        filtered["worktree_merge_cleanup"] = (
+                            normalize_worktree_merge_cleanup(
+                                filtered["worktree_merge_cleanup"])
+                        )
                     self.group_settings[gname] = GroupSettings(**filtered)
             # Promote orphaned children whose parent was deleted
             for aid, cell in self.agents.items():
@@ -1109,6 +1164,16 @@ class MatrixState:
                 ws_fields = set(WeaverSettings.__dataclass_fields__)
                 for gname, raw in self.db.load_all_weaver_settings().items():
                     filtered = {k: v for k, v in raw.items() if k in ws_fields}
+                    if "autonomy_mode" in filtered:
+                        filtered["autonomy_mode"] = (
+                            normalize_weaver_autonomy_mode(
+                                filtered["autonomy_mode"])
+                        )
+                    if "default_worker_concurrency" in filtered:
+                        filtered["default_worker_concurrency"] = (
+                            normalize_default_worker_concurrency(
+                                filtered["default_worker_concurrency"])
+                        )
                     self.weaver_settings[gname] = WeaverSettings(**filtered)
             cleaned = self.cleanup_orphaned_attention(emit=False)
             self.recompute_task_health(emit=False, persist=False)
@@ -1148,6 +1213,8 @@ class MatrixState:
         valid = set(GroupSettings.__dataclass_fields__)
         for key, value in fields.items():
             if key in valid:
+                if key == "worktree_merge_cleanup":
+                    value = normalize_worktree_merge_cleanup(value)
                 setattr(gs, key, value)
         self._emit("group_settings_update", name=name, **asdict(gs))
         self._db_save_group_settings(name)
@@ -1174,6 +1241,10 @@ class MatrixState:
         valid = set(WeaverSettings.__dataclass_fields__)
         for key, value in fields.items():
             if key in valid:
+                if key == "autonomy_mode":
+                    value = normalize_weaver_autonomy_mode(value)
+                elif key == "default_worker_concurrency":
+                    value = normalize_default_worker_concurrency(value)
                 setattr(ws, key, value)
         d = asdict(ws)
         d.pop("group", None)

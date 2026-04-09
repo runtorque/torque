@@ -9,7 +9,12 @@ import asyncio
 import logging
 import time
 
-from .state import WEAVER_MANDATORY_EVENTS
+from .state import (
+    WEAVER_MANDATORY_EVENTS,
+    normalize_default_worker_concurrency,
+    normalize_weaver_autonomy_mode,
+    normalize_worktree_merge_cleanup,
+)
 from .task_health import HEALTH_SEVERITY
 
 log = logging.getLogger("loom")
@@ -175,16 +180,92 @@ weaver_diff, weaver_worktree_remove, weaver_worktree_checkpoint
 """
 
 
+def _autonomy_mode_label(mode: str) -> str:
+    labels = {
+        "suggest_only": "Suggest only",
+        "dispatch_when_clear": "Dispatch when clear",
+        "aggressive_auto_continue": "Aggressive auto-continue",
+    }
+    return labels.get(mode, "Dispatch when clear")
+
+
+def _merge_cleanup_label(mode: str) -> str:
+    labels = {
+        "keep": "Keep agent session and worktree",
+        "close": "Close agent session only",
+        "remove": "Remove worktree only",
+        "close_remove": "Close agent session and remove worktree",
+    }
+    return labels.get(mode, "Keep agent session and worktree")
+
+
+def _policy_lines(mode: str) -> list[str]:
+    if mode == "suggest_only":
+        return [
+            "- Do not widen the wave automatically just because work exists.",
+            "- When backlog remains and the next step looks plausible, prefer `weaver_note` with a proposed wave over dispatching immediately.",
+            "- Ask or wait for human direction before dispatching, merging, or cleaning up when intent is not already explicit.",
+        ]
+    if mode == "aggressive_auto_continue":
+        return [
+            "- Treat an idle board with actionable backlog as permission to keep moving unless a real approval gate or blocker exists.",
+            "- Prefer `weaver_note` over `weaver_ask` for soft ambiguity; reserve blocking asks for true human decisions.",
+            "- Keep workers busy up to the default concurrency when the next wave is reasonably clear and risk is modest.",
+        ]
+    return [
+        "- Dispatch automatically when priorities and the next wave are clear from standing instructions and recent board state.",
+        "- Use `weaver_note` for soft ambiguity; reserve `weaver_ask` for blocking human decisions or approvals.",
+        "- Keep waves reviewable and avoid widening work when verification, review boundaries, or shared-surface risk says to pause.",
+    ]
+
+
+def _build_policy_section(weaver_settings=None, group_settings=None) -> str:
+    mode = normalize_weaver_autonomy_mode(
+        getattr(weaver_settings, "autonomy_mode", "")
+    )
+    concurrency = normalize_default_worker_concurrency(
+        getattr(weaver_settings, "default_worker_concurrency", 2)
+    )
+    cleanup_mode = normalize_worktree_merge_cleanup(
+        getattr(group_settings, "worktree_merge_cleanup", "keep")
+    )
+    lines = [
+        "── Operating Policy "
+        "──────────────────────────",
+        f"Autonomy mode: {_autonomy_mode_label(mode)}",
+        f"Default worker concurrency: {concurrency}",
+        f"Default post-merge cleanup: {_merge_cleanup_label(cleanup_mode)}",
+        "",
+        "Apply these policy defaults when the more general guidance above leaves room for judgment:",
+        *_policy_lines(mode),
+        (
+            "- When calling `weaver_batch_dispatch` without `max_concurrent`, "
+            f"use {concurrency} as the default limit."
+        ),
+        (
+            "- After a successful merge with no explicit cleanup flags, "
+            f"default to: {_merge_cleanup_label(cleanup_mode)}."
+        ),
+        "────────────────────────────────────────────────",
+    ]
+    return "\n".join(lines)
+
+
 def build_weaver_system_prompt(group: str, weaver_settings=None,
-                               action_system_prompt: str = "") -> str:
+                               action_system_prompt: str = "",
+                               group_settings=None) -> str:
     """Assemble the full system prompt for a weaver agent.
 
-    Concatenates: base identity → action system_prompt → custom instructions.
+    Concatenates: base identity → action system_prompt → structured policy
+    section → custom instructions.
     """
     parts = [_BASE_SYSTEM_PROMPT.format(group=group)]
 
     if action_system_prompt:
         parts.append(action_system_prompt.rstrip())
+
+    if weaver_settings or group_settings:
+        parts.append(_build_policy_section(weaver_settings, group_settings))
 
     if weaver_settings and weaver_settings.custom_instructions:
         ci = weaver_settings.custom_instructions.strip()

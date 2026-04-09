@@ -189,6 +189,15 @@ On shared same-agent branches, Loom merges only the latest clean task boundary.
 
 The **Squash on merge** group setting (default: on) tells the merge prompt to use `git merge --squash` instead of a regular merge. This keeps the base branch history clean by collapsing the worktree's commits into a single commit.
 
+The **Default post-merge cleanup** worktree setting controls what Loom should do after a successful merge when no explicit cleanup choice is provided:
+
+- keep the agent and worktree
+- close the agent session only
+- remove the worktree only
+- close the agent session and remove the worktree
+
+If the branch still has queued same-agent follow-up tasks attached, Loom keeps the agent/worktree alive regardless so the next wave can continue on a clean branch reset.
+
 ## Creating and removing worktrees manually
 
 You can manage worktrees independently of agent creation:

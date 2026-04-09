@@ -23,7 +23,11 @@ from .mcp_weaver_tools.shared import (
 )
 from .mcp_weaver_tools.tool_specs import WEAVER_TOOLS
 from .server_artifacts import serialize_task_for_mcp
-from .state import ARCHIVED_LANE, board_task_is_closed
+from .state import (
+    ARCHIVED_LANE,
+    board_task_is_closed,
+    normalize_default_worker_concurrency,
+)
 from .task_health import HEALTH_SEVERITY
 
 # ---------------------------------------------------------------------------
@@ -718,11 +722,19 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
     if name == "weaver_batch_dispatch":
         raw_tasks = args.get("tasks", [])
-        max_concurrent = args.get("max_concurrent", 0)
         if not isinstance(raw_tasks, list) or not raw_tasks:
             return "tasks must be a non-empty array", True
-        if not isinstance(max_concurrent, int) or max_concurrent < 1:
+        raw_max_concurrent = args.get("max_concurrent", None)
+        if raw_max_concurrent is None:
+            max_concurrent = normalize_default_worker_concurrency(
+                state.get_weaver_settings(
+                    _weaver_group).default_worker_concurrency
+            )
+        elif not isinstance(raw_max_concurrent, int) \
+                or raw_max_concurrent < 1:
             return "max_concurrent must be an integer >= 1", True
+        else:
+            max_concurrent = raw_max_concurrent
 
         dispatch_lane = (
             state.get_group_settings(_weaver_group).dispatch_lane

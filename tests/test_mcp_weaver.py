@@ -171,6 +171,34 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error, text)
         return json.loads(text)
 
+    async def test_batch_dispatch_uses_stored_default_concurrency(self):
+        state, weaver = self._make_state()
+        state.weaver_settings["g"] = self.state_mod.WeaverSettings(
+            group="g",
+            default_worker_concurrency=1,
+        )
+        self._add_task(state, "task-1", "First")
+        self._add_task(state, "task-2", "Second")
+
+        payload = await self._dispatch(
+            state,
+            weaver,
+            {
+                "tasks": [{"task": "task-1"}, {"task": "task-2"}],
+            },
+            self._make_handle_command(state),
+        )
+
+        self.assertEqual(payload["max_concurrent"], 1)
+        self.assertEqual(
+            [item["status"] for item in payload["results"]],
+            ["dispatched", "deferred"],
+        )
+        self.assertEqual(
+            state.auto_dispatch_queues["g"][0].max_concurrent,
+            1,
+        )
+
     async def test_batch_dispatch_respects_capacity(self):
         state, weaver = self._make_state()
         active = self.state_mod.AgentCell(

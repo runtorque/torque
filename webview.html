@@ -309,6 +309,15 @@
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Extra instructions appended to the merge prompt sent to Claude. Use this to customize merge behavior, e.g. 'Use a conventional commit message' or 'Run tests after merging'.">?</span>
           </label>
           <textarea id="gs-wt-merge-instructions" rows="2" placeholder="e.g. Use a conventional commit message"></textarea>
+          <label>Default post-merge cleanup
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="What Loom should do by default after a successful merge when no explicit cleanup choice is provided. Same-agent queued follow-up tasks still keep the agent and worktree alive.">?</span>
+          </label>
+          <select id="gs-wt-merge-cleanup">
+            <option value="keep">Keep agent and worktree</option>
+            <option value="close">Close agent only</option>
+            <option value="remove">Remove worktree only</option>
+            <option value="close_remove">Close agent and remove worktree</option>
+          </select>
           <label>Symlinks <span class="label-hint">symlinked from repo root</span>
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Relative paths from the repo root to symlink into each new worktree. Avoids reinstalling dependencies (e.g. node_modules, .venv). The target must exist in the repo root and should be in .gitignore.">?</span>
           </label>
@@ -361,22 +370,33 @@
 
       <div class="task-modal-section">
         <div class="task-modal-section-body">
-          <label>Provider</label>
-          <select id="gs-weaver-provider"></select>
-          <label>Command override</label>
-          <input id="gs-weaver-boot-cmd" placeholder="Use provider default" autocomplete="off">
+          <label>Autonomy mode
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How proactively the Weaver should continue work without waiting for you. Use a preset instead of writing custom instructions for common behavior.">?</span>
+          </label>
+          <select id="gs-weaver-autonomy-mode">
+            <option value="suggest_only">Suggest only</option>
+            <option value="dispatch_when_clear">Dispatch when clear</option>
+            <option value="aggressive_auto_continue">Aggressive auto-continue</option>
+          </select>
+          <label>Default worker concurrency
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Used as the default max_concurrent value when the Weaver dispatches a wave without specifying one explicitly. Counts non-Weaver worker agents only.">?</span>
+          </label>
+          <select id="gs-weaver-default-worker-concurrency">
+            <option value="1">1 worker</option>
+            <option value="2">2 workers</option>
+            <option value="3">3 workers</option>
+            <option value="4">4 workers</option>
+            <option value="5">5 workers</option>
+            <option value="6">6 workers</option>
+            <option value="8">8 workers</option>
+          </select>
         </div>
       </div>
 
       <div class="task-modal-section">
         <div class="task-modal-section-body">
-          <label>Custom Instructions</label>
-          <textarea id="gs-weaver-custom-instructions" rows="5" placeholder="Instructions appended to the weaver system prompt..."></textarea>
-        </div>
-      </div>
-
-      <div class="task-modal-section">
-        <div class="task-modal-section-body">
+          <label>Digest details</label>
+          <div class="label-hint" style="margin-bottom:8px">Advanced notification controls. Heartbeats and optional event types affect digest noise, not the Weaver's orchestration policy presets.</div>
           <label>Push interval</label>
           <select id="gs-weaver-push-interval">
             <option value="10">10s</option>
@@ -413,6 +433,17 @@
             <label class="gs-checkbox"><input id="gs-weaver-event-agent-progress" type="checkbox"> agent_progress</label>
             <label class="gs-checkbox"><input id="gs-weaver-event-task-health-alert" type="checkbox"> task_health_alert</label>
           </div>
+        </div>
+      </div>
+
+      <div class="task-modal-section">
+        <div class="task-modal-section-body">
+          <label>Provider</label>
+          <select id="gs-weaver-provider"></select>
+          <label>Command override</label>
+          <input id="gs-weaver-boot-cmd" placeholder="Use provider default" autocomplete="off">
+          <label>Custom instructions <span class="label-hint">expert override</span></label>
+          <textarea id="gs-weaver-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Weaver policy..."></textarea>
         </div>
       </div>
     </div>

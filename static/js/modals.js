@@ -414,6 +414,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-wt-checkpoint-on-progress').checked = s.checkpoint_on_progress || false;
   document.getElementById('gs-wt-merge-squash').checked = s.worktree_merge_squash !== false;
   document.getElementById('gs-wt-merge-instructions').value = s.worktree_merge_instructions || '';
+  _setSelectValue('gs-wt-merge-cleanup', s.worktree_merge_cleanup, 'keep');
   _gsWtSymlinks = (s.worktree_symlinks || []).slice();
   _renderWtSymlinks();
   _toggleWorktreeFields();
@@ -450,6 +451,12 @@ function _showGroupSettings(group, data) {
   _populateProviderSelect('gs-weaver-provider', ws.weaver_provider || '', true);
   document.getElementById('gs-weaver-boot-cmd').value = ws.weaver_boot_command || '';
   document.getElementById('gs-weaver-custom-instructions').value = ws.custom_instructions || '';
+  _setSelectValue('gs-weaver-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
+  _setSelectValue(
+    'gs-weaver-default-worker-concurrency',
+    ws.default_worker_concurrency,
+    2
+  );
   _setSelectValue('gs-weaver-push-interval', ws.push_interval, 60);
   _setSelectValue('gs-weaver-max-interval', ws.max_interval, 300);
   _setSelectValue(
@@ -470,7 +477,7 @@ function _showGroupSettings(group, data) {
   _gsInitialTab = 'group';
   _gsInitialSubtab = '';
   document.getElementById('modal-group-settings').classList.add('visible');
-  const focusId = initialTab === 'weaver' ? 'gs-weaver-provider' : 'gs-directory';
+  const focusId = initialTab === 'weaver' ? 'gs-weaver-autonomy-mode' : 'gs-directory';
   const focusEl = document.getElementById(focusId);
   if (focusEl) focusEl.focus();
 }
@@ -526,6 +533,7 @@ function submitGroupSettings() {
     checkpoint_on_progress: document.getElementById('gs-wt-checkpoint-on-progress').checked,
     worktree_merge_squash: document.getElementById('gs-wt-merge-squash').checked,
     worktree_merge_instructions: document.getElementById('gs-wt-merge-instructions').value.trim(),
+    worktree_merge_cleanup: document.getElementById('gs-wt-merge-cleanup').value,
     worktree_symlinks: _gsWtSymlinks.slice(),
     agent_session_resume: document.getElementById('gs-session-resume').checked,
     agent_idle_timeout: parseInt(document.getElementById('gs-agent-idle-timeout').value) || 0,
@@ -553,6 +561,8 @@ function submitGroupSettings() {
     weaver_provider: _getProviderValue('gs-weaver-provider'),
     weaver_boot_command: document.getElementById('gs-weaver-boot-cmd').value.trim(),
     custom_instructions: document.getElementById('gs-weaver-custom-instructions').value,
+    autonomy_mode: document.getElementById('gs-weaver-autonomy-mode').value,
+    default_worker_concurrency: parseInt(document.getElementById('gs-weaver-default-worker-concurrency').value, 10) || 2,
     push_interval: parseInt(document.getElementById('gs-weaver-push-interval').value, 10) || 60,
     max_interval: parseInt(document.getElementById('gs-weaver-max-interval').value, 10) || 300,
     heartbeat_interval: parseInt(document.getElementById('gs-weaver-heartbeat-interval').value, 10),

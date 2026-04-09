@@ -402,6 +402,26 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(ws.pending_note, "FYI: branch is ready")
         self.assertEqual(ws.pending_note_kind, "note")
 
+    def test_weaver_and_group_setting_updates_normalize_new_policy_fields(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+
+        state.update_weaver_settings(
+            "g",
+            autonomy_mode="not-a-real-mode",
+            default_worker_concurrency=0,
+        )
+        state.update_group_settings(
+            "g",
+            worktree_merge_cleanup="???",
+        )
+
+        ws = state.weaver_settings["g"]
+        gs = state.group_settings["g"]
+        self.assertEqual(ws.autonomy_mode, "dispatch_when_clear")
+        self.assertEqual(ws.default_worker_concurrency, 1)
+        self.assertEqual(gs.worktree_merge_cleanup, "keep")
+
 
 class MatrixStateBoardWorkflowTests(unittest.TestCase):
     def setUp(self):

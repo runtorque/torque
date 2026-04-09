@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     checkpoint_on_progress      INTEGER NOT NULL DEFAULT 0,
     worktree_merge_squash       INTEGER NOT NULL DEFAULT 1,
     worktree_merge_instructions TEXT NOT NULL DEFAULT '',
+    worktree_merge_cleanup      TEXT NOT NULL DEFAULT 'keep',
     worktree_symlinks           TEXT NOT NULL DEFAULT '[]',
     agent_session_resume        INTEGER NOT NULL DEFAULT 1,
     agent_idle_timeout          INTEGER NOT NULL DEFAULT 5,
@@ -247,6 +248,8 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     push_interval      INTEGER NOT NULL DEFAULT 60,
     max_interval       INTEGER NOT NULL DEFAULT 300,
     heartbeat_interval INTEGER NOT NULL DEFAULT 300,
+    default_worker_concurrency INTEGER NOT NULL DEFAULT 2,
+    autonomy_mode      TEXT NOT NULL DEFAULT 'dispatch_when_clear',
     paused             INTEGER NOT NULL DEFAULT 0,
     custom_instructions TEXT NOT NULL DEFAULT '',
     pending_question   TEXT NOT NULL DEFAULT '',
@@ -637,6 +640,15 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             "ALTER TABLE group_settings ADD COLUMN "
             "worktree_symlinks TEXT NOT NULL DEFAULT '[]'")
         conn.commit()
+    # Migrate: add worktree_merge_cleanup column to group_settings
+    try:
+        conn.execute(
+            "SELECT worktree_merge_cleanup FROM group_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE group_settings ADD COLUMN "
+            "worktree_merge_cleanup TEXT NOT NULL DEFAULT 'keep'")
+        conn.commit()
     # Migrate: add weaver_agent_id column to group_settings
     try:
         conn.execute(
@@ -718,6 +730,23 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             conn.commit()
         except sqlite3.OperationalError:
             pass
+    for col, default in (
+        ("default_worker_concurrency", "2"),
+        ("autonomy_mode", "'dispatch_when_clear'"),
+    ):
+        try:
+            conn.execute(
+                f"SELECT {col} FROM weaver_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            try:
+                conn.execute(
+                    f"ALTER TABLE weaver_settings ADD COLUMN "
+                    f"{col} "
+                    f"{'INTEGER' if col == 'default_worker_concurrency' else 'TEXT'} "
+                    f"NOT NULL DEFAULT {default}")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
     # Migrate: rename system labels with loom: prefix
     rows = conn.execute(
         "SELECT id, labels FROM board_tasks "
