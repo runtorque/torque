@@ -308,6 +308,17 @@ class ITerm2Adapter:
         log.info("Creating session for %s '%s' [%s]",
                  cell.cell_type, cell.name, cell.group)
         app = await iterm2.async_get_app(self.conn)
+        launch_dir = ""
+        if cell.directory:
+            launch_dir = os.path.expanduser(cell.directory)
+        else:
+            try:
+                launch_ctx = await self.get_launch_context()
+                launch_dir = os.path.expanduser(launch_ctx.current_path or "")
+            except Exception:
+                log.debug("Could not resolve launch context for '%s'", cell.name)
+            if launch_dir:
+                cell.directory = launch_dir
         if cell.parent_id:
             parent = self.state.agents.get(cell.parent_id)
             if parent:
@@ -372,9 +383,8 @@ class ITerm2Adapter:
             await asyncio.sleep(0.3)
 
         # Directory (expanduser so ~ works even when quoted)
-        if cell.directory:
-            d = os.path.expanduser(cell.directory)
-            await session.async_send_text(f"cd {shlex.quote(d)}\n")
+        if launch_dir:
+            await session.async_send_text(f"cd {shlex.quote(launch_dir)}\n")
 
         # Auto-detect agent type from boot command
         if cell.cell_type == "agent" and not cell.agent_type and cell.command:
@@ -405,7 +415,7 @@ class ITerm2Adapter:
         # Install agent hooks and MCP config (if adapter supports it)
         if cell.agent_type:
             adapter = get_adapter(cell.agent_type)
-            hook_dir = os.path.expanduser(cell.directory) if cell.directory else ""
+            hook_dir = launch_dir
             if hook_dir and system_prompt:
                 extra_flags = adapter.inject_system_prompt(
                     hook_dir, system_prompt)
@@ -472,8 +482,8 @@ class ITerm2Adapter:
             self._start_terminal_monitors(cell)
         else:
             # For agents, seed current_path from directory for git resolution
-            if cell.directory and not cell.current_path:
-                cell.current_path = os.path.expanduser(cell.directory)
+            if launch_dir and not cell.current_path:
+                cell.current_path = launch_dir
 
         # Resolve git info for all cell types
         await self._resolve_git_info(cell)

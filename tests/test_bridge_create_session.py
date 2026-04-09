@@ -1,7 +1,9 @@
 import importlib
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 
 
 def _install_test_stubs():
@@ -185,3 +187,42 @@ class CreateSessionWindowTargetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(child.window_id, "source-window")
         self.assertEqual(source.created_profiles, ["Default"])
         self.assertEqual(focused.created_profiles, [])
+
+    async def test_create_session_uses_launch_context_directory_for_blank_agent_dir(self):
+        focused = FakeWindow("focused-window")
+        bridge, _state = await self._make_bridge(FakeApp(focused, [focused]))
+        terminal_adapter = importlib.import_module("loom.terminal_adapter")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            async def fake_get_launch_context():
+                return terminal_adapter.TerminalLaunchContext(
+                    current_path=tmpdir,
+                )
+
+            bridge.get_launch_context = fake_get_launch_context
+
+            child = self.state_mod.AgentCell(
+                id="child",
+                name="child",
+                group="g",
+                cell_type="agent",
+                profile="Default",
+                command="",
+                directory="",
+                agent_type="claude-code",
+            )
+
+            await bridge.create_session(child)
+
+            session = focused.tabs[0].current_session
+            self.assertEqual(child.directory, tmpdir)
+            self.assertTrue(
+                any(
+                    sent.startswith("cd ")
+                    and tmpdir in sent
+                    for sent in session.sent
+                )
+            )
+            self.assertTrue(
+                (Path(tmpdir) / ".claude" / "settings.local.json").exists()
+            )

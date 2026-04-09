@@ -142,6 +142,8 @@ class LocalPtyAdapter:
                 cwd = self.state.agents.get(active.cell_id, AgentCell("", "", "")).current_path or ""
         if not cwd:
             cwd = os.getcwd()
+        if not cell.directory:
+            cell.directory = cwd
 
         master_fd, slave_fd = pty.openpty()
         session_id = uuid.uuid4().hex
@@ -373,7 +375,7 @@ class LocalPtyAdapter:
             )
         if cell.agent_type:
             adapter = get_adapter(cell.agent_type)
-            hook_dir = os.path.expanduser(cell.directory) if cell.directory else ""
+            hook_dir = os.path.expanduser(cell.directory or cwd)
             if hook_dir and system_prompt:
                 extra_flags = adapter.inject_system_prompt(hook_dir, system_prompt)
                 if extra_flags and extra_flags not in cell.command:

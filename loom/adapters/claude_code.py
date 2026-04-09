@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 import shlex
@@ -9,8 +10,7 @@ from textwrap import dedent
 
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
 
-# Marker URL used to identify Loom-managed hooks during cleanup
-LOOM_HOOK_URL = "http://localhost:18932/events"
+_LOOM_EVENT_URL_RE = re.compile(r"http://(?:localhost|127\.0\.0\.1):\d+/events")
 
 # Skill directory prefix used to identify Loom-managed skills during cleanup
 LOOM_SKILL_PREFIX = "loom-"
@@ -122,13 +122,29 @@ def _matches_claude_token(value: str) -> bool:
     )
 
 
+def _current_loom_port() -> str:
+    port = (os.environ.get("LOOM_PORT", "18932") or "").strip()
+    return port or "18932"
+
+
+def _loom_hook_url() -> str:
+    return f"http://localhost:{_current_loom_port()}/events"
+
+
+def _is_loom_event_target(value: str) -> bool:
+    return bool(_LOOM_EVENT_URL_RE.search(value or ""))
+
+
 def _is_loom_hook_entry(entry: dict) -> bool:
     """Check if a hook entry was installed by Loom (by URL marker)."""
     for hook in entry.get("hooks", []):
-        if hook.get("url") == LOOM_HOOK_URL:
+        if _is_loom_event_target(hook.get("url", "")):
             return True
         # Command hooks that curl to Loom
-        if hook.get("type") == "command" and LOOM_HOOK_URL in hook.get("command", ""):
+        if (
+            hook.get("type") == "command"
+            and _is_loom_event_target(hook.get("command", ""))
+        ):
             return True
     return False
 
@@ -223,7 +239,7 @@ class ClaudeCodeAdapter(AgentAdapter):
         requires type: "command" (Claude Code limitation — HTTP hooks are
         not supported for SessionStart/WorktreeCreate/WorktreeRemove).
         """
-        url = "http://localhost:18932/events"
+        url = _loom_hook_url()
         timeout = 3
 
         def _http_hook(matcher=None):
@@ -268,7 +284,8 @@ class ClaudeCodeAdapter(AgentAdapter):
         """Write Loom hooks into .claude/settings.local.json.
 
         Merges with any existing settings — Loom hooks are identified by
-        their URL (LOOM_HOOK_URL) so they can be cleanly removed later.
+        their localhost /events target so they can be cleanly removed later,
+        even across port changes.
         Returns True if hooks were installed successfully.
         """
         settings_dir = Path(working_dir) / ".claude"

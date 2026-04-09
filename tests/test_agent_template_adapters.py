@@ -1,7 +1,9 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from loom.adapters import detect_by_command, get_default_command_for_provider, get_providers
 from loom.adapters.claude_code import ClaudeCodeAdapter
@@ -86,7 +88,8 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 )
             )
 
-            self.assertTrue(adapter.install_hooks(tmp))
+            with mock.patch.dict(os.environ, {"LOOM_PORT": "18933"}, clear=False):
+                self.assertTrue(adapter.install_hooks(tmp))
 
             installed = json.loads(settings_file.read_text())
             self.assertEqual(installed["theme"], "dark")
@@ -96,6 +99,9 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 "https://user.example/hook",
             )
             self.assertEqual(len(installed["hooks"]["Notification"]), 1)
+            session_start_hook = installed["hooks"]["SessionStart"][0]["hooks"][0]
+            self.assertIn("http://localhost:18933/events", session_start_hook["command"])
+            self.assertNotIn("http://localhost:18932/events", session_start_hook["command"])
 
             adapter.uninstall_hooks(tmp)
 
@@ -256,7 +262,8 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 )
             )
 
-            self.assertTrue(adapter.install_hooks(tmp))
+            with mock.patch.dict(os.environ, {"LOOM_PORT": "18933"}, clear=False):
+                self.assertTrue(adapter.install_hooks(tmp))
 
             installed = json.loads(hooks_file.read_text())
             self.assertEqual(len(installed["hooks"]["Stop"]), 2)
@@ -265,6 +272,9 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 "echo user-stop",
             )
             self.assertEqual(len(installed["hooks"]["PreToolUse"]), 1)
+            session_start_hook = installed["hooks"]["SessionStart"][0]["hooks"][0]
+            self.assertIn("http://localhost:18933/events", session_start_hook["command"])
+            self.assertNotIn("http://localhost:18932/events", session_start_hook["command"])
 
             adapter.uninstall_hooks(tmp)
 
@@ -289,12 +299,14 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 "[profiles.default]\nmodel = \"gpt-5\"\n"
             )
 
-            self.assertTrue(adapter.install_mcp_config(tmp))
+            with mock.patch.dict(os.environ, {"LOOM_PORT": "18933"}, clear=False):
+                self.assertTrue(adapter.install_mcp_config(tmp))
 
             installed = config_file.read_text()
             self.assertIn("[profiles.default]", installed)
             self.assertIn("[mcp_servers.loom]", installed)
             self.assertIn("codex_hooks = true", installed)
+            self.assertIn('url = "http://127.0.0.1:18933/mcp"', installed)
 
             adapter.uninstall_mcp_config(tmp)
 

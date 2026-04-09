@@ -9,8 +9,7 @@ from pathlib import Path
 
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
 
-# Marker URL used to identify Loom-managed hooks during cleanup
-LOOM_HOOK_URL = "http://localhost:18932/events"
+_LOOM_EVENT_URL_RE = re.compile(r"http://(?:localhost|127\.0\.0\.1):\d+/events")
 
 # Marker comment for Loom-managed MCP config section
 _MCP_MARKER = "# -- Loom MCP server (managed by Loom, do not edit) --"
@@ -79,6 +78,19 @@ def _truncate(s: str, n: int) -> str:
     return s[:n] + "..." if len(s) > n else s
 
 
+def _current_loom_port() -> str:
+    port = (os.environ.get("LOOM_PORT", "18932") or "").strip()
+    return port or "18932"
+
+
+def _loom_hook_url() -> str:
+    return f"http://localhost:{_current_loom_port()}/events"
+
+
+def _loom_mcp_url() -> str:
+    return f"http://127.0.0.1:{_current_loom_port()}/mcp"
+
+
 def _matches_codex_token(value: str) -> bool:
     token = os.path.basename((value or "").strip().lower())
     return (
@@ -134,7 +146,7 @@ def _split_boot_args(boot_cmd: str) -> tuple[list[str], str]:
 def _is_loom_hook(hook: dict) -> bool:
     """Check if a single hook entry was installed by Loom (by URL marker)."""
     cmd = hook.get("command", "")
-    return LOOM_HOOK_URL in cmd
+    return bool(_LOOM_EVENT_URL_RE.search(cmd))
 
 
 def _ensure_codex_hooks_enabled(content: str) -> str:
@@ -318,7 +330,7 @@ class CodexAdapter(AgentAdapter):
         def _cmd_hook(matcher=None):
             h = {"type": "command", "timeout": timeout,
                  "command": (
-                     'curl -s -X POST ' + LOOM_HOOK_URL
+                     'curl -s -X POST ' + _loom_hook_url()
                      + ' -H "Content-Type: application/json"'
                      + ' -H "X-Loom-Cell-Id: $LOOM_CELL_ID"'
                      + ' -d "$(cat)" > /dev/null 2>&1'
@@ -344,7 +356,7 @@ class CodexAdapter(AgentAdapter):
         """Write Loom hooks into .codex/hooks.json.
 
         Merges with any existing hooks — Loom hooks are identified by
-        the LOOM_HOOK_URL in their command string.
+        the localhost /events target in their command string.
         Returns True if hooks were installed successfully.
         """
         hooks_dir = Path(working_dir) / ".codex"
@@ -434,7 +446,7 @@ class CodexAdapter(AgentAdapter):
         loom_section = (
             f"\n{_MCP_MARKER}\n"
             "[mcp_servers.loom]\n"
-            'url = "http://127.0.0.1:18932/mcp"\n'
+            f'url = "{_loom_mcp_url()}"\n'
             'env_http_headers = { "X-Loom-Cell-Id" = "LOOM_CELL_ID" }\n'
         )
 
