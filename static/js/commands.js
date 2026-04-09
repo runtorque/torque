@@ -53,13 +53,25 @@ function focusAgent(id) {
   var prevSelectedId = selectedAgentId;
   focusedItemId = id;
   _updateSelectedAgentContext(id);
+  selectedTerminalId = id;
   _syncPanelsAfterSelectionChange(prevSelectedId);
+  if (typeof renderTerminalWorkspace === 'function' && isEmbeddedTerminalMode()) {
+    render();
+  }
   send({ cmd: 'focus_agent', id });
 }
 
 function onAgentClick(id) {
   var prevSelectedId = selectedAgentId;
   focusedItemId = id;
+  selectedTerminalId = id;
+  if (typeof renderTerminalWorkspace === 'function' && isEmbeddedTerminalMode()) {
+    _updateSelectedAgentContext(id);
+    render();
+    _syncPanelsAfterSelectionChange(prevSelectedId);
+    send({ cmd: 'focus_agent', id });
+    return;
+  }
   if (selectedAgentId === id) {
     // Already selected → focus the agent's iTerm2 session
     send({ cmd: 'focus_agent', id });
@@ -78,6 +90,7 @@ function onAgentDblClick(id) {
   var prevSelectedId = selectedAgentId;
   focusedItemId = id;
   _updateSelectedAgentContext(id);
+  selectedTerminalId = id;
   send({ cmd: 'focus_agent', id });
   render();
   _syncPanelsAfterSelectionChange(prevSelectedId);
@@ -108,6 +121,7 @@ async function removeAgent(id) {
   }
   if (await showConfirm(msg)) {
     if (selectedAgentId === id) selectedAgentId = null;
+    if (selectedTerminalId === id) selectedTerminalId = null;
     send({ cmd: 'remove_agent', id });
   }
 }

@@ -5,6 +5,7 @@ let ws = null;
 let state = { agents: {}, groups: {}, children: {}, active_session_id: null };
 let dragInProgress = false;
 let selectedAgentId = null;
+let selectedTerminalId = null;
 let focusedItemId = null;
 let _cachedAgentTemplates = [];
 
@@ -155,6 +156,11 @@ function connect() {
   };
 }
 
+function _applyRuntimeMode() {
+  const embedded = !!(state && state.runtime && state.runtime.embedded_terminal);
+  document.body.classList.toggle('runtime-embedded', embedded);
+}
+
 /* -- Full state (initial connect + resync) -------------------------------- */
 
 function _handleFullState(msg) {
@@ -163,6 +169,7 @@ function _handleFullState(msg) {
     ? !_panelStateRestored
     : false;
   state = msg;
+  _applyRuntimeMode();
   if (typeof _boardFiltersByGroup !== 'undefined') _boardFiltersByGroup = null;
   if (typeof _boardSavedViewsByGroup !== 'undefined') _boardSavedViewsByGroup = null;
   if (typeof _boardLaneSortsByGroup !== 'undefined') _boardLaneSortsByGroup = null;
@@ -523,11 +530,14 @@ function send(obj) {
 function _syncSelectionToActiveSession() {
   for (const [id, cell] of Object.entries(state.agents)) {
     if (cell.session_id !== state.active_session_id) continue;
+    selectedTerminalId = id;
     if (cell.cell_type === 'agent') {
       selectedAgentId = id;
       focusedItemId = id;
     } else if (cell.parent_id) {
       selectedAgentId = cell.parent_id;
+      focusedItemId = id;
+    } else {
       focusedItemId = id;
     }
     return;

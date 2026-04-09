@@ -22,6 +22,7 @@ class TerminalCapabilities:
     """Feature flags for a terminal backend."""
 
     supports_profiles: bool = False
+    supports_embedded_terminal: bool = False
     supports_tab_color: bool = False
     supports_tab_reorder: bool = False
     supports_focus_tracking: bool = False
@@ -46,6 +47,7 @@ class TerminalAdapter(Protocol):
     capabilities: TerminalCapabilities
     on_session_terminated: Optional[Callable]
     on_terminal_disconnected: Optional[Callable]
+    on_terminal_output: Optional[Callable]
 
     async def start(self) -> None:
         """Start background monitors (focus, termination, etc.)."""
@@ -86,6 +88,10 @@ class TerminalAdapter(Protocol):
         """Send text/keystrokes to a terminal session."""
         ...
 
+    async def write_input(self, session_id: str, data: str) -> None:
+        """Write raw terminal input bytes without submit handling."""
+        ...
+
     async def reorder_tabs(self) -> None:
         """Reorder terminal tabs to match the Loom grid order."""
         ...
@@ -102,6 +108,10 @@ class TerminalAdapter(Protocol):
         """Skip the first input-ready wait for the given session."""
         ...
 
+    def signal_input_ready(self, cell_id: str) -> None:
+        """Mark an agent UI as ready to accept Loom prompts."""
+        ...
+
     async def register_web_view_tool(
         self,
         *,
@@ -111,4 +121,12 @@ class TerminalAdapter(Protocol):
         reveal_if_already_registered: bool = True,
     ) -> bool:
         """Register a native webview/toolbelt surface if the backend supports it."""
+        ...
+
+    async def resize_session(self, session_id: str, cols: int, rows: int) -> None:
+        """Resize a live terminal session."""
+        ...
+
+    def get_terminal_buffer(self, session_id: str) -> str:
+        """Return the recent output buffer for an embedded terminal session."""
         ...

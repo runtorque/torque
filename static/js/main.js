@@ -65,6 +65,9 @@ function _restorePanelState() {
   // panel_active: new key; backward compat from board_panel_open
   var active = state.panel_active || '';
   if (!active && state.board_panel_open) active = 'board';
+  if (!active && typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {
+    active = 'board';
+  }
   var height = state.board_panel_height;
   if (height > 0) _panelHeight = height;
 

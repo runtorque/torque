@@ -445,6 +445,11 @@ function _setTaskDeps(deps) {
 }
 
 function _currentGroup() {
+  if (typeof selectedTerminalId !== 'undefined'
+      && selectedTerminalId
+      && state && state.agents && state.agents[selectedTerminalId]) {
+    return state.agents[selectedTerminalId].group;
+  }
   if (selectedAgentId && state && state.agents && state.agents[selectedAgentId]) {
     return state.agents[selectedAgentId].group;
   }

@@ -1,0 +1,280 @@
+/* Embedded terminal workspace for standalone PTY mode */
+let _embeddedTerminal = null;
+let _embeddedTerminalFit = null;
+let _embeddedTerminalWs = null;
+let _embeddedTerminalSessionKey = '';
+let _embeddedTerminalResizeObserver = null;
+let _embeddedTerminalDataHandler = null;
+
+function isEmbeddedTerminalMode() {
+  return !!(state && state.runtime && state.runtime.embedded_terminal);
+}
+
+function _terminalCurrentGroupName() {
+  if (selectedTerminalId && state.agents && state.agents[selectedTerminalId]) {
+    return state.agents[selectedTerminalId].group || '';
+  }
+  if (selectedAgentId && state.agents && state.agents[selectedAgentId]) {
+    return state.agents[selectedAgentId].group || '';
+  }
+  if (state && state.active_session_id && state.agents) {
+    for (const id in state.agents) {
+      if (state.agents[id].session_id === state.active_session_id) {
+        return state.agents[id].group || '';
+      }
+    }
+  }
+  const groups = state && state.groups ? Object.keys(state.groups) : [];
+  return groups.length ? groups[0] : '';
+}
+
+function _terminalGroupCells(group) {
+  const out = [];
+  if (!group || !state || !state.groups || !state.agents) return out;
+  const ids = state.groups[group] || [];
+  for (let i = 0; i < ids.length; i++) {
+    const cell = state.agents[ids[i]];
+    if (!cell) continue;
+    out.push(cell);
+    if (cell.cell_type === 'agent') {
+      const kids = state.children && state.children[cell.id] ? state.children[cell.id] : [];
+      for (let j = 0; j < kids.length; j++) {
+        const child = state.agents[kids[j]];
+        if (child) out.push(child);
+      }
+    }
+  }
+  return out;
+}
+
+function _resolveTerminalWorkspaceCell() {
+  if (!state || !state.agents) return null;
+  if (selectedTerminalId && state.agents[selectedTerminalId]) {
+    return state.agents[selectedTerminalId];
+  }
+  if (state.active_session_id) {
+    for (const id in state.agents) {
+      const cell = state.agents[id];
+      if (cell.session_id === state.active_session_id) {
+        selectedTerminalId = id;
+        return cell;
+      }
+    }
+  }
+  if (selectedAgentId && state.agents[selectedAgentId]) {
+    selectedTerminalId = selectedAgentId;
+    return state.agents[selectedAgentId];
+  }
+  const group = _terminalCurrentGroupName();
+  const cells = _terminalGroupCells(group);
+  if (cells.length) {
+    selectedTerminalId = cells[0].id;
+    return cells[0];
+  }
+  const ids = Object.keys(state.agents);
+  if (!ids.length) return null;
+  selectedTerminalId = ids[0];
+  return state.agents[ids[0]];
+}
+
+function _terminalStatusLabel(cell) {
+  if (!cell) return 'No terminal selected';
+  if (cell.needs_attention) return cell.error_message || 'Needs attention';
+  if (cell.status === 'stopped') return 'Stopped';
+  if (cell.agent_type && cell.activity_detail) return cell.activity_detail;
+  if (cell.agent_type && cell.activity) return cell.activity;
+  if (cell.current_process) return cell.current_process;
+  return cell.status || 'idle';
+}
+
+function _ensureTerminalWorkspaceDom(root) {
+  let shell = root.querySelector('.terminal-shell');
+  if (!shell) {
+    root.innerHTML = ''
+      + '<div class="terminal-shell">'
+      + '  <div class="terminal-topbar"></div>'
+      + '  <div class="terminal-tabs"></div>'
+      + '  <div class="terminal-stage"></div>'
+      + '  <div class="terminal-statusbar"></div>'
+      + '</div>';
+    shell = root.querySelector('.terminal-shell');
+  }
+  return {
+    shell: shell,
+    topbar: shell.querySelector('.terminal-topbar'),
+    tabs: shell.querySelector('.terminal-tabs'),
+    stage: shell.querySelector('.terminal-stage'),
+    statusbar: shell.querySelector('.terminal-statusbar'),
+  };
+}
+
+function _renderTerminalTabs(cells, activeId) {
+  if (!cells.length) return '<div class="terminal-tabs-empty">No sessions</div>';
+  let html = '';
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    const active = cell.id === activeId;
+    const stopped = cell.status === 'stopped' || !cell.session_id;
+    html += '<button class="terminal-tab'
+      + (active ? ' active' : '')
+      + (stopped ? ' stopped' : '')
+      + '" onclick="focusAgent(\'' + esc(cell.id) + '\')">'
+      + '<span class="terminal-tab-dot ' + esc(agentStatusClass(cell)) + '"></span>'
+      + '<span class="terminal-tab-label">' + esc(cell.name) + '</span>'
+      + (cell.cell_type === 'terminal' ? '<span class="terminal-tab-kind">term</span>' : '')
+      + '</button>';
+  }
+  return html;
+}
+
+function _disposeEmbeddedTerminal() {
+  if (_embeddedTerminalResizeObserver) {
+    _embeddedTerminalResizeObserver.disconnect();
+    _embeddedTerminalResizeObserver = null;
+  }
+  if (_embeddedTerminalWs) {
+    _embeddedTerminalWs.onclose = null;
+    _embeddedTerminalWs.close();
+    _embeddedTerminalWs = null;
+  }
+  if (_embeddedTerminal) {
+    if (_embeddedTerminalDataHandler && typeof _embeddedTerminalDataHandler.dispose === 'function') {
+      _embeddedTerminalDataHandler.dispose();
+    }
+    _embeddedTerminal.dispose();
+    _embeddedTerminal = null;
+    _embeddedTerminalFit = null;
+    _embeddedTerminalDataHandler = null;
+  }
+  _embeddedTerminalSessionKey = '';
+}
+
+function _embeddedTerminalUrl(cell) {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return protocol + '//' + location.host + '/ws/terminal/' + encodeURIComponent(cell.id);
+}
+
+function _scheduleEmbeddedTerminalFit() {
+  if (!_embeddedTerminal || !_embeddedTerminalFit) return;
+  requestAnimationFrame(function() {
+    if (!_embeddedTerminal || !_embeddedTerminalFit) return;
+    _embeddedTerminalFit.fit();
+    if (_embeddedTerminalWs && _embeddedTerminalWs.readyState === WebSocket.OPEN) {
+      _embeddedTerminalWs.send(JSON.stringify({
+        type: 'resize',
+        cols: _embeddedTerminal.cols,
+        rows: _embeddedTerminal.rows,
+      }));
+      _embeddedTerminalWs.send(JSON.stringify({ type: 'focus' }));
+    }
+  });
+}
+
+function _connectEmbeddedTerminal(cell, surface) {
+  _disposeEmbeddedTerminal();
+  _embeddedTerminalSessionKey = cell.id + ':' + (cell.session_id || '');
+  _embeddedTerminal = new Terminal({
+    allowTransparency: false,
+    convertEol: false,
+    cursorBlink: true,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+    fontSize: 12,
+    lineHeight: 1.25,
+    scrollback: 5000,
+    theme: {
+      background: '#0d1117',
+      foreground: '#e6edf3',
+      cursor: '#58a6ff',
+      selectionBackground: 'rgba(88,166,255,0.28)',
+    },
+  });
+  _embeddedTerminalFit = new FitAddon.FitAddon();
+  _embeddedTerminal.loadAddon(_embeddedTerminalFit);
+  _embeddedTerminal.open(surface);
+  _embeddedTerminalDataHandler = _embeddedTerminal.onData(function(data) {
+    if (_embeddedTerminalWs && _embeddedTerminalWs.readyState === WebSocket.OPEN) {
+      _embeddedTerminalWs.send(JSON.stringify({ type: 'input', data: data }));
+    }
+  });
+  _embeddedTerminalResizeObserver = new ResizeObserver(function() {
+    _scheduleEmbeddedTerminalFit();
+  });
+  _embeddedTerminalResizeObserver.observe(surface);
+  _embeddedTerminalWs = new WebSocket(_embeddedTerminalUrl(cell));
+  _embeddedTerminalWs.onopen = function() {
+    _scheduleEmbeddedTerminalFit();
+  };
+  _embeddedTerminalWs.onmessage = function(event) {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'snapshot') {
+      _embeddedTerminal.reset();
+      if (msg.data) _embeddedTerminal.write(msg.data);
+      _scheduleEmbeddedTerminalFit();
+    } else if (msg.type === 'output' && msg.data) {
+      _embeddedTerminal.write(msg.data);
+    }
+  };
+  _embeddedTerminalWs.onclose = function() {
+    if (_embeddedTerminalSessionKey === cell.id + ':' + (cell.session_id || '')) {
+      const status = document.querySelector('#terminal-workspace .terminal-statusbar');
+      if (status) status.setAttribute('data-closed', '1');
+    }
+  };
+  _scheduleEmbeddedTerminalFit();
+}
+
+function renderTerminalWorkspace() {
+  const root = document.getElementById('terminal-workspace');
+  if (!root) return;
+  if (!isEmbeddedTerminalMode()) {
+    root.innerHTML = '';
+    root.classList.remove('active');
+    _disposeEmbeddedTerminal();
+    return;
+  }
+  root.classList.add('active');
+  const group = _terminalCurrentGroupName();
+  const cells = _terminalGroupCells(group);
+  const cell = _resolveTerminalWorkspaceCell();
+  const dom = _ensureTerminalWorkspaceDom(root);
+  const groupLabel = group || '';
+  dom.topbar.innerHTML = ''
+    + '<div class="terminal-topbar-left">'
+    + '  <span class="terminal-title">Terminal</span>'
+    + '  <span class="terminal-group-pill">' + esc(groupLabel || 'Standalone') + '</span>'
+    + '</div>'
+    + '<div class="terminal-topbar-right">'
+    + '  <button class="terminal-topbar-btn" onclick="togglePanel(\'board\')">Board</button>'
+    + (groupLabel
+      ? '  <button class="terminal-topbar-btn" onclick="openAddAgent(\'' + esc(groupLabel) + '\')">New Agent</button>'
+      : '')
+    + '</div>';
+  dom.tabs.innerHTML = _renderTerminalTabs(cells, cell ? cell.id : '');
+
+  if (!cell) {
+    dom.stage.innerHTML = '<div class="terminal-empty"><div class="terminal-empty-title">No sessions yet</div><div class="terminal-empty-body">Create an agent or terminal from the sidebar to start working.</div></div>';
+    dom.statusbar.textContent = 'Standalone PTY workspace';
+    _disposeEmbeddedTerminal();
+    return;
+  }
+
+  const sessionKey = cell.id + ':' + (cell.session_id || '');
+  if (!cell.session_id) {
+    dom.stage.innerHTML = ''
+      + '<div class="terminal-empty">'
+      + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
+      + '  <div class="terminal-empty-body">Relaunch this session to reopen it in the embedded terminal.</div>'
+      + '  <button class="terminal-empty-btn" onclick="relaunchAgent(\'' + esc(cell.id) + '\')">Relaunch</button>'
+      + '</div>';
+    dom.statusbar.textContent = _terminalStatusLabel(cell);
+    _disposeEmbeddedTerminal();
+    return;
+  }
+
+  if (_embeddedTerminalSessionKey !== sessionKey || !dom.stage.querySelector('.terminal-surface')) {
+    dom.stage.innerHTML = '<div class="terminal-surface"></div>';
+    _connectEmbeddedTerminal(cell, dom.stage.querySelector('.terminal-surface'));
+  }
+
+  dom.statusbar.textContent = (cell.current_path || cell.directory || '') + '  |  ' + _terminalStatusLabel(cell);
+}

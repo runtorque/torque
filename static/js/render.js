@@ -239,6 +239,72 @@ function _applyFlip(main, oldRects) {
   }
 }
 
+function renderStandaloneSidebar(main, groupNames) {
+  const navItems = [];
+  const navAgents = [];
+  const navByGroup = {};
+  const navGroupOrder = [];
+  let html = '<div class="sidebar-groups">';
+
+  for (let gi = 0; gi < groupNames.length; gi++) {
+    const gname = groupNames[gi];
+    const aids = state.groups[gname] || [];
+    const gs = (state.group_settings || {})[gname] || {};
+    if (!_collapsedInitialized.has(gname)) {
+      _collapsedInitialized.add(gname);
+      if (gs.collapsed_default) collapsedGroups.add(gname);
+    }
+    const collapsed = collapsedGroups.has(gname);
+    navGroupOrder.push(gname);
+    const groupNav = [];
+
+    html += '<section class="sidebar-group' + (collapsed ? ' collapsed' : '') + '" data-group-name="' + esc(gname) + '">';
+    html += '<div class="sidebar-group-hdr">';
+    html += '  <button class="sidebar-group-toggle" onclick="event.stopPropagation();toggleGroup(\'' + esc(gname) + '\')">\u25BE</button>';
+    html += '  <span class="sidebar-group-name">' + esc(gname) + '</span>';
+    html += '  <span class="sidebar-group-count">' + aids.length + '</span>';
+    html += '  <button class="sidebar-group-btn" title="New agent" onclick="event.stopPropagation();quickAddAgent(\'' + esc(gname) + '\')">+</button>';
+    html += '  <button class="sidebar-group-btn" title="Settings" onclick="event.stopPropagation();openGroupSettings(\'' + esc(gname) + '\')">\u2699</button>';
+    html += '</div>';
+    html += '<div class="sidebar-group-body">';
+
+    if (!aids.length) {
+      html += '<div class="sidebar-empty-group">No cells yet</div>';
+    }
+
+    for (let i = 0; i < aids.length; i++) {
+      const cell = state.agents[aids[i]];
+      if (!cell) continue;
+      navItems.push(cell.id);
+      groupNav.push(cell.id);
+      if (cell.cell_type !== 'terminal') navAgents.push(cell.id);
+      html += renderStandaloneCellRow(cell, 0);
+      if (cell.cell_type === 'agent') {
+        const childIds = state.children[cell.id] || [];
+        for (let j = 0; j < childIds.length; j++) {
+          const child = state.agents[childIds[j]];
+          if (!child) continue;
+          navItems.push(child.id);
+          groupNav.push(child.id);
+          html += renderStandaloneCellRow(child, 1);
+        }
+      }
+    }
+
+    html += '</div>';
+    html += '</section>';
+    navByGroup[gname] = groupNav;
+  }
+
+  html += '</div>';
+  main.innerHTML = html;
+  window._navItems = navItems;
+  window._navAgents = navAgents;
+  window._navByGroup = navByGroup;
+  window._navGroupOrder = navGroupOrder;
+  if (focusedItemId && !navItems.includes(focusedItemId)) focusedItemId = null;
+}
+
 function render() {
   const main = document.getElementById('main');
   const groupNames = Object.keys(state.groups);
@@ -251,6 +317,7 @@ function render() {
       </div>`;
     window._navItems = [];
     focusedItemId = null;
+    if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
     return;
   }
 
@@ -259,6 +326,19 @@ function render() {
 
   // Clear selectedAgentId if it no longer exists
   if (selectedAgentId && !state.agents[selectedAgentId]) selectedAgentId = null;
+  if (typeof selectedTerminalId !== 'undefined'
+      && selectedTerminalId
+      && !state.agents[selectedTerminalId]) {
+    selectedTerminalId = null;
+  }
+
+  if (typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {
+    renderStandaloneSidebar(main, groupNames);
+    if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
+    _updateWeaverTaskbarBadge();
+    if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
+    return;
+  }
 
   const navItems = [];
   const navAgents = [];  // agents only, for left/right navigation
@@ -422,6 +502,7 @@ function render() {
   if (oldRects) _applyFlip(main, oldRects);
   _updateWeaverTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
+  if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
 }
 
 function agentStatusClass(a) {
@@ -754,4 +835,49 @@ function renderTerminalRow(t) {
   h += `</div>`;
   h += `</div>`;
   return h;
+}
+
+function renderStandaloneCellRow(cell, depth) {
+  const active = cell.session_id && cell.session_id === state.active_session_id;
+  const selected = selectedTerminalId === cell.id;
+  const statusCls = agentStatusClass(cell);
+  const proc = cell.cell_type === 'terminal'
+    ? processInfo(cell.current_process || cell.command || '')
+    : null;
+  let subtitle = '';
+  if (cell.cell_type === 'agent') {
+    const task = _getAgentTask(cell.id);
+    subtitle = task ? task.task : (cell.activity_detail || cell.command || '');
+  } else {
+    subtitle = cell.current_path || cell.directory || cell.command || '';
+  }
+
+  let html = '<div class="sidebar-cell-row'
+    + (active ? ' active' : '')
+    + (selected ? ' selected' : '')
+    + (cell.status === 'stopped' ? ' stopped' : '')
+    + (depth > 0 ? ' child' : '')
+    + '" data-drag-id="' + esc(cell.id) + '" data-drag-type="' + esc(cell.cell_type) + '" data-drag-group="' + esc(cell.group) + '"'
+    + ' onclick="focusAgent(\'' + esc(cell.id) + '\')"'
+    + ' oncontextmenu="onCellContextMenu(event,\'' + esc(cell.id) + '\')"'
+    + ' onauxclick="if(event.button===1){event.preventDefault();removeAgent(\'' + esc(cell.id) + '\')}">';
+  html += '<span class="sidebar-cell-indent" style="width:' + (depth * 14) + 'px"></span>';
+  html += '<span class="sidebar-cell-status ' + esc(statusCls) + '"></span>';
+  if (cell.cell_type === 'agent') {
+    html += '<span class="sidebar-cell-icon">' + esc(cell.icon || agentIcon(cell.name)) + '</span>';
+  } else {
+    html += '<span class="sidebar-cell-badge" style="background:' + esc(proc.color) + '">' + esc(proc.label) + '</span>';
+  }
+  html += '<span class="sidebar-cell-copy">';
+  html += '  <span class="sidebar-cell-name">' + esc(cell.name) + '</span>';
+  if (subtitle) {
+    html += '  <span class="sidebar-cell-subtitle" title="' + esc(subtitle) + '">' + esc(subtitle) + '</span>';
+  }
+  html += '</span>';
+  if (cell.status === 'stopped') {
+    html += '<button class="sidebar-cell-btn" onclick="event.stopPropagation();relaunchAgent(\'' + esc(cell.id) + '\')" title="Relaunch">\u21BB</button>';
+  }
+  html += '<button class="sidebar-cell-btn danger" onclick="event.stopPropagation();removeAgent(\'' + esc(cell.id) + '\')" title="Remove">\u2715</button>';
+  html += '</div>';
+  return html;
 }

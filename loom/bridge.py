@@ -41,6 +41,7 @@ class ITerm2Adapter:
         self._focus_task: Optional[asyncio.Task] = None
         self.on_session_terminated = None  # async callback(cell)
         self.on_terminal_disconnected = None  # async callback(cell) — auto-remove
+        self.on_terminal_output = None  # async callback(cell_id, session_id, text)
 
     async def start(self):
         self._term_task = asyncio.create_task(self._watch_terminations())
@@ -616,6 +617,19 @@ class ITerm2Adapter:
             if "\n" in body:
                 await asyncio.sleep(submit_delay)
             await session.async_send_text(submit_key)
+
+    async def write_input(self, session_id: str, data: str) -> None:
+        session = await self._find_session(session_id)
+        if session:
+            await session.async_send_text(data)
+
+    async def resize_session(self, session_id: str, cols: int, rows: int) -> None:
+        _ = (session_id, cols, rows)
+        return
+
+    def get_terminal_buffer(self, session_id: str) -> str:
+        _ = session_id
+        return ""
 
     # -- Helpers ------------------------------------------------------------
 

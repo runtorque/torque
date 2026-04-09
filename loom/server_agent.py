@@ -70,6 +70,9 @@ class AgentLaunchService:
         self.template_mgr = template_mgr
         self._background_prompt_tasks: set[asyncio.Task] = set()
 
+    def _runtime_terminal_backend(self) -> str:
+        return "pty" if self.bridge.capabilities.supports_embedded_terminal else "iterm2"
+
     async def resolve_base_dir(self, group: str = "") -> str:
         """Resolve a base directory for action and template discovery."""
         if group:
@@ -228,6 +231,7 @@ class AgentLaunchService:
                 terminal = self.state.add_terminal(
                     name=term_name,
                     group=group,
+                    terminal_backend=self._runtime_terminal_backend(),
                     profile=gs.terminal_profile or gs.profile or "Default",
                     command=terminal_spec.get("command") or "",
                     directory=terminal_spec.get("directory")
@@ -265,6 +269,7 @@ class AgentLaunchService:
             terminal = self.state.add_terminal(
                 name=term_name,
                 group=group,
+                terminal_backend=self._runtime_terminal_backend(),
                 profile=profile,
                 command=command,
                 directory=directory or parent_cell.directory,
@@ -319,6 +324,7 @@ class AgentLaunchService:
         cell = self.state.add_agent(
             name=name,
             group=group,
+            terminal_backend=self._runtime_terminal_backend(),
             profile=launch_cfg["profile"],
             command=launch_cfg["command"],
             directory=launch_cfg["directory"],

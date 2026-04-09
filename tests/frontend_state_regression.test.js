@@ -384,6 +384,23 @@ function createWsRenderHarness() {
   return { context, document, sandbox };
 }
 
+function createStandaloneRenderHarness() {
+  const { sandbox, document } = createSandbox();
+  sandbox.renderTerminalWorkspaceCalls = 0;
+  sandbox.isEmbeddedTerminalMode = function() { return true; };
+  sandbox.renderTerminalWorkspace = function() {
+    sandbox.renderTerminalWorkspaceCalls++;
+  };
+  document.register('main');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    var PROCESS_MAP = {};
+    var focusedItemId = '';
+  `);
+  return { context, document, sandbox };
+}
+
 function createModalHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -3990,4 +4007,90 @@ test('diff review bulk collapse controls stay stable across refreshes', () => {
   assert.equal(jsonValue(context, `_isDiffFileCollapsed('src/b.js')`), false);
   assert.equal(jsonValue(context, `_isDiffFileCollapsed('src/c.js')`), false);
   assert.match(root.innerHTML, /0 of 3 collapsed/);
+});
+
+test('full state toggles embedded runtime body class', () => {
+  const { context, document } = createWsRenderHarness();
+
+  runInContext(context, `
+    _handleFullState({
+      seq: 7,
+      groups: {},
+      agents: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: [],
+      runtime: { embedded_terminal: true },
+    });
+  `);
+
+  assert.equal(document.body.classList.contains('runtime-embedded'), true);
+
+  runInContext(context, `
+    _handleFullState({
+      seq: 8,
+      groups: {},
+      agents: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: [],
+      runtime: { embedded_terminal: false },
+    });
+  `);
+
+  assert.equal(document.body.classList.contains('runtime-embedded'), false);
+});
+
+test('embedded runtime renders standalone sidebar and nested child terminals', () => {
+  const { context, document, sandbox } = createStandaloneRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { alpha: ['agent-1', 'term-root'] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = { 'agent-1': ['term-child'] };
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Runner',
+      group: 'alpha',
+      cell_type: 'agent',
+      icon: 'A',
+      command: 'codex',
+      status: 'idle',
+      session_id: 'sess-1',
+      activity_detail: 'Reviewing patch',
+    },
+    'term-child': {
+      id: 'term-child',
+      name: 'Shell Child',
+      group: 'alpha',
+      cell_type: 'terminal',
+      current_process: 'zsh',
+      current_path: '/tmp/child',
+      status: 'idle',
+      session_id: 'sess-2',
+    },
+    'term-root': {
+      id: 'term-root',
+      name: 'Shell Root',
+      group: 'alpha',
+      cell_type: 'terminal',
+      current_process: 'bash',
+      current_path: '/tmp/root',
+      status: 'stopped',
+      session_id: '',
+    },
+  };
+
+  runInContext(context, `
+    selectedTerminalId = 'term-child';
+    render();
+  `);
+
+  assert.match(main.innerHTML, /sidebar-group/);
+  assert.match(main.innerHTML, /Runner/);
+  assert.match(main.innerHTML, /Shell Child/);
+  assert.match(main.innerHTML, /Shell Root/);
+  assert.match(main.innerHTML, /sidebar-cell-row[^"]*child/);
+  assert.equal(sandbox.renderTerminalWorkspaceCalls, 1);
 });

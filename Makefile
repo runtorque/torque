@@ -63,8 +63,7 @@ install:
 		mkdir -p "$$(dirname "$$dest")"; \
 		cp "$$src" "$$dest"; \
 	done
-	cp static/style.css "$(SCRIPT_DIR)/static/"
-	@find static/js -type f -name '*.js' -print0 | while IFS= read -r -d '' src; do \
+	@find static -type f -print0 | while IFS= read -r -d '' src; do \
 		dest="$(SCRIPT_DIR)/$$src"; \
 		mkdir -p "$$(dirname "$$dest")"; \
 		cp "$$src" "$$dest"; \

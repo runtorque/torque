@@ -1,4 +1,4 @@
-"""aiohttp server, WebSocket command handler, and iTerm2 entry point."""
+"""aiohttp server, WebSocket command handler, and runtime entry point."""
 
 import asyncio
 import json
@@ -351,7 +351,7 @@ def _apply_verification_report(task, payload, actor_name, save_task,
     return msg, root_task
 
 
-async def main(connection):
+async def main(connection=None):
     log.info("Loom starting (port=%d)", WS_PORT)
     db = LoomDB(DB_FILE)
     db.init()
@@ -372,9 +372,14 @@ async def main(connection):
     asyncio.create_task(health_check(state, event_log, event_bus, notifier))
     log.info("Event bus, health monitor, and notifications started")
 
-    from .bridge import ITerm2Adapter
+    if STANDALONE:
+        from .local_pty import LocalPtyAdapter
 
-    bridge = ITerm2Adapter(connection, state)
+        bridge = LocalPtyAdapter(state)
+    else:
+        from .bridge import ITerm2Adapter
+
+        bridge = ITerm2Adapter(connection, state)
     worktree_mgr = WorktreeManager()
     action_mgr = ActionManager()
     template_mgr = TemplateManager()
@@ -548,13 +553,44 @@ async def main(connection):
     # Also checkpoint when the terminal session is actually closed (tab closed)
     bridge.on_session_terminated = _on_agent_session_end
 
+    def _runtime_payload() -> dict:
+        return {
+            "standalone": STANDALONE,
+            "embedded_terminal": bridge.capabilities.supports_embedded_terminal,
+            "layout": "ide" if bridge.capabilities.supports_embedded_terminal else "classic",
+            "terminal_backend": "pty" if STANDALONE else "iterm2",
+        }
+
     def _state_payload() -> dict:
         return {
             "type": "state",
             "seq": state._seq,
             **state.to_dict(),
             "providers": get_providers(),
+            "runtime": _runtime_payload(),
         }
+
+    terminal_clients: dict[str, set[web.WebSocketResponse]] = {}
+
+    async def _broadcast_terminal_output(cell_id: str, session_id: str, text: str):
+        if not text:
+            return
+        payload = json.dumps({
+            "type": "output",
+            "cell_id": cell_id,
+            "session_id": session_id,
+            "data": text,
+        })
+        dead = set()
+        for ws_client in terminal_clients.get(cell_id, set()):
+            try:
+                await ws_client.send_str(payload)
+            except Exception:
+                dead.add(ws_client)
+        if dead:
+            terminal_clients.get(cell_id, set()).difference_update(dead)
+
+    bridge.on_terminal_output = _broadcast_terminal_output
 
     async def _on_terminal_disconnected(cell):
         """Auto-remove a terminal when its tab is closed (close_on_disconnect)."""
@@ -575,6 +611,7 @@ async def main(connection):
     # running as an iTerm2-hosted script. External standalone mode still
     # controls sessions through the adapter, but it should not try to
     # register iTerm2-global shortcuts before the HTTP server binds.
+    keybindings = None
     _displaced = [[]]
     if _should_install_keybindings():
         _kb_overrides = state.global_settings.keybindings or None
@@ -1268,6 +1305,7 @@ async def main(connection):
                 "playbooks": state.list_playbooks(group=group,
                                                    status="published",
                                                    limit=200),
+                "runtime": _runtime_payload(),
             }
 
         # get_group_settings: respond directly, no state mutation
@@ -1290,6 +1328,7 @@ async def main(connection):
                 "playbooks": state.list_playbooks(group=group,
                                                    status="published",
                                                    limit=200),
+                "runtime": _runtime_payload(),
             }
 
         # get_global_settings: respond directly
@@ -1657,7 +1696,7 @@ async def main(connection):
                 old_kb = state.global_settings.keybindings.copy()
                 state.update_global_settings(**settings)
                 new_kb = state.global_settings.keybindings
-                if new_kb != old_kb:
+                if new_kb != old_kb and _should_install_keybindings() and keybindings:
                     _displaced[0] = await keybindings.reinstall(
                         connection, _displaced[0],
                         overrides=new_kb or None)
@@ -1670,10 +1709,10 @@ async def main(connection):
                     if panel_log._db:
                         panel_log._db.trim_panel_events(new_max)
 
-            elif cmd == "suspend_keybindings":
+            elif cmd == "suspend_keybindings" and _should_install_keybindings() and keybindings:
                 await keybindings.remove(connection, _displaced[0])
 
-            elif cmd == "resume_keybindings":
+            elif cmd == "resume_keybindings" and _should_install_keybindings() and keybindings:
                 _kb_overrides = (state.global_settings.keybindings
                                  or None)
                 _displaced[0] = await keybindings.reinstall(
@@ -1822,6 +1861,7 @@ async def main(connection):
 
                 cell = state.add_terminal(
                     name=data["name"], group=group,
+                    terminal_backend="pty" if bridge.capabilities.supports_embedded_terminal else "iterm2",
                     profile=profile, command=command,
                     directory=directory, tab_color=tab_color,
                     parent_id=parent_id,
@@ -5232,7 +5272,8 @@ async def main(connection):
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")
-                await keybindings.remove(connection, _displaced[0])
+                if _should_install_keybindings() and keybindings:
+                    await keybindings.remove(connection, _displaced[0])
                 # Persist all agents (status etc.) before restart
                 for cell in state.agents.values():
                     state._db_save_agent(cell)
@@ -5329,6 +5370,56 @@ async def main(connection):
                     break
         finally:
             state._ws_clients.discard(ws)
+        return ws
+
+    async def handle_terminal_ws(request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        cell_id = request.match_info.get("cell_id", "")
+        terminal_clients.setdefault(cell_id, set()).add(ws)
+        try:
+            if not bridge.capabilities.supports_embedded_terminal:
+                await ws.send_str(json.dumps({
+                    "type": "error",
+                    "message": "Embedded terminals are unavailable in this runtime.",
+                }))
+            cell = state.agents.get(cell_id)
+            if cell and cell.session_id:
+                await ws.send_str(json.dumps({
+                    "type": "snapshot",
+                    "cell_id": cell_id,
+                    "session_id": cell.session_id,
+                    "data": bridge.get_terminal_buffer(cell.session_id),
+                }))
+            else:
+                await ws.send_str(json.dumps({
+                    "type": "snapshot",
+                    "cell_id": cell_id,
+                    "session_id": "",
+                    "data": "",
+                }))
+            async for msg in ws:
+                if msg.type != aiohttp.WSMsgType.TEXT:
+                    continue
+                try:
+                    payload = json.loads(msg.data)
+                except json.JSONDecodeError:
+                    continue
+                cell = state.agents.get(cell_id)
+                if not cell or not cell.session_id:
+                    continue
+                if payload.get("type") == "input":
+                    await bridge.write_input(cell.session_id, payload.get("data", ""))
+                elif payload.get("type") == "resize":
+                    await bridge.resize_session(
+                        cell.session_id,
+                        int(payload.get("cols", 0) or 0),
+                        int(payload.get("rows", 0) or 0),
+                    )
+                elif payload.get("type") == "focus":
+                    await bridge.focus_session(cell.session_id)
+        finally:
+            terminal_clients.get(cell_id, set()).discard(ws)
         return ws
 
     # -- REST API endpoint --------------------------------------------------
@@ -5468,6 +5559,7 @@ async def main(connection):
     app_server = web.Application()
     app_server.router.add_get("/", handle_index)
     app_server.router.add_get("/ws", handle_ws)
+    app_server.router.add_get("/ws/terminal/{cell_id}", handle_terminal_ws)
     app_server.router.add_post("/events", handle_events)
     app_server.router.add_post("/api/cmd", handle_api_cmd)
     app_server.router.add_post("/mcp", create_mcp_handler(handle_command, state))
