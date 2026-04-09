@@ -253,8 +253,12 @@ class LocalPtyAdapter:
         if cell:
             await self._wait_for_input_ready(cell)
         body = text.rstrip("\r\n")
-        if body:
-            await self.write_input(session_id, body)
+        chunks = (
+            adapter.get_input_chunks(body)
+            if adapter else ([body] if body else [])
+        )
+        for chunk in chunks:
+            await self.write_input(session_id, chunk)
         if "\n" in body:
             await asyncio.sleep(submit_delay)
         await self.write_input(session_id, submit_key)

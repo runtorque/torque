@@ -232,6 +232,28 @@ class ClaudeCodeAdapter(AgentAdapter):
         lower = screen_text.lower()
         return "claude code" in lower or "claude.ai/code" in lower
 
+    def get_input_chunks(self, body: str) -> list[str]:
+        """Type multiline prompts using Claude Code's newline shortcut.
+
+        Claude Code can leave large pasted prompts sitting in the composer as
+        a collapsed "[Pasted-text]" block. Sending each line explicitly and
+        using ``\\`` + Enter for newlines avoids paste-mode and keeps the
+        final Enter as a real submit.
+        """
+        if not body:
+            return []
+        if "\n" not in body:
+            return [body]
+        lines = body.split("\n")
+        chunks: list[str] = []
+        for idx, line in enumerate(lines):
+            if line:
+                chunks.append(line)
+            if idx < len(lines) - 1:
+                chunks.append("\\")
+                chunks.append("\r")
+        return chunks
+
     def get_hook_config(self, cell) -> dict | None:
         """Return the Claude Code hooks config to write for this cell.
 

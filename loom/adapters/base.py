@@ -128,6 +128,15 @@ class AgentAdapter:
         """Return the delay before sending submit after a multi-line body."""
         return 0.3
 
+    def get_input_chunks(self, body: str) -> list[str]:
+        """Return the ordered terminal chunks used to enter a prompt body.
+
+        The default path sends the whole body as one chunk. Adapters can
+        override this when their TUI handles pasted multi-line input poorly
+        and needs explicit newline shortcut sequences instead.
+        """
+        return [body] if body else []
+
     def get_input_ready_policy(self) -> InputReadyPolicy:
         """Return how Loom should wait for the TUI to accept its first input."""
         return InputReadyPolicy()

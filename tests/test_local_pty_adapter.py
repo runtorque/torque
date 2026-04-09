@@ -152,6 +152,41 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_send_text_claude_multiline_uses_newline_shortcut_then_submit(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Loom")
+        cell = state.add_agent(
+            name="Weaver",
+            group="Loom",
+            terminal_backend="pty",
+            command="claude",
+            directory="/tmp",
+        )
+        cell.agent_type = "claude-code"
+        cell.session_id = "session-1"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        adapter._sessions[cell.session_id] = SimpleNamespace(cell_id=cell.id)
+        writes: list[tuple[str, str]] = []
+
+        async def fake_write_input(session_id, data):
+            writes.append((session_id, data))
+
+        adapter.write_input = fake_write_input
+        adapter._input_ready_sessions.add(cell.session_id)
+
+        await adapter.send_text(cell.session_id, "line one\nline two")
+
+        self.assertEqual(
+            writes,
+            [
+                ("session-1", "line one"),
+                ("session-1", "\\"),
+                ("session-1", "\r"),
+                ("session-1", "line two"),
+                ("session-1", "\r"),
+            ],
+        )
+
     async def test_create_session_installs_hooks_in_resolved_cwd_when_directory_blank(self):
         state = self.state_mod.MatrixState()
         state.add_group("Loom")

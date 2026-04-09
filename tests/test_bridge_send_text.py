@@ -150,6 +150,39 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.sent, ["line one\nline two", "\r"])
         self.assertEqual(delays, [0.3])
 
+    async def test_send_text_claude_multiline_uses_newline_shortcut_then_submit(self):
+        session = FakeSession("session-1")
+        bridge, state = await self._make_bridge(session)
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="agent",
+            group="g",
+            cell_type="agent",
+            session_id="session-1",
+            agent_type="claude-code",
+            command="claude",
+        )
+        state.agents[cell.id] = cell
+        bridge._input_ready_sessions.add("session-1")
+
+        delays = []
+
+        async def fake_sleep(delay):
+            delays.append(delay)
+
+        orig_sleep = self.bridge_mod.asyncio.sleep
+        self.bridge_mod.asyncio.sleep = fake_sleep
+        try:
+            await bridge.send_text("session-1", "line one\nline two\r")
+        finally:
+            self.bridge_mod.asyncio.sleep = orig_sleep
+
+        self.assertEqual(
+            session.sent,
+            ["line one", "\\", "\r", "line two", "\r"],
+        )
+        self.assertEqual(delays, [0.3])
+
     async def test_send_text_single_line_sends_submit_separately(self):
         session = FakeSession("session-1")
         bridge, state = await self._make_bridge(session)

@@ -643,8 +643,12 @@ class ITerm2Adapter:
             if cell:
                 await self._wait_for_input_ready(session, cell)
             body = text.rstrip("\r\n")
-            if body:
-                await session.async_send_text(body)
+            chunks = (
+                adapter.get_input_chunks(body)
+                if adapter else ([body] if body else [])
+            )
+            for chunk in chunks:
+                await session.async_send_text(chunk)
             if "\n" in body:
                 await asyncio.sleep(submit_delay)
             await session.async_send_text(submit_key)
