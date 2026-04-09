@@ -156,6 +156,49 @@ def _is_ours(binding):
             and binding.param.startswith(_RPC_PREFIX))
 
 
+def _next_name(state, prefix):
+    """Mirror the frontend quick-add naming strategy."""
+    existing = [
+        cell.name
+        for cell in state.agents.values()
+        if cell.name.startswith(prefix + " ")
+    ]
+    i = 1
+    while f"{prefix} {i}" in existing:
+        i += 1
+    return f"{prefix} {i}"
+
+
+def build_close_cell_confirmation_message(state, cell):
+    """Build the close/remove confirmation message for shortcut-triggered closes."""
+    child_count = len(state._children.get(cell.id, []))
+    msg = f'Remove "{cell.name}"?'
+    if child_count > 0:
+        msg = f'Remove "{cell.name}" and its {child_count} terminal(s)?'
+    if cell.worktree_path:
+        shared_with = [
+            other.name
+            for other in state.agents.values()
+            if other.id != cell.id
+            and other.worktree_path == cell.worktree_path
+        ]
+        if shared_with:
+            names = '", "'.join(shared_with)
+            msg += f' Its worktree is shared with "{names}" and will be kept.'
+        else:
+            warnings = []
+            if (cell.worktree_checkpoints or 0) > 0:
+                warnings.append("has unmerged commits")
+            if cell.worktree_dirty:
+                warnings.append("has uncommitted changes")
+            if warnings:
+                msg += (" Its worktree " + " and ".join(warnings)
+                        + ". All changes will be lost.")
+            else:
+                msg += " Its worktree will also be removed."
+    return msg
+
+
 def get_ordered_cells(state, window_id=None):
     """Return all cells with a live session, in group/position order."""
     ordered = []
@@ -273,7 +316,10 @@ async def reinstall(connection, displaced, overrides=None):
     return await install(connection, specs)
 
 
-async def setup(connection, state, bridge, overrides=None):
+async def setup(connection, state, bridge, overrides=None, *,
+                add_agent_handler=None,
+                add_terminal_handler=None,
+                close_cell_handler=None):
     """Register RPC functions and install global key bindings.
 
     Returns the displaced bindings list for cleanup on shutdown.
@@ -367,8 +413,13 @@ async def setup(connection, state, bridge, overrides=None):
     async def loom_close_cell():
         for cell in state.agents.values():
             if cell.session_id == state.active_session_id:
-                await _send_action("close_cell", cell_id=cell.id)
+                if close_cell_handler:
+                    await close_cell_handler(cell)
+                else:
+                    await _send_action("close_cell", cell_id=cell.id)
                 return
+        log.info("Close-cell shortcut ignored — no active Loom cell for session %s",
+                 state.active_session_id)
 
     @iterm2.RPC
     async def loom_add_agent():
@@ -383,16 +434,33 @@ async def setup(connection, state, bridge, overrides=None):
             groups = list(state.groups.keys())
             group = groups[0] if groups else None
         if group:
-            await _send_action("add_agent", group=group)
+            if add_agent_handler:
+                await add_agent_handler(group=group,
+                                        name=_next_name(state, "Agent"))
+            else:
+                await _send_action("add_agent", group=group)
+        else:
+            log.info("Add-agent shortcut ignored — no Loom group available")
 
     @iterm2.RPC
     async def loom_add_terminal():
         # Find the agent associated with the active session
         current_agent, _ = _find_current_agent(state)
         if current_agent:
-            await _send_action("add_terminal",
-                               group=current_agent.group,
-                               parent_id=current_agent.id)
+            if add_terminal_handler:
+                gs = state.get_group_settings(current_agent.group)
+                prefix = gs.terminal_name_prefix or "Terminal"
+                await add_terminal_handler(
+                    group=current_agent.group,
+                    parent_id=current_agent.id,
+                    name=_next_name(state, prefix))
+            else:
+                await _send_action("add_terminal",
+                                   group=current_agent.group,
+                                   parent_id=current_agent.id)
+        else:
+            log.info("Add-terminal shortcut ignored — no active Loom agent for session %s",
+                     state.active_session_id)
 
     # Register all RPCs
     await loom_focus_next.async_register(connection, timeout=10)

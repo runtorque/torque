@@ -6,7 +6,12 @@ import unittest
 
 
 def _install_iterm2_stub():
-    stored = {"bindings": []}
+    stored = {
+        "bindings": [],
+        "rpcs": {},
+        "alerts": [],
+        "alert_result": 1000,
+    }
 
     iterm2 = types.ModuleType("iterm2")
     binding = types.ModuleType("iterm2.binding")
@@ -53,7 +58,29 @@ def _install_iterm2_stub():
     async def async_set_global_key_bindings(_connection, bindings):
         stored["bindings"] = list(bindings)
 
+    class Alert:
+        def __init__(self, title, subtitle, window_id=None):
+            self.title = title
+            self.subtitle = subtitle
+            self.window_id = window_id
+            self.buttons = []
+
+        def add_button(self, title):
+            self.buttons.append(title)
+
+        async def async_run(self, _connection):
+            stored["alerts"].append({
+                "title": self.title,
+                "subtitle": self.subtitle,
+                "window_id": self.window_id,
+                "buttons": list(self.buttons),
+            })
+            return stored["alert_result"]
+
     def RPC(fn):
+        async def async_register(_connection, timeout=None):
+            stored["rpcs"][fn.__name__] = fn
+        fn.async_register = async_register
         return fn
 
     binding.KeyBinding = KeyBinding
@@ -64,6 +91,7 @@ def _install_iterm2_stub():
     keyboard.Keycode = Keycode
     iterm2.binding = binding
     iterm2.keyboard = keyboard
+    iterm2.Alert = Alert
     iterm2.RPC = RPC
     iterm2.Connection = object
 
@@ -175,3 +203,118 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         await self.keybindings_mod.remove(object(), displaced=saved)
 
         self.assertEqual(self.stored["bindings"], [unrelated, displaced])
+
+    async def test_build_close_confirmation_message_describes_terminals_and_worktree_loss(self):
+        state = self.state_mod.MatrixState()
+        state._children = {"agent-1": ["term-1"]}
+
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            cell_type="agent",
+            worktree_path="/tmp/wt",
+            worktree_checkpoints=2,
+            worktree_dirty=True,
+        )
+        terminal = self.state_mod.AgentCell(
+            id="term-1",
+            name="Logs",
+            group="g",
+            slug="worker:logs",
+            cell_type="terminal",
+            parent_id="agent-1",
+        )
+        state.agents = {cell.id: cell, terminal.id: terminal}
+
+        msg = self.keybindings_mod.build_close_cell_confirmation_message(
+            state, cell)
+
+        self.assertEqual(
+            msg,
+            'Remove "Worker" and its 1 terminal(s)? '
+            'Its worktree has unmerged commits and has uncommitted changes. '
+            'All changes will be lost.',
+        )
+
+    async def test_build_close_confirmation_message_describes_shared_worktree(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            cell_type="agent",
+            worktree_path="/tmp/shared",
+        )
+        shared = self.state_mod.AgentCell(
+            id="agent-2",
+            name="Peer",
+            group="g",
+            slug="peer",
+            cell_type="agent",
+            worktree_path="/tmp/shared",
+        )
+        state.agents = {cell.id: cell, shared.id: shared}
+
+        msg = self.keybindings_mod.build_close_cell_confirmation_message(
+            state, cell)
+
+        self.assertEqual(
+            msg,
+            'Remove "Worker"? Its worktree is shared with "Peer" and will be kept.',
+        )
+
+    async def test_action_shortcuts_call_server_handlers_without_ws_clients(self):
+        state = self.state_mod.MatrixState()
+        state.groups = {"g": ["agent-1"]}
+        agent = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Agent 1",
+            group="g",
+            slug="agent-1",
+            cell_type="agent",
+            session_id="session-1",
+            window_id="window-a",
+        )
+        state.agents = {agent.id: agent}
+        state.active_session_id = agent.session_id
+        state.current_window_id = agent.window_id
+
+        class Bridge:
+            async def focus_session(self, _session_id):
+                return None
+
+        calls = []
+
+        async def add_agent_handler(*, group, name=""):
+            calls.append(("add_agent", group, name))
+
+        async def add_terminal_handler(*, group, parent_id, name=""):
+            calls.append(("add_terminal", group, parent_id, name))
+
+        async def close_cell_handler(cell):
+            calls.append(("close_cell", cell.id))
+
+        await self.keybindings_mod.setup(
+            object(),
+            state,
+            Bridge(),
+            add_agent_handler=add_agent_handler,
+            add_terminal_handler=add_terminal_handler,
+            close_cell_handler=close_cell_handler,
+        )
+
+        await self.stored["rpcs"]["loom_add_agent"]()
+        await self.stored["rpcs"]["loom_add_terminal"]()
+        await self.stored["rpcs"]["loom_close_cell"]()
+
+        self.assertEqual(
+            calls,
+            [
+                ("add_agent", "g", "Agent 2"),
+                ("add_terminal", "g", "agent-1", "Terminal 1"),
+                ("close_cell", "agent-1"),
+            ],
+        )
