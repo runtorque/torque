@@ -2,6 +2,7 @@ import importlib
 import sys
 import types
 import unittest
+from types import SimpleNamespace
 
 
 def _install_aiohttp_stub():
@@ -78,3 +79,25 @@ class WeaverPromptTests(unittest.TestCase):
         self.assertIn("`weaver_task_dispatch(agent=...)`", prompt)
         self.assertIn("share one worktree/branch until merge or cleanup", prompt)
         self.assertIn("Actions and worker prompts can handle sequential same-agent", prompt)
+
+    def test_prompt_includes_structured_policy_overrides(self):
+        prompt = self.weaver_mod.build_weaver_system_prompt(
+            "Loom",
+            SimpleNamespace(
+                autonomy_mode="suggest_only",
+                default_worker_concurrency=4,
+                custom_instructions="",
+            ),
+            group_settings=SimpleNamespace(
+                worktree_merge_cleanup="close_remove",
+            ),
+        )
+
+        self.assertIn("Operating Policy", prompt)
+        self.assertIn("Autonomy mode: Suggest only", prompt)
+        self.assertIn("Default worker concurrency: 4", prompt)
+        self.assertIn(
+            "Default post-merge cleanup: Close agent session and remove worktree",
+            prompt,
+        )
+        self.assertIn("prefer `weaver_note` with a proposed wave", prompt)

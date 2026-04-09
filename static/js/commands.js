@@ -424,17 +424,28 @@ function _showWorktreePR(msg) {
     if (ok) window.open(msg.url);
   });
 }
+function _worktreeMergeCleanupDefaults(cell) {
+  var group = cell && cell.group ? cell.group : '';
+  var gs = (state.group_settings && group) ? state.group_settings[group] : null;
+  var mode = (gs && gs.worktree_merge_cleanup) || 'keep';
+  return {
+    close: mode === 'close' || mode === 'close_remove',
+    remove: mode === 'remove' || mode === 'close_remove',
+  };
+}
 async function _confirmWorktreeMerge(id, message) {
   const cell = state.agents[id];
   if (!cell) return false;
   const base = cell.worktree_base_branch || 'main';
   const squash = cell.worktree_merge_squash !== false;
+  const cleanupDefaults = _worktreeMergeCleanupDefaults(cell);
   const result = await showConfirm(
     `${squash ? 'Squash merge' : 'Merge'} "${cell.name}" into ${base}?`,
     {
       label: 'Merge', variant: 'btn-green',
       checkboxes: [
-        { key: 'close_on_merge', label: 'Close agent after merge', checked: false },
+        { key: 'close_agent_on_merge', label: 'Close agent after merge', checked: cleanupDefaults.close },
+        { key: 'remove_worktree_on_merge', label: 'Remove worktree after merge', checked: cleanupDefaults.remove },
         { key: 'clear_context', label: 'Clear context after merge', checked: false },
       ],
     }
@@ -443,7 +454,8 @@ async function _confirmWorktreeMerge(id, message) {
     send({
       cmd: 'worktree_merge', id,
       message: message || '',
-      close_on_merge: result.close_on_merge || false,
+      close_agent_on_merge: result.close_agent_on_merge || false,
+      remove_worktree_on_merge: result.remove_worktree_on_merge || false,
       clear_context: result.clear_context || false,
     });
     return true;

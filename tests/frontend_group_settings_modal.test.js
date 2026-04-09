@@ -156,12 +156,15 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
   vm.runInContext('_gsInitialTab = "weaver"', context);
   vm.runInContext(`_showGroupSettings("alpha", {
     settings: {
-      weaver_agent_id: "weaver-1"
+      weaver_agent_id: "weaver-1",
+      worktree_merge_cleanup: "close_remove"
     },
     weaver_settings: {
       weaver_provider: "codex",
       weaver_boot_command: "codex --model gpt-5",
       custom_instructions: "Watch for regressions.",
+      autonomy_mode: "aggressive_auto_continue",
+      default_worker_concurrency: 4,
       push_interval: 120,
       max_interval: 600,
       heartbeat_interval: 60,
@@ -173,10 +176,13 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
   assert.equal(ensure('gs-weaver-provider').value, 'codex');
   assert.equal(ensure('gs-weaver-boot-cmd').value, 'codex --model gpt-5');
   assert.equal(ensure('gs-weaver-custom-instructions').value, 'Watch for regressions.');
+  assert.equal(ensure('gs-weaver-autonomy-mode').value, 'aggressive_auto_continue');
+  assert.equal(ensure('gs-weaver-default-worker-concurrency').value, '4');
+  assert.equal(ensure('gs-wt-merge-cleanup').value, 'close_remove');
   assert.equal(ensure('gs-weaver-agent-name').textContent, 'Weaver');
   assert.equal(ensure('gs-weaver-event-agent-started').checked, true);
   assert.equal(ensure('gs-weaver-event-agent-progress').checked, true);
-  assert.equal(ensure('gs-weaver-provider').focused, true);
+  assert.equal(ensure('gs-weaver-autonomy-mode').focused, true);
   assert.equal(ensure('modal-group-settings').classList.contains('visible'), true);
 });
 
@@ -190,9 +196,12 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   ensure('gs-agent-directory').value = '/repo/agents';
   ensure('gs-terminal-prefix').value = 'Shell';
   ensure('gs-terminal-boot-cmd').value = 'npm run dev';
+  ensure('gs-wt-merge-cleanup').value = 'remove';
   ensure('gs-weaver-provider').value = 'codex';
   ensure('gs-weaver-boot-cmd').value = 'codex --model gpt-5';
   ensure('gs-weaver-custom-instructions').value = 'Stay focused';
+  ensure('gs-weaver-autonomy-mode').value = 'suggest_only';
+  ensure('gs-weaver-default-worker-concurrency').value = '3';
   ensure('gs-weaver-push-interval').value = '120';
   ensure('gs-weaver-max-interval').value = '600';
   ensure('gs-weaver-heartbeat-interval').value = '60';
@@ -206,11 +215,14 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   assert.equal(sandbox.sendCalls[0].group, 'alpha');
   assert.equal(sandbox.sendCalls[0].settings.terminal_name_prefix, 'Shell');
   assert.equal(sandbox.sendCalls[0].settings.terminal_boot_command, 'npm run dev');
+  assert.equal(sandbox.sendCalls[0].settings.worktree_merge_cleanup, 'remove');
   assert.equal(sandbox.sendCalls[1].cmd, 'weaver_update_settings');
   assert.equal(sandbox.sendCalls[1].group, 'alpha');
   assert.equal(sandbox.sendCalls[1].weaver_provider, 'codex');
   assert.equal(sandbox.sendCalls[1].weaver_boot_command, 'codex --model gpt-5');
   assert.equal(sandbox.sendCalls[1].custom_instructions, 'Stay focused');
+  assert.equal(sandbox.sendCalls[1].autonomy_mode, 'suggest_only');
+  assert.equal(sandbox.sendCalls[1].default_worker_concurrency, 3);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[1].enabled_events)), ['agent_started', 'agent_progress']);
 });
 

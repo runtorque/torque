@@ -774,17 +774,20 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn.execute("""
             INSERT OR REPLACE INTO weaver_settings
                 (group_name, push_interval, max_interval, heartbeat_interval,
+                 default_worker_concurrency, autonomy_mode,
                  paused,
                  custom_instructions, pending_question, pending_note,
                  pending_note_kind, enabled_events,
                  weaver_provider, weaver_boot_command)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             group_name,
             settings.get("push_interval", 60),
             settings.get("max_interval", 300),
             settings.get("heartbeat_interval",
                          settings.get("max_interval", 300)),
+            settings.get("default_worker_concurrency", 2),
+            settings.get("autonomy_mode", "dispatch_when_clear"),
             1 if settings.get("paused", False) else 0,
             settings.get("custom_instructions", ""),
             settings.get("pending_question", ""),
@@ -799,7 +802,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     def load_weaver_settings(self, group_name: str) -> dict | None:
         """Load weaver settings for a group. Returns None if not set."""
         row = self._conn.execute(
-            "SELECT group_name, push_interval, max_interval, heartbeat_interval, paused, "
+            "SELECT group_name, push_interval, max_interval, heartbeat_interval, "
+            "default_worker_concurrency, autonomy_mode, paused, "
             "custom_instructions, pending_question, pending_note, pending_note_kind, enabled_events, "
             "weaver_provider, weaver_boot_command "
             "FROM weaver_settings "
@@ -807,7 +811,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not row:
             return None
         try:
-            enabled = json.loads(row[9])
+            enabled = json.loads(row[11])
         except (json.JSONDecodeError, TypeError):
             enabled = ["agent_started", "task_dispatched", "task_derived"]
         heartbeat_interval = row[3]
@@ -819,14 +823,16 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "push_interval": row[1],
             "max_interval": row[2],
             "heartbeat_interval": heartbeat_interval,
-            "paused": bool(row[4]),
-            "custom_instructions": row[5],
-            "pending_question": row[6],
-            "pending_note": row[7],
-            "pending_note_kind": row[8],
+            "default_worker_concurrency": row[4],
+            "autonomy_mode": row[5],
+            "paused": bool(row[6]),
+            "custom_instructions": row[7],
+            "pending_question": row[8],
+            "pending_note": row[9],
+            "pending_note_kind": row[10],
             "enabled_events": enabled,
-            "weaver_provider": row[10] if len(row) > 10 else "",
-            "weaver_boot_command": row[11] if len(row) > 11 else "",
+            "weaver_provider": row[12] if len(row) > 12 else "",
+            "weaver_boot_command": row[13] if len(row) > 13 else "",
         }
 
     def delete_weaver_settings(self, group_name: str):
@@ -837,7 +843,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     def load_all_weaver_settings(self) -> dict[str, dict]:
         """Load weaver settings for all groups. Returns {group: settings}."""
         rows = self._conn.execute(
-            "SELECT group_name, push_interval, max_interval, heartbeat_interval, paused, "
+            "SELECT group_name, push_interval, max_interval, heartbeat_interval, "
+            "default_worker_concurrency, autonomy_mode, paused, "
             "custom_instructions, pending_question, pending_note, pending_note_kind, enabled_events, "
             "weaver_provider, weaver_boot_command "
             "FROM weaver_settings"
@@ -845,7 +852,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         result = {}
         for row in rows:
             try:
-                enabled = json.loads(row[9])
+                enabled = json.loads(row[11])
             except (json.JSONDecodeError, TypeError):
                 enabled = ["agent_started", "task_dispatched", "task_derived"]
             heartbeat_interval = row[3]
@@ -857,14 +864,16 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "push_interval": row[1],
                 "max_interval": row[2],
                 "heartbeat_interval": heartbeat_interval,
-                "paused": bool(row[4]),
-                "custom_instructions": row[5],
-                "pending_question": row[6],
-                "pending_note": row[7],
-                "pending_note_kind": row[8],
+                "default_worker_concurrency": row[4],
+                "autonomy_mode": row[5],
+                "paused": bool(row[6]),
+                "custom_instructions": row[7],
+                "pending_question": row[8],
+                "pending_note": row[9],
+                "pending_note_kind": row[10],
                 "enabled_events": enabled,
-                "weaver_provider": row[10] if len(row) > 10 else "",
-                "weaver_boot_command": row[11] if len(row) > 11 else "",
+                "weaver_provider": row[12] if len(row) > 12 else "",
+                "weaver_boot_command": row[13] if len(row) > 13 else "",
             }
         return result
 

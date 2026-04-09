@@ -25,7 +25,7 @@ The journal belongs to the group, not the individual agent. If you recreate the 
 
 Use the target group's **+ New** dropdown and choose **Weaver**.
 
-After the Weaver exists, open **Group Settings** for that group and switch to the **Weaver** tab to manage provider overrides, custom instructions, and digest settings.
+After the Weaver exists, open **Group Settings** for that group and switch to the **Weaver** tab to manage its operating-style presets, advanced digest settings, and expert overrides.
 
 The Weaver must be created through Loom's dedicated Weaver flow because Loom needs to boot it with a persistent system prompt. You cannot turn an existing agent into a Weaver after the fact.
 
@@ -44,9 +44,9 @@ The panel header also shows:
 The Weaver tab in group settings contains the editable Weaver configuration:
 
 - **Agent** section shows the current Weaver agent or the create button.
-- **Backend** lets you override the provider and boot command just for the Weaver. If empty, the Weaver uses the group's defaults.
-- **Custom Instructions** appends extra operating rules to the Weaver system prompt.
-- **Notifications** configures push interval, max interval, heartbeat interval, and which optional event types appear in digests.
+- **Operating style** sets the Weaver's autonomy mode and default worker concurrency.
+- **Digest details** configures push interval, max interval, heartbeat interval, and which optional event types appear in digests.
+- **Expert overrides** let you override the provider and boot command just for the Weaver and append custom instructions. If left empty, the Weaver uses the group's defaults and built-in policy.
 
 ### Agent cell behavior
 
@@ -81,6 +81,11 @@ The Weaver system prompt steers it toward a few practical habits:
 - inspect diff stats before deep review
 - treat an idle board with remaining backlog as a new planning turn, not as done
 - clean up worktrees and sessions intentionally after merge
+
+Group settings now expose two safe first-class policy controls:
+
+- **Autonomy mode** — `Suggest only`, `Dispatch when clear`, or `Aggressive auto-continue`
+- **Default worker concurrency** — the fallback worker cap Loom uses when the Weaver dispatches a batch without explicitly passing `max_concurrent`
 
 ## Event digests and delivery
 
@@ -294,6 +299,8 @@ Batch dispatch:
 - enforces `max_concurrent` against active non-Weaver agents in the group
 - can keep related tasks on the same agent with `agent_group`
 - refuses tasks that are already assigned, already done, already in progress, or blocked by dependencies
+
+If you omit `max_concurrent`, Loom uses the group's stored Weaver default worker concurrency.
 
 ### Result states
 

@@ -59,6 +59,7 @@ class LoomDBTests(unittest.TestCase):
                 worktree_symlinks=["shared/config.yml"],
                 agent_session_resume=False,
                 worktree_merge_squash=False,
+                worktree_merge_cleanup="close_remove",
             ),
         )
         self.db.save_board_task(
@@ -171,6 +172,10 @@ class LoomDBTests(unittest.TestCase):
             ["shared/config.yml"],
         )
         self.assertFalse(loaded["group_settings"]["g"]["worktree_merge_squash"])
+        self.assertEqual(
+            loaded["group_settings"]["g"]["worktree_merge_cleanup"],
+            "close_remove",
+        )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["action_vars"],
             {"TEST_COMMAND": "python3 -m unittest"},
@@ -554,6 +559,8 @@ class LoomDBTests(unittest.TestCase):
                 "push_interval": 30,
                 "max_interval": 120,
                 "heartbeat_interval": 180,
+                "default_worker_concurrency": 4,
+                "autonomy_mode": "aggressive_auto_continue",
                 "paused": True,
                 "custom_instructions": "Focus on regressions.",
                 "pending_question": "Need approval",
@@ -573,6 +580,8 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["pending_note_kind"], "note")
         self.assertEqual(loaded["enabled_events"], ["task_completed"])
         self.assertEqual(loaded["heartbeat_interval"], 180)
+        self.assertEqual(loaded["default_worker_concurrency"], 4)
+        self.assertEqual(loaded["autonomy_mode"], "aggressive_auto_continue")
         self.assertEqual(loaded["weaver_boot_command"], "codex --model gpt-5")
 
         entries = self.db.load_journal_entries("g", limit=10)
@@ -611,6 +620,8 @@ class LoomDBTests(unittest.TestCase):
 
         self.assertEqual(loaded["max_interval"], 240)
         self.assertEqual(loaded["heartbeat_interval"], 240)
+        self.assertEqual(loaded["default_worker_concurrency"], 2)
+        self.assertEqual(loaded["autonomy_mode"], "dispatch_when_clear")
 
     def test_playbook_candidates_roundtrip(self):
         candidate = {

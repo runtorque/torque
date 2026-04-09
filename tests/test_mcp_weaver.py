@@ -171,6 +171,34 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error, text)
         return json.loads(text)
 
+    async def test_batch_dispatch_uses_stored_default_concurrency(self):
+        state, weaver = self._make_state()
+        state.weaver_settings["g"] = self.state_mod.WeaverSettings(
+            group="g",
+            default_worker_concurrency=1,
+        )
+        self._add_task(state, "task-1", "First")
+        self._add_task(state, "task-2", "Second")
+
+        payload = await self._dispatch(
+            state,
+            weaver,
+            {
+                "tasks": [{"task": "task-1"}, {"task": "task-2"}],
+            },
+            self._make_handle_command(state),
+        )
+
+        self.assertEqual(payload["max_concurrent"], 1)
+        self.assertEqual(
+            [item["status"] for item in payload["results"]],
+            ["dispatched", "deferred"],
+        )
+        self.assertEqual(
+            state.auto_dispatch_queues["g"][0].max_concurrent,
+            1,
+        )
+
     async def test_batch_dispatch_respects_capacity(self):
         state, weaver = self._make_state()
         active = self.state_mod.AgentCell(
@@ -1396,6 +1424,72 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
                     "id": cell.id,
                     "close_agent_on_merge": True,
                     "remove_worktree_on_merge": True,
+                },
+            ],
+        )
+
+    async def test_merge_forwards_explicit_false_cleanup_flags(self):
+        state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
+        state.group_settings["g"].worktree_merge_cleanup = "close_remove"
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            cell_type="agent",
+            worktree_path="/tmp/worktree",
+            worktree_branch="loom/worker",
+            worktree_base_branch="main",
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"].append(cell.id)
+
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {"type": "ok", "clean": True}
+            if payload["cmd"] == "worktree_merge":
+                return {
+                    "type": "worktree_merge",
+                    "ok": True,
+                    "sha": "abc123",
+                    "cleanup": {
+                        "close_agent": False,
+                        "remove_worktree": False,
+                        "agent_closed": False,
+                        "worktree_removed": False,
+                        "errors": [],
+                    },
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_merge",
+            {
+                "agent": cell.id,
+                "close_agent_on_merge": False,
+                "remove_worktree_on_merge": False,
+            },
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        result = json.loads(text)
+        self.assertEqual(result["sha"], "abc123")
+        self.assertEqual(
+            calls,
+            [
+                {"cmd": "worktree_check_merge", "id": cell.id},
+                {
+                    "cmd": "worktree_merge",
+                    "id": cell.id,
+                    "close_agent_on_merge": False,
+                    "remove_worktree_on_merge": False,
                 },
             ],
         )

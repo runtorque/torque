@@ -17,7 +17,13 @@ from aiohttp import web
 from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, STANDALONE, BIND_HOST, ATTACHMENTS_DIR, log
 from .db import LoomDB
 from dataclasses import asdict
-from .state import ARCHIVED_LANE, MatrixState, task_counts_as_done, task_is_closed
+from .state import (
+    ARCHIVED_LANE,
+    MatrixState,
+    merge_cleanup_flags,
+    task_counts_as_done,
+    task_is_closed,
+)
 from .events import EventLog, EventBus, PanelEventLog, health_check
 from .adapters import get_adapter, get_providers
 from .notifications import NotificationManager
@@ -87,10 +93,6 @@ from .server_worktrees import (
     _worktree_diff_updater,
     _worktree_full_diff,
 )
-
-# Delay (seconds) before closing an agent after a successful merge.
-# TODO: make this a user-facing setting in global/group settings.
-CLOSE_AFTER_MERGE_DELAY = 5
 
 
 def _should_install_keybindings() -> bool:
@@ -351,6 +353,43 @@ def _apply_verification_report(task, payload, actor_name, save_task,
     return msg, root_task
 
 
+async def _relaunch_agent_after_worktree_removal(
+        cell, *,
+        bridge,
+        state,
+        resolve_base_dir,
+        resolve_agent_launch_config,
+        apply_persistent_prompt,
+        build_cell_persistent_prompt):
+    """Reset an agent session after its worktree is removed."""
+    if cell.cell_type != "agent":
+        return
+    if cell.session_id:
+        await bridge.close_session(cell.session_id)
+    cell.status = "stopped"
+    cell.session_id = None
+    cell.agent_session_id = ""
+    base_dir = cell.worktree_repo_root or cell.directory \
+        or await resolve_base_dir(cell.group)
+    launch_cfg = resolve_agent_launch_config(
+        cell.group,
+        base_dir=base_dir,
+        explicit_template=cell.template,
+        overrides={},
+    )
+    apply_persistent_prompt(
+        cell, launch_cfg,
+        build_cell_persistent_prompt(cell, launch_cfg))
+    state._emit_agent(cell)
+    state._db_save_agent(cell)
+    await bridge.create_session(
+        cell,
+        env_vars=launch_cfg.get("env_vars"),
+        env_file=launch_cfg.get("env_file", ""),
+        shell=launch_cfg.get("shell", ""),
+        system_prompt=launch_cfg.get("system_prompt", ""))
+
+
 async def main(connection=None):
     log.info("Loom starting (port=%d)", WS_PORT)
     db = LoomDB(DB_FILE)
@@ -486,8 +525,19 @@ async def main(connection=None):
             )
         if repo_root:
             cell.directory = repo_root
-        state._emit_agent(cell)
-        state._db_save_agent(cell)
+        if ok and cell.cell_type == "agent" and cell.session_id:
+            await _relaunch_agent_after_worktree_removal(
+                cell,
+                bridge=bridge,
+                state=state,
+                resolve_base_dir=_resolve_base_dir,
+                resolve_agent_launch_config=_resolve_agent_launch_config,
+                apply_persistent_prompt=_apply_persistent_prompt,
+                build_cell_persistent_prompt=_build_cell_persistent_prompt,
+            )
+        else:
+            state._emit_agent(cell)
+            state._db_save_agent(cell)
         return cleanup
 
     def _checkpoint_message(cell) -> str:
@@ -739,7 +789,8 @@ async def main(connection=None):
             from .weaver import build_weaver_system_prompt
             ws = state.get_weaver_settings(cell.group)
             return build_weaver_system_prompt(
-                cell.group, ws, launch_cfg.get("system_prompt", ""))
+                cell.group, ws, launch_cfg.get("system_prompt", ""),
+                group_settings=gs)
         return _build_dispatch_persistent_prompt(
             launch_cfg.get("system_prompt", ""))
 
@@ -1772,7 +1823,8 @@ async def main(connection=None):
                         ws = state.get_weaver_settings(group)
                         action_sp = launch_cfg.get("system_prompt", "")
                         persistent_prompt_text = build_weaver_system_prompt(
-                            group, ws, action_sp)
+                            group, ws, action_sp,
+                            group_settings=state.get_group_settings(group))
                         launch_cfg["worktree"] = False
                     startup_prompt = _startup_prompt_for_new_agent(
                         agent_type=launch_cfg.get("agent_type", ""),
@@ -2153,34 +2205,20 @@ async def main(connection=None):
                     await _safe_remove_worktree(cell)
                     if repo_root:
                         cell.directory = repo_root
-                    state._emit_agent(cell)
-                    state._db_save_agent(cell)
                     # Relaunch if requested by the UI
                     if data.get("relaunch") and cell.cell_type == "agent":
-                        if cell.session_id:
-                            await bridge.close_session(cell.session_id)
-                        cell.status = "stopped"
-                        cell.session_id = None
-                        cell.agent_session_id = ""
-                        base_dir = cell.worktree_repo_root or cell.directory \
-                            or await _resolve_base_dir(cell.group)
-                        launch_cfg = _resolve_agent_launch_config(
-                            cell.group,
-                            base_dir=base_dir,
-                            explicit_template=cell.template,
-                            overrides={},
+                        await _relaunch_agent_after_worktree_removal(
+                            cell,
+                            bridge=bridge,
+                            state=state,
+                            resolve_base_dir=_resolve_base_dir,
+                            resolve_agent_launch_config=_resolve_agent_launch_config,
+                            apply_persistent_prompt=_apply_persistent_prompt,
+                            build_cell_persistent_prompt=_build_cell_persistent_prompt,
                         )
-                        _apply_persistent_prompt(
-                            cell, launch_cfg,
-                            _build_cell_persistent_prompt(cell, launch_cfg))
+                    else:
                         state._emit_agent(cell)
                         state._db_save_agent(cell)
-                        await bridge.create_session(
-                            cell,
-                            env_vars=launch_cfg.get("env_vars"),
-                            env_file=launch_cfg.get("env_file", ""),
-                            shell=launch_cfg.get("shell", ""),
-                            system_prompt=launch_cfg.get("system_prompt", ""))
 
             elif cmd == "worktree_checkpoint":
                 cell = state.agents.get(data["id"])
@@ -2498,26 +2536,40 @@ async def main(connection=None):
 
                             legacy_close_flag = bool(
                                 data.get("close_on_merge"))
-                            close_flag = bool(
-                                data.get("close_agent_on_merge"))
-                            remove_flag = bool(
-                                data.get("remove_worktree_on_merge"))
+                            explicit_close = (
+                                "close_agent_on_merge" in data
+                            )
+                            explicit_remove = (
+                                "remove_worktree_on_merge" in data
+                            )
+                            if explicit_close or explicit_remove:
+                                close_flag = bool(
+                                    data.get("close_agent_on_merge"))
+                                remove_flag = bool(
+                                    data.get("remove_worktree_on_merge"))
+                            elif legacy_close_flag:
+                                close_flag = True
+                                remove_flag = True
+                            else:
+                                close_flag, remove_flag = (
+                                    merge_cleanup_flags(
+                                        state.get_group_settings(
+                                            cell.group
+                                        ).worktree_merge_cleanup
+                                    )
+                                )
                             queued_followups = [
                                 t for t in state.board_tasks.values()
                                 if t.agent_id == cell.id
                                 and t.lane in {"Backlog", "To Do"}
                             ]
-                            if legacy_close_flag and not close_flag \
-                                    and not remove_flag:
-                                close_flag = True
-                                remove_flag = True
                             if queued_followups:
                                 close_flag = False
                                 remove_flag = False
-                                legacy_close_flag = False
                             clear_flag = bool(
                                 data.get("clear_context"))
-                            if queued_followups:
+                            if queued_followups or close_flag \
+                                    or remove_flag:
                                 clear_flag = False
                             cleanup = {
                                 "close_agent": close_flag,
@@ -2537,56 +2589,12 @@ async def main(connection=None):
                                 log.info(
                                     "Cleared context for '%s' "
                                     "after merge", cell.name)
-                            if data.get("close_agent_on_merge") \
-                                    or data.get(
-                                        "remove_worktree_on_merge"):
+                            if close_flag or remove_flag:
                                 cleanup = await _cleanup_after_merge(
                                     cell,
                                     close_agent=close_flag,
                                     remove_worktree=remove_flag,
                                 )
-                            elif legacy_close_flag:
-                                async def _deferred_close(
-                                        _cell=cell):
-                                    await asyncio.sleep(
-                                        CLOSE_AFTER_MERGE_DELAY)
-                                    removed = state.remove_agent(
-                                        _cell.id)
-                                    for c in removed:
-                                        if c.session_id:
-                                            await bridge\
-                                                .close_session(
-                                                    c.session_id)
-                                        if c.agent_type \
-                                                and c.directory:
-                                            adapter = get_adapter(
-                                                c.agent_type)
-                                            if hasattr(adapter,
-                                                       "uninstall_hooks"):
-                                                adapter\
-                                                    .uninstall_hooks(
-                                                        os.path
-                                                        .expanduser(
-                                                            c.directory))
-                                            if hasattr(adapter,
-                                                       "uninstall_mcp_config"):
-                                                adapter\
-                                                    .uninstall_mcp_config(
-                                                        os.path
-                                                        .expanduser(
-                                                            c.directory))
-                                            adapter\
-                                                .uninstall_persistent_prompt(
-                                                    os.path
-                                                    .expanduser(
-                                                        c.directory),
-                                                    _persistent_prompt_filename(c))
-                                        event_bus.cleanup_cell(
-                                            c.id)
-                                        await _safe_remove_worktree(
-                                            c)
-                                asyncio.create_task(
-                                    _deferred_close())
                             elif cell.worktree_path:
                                 # Reset worktree branch to base tip
                                 # so new work starts fresh (avoids
@@ -5152,6 +5160,8 @@ async def main(connection=None):
                 fields = {}
                 for k in ("push_interval", "max_interval",
                           "heartbeat_interval",
+                          "default_worker_concurrency",
+                          "autonomy_mode",
                           "pending_note", "pending_note_kind",
                           "custom_instructions", "enabled_events",
                           "paused", "weaver_provider",

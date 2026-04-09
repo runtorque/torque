@@ -453,7 +453,7 @@ WEAVER_TOOLS = [
         "name": "weaver_batch_dispatch",
         "description": (
             "Dispatch a planned batch of tasks with an explicit "
-            "concurrency cap. Tasks are processed in request order. "
+            "or default concurrency cap. Tasks are processed in request order. "
             "When capacity is full, remaining tasks are queued "
             "persistently and auto-dispatched later as slots open. "
             "Tasks that share an agent_group are routed to the same "
@@ -494,11 +494,13 @@ WEAVER_TOOLS = [
                     "type": "integer",
                     "description": (
                         "Maximum number of active worker agents "
-                        "allowed in the group after this call."
+                        "allowed in the group after this call. If "
+                        "omitted, Loom uses the group's stored Weaver "
+                        "default."
                     ),
                 },
             },
-            "required": ["tasks", "max_concurrent"],
+            "required": ["tasks"],
         },
     },
     {
