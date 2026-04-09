@@ -133,3 +133,27 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved["provider"], "codex")
         self.assertEqual(resolved["command"], "codex --model gpt-5.4")
         self.assertFalse(resolved["worktree"])
+
+    def test_resolve_agent_launch_config_includes_runtime_worktree_name(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(agent_directory="/repo"),
+            connection=None,
+            bridge=_FakeBridge(current_path="/tmp/ignored"),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_agent_launch_config(
+            "backend",
+            overrides={
+                "provider": "",
+                "command": "codex",
+                "directory": "/repo",
+                "worktree": True,
+                "worktree_base_dir": ".loom/worktrees",
+                "worktree_base_branch": "main",
+                "worktree_name": "Feature API / v2",
+            },
+        )
+
+        self.assertEqual(resolved["worktree_name"], "Feature API / v2")

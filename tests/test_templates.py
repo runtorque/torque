@@ -135,3 +135,30 @@ class TemplateManagerTests(unittest.TestCase):
                 "SHARED": "override",
             },
         )
+
+    def test_resolve_agent_config_allows_runtime_worktree_name_override(self):
+        gs = SimpleNamespace(
+            default_agent_template="",
+            agent_provider="",
+            agent_directory="",
+            agent_profile="",
+            agent_shell="",
+            agent_tab_color="",
+            agent_env_vars={},
+            git_worktree=True,
+            worktree_base_dir=".loom/worktrees",
+            worktree_base_branch="main",
+            worktree_auto_checkpoint=False,
+            worktree_merge_squash=True,
+            agent_session_resume=True,
+            agent_idle_timeout=5,
+        )
+
+        resolved = self.mgr.resolve_agent_config(
+            "",
+            gs,
+            {"worktree_name": "Feature API / v2"},
+            base_dir=str(self.project),
+        )
+
+        self.assertEqual(resolved["worktree_name"], "Feature API / v2")

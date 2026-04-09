@@ -183,6 +183,7 @@ function _showAddModal(mode, group, config) {
     document.getElementById('add-wt-enabled').checked = !!resolved.worktree;
     document.getElementById('add-wt-base-dir').value = resolved.worktree_base_dir || gs.worktree_base_dir || '';
     document.getElementById('add-wt-base-branch').value = resolved.worktree_base_branch || gs.worktree_base_branch || '';
+    document.getElementById('add-wt-name').value = '';
     document.getElementById('add-wt-auto-checkpoint').checked = resolved.worktree_auto_checkpoint || false;
     document.getElementById('add-wt-checkpoint-on-progress').checked = resolved.checkpoint_on_progress || false;
     document.getElementById('add-wt-squash').checked = resolved.worktree_merge_squash !== false;
@@ -332,8 +333,10 @@ function submitAdd() {
     if (wtEnabled) {
       const wtDir = document.getElementById('add-wt-base-dir').value.trim();
       const wtBranch = document.getElementById('add-wt-base-branch').value.trim();
+      const wtName = document.getElementById('add-wt-name').value.trim();
       if (wtDir) msg.worktree_base_dir = wtDir;
       if (wtBranch) msg.worktree_base_branch = wtBranch;
+      if (wtName) msg.worktree_name = wtName;
       msg.worktree_auto_checkpoint = document.getElementById('add-wt-auto-checkpoint').checked;
       msg.checkpoint_on_progress = document.getElementById('add-wt-checkpoint-on-progress').checked;
       msg.worktree_merge_squash = document.getElementById('add-wt-squash').checked;
