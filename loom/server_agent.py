@@ -206,6 +206,7 @@ class AgentLaunchService:
                 "worktree_base_dir", gs.worktree_base_dir),
             "worktree_base_branch": resolved.get(
                 "worktree_base_branch", gs.worktree_base_branch),
+            "worktree_name": resolved.get("worktree_name", ""),
             "worktree_auto_checkpoint": resolved.get(
                 "worktree_auto_checkpoint", gs.worktree_auto_checkpoint),
             "checkpoint_on_progress": resolved.get(
@@ -383,6 +384,7 @@ class AgentLaunchService:
                     base_dir=cell.worktree_base_dir or ".loom/worktrees",
                     base_branch=launch_cfg.get("worktree_base_branch", ""),
                     symlinks=launch_cfg.get("worktree_symlinks", []),
+                    worktree_name=launch_cfg.get("worktree_name", ""),
                 )
                 if worktree_path:
                     cell.directory = worktree_path

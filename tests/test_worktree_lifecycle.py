@@ -108,6 +108,67 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cell.worktree_diff, {})
         self.assertEqual(cell.worktree_checkpoints, 0)
 
+    async def test_blank_custom_worktree_name_preserves_default_naming(self):
+        cell = self._make_cell()
+
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+            worktree_name="",
+        )
+
+        self.assertIsNotNone(wt_path)
+        self.assertEqual(
+            Path(wt_path).resolve(),
+            (self.repo_root / ".loom" / "worktrees" / cell.id).resolve(),
+        )
+        self.assertTrue(cell.worktree_branch.startswith("loom/worker-"))
+
+    async def test_custom_worktree_name_is_sanitized_for_branch_and_path(self):
+        cell = self._make_cell()
+
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_dir=".loom/custom-worktrees",
+            base_branch="main",
+            worktree_name="Feature API / v2!!!",
+        )
+
+        self.assertIsNotNone(wt_path)
+        self.assertEqual(
+            Path(wt_path).resolve(),
+            (self.repo_root / ".loom" / "custom-worktrees" / "feature-api-v2").resolve(),
+        )
+        self.assertEqual(cell.worktree_branch, "loom/feature-api-v2")
+
+    async def test_custom_worktree_name_collision_adds_numeric_suffix(self):
+        first = self._make_cell(agent_id="agent-1", name="Worker One")
+        second = self._make_cell(agent_id="agent-2", name="Worker Two")
+
+        first_path = await self.mgr.create(
+            first,
+            str(self.repo_root),
+            base_branch="main",
+            worktree_name="feature-api-v2",
+        )
+        second_path = await self.mgr.create(
+            second,
+            str(self.repo_root),
+            base_branch="main",
+            worktree_name="feature-api-v2",
+        )
+
+        self.assertIsNotNone(first_path)
+        self.assertIsNotNone(second_path)
+        self.assertEqual(first.worktree_branch, "loom/feature-api-v2")
+        self.assertEqual(second.worktree_branch, "loom/feature-api-v2-2")
+        self.assertEqual(
+            Path(second_path).resolve(),
+            (self.repo_root / ".loom" / "worktrees" / "feature-api-v2-2").resolve(),
+        )
+
     async def test_checkpoint_history_and_rollback_cover_worktree_progress(self):
         cell = self._make_cell()
         wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")

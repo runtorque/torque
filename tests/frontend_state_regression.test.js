@@ -3827,6 +3827,86 @@ test('openEditTask resets task modal body scroll to the top', () => {
   assert.equal(taskModalBody.scrollTop, 0);
 });
 
+test('submitAdd includes worktree_name for custom agent worktrees', () => {
+  const { context, document } = createModalHarness();
+
+  document.register('add-name-input').value = 'Worker';
+  document.register('add-group-select').value = 'alpha';
+  document.register('add-cmd-input').value = '';
+  document.register('add-profile-select').value = 'Default';
+  document.register('add-dir-select').value = '/repo';
+  document.register('add-dir-input').value = '';
+  document.register('add-shell-select').value = '';
+  document.register('add-env-vars').value = '';
+  document.register('add-template-select').value = '';
+  document.register('add-provider-select').value = '';
+  document.register('add-wt-enabled').checked = true;
+  document.register('add-wt-base-dir').value = '.loom/worktrees';
+  document.register('add-wt-base-branch').value = 'main';
+  document.register('add-wt-name').value = 'Feature API / v2';
+  document.register('add-wt-auto-checkpoint').checked = false;
+  document.register('add-wt-checkpoint-on-progress').checked = false;
+  document.register('add-wt-squash').checked = true;
+
+  context.submitAdd();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
+    cmd: 'add_agent',
+    name: 'Worker',
+    group: 'alpha',
+    profile: 'Default',
+    directory: '/repo',
+    worktree: true,
+    worktree_base_dir: '.loom/worktrees',
+    worktree_base_branch: 'main',
+    worktree_name: 'Feature API / v2',
+    worktree_auto_checkpoint: false,
+    checkpoint_on_progress: false,
+    worktree_merge_squash: true,
+  });
+});
+
+test('submitAdd omits worktree_name when custom worktree naming is blank or disabled', () => {
+  const { context, document } = createModalHarness();
+
+  document.register('add-name-input').value = 'Worker';
+  document.register('add-group-select').value = 'alpha';
+  document.register('add-cmd-input').value = '';
+  document.register('add-profile-select').value = 'Default';
+  document.register('add-dir-select').value = '/repo';
+  document.register('add-dir-input').value = '';
+  document.register('add-shell-select').value = '';
+  document.register('add-env-vars').value = '';
+  document.register('add-template-select').value = '';
+  document.register('add-provider-select').value = '';
+  document.register('add-wt-enabled').checked = true;
+  document.register('add-wt-base-dir').value = '.loom/worktrees';
+  document.register('add-wt-base-branch').value = 'main';
+  document.register('add-wt-name').value = '   ';
+  document.register('add-wt-auto-checkpoint').checked = false;
+  document.register('add-wt-checkpoint-on-progress').checked = false;
+  document.register('add-wt-squash').checked = true;
+
+  context.submitAdd();
+
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(jsonValue(context, 'sendCalls[0]'), 'worktree_name'),
+    false,
+  );
+
+  context.sendCalls.length = 0;
+  document.getElementById('add-wt-enabled').checked = false;
+  document.getElementById('add-wt-name').value = 'Feature API / v2';
+
+  context.submitAdd();
+
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(jsonValue(context, 'sendCalls[0]'), 'worktree_name'),
+    false,
+  );
+  assert.equal(jsonValue(context, 'sendCalls[0].worktree'), false);
+});
+
 test('task modal keeps a scrollable body separate from its footer actions', () => {
   const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');

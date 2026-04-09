@@ -59,6 +59,7 @@ _BUILD_TEST_RE = re.compile(
     r"(^|/)\.github/workflows/",
     re.IGNORECASE,
 )
+_WORKTREE_NAME_MAX_LEN = 40
 
 
 def _diff_status_from_name_status(code: str) -> str:
@@ -223,6 +224,37 @@ def ensure_git_exclude(directory: str) -> None:
         log.debug("Could not update git exclude in %s", directory)
 
 
+def _slugify_worktree_name(name: str, max_len: int = _WORKTREE_NAME_MAX_LEN) -> str:
+    """Normalize a user-supplied worktree name to one safe slug segment."""
+    slug = re.sub(r"[^a-z0-9]+", "-", str(name or "").lower()).strip("-")
+    slug = re.sub(r"-+", "-", slug)
+    if max_len > 0 and len(slug) > max_len:
+        slug = slug[:max_len].strip("-")
+    return slug
+
+
+def _dedupe_worktree_name(base: str, index: int,
+                          max_len: int = _WORKTREE_NAME_MAX_LEN) -> str:
+    """Append a numeric suffix while keeping the worktree name bounded."""
+    if index <= 1:
+        return base
+    suffix = f"-{index}"
+    trimmed = base
+    if max_len > 0 and len(trimmed) + len(suffix) > max_len:
+        trimmed = trimmed[:max_len - len(suffix)].rstrip("-")
+    trimmed = trimmed or "worktree"
+    return f"{trimmed}{suffix}"
+
+
+def _resolve_worktree_base_path(repo_root: str, base_dir: str) -> str:
+    """Return the absolute base directory under which worktrees are created."""
+    repo_root = os.path.realpath(os.path.expanduser(repo_root))
+    base_dir = os.path.expanduser(base_dir or ".loom/worktrees")
+    if os.path.isabs(base_dir):
+        return os.path.realpath(base_dir)
+    return os.path.realpath(os.path.join(repo_root, base_dir))
+
+
 class WorktreeManager:
     """Manages git worktrees for agent isolation."""
 
@@ -277,10 +309,58 @@ class WorktreeManager:
             log.debug("Could not get current branch for %s", repo_root)
         return "HEAD"
 
+    async def _branch_exists(self, repo_root: str, branch: str) -> bool:
+        """Return whether a local branch already exists."""
+        if not branch:
+            return False
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root, "show-ref", "--verify", "--quiet",
+                f"refs/heads/{branch}",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+            return proc.returncode == 0
+        except Exception:
+            log.debug("Could not check for existing branch %s", branch)
+            return False
+
+    async def _resolve_worktree_target(self, cell, repo_root: str, base_dir: str,
+                                       worktree_name: str = "") -> tuple[str, str]:
+        """Choose the final worktree branch/path pair for this creation."""
+        requested = _slugify_worktree_name(worktree_name)
+        if not requested:
+            slug = _slugify_worktree_name(cell.name, max_len=30) or "unnamed"
+            short_id = cell.id[:7]
+            branch = f"loom/{slug}-{short_id}"
+            wt_path = os.path.join(
+                _resolve_worktree_base_path(repo_root, base_dir),
+                cell.id,
+            )
+            return branch, wt_path
+
+        base_path = _resolve_worktree_base_path(repo_root, base_dir)
+        candidate = requested
+        suffix_index = 2
+        while True:
+            branch = f"loom/{candidate}"
+            wt_path = os.path.realpath(os.path.join(base_path, candidate))
+            if os.path.commonpath([base_path, wt_path]) != base_path:
+                candidate = _dedupe_worktree_name(requested, suffix_index)
+                suffix_index += 1
+                continue
+            if not await self._branch_exists(repo_root, branch) \
+                    and not os.path.lexists(wt_path):
+                return branch, wt_path
+            candidate = _dedupe_worktree_name(requested, suffix_index)
+            suffix_index += 1
+
     async def create(self, cell, repo_root: str,
                      base_dir: str = ".loom/worktrees",
                      base_branch: str = "",
-                     symlinks: list[str] | None = None) -> Optional[str]:
+                     symlinks: list[str] | None = None,
+                     worktree_name: str = "") -> Optional[str]:
         """Create a git worktree for the cell.
 
         Args:
@@ -289,16 +369,20 @@ class WorktreeManager:
             base_dir: Directory name for worktrees (relative to repo root).
             base_branch: Branch to fork from (empty = current HEAD).
             symlinks: Relative paths to symlink from repo root into worktree.
+            worktree_name: Optional custom name for the worktree folder and
+                branch suffix.
 
         Returns:
             Absolute path to the worktree, or None on failure.
         """
         try:
-            slug = re.sub(r"[^a-z0-9-]", "-",
-                          cell.name.lower().strip())[:30].strip("-")
-            short_id = cell.id[:7]
-            branch = f"loom/{slug}-{short_id}"
-            wt_path = os.path.join(repo_root, base_dir, cell.id)
+            branch, wt_path = await self._resolve_worktree_target(
+                cell,
+                repo_root,
+                base_dir,
+                worktree_name=worktree_name,
+            )
+            os.makedirs(os.path.dirname(wt_path), exist_ok=True)
 
             # Ensure .loom directory exists
             loom_dir = os.path.join(repo_root, ".loom")

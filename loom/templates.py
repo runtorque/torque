@@ -71,7 +71,13 @@ _BOOL_KEYS = {
 }
 
 _KNOWN_KEYS = _SCALAR_KEYS | _INT_KEYS | _BOOL_KEYS | {"env_vars", "terminals"}
-_RUNTIME_OVERRIDE_KEYS = {"directory", "profile", "shell", "worktree_base_dir"}
+_RUNTIME_OVERRIDE_KEYS = {
+    "directory",
+    "profile",
+    "shell",
+    "worktree_base_dir",
+    "worktree_name",
+}
 
 
 def _normalize_terminals(raw) -> list[dict]:
