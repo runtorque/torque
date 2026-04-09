@@ -110,12 +110,27 @@ run:
 		exit 1; \
 	fi
 	@pid_file="$(SCRIPT_DIR)/loom.pid"; \
+	profile="$(LOOM_PROFILE)"; \
+	if [ -n "$(LOOM_DATA_DIR)" ]; then \
+		data_dir="$(LOOM_DATA_DIR)"; \
+	elif [ -n "$$profile" ]; then \
+		safe_profile=$$(printf '%s' "$$profile" \
+			| tr '[:upper:]' '[:lower:]' \
+			| sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$$//'); \
+		[ -n "$$safe_profile" ] || safe_profile=default; \
+		data_dir="$$HOME/.loom/profiles/$$safe_profile"; \
+	else \
+		data_dir="$(SCRIPT_DIR)"; \
+	fi; \
+	mkdir -p "$$data_dir"; \
 	nohup env LOOM_PORT="$(or $(LOOM_PORT),18932)" \
+		LOOM_PROFILE="$$profile" \
+		LOOM_DATA_DIR="$(LOOM_DATA_DIR)" \
 		"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
-		>> "$(SCRIPT_DIR)/loom.log" 2>&1 < /dev/null & \
+		>> "$$data_dir/loom.log" 2>&1 < /dev/null & \
 	pid=$$!; \
 	echo "$$pid" > "$$pid_file"; \
-	echo "Loom started (PID $$pid). Logs: $(SCRIPT_DIR)/loom.log"
+	echo "Loom started (PID $$pid). Logs: $$data_dir/loom.log"
 
 ## stop: Kill any running loom instance (by port)
 stop:
@@ -155,9 +170,22 @@ standalone: install
 		echo "Error: iTerm2 Python not found. Run make install first."; \
 		exit 1; \
 	fi
-	@echo "Starting Loom standalone on http://127.0.0.1:$(or $(LOOM_PORT),18932)/"
-	@echo "Running in the foreground. Keep this shell open; press Ctrl-C to stop."
-	@env LOOM_STANDALONE=1 LOOM_PORT="$(or $(LOOM_PORT),18932)" \
+	@profile="$(or $(LOOM_PROFILE),standalone)"; \
+	if [ -n "$(LOOM_DATA_DIR)" ]; then \
+		data_dir="$(LOOM_DATA_DIR)"; \
+	else \
+		safe_profile=$$(printf '%s' "$$profile" \
+			| tr '[:upper:]' '[:lower:]' \
+			| sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$$//'); \
+		[ -n "$$safe_profile" ] || safe_profile=default; \
+		data_dir="$$HOME/.loom/profiles/$$safe_profile"; \
+	fi; \
+	echo "Starting Loom standalone on http://127.0.0.1:$(or $(LOOM_PORT),18932)/"; \
+	echo "Using standalone data dir: $$data_dir"; \
+	echo "Running in the foreground. Keep this shell open; press Ctrl-C to stop."; \
+	env LOOM_STANDALONE=1 LOOM_PORT="$(or $(LOOM_PORT),18932)" \
+		LOOM_PROFILE="$$profile" \
+		LOOM_DATA_DIR="$(LOOM_DATA_DIR)" \
 		"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
 
 ## standalone-bg: Best-effort detached standalone launch
@@ -167,12 +195,25 @@ standalone-bg: install
 		exit 1; \
 	fi
 	@pid_file="$(SCRIPT_DIR)/standalone.pid"; \
+	profile="$(or $(LOOM_PROFILE),standalone)"; \
+	if [ -n "$(LOOM_DATA_DIR)" ]; then \
+		data_dir="$(LOOM_DATA_DIR)"; \
+	else \
+		safe_profile=$$(printf '%s' "$$profile" \
+			| tr '[:upper:]' '[:lower:]' \
+			| sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$$//'); \
+		[ -n "$$safe_profile" ] || safe_profile=default; \
+		data_dir="$$HOME/.loom/profiles/$$safe_profile"; \
+	fi; \
+	mkdir -p "$$data_dir"; \
 	nohup env LOOM_STANDALONE=1 LOOM_PORT="$(or $(LOOM_PORT),18932)" \
+		LOOM_PROFILE="$$profile" \
+		LOOM_DATA_DIR="$(LOOM_DATA_DIR)" \
 		"$(ITERM2_PYTHON)" "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" \
-		>> "$(SCRIPT_DIR)/loom.log" 2>&1 < /dev/null & \
+		>> "$$data_dir/loom.log" 2>&1 < /dev/null & \
 	pid=$$!; \
 	echo "$$pid" > "$$pid_file"; \
-	echo "Loom standalone launch requested (PID $$pid). Logs: $(SCRIPT_DIR)/loom.log"; \
+	echo "Loom standalone launch requested (PID $$pid). Logs: $$data_dir/loom.log"; \
 	echo "Open http://127.0.0.1:$(or $(LOOM_PORT),18932)/ in a browser"
 
 ## open: Open the Loom UI in the default browser (works in dual or standalone mode)

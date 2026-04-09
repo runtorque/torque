@@ -7,6 +7,8 @@ Talks to the Loom daemon over HTTP (POST /api/cmd).
 import argparse
 import json
 import os
+from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -29,10 +31,36 @@ def _yaml():
             die("PyYAML is required for this command.\n"
                 "  Install with: pip3 install pyyaml")
     return _yaml_mod
-LOOM_LOG = os.path.expanduser(
-    "~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.log")
-LOOM_DB = os.path.expanduser(
-    "~/Library/Application Support/iTerm2/Scripts/loom/loom/loom.db")
+ITERM2_RUNTIME_DIR = Path(os.path.expanduser(
+    "~/Library/Application Support/iTerm2/Scripts/loom/loom"))
+
+
+def _truthy_env(name):
+    return os.environ.get(name, "").lower() in ("1", "true", "yes")
+
+
+def _slugify_profile(name):
+    text = re.sub(r"[^A-Za-z0-9._-]+", "-", (name or "").strip().lower())
+    text = text.strip(".-_")
+    return text or "default"
+
+
+def _resolve_runtime_dir():
+    explicit = os.environ.get("LOOM_DATA_DIR", "").strip()
+    if explicit:
+        return Path(os.path.expanduser(explicit))
+
+    profile = os.environ.get("LOOM_PROFILE", "").strip()
+    if not profile and _truthy_env("LOOM_STANDALONE"):
+        profile = "standalone"
+    if profile:
+        return Path.home() / ".loom" / "profiles" / _slugify_profile(profile)
+    return ITERM2_RUNTIME_DIR
+
+
+RUNTIME_DIR = _resolve_runtime_dir()
+LOOM_LOG = str(RUNTIME_DIR / "loom.log")
+LOOM_DB = str(RUNTIME_DIR / "loom.db")
 ARCHIVED_LANE = "Archived"
 
 
