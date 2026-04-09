@@ -1844,6 +1844,10 @@ async def main(connection=None):
                     cell = await _create_agent_with_config(
                         group, name, launch_cfg,
                         explicit_template=explicit_template,
+                        target_session_id=data.get(
+                            "target_session_id", ""),
+                        target_window_id=data.get(
+                            "target_window_id", ""),
                         persistent_prompt_text=persistent_prompt_text)
                     if cell:
                         # Designate as weaver
@@ -5291,7 +5295,7 @@ async def main(connection=None):
             alert = iterm2.Alert(
                 "Close cell?",
                 message,
-                window_id=state.current_window_id or cell.window_id or None,
+                window_id=cell.window_id or state.current_window_id or None,
             )
             alert.add_button("Cancel")
             alert.add_button("Remove")
@@ -5309,10 +5313,18 @@ async def main(connection=None):
                         description, result.get("message", "unknown error"))
         return result
 
-    async def _handle_keybinding_add_agent(*, group: str, name: str = ""):
+    async def _handle_keybinding_add_agent(*,
+                                           group: str,
+                                           name: str = "",
+                                           target_session_id: str = "",
+                                           target_window_id: str = ""):
         payload = {"cmd": "add_agent", "group": group}
         if name:
             payload["name"] = name
+        if target_session_id:
+            payload["target_session_id"] = target_session_id
+        if target_window_id:
+            payload["target_window_id"] = target_window_id
         await _run_keybinding_command(payload, "add_agent")
 
     async def _handle_keybinding_add_terminal(*,
