@@ -5,7 +5,8 @@ import unittest
 
 class _FakeState:
     def __init__(self, *, agent_directory="", default_directory="",
-                 weaver_provider="", weaver_boot_command=""):
+                 weaver_provider="", weaver_boot_command="",
+                 git_worktree=False):
         self._settings = types.SimpleNamespace(
             agent_directory=agent_directory,
             default_directory=default_directory,
@@ -22,7 +23,7 @@ class _FakeState:
             env_file="",
             agent_session_resume=True,
             agent_idle_timeout=5,
-            git_worktree=False,
+            git_worktree=git_worktree,
             worktree_base_dir=".loom/worktrees",
             worktree_base_branch="",
             worktree_auto_checkpoint=False,
@@ -119,6 +120,7 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             state=_FakeState(
                 weaver_provider="codex",
                 weaver_boot_command="codex --model gpt-5.4",
+                git_worktree=True,
             ),
             connection=None,
             bridge=_FakeBridge(),
@@ -130,3 +132,4 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(resolved["provider"], "codex")
         self.assertEqual(resolved["command"], "codex --model gpt-5.4")
+        self.assertFalse(resolved["worktree"])

@@ -228,12 +228,14 @@ class AgentLaunchService:
             merged["provider"] = ws.weaver_provider
         if getattr(ws, "weaver_boot_command", ""):
             merged["command"] = ws.weaver_boot_command
-        return self.resolve_agent_launch_config(
+        resolved = self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,
             explicit_template=explicit_template,
             overrides=merged,
         )
+        resolved["worktree"] = False
+        return resolved
 
     async def create_child_terminals(self, group: str, parent_cell,
                                      terminals: list[dict] | None = None,
