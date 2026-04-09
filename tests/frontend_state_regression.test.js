@@ -1654,7 +1654,7 @@ test('_renderBoardCard shows overdue and due-soon chips with distinct classes', 
   assert.match(dueSoonHtml, /Due Apr 8 08:00/);
 });
 
-test('_boardTaskDispatchEligibility maps dispatch states onto compact card badges', () => {
+test('_boardTaskDispatchEligibility only surfaces non-default dispatch states on cards', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   context.Date.now = () => Date.parse('2026-04-07T12:00:00Z');
@@ -1682,11 +1682,7 @@ test('_boardTaskDispatchEligibility maps dispatch states onto compact card badge
         labels: []
       }))`,
     ),
-    JSON.stringify({
-      className: 'board-card-dispatch board-card-dispatch-ready',
-      label: 'Ready',
-      title: 'Ready to dispatch',
-    }),
+    'null',
   );
   assert.equal(
     runInContext(
@@ -1818,7 +1814,7 @@ test('ws ignores unsolicited action lists instead of reopening task-from-action 
   assert.equal(actionModal.classList.contains('visible'), false);
 });
 
-test('_renderBoardCard shows dispatch eligibility badges for ready and missing refs states', () => {
+test('_renderBoardCard omits the default dispatch badge while keeping warning states', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
   loadBoardScripts(context);
@@ -1848,8 +1844,8 @@ test('_renderBoardCard shows dispatch eligibility badges for ready and missing r
     }, {}, 0)
   `);
 
-  assert.match(readyHtml, /board-card-dispatch-ready/);
-  assert.match(readyHtml, />Ready</);
+  assert.doesNotMatch(readyHtml, /board-card-dispatch-/);
+  assert.doesNotMatch(readyHtml, /Ready to dispatch/);
   assert.match(missingHtml, /board-card-dispatch-warning/);
   assert.match(missingHtml, />Missing refs</);
 });

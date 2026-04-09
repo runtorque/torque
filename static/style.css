@@ -2052,10 +2052,6 @@ textarea.task-tpl-var, #task-task-input, #task-description-input {
 .board-card-dispatch {
   font-weight: 600;
 }
-.board-card-dispatch-ready {
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 15%, transparent);
-}
 .board-card-dispatch-blocked {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 16%, transparent);
