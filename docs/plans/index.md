@@ -14,6 +14,7 @@ They are not the primary user-facing docs. For day-to-day usage, start from [Get
 - [Git Worktree Lifecycle](git-worktree-lifecycle.md)
 - [Pipelines](pipelines.md)
 - [Standalone Application](standalone_application.md)
+- [Standalone xterm.js Execution](standalone_xterm_execution.md)
 - [Task Board](task-board.md)
 - [Weaver](weaver.md)
 - [Workflow Automation](workflow-automation.md)

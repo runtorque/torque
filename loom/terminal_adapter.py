@@ -10,16 +10,40 @@ adapters in loom/adapters/ which handle AI agent awareness (Claude Code, etc.).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from .state import AgentCell
 
 
+@dataclass(frozen=True)
+class TerminalCapabilities:
+    """Feature flags for a terminal backend."""
+
+    supports_profiles: bool = False
+    supports_tab_color: bool = False
+    supports_tab_reorder: bool = False
+    supports_focus_tracking: bool = False
+    supports_global_keybindings: bool = False
+    supports_toolbelt_registration: bool = False
+
+
+@dataclass(frozen=True)
+class TerminalLaunchContext:
+    """Best-effort launch context for creating new sessions."""
+
+    current_path: str = ""
+    current_profile: str = "Default"
+    current_window_id: str = ""
+    active_session_id: str = ""
+
+
 @runtime_checkable
 class TerminalAdapter(Protocol):
     """Interface for controlling a terminal emulator."""
 
+    capabilities: TerminalCapabilities
     on_session_terminated: Optional[Callable]
     on_terminal_disconnected: Optional[Callable]
 
@@ -36,8 +60,10 @@ class TerminalAdapter(Protocol):
         cell: AgentCell,
         *,
         env_vars: dict[str, str] | None = None,
+        env_file: str = "",
         init_script: str = "",
         shell: str = "",
+        system_prompt: str = "",
         target_session_id: str = "",
         target_window_id: str = "",
     ) -> None:
@@ -62,4 +88,27 @@ class TerminalAdapter(Protocol):
 
     async def reorder_tabs(self) -> None:
         """Reorder terminal tabs to match the Loom grid order."""
+        ...
+
+    async def list_profiles(self) -> list[str]:
+        """Return backend-specific launch profiles, if any."""
+        ...
+
+    async def get_launch_context(self) -> TerminalLaunchContext:
+        """Return the active launch context for creating new sessions."""
+        ...
+
+    def prime_input_ready(self, session_id: str) -> None:
+        """Skip the first input-ready wait for the given session."""
+        ...
+
+    async def register_web_view_tool(
+        self,
+        *,
+        display_name: str,
+        identifier: str,
+        url: str,
+        reveal_if_already_registered: bool = True,
+    ) -> bool:
+        """Register a native webview/toolbelt surface if the backend supports it."""
         ...

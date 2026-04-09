@@ -37,7 +37,8 @@ from loom.task_ids import (
 log = logging.getLogger("loom")
 
 _AGENT_PERSISTED_COLS = [
-    "id", "name", "slug", "group_name", "cell_type", "session_id", "profile",
+    "id", "name", "slug", "group_name", "cell_type", "terminal_backend",
+    "session_id", "profile",
     "command", "directory", "tab_color", "icon", "template", "window_id",
     "parent_id", "status", "worktree_path", "worktree_branch",
     "worktree_repo_root", "worktree_base_dir", "worktree_base_branch",
@@ -150,7 +151,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         """Upsert a single agent/terminal cell (persisted fields only)."""
         self._conn.execute("""
             INSERT OR REPLACE INTO agents
-                (id, name, slug, group_name, cell_type, session_id, profile,
+                (id, name, slug, group_name, cell_type, terminal_backend,
+                 session_id, profile,
                  command, directory, tab_color, icon, template, window_id,
                  parent_id, status, worktree_path, worktree_branch,
                  worktree_repo_root, worktree_base_dir, worktree_base_branch,
@@ -158,12 +160,13 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                  worktree_merge_squash,
                  agent_type, agent_session_id, session_resume, idle_timeout,
                  tasks_dispatched)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             cell.id, cell.name, cell.slug, cell.group, cell.cell_type,
-            cell.session_id, cell.profile, cell.command, cell.directory,
-            cell.tab_color, cell.icon, cell.template, cell.window_id,
-            cell.parent_id, cell.status, cell.worktree_path,
+            cell.terminal_backend, cell.session_id, cell.profile,
+            cell.command, cell.directory, cell.tab_color, cell.icon,
+            cell.template, cell.window_id, cell.parent_id, cell.status,
+            cell.worktree_path,
             cell.worktree_branch, cell.worktree_repo_root,
             cell.worktree_base_dir, cell.worktree_base_branch,
             int(cell.worktree_auto_checkpoint),
@@ -1288,7 +1291,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             for aid, a in state_dict.get("agents", {}).items():
                 c.execute("""
                     INSERT INTO agents
-                        (id, name, slug, group_name, cell_type, session_id,
+                        (id, name, slug, group_name, cell_type,
+                         terminal_backend, session_id,
                          profile, command, directory, tab_color, icon,
                          template, window_id, parent_id, status,
                          worktree_path, worktree_branch, worktree_repo_root,
@@ -1297,13 +1301,14 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                          worktree_merge_squash,
                          agent_type, agent_session_id, session_resume,
                          idle_timeout, tasks_dispatched)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     a.get("id", aid),
                     a.get("name", ""),
                     a.get("slug", ""),
                     a.get("group", ""),
                     a.get("cell_type", "agent"),
+                    a.get("terminal_backend", "iterm2"),
                     a.get("session_id"),
                     a.get("profile", "Default"),
                     a.get("command", ""),

@@ -14,12 +14,10 @@ from pathlib import Path
 
 import aiohttp
 from aiohttp import web
-import iterm2
 from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, STANDALONE, BIND_HOST, ATTACHMENTS_DIR, log
 from .db import LoomDB
 from dataclasses import asdict
 from .state import ARCHIVED_LANE, MatrixState, task_counts_as_done, task_is_closed
-from .bridge import ITerm2Adapter
 from .events import EventLog, EventBus, PanelEventLog, health_check
 from .adapters import get_adapter, get_providers
 from .notifications import NotificationManager
@@ -67,7 +65,6 @@ from .external_tickets import (
     post_ticket_comment,
     push_ticket_status,
 )
-from . import keybindings
 from .mcp import create_mcp_handler
 
 from .server_actions import _action_to_yaml
@@ -349,7 +346,7 @@ def _apply_verification_report(task, payload, actor_name, save_task,
     return msg, root_task
 
 
-async def main(connection: iterm2.Connection):
+async def main(connection):
     log.info("Loom starting (port=%d)", WS_PORT)
     db = LoomDB(DB_FILE)
     db.init()
@@ -369,6 +366,8 @@ async def main(connection: iterm2.Connection):
     event_bus.start()
     asyncio.create_task(health_check(state, event_log, event_bus, notifier))
     log.info("Event bus, health monitor, and notifications started")
+
+    from .bridge import ITerm2Adapter
 
     bridge = ITerm2Adapter(connection, state)
     worktree_mgr = WorktreeManager()
@@ -566,6 +565,8 @@ async def main(connection: iterm2.Connection):
 
     # Register RPCs and install global key bindings
     _kb_overrides = state.global_settings.keybindings or None
+    from . import keybindings
+
     displaced_bindings = await keybindings.setup(
         connection, state, bridge, overrides=_kb_overrides)
     # Mutable container so nested closures can reassign on keybinding change
@@ -1218,30 +1219,10 @@ async def main(connection: iterm2.Connection):
 
         # get_config: respond directly, no state mutation
         if cmd == "get_config":
-            try:
-                all_profiles = await iterm2.PartialProfile.async_query(
-                    connection)
-                profile_names = sorted(
-                    set(p.name for p in all_profiles if p.name))
-            except Exception:
-                log.exception("Failed to query profiles")
-                profile_names = ["Default"]
-
-            current_path = ""
-            current_profile = "Default"
-            try:
-                app = await iterm2.async_get_app(connection)
-                win = app.current_terminal_window
-                if win and win.current_tab \
-                        and win.current_tab.current_session:
-                    sess = win.current_tab.current_session
-                    current_path = (
-                        await sess.async_get_variable("path") or "")
-                    current_profile = (
-                        await sess.async_get_variable("profileName")
-                        or "Default")
-            except Exception:
-                log.exception("Failed to get current session info")
+            profile_names = await bridge.list_profiles()
+            ctx = await bridge.get_launch_context()
+            current_path = ctx.current_path
+            current_profile = ctx.current_profile
 
             group = data.get("group", "")
             group_cells = []
@@ -1276,14 +1257,7 @@ async def main(connection: iterm2.Connection):
         if cmd == "get_group_settings":
             group = data.get("group", "")
             gs = state.get_group_settings(group)
-            try:
-                all_profiles = await iterm2.PartialProfile.async_query(
-                    connection)
-                pnames = sorted(
-                    set(p.name for p in all_profiles if p.name))
-            except Exception:
-                log.exception("Failed to query profiles")
-                pnames = ["Default"]
+            pnames = await bridge.list_profiles()
             base_dir = await _resolve_base_dir(group)
             return {
                 "type": "group_settings",
@@ -5083,8 +5057,7 @@ async def main(connection: iterm2.Connection):
                         )
                         # Pre-mark as input-ready (agent is
                         # likely idle/waiting for this message)
-                        bridge._input_ready_sessions.add(
-                            target.session_id)
+                        bridge.prime_input_ready(target.session_id)
                         await bridge.send_text(
                             target.session_id, formatted)
                         target.pending_weaver_message = True
@@ -5215,8 +5188,7 @@ async def main(connection: iterm2.Connection):
                         )
                         # Pre-mark as input-ready so send_text
                         # skips the wait (weaver is already idle)
-                        bridge._input_ready_sessions.add(
-                            weaver.session_id)
+                        bridge.prime_input_ready(weaver.session_id)
                         await bridge.send_text(
                             weaver.session_id, formatted)
                         # Clear question, unpause events
@@ -5502,14 +5474,16 @@ async def main(connection: iterm2.Connection):
     # -- Register toolbelt (skipped in standalone-only mode) ----------------
 
     if not STANDALONE:
-        await iterm2.tool.async_register_web_view_tool(
-            connection,
+        registered = await bridge.register_web_view_tool(
             display_name="Loom",
             identifier="com.loom.toolbelt",
             reveal_if_already_registered=True,
             url=f"http://127.0.0.1:{WS_PORT}/",
         )
-        log.info("Toolbelt webview registered — Loom ready")
+        if registered:
+            log.info("Toolbelt webview registered — Loom ready")
+        else:
+            log.warning("Toolbelt webview registration unavailable")
     else:
         log.info("Standalone mode — toolbelt registration skipped")
         log.info("Open http://127.0.0.1:%d/ in a browser", WS_PORT)

@@ -30,6 +30,7 @@ class LoomDBTests(unittest.TestCase):
             group="g",
             slug="worker",
             cell_type="agent",
+            terminal_backend="pty",
             session_id="session-1",
             command="codex",
             directory="/repo",
@@ -52,6 +53,7 @@ class LoomDBTests(unittest.TestCase):
         self.db.save_group_settings(
             "g",
             GroupSettings(
+                default_terminal_backend="pty",
                 notifications=True,
                 board_default_labels=["ready"],
                 worktree_symlinks=["shared/config.yml"],
@@ -153,8 +155,13 @@ class LoomDBTests(unittest.TestCase):
 
         self.assertEqual(loaded["groups"], {"g": ["agent-1"]})
         self.assertEqual(loaded["group_slugs"], {"g": "g"})
+        self.assertEqual(loaded["agents"]["agent-1"]["terminal_backend"], "pty")
         self.assertFalse(loaded["agents"]["agent-1"]["session_resume"])
         self.assertTrue(loaded["agents"]["agent-1"]["worktree_auto_checkpoint"])
+        self.assertEqual(
+            loaded["group_settings"]["g"]["default_terminal_backend"],
+            "pty",
+        )
         self.assertEqual(
             loaded["group_settings"]["g"]["board_default_labels"],
             ["ready"],

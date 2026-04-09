@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS agents (
     slug                  TEXT NOT NULL DEFAULT '',
     group_name            TEXT NOT NULL,
     cell_type             TEXT NOT NULL DEFAULT 'agent',
+    terminal_backend      TEXT NOT NULL DEFAULT 'iterm2',
     session_id            TEXT,
     profile               TEXT NOT NULL DEFAULT 'Default',
     command               TEXT NOT NULL DEFAULT '',
@@ -57,6 +58,7 @@ CREATE TABLE IF NOT EXISTS group_members (
 CREATE TABLE IF NOT EXISTS group_settings (
     group_name                  TEXT PRIMARY KEY,
     default_directory           TEXT NOT NULL DEFAULT '',
+    default_terminal_backend    TEXT NOT NULL DEFAULT 'iterm2',
     profile                     TEXT NOT NULL DEFAULT '',
     shell                       TEXT NOT NULL DEFAULT '',
     tab_color                   TEXT NOT NULL DEFAULT '',
@@ -653,6 +655,17 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             conn.execute(
                 f"ALTER TABLE {table} ADD COLUMN "
                 "checkpoint_on_progress INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+    for table, col in (
+        ("agents", "terminal_backend"),
+        ("group_settings", "default_terminal_backend"),
+    ):
+        try:
+            conn.execute(f"SELECT {col} FROM {table} LIMIT 0")
+        except sqlite3.OperationalError:
+            conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN "
+                f"{col} TEXT NOT NULL DEFAULT 'iterm2'")
             conn.commit()
     # Migrate: add pending_question column to weaver_settings
     try:

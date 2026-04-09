@@ -7,8 +7,6 @@ import os
 import shlex
 from typing import Any
 
-import iterm2
-
 from .adapters import get_adapter, get_default_command_for_provider
 from .artifacts import artifact_prompt_block, legacy_image_prompt_block
 
@@ -80,14 +78,9 @@ class AgentLaunchService:
             if directory:
                 return os.path.expanduser(directory)
         try:
-            app = await iterm2.async_get_app(self.connection)
-            win = app.current_terminal_window
-            if win and win.current_tab and win.current_tab.current_session:
-                path = await win.current_tab.current_session.async_get_variable(
-                    "path"
-                )
-                if path:
-                    return path
+            ctx = await self.bridge.get_launch_context()
+            if ctx.current_path:
+                return ctx.current_path
         except Exception:
             pass
         return ""

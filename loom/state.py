@@ -131,6 +131,7 @@ class AgentCell:
     group: str
     slug: str = ""              # auto-generated from name
     cell_type: str = "agent"  # "agent" | "terminal"
+    terminal_backend: str = "iterm2"  # "iterm2" | "pty" (future backends)
     session_id: Optional[str] = None
     profile: str = "Default"
     command: str = ""
@@ -340,6 +341,7 @@ class GroupSettings:
     """Default settings applied when creating agents/terminals in a group."""
     # Group-level defaults
     default_directory: str = ""
+    default_terminal_backend: str = "iterm2"
     profile: str = ""
     shell: str = ""
     tab_color: str = ""
@@ -1590,6 +1592,7 @@ class MatrixState:
         name: str,
         group: str,
         cell_type: str,
+        terminal_backend: str = "",
         profile: str = "Default",
         command: str = "",
         directory: str = "",
@@ -1605,9 +1608,9 @@ class MatrixState:
             group = parent.group
         elif group not in self.groups:
             return None
+        gs = self.get_group_settings(group)
         # Max agents cap
         if cell_type == "agent" and not parent_id:
-            gs = self.get_group_settings(group)
             if gs.max_agents > 0:
                 current = sum(1 for aid in self.groups.get(group, [])
                               if self.agents.get(aid)
@@ -1628,6 +1631,9 @@ class MatrixState:
             group=group,
             slug=slug,
             cell_type=cell_type,
+            terminal_backend=terminal_backend
+            or gs.default_terminal_backend
+            or "iterm2",
             profile=profile,
             command=command or (self.get_default_command() if cell_type == "agent" else ""),
             directory=directory,

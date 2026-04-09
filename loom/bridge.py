@@ -11,12 +11,24 @@ import iterm2
 from .config import log
 from .state import AgentCell, MatrixState
 from .adapters import detect_agent_type, detect_by_command, get_adapter
+from .terminal_adapter import (
+    TerminalCapabilities,
+    TerminalLaunchContext,
+)
 from .worktree import ensure_git_exclude
 
 _TITLE_RE = re.compile(r"^\[(.+?)\]\s+(.+)$")
 
 
 class ITerm2Adapter:
+    capabilities = TerminalCapabilities(
+        supports_profiles=True,
+        supports_tab_color=True,
+        supports_tab_reorder=True,
+        supports_focus_tracking=True,
+        supports_global_keybindings=True,
+        supports_toolbelt_registration=True,
+    )
 
     def __init__(self, connection: iterm2.Connection, state: MatrixState):
         self.conn = connection
@@ -170,6 +182,72 @@ class ITerm2Adapter:
                       if c.status == "stopped")
         log.info("Orphan reconnect: %d re-linked, %d remain stopped",
                  len(matched), stopped)
+
+    async def list_profiles(self) -> list[str]:
+        """Return sorted iTerm2 profile names."""
+        try:
+            all_profiles = await iterm2.PartialProfile.async_query(self.conn)
+            return sorted(set(p.name for p in all_profiles if p.name))
+        except Exception:
+            log.exception("Failed to query profiles")
+            return ["Default"]
+
+    async def get_launch_context(self) -> TerminalLaunchContext:
+        """Return the current session metadata used for launching new sessions."""
+        try:
+            app = await iterm2.async_get_app(self.conn)
+            win = getattr(app, "current_terminal_window", None) \
+                or getattr(app, "current_window", None)
+            if not win:
+                return TerminalLaunchContext(
+                    current_window_id=self.state.current_window_id or "",
+                    active_session_id=self.state.active_session_id or "",
+                )
+            tab = getattr(win, "current_tab", None)
+            session = getattr(tab, "current_session", None) if tab else None
+            if not session:
+                return TerminalLaunchContext(
+                    current_window_id=getattr(win, "window_id", "") or "",
+                    active_session_id=self.state.active_session_id or "",
+                )
+            return TerminalLaunchContext(
+                current_path=await session.async_get_variable("path") or "",
+                current_profile=(
+                    await session.async_get_variable("profileName")
+                    or "Default"
+                ),
+                current_window_id=getattr(win, "window_id", "") or "",
+                active_session_id=getattr(session, "session_id", "") or "",
+            )
+        except Exception:
+            log.exception("Failed to get current session info")
+            return TerminalLaunchContext(
+                current_window_id=self.state.current_window_id or "",
+                active_session_id=self.state.active_session_id or "",
+            )
+
+    def prime_input_ready(self, session_id: str) -> None:
+        """Mark a session as ready for immediate input delivery."""
+        if session_id:
+            self._input_ready_sessions.add(session_id)
+
+    async def register_web_view_tool(self, *, display_name: str,
+                                     identifier: str, url: str,
+                                     reveal_if_already_registered: bool = True
+                                     ) -> bool:
+        """Register the Loom toolbelt webview in iTerm2."""
+        try:
+            await iterm2.tool.async_register_web_view_tool(
+                self.conn,
+                display_name=display_name,
+                identifier=identifier,
+                reveal_if_already_registered=reveal_if_already_registered,
+                url=url,
+            )
+            return True
+        except Exception:
+            log.exception("Failed to register iTerm2 web view tool")
+            return False
 
     # -- Session lifecycle --------------------------------------------------
 
