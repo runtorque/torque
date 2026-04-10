@@ -262,6 +262,262 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.reload(self.server_mod)
+        from loom.db import LoomDB
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.db = LoomDB(Path(self.tmp.name) / 'loom.db')
+        self.db.init()
+        self.addCleanup(self.db.close)
+
+    def _make_state(self):
+        state = self.state_mod.MatrixState(db=self.db)
+        state.groups['g'] = []
+        return state
+
+    def _add_weaver_and_worker(self, state, *, current_task_id=''):
+        weaver = self.state_mod.AgentCell(
+            id='weaver-1',
+            name='Weaver',
+            group='g',
+            cell_type='agent',
+        )
+        worker = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            session_id='session-1',
+            status='running',
+            current_task_id=current_task_id,
+        )
+        state.agents[weaver.id] = weaver
+        state.agents[worker.id] = worker
+        state.groups['g'] = [weaver.id, worker.id]
+        state.group_settings['g'] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        state.history_record_agent(worker)
+        return weaver, worker
+
+    async def test_send_weaver_message_creates_derived_follow_up_task_and_history(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            'Implement feature',
+            'g',
+            lane='In Progress',
+            id='task-parent',
+            agent_id='agent-1',
+        )
+        _weaver, worker = self._add_weaver_and_worker(
+            state,
+            current_task_id=parent.id,
+        )
+
+        primed = []
+        sent = []
+        events = []
+
+        class FakeBridge:
+            def prime_input_ready(self, session_id):
+                primed.append(session_id)
+
+            async def send_text(self, session_id, text):
+                sent.append((session_id, text))
+
+        def panel_event(kind, cell_id, agent_name, group, message, task_id=''):
+            events.append({
+                'kind': kind,
+                'cell_id': cell_id,
+                'agent_name': agent_name,
+                'group': group,
+                'message': message,
+                'task_id': task_id,
+            })
+
+        result = await self.server_mod._send_weaver_message_to_agent(
+            state,
+            FakeBridge(),
+            worker,
+            'Please rebase the branch and report back',
+            panel_event,
+        )
+
+        self.assertEqual(result['type'], 'ok')
+        follow_up = state.board_tasks[result['task_id']]
+        self.assertEqual(follow_up.parent_task_id, parent.id)
+        self.assertEqual(follow_up.pipeline_root_id, parent.id)
+        self.assertEqual(follow_up.pipeline_depth, 1)
+        self.assertEqual(follow_up.reply_agent_id, worker.id)
+        self.assertEqual(follow_up.status, 'Awaiting Reply')
+        self.assertIn('loom:derived', follow_up.labels)
+        self.assertIn('loom:weaver-message', follow_up.labels)
+        self.assertEqual(follow_up.messages[-1]['action'], 'weaver_message')
+        self.assertTrue(worker.pending_weaver_message)
+        self.assertEqual(primed, ['session-1'])
+        self.assertEqual(sent[0][0], 'session-1')
+        self.assertIn(f'Task: {follow_up.id}', sent[0][1])
+        self.assertIn(
+            f'loom_reply(task=\"{follow_up.id}\", message=\"your response\")',
+            sent[0][1],
+        )
+        self.assertEqual(events, [{
+            'kind': 'weaver_message',
+            'cell_id': worker.id,
+            'agent_name': worker.name,
+            'group': worker.group,
+            'message': 'Please rebase the branch and report back',
+            'task_id': follow_up.id,
+        }])
+        self.assertEqual(
+            self.db.load_agent_tasks(worker.id)[0]['task_id'],
+            follow_up.id,
+        )
+        self.assertEqual(
+            self.db.load_agent_messages_by_task(follow_up.id)[0]['action'],
+            'weaver_message',
+        )
+
+    async def test_send_weaver_message_without_active_task_creates_root_follow_up(self):
+        state = self._make_state()
+        _weaver, worker = self._add_weaver_and_worker(state)
+
+        class FakeBridge:
+            def prime_input_ready(self, _session_id):
+                pass
+
+            async def send_text(self, _session_id, _text):
+                return None
+
+        result = await self.server_mod._send_weaver_message_to_agent(
+            state,
+            FakeBridge(),
+            worker,
+            'Need a quick status update',
+            lambda *args, **kwargs: None,
+        )
+
+        follow_up = state.board_tasks[result['task_id']]
+        self.assertEqual(follow_up.parent_task_id, '')
+        self.assertEqual(follow_up.pipeline_root_id, '')
+        self.assertEqual(follow_up.pipeline_depth, 0)
+        self.assertEqual(follow_up.group, 'g')
+        self.assertEqual(follow_up.labels, ['loom:weaver-message'])
+
+    def test_handle_weaver_reply_completes_follow_up_only_and_preserves_parent_state(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            'Implement feature',
+            'g',
+            lane='In Progress',
+            id='task-parent',
+            agent_id='agent-1',
+            status='Reviewing',
+        )
+        _weaver, worker = self._add_weaver_and_worker(
+            state,
+            current_task_id=parent.id,
+        )
+        follow_up = state.board_add_task(
+            'Weaver: Need rebase status',
+            'g',
+            lane='Backlog',
+            id='task-reply',
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+            reply_agent_id=worker.id,
+            labels=['loom:derived', 'loom:weaver-message'],
+            status='Awaiting Reply',
+        )
+        state.history_record_dispatch(worker, follow_up)
+        worker.pending_weaver_message = True
+        events = []
+
+        def panel_event(kind, cell_id, agent_name, group, message, task_id=''):
+            events.append((kind, cell_id, agent_name, group, message, task_id))
+
+        result = self.server_mod._handle_weaver_reply(
+            state,
+            worker,
+            message='Rebased successfully',
+            task_id=follow_up.id,
+            panel_event=panel_event,
+        )
+
+        self.assertEqual(result, {'type': 'ok', 'task_id': follow_up.id})
+        self.assertEqual(state.board_tasks[follow_up.id].lane, 'Done')
+        self.assertEqual(state.board_tasks[follow_up.id].status, '')
+        self.assertEqual(state.board_tasks[parent.id].lane, 'In Progress')
+        self.assertEqual(state.board_tasks[parent.id].status, 'Reviewing')
+        self.assertFalse(worker.pending_weaver_message)
+        self.assertEqual(
+            state.board_tasks[follow_up.id].messages[-1]['action'],
+            'reply',
+        )
+        self.assertEqual(self.db.load_agent_messages_by_task(parent.id), [])
+        reply_messages = self.db.load_agent_messages_by_task(follow_up.id)
+        self.assertEqual(reply_messages[0]['action'], 'reply')
+        task_rows = self.db.load_agent_tasks(worker.id)
+        self.assertEqual(task_rows[0]['task_id'], follow_up.id)
+        self.assertEqual(task_rows[0]['outcome'], 'answered')
+        self.assertIsNotNone(task_rows[0]['completed_at'])
+        self.assertEqual(
+            events,
+            [('agent_reply', worker.id, worker.name, worker.group,
+              'Rebased successfully', follow_up.id)],
+        )
+
+    def test_handle_weaver_reply_requires_explicit_task_when_multiple_are_pending(self):
+        state = self._make_state()
+        _weaver, worker = self._add_weaver_and_worker(state)
+        first = state.board_add_task(
+            'Weaver: First question',
+            'g',
+            lane='Backlog',
+            id='task-first',
+            reply_agent_id=worker.id,
+            labels=['loom:weaver-message'],
+            status='Awaiting Reply',
+        )
+        second = state.board_add_task(
+            'Weaver: Second question',
+            'g',
+            lane='Backlog',
+            id='task-second',
+            reply_agent_id=worker.id,
+            labels=['loom:weaver-message'],
+            status='Awaiting Reply',
+        )
+        worker.pending_weaver_message = True
+
+        ambiguous = self.server_mod._handle_weaver_reply(
+            state,
+            worker,
+            message='Need task id',
+        )
+        answered = self.server_mod._handle_weaver_reply(
+            state,
+            worker,
+            message='Answer for the first thread',
+            task_id=first.id,
+        )
+
+        self.assertEqual(ambiguous['type'], 'error')
+        self.assertIn('Multiple pending weaver messages', ambiguous['message'])
+        self.assertEqual(answered, {'type': 'ok', 'task_id': first.id})
+        self.assertEqual(state.board_tasks[first.id].lane, 'Done')
+        self.assertEqual(state.board_tasks[second.id].lane, 'Backlog')
+        self.assertTrue(worker.pending_weaver_message)
+
+
 class ServerWorktreeMergeDiffTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()

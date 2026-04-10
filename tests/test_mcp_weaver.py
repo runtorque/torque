@@ -117,7 +117,13 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool for tool in self.mcp_weaver_mod.WEAVER_TOOLS
             if tool["name"] == "weaver_task_upload_artifact"
         )
+        message_tool = next(
+            tool for tool in self.mcp_weaver_mod.WEAVER_TOOLS
+            if tool["name"] == "weaver_agent_message"
+        )
         self.assertIn("Upload and attach an image or other artifact", upload_tool["description"])
+        self.assertIn("visible follow-up task", message_tool["description"])
+        self.assertIn("returns its task id", message_tool["description"])
 
     async def test_non_weaver_agent_cannot_call_weaver_tools(self):
         state, weaver = self._make_state()
@@ -2026,6 +2032,44 @@ class WeaverAgentLifecycleToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error)
         self.assertEqual(captured, {"cmd": "relaunch_agent", "id": cell.id})
         self.assertIn("relaunched", text)
+
+    async def test_agent_message_forwards_result_with_follow_up_task_id(self):
+        state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"].append(cell.id)
+
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok", "task_id": "LOOM:1:2"}
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_agent_message",
+            {"agent": cell.slug, "message": "Please rebase and report back"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(text), {"type": "ok", "task_id": "LOOM:1:2"})
+        self.assertEqual(
+            calls,
+            [{
+                "cmd": "weaver_message",
+                "agent_id": cell.id,
+                "message": "Please rebase and report back",
+            }],
+        )
 
 
 class WeaverOwnedAgentRestrictionTests(unittest.IsolatedAsyncioTestCase):

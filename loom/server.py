@@ -11,6 +11,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 import aiohttp
 from aiohttp import web
@@ -28,6 +29,7 @@ from .db import LoomDB
 from dataclasses import asdict
 from .state import (
     ARCHIVED_LANE,
+    BoardTask,
     MatrixState,
     merge_cleanup_flags,
     task_counts_as_done,
@@ -351,6 +353,222 @@ def _nearest_ancestor_agent_for_action_stage(state: MatrixState, task,
     return None
 
 
+def _append_mcp_message(cell, action: str, message: str = ""):
+    """Append an MCP message to the cell log."""
+    if not cell:
+        return
+    cell.mcp_messages.insert(0, {
+        "action": action,
+        "message": message,
+        "timestamp": time.time(),
+    })
+    if len(cell.mcp_messages) > 20:
+        cell.mcp_messages[:] = cell.mcp_messages[:20]
+
+
+def _weaver_display_name(state: MatrixState, group: str) -> str:
+    weaver_id = state.get_group_settings(group).weaver_agent_id or ""
+    weaver = state.agents.get(weaver_id) if weaver_id else None
+    name = (weaver.name if weaver else "").strip()
+    return name or "Weaver"
+
+
+def _summarize_weaver_message(message: str, *, limit: int = 72) -> str:
+    lines = [
+        line.strip() for line in str(message or "").splitlines()
+        if line.strip()
+    ]
+    summary = lines[0] if lines else str(message or "").strip()
+    if not summary:
+        return "Weaver follow-up"
+    if len(summary) <= limit:
+        return summary
+    return summary[:limit - 1].rstrip() + "…"
+
+
+def _weaver_followup_task_title(message: str) -> str:
+    return f"Weaver: {_summarize_weaver_message(message)}"
+
+
+def _format_weaver_message_prompt(message: str, task_id: str) -> str:
+    return (
+        "\n"
+        "## Message from Weaver\n"
+        f"{message}\n\n"
+        f"Task: {task_id}\n"
+        f'Reply with: loom_reply(task="{task_id}", message="your response")\n'
+        "---\n"
+    )
+
+
+def _create_weaver_followup_task(state: MatrixState, target, message: str
+                                 ) -> Optional[BoardTask]:
+    if not target or not target.group:
+        return None
+    active_task = state.agent_current_task(target.id)
+    labels = ["loom:weaver-message"]
+    kwargs = {
+        "description": message,
+        "status": "Awaiting Reply",
+        "labels": labels,
+        "reply_agent_id": target.id,
+    }
+    task_group = target.group
+    if active_task:
+        labels.insert(0, "loom:derived")
+        task_group = active_task.group or target.group
+        kwargs.update({
+            "parent_task_id": active_task.id,
+            "pipeline_depth": active_task.pipeline_depth + 1,
+            "pipeline_root_id": active_task.pipeline_root_id or active_task.id,
+        })
+    return state.board_add_task(
+        task=_weaver_followup_task_title(message),
+        group=task_group,
+        lane="Backlog",
+        **kwargs,
+    )
+
+
+def _resolve_pending_weaver_reply_task(state: MatrixState, cell, *,
+                                       task_id: str = ""
+                                       ) -> tuple[Optional[BoardTask],
+                                                  list[BoardTask], str]:
+    pending = state.agent_pending_weaver_reply_tasks(cell.id) if cell else []
+    if not cell:
+        return None, pending, "Cell not found"
+    explicit = _resolve_task_id(state, task_id) if task_id else ""
+    if explicit:
+        task = state.board_tasks.get(explicit)
+        if not task:
+            return None, pending, f"Task not found: {task_id}"
+        if task.reply_agent_id != cell.id:
+            return None, pending, (
+                f"Task {task.id} is not awaiting a reply from this agent"
+            )
+        if task_is_closed(task):
+            return None, pending, f"Task {task.id} is already closed"
+        return task, pending, ""
+    if len(pending) == 1:
+        return pending[0], pending, ""
+    if not pending:
+        return None, pending, "No pending weaver message to reply to"
+    ids = ", ".join(task.id for task in pending[:5])
+    if len(pending) > 5:
+        ids += ", …"
+    return None, pending, (
+        "Multiple pending weaver messages; reply with task=<id>. "
+        f"Open reply tasks: {ids}"
+    )
+
+
+async def _send_weaver_message_to_agent(state: MatrixState, bridge, target,
+                                        message: str, panel_event) -> dict:
+    if not target or not target.session_id:
+        return {"type": "error", "message": "Agent is not running"}
+    follow_up = _create_weaver_followup_task(state, target, message)
+    if not follow_up:
+        return {
+            "type": "error",
+            "message": "Failed to create Weaver follow-up task",
+        }
+    try:
+        if hasattr(bridge, "prime_input_ready"):
+            bridge.prime_input_ready(target.session_id)
+        await bridge.send_text(
+            target.session_id,
+            _format_weaver_message_prompt(message, follow_up.id),
+        )
+    except Exception as exc:
+        log.exception("Failed to send Weaver message to agent %s", target.id)
+        state.board_remove_task(follow_up.id)
+        return {
+            "type": "error",
+            "message": f"Failed to send message: {exc}",
+        }
+
+    follow_up.messages.append({
+        "timestamp": time.time(),
+        "action": "weaver_message",
+        "message": message,
+        "agent_name": _weaver_display_name(state, target.group),
+    })
+    state.board_update_task(
+        follow_up.id,
+        messages=list(follow_up.messages),
+    )
+    state.history_record_dispatch(target, follow_up)
+    state.history_record_message(
+        target.id,
+        "weaver_message",
+        message,
+        task_id=follow_up.id,
+    )
+    target.pending_weaver_message = True
+    state._emit_agent(target)
+    panel_event(
+        "weaver_message",
+        target.id,
+        target.name,
+        target.group,
+        message[:200],
+        task_id=follow_up.id,
+    )
+    return {"type": "ok", "task_id": follow_up.id}
+
+
+def _handle_weaver_reply(state: MatrixState, cell, *, message: str,
+                         task_id: str = "", panel_event=None) -> dict:
+    if not message:
+        return {"type": "error", "message": "Reply message is required"}
+    reply_task, pending, error = _resolve_pending_weaver_reply_task(
+        state,
+        cell,
+        task_id=task_id,
+    )
+    if error:
+        if not pending:
+            cell.pending_weaver_message = False
+            state._emit_agent(cell)
+        return {"type": "error", "message": error}
+
+    _append_mcp_message(cell, "reply", message)
+    reply_task.messages.append({
+        "timestamp": time.time(),
+        "action": "reply",
+        "message": message,
+        "agent_name": cell.name,
+    })
+    state.board_update_task(
+        reply_task.id,
+        messages=list(reply_task.messages),
+        status="",
+    )
+    state.history_record_message(
+        cell.id,
+        "reply",
+        message,
+        task_id=reply_task.id,
+    )
+    state.history_complete_task(cell.id, reply_task.id, "answered")
+    if not task_counts_as_done(reply_task):
+        state.board_move_task(reply_task.id, "Done")
+    cell.pending_weaver_message = bool(
+        state.agent_pending_weaver_reply_tasks(cell.id)
+    )
+    state._emit_agent(cell)
+    if panel_event:
+        panel_event(
+            "agent_reply",
+            cell.id,
+            cell.name,
+            cell.group,
+            message[:200],
+            task_id=reply_task.id,
+        )
+    return {"type": "ok", "task_id": reply_task.id}
+
+
 def _resolve_ai_report_task(state: MatrixState, cell, *,
                             task_id: str = "") -> Optional[BoardTask]:
     """Resolve the task an agent report should apply to.
@@ -363,7 +581,7 @@ def _resolve_ai_report_task(state: MatrixState, cell, *,
     if not cell:
         return None
     if task_id:
-        return state.board_tasks.get(task_id)
+        return state.board_tasks.get(_resolve_task_id(state, task_id))
     if cell.current_task_id:
         current = state.board_tasks.get(cell.current_task_id)
         if state.task_occupies_execution_slot(current, agent_id=cell.id):
@@ -4456,14 +4674,7 @@ async def main(connection=None):
                                 break
 
                     def _append_mcp(c, act, msg=""):
-                        """Append an MCP message to the cell log."""
-                        c.mcp_messages.insert(0, {
-                            "action": act,
-                            "message": msg,
-                            "timestamp": time.time(),
-                        })
-                        if len(c.mcp_messages) > 20:
-                            c.mcp_messages[:] = c.mcp_messages[:20]
+                        _append_mcp_message(c, act, msg)
 
                     def _append_task_msg(t, act, msg, agent_name):
                         """Append to the task's persisted activity log."""
@@ -4475,11 +4686,14 @@ async def main(connection=None):
                                 "agent_name": agent_name,
                             })
 
-                    def _record_history_msg(c, act, msg=""):
+                    def _record_history_msg(c, act, msg="", task_override=None):
                         """Persist to agent_messages history table."""
                         state.history_record_message(
                             c.id, act, msg,
-                            task_id=task.id if task else "")
+                            task_id=(
+                                task_override.id if task_override
+                                else (task.id if task else "")
+                            ))
 
                     async def _auto_dispatch_next(c):
                         """Pick the next queued task for this agent."""
@@ -5225,24 +5439,13 @@ async def main(connection=None):
                                       "slug": cell.slug}
 
                     elif action == "reply":
-                        if not message:
-                            result = {"type": "error",
-                                      "message":
-                                          "Reply message is required"}
-                        elif not cell.pending_weaver_message:
-                            result = {"type": "error",
-                                      "message":
-                                          "No pending weaver message "
-                                          "to reply to"}
-                        else:
-                            cell.pending_weaver_message = False
-                            _append_mcp(cell, "reply", message)
-                            _record_history_msg(cell, "reply", message)
-                            _panel_event(
-                                "agent_reply", cell.id,
-                                cell.name, cell.group,
-                                message[:200])
-                            result = {"type": "ok"}
+                        result = _handle_weaver_reply(
+                            state,
+                            cell,
+                            message=message,
+                            task_id=task_id,
+                            panel_event=_panel_event,
+                        )
 
                     else:
                         result = {"type": "error",
@@ -5503,29 +5706,13 @@ async def main(connection=None):
                               "message": "Message is required"}
                 else:
                     target = state.agents.get(agent_id)
-                    if not target or not target.session_id:
-                        result = {"type": "error",
-                                  "message": "Agent is not running"}
-                    else:
-                        formatted = (
-                            "\n"
-                            "## Message from Weaver\n"
-                            f"{msg_text}\n\n"
-                            'Reply with: loom_reply("your response")\n'
-                            "---\n"
-                        )
-                        # Pre-mark as input-ready (agent is
-                        # likely idle/waiting for this message)
-                        bridge.prime_input_ready(target.session_id)
-                        await bridge.send_text(
-                            target.session_id, formatted)
-                        target.pending_weaver_message = True
-                        state._emit_agent(target)
-                        _panel_event(
-                            "weaver_message", target.id,
-                            target.name, target.group,
-                            msg_text[:200])
-                        result = {"type": "ok"}
+                    result = await _send_weaver_message_to_agent(
+                        state,
+                        bridge,
+                        target,
+                        msg_text,
+                        _panel_event,
+                    )
 
             elif cmd == "weaver_journal_append":
                 group = data.get("group", "")

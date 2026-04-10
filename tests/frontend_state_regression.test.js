@@ -3491,6 +3491,30 @@ test('agent history task links open the board and focus the selected task', () =
   assert.equal(focusedCard.scrollIntoViewOptions.block, 'nearest');
 });
 
+test('agent history renders answered outcomes for weaver follow-up tasks', () => {
+  const { context, document } = createAgentHistoryHarness();
+  const detail = document.register('ah-detail-agent-1');
+
+  runInContext(context, `
+    _agentHistoryDetail = {
+      record: { id: 'agent-1', template: '', worktree_branch: '', created_at: 1 },
+      tasks: [{
+        task_id: 'task-1',
+        task_title: 'Weaver: Need rebase status',
+        outcome: 'answered',
+        started_at: 1,
+        completed_at: 2
+      }],
+      messages: [],
+    };
+  `);
+
+  context.renderAgentHistoryExpanded();
+
+  assert.match(detail.innerHTML, /ah-outcome-answered/);
+  assert.match(detail.innerHTML, /answered/);
+});
+
 test('renderEvents restores focused search input value and caret across rerenders', () => {
   const { context, document } = createEventsHarness();
   const panel = document.register('panel-events');

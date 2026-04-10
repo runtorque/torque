@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     lane           TEXT NOT NULL DEFAULT 'Backlog',
     position       INTEGER NOT NULL DEFAULT 0,
     agent_id       TEXT NOT NULL DEFAULT '',
+    reply_agent_id TEXT NOT NULL DEFAULT '',
     labels         TEXT NOT NULL DEFAULT '[]',
     created_at     TEXT NOT NULL DEFAULT '',
     updated_at     TEXT NOT NULL DEFAULT '',
@@ -485,6 +486,15 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 f"ALTER TABLE board_tasks ADD COLUMN {col} "
                 f"{col_type} NOT NULL DEFAULT {default}")
             conn.commit()
+    # Migrate: add reply_agent_id column to board_tasks
+    try:
+        conn.execute(
+            "SELECT reply_agent_id FROM board_tasks LIMIT 0")
+    except sqlite3.OperationalError:
+        conn.execute(
+            "ALTER TABLE board_tasks ADD COLUMN reply_agent_id "
+            "TEXT NOT NULL DEFAULT ''")
+        conn.commit()
     # Migrate: add description column to board_tasks
     try:
         conn.execute(

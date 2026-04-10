@@ -142,6 +142,7 @@ class BoardTask:
     lane: str = "Backlog"
     position: int = 0
     agent_id: str = ""          # concrete agent working on this (optional)
+    reply_agent_id: str = ""    # worker expected to answer this follow-up
     labels: list[str] = field(default_factory=list)
     created_at: str = ""        # ISO 8601
     updated_at: str = ""        # ISO 8601
@@ -1136,6 +1137,10 @@ class MatrixState:
                 if root_id
             }
             self.cleanup_stale_boundary_successors(emit=False)
+            for aid, cell in self.agents.items():
+                cell.pending_weaver_message = bool(
+                    self.agent_pending_weaver_reply_tasks(aid)
+                )
             # panel_active: new key; backward compat from board_panel_open
             pa = data.get("panel_active", "")
             if not pa and data.get("board_panel_open"):
@@ -2588,6 +2593,15 @@ class MatrixState:
                 return task
         tasks = self.agent_active_tasks(agent_id)
         return tasks[0] if tasks else None
+
+    def agent_pending_weaver_reply_tasks(self, agent_id: str) -> list[BoardTask]:
+        """Return open Weaver follow-up tasks awaiting ``agent_id`` replies."""
+        tasks = [
+            task for task in self.board_tasks.values()
+            if task.reply_agent_id == agent_id and not board_task_is_closed(task)
+        ]
+        tasks.sort(key=lambda task: (task.created_at, task.id))
+        return tasks
 
     def agent_is_busy(self, agent_id: str) -> bool:
         cell = self.agents.get(agent_id)

@@ -696,10 +696,11 @@ WEAVER_TOOLS = [
         "description": (
             "Send a message to any agent's terminal. The agent can "
             "reply via loom_reply, which appears in the weaver's "
-            "next event digest. Use for: redirecting agents, "
-            "providing context, answering questions. When owned-agent "
-            "restriction is enabled, only agents created by this Weaver "
-            "can be targeted."
+            "next event digest. Loom also creates a visible follow-up "
+            "task for the exchange and returns its task id. Use for: "
+            "redirecting agents, providing context, answering questions. "
+            "When owned-agent restriction is enabled, only agents "
+            "created by this Weaver can be targeted."
         ),
         "inputSchema": {
             "type": "object",

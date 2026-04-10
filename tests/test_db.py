@@ -77,6 +77,7 @@ class LoomDBTests(unittest.TestCase):
                 lane="In Progress",
                 position=2,
                 agent_id=cell.id,
+                reply_agent_id="agent-2",
                 labels=["loom:blocked", "keep"],
                 created_at="2026-04-06T00:00:00+00:00",
                 updated_at="2026-04-06T01:00:00+00:00",
@@ -193,6 +194,10 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["depends_on"],
             ["dep-1"],
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["reply_agent_id"],
+            "agent-2",
         )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["lane_entered_at"],
@@ -471,6 +476,7 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["board_tasks"]["LOOM:1:1"]["parent_task_id"], "LOOM:1")
         self.assertEqual(loaded["board_tasks"]["LOOM:1:1"]["pipeline_root_id"], "LOOM:1")
         self.assertEqual(loaded["board_tasks"]["LOOM:1:1"]["depends_on"], ["LOOM:1"])
+        self.assertEqual(loaded["board_tasks"]["LOOM:1"]["reply_agent_id"], "")
         self.assertEqual(loaded["auto_dispatch_queues"]["Loom"][0]["task_id"], "LOOM:1:1")
         self.assertEqual(
             loaded["auto_dispatch_queues"]["Loom"][0]["weaver_owner_id"],
