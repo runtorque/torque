@@ -98,6 +98,7 @@ class WeaverPromptTests(unittest.TestCase):
         )
 
         self.assertIn("Operating Policy", prompt)
+        self.assertIn("## Operating Policy", prompt)
         self.assertIn("Autonomy mode: Suggest only", prompt)
         self.assertIn("Default worker concurrency: 4", prompt)
         self.assertIn("Wave size preference: Fill available capacity", prompt)
@@ -114,3 +115,14 @@ class WeaverPromptTests(unittest.TestCase):
         )
         self.assertIn("prefer `weaver_note` with a proposed wave", prompt)
         self.assertIn("Shape Loom digests as detailed by default.", prompt)
+
+    def test_prompt_uses_markdown_heading_for_custom_instructions(self):
+        prompt = self.weaver_mod.build_weaver_system_prompt(
+            "Loom",
+            SimpleNamespace(
+                custom_instructions="Use concise notes.",
+            ),
+        )
+
+        self.assertIn("## Custom Instructions", prompt)
+        self.assertIn("Use concise notes.", prompt)
