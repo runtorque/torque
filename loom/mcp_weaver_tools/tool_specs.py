@@ -9,7 +9,8 @@ WEAVER_TOOLS = [
             "Return a compact board overview for the weaver's group. "
             "Includes lane counts, active agent status, pending asks, "
             "task-health rollups, and key label counts without embedding "
-            "full task lists."
+            "full task lists. When owned-agent restriction is enabled, "
+            "agent rollups only include agents created by this Weaver."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -74,7 +75,9 @@ WEAVER_TOOLS = [
         "name": "weaver_agents_list",
         "description": (
             "List all active agents with their name, slug, status, "
-            "group, current task, and activity detail."
+            "group, current task, and activity detail. When owned-agent "
+            "restriction is enabled, only agents created by this Weaver "
+            "are listed."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -85,7 +88,8 @@ WEAVER_TOOLS = [
             "Returns agent metadata, worktree state (path, branch, "
             "diff stats, checkpoints), task history with messages, "
             "session info, and child terminals. Use for post-completion "
-            "review before merging."
+            "review before merging. When owned-agent restriction is "
+            "enabled, the target agent must have been created by this Weaver."
         ),
         "inputSchema": {
             "type": "object",
@@ -408,7 +412,8 @@ WEAVER_TOOLS = [
             "Dispatch a task to an agent. Creates a new agent by "
             "default, or dispatches to an existing agent if specified. "
             "The task moves to In Progress and the agent receives "
-            "the rendered prompt."
+            "the rendered prompt. When owned-agent restriction is enabled, "
+            "existing-agent dispatch can only target agents created by this Weaver."
         ),
         "inputSchema": {
             "type": "object",
@@ -743,8 +748,11 @@ WEAVER_TOOLS = [
         "description": (
             "Send a message to any agent's terminal. The agent can "
             "reply via loom_reply, which appears in the weaver's "
-            "next event digest. Use for: redirecting agents, "
-            "providing context, answering questions."
+            "next event digest. Loom also creates a visible follow-up "
+            "task for the exchange and returns its task id. Use for: "
+            "redirecting agents, providing context, answering questions. "
+            "When owned-agent restriction is enabled, only agents "
+            "created by this Weaver can be targeted."
         ),
         "inputSchema": {
             "type": "object",
@@ -819,7 +827,8 @@ WEAVER_TOOLS = [
             "Close an agent — ends its terminal session and removes "
             "it from the group. The agent's worktree (if any) is "
             "preserved on disk. Use after merging or when the agent "
-            "is no longer needed."
+            "is no longer needed. When owned-agent restriction is "
+            "enabled, only agents created by this Weaver can be closed."
         ),
         "inputSchema": {
             "type": "object",
@@ -838,7 +847,8 @@ WEAVER_TOOLS = [
             "Relaunch a stopped agent — re-creates the terminal "
             "session. If the agent has a worktree, it is reused. "
             "If session_resume is enabled, the previous Claude Code "
-            "session is resumed."
+            "session is resumed. When owned-agent restriction is "
+            "enabled, only agents created by this Weaver can be relaunched."
         ),
         "inputSchema": {
             "type": "object",
@@ -858,7 +868,9 @@ WEAVER_TOOLS = [
             "Merge an agent's worktree branch into the base branch "
             "(usually main). Uses server-side merge — no interactive "
             "resolution. If there are conflicts, use weaver_rebase "
-            "to replay the branch onto base before retrying the merge."
+            "to replay the branch onto base before retrying the merge. "
+            "When owned-agent restriction is enabled, only agents created "
+            "by this Weaver can be targeted."
         ),
         "inputSchema": {
             "type": "object",
@@ -896,7 +908,9 @@ WEAVER_TOOLS = [
             "Rebase an agent's worktree branch onto its base branch. "
             "Useful after weaver_merge reports conflicts. Returns "
             "post-rebase merge readiness, and aborts automatically "
-            "if conflicts still require manual resolution."
+            "if conflicts still require manual resolution. When owned-agent "
+            "restriction is enabled, only agents created by this Weaver can "
+            "be targeted."
         ),
         "inputSchema": {
             "type": "object",
@@ -914,7 +928,9 @@ WEAVER_TOOLS = [
         "description": (
             "Create a GitHub pull request for an agent's worktree "
             "branch. Pushes the branch to origin and creates a PR "
-            "via the GitHub CLI (gh). Returns the PR URL."
+            "via the GitHub CLI (gh). Returns the PR URL. When owned-agent "
+            "restriction is enabled, only agents created by this Weaver can "
+            "be targeted."
         ),
         "inputSchema": {
             "type": "object",
@@ -945,7 +961,8 @@ WEAVER_TOOLS = [
             "its base branch. Can return a structured summary, "
             "diffstat, or full diff output, optionally limited to "
             "specific files. Useful for reviewing changes before "
-            "merge or PR."
+            "merge or PR. When owned-agent restriction is enabled, only "
+            "agents created by this Weaver can be targeted."
         ),
         "inputSchema": {
             "type": "object",
@@ -988,7 +1005,8 @@ WEAVER_TOOLS = [
         "description": (
             "Remove an agent's worktree from disk. Use after merging "
             "to clean up. The agent's directory reverts to the "
-            "original repo root."
+            "original repo root. When owned-agent restriction is enabled, "
+            "only agents created by this Weaver can be targeted."
         ),
         "inputSchema": {
             "type": "object",
@@ -1007,7 +1025,8 @@ WEAVER_TOOLS = [
             "Create a checkpoint commit on an agent's worktree. "
             "Commits all current changes with an auto-generated "
             "message. Useful for saving progress before risky "
-            "operations."
+            "operations. When owned-agent restriction is enabled, only "
+            "agents created by this Weaver can be targeted."
         ),
         "inputSchema": {
             "type": "object",

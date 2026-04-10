@@ -307,6 +307,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 name="Worker",
                 group="g",
                 cell_type="agent",
+                created_by_weaver_id="weaver-1",
             )
         )
         db.save_board_task(
@@ -332,6 +333,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
                 "agent_group": "followup",
                 "max_concurrent": 1,
                 "target_agent_id": "agent-1",
+                "weaver_owner_id": "weaver-1",
                 "enqueued_at": "2026-04-07T10:00:00+00:00",
             }
         ])
@@ -351,6 +353,65 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(
             state.auto_dispatch_queues["g"][0].target_agent_id,
             "agent-1",
+        )
+        self.assertEqual(
+            state.auto_dispatch_queues["g"][0].weaver_owner_id,
+            "weaver-1",
+        )
+        self.assertEqual(
+            state.agents["agent-1"].created_by_weaver_id,
+            "weaver-1",
+        )
+
+    def test_agent_visibility_to_weaver_respects_owned_agent_setting(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            cell_type="agent",
+        )
+        owned = self.state_mod.AgentCell(
+            id="agent-owned",
+            name="Owned worker",
+            group="g",
+            cell_type="agent",
+            created_by_weaver_id=weaver.id,
+        )
+        legacy = self.state_mod.AgentCell(
+            id="agent-legacy",
+            name="Legacy worker",
+            group="g",
+            cell_type="agent",
+        )
+        other_group = self.state_mod.AgentCell(
+            id="agent-other",
+            name="Other group worker",
+            group="other",
+            cell_type="agent",
+            created_by_weaver_id=weaver.id,
+        )
+        state.agents = {
+            weaver.id: weaver,
+            owned.id: owned,
+            legacy.id: legacy,
+            other_group.id: other_group,
+        }
+        state.groups["g"] = [weaver.id, owned.id, legacy.id]
+        state.groups["other"] = [other_group.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+
+        self.assertTrue(state.agent_is_visible_to_weaver(weaver.id, owned.id))
+        self.assertTrue(state.agent_is_visible_to_weaver(weaver.id, legacy.id))
+
+        state.update_weaver_settings("g", restrict_to_created_agents=True)
+
+        self.assertTrue(state.agent_is_visible_to_weaver(weaver.id, owned.id))
+        self.assertFalse(state.agent_is_visible_to_weaver(weaver.id, legacy.id))
+        self.assertFalse(
+            state.agent_is_visible_to_weaver(weaver.id, other_group.id)
         )
 
     def test_board_remove_task_clears_boundary_successor_links(self):
@@ -414,6 +475,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
             same_agent_follow_up_preference="always",
             digest_verbosity="wall-of-text",
             escalation_style="shrug",
+            restrict_to_created_agents=1,
         )
         state.update_group_settings(
             "g",
@@ -429,6 +491,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(ws.same_agent_follow_up_preference, "balanced")
         self.assertEqual(ws.digest_verbosity, "balanced")
         self.assertEqual(ws.escalation_style, "note_then_ask")
+        self.assertTrue(ws.restrict_to_created_agents)
         self.assertEqual(gs.worktree_merge_cleanup, "keep")
         self.assertTrue(gs.worktree_merge_preserve_diff)
 
@@ -554,6 +617,83 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertFalse(state.task_has_live_handoff_descendants(parent.id))
         self.assertEqual(state.agent_current_task("agent-1").id, parent.id)
         self.assertTrue(state.agent_is_busy("agent-1"))
+
+    def test_agent_pending_weaver_reply_tasks_only_include_open_tasks_for_worker(self):
+        state = self._make_state()
+        state.board_add_task(
+            "Answered thread",
+            "g",
+            lane="Done",
+            id="task-done",
+            reply_agent_id="agent-1",
+            labels=["loom:weaver-message"],
+        )
+        pending_old = state.board_add_task(
+            "Older thread",
+            "g",
+            lane="Backlog",
+            id="task-old",
+            reply_agent_id="agent-1",
+            labels=["loom:weaver-message"],
+        )
+        pending_new = state.board_add_task(
+            "Newer thread",
+            "g",
+            lane="Backlog",
+            id="task-new",
+            reply_agent_id="agent-1",
+            labels=["loom:weaver-message"],
+        )
+        state.board_add_task(
+            "Other worker thread",
+            "g",
+            lane="Backlog",
+            id="task-other",
+            reply_agent_id="agent-2",
+            labels=["loom:weaver-message"],
+        )
+
+        pending = state.agent_pending_weaver_reply_tasks("agent-1")
+
+        self.assertEqual([task.id for task in pending], [pending_old.id, pending_new.id])
+
+    def test_load_restores_pending_weaver_message_from_open_followup_tasks(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": ["agent-1"]}, {"g": "g"})
+        db.save_group_members("g", ["agent-1"])
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="agent-1",
+                name="Worker",
+                group="g",
+                cell_type="agent",
+            )
+        )
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-reply",
+                task="Weaver: Check status",
+                group="g",
+                lane="Backlog",
+                reply_agent_id="agent-1",
+                labels=["loom:weaver-message"],
+            )
+        )
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        self.assertTrue(state.agents["agent-1"].pending_weaver_message)
+        self.assertEqual(
+            [task.id for task in state.agent_pending_weaver_reply_tasks("agent-1")],
+            ["task-reply"],
+        )
 
     def test_queued_follow_up_becomes_current_task_over_suspended_parent(self):
         state = self._make_state()

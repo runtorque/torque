@@ -45,7 +45,7 @@ _AGENT_PERSISTED_COLS = [
     "worktree_auto_checkpoint", "checkpoint_on_progress",
     "worktree_merge_squash", "agent_type",
     "agent_session_id", "session_resume", "idle_timeout",
-    "tasks_dispatched",
+    "tasks_dispatched", "created_by_weaver_id",
 ]
 
 # GroupSettings fields that store dicts — persisted as JSON text.
@@ -159,8 +159,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                  worktree_auto_checkpoint, checkpoint_on_progress,
                  worktree_merge_squash,
                  agent_type, agent_session_id, session_resume, idle_timeout,
-                 tasks_dispatched)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 tasks_dispatched, created_by_weaver_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             cell.id, cell.name, cell.slug, cell.group, cell.cell_type,
             cell.terminal_backend, cell.session_id, cell.profile,
@@ -175,6 +175,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             cell.agent_session_id, int(cell.session_resume),
             cell.idle_timeout,
             cell.tasks_dispatched,
+            cell.created_by_weaver_id,
         ))
         self._conn.commit()
 
@@ -302,8 +303,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             self._conn.execute(
                 "INSERT INTO auto_dispatch_queue "
                 "(group_name, position, task_id, agent_group, "
-                "max_concurrent, target_agent_id, enqueued_at) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "max_concurrent, target_agent_id, weaver_owner_id, enqueued_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 (
                     group_name,
                     pos,
@@ -311,6 +312,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     item.get("agent_group", ""),
                     int(item.get("max_concurrent", 1) or 1),
                     item.get("target_agent_id", ""),
+                    item.get("weaver_owner_id", ""),
                     item.get("enqueued_at", ""),
                 ),
             )
@@ -778,11 +780,12 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                  wave_size_preference, same_agent_follow_up_preference,
                  digest_verbosity, escalation_style,
                  paused,
-                 custom_instructions, pending_question, pending_note,
+                 custom_instructions, restrict_to_created_agents,
+                 pending_question, pending_note,
                  pending_note_kind, enabled_events,
                  weaver_provider, weaver_boot_command,
                  weaver_model, weaver_reasoning_effort)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             group_name,
             settings.get("push_interval", 60),
@@ -797,6 +800,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             settings.get("escalation_style", "note_then_ask"),
             1 if settings.get("paused", False) else 0,
             settings.get("custom_instructions", ""),
+            1 if settings.get("restrict_to_created_agents", False) else 0,
             settings.get("pending_question", ""),
             settings.get("pending_note", ""),
             settings.get("pending_note_kind", ""),
@@ -815,7 +819,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "default_worker_concurrency, autonomy_mode, "
             "wave_size_preference, same_agent_follow_up_preference, "
             "digest_verbosity, escalation_style, paused, "
-            "custom_instructions, pending_question, pending_note, pending_note_kind, enabled_events, "
+            "custom_instructions, restrict_to_created_agents, "
+            "pending_question, pending_note, pending_note_kind, enabled_events, "
             "weaver_provider, weaver_boot_command, "
             "weaver_model, weaver_reasoning_effort "
             "FROM weaver_settings "
@@ -823,7 +828,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not row:
             return None
         try:
-            enabled = json.loads(row[15])
+            enabled = json.loads(row[16])
         except (json.JSONDecodeError, TypeError):
             enabled = ["agent_started", "task_dispatched", "task_derived"]
         heartbeat_interval = row[3]
@@ -845,14 +850,15 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "escalation_style": row[9] if len(row) > 9 else "note_then_ask",
             "paused": bool(row[10]),
             "custom_instructions": row[11],
-            "pending_question": row[12],
-            "pending_note": row[13],
-            "pending_note_kind": row[14],
+            "restrict_to_created_agents": bool(row[12]),
+            "pending_question": row[13],
+            "pending_note": row[14],
+            "pending_note_kind": row[15],
             "enabled_events": enabled,
-            "weaver_provider": row[16] if len(row) > 16 else "",
-            "weaver_boot_command": row[17] if len(row) > 17 else "",
-            "weaver_model": row[18] if len(row) > 18 else "",
-            "weaver_reasoning_effort": row[19] if len(row) > 19 else "",
+            "weaver_provider": row[17] if len(row) > 17 else "",
+            "weaver_boot_command": row[18] if len(row) > 18 else "",
+            "weaver_model": row[19] if len(row) > 19 else "",
+            "weaver_reasoning_effort": row[20] if len(row) > 20 else "",
         }
 
     def delete_weaver_settings(self, group_name: str):
@@ -867,7 +873,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "default_worker_concurrency, autonomy_mode, "
             "wave_size_preference, same_agent_follow_up_preference, "
             "digest_verbosity, escalation_style, paused, "
-            "custom_instructions, pending_question, pending_note, pending_note_kind, enabled_events, "
+            "custom_instructions, restrict_to_created_agents, "
+            "pending_question, pending_note, pending_note_kind, enabled_events, "
             "weaver_provider, weaver_boot_command, "
             "weaver_model, weaver_reasoning_effort "
             "FROM weaver_settings"
@@ -875,7 +882,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         result = {}
         for row in rows:
             try:
-                enabled = json.loads(row[15])
+                enabled = json.loads(row[16])
             except (json.JSONDecodeError, TypeError):
                 enabled = ["agent_started", "task_dispatched", "task_derived"]
             heartbeat_interval = row[3]
@@ -897,14 +904,15 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "escalation_style": row[9] if len(row) > 9 else "note_then_ask",
                 "paused": bool(row[10]),
                 "custom_instructions": row[11],
-                "pending_question": row[12],
-                "pending_note": row[13],
-                "pending_note_kind": row[14],
+                "restrict_to_created_agents": bool(row[12]),
+                "pending_question": row[13],
+                "pending_note": row[14],
+                "pending_note_kind": row[15],
                 "enabled_events": enabled,
-                "weaver_provider": row[16] if len(row) > 16 else "",
-                "weaver_boot_command": row[17] if len(row) > 17 else "",
-                "weaver_model": row[18] if len(row) > 18 else "",
-                "weaver_reasoning_effort": row[19] if len(row) > 19 else "",
+                "weaver_provider": row[17] if len(row) > 17 else "",
+                "weaver_boot_command": row[18] if len(row) > 18 else "",
+                "weaver_model": row[19] if len(row) > 19 else "",
+                "weaver_reasoning_effort": row[20] if len(row) > 20 else "",
             }
         return result
 
@@ -1340,8 +1348,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                          worktree_auto_checkpoint, checkpoint_on_progress,
                          worktree_merge_squash,
                          agent_type, agent_session_id, session_resume,
-                         idle_timeout, tasks_dispatched)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         idle_timeout, tasks_dispatched, created_by_weaver_id)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     a.get("id", aid),
                     a.get("name", ""),
@@ -1372,6 +1380,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     int(a.get("session_resume", True)),
                     a.get("idle_timeout", 5),
                     a.get("tasks_dispatched", 0),
+                    a.get("created_by_weaver_id", ""),
                 ))
 
             # Groups + members
@@ -1485,8 +1494,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     c.execute("""
                         INSERT INTO auto_dispatch_queue
                             (group_name, position, task_id, agent_group,
-                             max_concurrent, target_agent_id, enqueued_at)
-                        VALUES (?,?,?,?,?,?,?)
+                             max_concurrent, target_agent_id,
+                             weaver_owner_id, enqueued_at)
+                        VALUES (?,?,?,?,?,?,?,?)
                     """, (
                         gname,
                         pos,
@@ -1494,6 +1504,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                         item.get("agent_group", ""),
                         int(item.get("max_concurrent", 1) or 1),
                         item.get("target_agent_id", ""),
+                        item.get("weaver_owner_id", ""),
                         item.get("enqueued_at", ""),
                     ))
 
@@ -1706,7 +1717,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         try:
             rows = c.execute(
                 "SELECT group_name, position, task_id, agent_group, "
-                "max_concurrent, target_agent_id, enqueued_at "
+                "max_concurrent, target_agent_id, weaver_owner_id, enqueued_at "
                 "FROM auto_dispatch_queue ORDER BY group_name, position"
             ).fetchall()
             auto_dispatch_queues = decode_auto_dispatch_queue_rows(rows)

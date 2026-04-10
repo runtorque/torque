@@ -168,6 +168,43 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             }],
         )
 
+    async def test_loom_reply_forwards_optional_task_id(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok", "task_id": "LOOM:1:2"}
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "loom_reply",
+            {"task": "LOOM:1:2", "message": "Rebased successfully"},
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(text), {"type": "ok", "task_id": "LOOM:1:2"})
+        self.assertEqual(
+            calls,
+            [{
+                "cmd": "ai_report",
+                "cell_id": "agent-1",
+                "action": "reply",
+                "task_id": "LOOM:1:2",
+                "message": "Rebased successfully",
+            }],
+        )
+
     async def test_dispatch_tool_maps_memory_commands(self):
         state = self.state_mod.MatrixState()
         cell = self.state_mod.AgentCell(
@@ -444,9 +481,15 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool for tool in self.mcp_mod.TOOLS
             if tool["name"] == "loom_ask"
         )
+        reply_tool = next(
+            tool for tool in self.mcp_mod.TOOLS
+            if tool["name"] == "loom_reply"
+        )
 
         self.assertIn("blocking human decision or approval", ask_tool["description"])
         self.assertIn("Do not use this for status updates", ask_tool["description"])
+        self.assertIn("include the task id", reply_tool["description"])
+        self.assertIn("task", reply_tool["inputSchema"]["properties"])
 
     async def test_loom_context_includes_combined_task_artifacts(self):
         state = self.state_mod.MatrixState()

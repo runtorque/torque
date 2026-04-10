@@ -3666,6 +3666,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
 }
 .ah-outcome-done { background: #238636; color: #fff; }
 .ah-outcome-ready { background: #238636; color: #fff; }
+.ah-outcome-answered { background: #1f6feb; color: #fff; }
 .ah-outcome-blocked { background: #d29922; color: #000; }
 .ah-outcome-error { background: #da3633; color: #fff; }
 .ah-task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -5086,6 +5087,10 @@ body.task-history-open #ctx-menu {
 .th-outcome-ready {
   background: rgba(35,134,54,.2);
   color: var(--green);
+}
+.th-outcome-answered {
+  background: rgba(31,111,235,.18);
+  color: #58a6ff;
 }
 .th-outcome-inprogress {
   background: rgba(88,166,255,.15);

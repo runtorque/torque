@@ -319,11 +319,20 @@ TOOLS = [
         "description": (
             "Reply to a message from the weaver (orchestrator agent). "
             "The reply is delivered to the weaver in its next event "
-            "digest. Only works when you have a pending weaver message."
+            "digest. Only works when you have a pending weaver message. "
+            "When multiple Weaver follow-up tasks are open, include the "
+            "task id to choose which message you are answering."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "Optional task ID for the specific Weaver "
+                        "follow-up you are answering."
+                    ),
+                },
                 "message": {
                     "type": "string",
                     "description": "Your reply to the weaver.",
@@ -676,6 +685,8 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
             payload["description"] = args["description"]
     elif action == "reply":
         payload["message"] = args.get("message", "")
+        if args.get("task"):
+            payload["task_id"] = args["task"]
 
     result = await handle_command(payload)
     if result and result.get("type") == "error":

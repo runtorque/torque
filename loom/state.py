@@ -142,6 +142,7 @@ class BoardTask:
     lane: str = "Backlog"
     position: int = 0
     agent_id: str = ""          # concrete agent working on this (optional)
+    reply_agent_id: str = ""    # worker expected to answer this follow-up
     labels: list[str] = field(default_factory=list)
     created_at: str = ""        # ISO 8601
     updated_at: str = ""        # ISO 8601
@@ -220,6 +221,7 @@ class AutoDispatchQueueEntry:
     agent_group: str = ""
     max_concurrent: int = 1
     target_agent_id: str = ""
+    weaver_owner_id: str = ""
     enqueued_at: str = ""
 
 
@@ -267,6 +269,7 @@ class AgentCell:
     last_summary: str = ""  # last assistant message on Stop (for checkpoint msgs)
     # Context preservation (dispatch history)
     tasks_dispatched: int = 0  # number of tasks sent to this agent (persisted)
+    created_by_weaver_id: str = ""  # immutable Weaver provenance (persisted)
     current_task_id: str = ""  # most recently dispatched task (ephemeral)
     session_resume: bool = True  # whether relaunch should resume the prior session
     idle_timeout: int = 5  # per-agent idle timeout in minutes
@@ -518,6 +521,7 @@ class WeaverSettings:
     escalation_style: str = "note_then_ask"  # ask_early | note_then_ask | keep_moving
     paused: bool = False                 # user paused event pushes
     custom_instructions: str = ""        # user-defined instructions appended to weaver system prompt
+    restrict_to_created_agents: bool = False  # limit Weaver agent visibility/control to its own created agents
     pending_question: str = ""           # question awaiting human reply (non-empty = awaiting input)
     pending_note: str = ""               # non-blocking note/question for the human
     pending_note_kind: str = ""          # "note" | "question" | ""
@@ -810,7 +814,8 @@ class MatrixState:
     def auto_dispatch_queue_add(self, group: str, task_id: str, *,
                                 agent_group: str = "",
                                 max_concurrent: int = 1,
-                                target_agent_id: str = ""):
+                                target_agent_id: str = "",
+                                weaver_owner_id: str = ""):
         found_group, _idx, entry = self.auto_dispatch_queue_find(task_id)
         if entry:
             if found_group != group:
@@ -824,6 +829,7 @@ class MatrixState:
             agent_group=agent_group.strip(),
             max_concurrent=max(1, int(max_concurrent or 1)),
             target_agent_id=target_agent_id.strip(),
+            weaver_owner_id=str(weaver_owner_id or "").strip(),
             enqueued_at=datetime.now(timezone.utc).isoformat(),
         )
         queue.append(entry)
@@ -1135,6 +1141,10 @@ class MatrixState:
                 if root_id
             }
             self.cleanup_stale_boundary_successors(emit=False)
+            for aid, cell in self.agents.items():
+                cell.pending_weaver_message = bool(
+                    self.agent_pending_weaver_reply_tasks(aid)
+                )
             # panel_active: new key; backward compat from board_panel_open
             pa = data.get("panel_active", "")
             if not pa and data.get("board_panel_open"):
@@ -1337,6 +1347,8 @@ class MatrixState:
                     value = normalize_weaver_digest_verbosity(value)
                 elif key == "escalation_style":
                     value = normalize_weaver_escalation_style(value)
+                elif key == "restrict_to_created_agents":
+                    value = bool(value)
                 elif key in {"weaver_model", "weaver_reasoning_effort"}:
                     value = str(value or "").strip()
                 setattr(ws, key, value)
@@ -1345,6 +1357,31 @@ class MatrixState:
         self._emit("weaver_settings_update", group=group, **d)
         if self.db:
             self.db.save_weaver_settings(group, asdict(ws))
+
+    def weaver_restricts_to_created_agents(self, group: str) -> bool:
+        """Return whether the group's Weaver is restricted to owned agents."""
+        return bool(
+            self.get_weaver_settings(group).restrict_to_created_agents
+        )
+
+    def agent_is_visible_to_weaver(self, weaver_id: str, agent_id: str) -> bool:
+        """Return whether ``agent_id`` is visible/controllable to ``weaver_id``.
+
+        Visibility is always limited to agent cells in the same group. When the
+        per-group restriction is enabled, only agents whose immutable Weaver
+        provenance matches the caller are visible.
+        """
+        weaver = self.agents.get(str(weaver_id or "").strip())
+        agent = self.agents.get(str(agent_id or "").strip())
+        if not weaver or weaver.cell_type != "agent":
+            return False
+        if not agent or agent.cell_type != "agent":
+            return False
+        if not weaver.group or agent.group != weaver.group:
+            return False
+        if not self.weaver_restricts_to_created_agents(weaver.group):
+            return True
+        return bool(agent.created_by_weaver_id == weaver.id)
 
     def _save_weaver_settings(self, group: str, emit: bool = True):
         ws = self.weaver_settings.get(group)
@@ -2564,6 +2601,15 @@ class MatrixState:
                 return task
         tasks = self.agent_active_tasks(agent_id)
         return tasks[0] if tasks else None
+
+    def agent_pending_weaver_reply_tasks(self, agent_id: str) -> list[BoardTask]:
+        """Return open Weaver follow-up tasks awaiting ``agent_id`` replies."""
+        tasks = [
+            task for task in self.board_tasks.values()
+            if task.reply_agent_id == agent_id and not board_task_is_closed(task)
+        ]
+        tasks.sort(key=lambda task: (task.created_at, task.id))
+        return tasks
 
     def agent_is_busy(self, agent_id: str) -> bool:
         cell = self.agents.get(agent_id)

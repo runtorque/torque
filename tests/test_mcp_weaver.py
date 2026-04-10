@@ -71,6 +71,7 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
                     name=f"worker-{counter['value']}",
                     group="g",
                     cell_type="agent",
+                    created_by_weaver_id=data.get("_created_by_weaver_id", ""),
                 )
                 cell.current_task_id = tid
                 state.agents[aid] = cell
@@ -116,7 +117,13 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool for tool in self.mcp_weaver_mod.WEAVER_TOOLS
             if tool["name"] == "weaver_task_upload_artifact"
         )
+        message_tool = next(
+            tool for tool in self.mcp_weaver_mod.WEAVER_TOOLS
+            if tool["name"] == "weaver_agent_message"
+        )
         self.assertIn("Upload and attach an image or other artifact", upload_tool["description"])
+        self.assertIn("visible follow-up task", message_tool["description"])
+        self.assertIn("returns its task id", message_tool["description"])
 
     async def test_non_weaver_agent_cannot_call_weaver_tools(self):
         state, weaver = self._make_state()
@@ -195,8 +202,20 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
             ["dispatched", "deferred"],
         )
         self.assertEqual(
+            state.board_tasks["task-1"].agent_id,
+            "agent-1",
+        )
+        self.assertEqual(
             state.auto_dispatch_queues["g"][0].max_concurrent,
             1,
+        )
+        self.assertEqual(
+            state.agents["agent-1"].created_by_weaver_id,
+            weaver.id,
+        )
+        self.assertEqual(
+            state.auto_dispatch_queues["g"][0].weaver_owner_id,
+            weaver.id,
         )
 
     async def test_batch_dispatch_respects_capacity(self):
@@ -243,6 +262,14 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             state.auto_dispatch_queues["g"][0].max_concurrent,
             2,
+        )
+        self.assertEqual(
+            state.agents["agent-1"].created_by_weaver_id,
+            weaver.id,
+        )
+        self.assertEqual(
+            state.auto_dispatch_queues["g"][0].weaver_owner_id,
+            weaver.id,
         )
 
     async def test_batch_dispatch_continues_after_validation_failure(self):
@@ -508,6 +535,7 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["cmd"], "dispatch_task")
         self.assertEqual(captured["id"], task.id)
         self.assertTrue(captured["create_agent"])
+        self.assertEqual(captured["_created_by_weaver_id"], weaver.id)
         self.assertEqual(captured["target_session_id"], weaver.session_id)
         self.assertEqual(captured["target_window_id"], weaver.window_id)
 
@@ -603,6 +631,39 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
             captured,
             {"cmd": "dispatch_task", "id": task.id, "agent_id": worker.id},
         )
+
+    async def test_dispatch_to_existing_agent_rejects_hidden_legacy_agent_when_restricted(self):
+        state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
+        state.weaver_settings["g"] = self.state_mod.WeaverSettings(
+            group="g",
+            restrict_to_created_agents=True,
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker One",
+            group="g",
+            slug="worker-one",
+            cell_type="agent",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        task = state.board_add_task("Investigate bug", "g")
+        self.assertIsNotNone(task)
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_dispatch",
+            {"task": task.id, "agent": worker.slug},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, f"Agent not found: {worker.slug}")
 
     async def test_dispatch_ignores_legacy_force_flag(self):
         state = self.state_mod.MatrixState()
@@ -2001,6 +2062,230 @@ class WeaverAgentLifecycleToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error)
         self.assertEqual(captured, {"cmd": "relaunch_agent", "id": cell.id})
         self.assertIn("relaunched", text)
+
+    async def test_agent_message_forwards_result_with_follow_up_task_id(self):
+        state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            cell_type="agent",
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"].append(cell.id)
+
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            return {"type": "ok", "task_id": "LOOM:1:2"}
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_agent_message",
+            {"agent": cell.slug, "message": "Please rebase and report back"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(text), {"type": "ok", "task_id": "LOOM:1:2"})
+        self.assertEqual(
+            calls,
+            [{
+                "cmd": "weaver_message",
+                "agent_id": cell.id,
+                "message": "Please rebase and report back",
+            }],
+        )
+
+
+class WeaverOwnedAgentRestrictionTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+        self.mcp_weaver_mod = importlib.import_module("loom.mcp_weaver")
+        self.mcp_weaver_mod = importlib.reload(self.mcp_weaver_mod)
+
+    def _make_state(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            cell_type="agent",
+            slug="weaver",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        state.weaver_settings["g"] = self.state_mod.WeaverSettings(
+            group="g",
+            restrict_to_created_agents=True,
+        )
+        return state, weaver
+
+    def _add_worker(self, state, *, agent_id, slug, created_by_weaver_id=""):
+        worker = self.state_mod.AgentCell(
+            id=agent_id,
+            name=slug.replace("-", " ").title(),
+            slug=slug,
+            group="g",
+            cell_type="agent",
+            status="running",
+            current_task_id=f"task-{agent_id}",
+            created_by_weaver_id=created_by_weaver_id,
+            worktree_path=f"/tmp/{agent_id}",
+            worktree_branch=f"loom/{slug}",
+            worktree_repo_root="/repo",
+            worktree_base_branch="main",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+        state.board_tasks[worker.current_task_id] = self.state_mod.BoardTask(
+            id=worker.current_task_id,
+            task=f"Task for {slug}",
+            group="g",
+            lane="In Progress",
+            agent_id=worker.id,
+        )
+        return worker
+
+    async def test_restricted_agents_list_and_board_summary_only_include_owned_agents(self):
+        state, weaver = self._make_state()
+        owned = self._add_worker(
+            state,
+            agent_id="agent-owned",
+            slug="owned-worker",
+            created_by_weaver_id=weaver.id,
+        )
+        self._add_worker(
+            state,
+            agent_id="agent-legacy",
+            slug="legacy-worker",
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        agents_text, agents_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_agents_list",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+        summary_text, summary_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(agents_error)
+        self.assertFalse(summary_error)
+        agents = json.loads(agents_text)["agents"]
+        summary = json.loads(summary_text)
+        self.assertEqual([item["id"] for item in agents], [owned.id])
+        self.assertEqual(summary["agents"]["total"], 1)
+        self.assertEqual(summary["agents"]["active_count"], 1)
+        self.assertEqual(summary["agents"]["active"][0]["id"], owned.id)
+
+    async def test_restricted_task_views_hide_unowned_agent_identity(self):
+        state, weaver = self._make_state()
+        legacy = self._add_worker(
+            state,
+            agent_id="agent-legacy",
+            slug="legacy-worker",
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        board_text, board_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_list",
+            {"lane": "In Progress"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+        task_text, task_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_show",
+            {"task": legacy.current_task_id},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(board_error)
+        self.assertFalse(task_error)
+        board = json.loads(board_text)
+        task = json.loads(task_text)
+        board_item = board["lanes"]["In Progress"][0]
+        self.assertEqual(board_item["agent"], "")
+        self.assertTrue(board_item["agent_hidden"])
+        self.assertEqual(task["agent_id"], "")
+        self.assertTrue(task["agent_hidden"])
+        self.assertNotIn("agent_name", task)
+
+    async def test_restricted_agent_and_worktree_tools_reject_unowned_agents(self):
+        state, weaver = self._make_state()
+        legacy = self._add_worker(
+            state,
+            agent_id="agent-legacy",
+            slug="legacy-worker",
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        tool_calls = [
+            ("weaver_agent_show", {}),
+            ("weaver_agent_message", {"message": "hello"}),
+            ("weaver_agent_close", {}),
+            ("weaver_agent_relaunch", {}),
+            ("weaver_diff", {}),
+        ]
+        for tool_name, extra_args in tool_calls:
+            text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+                tool_name,
+                {"agent": legacy.slug, **extra_args},
+                fake_handle_command,
+                state,
+                cell_id=weaver.id,
+            )
+
+            self.assertTrue(is_error, tool_name)
+            self.assertEqual(text, f"Agent not found: {legacy.slug}")
+
+    async def test_restricted_agent_show_allows_owned_agents(self):
+        state, weaver = self._make_state()
+        owned = self._add_worker(
+            state,
+            agent_id="agent-owned",
+            slug="owned-worker",
+            created_by_weaver_id=weaver.id,
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_agent_show",
+            {"agent": owned.slug},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(json.loads(text)["id"], owned.id)
 
 
 class WeaverRecoveryToolTests(unittest.IsolatedAsyncioTestCase):

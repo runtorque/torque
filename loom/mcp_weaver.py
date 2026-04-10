@@ -58,6 +58,38 @@ def _authorize_weaver_cell(state, cell_id: str):
     return cell, group, ""
 
 
+def _agent_visible_to_weaver(state, weaver_cell, agent_id: str) -> bool:
+    if not weaver_cell:
+        return False
+    return state.agent_is_visible_to_weaver(weaver_cell.id, agent_id)
+
+
+def _resolve_visible_agent(state, weaver_cell, agent_ident: str) -> str | None:
+    agent_id = _resolve_agent(state, agent_ident)
+    if not agent_id:
+        return None
+    if not _agent_visible_to_weaver(state, weaver_cell, agent_id):
+        return None
+    return agent_id
+
+
+def _task_agent_payload_for_weaver(state, weaver_cell, agent_id: str) -> dict:
+    """Return safe agent details for task views without leaking hidden agents."""
+    if not agent_id:
+        return {}
+    agent = state.agents.get(agent_id)
+    if not agent or agent.cell_type != "agent":
+        return {}
+    if _agent_visible_to_weaver(state, weaver_cell, agent_id):
+        return {
+            "agent_name": agent.slug or agent.name,
+            "agent_status": agent.status,
+        }
+    if state.weaver_restricts_to_created_agents(weaver_cell.group):
+        return {"agent_hidden": True}
+    return {}
+
+
 async def _dispatch_weaver_tool(name, args, handle_command, state,
                                 cell_id=""):
     """Execute a weaver tool call and return (content_text, is_error)."""
@@ -173,6 +205,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             if c.cell_type == "agent"
             and c.group == _weaver_group
             and c.id != weaver_id
+            and _agent_visible_to_weaver(state, _weaver_cell, c.id)
         ]
         agents.sort(key=lambda c: ((c.slug or c.name or c.id).lower(), c.id))
 
@@ -297,11 +330,14 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 continue
             lane_tasks = lanes.setdefault(t.lane, [])
             agent_name = ""
+            agent_hidden = False
             if t.agent_id:
-                agent = state.agents.get(t.agent_id)
-                if agent:
-                    agent_name = agent.slug or agent.name
-            lane_tasks.append({
+                agent_payload = _task_agent_payload_for_weaver(
+                    state, _weaver_cell, t.agent_id
+                )
+                agent_name = agent_payload.get("agent_name", "")
+                agent_hidden = bool(agent_payload.get("agent_hidden"))
+            item = {
                 "id": t.id,
                 "slug": t.slug,
                 "title": t.task,
@@ -322,7 +358,10 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "external_url": t.external_url,
                 "health_since": getattr(t, "health_since", ""),
                 "parent_task_id": t.parent_task_id,
-            })
+            }
+            if agent_hidden:
+                item["agent_hidden"] = True
+            lane_tasks.append(item)
 
         # Order lanes by board_lanes order
         ordered = {}
@@ -348,15 +387,21 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         d = serialize_task_for_mcp(task)
         d["title"] = task.task
         d["action"] = task.action_name
+        if task.agent_id and not _agent_visible_to_weaver(
+                state, _weaver_cell, task.agent_id):
+            d["agent_id"] = ""
+            if state.weaver_restricts_to_created_agents(_weaver_group):
+                d["agent_hidden"] = True
         # Include recent messages (last 10 only)
         if task.messages:
             d["messages"] = task.messages[-10:]
         # Enrich with agent info
         if task.agent_id:
-            agent = state.agents.get(task.agent_id)
-            if agent:
-                d["agent_name"] = agent.slug or agent.name
-                d["agent_status"] = agent.status
+            d.update(
+                _task_agent_payload_for_weaver(
+                    state, _weaver_cell, task.agent_id
+                )
+            )
         # Auto-include pipeline chain for pipeline tasks
         if task.pipeline_root_id or task.parent_task_id:
             chain = state.board_get_chain(tid)
@@ -365,11 +410,14 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 if ct.group != _weaver_group:
                     continue
                 agent_slug = ""
+                agent_hidden = False
                 if ct.agent_id:
-                    a = state.agents.get(ct.agent_id)
-                    if a:
-                        agent_slug = a.slug or a.name
-                d["pipeline_chain"].append({
+                    agent_payload = _task_agent_payload_for_weaver(
+                        state, _weaver_cell, ct.agent_id
+                    )
+                    agent_slug = agent_payload.get("agent_name", "")
+                    agent_hidden = bool(agent_payload.get("agent_hidden"))
+                item = {
                     "id": ct.id,
                     "title": ct.task,
                     "lane": ct.lane,
@@ -380,7 +428,10 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                     ) or "",
                     "depth": ct.pipeline_depth,
                     "agent": agent_slug,
-                })
+                }
+                if agent_hidden:
+                    item["agent_hidden"] = True
+                d["pipeline_chain"].append(item)
         return json.dumps(d), False
 
     if name == "weaver_agents_list":
@@ -389,6 +440,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             if c.cell_type != "agent":
                 continue
             if c.group != _weaver_group:
+                continue
+            if not _agent_visible_to_weaver(state, _weaver_cell, c.id):
                 continue
             current_task = state.agent_current_task(c.id)
             agents.append({
@@ -406,12 +459,10 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
     if name == "weaver_agent_show":
         agent_ident = args.get("agent", "")
-        agent_id = _resolve_agent(state, agent_ident)
+        agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
         if not agent_id:
             return f"Agent not found: {agent_ident}", True
         cell = state.agents[agent_id]
-        if cell.group != _weaver_group:
-            return f"Agent not found: {agent_ident}", True
 
         d = {
             "id": cell.id,
@@ -695,12 +746,13 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         payload = {"cmd": "dispatch_task", "id": tid}
         agent_ident = args.get("agent", "")
         if agent_ident:
-            agent_id = _resolve_agent(state, agent_ident)
+            agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
             if not agent_id:
                 return f"Agent not found: {agent_ident}", True
             payload["agent_id"] = agent_id
         else:
             payload["create_agent"] = True
+            payload["_created_by_weaver_id"] = _weaver_cell.id
             if _weaver_cell:
                 if _weaver_cell.session_id:
                     payload["target_session_id"] = _weaver_cell.session_id
@@ -847,6 +899,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                     agent_group=agent_group,
                     max_concurrent=max_concurrent,
                     target_agent_id=target_agent_id,
+                    weaver_owner_id=_weaver_cell.id,
                 )
                 queue = state.auto_dispatch_queues.get(_weaver_group, [])
                 item = {
@@ -873,6 +926,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 payload["agent_id"] = target_agent_id
             else:
                 payload["create_agent"] = True
+                payload["_created_by_weaver_id"] = _weaver_cell.id
 
             result = await handle_command(payload)
             task_after = state.board_tasks.get(tid)
@@ -1055,7 +1109,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
     if name == "weaver_agent_message":
         agent_ident = args.get("agent", "")
-        agent_id = _resolve_agent(state, agent_ident)
+        agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
         if not agent_id:
             return f"Agent not found: {agent_ident}", True
 
@@ -1111,7 +1165,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
     if name == "weaver_agent_close":
         agent_ident = args.get("agent", "")
-        agent_id = _resolve_agent(state, agent_ident)
+        agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
         if not agent_id:
             return f"Agent not found: {agent_ident}", True
         result = await handle_command({
@@ -1125,7 +1179,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
     if name == "weaver_agent_relaunch":
         agent_ident = args.get("agent", "")
-        agent_id = _resolve_agent(state, agent_ident)
+        agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
         if not agent_id:
             return f"Agent not found: {agent_ident}", True
         cell = state.agents.get(agent_id)
@@ -1146,7 +1200,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
     if name == "weaver_merge":
         agent_ident = args.get("agent", "")
-        agent_id = _resolve_agent(state, agent_ident)
+        agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
         if not agent_id:
             return f"Agent not found: {agent_ident}", True
         cell = state.agents.get(agent_id)
@@ -1224,7 +1278,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
     if name == "weaver_rebase":
         agent_ident = args.get("agent", "")
-        agent_id = _resolve_agent(state, agent_ident)
+        agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
         if not agent_id:
             return f"Agent not found: {agent_ident}", True
         cell = state.agents.get(agent_id)
@@ -1277,7 +1331,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
     if name == "weaver_create_pr":
         agent_ident = args.get("agent", "")
-        agent_id = _resolve_agent(state, agent_ident)
+        agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
         if not agent_id:
             return f"Agent not found: {agent_ident}", True
         cell = state.agents.get(agent_id)
@@ -1302,7 +1356,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
     if name == "weaver_diff":
         agent_ident = args.get("agent", "")
-        agent_id = _resolve_agent(state, agent_ident)
+        agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
         if not agent_id:
             return f"Agent not found: {agent_ident}", True
         cell = state.agents.get(agent_id)
@@ -1326,7 +1380,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
     if name == "weaver_worktree_remove":
         agent_ident = args.get("agent", "")
-        agent_id = _resolve_agent(state, agent_ident)
+        agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
         if not agent_id:
             return f"Agent not found: {agent_ident}", True
         cell = state.agents.get(agent_id)
@@ -1343,7 +1397,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
 
     if name == "weaver_worktree_checkpoint":
         agent_ident = args.get("agent", "")
-        agent_id = _resolve_agent(state, agent_ident)
+        agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
         if not agent_id:
             return f"Agent not found: {agent_ident}", True
         cell = state.agents.get(agent_id)

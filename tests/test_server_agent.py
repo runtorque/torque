@@ -289,3 +289,34 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
                 "restore_focus_to_prev_tab"
             ]
         )
+
+    async def test_create_agent_with_config_stamps_created_by_weaver_id(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("backend")
+        bridge = _CapturingBridge(current_path="/tmp/project")
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=bridge,
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        cell = await service.create_agent_with_config(
+            "backend",
+            "Worker",
+            {
+                "profile": "Default",
+                "command": "codex",
+                "directory": "/tmp/project",
+                "tab_color": "",
+                "env_vars": {},
+                "env_file": "",
+                "shell": "zsh",
+                "system_prompt": "",
+            },
+            created_by_weaver_id="weaver-1",
+        )
+
+        self.assertIsNotNone(cell)
+        self.assertEqual(cell.created_by_weaver_id, "weaver-1")

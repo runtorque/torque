@@ -186,6 +186,7 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
       weaver_model: "gpt-5.1-codex",
       weaver_reasoning_effort: "xhigh",
       custom_instructions: "Watch for regressions.",
+      restrict_to_created_agents: true,
       autonomy_mode: "aggressive_auto_continue",
       default_worker_concurrency: 4,
       wave_size_preference: "large",
@@ -215,6 +216,7 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
     ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
   );
   assert.equal(ensure('gs-weaver-custom-instructions').value, 'Watch for regressions.');
+  assert.equal(ensure('gs-weaver-restrict-to-created-agents').checked, true);
   assert.equal(ensure('gs-weaver-autonomy-mode').value, 'aggressive_auto_continue');
   assert.equal(ensure('gs-weaver-default-worker-concurrency').value, '4');
   assert.equal(ensure('gs-weaver-wave-size-preference').value, 'large');
@@ -250,6 +252,7 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   ensure('gs-weaver-model').value = 'gpt-5.1';
   ensure('gs-weaver-reasoning-effort').value = 'xhigh';
   ensure('gs-weaver-custom-instructions').value = 'Stay focused';
+  ensure('gs-weaver-restrict-to-created-agents').checked = true;
   ensure('gs-weaver-autonomy-mode').value = 'suggest_only';
   ensure('gs-weaver-default-worker-concurrency').value = '3';
   ensure('gs-weaver-wave-size-preference').value = 'small';
@@ -284,6 +287,7 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   assert.equal(sandbox.sendCalls[1].weaver_model, 'gpt-5.1');
   assert.equal(sandbox.sendCalls[1].weaver_reasoning_effort, 'xhigh');
   assert.equal(sandbox.sendCalls[1].custom_instructions, 'Stay focused');
+  assert.equal(sandbox.sendCalls[1].restrict_to_created_agents, true);
   assert.equal(sandbox.sendCalls[1].autonomy_mode, 'suggest_only');
   assert.equal(sandbox.sendCalls[1].default_worker_concurrency, 3);
   assert.equal(sandbox.sendCalls[1].wave_size_preference, 'small');
