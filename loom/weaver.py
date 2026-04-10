@@ -408,7 +408,10 @@ class WeaverEventBuffer:
         self._state = state
         self._bridge = bridge          # ITerm2Adapter — for send_text()
         self._buffers: dict[str, list[dict]] = {}   # group → buffered events
+        self._buffer_started: dict[str, float] = {}  # group → oldest buffered event timestamp
         self._last_push: dict[str, float] = {}       # group → timestamp
+        self._due_checks: dict[str, asyncio.TimerHandle] = {}  # group → next regular-digest deadline callback
+        self._due_check_deadlines: dict[str, float] = {}  # group → wall-clock deadline for due check
         self._pending_flush: dict[str, bool] = {}    # group → flush task scheduled/running
         self._was_idle_with_question: set[str] = set()  # groups where weaver went idle with pending_question
         self._timer_handle: asyncio.TimerHandle | None = None
@@ -423,6 +426,10 @@ class WeaverEventBuffer:
         if self._timer_handle:
             self._timer_handle.cancel()
             self._timer_handle = None
+        for handle in self._due_checks.values():
+            handle.cancel()
+        self._due_checks.clear()
+        self._due_check_deadlines.clear()
 
     def get_buffer_stats(self, group: str) -> dict:
         """Return buffer stats for the UI: event count + seconds until next push."""
@@ -431,22 +438,88 @@ class WeaverEventBuffer:
         last = self._last_push.get(group, 0)
         now = time.time()
 
-        if not last:
+        if buf:
+            next_in = self._seconds_until_buffered_digest(group, ws, now=now)
+        elif not last:
             next_in = ws.push_interval
         else:
             elapsed = now - last
             next_in = max(0, ws.push_interval - elapsed)
 
-        # If the weaver is idle and events are buffered, next push is imminent
-        weaver = self._state.get_weaver_for_group(group)
-        if weaver and (not weaver.activity or weaver.activity == "waiting"):
-            if buf:
-                next_in = 0
-
         return {
             "buffered_events": len(buf),
             "next_push_in": int(next_in),
         }
+
+    def _buffered_digest_deadline(self, group: str, ws) -> float | None:
+        """Return the next eligible wall-clock time for a buffered digest."""
+        if not self._buffers.get(group):
+            return None
+        first = self._buffer_started.get(group)
+        if first is None:
+            return None
+
+        last = self._last_push.get(group, 0)
+        push_deadline = (last + ws.push_interval) if last else (
+            first + ws.push_interval
+        )
+        max_deadline = first + ws.max_interval
+        return min(push_deadline, max_deadline)
+
+    def _seconds_until_buffered_digest(self, group: str, ws, *,
+                                       now: float | None = None) -> float:
+        """Return seconds until buffered events become eligible to flush."""
+        deadline = self._buffered_digest_deadline(group, ws)
+        if deadline is None:
+            return 0
+        current = time.time() if now is None else now
+        return max(0, deadline - current)
+
+    def _is_buffered_digest_due(self, group: str, ws, *,
+                                now: float | None = None) -> bool:
+        """Check whether buffered events are eligible for a regular digest."""
+        deadline = self._buffered_digest_deadline(group, ws)
+        if deadline is None:
+            return False
+        current = time.time() if now is None else now
+        return current >= deadline
+
+    def _cancel_due_check(self, group: str):
+        handle = self._due_checks.pop(group, None)
+        if handle:
+            handle.cancel()
+        self._due_check_deadlines.pop(group, None)
+
+    def _ensure_due_check(self, group: str, ws):
+        """Schedule a precise wake-up for the next buffered-digest deadline."""
+        if not self._loop or self._loop.is_closed():
+            return
+
+        deadline = self._buffered_digest_deadline(group, ws)
+        if deadline is None:
+            self._cancel_due_check(group)
+            return
+
+        existing = self._due_checks.get(group)
+        existing_deadline = self._due_check_deadlines.get(group)
+        if existing and not existing.cancelled() and existing_deadline is not None:
+            if abs(existing_deadline - deadline) < 0.5:
+                return
+            existing.cancel()
+
+        delay = max(0, deadline - time.time())
+        self._due_checks[group] = self._loop.call_later(
+            delay, self._on_due_check, group)
+        self._due_check_deadlines[group] = deadline
+
+    def _on_due_check(self, group: str):
+        self._due_checks.pop(group, None)
+        self._due_check_deadlines.pop(group, None)
+        weaver = self._state.get_weaver_for_group(group)
+        if not weaver:
+            return
+        if not weaver.activity or weaver.activity == "waiting":
+            self._check_weaver_flush(weaver)
 
     def _emit_buffer_stats(self, group: str):
         """Queue a buffer-stats delta for the UI."""
@@ -478,6 +551,8 @@ class WeaverEventBuffer:
                 return
 
         buf = self._buffers.setdefault(group, [])
+        if not buf:
+            self._buffer_started[group] = time.time()
         buf.append(event)
         self._emit_buffer_stats(group)
 
@@ -485,10 +560,10 @@ class WeaverEventBuffer:
             return
 
         # If the weaver is already idle, schedule a flush now.
-        # Without this, buffered events sit until the weaver's next
-        # activity change or the heartbeat timer (up to max_interval).
+        # `_check_weaver_flush()` decides whether the digest is due yet or
+        # needs a precise wake-up later.
         if not weaver.activity or weaver.activity == "waiting":
-            self._schedule_flush(group)
+            self._check_weaver_flush(weaver)
 
     def on_delivery_resumed(self, group: str):
         """Re-check a group's buffered events after pause/resume changes."""
@@ -497,7 +572,11 @@ class WeaverEventBuffer:
             return
         self._emit_buffer_stats(group)
         if not weaver.activity or weaver.activity == "waiting":
-            self._check_weaver_flush(weaver)
+            if self._buffers.get(group):
+                self._cancel_due_check(group)
+                self._schedule_flush(group)
+            else:
+                self._check_weaver_flush(weaver)
 
     def on_agent_activity_change(self, cell):
         """Called when an agent's activity changes.  Flush if weaver goes idle."""
@@ -541,19 +620,28 @@ class WeaverEventBuffer:
             return
 
         has_events = bool(self._buffers.get(group))
-        is_overdue = self._is_digest_due(group, ws)
+        if has_events:
+            if self._is_buffered_digest_due(group, ws):
+                self._cancel_due_check(group)
+                self._schedule_flush(group)
+            else:
+                self._ensure_due_check(group, ws)
+            return
 
-        if has_events or is_overdue:
+        self._cancel_due_check(group)
+        is_overdue = self._is_heartbeat_due(group, ws)
+        if is_overdue:
             self._schedule_flush(group)
 
     def _schedule_flush(self, group: str):
         """Schedule one flush task per group at a time."""
         if not self._loop or self._pending_flush.get(group):
             return
+        self._cancel_due_check(group)
         self._pending_flush[group] = True
         self._loop.create_task(self._flush(group))
 
-    def _is_digest_due(self, group: str, ws) -> bool:
+    def _is_heartbeat_due(self, group: str, ws) -> bool:
         """Check if the idle heartbeat interval has elapsed since last push."""
         interval = getattr(ws, "heartbeat_interval", 0)
         if not interval:
@@ -580,6 +668,7 @@ class WeaverEventBuffer:
                 return
 
             events = self._buffers.pop(group, [])
+            self._buffer_started.pop(group, None)
             board_summary = self._board_summary(group)
             text = self._format_digest(group, events, board_summary, weaver)
 
@@ -601,10 +690,8 @@ class WeaverEventBuffer:
             if weaver:
                 is_idle = not weaver.activity or weaver.activity == "waiting"
                 ws = self._state.get_weaver_settings(group)
-                if is_idle and not ws.paused and (
-                        self._buffers.get(group)
-                        or self._is_digest_due(group, ws)):
-                    self._schedule_flush(group)
+                if is_idle and not ws.paused:
+                    self._check_weaver_flush(weaver)
 
             if events:
                 self._emit_buffer_stats(group)
@@ -779,7 +866,6 @@ class WeaverEventBuffer:
     def _timer_tick(self):
         """Check if any weaver needs a digest and emit buffer stats."""
         self._timer_handle = None
-        now = time.time()
         stats_changed = False
 
         for group, gs_obj in self._state.group_settings.items():
@@ -799,13 +885,10 @@ class WeaverEventBuffer:
             if ws.paused:
                 continue
 
-            # Flush if weaver is idle and has buffered events,
-            # or if an idle heartbeat digest is overdue.
+            # Re-check due regular digests / heartbeats for idle weavers.
             is_idle = not weaver.activity or weaver.activity == "waiting"
-            has_events = bool(self._buffers.get(group))
-            digest_due = self._is_digest_due(group, ws)
-            if is_idle and (has_events or digest_due):
-                self._schedule_flush(group)
+            if is_idle:
+                self._check_weaver_flush(weaver)
 
         if stats_changed and self._loop:
             self._loop.create_task(self._state.broadcast())

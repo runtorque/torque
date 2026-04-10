@@ -4,6 +4,7 @@ import sys
 import time
 import types
 import unittest
+from unittest import mock
 
 
 def _install_aiohttp_stub():
@@ -62,6 +63,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         bridge = FakeBridge()
         buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[group] = time.time() - 61
 
         buffer.on_panel_event({
             "group": group,
@@ -75,6 +77,99 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(bridge.sent), 1)
         self.assertIn("── Loom Digest (1 event)", bridge.sent[0])
         self.assertNotIn("Heartbeat", bridge.sent[0])
+
+    async def test_idle_buffered_events_wait_for_push_interval_before_flushing(self):
+        state, group, weaver = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            push_interval=60,
+            max_interval=300,
+            heartbeat_interval=300,
+        )
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+            buffer.on_panel_event({
+                "group": group,
+                "kind": "task_completed",
+                "message": "batched",
+            })
+
+        await asyncio.sleep(0.05)
+        self.assertEqual(bridge.sent, [])
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=159.0):
+            buffer._check_weaver_flush(weaver)
+        await asyncio.sleep(0.05)
+        self.assertEqual(bridge.sent, [])
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=160.0):
+            buffer._check_weaver_flush(weaver)
+            await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("── Loom Digest (1 event)", bridge.sent[0])
+        buffer.stop()
+
+    async def test_max_interval_caps_buffered_digest_delay(self):
+        state, group, weaver = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            push_interval=120,
+            max_interval=30,
+            heartbeat_interval=300,
+        )
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+            buffer.on_panel_event({
+                "group": group,
+                "kind": "task_completed",
+                "message": "respect max interval",
+            })
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=129.0):
+            buffer._check_weaver_flush(weaver)
+        await asyncio.sleep(0.05)
+        self.assertEqual(bridge.sent, [])
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=130.0):
+            buffer._check_weaver_flush(weaver)
+            await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("respect max interval", bridge.sent[0])
+        buffer.stop()
+
+    async def test_buffer_stats_count_down_while_idle_events_wait_to_flush(self):
+        state, group, _ = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            push_interval=60,
+            max_interval=300,
+            heartbeat_interval=300,
+        )
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+            buffer.on_panel_event({
+                "group": group,
+                "kind": "task_completed",
+                "message": "count me down",
+            })
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=115.0):
+            stats = buffer.get_buffer_stats(group)
+
+        self.assertEqual(stats["buffered_events"], 1)
+        self.assertEqual(stats["next_push_in"], 45)
+        buffer.stop()
 
     async def test_overdue_idle_push_uses_digest_format(self):
         state, group, _ = self._make_state()
@@ -167,6 +262,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         bridge = FakeBridge()
         buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[group] = time.time() - 61
 
         for idx in range(7):
             buffer.on_panel_event({
@@ -199,6 +295,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         bridge = FakeBridge()
         buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
         buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[group] = time.time() - 61
         buffer.on_panel_event({
             "group": group,
             "kind": "task_completed",
