@@ -267,7 +267,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             bridge.sent[0],
         )
 
-    async def test_paused_weaver_does_not_buffer_or_flush_events(self):
+    async def test_paused_weaver_buffers_events_without_flushing(self):
         state, group, weaver = self._make_state()
         state.weaver_settings[group] = self.state_mod.WeaverSettings(
             group=group,
@@ -286,8 +286,43 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
 
         await asyncio.sleep(0.05)
 
-        self.assertEqual(buffer.get_buffer_stats(group)["buffered_events"], 0)
+        self.assertEqual(buffer.get_buffer_stats(group)["buffered_events"], 1)
         self.assertEqual(bridge.sent, [])
+
+    async def test_resume_flushes_events_buffered_while_paused_in_order(self):
+        state, group, _ = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            paused=True,
+        )
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        buffer.on_panel_event({
+            "group": group,
+            "kind": "task_completed",
+            "message": "first while paused",
+        })
+        buffer.on_panel_event({
+            "group": group,
+            "kind": "task_completed",
+            "message": "second while paused",
+        })
+
+        state.update_weaver_settings(group, paused=False)
+        buffer.on_delivery_resumed(group)
+
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(buffer.get_buffer_stats(group)["buffered_events"], 0)
+        self.assertEqual(len(bridge.sent), 1)
+        digest = bridge.sent[0]
+        self.assertIn("── Loom Digest (2 events)", digest)
+        self.assertLess(
+            digest.index("first while paused"),
+            digest.index("second while paused"),
+        )
 
     async def test_pending_question_clears_only_after_weaver_becomes_active(self):
         state, group, weaver = self._make_state()

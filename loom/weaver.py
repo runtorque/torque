@@ -448,6 +448,14 @@ class WeaverEventBuffer:
             "next_push_in": int(next_in),
         }
 
+    def _emit_buffer_stats(self, group: str):
+        """Queue a buffer-stats delta for the UI."""
+        self._state._emit(
+            "weaver_buffer_stats",
+            group=group,
+            **self.get_buffer_stats(group),
+        )
+
     # -- Public hooks ---------------------------------------------------------
 
     def on_panel_event(self, event: dict):
@@ -462,8 +470,6 @@ class WeaverEventBuffer:
             return
 
         ws = self._state.get_weaver_settings(group)
-        if ws.paused:
-            return
 
         kind = event.get("kind", "")
         # Check if this event type should be buffered
@@ -473,12 +479,25 @@ class WeaverEventBuffer:
 
         buf = self._buffers.setdefault(group, [])
         buf.append(event)
+        self._emit_buffer_stats(group)
+
+        if ws.paused:
+            return
 
         # If the weaver is already idle, schedule a flush now.
         # Without this, buffered events sit until the weaver's next
         # activity change or the heartbeat timer (up to max_interval).
         if not weaver.activity or weaver.activity == "waiting":
             self._schedule_flush(group)
+
+    def on_delivery_resumed(self, group: str):
+        """Re-check a group's buffered events after pause/resume changes."""
+        weaver = self._state.get_weaver_for_group(group)
+        if not weaver:
+            return
+        self._emit_buffer_stats(group)
+        if not weaver.activity or weaver.activity == "waiting":
+            self._check_weaver_flush(weaver)
 
     def on_agent_activity_change(self, cell):
         """Called when an agent's activity changes.  Flush if weaver goes idle."""
@@ -546,6 +565,7 @@ class WeaverEventBuffer:
 
     async def _flush(self, group: str):
         """Format and send buffered events as a digest to the weaver."""
+        events = None
         try:
             weaver = self._state.get_weaver_for_group(group)
             if not weaver or not weaver.session_id:
@@ -585,6 +605,11 @@ class WeaverEventBuffer:
                         self._buffers.get(group)
                         or self._is_digest_due(group, ws)):
                     self._schedule_flush(group)
+
+            if events:
+                self._emit_buffer_stats(group)
+                if self._loop:
+                    self._loop.create_task(self._state.broadcast())
 
     def _format_digest(self, group: str, events: list[dict], board_summary: str,
                        weaver=None) -> str:

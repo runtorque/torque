@@ -5474,6 +5474,7 @@ async def main(connection=None):
                             group,
                             pending_question="",
                             paused=False)
+                        weaver_buffer.on_delivery_resumed(group)
                         # Log to journal
                         state.journal_append(
                             group, "observation",
@@ -5489,6 +5490,7 @@ async def main(connection=None):
                 group = data.get("group", "")
                 state.update_weaver_settings(
                     group, paused=False, pending_question="")
+                weaver_buffer.on_delivery_resumed(group)
                 result = {"type": "ok"}
 
             elif cmd == "restart":
