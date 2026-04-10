@@ -4691,6 +4691,8 @@ test('submitAdd includes worktree_name for custom agent worktrees', () => {
   document.register('add-env-vars').value = '';
   document.register('add-template-select').value = '';
   document.register('add-provider-select').value = '';
+  document.register('add-model-input').value = 'gpt-5';
+  document.register('add-reasoning-effort').value = 'high';
   document.register('add-wt-enabled').checked = true;
   document.register('add-wt-base-dir').value = '.loom/worktrees';
   document.register('add-wt-base-branch').value = 'main';
@@ -4707,6 +4709,8 @@ test('submitAdd includes worktree_name for custom agent worktrees', () => {
     group: 'alpha',
     profile: 'Default',
     directory: '/repo',
+    model: 'gpt-5',
+    reasoning_effort: 'high',
     worktree: true,
     worktree_base_dir: '.loom/worktrees',
     worktree_base_branch: 'main',
@@ -4730,6 +4734,8 @@ test('submitAdd omits worktree_name when custom worktree naming is blank or disa
   document.register('add-env-vars').value = '';
   document.register('add-template-select').value = '';
   document.register('add-provider-select').value = '';
+  document.register('add-model-input').value = '';
+  document.register('add-reasoning-effort').value = '';
   document.register('add-wt-enabled').checked = true;
   document.register('add-wt-base-dir').value = '.loom/worktrees';
   document.register('add-wt-base-branch').value = 'main';
@@ -4756,6 +4762,57 @@ test('submitAdd omits worktree_name when custom worktree naming is blank or disa
     false,
   );
   assert.equal(jsonValue(context, 'sendCalls[0].worktree'), false);
+});
+
+test('rendered add-agent templates apply model and reasoning effort overrides', () => {
+  const { context, document } = createModalHarness();
+  [
+    'add-provider-select',
+    'add-cmd-input',
+    'add-cmd-row',
+    'add-model-row',
+    'add-reasoning-row',
+    'add-model-input',
+    'add-reasoning-effort',
+    'add-shell-select',
+    'add-env-vars',
+    'add-wt-enabled',
+    'add-wt-fields',
+    'add-wt-base-dir',
+    'add-wt-base-branch',
+    'add-wt-auto-checkpoint',
+    'add-wt-checkpoint-on-progress',
+    'add-wt-squash',
+    'add-profile-select',
+    'add-dir-select',
+    'add-dir-input',
+    'add-name-input',
+  ].forEach((id) => document.register(id));
+  document.getElementById('add-cmd-row').setQuerySelector('label', document.register('add-cmd-row-label'));
+  runInContext(context, `
+    _cachedAgentTemplates = [];
+    _cachedProviders = [{
+      name: 'codex',
+      display_name: 'Codex',
+      command: 'codex',
+      reasoning_efforts: ['low', 'medium', 'high'],
+    }];
+    addCellMode = 'agent';
+  `);
+  context._applyRenderedAddTemplate({
+    provider: 'codex',
+    command: 'codex --full-auto',
+    model: 'gpt-5',
+    reasoning_effort: 'high',
+    shell: 'zsh',
+    env_vars: {},
+    worktree: false,
+  }, 'worker/reviewer');
+
+  assert.equal(document.getElementById('add-provider-select').value, 'codex');
+  assert.equal(document.getElementById('add-cmd-input').value, 'codex --full-auto');
+  assert.equal(document.getElementById('add-model-input').value, 'gpt-5');
+  assert.equal(document.getElementById('add-reasoning-effort').value, 'high');
 });
 
 test('standalone submitGroup immediately continues into add-agent setup', () => {

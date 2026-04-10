@@ -76,6 +76,8 @@ function createSandbox() {
         alpha: {
           weaver_provider: 'codex',
           weaver_boot_command: 'codex --model gpt-5.4',
+          weaver_model: 'gpt-5.4',
+          weaver_reasoning_effort: 'medium',
           custom_instructions: 'Keep waves tight.',
           autonomy_mode: 'aggressive_auto_continue',
           default_worker_concurrency: 4,
@@ -87,7 +89,12 @@ function createSandbox() {
       },
     },
     _cachedProviders: [
-      { name: 'codex', display_name: 'Codex', command: 'codex' },
+      {
+        name: 'codex',
+        display_name: 'Codex',
+        command: 'codex',
+        reasoning_efforts: ['low', 'medium', 'high'],
+      },
     ],
     sendCalls: [],
     document: {
@@ -137,6 +144,8 @@ test('openWeaverLaunchDialog populates persisted weaver launch settings', () => 
   assert.equal(ensure('weaver-launch-submit-btn').textContent, 'Create Weaver');
   assert.equal(ensure('weaver-launch-provider').value, 'codex');
   assert.equal(ensure('weaver-launch-boot-cmd').value, 'codex --model gpt-5.4');
+  assert.equal(ensure('weaver-launch-model').value, 'gpt-5.4');
+  assert.equal(ensure('weaver-launch-reasoning-effort').value, 'medium');
   assert.equal(ensure('weaver-launch-custom-instructions').value, 'Keep waves tight.');
   assert.equal(ensure('weaver-launch-autonomy-mode').value, 'aggressive_auto_continue');
   assert.equal(ensure('weaver-launch-default-worker-concurrency').value, '4');
@@ -156,6 +165,8 @@ test('submitWeaverLaunchDialog persists settings then creates a Weaver', () => {
   vm.runInContext(`openWeaverLaunchDialog('alpha')`, context);
   ensure('weaver-launch-provider').value = 'codex';
   ensure('weaver-launch-boot-cmd').value = 'codex --model gpt-5.5';
+  ensure('weaver-launch-model').value = 'gpt-5.5';
+  ensure('weaver-launch-reasoning-effort').value = 'high';
   ensure('weaver-launch-custom-instructions').value = 'Watch deploy risk.';
   ensure('weaver-launch-autonomy-mode').value = 'suggest_only';
   ensure('weaver-launch-default-worker-concurrency').value = '3';
@@ -172,6 +183,8 @@ test('submitWeaverLaunchDialog persists settings then creates a Weaver', () => {
       group: 'alpha',
       weaver_provider: 'codex',
       weaver_boot_command: 'codex --model gpt-5.5',
+      weaver_model: 'gpt-5.5',
+      weaver_reasoning_effort: 'high',
       custom_instructions: 'Watch deploy risk.',
       autonomy_mode: 'suggest_only',
       default_worker_concurrency: 3,
@@ -207,6 +220,8 @@ test('submitWeaverLaunchDialog persists settings then relaunches the designated 
       group: 'alpha',
       weaver_provider: 'codex',
       weaver_boot_command: 'codex --model gpt-5.4',
+      weaver_model: 'gpt-5.4',
+      weaver_reasoning_effort: 'medium',
       custom_instructions: 'Keep waves tight.',
       autonomy_mode: 'aggressive_auto_continue',
       default_worker_concurrency: 4,

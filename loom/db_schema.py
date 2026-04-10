@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS group_settings (
     default_agent_template      TEXT NOT NULL DEFAULT '',
     agent_provider              TEXT NOT NULL DEFAULT '',
     agent_boot_command          TEXT NOT NULL DEFAULT '',
+    agent_model                 TEXT NOT NULL DEFAULT '',
+    agent_reasoning_effort      TEXT NOT NULL DEFAULT '',
     git_worktree                INTEGER NOT NULL DEFAULT 0,
     worktree_base_dir           TEXT NOT NULL DEFAULT '.loom/worktrees',
     worktree_base_branch        TEXT NOT NULL DEFAULT '',
@@ -261,7 +263,9 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     pending_note_kind  TEXT NOT NULL DEFAULT '',
     enabled_events     TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived"]',
     weaver_provider    TEXT NOT NULL DEFAULT '',
-    weaver_boot_command TEXT NOT NULL DEFAULT ''
+    weaver_boot_command TEXT NOT NULL DEFAULT '',
+    weaver_model       TEXT NOT NULL DEFAULT '',
+    weaver_reasoning_effort TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS weaver_journal (
@@ -428,6 +432,15 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             "ALTER TABLE group_settings ADD COLUMN "
             "agent_provider TEXT NOT NULL DEFAULT ''")
         conn.commit()
+    for col in ("agent_model", "agent_reasoning_effort"):
+        try:
+            conn.execute(
+                f"SELECT {col} FROM group_settings LIMIT 0")
+        except sqlite3.OperationalError:
+            conn.execute(
+                f"ALTER TABLE group_settings ADD COLUMN "
+                f"{col} TEXT NOT NULL DEFAULT ''")
+            conn.commit()
     # Migrate: add terminal_close_on_disconnect column
     try:
         conn.execute(
@@ -707,8 +720,9 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 conn.commit()
             except sqlite3.OperationalError:
                 pass
-    # Migrate: add weaver_provider and weaver_boot_command columns
-    for col in ("weaver_provider", "weaver_boot_command"):
+    # Migrate: add weaver_provider and launch override columns
+    for col in ("weaver_provider", "weaver_boot_command",
+                "weaver_model", "weaver_reasoning_effort"):
         try:
             conn.execute(
                 f"SELECT {col} FROM weaver_settings LIMIT 0")

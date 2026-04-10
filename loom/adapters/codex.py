@@ -291,6 +291,15 @@ class CodexAdapter(AgentAdapter):
             return ""
         return f" --model {shlex.quote(model)}"
 
+    def resolve_reasoning_effort_flags(self, reasoning_effort: str) -> str:
+        reasoning_effort = str(reasoning_effort or "").strip()
+        if not reasoning_effort:
+            return ""
+        return f" -c model_reasoning_effort={shlex.quote(reasoning_effort)}"
+
+    def get_reasoning_effort_options(self) -> list[str]:
+        return ["low", "medium", "high"]
+
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
         parts = shlex.split(boot_cmd)
         if not parts:

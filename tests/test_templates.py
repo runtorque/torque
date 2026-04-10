@@ -62,6 +62,7 @@ class TemplateManagerTests(unittest.TestCase):
                 "provider": "claude-code",
                 "tab_color": "#111111",
                 "model": "opus",
+                "reasoning_effort": "medium",
                 "worktree": True,
                 "worktree_base_branch": "main",
                 "env_vars": {"BASE": "1", "SHARED": "base"},
@@ -75,6 +76,7 @@ class TemplateManagerTests(unittest.TestCase):
                 "name": "researcher",
                 "provider": "codex",
                 "model": "gpt-5",
+                "reasoning_effort": "high",
                 "tab_color": "#222222",
                 "session_resume": False,
                 "env_vars": {"TPL": "1", "SHARED": "template"},
@@ -86,6 +88,8 @@ class TemplateManagerTests(unittest.TestCase):
         gs = SimpleNamespace(
             default_agent_template="base/default",
             agent_provider="claude-code",
+            agent_model="haiku",
+            agent_reasoning_effort="low",
             agent_directory="/group/repo",
             agent_profile="Dev",
             agent_shell="zsh",
@@ -114,6 +118,7 @@ class TemplateManagerTests(unittest.TestCase):
 
         self.assertEqual(resolved["provider"], "codex")
         self.assertEqual(resolved["model"], "gpt-5")
+        self.assertEqual(resolved["reasoning_effort"], "high")
         self.assertEqual(resolved["directory"], "/override/repo")
         self.assertEqual(resolved["profile"], "Dev")
         self.assertEqual(resolved["shell"], "bash")
@@ -140,6 +145,8 @@ class TemplateManagerTests(unittest.TestCase):
         gs = SimpleNamespace(
             default_agent_template="",
             agent_provider="",
+            agent_model="",
+            agent_reasoning_effort="",
             agent_directory="",
             agent_profile="",
             agent_shell="",

@@ -22,6 +22,10 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 "Follow the spec.\n",
             )
             self.assertEqual(adapter.resolve_model_flags("sonnet"), " --model sonnet")
+            self.assertEqual(
+                adapter.resolve_reasoning_effort_flags("high"),
+                " --effort high",
+            )
 
     def test_claude_persistent_prompts_use_named_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -158,6 +162,10 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             " 'Be precise.'",
         )
         self.assertEqual(adapter.resolve_model_flags("gpt-5"), " --model gpt-5")
+        self.assertEqual(
+            adapter.resolve_reasoning_effort_flags("high"),
+            " -c model_reasoning_effort=high",
+        )
 
     def test_codex_persistent_prompts_use_cli_args(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -334,6 +342,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
         adapter = GenericAdapter()
         self.assertEqual(adapter.inject_system_prompt("/tmp", "ignored"), "")
         self.assertEqual(adapter.resolve_model_flags("ignored"), "")
+        self.assertEqual(adapter.resolve_reasoning_effort_flags("ignored"), "")
 
     def test_provider_registry_and_detection_cover_cross_provider_semantics(self):
         providers = get_providers()
@@ -342,6 +351,15 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             [p["name"] for p in providers],
             ["claude-code", "codex", "gemini-cli"],
         )
+        self.assertEqual(
+            providers[0]["reasoning_efforts"],
+            ["low", "medium", "high"],
+        )
+        self.assertEqual(
+            providers[1]["reasoning_efforts"],
+            ["low", "medium", "high"],
+        )
+        self.assertEqual(providers[2]["reasoning_efforts"], [])
         self.assertEqual(get_default_command_for_provider("codex"), "codex")
         self.assertEqual(get_default_command_for_provider("gemini-cli"), "gemini")
         self.assertEqual(get_default_command_for_provider("missing"), "")

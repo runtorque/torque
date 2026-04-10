@@ -27,6 +27,7 @@ _TEMPLATE_KEY_ORDER = [
     "provider",
     "command",
     "model",
+    "reasoning_effort",
     "permissions",
     "max_turns",
     "system_prompt",
@@ -52,6 +53,7 @@ _SCALAR_KEYS = {
     "provider",
     "command",
     "model",
+    "reasoning_effort",
     "permissions",
     "system_prompt",
     "initial_prompt",
@@ -352,6 +354,10 @@ class TemplateManager:
             "env_vars": getattr(group_settings, "agent_env_vars", {}),
             "provider": getattr(group_settings, "agent_provider", ""),
             "command": getattr(group_settings, "agent_boot_command", ""),
+            "model": getattr(group_settings, "agent_model", ""),
+            "reasoning_effort": getattr(
+                group_settings, "agent_reasoning_effort", ""
+            ),
             "worktree": getattr(group_settings, "git_worktree", False),
             "worktree_base_dir": getattr(
                 group_settings, "worktree_base_dir", ""

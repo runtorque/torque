@@ -34,6 +34,7 @@ function connect() {
     } else if (msg.type === 'config') {
       if (msg.providers) _cachedProviders = msg.providers;
       if (msg.templates) _cachedAgentTemplates = msg.templates;
+      if (msg.runtime) state.runtime = msg.runtime;
       if (_pendingModal) {
         _showAddModal(_pendingModal.mode, _pendingModal.group, msg);
         _pendingModal = null;
@@ -41,6 +42,7 @@ function connect() {
     } else if (msg.type === 'group_settings') {
       if (msg.providers) _cachedProviders = msg.providers;
       if (msg.templates) _cachedAgentTemplates = msg.templates;
+      if (msg.runtime) state.runtime = msg.runtime;
       _showGroupSettings(msg.group, msg);
     } else if (msg.type === 'toast') {
       _showToast(msg.message, msg.level);

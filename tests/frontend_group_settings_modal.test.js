@@ -101,7 +101,12 @@ function createSandbox() {
     },
     _cachedAgentTemplates: [],
     _cachedProviders: [
-      { name: 'codex', display_name: 'Codex', command: 'codex' },
+      {
+        name: 'codex',
+        display_name: 'Codex',
+        command: 'codex',
+        reasoning_efforts: ['low', 'medium', 'high'],
+      },
     ],
     sendCalls: [],
     document: {
@@ -157,11 +162,16 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
   vm.runInContext(`_showGroupSettings("alpha", {
     settings: {
       weaver_agent_id: "weaver-1",
+      agent_provider: "codex",
+      agent_model: "gpt-5.1",
+      agent_reasoning_effort: "high",
       worktree_merge_cleanup: "close_remove"
     },
     weaver_settings: {
       weaver_provider: "codex",
       weaver_boot_command: "codex --model gpt-5",
+      weaver_model: "gpt-5.1-codex",
+      weaver_reasoning_effort: "medium",
       custom_instructions: "Watch for regressions.",
       autonomy_mode: "aggressive_auto_continue",
       default_worker_concurrency: 4,
@@ -179,6 +189,10 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
 
   assert.equal(ensure('gs-weaver-provider').value, 'codex');
   assert.equal(ensure('gs-weaver-boot-cmd').value, 'codex --model gpt-5');
+  assert.equal(ensure('gs-agent-model').value, 'gpt-5.1');
+  assert.equal(ensure('gs-agent-reasoning-effort').value, 'high');
+  assert.equal(ensure('gs-weaver-model').value, 'gpt-5.1-codex');
+  assert.equal(ensure('gs-weaver-reasoning-effort').value, 'medium');
   assert.equal(ensure('gs-weaver-custom-instructions').value, 'Watch for regressions.');
   assert.equal(ensure('gs-weaver-autonomy-mode').value, 'aggressive_auto_continue');
   assert.equal(ensure('gs-weaver-default-worker-concurrency').value, '4');
@@ -207,6 +221,10 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   ensure('gs-wt-merge-cleanup').value = 'remove';
   ensure('gs-weaver-provider').value = 'codex';
   ensure('gs-weaver-boot-cmd').value = 'codex --model gpt-5';
+  ensure('gs-agent-model').value = 'gpt-5';
+  ensure('gs-agent-reasoning-effort').value = 'medium';
+  ensure('gs-weaver-model').value = 'gpt-5.1';
+  ensure('gs-weaver-reasoning-effort').value = 'high';
   ensure('gs-weaver-custom-instructions').value = 'Stay focused';
   ensure('gs-weaver-autonomy-mode').value = 'suggest_only';
   ensure('gs-weaver-default-worker-concurrency').value = '3';
@@ -228,10 +246,14 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   assert.equal(sandbox.sendCalls[0].settings.terminal_name_prefix, 'Shell');
   assert.equal(sandbox.sendCalls[0].settings.terminal_boot_command, 'npm run dev');
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_cleanup, 'remove');
+  assert.equal(sandbox.sendCalls[0].settings.agent_model, 'gpt-5');
+  assert.equal(sandbox.sendCalls[0].settings.agent_reasoning_effort, 'medium');
   assert.equal(sandbox.sendCalls[1].cmd, 'weaver_update_settings');
   assert.equal(sandbox.sendCalls[1].group, 'alpha');
   assert.equal(sandbox.sendCalls[1].weaver_provider, 'codex');
   assert.equal(sandbox.sendCalls[1].weaver_boot_command, 'codex --model gpt-5');
+  assert.equal(sandbox.sendCalls[1].weaver_model, 'gpt-5.1');
+  assert.equal(sandbox.sendCalls[1].weaver_reasoning_effort, 'high');
   assert.equal(sandbox.sendCalls[1].custom_instructions, 'Stay focused');
   assert.equal(sandbox.sendCalls[1].autonomy_mode, 'suggest_only');
   assert.equal(sandbox.sendCalls[1].default_worker_concurrency, 3);

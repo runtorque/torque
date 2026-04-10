@@ -460,6 +460,8 @@ class GroupSettings:
     default_agent_template: str = ""
     agent_provider: str = ""  # adapter name ("claude-code", "codex", etc.) — empty = use default
     agent_boot_command: str = ""  # override default boot command (e.g. "codex")
+    agent_model: str = ""  # default model override when provider supports it
+    agent_reasoning_effort: str = ""  # default reasoning-effort override
     git_worktree: bool = False
     worktree_base_dir: str = ".loom/worktrees"  # directory for worktrees (relative to repo)
     worktree_base_branch: str = ""  # branch to fork from (empty = current HEAD)
@@ -520,6 +522,8 @@ class WeaverSettings:
     pending_note_kind: str = ""          # "note" | "question" | ""
     weaver_provider: str = ""            # adapter name override (empty = use group default)
     weaver_boot_command: str = ""        # boot command override (empty = use provider default)
+    weaver_model: str = ""               # model override for the designated weaver
+    weaver_reasoning_effort: str = ""    # reasoning-effort override for the designated weaver
     enabled_events: list[str] = field(   # optional events (mandatory always on)
         default_factory=lambda: [
             "agent_started",
@@ -1291,6 +1295,8 @@ class MatrixState:
             if key in valid:
                 if key == "worktree_merge_cleanup":
                     value = normalize_worktree_merge_cleanup(value)
+                elif key in {"agent_model", "agent_reasoning_effort"}:
+                    value = str(value or "").strip()
                 setattr(gs, key, value)
         self._emit("group_settings_update", name=name, **asdict(gs))
         self._db_save_group_settings(name)
@@ -1330,6 +1336,8 @@ class MatrixState:
                     value = normalize_weaver_digest_verbosity(value)
                 elif key == "escalation_style":
                     value = normalize_weaver_escalation_style(value)
+                elif key in {"weaver_model", "weaver_reasoning_effort"}:
+                    value = str(value or "").strip()
                 setattr(ws, key, value)
         d = asdict(ws)
         d.pop("group", None)

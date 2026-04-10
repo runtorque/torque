@@ -113,6 +113,15 @@ class AgentAdapter:
             return ""
         return f" --model {shlex.quote(model)}"
 
+    def resolve_reasoning_effort_flags(self, reasoning_effort: str) -> str:
+        """Return provider-specific CLI flags for reasoning effort."""
+        del reasoning_effort
+        return ""
+
+    def get_reasoning_effort_options(self) -> list[str]:
+        """Return supported reasoning-effort options for UI affordances."""
+        return []
+
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
         """Return the modified boot command for resuming a session.
 
