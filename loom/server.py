@@ -990,6 +990,7 @@ async def main(connection=None):
                                         target_session_id: str = "",
                                         target_window_id: str = "",
                                         persistent_prompt_text: str = "",
+                                        created_by_weaver_id: str = "",
                                         restore_focus_to_prev_tab: bool = False):
         return await agent_launch.create_agent_with_config(
             group,
@@ -999,6 +1000,7 @@ async def main(connection=None):
             target_session_id=target_session_id,
             target_window_id=target_window_id,
             persistent_prompt_text=persistent_prompt_text,
+            created_by_weaver_id=created_by_weaver_id,
             restore_focus_to_prev_tab=restore_focus_to_prev_tab,
         )
 
@@ -1083,6 +1085,17 @@ async def main(connection=None):
             return False
         gs = state.get_group_settings(cell.group)
         return bool(gs and gs.weaver_agent_id == cell.id)
+
+    def _ownership_weaver_id_for_dispatch_source(cell) -> str:
+        """Return the immutable Weaver owner id to stamp on new agents."""
+        if not cell or cell.cell_type != "agent":
+            return ""
+        owner_id = str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+        if owner_id:
+            return owner_id
+        if _is_designated_weaver(cell):
+            return cell.id
+        return ""
 
     def _record_task_dispatch(cell, task, lane: str) -> None:
         """Link a task to an agent and persist dispatch history."""
@@ -3539,6 +3552,8 @@ async def main(connection=None):
                                 target_window_id=data.get(
                                     "target_window_id", ""),
                                 persistent_prompt_text=persistent_prompt_text,
+                                created_by_weaver_id=data.get(
+                                    "_created_by_weaver_id", ""),
                                 restore_focus_to_prev_tab=True,
                             )
                             if cell:
@@ -5053,6 +5068,14 @@ async def main(connection=None):
                                                 "id": new_task.id,
                                                 "create_agent": True,
                                             }
+                                            owner_weaver_id = \
+                                                _ownership_weaver_id_for_dispatch_source(
+                                                    cell
+                                                )
+                                            if owner_weaver_id:
+                                                dispatch_data[
+                                                    "_created_by_weaver_id"
+                                                ] = owner_weaver_id
                                             # Inherit worktree from
                                             # parent agent
                                             if cell.worktree_path:

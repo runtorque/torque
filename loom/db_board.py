@@ -171,8 +171,8 @@ def replace_auto_dispatch_queue(executor, group_name, entries):
         executor.execute(
             "INSERT INTO auto_dispatch_queue "
             "(group_name, position, task_id, agent_group, "
-            "max_concurrent, target_agent_id, enqueued_at) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "max_concurrent, target_agent_id, weaver_owner_id, enqueued_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             (
                 group_name,
                 pos,
@@ -180,6 +180,7 @@ def replace_auto_dispatch_queue(executor, group_name, entries):
                 item.get("agent_group", ""),
                 int(item.get("max_concurrent", 1) or 1),
                 item.get("target_agent_id", ""),
+                item.get("weaver_owner_id", ""),
                 item.get("enqueued_at", ""),
             ),
         )
@@ -188,13 +189,23 @@ def replace_auto_dispatch_queue(executor, group_name, entries):
 def decode_auto_dispatch_queue_rows(rows):
     queues = {}
     for row in rows:
-        group_name, _pos, task_id, agent_group, max_concurrent, target_agent_id, enqueued_at = row
+        (
+            group_name,
+            _pos,
+            task_id,
+            agent_group,
+            max_concurrent,
+            target_agent_id,
+            weaver_owner_id,
+            enqueued_at,
+        ) = row
         queues.setdefault(group_name, []).append(
             {
                 "task_id": task_id,
                 "agent_group": agent_group or "",
                 "max_concurrent": int(max_concurrent or 1),
                 "target_agent_id": target_agent_id or "",
+                "weaver_owner_id": weaver_owner_id or "",
                 "enqueued_at": enqueued_at or "",
             }
         )

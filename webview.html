@@ -453,6 +453,11 @@
               <div id="gs-weaver-agent-meta" class="label-hint">Create a Weaver from the group&#39;s + New dropdown, then configure it here.</div>
             </div>
           </div>
+          <label class="gs-checkbox">
+            <input id="gs-weaver-restrict-to-created-agents" type="checkbox">
+            Only show/manage agents launched by this Weaver
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this Weaver can only list, inspect, message, close, relaunch, or use worktree tools on worker agents it originally created. Human operators still see all agents on the board.">?</span>
+          </label>
         </div>
       </div>
 

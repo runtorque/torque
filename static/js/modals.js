@@ -464,6 +464,7 @@ function _showGroupSettings(group, data) {
   _populateProviderSelect('gs-weaver-provider', ws.weaver_provider || '', true);
   document.getElementById('gs-weaver-boot-cmd').value = ws.weaver_boot_command || '';
   document.getElementById('gs-weaver-custom-instructions').value = ws.custom_instructions || '';
+  document.getElementById('gs-weaver-restrict-to-created-agents').checked = !!ws.restrict_to_created_agents;
   _setSelectValue('gs-weaver-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
   _setSelectValue(
     'gs-weaver-default-worker-concurrency',
@@ -595,6 +596,7 @@ function submitGroupSettings() {
     weaver_provider: _getProviderValue('gs-weaver-provider'),
     weaver_boot_command: document.getElementById('gs-weaver-boot-cmd').value.trim(),
     custom_instructions: document.getElementById('gs-weaver-custom-instructions').value,
+    restrict_to_created_agents: document.getElementById('gs-weaver-restrict-to-created-agents').checked,
     autonomy_mode: document.getElementById('gs-weaver-autonomy-mode').value,
     default_worker_concurrency: parseInt(document.getElementById('gs-weaver-default-worker-concurrency').value, 10) || 2,
     wave_size_preference: document.getElementById('gs-weaver-wave-size-preference').value,

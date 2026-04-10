@@ -46,6 +46,7 @@ class LoomDBTests(unittest.TestCase):
             session_resume=False,
             idle_timeout=9,
             tasks_dispatched=3,
+            created_by_weaver_id="weaver-1",
         )
         self.db.save_agent(cell)
         self.db.save_groups({"g": [cell.id]}, {"g": "g"})
@@ -148,6 +149,7 @@ class LoomDBTests(unittest.TestCase):
                 "agent_group": "release",
                 "max_concurrent": 2,
                 "target_agent_id": "agent-1",
+                "weaver_owner_id": "weaver-1",
                 "enqueued_at": "2026-04-07T09:00:00+00:00",
             }
         ])
@@ -160,6 +162,10 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["agents"]["agent-1"]["terminal_backend"], "pty")
         self.assertFalse(loaded["agents"]["agent-1"]["session_resume"])
         self.assertTrue(loaded["agents"]["agent-1"]["worktree_auto_checkpoint"])
+        self.assertEqual(
+            loaded["agents"]["agent-1"]["created_by_weaver_id"],
+            "weaver-1",
+        )
         self.assertEqual(
             loaded["group_settings"]["g"]["default_terminal_backend"],
             "pty",
@@ -241,6 +247,10 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["auto_dispatch_queues"]["g"][0]["target_agent_id"],
             "agent-1",
+        )
+        self.assertEqual(
+            loaded["auto_dispatch_queues"]["g"][0]["weaver_owner_id"],
+            "weaver-1",
         )
 
     def test_load_all_restores_board_filters_by_group(self):
@@ -462,6 +472,10 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["board_tasks"]["LOOM:1:1"]["pipeline_root_id"], "LOOM:1")
         self.assertEqual(loaded["board_tasks"]["LOOM:1:1"]["depends_on"], ["LOOM:1"])
         self.assertEqual(loaded["auto_dispatch_queues"]["Loom"][0]["task_id"], "LOOM:1:1")
+        self.assertEqual(
+            loaded["auto_dispatch_queues"]["Loom"][0]["weaver_owner_id"],
+            "",
+        )
         self.assertEqual(loaded["schedules"]["sched"]["last_task_id"], "LOOM:1")
         self.assertEqual(loaded["task_id_aliases"]["task-root"], "LOOM:1")
         self.assertEqual(loaded["task_id_aliases"]["task-child"], "LOOM:1:1")
@@ -571,6 +585,7 @@ class LoomDBTests(unittest.TestCase):
                 "escalation_style": "keep_moving",
                 "paused": True,
                 "custom_instructions": "Focus on regressions.",
+                "restrict_to_created_agents": True,
                 "pending_question": "Need approval",
                 "pending_note": "FYI: release notes are ready",
                 "pending_note_kind": "note",
@@ -584,6 +599,7 @@ class LoomDBTests(unittest.TestCase):
 
         loaded = self.db.load_weaver_settings("g")
         self.assertEqual(loaded["pending_question"], "Need approval")
+        self.assertTrue(loaded["restrict_to_created_agents"])
         self.assertEqual(loaded["pending_note"], "FYI: release notes are ready")
         self.assertEqual(loaded["pending_note_kind"], "note")
         self.assertEqual(loaded["enabled_events"], ["task_completed"])
@@ -635,6 +651,7 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["max_interval"], 240)
         self.assertEqual(loaded["heartbeat_interval"], 240)
         self.assertEqual(loaded["default_worker_concurrency"], 2)
+        self.assertFalse(loaded["restrict_to_created_agents"])
         self.assertEqual(loaded["autonomy_mode"], "dispatch_when_clear")
         self.assertEqual(loaded["wave_size_preference"], "small")
         self.assertEqual(

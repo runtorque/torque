@@ -327,6 +327,9 @@ def _build_policy_section(weaver_settings=None, group_settings=None) -> str:
     cleanup_mode = normalize_worktree_merge_cleanup(
         getattr(group_settings, "worktree_merge_cleanup", "keep")
     )
+    restrict_to_created_agents = bool(
+        getattr(weaver_settings, "restrict_to_created_agents", False)
+    )
     lines = [
         "## Operating Policy",
         f"Autonomy mode: {_autonomy_mode_label(mode)}",
@@ -337,6 +340,8 @@ def _build_policy_section(weaver_settings=None, group_settings=None) -> str:
         f"Digest verbosity: {_digest_verbosity_label(digest_verbosity)}",
         f"Escalation style: {_escalation_style_label(escalation_style)}",
         f"Default post-merge cleanup: {_merge_cleanup_label(cleanup_mode)}",
+        "Owned-agent restriction: "
+        + ("Enabled" if restrict_to_created_agents else "Disabled"),
         "",
         "Apply these policy defaults when the more general guidance above leaves room for judgment:",
         *_autonomy_policy_lines(mode),
@@ -356,6 +361,11 @@ def _build_policy_section(weaver_settings=None, group_settings=None) -> str:
             f"default to: {_merge_cleanup_label(cleanup_mode)}."
         ),
     ]
+    if restrict_to_created_agents:
+        lines.extend([
+            "- You can only inspect or control worker agents that you originally created.",
+            "- Legacy or human-created agents may still exist on the board, but they are intentionally hidden from your agent-targeted tools.",
+        ])
     return "\n".join(lines)
 
 

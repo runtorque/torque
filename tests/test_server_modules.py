@@ -151,6 +151,7 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
             status='running',
             directory='/repo',
             template='default',
+            created_by_weaver_id='weaver-1',
         )
         emitted = []
         saved = []
@@ -218,6 +219,7 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(closed, ['session-old'])
+        self.assertEqual(cell.created_by_weaver_id, 'weaver-1')
         self.assertEqual(cell.session_id, 'session-new')
         self.assertEqual(cell.agent_session_id, '')
         self.assertEqual(cell.status, 'stopped')

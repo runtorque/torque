@@ -164,6 +164,7 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
       weaver_provider: "codex",
       weaver_boot_command: "codex --model gpt-5",
       custom_instructions: "Watch for regressions.",
+      restrict_to_created_agents: true,
       autonomy_mode: "aggressive_auto_continue",
       default_worker_concurrency: 4,
       wave_size_preference: "large",
@@ -181,6 +182,7 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
   assert.equal(ensure('gs-weaver-provider').value, 'codex');
   assert.equal(ensure('gs-weaver-boot-cmd').value, 'codex --model gpt-5');
   assert.equal(ensure('gs-weaver-custom-instructions').value, 'Watch for regressions.');
+  assert.equal(ensure('gs-weaver-restrict-to-created-agents').checked, true);
   assert.equal(ensure('gs-weaver-autonomy-mode').value, 'aggressive_auto_continue');
   assert.equal(ensure('gs-weaver-default-worker-concurrency').value, '4');
   assert.equal(ensure('gs-weaver-wave-size-preference').value, 'large');
@@ -211,6 +213,7 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   ensure('gs-weaver-provider').value = 'codex';
   ensure('gs-weaver-boot-cmd').value = 'codex --model gpt-5';
   ensure('gs-weaver-custom-instructions').value = 'Stay focused';
+  ensure('gs-weaver-restrict-to-created-agents').checked = true;
   ensure('gs-weaver-autonomy-mode').value = 'suggest_only';
   ensure('gs-weaver-default-worker-concurrency').value = '3';
   ensure('gs-weaver-wave-size-preference').value = 'small';
@@ -237,6 +240,7 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   assert.equal(sandbox.sendCalls[1].weaver_provider, 'codex');
   assert.equal(sandbox.sendCalls[1].weaver_boot_command, 'codex --model gpt-5');
   assert.equal(sandbox.sendCalls[1].custom_instructions, 'Stay focused');
+  assert.equal(sandbox.sendCalls[1].restrict_to_created_agents, true);
   assert.equal(sandbox.sendCalls[1].autonomy_mode, 'suggest_only');
   assert.equal(sandbox.sendCalls[1].default_worker_concurrency, 3);
   assert.equal(sandbox.sendCalls[1].wave_size_preference, 'small');

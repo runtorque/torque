@@ -123,6 +123,8 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
                 payload["agent_id"] = target_agent_id
             else:
                 payload["create_agent"] = True
+                if entry.weaver_owner_id:
+                    payload["_created_by_weaver_id"] = entry.weaver_owner_id
             result = await handle_command(payload)
             if result and result.get("type") in {"error", "dispatch_action_missing"}:
                 state.auto_dispatch_queue_remove_task(task.id)

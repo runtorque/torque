@@ -39,7 +39,9 @@ CREATE TABLE IF NOT EXISTS agents (
     agent_type            TEXT NOT NULL DEFAULT '',
     agent_session_id      TEXT NOT NULL DEFAULT '',
     session_resume        INTEGER NOT NULL DEFAULT 1,
-    idle_timeout          INTEGER NOT NULL DEFAULT 5
+    idle_timeout          INTEGER NOT NULL DEFAULT 5,
+    tasks_dispatched      INTEGER NOT NULL DEFAULT 0,
+    created_by_weaver_id  TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS groups (
@@ -257,6 +259,7 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     escalation_style   TEXT NOT NULL DEFAULT 'note_then_ask',
     paused             INTEGER NOT NULL DEFAULT 0,
     custom_instructions TEXT NOT NULL DEFAULT '',
+    restrict_to_created_agents INTEGER NOT NULL DEFAULT 0,
     pending_question   TEXT NOT NULL DEFAULT '',
     pending_note       TEXT NOT NULL DEFAULT '',
     pending_note_kind  TEXT NOT NULL DEFAULT '',
@@ -331,6 +334,7 @@ CREATE TABLE IF NOT EXISTS auto_dispatch_queue (
     agent_group      TEXT NOT NULL DEFAULT '',
     max_concurrent   INTEGER NOT NULL DEFAULT 1,
     target_agent_id  TEXT NOT NULL DEFAULT '',
+    weaver_owner_id  TEXT NOT NULL DEFAULT '',
     enqueued_at      TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (group_name, position)
 );
@@ -590,6 +594,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     # Migrate: add tasks_dispatched column to agents
     for col, col_type, default in [
         ("tasks_dispatched", "INTEGER", "0"),
+        ("created_by_weaver_id", "TEXT", "''"),
         ("template", "TEXT", "''"),
         ("worktree_base_dir", "TEXT", "'.loom/worktrees'"),
         ("worktree_auto_checkpoint", "INTEGER", "0"),
@@ -717,6 +722,17 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 conn.commit()
             except sqlite3.OperationalError:
                 pass
+    try:
+        conn.execute(
+            "SELECT restrict_to_created_agents FROM weaver_settings LIMIT 0")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute(
+                "ALTER TABLE weaver_settings ADD COLUMN "
+                "restrict_to_created_agents INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     # Migrate: add weaver_provider and weaver_boot_command columns
     for col in ("weaver_provider", "weaver_boot_command"):
         try:
@@ -765,6 +781,17 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 conn.commit()
             except sqlite3.OperationalError:
                 pass
+    try:
+        conn.execute(
+            "SELECT weaver_owner_id FROM auto_dispatch_queue LIMIT 0")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute(
+                "ALTER TABLE auto_dispatch_queue ADD COLUMN "
+                "weaver_owner_id TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     # Migrate: rename system labels with loom: prefix
     rows = conn.execute(
         "SELECT id, labels FROM board_tasks "

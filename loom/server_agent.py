@@ -341,6 +341,7 @@ class AgentLaunchService:
                                        target_session_id: str = "",
                                        target_window_id: str = "",
                                        persistent_prompt_text: str = "",
+                                       created_by_weaver_id: str = "",
                                        restore_focus_to_prev_tab: bool = False):
         """Create an agent cell, prepare its worktree, and open the session."""
         cell = self.state.add_agent(
@@ -370,6 +371,7 @@ class AgentLaunchService:
             launch_cfg.get("worktree_merge_squash", True)
         )
         cell.template = explicit_template or launch_cfg.get("template", "")
+        cell.created_by_weaver_id = str(created_by_weaver_id or "").strip()
         if launch_cfg.get("agent_type"):
             cell.agent_type = launch_cfg["agent_type"]
         self.state._emit_agent(cell)

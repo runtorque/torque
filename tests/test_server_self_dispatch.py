@@ -774,6 +774,48 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("g", state.auto_dispatch_queues)
         self.assertEqual(panel_events[0][0], "task_auto_dispatched")
 
+    async def test_pump_auto_dispatch_queue_forwards_weaver_owner_on_new_agents(self):
+        state = self._make_state()
+        task = state.board_add_task("Queued task", "g", id="task-1")
+        self.assertIsNotNone(task)
+        state.auto_dispatch_queue_add(
+            "g",
+            "task-1",
+            max_concurrent=1,
+            weaver_owner_id="weaver-1",
+        )
+
+        async def handle_command(payload):
+            self.assertEqual(payload["cmd"], "dispatch_task")
+            self.assertTrue(payload["create_agent"])
+            self.assertEqual(payload["_created_by_weaver_id"], "weaver-1")
+            queued_task = state.board_tasks[payload["id"]]
+            agent = self.state_mod.AgentCell(
+                id="agent-1",
+                name="worker",
+                group="g",
+                cell_type="agent",
+                current_task_id=queued_task.id,
+                created_by_weaver_id=payload["_created_by_weaver_id"],
+            )
+            state.agents[agent.id] = agent
+            state.groups["g"].append(agent.id)
+            queued_task.agent_id = agent.id
+            queued_task.lane = "In Progress"
+            return None
+
+        await self.server_mod._pump_auto_dispatch_queue(
+            state,
+            handle_command,
+            lambda *args, **kwargs: None,
+            group="g",
+        )
+
+        self.assertEqual(
+            state.agents["agent-1"].created_by_weaver_id,
+            "weaver-1",
+        )
+
     async def test_pump_auto_dispatch_queue_binds_agent_group_followups(self):
         state = self._make_state()
         first = state.board_add_task("First", "g", id="task-1")
