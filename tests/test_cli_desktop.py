@@ -159,6 +159,15 @@ class CliDesktopTests(unittest.TestCase):
                 self.cli.DESKTOP_DEFAULT_PORT,
             )
 
+    def test_build_parser_accepts_desktop_port_after_subcommand(self):
+        parser = self.cli.build_parser()
+
+        args = parser.parse_args(["desktop", "--port", "19046"])
+
+        self.assertEqual(args.command, "desktop")
+        self.assertEqual(args.port, 19046)
+        self.assertIs(args.func, self.cli.cmd_desktop)
+
     def test_desktop_runtime_guardrail_requires_pywebview_in_selected_python(self):
         cli = _load_cli_module()
         cli._python_has_module = lambda python_path, module_name: False

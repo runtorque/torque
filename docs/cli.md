@@ -68,6 +68,7 @@ make desktop-deps
 |------|-------------|
 | `--attach` | Reuse an existing matching standalone Loom server instead of spawning a child server |
 | `--profile` | Desktop profile override |
+| `--port` | Desktop standalone port override |
 | `--data-dir` | Desktop data-dir override |
 | `--python` | Python runtime used to launch the desktop shell |
 

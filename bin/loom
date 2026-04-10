@@ -3741,6 +3741,9 @@ def build_parser():
     p.add_argument("--profile",
                    help=f"Standalone profile for the desktop app "
                         f"(default: {DESKTOP_DEFAULT_PROFILE})")
+    p.add_argument("--port", type=int,
+                   help=f"Standalone port for the desktop app "
+                        f"(default: {DESKTOP_DEFAULT_PORT})")
     p.add_argument("--data-dir",
                    help="Standalone data directory for the desktop app")
     p.add_argument("--python",
