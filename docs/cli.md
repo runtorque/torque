@@ -37,6 +37,42 @@ Aliases: `st`, `ls`
 
 ---
 
+## desktop
+
+Launch Loom in the native desktop shell.
+
+```bash
+loom desktop
+loom desktop --attach --profile desktop --port 18933
+loom desktop --python "/path/to/python3"
+```
+
+Default desktop values are intentionally separate from the Toolbelt daemon:
+
+- profile: `desktop`
+- port: `18933`
+- data dir: `~/.loom/profiles/desktop`
+
+Attach mode only reuses an existing **matching standalone** Loom server. It
+will refuse to attach to the iTerm2-hosted Toolbelt daemon or to a standalone
+server with a different profile or data dir.
+
+`pywebview` must be installed in the Python runtime that launches the desktop
+shell. For the standard Loom install, run:
+
+```bash
+make desktop-deps
+```
+
+| Flag | Description |
+|------|-------------|
+| `--attach` | Reuse an existing matching standalone Loom server instead of spawning a child server |
+| `--profile` | Desktop profile override |
+| `--data-dir` | Desktop data-dir override |
+| `--python` | Python runtime used to launch the desktop shell |
+
+---
+
 ## group
 
 Manage groups.

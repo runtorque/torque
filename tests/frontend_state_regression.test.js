@@ -4908,6 +4908,21 @@ test('standalone sidebar formats repo and home paths compactly', () => {
   );
 });
 
+test('desktop runtime metadata does not change standalone embedded-runtime detection', () => {
+  const { context, sandbox } = createStandaloneRenderHarness();
+
+  sandbox.state.runtime = {
+    embedded_terminal: true,
+    desktop_shell: 'pywebview',
+    profile: 'desktop',
+    data_dir: '/Users/aleks/.loom/profiles/desktop',
+    port: 18933,
+    home_directory: '/Users/aleks',
+  };
+
+  assert.equal(jsonValue(context, `_embeddedRuntimeEnabled()`), true);
+});
+
 test('classic runtime keeps the shared left rail filtered to the current window', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');

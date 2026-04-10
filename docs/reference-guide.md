@@ -22,7 +22,7 @@ The full command surface lives in [CLI Reference](cli.md). This table groups the
 |---|---|
 | Check whether Loom is up | `loom status`, `make check`, `loom logs -f` |
 | Install or update Loom | `make deps`, `make install`, `make deploy`, `make stop` |
-| Start or open the UI | `make run`, `make standalone`, `make open` |
+| Start or open the UI | `make run`, `make standalone`, `make open`, `loom desktop`, `make desktop-attach` |
 | Create or inspect agents | `loom agent add`, `loom agent relaunch`, `loom agent remove`, `loom status <agent>` |
 | Work with tasks | `loom task create`, `loom task dispatch`, `loom task list`, `loom task show`, `loom task move`, `loom task resolve` |
 | Inspect board state | `loom board list`, `loom board lanes` |
@@ -54,7 +54,7 @@ Loom has a few settings surfaces. The details live in the linked pages; this sec
 | [Group Settings](group-settings.md) | Defaults for directories, boot commands, shells, windows, worktrees, terminal defaults, and Weaver behavior |
 | [Agent Templates](agent-templates.md) | Reusable launch presets with provider, model, prompt, worktree, and child terminal defaults |
 | [Actions & Templates](actions.md) | Prompt rendering, variables, transitions, and pipelines used by dispatch and derive |
-| Top-level README environment variable reference | Runtime defaults like `LOOM_PORT`, `LOOM_DEFAULT_CMD`, `LOOM_STANDALONE`, and `LOOM_BIND_ALL` |
+| Top-level README environment variable reference | Runtime defaults like `LOOM_PORT`, `LOOM_DEFAULT_CMD`, `LOOM_STANDALONE`, `LOOM_BIND_ALL`, and desktop-shell overrides such as `LOOM_DESKTOP_MODE` |
 
 ### High-impact settings to remember
 
@@ -84,11 +84,14 @@ These are operator notes, not implementation details.
 |---|---|
 | Verify prerequisites | `make check` |
 | Install or refresh dependencies in iTerm2's Python | `make deps` |
+| Install the optional native desktop-shell dependency | `make desktop-deps` |
 | Copy the current repo into the iTerm2 Scripts install | `make install` |
 | Replace the installed copy after pulling changes | `make deploy` |
 | Stop the daemon listening on port `18932` | `make stop` |
 | Run Loom directly | `make run` |
 | Open the standalone/browser view | `make standalone`, then `make open` |
+| Open the native desktop shell | `loom desktop` or `make desktop` |
+| Attach the native shell to an existing standalone server | `loom desktop --attach` or `make desktop-attach` |
 
 !!! note
     `make deploy` updates the installed copy and stops the old daemon, but you still need to relaunch Loom from the Scripts menu or run `make run`.

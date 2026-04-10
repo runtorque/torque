@@ -2,6 +2,8 @@ import contextlib
 import importlib.util
 import io
 import signal
+import os
+import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -22,6 +24,7 @@ class CliDesktopTests(unittest.TestCase):
     def setUp(self):
         self.cli = _load_cli_module()
         self.entrypoint = Path(__file__).resolve().parents[1] / "loom_desktop.py"
+        self.cli._ensure_desktop_runtime_ready = lambda python_path: None
 
     def test_cmd_desktop_spawn_uses_desktop_defaults(self):
         calls = []
@@ -133,6 +136,44 @@ class CliDesktopTests(unittest.TestCase):
         resolved = self.cli._resolve_desktop_python("")
 
         self.assertEqual(resolved, Path("/project/python3"))
+
+    def test_resolve_desktop_profile_ignores_general_loom_profile(self):
+        with mock.patch.dict(os.environ, {
+            "LOOM_PROFILE": "toolbelt-profile",
+            "LOOM_DESKTOP_PROFILE": "",
+        }, clear=False):
+            self.assertEqual(
+                self.cli._resolve_desktop_profile(""),
+                self.cli.DESKTOP_DEFAULT_PROFILE,
+            )
+
+    def test_resolve_desktop_port_ignores_general_loom_port(self):
+        args = SimpleNamespace(port=self.cli.DEFAULT_PORT)
+        self.cli._argv_has_flag = lambda flag: False
+        with mock.patch.dict(os.environ, {
+            "LOOM_PORT": "18932",
+            "LOOM_DESKTOP_PORT": "",
+        }, clear=False):
+            self.assertEqual(
+                self.cli._resolve_desktop_port(args),
+                self.cli.DESKTOP_DEFAULT_PORT,
+            )
+
+    def test_desktop_runtime_guardrail_requires_pywebview_in_selected_python(self):
+        cli = _load_cli_module()
+        cli._python_has_module = lambda python_path, module_name: False
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as td:
+            fake_python = Path(td) / "python3"
+            fake_python.write_text("#!/bin/sh\n")
+
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as ctx:
+                    cli._ensure_desktop_runtime_ready(fake_python)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("make desktop-deps", stderr.getvalue())
+        self.assertIn("--python", stderr.getvalue())
 
     def test_cmd_desktop_handles_keyboard_interrupt_cleanly(self):
         self.cli._resolve_desktop_entrypoint = lambda: self.entrypoint

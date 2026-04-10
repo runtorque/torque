@@ -1,6 +1,6 @@
 # Loom
 
-Loom is an iTerm2-first agent orchestration workspace for people who already live in the terminal. It gives you structured groups, managed agent sessions, companion terminals, worktrees, a task board, action-driven dispatch, and a semi-autonomous weaver, all backed by a local Python daemon and a web UI that runs in the Toolbelt or a browser.
+Loom is an iTerm2-first agent orchestration workspace for people who already live in the terminal. It gives you structured groups, managed agent sessions, companion terminals, worktrees, a task board, action-driven dispatch, and a semi-autonomous weaver, all backed by a local Python daemon and a web UI that runs in the Toolbelt, a browser, or a native desktop shell.
 
 ## What Loom Covers
 
@@ -74,6 +74,36 @@ For standalone-only mode:
 make standalone
 make open
 ```
+
+For the native desktop shell:
+
+```bash
+make desktop-deps   # installs pywebview into the iTerm2-managed Python runtime
+loom desktop        # spawn a desktop-owned standalone server on port 18933
+```
+
+To attach the native window to an existing matching standalone server instead of
+spawning a child server:
+
+```bash
+loom desktop --attach --profile desktop --port 18933
+```
+
+Desktop mode intentionally defaults to its own runtime values so it does not
+accidentally attach to the live Toolbelt daemon:
+
+- profile: `desktop`
+- port: `18933`
+- data dir: `~/.loom/profiles/desktop`
+
+`pywebview` must be installed in the Python runtime that is actually launching
+the desktop shell. On a normal Loom install, that means the iTerm2-managed
+runtime installed by `make desktop-deps`, not necessarily the `python3` on your
+current shell `PATH`.
+
+> Current operator support is macOS + iTerm2. The native shell was validated on
+> macOS. Linux and Windows remain follow-up targets because Loom still depends on
+> iTerm2 integration even though `pywebview` itself is cross-platform.
 
 ## Documentation
 

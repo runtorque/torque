@@ -138,8 +138,9 @@ def load_pywebview(import_module=importlib.import_module):
     except (ImportError, ModuleNotFoundError) as exc:
         raise RuntimeError(
             "pywebview is required for Loom desktop mode. "
-            "Install it in the runtime you are using "
-            "(for example: make desktop-deps)."
+            "Install it in the Python runtime that is launching Loom desktop "
+            "(for example the iTerm2-managed runtime via make desktop-deps, "
+            "or the interpreter passed with loom desktop --python)."
         ) from exc
 
 

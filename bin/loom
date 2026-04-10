@@ -132,6 +132,32 @@ def _resolve_desktop_python(explicit=""):
     return Path(sys.executable).resolve()
 
 
+def _python_has_module(python_path, module_name):
+    try:
+        result = subprocess.run(
+            [str(python_path), "-c", f"import {module_name}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+def _ensure_desktop_runtime_ready(python_path):
+    python_path = Path(python_path)
+    if not python_path.exists():
+        die(f"Desktop Python not found: {python_path}")
+    if not _python_has_module(python_path, "webview"):
+        die(
+            "pywebview is not installed in the Python runtime that will launch "
+            f"Loom desktop: {python_path}\n"
+            "  If you want the iTerm2-managed runtime, run: make desktop-deps\n"
+            "  Otherwise install pywebview into the interpreter passed via "
+            "--python or LOOM_DESKTOP_PYTHON."
+        )
+
+
 RUNTIME_DIR = _resolve_runtime_dir()
 LOOM_LOG = str(RUNTIME_DIR / "loom.log")
 LOOM_DB = str(RUNTIME_DIR / "loom.db")
@@ -2511,6 +2537,7 @@ def cmd_desktop(args):
     port = _resolve_desktop_port(args)
     data_dir = _resolve_desktop_data_dir(profile, getattr(args, "data_dir", ""))
     python_path = _resolve_desktop_python(getattr(args, "python", ""))
+    _ensure_desktop_runtime_ready(python_path)
     launch_mode = "attach" if getattr(args, "attach", False) else "spawn"
 
     env = os.environ.copy()

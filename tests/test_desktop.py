@@ -100,7 +100,7 @@ class DesktopLauncherTests(unittest.TestCase):
             env={
                 "HOME": "/tmp/home",
                 "LOOM_DESKTOP_MODE": "attach",
-                "LOOM_PROFILE": "desktop-dev",
+                "LOOM_DESKTOP_PROFILE": "desktop-dev",
             },
             script_dir=Path("/repo"),
         )
@@ -111,6 +111,24 @@ class DesktopLauncherTests(unittest.TestCase):
             settings.data_dir,
             Path("/tmp/home/.loom/profiles/desktop-dev"),
         )
+
+    def test_desktop_specific_env_overrides_general_loom_runtime_values(self):
+        settings = self.desktop_mod.resolve_desktop_settings(
+            env={
+                "HOME": "/tmp/home",
+                "LOOM_PROFILE": "toolbelt-profile",
+                "LOOM_PORT": "18932",
+                "LOOM_DATA_DIR": "/tmp/toolbelt-runtime",
+                "LOOM_DESKTOP_PROFILE": "desktop-dev",
+                "LOOM_DESKTOP_PORT": "19022",
+                "LOOM_DESKTOP_DATA_DIR": "/tmp/desktop-runtime",
+            },
+            script_dir=Path("/repo"),
+        )
+
+        self.assertEqual(settings.profile, "desktop-dev")
+        self.assertEqual(settings.port, 19022)
+        self.assertEqual(settings.data_dir, Path("/tmp/desktop-runtime"))
 
     def test_run_spawns_server_opens_window_and_cleans_up_child(self):
         with tempfile.TemporaryDirectory() as home_dir:
@@ -300,3 +318,4 @@ class DesktopLauncherTests(unittest.TestCase):
             )
 
         self.assertIn("make desktop-deps", str(ctx.exception))
+        self.assertIn("--python", str(ctx.exception))
