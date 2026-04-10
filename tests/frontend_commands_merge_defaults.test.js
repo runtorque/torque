@@ -20,7 +20,10 @@ function createSandbox() {
         },
       },
       group_settings: {
-        alpha: { worktree_merge_cleanup: 'close_remove' },
+        alpha: {
+          worktree_merge_cleanup: 'close_remove',
+          worktree_merge_preserve_diff: true,
+        },
       },
     },
     document: {
@@ -46,11 +49,11 @@ function createSandbox() {
   };
   sandbox.showConfirm = function(message, opts) {
     sandbox.confirmCalls.push({ message, opts });
-    return Promise.resolve({
-      close_agent_on_merge: !!opts.checkboxes[0].checked,
-      remove_worktree_on_merge: !!opts.checkboxes[1].checked,
-      clear_context: false,
-    });
+    return Promise.resolve(
+      Object.fromEntries(
+        opts.checkboxes.map((checkbox) => [checkbox.key, !!checkbox.checked])
+      )
+    );
   };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
@@ -72,8 +75,12 @@ test('confirmWorktreeMerge preselects cleanup flags from group defaults', async 
 
   assert.equal(merged, true);
   assert.equal(sandbox.confirmCalls.length, 1);
-  assert.equal(sandbox.confirmCalls[0].opts.checkboxes[0].checked, true);
-  assert.equal(sandbox.confirmCalls[0].opts.checkboxes[1].checked, true);
+  const checkboxMap = Object.fromEntries(
+    sandbox.confirmCalls[0].opts.checkboxes.map((checkbox) => [checkbox.key, checkbox])
+  );
+  assert.equal(checkboxMap.close_agent_on_merge.checked, true);
+  assert.equal(checkboxMap.remove_worktree_on_merge.checked, true);
+  assert.equal(checkboxMap.preserve_merge_diff.checked, true);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     {
       cmd: 'worktree_merge',
@@ -81,6 +88,7 @@ test('confirmWorktreeMerge preselects cleanup flags from group defaults', async 
       message: '',
       close_agent_on_merge: true,
       remove_worktree_on_merge: true,
+      preserve_merge_diff: true,
       clear_context: false,
     },
   ]);

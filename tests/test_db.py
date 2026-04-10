@@ -60,6 +60,7 @@ class LoomDBTests(unittest.TestCase):
                 agent_session_resume=False,
                 worktree_merge_squash=False,
                 worktree_merge_cleanup="close_remove",
+                worktree_merge_preserve_diff=True,
             ),
         )
         self.db.save_board_task(
@@ -175,6 +176,9 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["group_settings"]["g"]["worktree_merge_cleanup"],
             "close_remove",
+        )
+        self.assertTrue(
+            loaded["group_settings"]["g"]["worktree_merge_preserve_diff"],
         )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["action_vars"],

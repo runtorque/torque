@@ -340,7 +340,8 @@ class AgentLaunchService:
                                        explicit_template: str = "",
                                        target_session_id: str = "",
                                        target_window_id: str = "",
-                                       persistent_prompt_text: str = ""):
+                                       persistent_prompt_text: str = "",
+                                       restore_focus_to_prev_tab: bool = False):
         """Create an agent cell, prepare its worktree, and open the session."""
         cell = self.state.add_agent(
             name=name,
@@ -406,6 +407,7 @@ class AgentLaunchService:
             system_prompt=launch_cfg.get("system_prompt", ""),
             target_session_id=target_session_id,
             target_window_id=target_window_id,
+            restore_focus_to_prev_tab=restore_focus_to_prev_tab,
         )
         return cell
 

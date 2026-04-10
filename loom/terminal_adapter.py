@@ -68,6 +68,7 @@ class TerminalAdapter(Protocol):
         system_prompt: str = "",
         target_session_id: str = "",
         target_window_id: str = "",
+        restore_focus_to_prev_tab: bool = False,
     ) -> None:
         """Create a new terminal session for the given cell."""
         ...

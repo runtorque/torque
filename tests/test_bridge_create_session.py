@@ -67,8 +67,11 @@ class FakeSession:
 
 
 class FakePrevTab:
+    def __init__(self):
+        self.select_calls = 0
+
     async def async_select(self):
-        pass
+        self.select_calls += 1
 
 
 class FakeTab:
@@ -82,9 +85,9 @@ class FakeTab:
 
 
 class FakeWindow:
-    def __init__(self, window_id):
+    def __init__(self, window_id, current_tab=None):
         self.window_id = window_id
-        self.current_tab = FakePrevTab()
+        self.current_tab = current_tab or FakePrevTab()
         self.created_profiles = []
         self.tabs = []
 
@@ -226,3 +229,77 @@ class CreateSessionWindowTargetTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(
                 (Path(tmpdir) / ".claude" / "settings.local.json").exists()
             )
+
+    async def test_dispatch_created_tab_restores_currently_selected_tab(self):
+        focused_tab = FakePrevTab()
+        source_tab = FakePrevTab()
+        focused = FakeWindow("focused-window", current_tab=focused_tab)
+        source = FakeWindow("source-window", current_tab=source_tab)
+        source.tabs.append(FakeTab(FakeSession("parent-session")))
+        bridge, _state = await self._make_bridge(
+            FakeApp(focused, [focused, source])
+        )
+
+        child = self.state_mod.AgentCell(
+            id="child",
+            name="child",
+            group="g",
+            cell_type="agent",
+            profile="Default",
+            command="echo hi",
+            directory="",
+        )
+
+        await bridge.create_session(
+            child,
+            target_session_id="parent-session",
+            restore_focus_to_prev_tab=True,
+        )
+
+        self.assertEqual(focused_tab.select_calls, 1)
+        self.assertEqual(source_tab.select_calls, 0)
+
+    async def test_create_session_leaves_focus_on_new_tab_when_enabled(self):
+        focused_tab = FakePrevTab()
+        focused = FakeWindow("focused-window", current_tab=focused_tab)
+        bridge, _state = await self._make_bridge(FakeApp(focused, [focused]))
+
+        child = self.state_mod.AgentCell(
+            id="child",
+            name="child",
+            group="g",
+            cell_type="agent",
+            profile="Default",
+            command="echo hi",
+            directory="",
+        )
+
+        await bridge.create_session(child)
+
+        self.assertEqual(focused_tab.select_calls, 0)
+
+    async def test_create_session_preserves_existing_focus_new_tabs_setting(self):
+        focused_tab = FakePrevTab()
+        source_tab = FakePrevTab()
+        focused = FakeWindow("focused-window", current_tab=focused_tab)
+        source = FakeWindow("source-window", current_tab=source_tab)
+        source.tabs.append(FakeTab(FakeSession("parent-session")))
+        bridge, state = await self._make_bridge(
+            FakeApp(focused, [focused, source])
+        )
+        state.global_settings.focus_new_tabs = False
+
+        child = self.state_mod.AgentCell(
+            id="child",
+            name="child",
+            group="g",
+            cell_type="agent",
+            profile="Default",
+            command="echo hi",
+            directory="",
+        )
+
+        await bridge.create_session(child, target_session_id="parent-session")
+
+        self.assertEqual(source_tab.select_calls, 1)
+        self.assertEqual(focused_tab.select_calls, 0)

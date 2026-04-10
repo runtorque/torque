@@ -63,6 +63,7 @@ class FakeElement {
     this.offsetWidth = 80;
     this.selectionStart = 0;
     this.selectionEnd = 0;
+    this.selectionDirection = 'none';
     this.focused = false;
     this.selected = false;
     this.listeners = {};
@@ -2606,6 +2607,85 @@ test('boardAddTaskInput mirrors the current inline editor text into draft state'
   context.boardAddTaskInput(input);
 
   assert.equal(runInContext(context, '_boardAddingTaskDraft'), 'Follow up with design review');
+});
+
+test('boardAddTaskKeydown moves Home and End to the current line boundaries', () => {
+  const { context, document } = createBoardHarness();
+  const input = document.register('board-add-task-input');
+  document.register('board-add-label-dropdown');
+  input.value = 'First line\nSecond line\nThird line';
+  const secondLineStart = input.value.indexOf('Second');
+  const secondLineEnd = input.value.indexOf('\n', secondLineStart);
+  const midSecondLine = secondLineStart + 'Second'.length;
+  input.selectionStart = midSecondLine;
+  input.selectionEnd = midSecondLine;
+
+  const homeEvent = {
+    key: 'Home',
+    target: input,
+    shiftKey: false,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    preventDefaultCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() {},
+  };
+  context.boardAddTaskKeydown(homeEvent);
+
+  assert.equal(homeEvent.preventDefaultCalled, true);
+  assert.equal(input.selectionStart, secondLineStart);
+  assert.equal(input.selectionEnd, secondLineStart);
+
+  input.selectionStart = midSecondLine;
+  input.selectionEnd = midSecondLine;
+  const endEvent = {
+    key: 'End',
+    target: input,
+    shiftKey: false,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    preventDefaultCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+    stopPropagation() {},
+  };
+  context.boardAddTaskKeydown(endEvent);
+
+  assert.equal(endEvent.preventDefaultCalled, true);
+  assert.equal(input.selectionStart, secondLineEnd);
+  assert.equal(input.selectionEnd, secondLineEnd);
+});
+
+test('boardAddTaskKeydown updates inline label dropdown after moving the caret with Home', () => {
+  const { context, document } = createBoardHarness();
+  const input = document.register('board-add-task-input');
+  const dropdown = document.register('board-add-label-dropdown');
+  runInContext(context, `
+    _getAllLabels = function() { return ['release']; };
+  `);
+  input.value = 'First line\nTask %rel';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+
+  context.boardAddTaskInput(input);
+  assert.equal(dropdown.style.display, '');
+
+  const homeEvent = {
+    key: 'Home',
+    target: input,
+    shiftKey: false,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+  context.boardAddTaskKeydown(homeEvent);
+
+  assert.equal(input.selectionStart, 'First line\n'.length);
+  assert.equal(input.selectionEnd, 'First line\n'.length);
+  assert.equal(dropdown.style.display, 'none');
 });
 
 test('boardDuplicateTask creates a fresh task from reusable fields only', () => {

@@ -39,6 +39,15 @@ def sanitize_uploaded_filename(filename: str, *, default: str = "artifact.bin") 
     return name or default
 
 
+def _filename_token(value: str, *, default: str = "artifact") -> str:
+    raw = str(value or "").strip()
+    token = "".join(
+        ch if ch.isalnum() or ch in {"-", "_", "."} else "_"
+        for ch in raw
+    ).strip("._")
+    return token or default
+
+
 def dedupe_uploaded_filename(directory: Path, filename: str) -> str:
     safe = sanitize_uploaded_filename(filename)
     dest = directory / safe
@@ -127,6 +136,50 @@ def _summary_for_upload(size_bytes: int, artifact_type: str) -> str:
     return " | ".join(parts)
 
 
+def _merge_diff_stats(stats: dict | None, files) -> dict:
+    source = dict(stats or {})
+    normalized = {
+        "files": 0,
+        "insertions": 0,
+        "deletions": 0,
+    }
+    for key in normalized:
+        value = source.get(key)
+        try:
+            if value not in (None, ""):
+                normalized[key] = int(value)
+        except (TypeError, ValueError):
+            pass
+    if not normalized["files"] and isinstance(files, list):
+        normalized["files"] = len(files)
+    if not normalized["insertions"] and isinstance(files, list):
+        normalized["insertions"] = sum(
+            int(file_info.get("insertions", 0) or 0)
+            for file_info in files
+            if isinstance(file_info, dict)
+        )
+    if not normalized["deletions"] and isinstance(files, list):
+        normalized["deletions"] = sum(
+            int(file_info.get("deletions", 0) or 0)
+            for file_info in files
+            if isinstance(file_info, dict)
+        )
+    return normalized
+
+
+def _merge_diff_summary(stats: dict) -> str:
+    files = int(stats.get("files", 0) or 0)
+    insertions = int(stats.get("insertions", 0) or 0)
+    deletions = int(stats.get("deletions", 0) or 0)
+    parts = [
+        f"{files} file" + ("" if files == 1 else "s"),
+        f"+{insertions}",
+        f"-{deletions}",
+        "pre-merge patch",
+    ]
+    return " | ".join(parts)
+
+
 def serialize_task_artifact(
     artifact: dict,
     *,
@@ -186,6 +239,81 @@ def serialize_task_for_mcp(task) -> dict:
         task_label=str(data.get("task", "") or ""),
     )
     return data
+
+
+def store_preserved_merge_diff(
+    *,
+    task_id: str,
+    patch_text: str,
+    worktree_branch: str = "",
+    base_branch: str = "",
+    merge_commit_sha: str = "",
+    boundary_task_id: str = "",
+    boundary_recorded_at: str = "",
+    boundary_task_title: str = "",
+    diff_stats: dict | None = None,
+    diff_files=None,
+    agent_id: str = "",
+    agent_name: str = "",
+) -> dict:
+    patch = "" if patch_text is None else str(patch_text)
+    if not patch:
+        raise ValueError("patch_text is required")
+
+    stats = _merge_diff_stats(diff_stats, diff_files)
+    branch_token = _filename_token(
+        worktree_branch or boundary_task_id or "merge-diff",
+        default="merge-diff",
+    )
+    title_subject = (
+        f"{worktree_branch} → {base_branch}"
+        if worktree_branch and base_branch
+        else (boundary_task_title or worktree_branch or "merge")
+    )
+    artifact = store_task_upload(
+        task_id=task_id,
+        filename=f"{branch_token}-pre-merge.patch",
+        content_text=patch,
+        artifact_type="diff",
+        title=f"Pre-merge diff — {title_subject}",
+        mime_type="text/x-diff",
+        summary=_merge_diff_summary(stats),
+        prompt_mode="summary",
+        provenance={
+            "source": "loom",
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+        },
+    )
+
+    metadata = dict(artifact.get("metadata") or {})
+    metadata["preserved_on_merge"] = True
+    metadata["base_branch"] = str(base_branch or "").strip()
+    metadata["worktree_branch"] = str(worktree_branch or "").strip()
+    metadata["merge_commit_sha"] = str(merge_commit_sha or "").strip()
+    metadata["boundary_task_id"] = str(boundary_task_id or "").strip()
+    metadata["boundary_recorded_at"] = str(boundary_recorded_at or "").strip()
+    metadata["stats"] = stats
+    compact_files = []
+    for file_info in diff_files or []:
+        if not isinstance(file_info, dict):
+            continue
+        path = str(file_info.get("path", "") or "").strip()
+        if not path:
+            continue
+        compact_files.append({
+            "path": path,
+            "status": str(file_info.get("status", "modified") or "modified"),
+            "insertions": int(file_info.get("insertions", 0) or 0),
+            "deletions": int(file_info.get("deletions", 0) or 0),
+            "binary": bool(file_info.get("binary")),
+        })
+    if compact_files:
+        metadata["files"] = compact_files
+    artifact["metadata"] = metadata
+    artifact["summary"] = _merge_diff_summary(stats)
+    artifact["prompt"] = {"mode": "summary"}
+    return normalize_artifact(artifact)
 
 
 def task_owned_artifact_filenames(artifacts, *, task_id: str = "") -> set[str]:

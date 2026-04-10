@@ -116,6 +116,44 @@ class ServerArtifactHelperTests(unittest.TestCase):
                 local_path="https://example.com/report.txt",
             )
 
+    def test_store_preserved_merge_diff_writes_diff_artifact_with_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_dir = self.helper.ATTACHMENTS_DIR
+            self.helper.ATTACHMENTS_DIR = Path(tmpdir)
+            try:
+                artifact = self.helper.store_preserved_merge_diff(
+                    task_id="task-1",
+                    patch_text="diff --git a/README.md b/README.md\n+hello\n",
+                    worktree_branch="loom/worker",
+                    base_branch="main",
+                    merge_commit_sha="abc123",
+                    boundary_task_id="task-1",
+                    boundary_recorded_at="2026-04-10T00:00:00+00:00",
+                    boundary_task_title="Review worker patch",
+                    diff_stats={"files": 1, "insertions": 1, "deletions": 0},
+                    diff_files=[{
+                        "path": "README.md",
+                        "status": "modified",
+                        "insertions": 1,
+                        "deletions": 0,
+                        "binary": False,
+                    }],
+                    agent_id="agent-1",
+                    agent_name="worker",
+                )
+                self.assertTrue(Path(artifact["path"]).is_file())
+            finally:
+                self.helper.ATTACHMENTS_DIR = original_dir
+
+        self.assertEqual(artifact["type"], "diff")
+        self.assertEqual(artifact["prompt"]["mode"], "summary")
+        self.assertEqual(artifact["provenance"]["source"], "loom")
+        self.assertTrue(artifact["metadata"]["preserved_on_merge"])
+        self.assertEqual(artifact["metadata"]["merge_commit_sha"], "abc123")
+        self.assertEqual(artifact["metadata"]["stats"]["files"], 1)
+        self.assertEqual(artifact["metadata"]["files"][0]["path"], "README.md")
+        self.assertIn("pre-merge patch", artifact["summary"])
+
     def test_finalize_task_attachments_moves_draft_uploads_to_canonical_task_id(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_dir = self.helper.ATTACHMENTS_DIR
