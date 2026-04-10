@@ -15,7 +15,7 @@ GLOBAL_PYTHON  := $(shell ls $(HOME)/.config/iterm2/AppSupport/iterm2env*/versio
                     2>/dev/null | sort -V | tail -1)
 ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
 
-.PHONY: install uninstall run deps check stop deploy autolaunch cli standalone standalone-bg open test
+.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop open test
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
@@ -57,6 +57,7 @@ install:
 	fi
 	@# -- Copy source files --
 	cp loom.py "$(SCRIPT_DIR)/$(MAIN_SCRIPT)"
+	cp loom_desktop.py "$(SCRIPT_DIR)/loom_desktop.py"
 	cp webview.html "$(SCRIPT_DIR)/webview.html"
 	@find loom -type f -name '*.py' -print0 | while IFS= read -r -d '' src; do \
 		dest="$(SCRIPT_DIR)/$$src"; \
@@ -90,7 +91,7 @@ autolaunch: install
 
 ## uninstall: Remove installed files and autolaunch symlink
 uninstall:
-	rm -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(SCRIPT_DIR)/webview.html" "$(SCRIPT_DIR)/state.json" "$(SCRIPT_DIR)/loom.db"
+	rm -f "$(SCRIPT_DIR)/$(MAIN_SCRIPT)" "$(SCRIPT_DIR)/loom_desktop.py" "$(SCRIPT_DIR)/webview.html" "$(SCRIPT_DIR)/state.json" "$(SCRIPT_DIR)/loom.db"
 	rm -f "$(AUTOLAUNCH_DIR)/$(MAIN_SCRIPT)"
 	@echo "Uninstalled."
 
@@ -102,6 +103,15 @@ deps:
 	fi
 	"$(ITERM2_PYTHON)" -m pip install aiohttp jinja2 pyyaml
 	@echo "Done. Using: $(ITERM2_PYTHON)"
+
+## desktop-deps: Install optional native desktop-shell dependency
+desktop-deps:
+	@if [ -z "$(ITERM2_PYTHON)" ]; then \
+		echo "Error: iTerm2 Python not found. Run make install first."; \
+		exit 1; \
+	fi
+	"$(ITERM2_PYTHON)" -m pip install pywebview
+	@echo "Installed pywebview into: $(ITERM2_PYTHON)"
 
 ## run: Launch the script in the background (iTerm2 must be running with Python API enabled)
 run:
@@ -216,6 +226,21 @@ standalone-bg: install
 	echo "Loom standalone launch requested (PID $$pid). Logs: $$data_dir/loom.log"; \
 	echo "Open http://127.0.0.1:$(or $(LOOM_PORT),18932)/ in a browser"
 
+## desktop: Run Loom in a native pywebview window backed by a standalone server
+desktop:
+	@if [ -z "$(ITERM2_PYTHON)" ]; then \
+		echo "Error: iTerm2 Python not found. Run make install first."; \
+		exit 1; \
+	fi
+	@profile="$(or $(LOOM_PROFILE),desktop)"; \
+	port="$(or $(LOOM_PORT),18933)"; \
+	echo "Starting Loom desktop shell on http://127.0.0.1:$$port/"; \
+	echo "Using desktop profile: $$profile"; \
+	env LOOM_PORT="$$port" \
+		LOOM_PROFILE="$$profile" \
+		LOOM_DATA_DIR="$(LOOM_DATA_DIR)" \
+		"$(ITERM2_PYTHON)" "$(CURDIR)/loom_desktop.py"
+
 ## open: Open the Loom UI in the default browser (works in dual or standalone mode)
 open:
 	@open "http://127.0.0.1:$(or $(LOOM_PORT),18932)/"
@@ -227,6 +252,9 @@ check:
 		echo "aiohttp:"; \
 		"$(ITERM2_PYTHON)" -c "import aiohttp; print('  installed:', aiohttp.__version__)" 2>/dev/null \
 			|| echo "  NOT installed (run: make deps)"; \
+		echo "pywebview:"; \
+		"$(ITERM2_PYTHON)" -c "import webview; print('  installed:', getattr(webview, '__version__', 'unknown'))" 2>/dev/null \
+			|| echo "  NOT installed (run: make desktop-deps)"; \
 		echo "iterm2:"; \
 		"$(ITERM2_PYTHON)" -c "import iterm2; print('  installed')" 2>/dev/null \
 			|| echo "  NOT installed"; \
