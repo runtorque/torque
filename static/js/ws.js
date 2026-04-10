@@ -214,11 +214,15 @@ function _handleDelta(msg) {
   _expectedSeq = msg.seq + 1;
   _applyDelta(msg.ops);
   const nextGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
+  const activeSurface = typeof _activePanelSurface === 'function'
+    ? _activePanelSurface()
+    : '';
   if (prevGroup !== nextGroup) {
-    const activeSurface = typeof _activePanelSurface === 'function'
-      ? _activePanelSurface()
-      : '';
     if (activeSurface) invalidations[activeSurface] = true;
+  } else if (activeSurface
+      && invalidations[activeSurface]
+      && !_opsAffectCurrentSurfaceGroup(activeSurface, nextGroup, msg.ops)) {
+    invalidations[activeSurface] = false;
   }
   if (!dragInProgress) {
     if (typeof renderInvalidatedSurfaces === 'function') {
@@ -302,6 +306,47 @@ function _applyUiSurfaceInvalidation(flags, key) {
       || key === 'board_card_density_by_group') {
     _markSurface(flags, 'board');
   }
+}
+
+function _surfaceUsesCurrentGroup(surface) {
+  if (surface === 'board') {
+    return typeof _boardFilterByGroup === 'undefined' || !!_boardFilterByGroup;
+  }
+  if (surface === 'events') {
+    return typeof _eventsFilterByGroup === 'undefined' || !!_eventsFilterByGroup;
+  }
+  return surface === 'context' || surface === 'weaver';
+}
+
+function _opTouchesGroup(op, group) {
+  if (!op || !group) return true;
+  switch (op.op) {
+    case 'agent_upsert':
+    case 'task_upsert':
+    case 'event_append':
+      return (op.group || '') === group;
+    case 'group_update':
+    case 'group_remove':
+    case 'group_settings_update':
+      return (op.name || '') === group;
+    case 'group_rename':
+      return op.old_name === group || op.new_name === group;
+    case 'journal_append':
+    case 'journal_delete':
+    case 'weaver_buffer_stats':
+    case 'weaver_settings_update':
+      return (op.group || '') === group;
+    default:
+      return true;
+  }
+}
+
+function _opsAffectCurrentSurfaceGroup(surface, group, ops) {
+  if (!surface || !_surfaceUsesCurrentGroup(surface) || !group) return true;
+  for (let i = 0; i < ops.length; i++) {
+    if (_opTouchesGroup(ops[i], group)) return true;
+  }
+  return false;
 }
 
 function _applyDelta(ops) {

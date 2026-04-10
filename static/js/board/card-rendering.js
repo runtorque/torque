@@ -605,10 +605,11 @@ function _renderBoardCard(t, childrenOf, depth) {
   var dotClass = t.agent_id ? _boardAgentStatus(t.agent_id) : '';
   var focused = t.id === _boardFocusedTask ? ' focused' : '';
   var selected = _boardSelectedTasks[t.id] ? ' board-card-selected' : '';
+  var hovered = t.id === _boardHoveredTask ? ' board-card-hovered' : '';
   var quickOpen = _boardQuickEditTask === t.id ? ' board-card-quick-open' : '';
   var subClass = isSubordinate ? ' board-card-subordinate' : '';
   var doneClass = (isSubordinate && isDone) ? ' board-card-done' : '';
-  var cardHtml = '<div class="board-card' + focused + selected + quickOpen + subClass + doneClass + '"'
+  var cardHtml = '<div class="board-card' + focused + selected + hovered + quickOpen + subClass + doneClass + '"'
     + ' data-task-id="' + t.id + '"'
     + ' draggable="true"'
     + ' ondragstart="boardCardDragStart(event,\'' + t.id + '\')"'
@@ -616,6 +617,8 @@ function _renderBoardCard(t, childrenOf, depth) {
     + ' ondragover="boardCardDragOver(event)"'
     + ' ondragleave="boardCardDragLeave(event)"'
     + ' ondrop="boardCardDrop(event)"'
+    + ' onmouseenter="boardCardMouseEnter(\'' + t.id + '\')"'
+    + ' onmouseleave="boardCardMouseLeave(\'' + t.id + '\')"'
     + ' onclick="boardFocusTask(\'' + t.id + '\', event)"'
     + ' oncontextmenu="boardCardMenu(event,\'' + t.id + '\')"'
     + ' ondblclick="openEditTask(\'' + t.id + '\')">';

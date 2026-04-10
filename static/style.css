@@ -1834,7 +1834,8 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   transition: background .15s, border-color .15s;
   min-height: 32px;
 }
-.board-card:hover { background: var(--bg-hover); }
+.board-card:hover,
+.board-card.board-card-hovered { background: var(--bg-hover); }
 .board-density-compact .board-card {
   gap: 6px;
   padding: 4px 6px;
@@ -1978,6 +1979,7 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   transition: opacity .15s ease, max-height .15s ease, margin-top .15s ease;
 }
 .board-card:hover .board-card-quick-controls,
+.board-card.board-card-hovered .board-card-quick-controls,
 .board-card.focused .board-card-quick-controls,
 .board-card.board-card-quick-open .board-card-quick-controls {
   max-height: 44px;
@@ -2171,7 +2173,8 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
   border-radius: 3px;
   opacity: 0; transition: opacity .15s;
 }
-.board-card:hover .board-card-menu-btn { opacity: 1; }
+.board-card:hover .board-card-menu-btn,
+.board-card.board-card-hovered .board-card-menu-btn { opacity: 1; }
 .board-card-menu-btn:hover { background: var(--bg); color: var(--text); }
 /* Status badge */
 .board-card-status {
