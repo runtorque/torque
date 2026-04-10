@@ -304,7 +304,8 @@ class ITerm2Adapter:
                              shell: str = "",
                              system_prompt: str = "",
                              target_session_id: str = "",
-                             target_window_id: str = ""):
+                             target_window_id: str = "",
+                             restore_focus_to_prev_tab: bool = False):
         log.info("Creating session for %s '%s' [%s]",
                  cell.cell_type, cell.name, cell.group)
         app = await iterm2.async_get_app(self.conn)
@@ -338,8 +339,10 @@ class ITerm2Adapter:
             self.state._db_save_agent(cell)
             return
 
-        # Remember the active tab so we can restore focus if needed
-        prev_tab = window.current_tab
+        # Remember tabs up front so we can restore user focus if needed.
+        prev_target_tab = window.current_tab
+        active_window = app.current_window
+        prev_active_tab = active_window.current_tab if active_window else None
 
         tab = await window.async_create_tab(profile=cell.profile)
         session = tab.current_session
@@ -493,10 +496,16 @@ class ITerm2Adapter:
         self._start_prompt_monitor(cell)
         await self.reorder_tabs()
 
-        # Restore focus to the previously active tab if configured
-        if not self.state.global_settings.focus_new_tabs and prev_tab:
+        # Restore focus when dispatch explicitly asked to preserve the user's
+        # current tab, or when the global setting disables focusing new tabs.
+        restore_tab = None
+        if restore_focus_to_prev_tab:
+            restore_tab = prev_active_tab or prev_target_tab
+        elif not self.state.global_settings.focus_new_tabs:
+            restore_tab = prev_target_tab
+        if restore_tab:
             try:
-                await prev_tab.async_select()
+                await restore_tab.async_select()
             except Exception:
                 log.debug("Could not restore focus to previous tab")
 

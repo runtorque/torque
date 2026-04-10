@@ -50,6 +50,9 @@ class _FakeBridge:
     def __init__(self, current_path="", fail=False):
         self.current_path = current_path
         self.fail = fail
+        self.capabilities = types.SimpleNamespace(
+            supports_embedded_terminal=False,
+        )
 
     async def get_launch_context(self):
         if self.fail:
@@ -58,6 +61,18 @@ class _FakeBridge:
         return terminal_adapter.TerminalLaunchContext(
             current_path=self.current_path,
         )
+
+
+class _CapturingBridge(_FakeBridge):
+    def __init__(self, current_path="", fail=False):
+        super().__init__(current_path=current_path, fail=fail)
+        self.create_session_calls = []
+
+    async def create_session(self, cell, **kwargs):
+        self.create_session_calls.append({
+            "cell": cell,
+            "kwargs": kwargs,
+        })
 
 
 class _FakeTemplateManager:
@@ -75,6 +90,8 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.server_agent_mod = importlib.import_module("loom.server_agent")
         self.server_agent_mod = importlib.reload(self.server_agent_mod)
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
 
     async def test_resolve_base_dir_prefers_group_directory(self):
         service = self.server_agent_mod.AgentLaunchService(
@@ -157,3 +174,39 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(resolved["worktree_name"], "Feature API / v2")
+
+    async def test_create_agent_with_config_forwards_dispatch_focus_restore(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("backend")
+        bridge = _CapturingBridge(current_path="/tmp/project")
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=bridge,
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        cell = await service.create_agent_with_config(
+            "backend",
+            "Worker",
+            {
+                "profile": "Default",
+                "command": "codex",
+                "directory": "/tmp/project",
+                "tab_color": "",
+                "env_vars": {"LOOM_ENV": "1"},
+                "env_file": "/tmp/project/.env",
+                "shell": "zsh",
+                "system_prompt": "Stay focused",
+            },
+            restore_focus_to_prev_tab=True,
+        )
+
+        self.assertIsNotNone(cell)
+        self.assertEqual(len(bridge.create_session_calls), 1)
+        self.assertTrue(
+            bridge.create_session_calls[0]["kwargs"][
+                "restore_focus_to_prev_tab"
+            ]
+        )

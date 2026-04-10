@@ -865,7 +865,8 @@ async def main(connection=None):
                                         explicit_template: str = "",
                                         target_session_id: str = "",
                                         target_window_id: str = "",
-                                        persistent_prompt_text: str = ""):
+                                        persistent_prompt_text: str = "",
+                                        restore_focus_to_prev_tab: bool = False):
         return await agent_launch.create_agent_with_config(
             group,
             name,
@@ -874,6 +875,7 @@ async def main(connection=None):
             target_session_id=target_session_id,
             target_window_id=target_window_id,
             persistent_prompt_text=persistent_prompt_text,
+            restore_focus_to_prev_tab=restore_focus_to_prev_tab,
         )
 
     async def _send_agent_prompt(cell, prompt: str, *,
@@ -3374,6 +3376,7 @@ async def main(connection=None):
                                 target_window_id=data.get(
                                     "target_window_id", ""),
                                 persistent_prompt_text=persistent_prompt_text,
+                                restore_focus_to_prev_tab=True,
                             )
                             if cell:
                                 # Worktree inheritance (pipeline)
