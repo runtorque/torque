@@ -423,11 +423,11 @@
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When a merge succeeds, save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. If no open boundary task exists, Loom warns but still completes the merge.">?</span>
           </label>
           <label>Symlinks <span class="label-hint">symlinked from repo root</span>
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Relative paths from the repo root to symlink into each new worktree. Avoids reinstalling dependencies (e.g. node_modules, .venv). The target must exist in the repo root and should be in .gitignore.">?</span>
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Repo-relative exact paths or glob patterns to symlink into each new worktree. Recursive `**` is supported (for example `etl/**/node_modules`). Only existing matches inside the repo root are linked, and escape paths like `..` are ignored.">?</span>
           </label>
           <div id="gs-wt-symlinks-list" class="wt-symlinks-chips"></div>
           <div style="display:flex;gap:4px;align-items:center">
-            <input id="gs-wt-symlink-input" placeholder="e.g. node_modules" autocomplete="off" style="flex:1"
+            <input id="gs-wt-symlink-input" placeholder="e.g. etl/**/node_modules" autocomplete="off" style="flex:1"
                    onkeydown="if(event.key==='Enter'){event.preventDefault();_addWtSymlink()}">
             <button class="btn btn-sm" onclick="_addWtSymlink()">Add</button>
           </div>

@@ -8,7 +8,6 @@ function _providerCommandToken(command) {
   if (!raw) return '';
   return raw.split(/\s+/)[0] || '';
 }
-
 function _findProviderMeta(name) {
   return (_cachedProviders || []).find(p => p.name === name) || null;
 }
@@ -27,7 +26,6 @@ function _runtimeDefaultCommand() {
 function _runtimeDefaultProviderName() {
   return _detectProviderNameFromCommand(_runtimeDefaultCommand());
 }
-
 function _populateReasoningEffortSelect(selectId, providerName, currentValue, emptyLabel, unsupportedLabel) {
   const sel = document.getElementById(selectId);
   if (!sel) return;

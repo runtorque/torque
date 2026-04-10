@@ -236,7 +236,7 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   loadModals(context);
   seedProviders(context, sandbox._cachedProviders);
 
-  vm.runInContext('_settingsGroup = "alpha"; _gsWtSymlinks = ["node_modules"];', context);
+  vm.runInContext('_settingsGroup = "alpha"; _gsWtSymlinks = ["etl/**/node_modules"];', context);
   ensure('gs-directory').value = '/repo';
   ensure('gs-agent-directory').value = '/repo/agents';
   ensure('gs-terminal-prefix').value = 'Shell';
@@ -273,6 +273,10 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_preserve_diff, true);
   assert.equal(sandbox.sendCalls[0].settings.agent_model, 'gpt-5');
   assert.equal(sandbox.sendCalls[0].settings.agent_reasoning_effort, 'minimal');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(sandbox.sendCalls[0].settings.worktree_symlinks)),
+    ['etl/**/node_modules'],
+  );
   assert.equal(sandbox.sendCalls[1].cmd, 'weaver_update_settings');
   assert.equal(sandbox.sendCalls[1].group, 'alpha');
   assert.equal(sandbox.sendCalls[1].weaver_provider, 'codex');
@@ -303,4 +307,19 @@ test('group settings points Weaver creation to the + New dropdown when absent', 
   assert.equal(ensure('gs-weaver-agent-name').textContent, 'No weaver agent');
   assert.match(ensure('gs-weaver-agent-meta').textContent, /\+ New dropdown/);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), []);
+});
+
+test('_addWtSymlink trims outer slashes while preserving glob syntax', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+
+  ensure('gs-wt-symlink-input').value = '/etl/**/node_modules/';
+  vm.runInContext('_gsWtSymlinks = []; _addWtSymlink()', context);
+
+  assert.deepEqual(
+    JSON.parse(vm.runInContext('JSON.stringify(_gsWtSymlinks)', context)),
+    ['etl/**/node_modules'],
+  );
+  assert.equal(ensure('gs-wt-symlink-input').value, '');
 });
