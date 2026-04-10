@@ -14,7 +14,16 @@ from pathlib import Path
 
 import aiohttp
 from aiohttp import web
-from .config import WS_PORT, DB_FILE, WEBVIEW_FILE, STANDALONE, BIND_HOST, ATTACHMENTS_DIR, log
+from .config import (
+    WS_PORT,
+    DB_FILE,
+    WEBVIEW_FILE,
+    STANDALONE,
+    BIND_HOST,
+    ATTACHMENTS_DIR,
+    DATA_DIR,
+    log,
+)
 from .db import LoomDB
 from dataclasses import asdict
 from .state import (
@@ -643,6 +652,10 @@ async def main(connection=None):
             "layout": "ide" if bridge.capabilities.supports_embedded_terminal else "classic",
             "terminal_backend": "pty" if STANDALONE else "iterm2",
             "home_directory": str(Path.home()),
+            "profile": os.environ.get("LOOM_PROFILE", "").strip(),
+            "data_dir": str(DATA_DIR),
+            "desktop_shell": os.environ.get("LOOM_DESKTOP_SHELL", "").strip(),
+            "port": WS_PORT,
         }
 
     def _state_payload() -> dict:

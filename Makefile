@@ -15,7 +15,7 @@ GLOBAL_PYTHON  := $(shell ls $(HOME)/.config/iterm2/AppSupport/iterm2env*/versio
                     2>/dev/null | sort -V | tail -1)
 ITERM2_PYTHON  := $(or $(PROJECT_PYTHON),$(GLOBAL_PYTHON))
 
-.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop open test
+.PHONY: install uninstall run deps desktop-deps check stop deploy autolaunch cli standalone standalone-bg desktop desktop-attach open test
 
 ## install: Set up the iTerm2 script project and copy all files
 install:
@@ -234,11 +234,54 @@ desktop:
 	fi
 	@profile="$(or $(LOOM_PROFILE),desktop)"; \
 	port="$(or $(LOOM_PORT),18933)"; \
+	if [ -n "$(LOOM_DATA_DIR)" ]; then \
+		data_dir="$(LOOM_DATA_DIR)"; \
+	else \
+		safe_profile=$$(printf '%s' "$$profile" \
+			| tr '[:upper:]' '[:lower:]' \
+			| sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$$//'); \
+		[ -n "$$safe_profile" ] || safe_profile=default; \
+		data_dir="$$HOME/.loom/profiles/$$safe_profile"; \
+	fi; \
 	echo "Starting Loom desktop shell on http://127.0.0.1:$$port/"; \
 	echo "Using desktop profile: $$profile"; \
-	env LOOM_PORT="$$port" \
+	echo "Using desktop data dir: $$data_dir"; \
+	env LOOM_DESKTOP_PORT="$$port" \
+		LOOM_DESKTOP_PROFILE="$$profile" \
+		LOOM_DESKTOP_DATA_DIR="$$data_dir" \
+		LOOM_PORT="$$port" \
 		LOOM_PROFILE="$$profile" \
-		LOOM_DATA_DIR="$(LOOM_DATA_DIR)" \
+		LOOM_DATA_DIR="$$data_dir" \
+		LOOM_DESKTOP_MODE="spawn" \
+		"$(ITERM2_PYTHON)" "$(CURDIR)/loom_desktop.py"
+
+## desktop-attach: Attach the native shell to an existing matching standalone Loom server
+desktop-attach:
+	@if [ -z "$(ITERM2_PYTHON)" ]; then \
+		echo "Error: iTerm2 Python not found. Run make install first."; \
+		exit 1; \
+	fi
+	@profile="$(or $(LOOM_PROFILE),desktop)"; \
+	port="$(or $(LOOM_PORT),18933)"; \
+	if [ -n "$(LOOM_DATA_DIR)" ]; then \
+		data_dir="$(LOOM_DATA_DIR)"; \
+	else \
+		safe_profile=$$(printf '%s' "$$profile" \
+			| tr '[:upper:]' '[:lower:]' \
+			| sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^[._-]+//; s/[._-]+$$//'); \
+		[ -n "$$safe_profile" ] || safe_profile=default; \
+		data_dir="$$HOME/.loom/profiles/$$safe_profile"; \
+	fi; \
+	echo "Attaching Loom desktop shell to http://127.0.0.1:$$port/"; \
+	echo "Expecting standalone profile: $$profile"; \
+	echo "Expecting standalone data dir: $$data_dir"; \
+	env LOOM_DESKTOP_PORT="$$port" \
+		LOOM_DESKTOP_PROFILE="$$profile" \
+		LOOM_DESKTOP_DATA_DIR="$$data_dir" \
+		LOOM_PORT="$$port" \
+		LOOM_PROFILE="$$profile" \
+		LOOM_DATA_DIR="$$data_dir" \
+		LOOM_DESKTOP_MODE="attach" \
 		"$(ITERM2_PYTHON)" "$(CURDIR)/loom_desktop.py"
 
 ## open: Open the Loom UI in the default browser (works in dual or standalone mode)

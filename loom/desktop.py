@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import importlib
 import json
 import os
@@ -20,6 +21,8 @@ from .config import SCRIPT_DIR, log
 
 DESKTOP_DEFAULT_PROFILE = "desktop"
 DESKTOP_DEFAULT_PORT = 18933
+DESKTOP_MODE_SPAWN = "spawn"
+DESKTOP_MODE_ATTACH = "attach"
 WINDOW_TITLE = "Loom"
 WINDOW_WIDTH = 1440
 WINDOW_HEIGHT = 960
@@ -33,6 +36,18 @@ def _truthy(value: str | None) -> bool:
     return (value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _normalize_launch_mode(value: str | None) -> str:
+    mode = (value or "").strip().lower()
+    if not mode:
+        return DESKTOP_MODE_SPAWN
+    if mode not in {DESKTOP_MODE_SPAWN, DESKTOP_MODE_ATTACH}:
+        raise RuntimeError(
+            f"Unsupported desktop launch mode '{value}'. "
+            f"Expected '{DESKTOP_MODE_SPAWN}' or '{DESKTOP_MODE_ATTACH}'."
+        )
+    return mode
+
+
 def _slugify_profile(name: str) -> str:
     import re
 
@@ -43,6 +58,7 @@ def _slugify_profile(name: str) -> str:
 
 @dataclass(frozen=True)
 class DesktopSettings:
+    launch_mode: str
     profile: str
     port: int
     data_dir: Path
@@ -57,13 +73,30 @@ def resolve_desktop_settings(*,
                              env: Mapping[str, str] | None = None,
                              script_dir: Path | None = None) -> DesktopSettings:
     env_map = dict(os.environ if env is None else env)
-    profile = (env_map.get("LOOM_PROFILE", "") or "").strip() \
+    launch_mode = _normalize_launch_mode(
+        env_map.get("LOOM_DESKTOP_MODE")
+        or (DESKTOP_MODE_ATTACH if _truthy(env_map.get("LOOM_DESKTOP_ATTACH"))
+            else DESKTOP_MODE_SPAWN)
+    )
+    profile = (
+        env_map.get("LOOM_DESKTOP_PROFILE")
+        or env_map.get("LOOM_PROFILE", "")
+        or ""
+    ).strip() \
         or DESKTOP_DEFAULT_PROFILE
 
-    port_text = (env_map.get("LOOM_PORT", "") or "").strip()
+    port_text = (
+        env_map.get("LOOM_DESKTOP_PORT")
+        or env_map.get("LOOM_PORT", "")
+        or ""
+    ).strip()
     port = int(port_text or DESKTOP_DEFAULT_PORT)
 
-    data_dir_text = (env_map.get("LOOM_DATA_DIR", "") or "").strip()
+    data_dir_text = (
+        env_map.get("LOOM_DESKTOP_DATA_DIR")
+        or env_map.get("LOOM_DATA_DIR", "")
+        or ""
+    ).strip()
     if data_dir_text:
         data_dir = Path(os.path.expanduser(data_dir_text))
     else:
@@ -72,6 +105,7 @@ def resolve_desktop_settings(*,
 
     root = script_dir or SCRIPT_DIR
     return DesktopSettings(
+        launch_mode=launch_mode,
         profile=profile,
         port=port,
         data_dir=data_dir,
@@ -87,6 +121,13 @@ def build_server_env(settings: DesktopSettings,
     env_map["LOOM_PROFILE"] = settings.profile
     env_map["LOOM_PORT"] = str(settings.port)
     env_map["LOOM_DATA_DIR"] = str(settings.data_dir)
+    env_map["LOOM_DESKTOP_PROFILE"] = settings.profile
+    env_map["LOOM_DESKTOP_PORT"] = str(settings.port)
+    env_map["LOOM_DESKTOP_DATA_DIR"] = str(settings.data_dir)
+    env_map["LOOM_DESKTOP_MODE"] = settings.launch_mode
+    env_map["LOOM_DESKTOP_ATTACH"] = (
+        "1" if settings.launch_mode == DESKTOP_MODE_ATTACH else "0"
+    )
     env_map.setdefault("LOOM_DESKTOP_SHELL", "pywebview")
     return env_map
 
@@ -159,6 +200,55 @@ class DesktopLauncher:
         self._monotonic = monotonic
         self._server_process = None
         self._attached_to_existing = False
+        self._window = None
+
+    @property
+    def launch_mode(self) -> str:
+        return self.settings.launch_mode
+
+    def _describe_runtime(self, runtime: dict) -> str:
+        details = []
+        profile = (runtime.get("profile") or "").strip()
+        if profile:
+            details.append(f"profile={profile}")
+        data_dir = (runtime.get("data_dir") or "").strip()
+        if data_dir:
+            details.append(f"data_dir={data_dir}")
+        return ", ".join(details) if details else "no runtime metadata"
+
+    def _runtime_matches_target(self, runtime: dict) -> tuple[bool, list[str]]:
+        mismatches: list[str] = []
+        saw_identity = False
+        runtime_profile = (runtime.get("profile") or "").strip()
+        if runtime_profile and runtime_profile != self.settings.profile:
+            mismatches.append(
+                f"profile is '{runtime_profile}' instead of "
+                f"'{self.settings.profile}'"
+            )
+        if runtime_profile:
+            saw_identity = True
+
+        runtime_data_dir = (runtime.get("data_dir") or "").strip()
+        if runtime_data_dir:
+            saw_identity = True
+            actual = Path(runtime_data_dir).expanduser()
+            expected = self.settings.data_dir.expanduser()
+            try:
+                actual = actual.resolve()
+            except FileNotFoundError:
+                actual = actual.absolute()
+            try:
+                expected = expected.resolve()
+            except FileNotFoundError:
+                expected = expected.absolute()
+            if actual != expected:
+                mismatches.append(
+                    f"data dir is '{actual}' instead of '{expected}'"
+                )
+        if not saw_identity:
+            mismatches.append("the runtime did not advertise a profile or data dir")
+
+        return (len(mismatches) == 0), mismatches
 
     def probe_runtime(self, timeout: float = PROBE_TIMEOUT_SECS) -> dict | None:
         return _probe_runtime_payload(
@@ -177,17 +267,44 @@ class DesktopLauncher:
                     "own standalone profile and port by default so it does not "
                     "attach to the live toolbelt daemon."
                 )
-            if _truthy(self.env.get("LOOM_DESKTOP_ATTACH")):
+
+            matches_target, mismatches = self._runtime_matches_target(runtime)
+            if self.launch_mode == DESKTOP_MODE_ATTACH:
+                if not matches_target:
+                    details = "; ".join(mismatches) or self._describe_runtime(runtime)
+                    raise RuntimeError(
+                        "Refusing to attach the desktop shell to an existing "
+                        f"standalone Loom because {details}. "
+                        "Choose matching LOOM_PROFILE/LOOM_DATA_DIR/LOOM_PORT "
+                        "values or launch a fresh desktop-owned server instead."
+                    )
                 self._attached_to_existing = True
                 log.info(
                     "Attaching desktop shell to existing standalone Loom at %s",
                     self.settings.url,
                 )
                 return runtime
+
+            if matches_target:
+                raise RuntimeError(
+                    "A matching standalone Loom server is already listening on "
+                    f"{self.settings.url}. Reuse it with "
+                    "LOOM_DESKTOP_MODE=attach (or loom desktop --attach) "
+                    "instead of starting another desktop-owned server."
+                )
+
             raise RuntimeError(
-                f"A standalone Loom server is already listening on "
-                f"{self.settings.url}. Reuse it with LOOM_DESKTOP_ATTACH=1 or "
-                "choose a different LOOM_PORT."
+                f"A different standalone Loom server is already listening on "
+                f"{self.settings.url} ({self._describe_runtime(runtime)}). "
+                "Choose a different LOOM_PORT or attach only to the matching "
+                "standalone runtime you intend to reuse."
+            )
+
+        if self.launch_mode == DESKTOP_MODE_ATTACH:
+            raise RuntimeError(
+                f"No standalone Loom server is listening on {self.settings.url} "
+                "for attach mode. Launch without --attach (or "
+                "LOOM_DESKTOP_MODE=spawn) to start a desktop-owned server."
             )
 
         if _is_port_open(self.settings.port):
@@ -199,9 +316,10 @@ class DesktopLauncher:
 
         self.settings.data_dir.mkdir(parents=True, exist_ok=True)
         log.info(
-            "Launching standalone Loom server for desktop shell on %s "
-            "(profile=%s, data_dir=%s)",
+            "Launching desktop-owned standalone Loom server on %s "
+            "(mode=%s, profile=%s, data_dir=%s)",
             self.settings.url,
+            self.launch_mode,
             self.settings.profile,
             self.settings.data_dir,
         )
@@ -240,13 +358,28 @@ class DesktopLauncher:
 
     def create_window(self, webview_module) -> None:
         log.info("Opening desktop window at %s", self.settings.url)
-        webview_module.create_window(
+        window = webview_module.create_window(
             WINDOW_TITLE,
             self.settings.url,
             width=WINDOW_WIDTH,
             height=WINDOW_HEIGHT,
             min_size=WINDOW_MIN_SIZE,
         )
+        self._window = window
+
+        events = getattr(window, "events", None)
+        if events:
+            for event_name in ("closed", "closing"):
+                event = getattr(events, event_name, None)
+                if event is None:
+                    continue
+                try:
+                    event += self._handle_window_close
+                except Exception:
+                    log.debug("Unable to bind desktop window %s event", event_name)
+
+    def _handle_window_close(self, *_args, **_kwargs):
+        self.stop_server()
 
     def stop_server(self) -> None:
         proc = self._server_process
@@ -305,6 +438,7 @@ def _restore_signal_handlers(handled, previous):
 def main() -> int:
     launcher = DesktopLauncher()
     handled, previous = _install_signal_handlers()
+    atexit.register(launcher.stop_server)
     try:
         launcher.run()
         return 0
