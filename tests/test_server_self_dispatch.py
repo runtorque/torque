@@ -539,6 +539,10 @@ class ServerSelfDispatchTests(unittest.TestCase):
         state = self.state_mod.MatrixState()
         impl = self._make_agent("impl-1")
         reviewer = self._make_agent("review-1")
+        impl.session_id = "impl-session"
+        impl.status = "running"
+        reviewer.session_id = "review-session"
+        reviewer.status = "idle"
         state.agents = {impl.id: impl, reviewer.id: reviewer}
         root = self.state_mod.BoardTask(
             id="task-root",
@@ -581,6 +585,93 @@ class ServerSelfDispatchTests(unittest.TestCase):
 
         self.assertIs(reused, reviewer)
         self.assertIsNone(first_pass)
+
+    def test_nearest_ancestor_agent_for_action_stage_skips_dead_reviewer(self):
+        state = self.state_mod.MatrixState()
+        impl = self._make_agent("impl-1")
+        reviewer = self._make_agent("review-1")
+        impl.session_id = "impl-session"
+        impl.status = "running"
+        reviewer.status = "stopped"
+        reviewer.session_id = ""
+        state.agents = {impl.id: impl, reviewer.id: reviewer}
+        root = self.state_mod.BoardTask(
+            id="task-root",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            action_name="feature/implement",
+            agent_id=impl.id,
+        )
+        review = self.state_mod.BoardTask(
+            id="task-review",
+            task="Review feature",
+            group="g",
+            lane="Done",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            agent_id=reviewer.id,
+        )
+        fix = self.state_mod.BoardTask(
+            id="task-fix",
+            task="Fix review issues",
+            group="g",
+            lane="In Progress",
+            action_name="feature/implement",
+            parent_task_id=review.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+            agent_id=impl.id,
+        )
+        state.board_tasks = {root.id: root, review.id: review, fix.id: fix}
+
+        reused = self.server_mod._nearest_ancestor_agent_for_action_stage(
+            state, fix, "feature/review"
+        )
+
+        self.assertIsNone(reused)
+
+    def test_resolve_ai_report_task_prefers_live_child_over_stale_parent(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-root",
+            agent_id="agent-1",
+        )
+        child = state.board_add_task(
+            "Fix review issues",
+            "g",
+            lane="To Do",
+            id="task-fix",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+            agent_id="agent-1",
+        )
+        cell = self._make_agent("agent-1", current_task_id=parent.id)
+        state.agents[cell.id] = cell
+
+        resolved = self.server_mod._resolve_ai_report_task(state, cell)
+
+        self.assertIs(resolved, child)
+        self.assertEqual(state.agent_current_task(cell.id).id, child.id)
+
+    def test_derive_handoff_accepted_requires_explicit_success_result(self):
+        self.assertFalse(self.server_mod._derive_handoff_accepted(None))
+        self.assertFalse(self.server_mod._derive_handoff_accepted({
+            "type": "dispatch_action_missing",
+        }))
+        self.assertTrue(self.server_mod._derive_handoff_accepted({
+            "type": "ok",
+        }))
+        self.assertTrue(self.server_mod._derive_handoff_accepted({
+            "type": "queued",
+        }))
 
     def test_reject_completion_with_open_descendants_blocks_manual_done(self):
         state = self.state_mod.MatrixState()

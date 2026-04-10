@@ -143,12 +143,16 @@ class ServerDeriveLifecycleTests(unittest.TestCase):
             name="Implementer",
             group="g",
             cell_type="agent",
+            session_id="impl-session",
+            status="running",
         )
         reviewer = self.state_mod.AgentCell(
             id="review-1",
             name="Reviewer",
             group="g",
             cell_type="agent",
+            session_id="review-session",
+            status="idle",
         )
         state.agents = {implementer.id: implementer, reviewer.id: reviewer}
         root = state.board_add_task(

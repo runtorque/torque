@@ -157,9 +157,19 @@ def _resolve_agent_id(state, identifier: str) -> str:
 
 
 def _derive_handoff_accepted(dispatch_result) -> bool:
-    if dispatch_result is None:
-        return True
-    return dispatch_result.get("type") in {"ok", "queued"}
+    return bool(dispatch_result) and dispatch_result.get("type") in {
+        "ok",
+        "queued",
+    }
+
+
+def _agent_can_receive_dispatch(cell) -> bool:
+    return bool(
+        cell
+        and cell.cell_type == "agent"
+        and cell.session_id
+        and (cell.status or "") not in {"stopped", "error"}
+    )
 
 
 def _promote_task_for_active_report(state: MatrixState, cell, task) -> None:
@@ -211,9 +221,39 @@ def _nearest_ancestor_agent_for_action_stage(state: MatrixState, task,
             break
         if ancestor.action_name == action_name and ancestor.agent_id:
             agent = state.agents.get(ancestor.agent_id)
-            if agent:
+            if _agent_can_receive_dispatch(agent):
                 return agent
         ancestor_id = ancestor.parent_task_id
+    return None
+
+
+def _resolve_ai_report_task(state: MatrixState, cell, *,
+                            task_id: str = "") -> Optional[BoardTask]:
+    """Resolve the task an agent report should apply to.
+
+    Prefer an explicit task id. Otherwise ignore stale ``current_task_id``
+    pointers that no longer occupy the agent's live execution slot, and fall
+    back to the state-derived active task before using the older linked-task
+    heuristic.
+    """
+    if not cell:
+        return None
+    if task_id:
+        return state.board_tasks.get(task_id)
+    if cell.current_task_id:
+        current = state.board_tasks.get(cell.current_task_id)
+        if state.task_occupies_execution_slot(current, agent_id=cell.id):
+            return current
+    current = state.agent_current_task(cell.id)
+    if current:
+        return current
+    linked = [
+        t for t in state.board_tasks.values()
+        if t.agent_id == cell.id
+        and t.lane not in ("Done", "Backlog", ARCHIVED_LANE)
+    ]
+    if len(linked) == 1:
+        return linked[0]
     return None
 
 
@@ -936,7 +976,6 @@ async def main(connection=None):
         state.board_update_task(task.id, agent_id=cell.id, lane=lane)
         state.auto_dispatch_queue_remove_task(task.id)
         cell.current_task_id = task.id
-        state.history_record_dispatch(cell, task)
 
     def _iso_to_unix(ts: str) -> float | None:
         if not ts:
@@ -3284,6 +3323,14 @@ async def main(connection=None):
                                         "task_id": tid,
                                         "agent_id": cell.id}
                                     cell = None  # skip dispatch below
+                            if cell and not result \
+                                    and not _agent_can_receive_dispatch(cell):
+                                result = {
+                                    "type": "error",
+                                    "message": "Agent is not available",
+                                    "agent_id": cell.id,
+                                }
+                                cell = None
                         elif data.get("create_agent"):
                             # Create a new agent
                             from loom.state import _slugify
@@ -3396,56 +3443,16 @@ async def main(connection=None):
                                     await _create_child_terminals(
                                         group, cell, count=gs.auto_terminals)
 
-                        if cell:
-                            # Link task to agent and move to In Progress
-                            owner = _find_active_worktree_owner(state, cell)
-                            if owner:
-                                if _should_handoff_shared_worktree(
-                                        owner,
-                                        target_agent_id=cell.id,
-                                        handoff_from=handoff_from):
-                                    owner.current_task_id = ""
-                                    owner.activity = ""
-                                    owner.activity_detail = ""
-                                    state._emit_agent(owner)
-                                    state._db_save_agent(owner)
-                                else:
-                                    state.board_update_task(
-                                        tid, agent_id=cell.id)
-                                    state.board_move_task(tid, "To Do")
-                                    _panel_event(
-                                        "task_queued", cell.id,
-                                        cell.name, cell.group,
-                                        f"{task.task[:80]} "
-                                        f"(waiting for {owner.name})",
-                                        task_id=tid)
-                                    result = {
-                                        "type": "queued",
-                                        "task_id": tid,
-                                        "agent_id": cell.id,
-                                        "reason":
-                                            "shared_worktree_busy",
-                                        "blocked_by_agent_id":
-                                            owner.id,
-                                        "blocked_by_task_id":
-                                            (
-                                                state.agent_current_task(
-                                                    owner.id
-                                                ).id
-                                                if state.agent_current_task(
-                                                    owner.id
-                                                ) else ""
-                                            ),
-                                    }
-                                    cell = None
-                        if cell:
-                            # Link task to agent and move to In Progress
-                            dispatch_lane = \
-                                state.get_group_settings(group) \
-                                    .dispatch_lane or "In Progress"
-                            _record_task_dispatch(
-                                cell, task, dispatch_lane)
+                        if cell and not result \
+                                and not _agent_can_receive_dispatch(cell):
+                            result = {
+                                "type": "error",
+                                "message": "Agent is not available",
+                                "agent_id": cell.id,
+                            }
+                            cell = None
 
+                        if cell:
                             final_prompt = ""
                             shared_context_block = build_prompt_memory_block(
                                 state.db,
@@ -3517,43 +3524,105 @@ async def main(connection=None):
                                         is_clean=is_clean,
                                         cell=cell)
 
-                            if final_prompt:
-                                # Track dispatch count
-                                cell.tasks_dispatched += 1
-                                state._emit_agent(cell)
-                                state._db_save_agent(cell)
-                                _panel_event(
-                                    "task_dispatched", cell.id,
-                                    cell.name, cell.group,
-                                    task.task[:80],
-                                    task_id=task.id)
+                            if not result and not final_prompt:
+                                result = {
+                                    "type": "error",
+                                    "message": "Dispatch prompt unavailable",
+                                    "task_id": tid,
+                                }
 
-                                if agent_id and cell.session_id:
-                                    delay = 3 if data.get(
-                                        "_self_dispatch") else 0
-                                    if delay:
-                                        # Self-dispatch: delay so
-                                        # prompt arrives after current
-                                        # agent turn finishes
-                                        await _send_agent_prompt(
-                                            cell, final_prompt,
-                                            delay=delay,
-                                            background=True)
-                                    else:
-                                        # Existing agent — send now
-                                        await _send_agent_prompt(cell, final_prompt)
-                                elif data.get("create_agent") \
-                                        and cell.session_id:
-                                    for prompt_text, send_kwargs in \
-                                            _new_agent_prompt_sequence(
-                                                launch_cfg,
-                                                startup_prompt=
-                                                startup_prompt,
-                                                final_prompt=final_prompt):
-                                        await _send_agent_prompt(
-                                            cell,
-                                            prompt_text,
-                                            **send_kwargs)
+                        if cell and not result:
+                            owner = _find_active_worktree_owner(state, cell)
+                            if owner:
+                                if _should_handoff_shared_worktree(
+                                        owner,
+                                        target_agent_id=cell.id,
+                                        handoff_from=handoff_from):
+                                    owner.current_task_id = ""
+                                    owner.activity = ""
+                                    owner.activity_detail = ""
+                                    state._emit_agent(owner)
+                                    state._db_save_agent(owner)
+                                else:
+                                    state.board_update_task(
+                                        tid, agent_id=cell.id)
+                                    state.board_move_task(tid, "To Do")
+                                    _panel_event(
+                                        "task_queued", cell.id,
+                                        cell.name, cell.group,
+                                        f"{task.task[:80]} "
+                                        f"(waiting for {owner.name})",
+                                        task_id=tid)
+                                    result = {
+                                        "type": "queued",
+                                        "task_id": tid,
+                                        "agent_id": cell.id,
+                                        "reason":
+                                            "shared_worktree_busy",
+                                        "blocked_by_agent_id":
+                                            owner.id,
+                                        "blocked_by_task_id":
+                                            (
+                                                state.agent_current_task(
+                                                    owner.id
+                                                ).id
+                                                if state.agent_current_task(
+                                                    owner.id
+                                                ) else ""
+                                            ),
+                                    }
+                                    cell = None
+                        if cell and not result:
+                            dispatch_lane = \
+                                state.get_group_settings(group) \
+                                    .dispatch_lane or "In Progress"
+                            _record_task_dispatch(
+                                cell, task, dispatch_lane)
+
+                            # Track dispatch count after prompt resolution
+                            cell.tasks_dispatched += 1
+                            state._emit_agent(cell)
+                            state._db_save_agent(cell)
+
+                            if agent_id:
+                                delay = 3 if data.get(
+                                    "_self_dispatch") else 0
+                                if delay:
+                                    # Self-dispatch: delay so
+                                    # prompt arrives after current
+                                    # agent turn finishes
+                                    await _send_agent_prompt(
+                                        cell, final_prompt,
+                                        delay=delay,
+                                        background=True)
+                                else:
+                                    # Existing agent — send now
+                                    await _send_agent_prompt(
+                                        cell, final_prompt
+                                    )
+                            elif data.get("create_agent"):
+                                for prompt_text, send_kwargs in \
+                                        _new_agent_prompt_sequence(
+                                            launch_cfg,
+                                            startup_prompt=
+                                            startup_prompt,
+                                            final_prompt=final_prompt):
+                                    await _send_agent_prompt(
+                                        cell,
+                                        prompt_text,
+                                        **send_kwargs)
+
+                            state.history_record_dispatch(cell, task)
+                            _panel_event(
+                                "task_dispatched", cell.id,
+                                cell.name, cell.group,
+                                task.task[:80],
+                                task_id=task.id)
+                            result = {
+                                "type": "ok",
+                                "task_id": tid,
+                                "agent_id": cell.id,
+                            }
 
             elif cmd == "resolve_ask":
                 # Resolve an ask task: send answer to parent's agent
@@ -4166,21 +4235,11 @@ async def main(connection=None):
                     result = {"type": "error",
                               "message": f"Cell {cell_id} not found"}
                 else:
-                    # Resolve task: explicit ID → current_task_id →
-                    # auto-detect from cell's active tasks.
-                    task = None
-                    if task_id:
-                        task = state.board_tasks.get(task_id)
-                    elif cell.current_task_id:
-                        task = state.board_tasks.get(
-                            cell.current_task_id)
-                    if not task and not task_id:
-                        linked = [
-                            t for t in state.board_tasks.values()
-                            if t.agent_id == cell_id
-                            and t.lane not in ("Done", "Backlog", ARCHIVED_LANE)]
-                        if len(linked) == 1:
-                            task = linked[0]
+                    task = _resolve_ai_report_task(
+                        state,
+                        cell,
+                        task_id=task_id,
+                    )
 
                     def _add_label(t, label):
                         if label not in t.labels:
