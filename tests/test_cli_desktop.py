@@ -165,8 +165,25 @@ class CliDesktopTests(unittest.TestCase):
         args = parser.parse_args(["desktop", "--port", "19046"])
 
         self.assertEqual(args.command, "desktop")
-        self.assertEqual(args.port, 19046)
+        self.assertEqual(args.desktop_port, 19046)
         self.assertIs(args.func, self.cli.cmd_desktop)
+
+    def test_build_parser_accepts_top_level_port_before_desktop_subcommand(self):
+        parser = self.cli.build_parser()
+
+        args = parser.parse_args(["--port", "19046", "desktop"])
+
+        self.assertEqual(args.command, "desktop")
+        self.assertEqual(args.port, 19046)
+        self.assertIsNone(args.desktop_port)
+        self.assertIs(args.func, self.cli.cmd_desktop)
+
+    def test_resolve_desktop_port_accepts_top_level_before_subcommand_form(self):
+        parser = self.cli.build_parser()
+        args = parser.parse_args(["--port", "19046", "desktop"])
+        self.cli._argv_has_flag = lambda flag: flag == "--port"
+
+        self.assertEqual(self.cli._resolve_desktop_port(args), 19046)
 
     def test_desktop_runtime_guardrail_requires_pywebview_in_selected_python(self):
         cli = _load_cli_module()

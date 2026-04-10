@@ -66,7 +66,11 @@ def _argv_has_flag(flag):
 
 
 def _resolve_desktop_port(args):
-    if _argv_has_flag("--port"):
+    desktop_port = getattr(args, "desktop_port", None)
+    if desktop_port is not None:
+        return int(desktop_port)
+
+    if _argv_has_flag("--port") and getattr(args, "port", None) is not None:
         return int(args.port)
     env_port = (os.environ.get("LOOM_DESKTOP_PORT", "") or "").strip()
     return int(env_port or DESKTOP_DEFAULT_PORT)
@@ -3741,7 +3745,7 @@ def build_parser():
     p.add_argument("--profile",
                    help=f"Standalone profile for the desktop app "
                         f"(default: {DESKTOP_DEFAULT_PROFILE})")
-    p.add_argument("--port", type=int,
+    p.add_argument("--port", dest="desktop_port", type=int,
                    help=f"Standalone port for the desktop app "
                         f"(default: {DESKTOP_DEFAULT_PORT})")
     p.add_argument("--data-dir",
