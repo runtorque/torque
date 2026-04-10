@@ -56,7 +56,7 @@ _GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars",
 _GS_BOOL_FIELDS = {
     "collapsed_default", "filter_by_window", "git_worktree",
     "worktree_auto_checkpoint", "checkpoint_on_progress",
-    "worktree_merge_squash",
+    "worktree_merge_squash", "worktree_merge_preserve_diff",
     "agent_session_resume", "agent_always_custom_dialog",
     "dispatch_auto_terminals",
     "notifications", "notify_on_finish", "notify_on_error",

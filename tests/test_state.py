@@ -418,6 +418,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         state.update_group_settings(
             "g",
             worktree_merge_cleanup="???",
+            worktree_merge_preserve_diff=True,
         )
 
         ws = state.weaver_settings["g"]
@@ -429,6 +430,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(ws.digest_verbosity, "balanced")
         self.assertEqual(ws.escalation_style, "note_then_ask")
         self.assertEqual(gs.worktree_merge_cleanup, "keep")
+        self.assertTrue(gs.worktree_merge_preserve_diff)
 
 
 class MatrixStateBoardWorkflowTests(unittest.TestCase):

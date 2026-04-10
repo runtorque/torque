@@ -161,8 +161,8 @@ async def _worktree_diff_updater(state, worktree_mgr):
             await state.broadcast()
 
 
-async def _worktree_full_diff(cell, worktree_mgr) -> dict:
-    """Build the structured diff payload for the worktree review view."""
+async def _worktree_merge_diff_snapshot(cell, worktree_mgr) -> dict:
+    """Capture the full pre-merge patch plus structured summary data."""
     if not cell or not cell.worktree_path:
         return {"error": "Agent has no worktree."}
     base_branch = cell.worktree_base_branch or "main"
@@ -179,7 +179,8 @@ async def _worktree_full_diff(cell, worktree_mgr) -> dict:
         if proc.returncode != 0:
             err = stderr.decode().strip() or "Failed to load worktree diff."
             return {"error": err}
-        files = _parse_unified_diff(stdout.decode())
+        patch_text = stdout.decode()
+        files = _parse_unified_diff(patch_text)
         if not stats:
             stats = {
                 "files": len(files),
@@ -192,10 +193,20 @@ async def _worktree_full_diff(cell, worktree_mgr) -> dict:
             "base_branch": base_branch,
             "stats": stats,
             "files": files,
+            "patch_text": patch_text,
         }
     except Exception:
-        log.exception("Failed to build full diff for '%s'", cell.name)
+        log.exception("Failed to build merge diff snapshot for '%s'", cell.name)
         return {"error": "Failed to load worktree diff."}
+
+
+async def _worktree_full_diff(cell, worktree_mgr) -> dict:
+    """Build the structured diff payload for the worktree review view."""
+    snapshot = await _worktree_merge_diff_snapshot(cell, worktree_mgr)
+    if snapshot.get("error"):
+        return {"error": snapshot["error"]}
+    snapshot.pop("patch_text", None)
+    return snapshot
 
 
 async def _generate_merge_message(cell, worktree_mgr, squash: bool,
