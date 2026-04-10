@@ -120,3 +120,10 @@ class BridgeAdapterSurfaceTests(unittest.IsolatedAsyncioTestCase):
             self.bridge_mod.iterm2.tool.calls[0]["identifier"],
             "com.loom.toolbelt",
         )
+
+    async def test_iterm2_capabilities_remain_classic_toolbelt_only(self):
+        bridge = self.bridge_mod.ITerm2Adapter(None, self.state_mod.MatrixState())
+
+        self.assertFalse(bridge.capabilities.supports_embedded_terminal)
+        self.assertTrue(bridge.capabilities.supports_toolbelt_registration)
+        self.assertTrue(bridge.capabilities.supports_focus_tracking)

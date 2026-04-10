@@ -5,6 +5,7 @@ let _embeddedTerminalWs = null;
 let _embeddedTerminalSessionKey = '';
 let _embeddedTerminalResizeObserver = null;
 let _embeddedTerminalDataHandler = null;
+let _embeddedTerminalPendingFocusKey = '';
 
 function isEmbeddedTerminalMode() {
   return !!(state && state.runtime && state.runtime.embedded_terminal);
@@ -96,6 +97,60 @@ function _terminalStatusLabel(cell) {
   return cell.status || 'idle';
 }
 
+function _terminalDisplayPath(cell) {
+  if (!cell) return '';
+  const fullPath = cell.current_path || cell.directory || '';
+  return _formatDisplayPath(
+    fullPath,
+    cell.git_root || cell.worktree_repo_root || ''
+  );
+}
+
+function _terminalPrimaryAction(groupLabel, agentTarget) {
+  if (!groupLabel) return null;
+  return {
+    label: 'New Terminal',
+    onclick: 'quickAddTerminal(\''
+      + esc(groupLabel)
+      + '\',\''
+      + esc(agentTarget && agentTarget.id ? agentTarget.id : '')
+      + '\')',
+  };
+}
+
+function _embeddedTerminalCanTakeFocus(force) {
+  if (!_embeddedTerminal || !isEmbeddedTerminalMode()) return false;
+  if (!_embeddedTerminalSessionKey) return false;
+  if (!force && _embeddedTerminalPendingFocusKey !== _embeddedTerminalSessionKey) {
+    return false;
+  }
+  if (document.querySelector && document.querySelector('.overlay.visible')) return false;
+  const active = document.activeElement;
+  if (!active || active === document.body) return true;
+  const workspace = document.getElementById('terminal-workspace');
+  if (workspace && typeof workspace.contains === 'function' && workspace.contains(active)) {
+    return true;
+  }
+  if (force) return true;
+  const tag = (active.tagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || active.isContentEditable) {
+    return false;
+  }
+  return true;
+}
+
+function focusEmbeddedTerminalWorkspace(force) {
+  if (!_embeddedTerminalCanTakeFocus(!!force)) return false;
+  const expectedKey = _embeddedTerminalSessionKey;
+  requestAnimationFrame(function() {
+    if (_embeddedTerminalSessionKey !== expectedKey) return;
+    if (!_embeddedTerminalCanTakeFocus(!!force)) return;
+    if (typeof _embeddedTerminal.focus === 'function') _embeddedTerminal.focus();
+    _embeddedTerminalPendingFocusKey = '';
+  });
+  return true;
+}
+
 function _ensureTerminalWorkspaceDom(root) {
   let shell = root.querySelector('.terminal-shell');
   if (!shell) {
@@ -142,6 +197,9 @@ function _disposeEmbeddedTerminal() {
     _embeddedTerminalResizeObserver = null;
   }
   if (_embeddedTerminalWs) {
+    _embeddedTerminalWs.onopen = null;
+    _embeddedTerminalWs.onmessage = null;
+    _embeddedTerminalWs.onerror = null;
     _embeddedTerminalWs.onclose = null;
     _embeddedTerminalWs.close();
     _embeddedTerminalWs = null;
@@ -156,6 +214,7 @@ function _disposeEmbeddedTerminal() {
     _embeddedTerminalDataHandler = null;
   }
   _embeddedTerminalSessionKey = '';
+  _embeddedTerminalPendingFocusKey = '';
 }
 
 function _embeddedTerminalUrl(cell) {
@@ -181,7 +240,10 @@ function _scheduleEmbeddedTerminalFit() {
 
 function _connectEmbeddedTerminal(cell, surface) {
   _disposeEmbeddedTerminal();
-  _embeddedTerminalSessionKey = cell.id + ':' + (cell.session_id || '');
+  var expectedSessionId = cell.session_id || '';
+  var sessionKey = cell.id + ':' + expectedSessionId;
+  _embeddedTerminalSessionKey = sessionKey;
+  _embeddedTerminalPendingFocusKey = sessionKey;
   _embeddedTerminal = new Terminal({
     allowTransparency: false,
     convertEol: false,
@@ -210,21 +272,34 @@ function _connectEmbeddedTerminal(cell, surface) {
   });
   _embeddedTerminalResizeObserver.observe(surface);
   _embeddedTerminalWs = new WebSocket(_embeddedTerminalUrl(cell));
+  var socket = _embeddedTerminalWs;
+  function isCurrentSessionMessage(msg) {
+    if (_embeddedTerminalSessionKey !== sessionKey) return false;
+    if (_embeddedTerminalWs !== socket) return false;
+    if (msg && typeof msg.session_id === 'string' && msg.session_id !== expectedSessionId) {
+      return false;
+    }
+    return true;
+  }
   _embeddedTerminalWs.onopen = function() {
+    if (!isCurrentSessionMessage()) return;
     _scheduleEmbeddedTerminalFit();
+    focusEmbeddedTerminalWorkspace(false);
   };
   _embeddedTerminalWs.onmessage = function(event) {
     const msg = JSON.parse(event.data);
+    if (!isCurrentSessionMessage(msg)) return;
     if (msg.type === 'snapshot') {
       _embeddedTerminal.reset();
       if (msg.data) _embeddedTerminal.write(msg.data);
       _scheduleEmbeddedTerminalFit();
+      focusEmbeddedTerminalWorkspace(false);
     } else if (msg.type === 'output' && msg.data) {
       _embeddedTerminal.write(msg.data);
     }
   };
   _embeddedTerminalWs.onclose = function() {
-    if (_embeddedTerminalSessionKey === cell.id + ':' + (cell.session_id || '')) {
+    if (isCurrentSessionMessage()) {
       const status = document.querySelector('#terminal-workspace .terminal-statusbar');
       if (status) status.setAttribute('data-closed', '1');
     }
@@ -243,29 +318,39 @@ function renderTerminalWorkspace() {
   }
   root.classList.add('active');
   const group = _terminalCurrentGroupName();
+  const groupLabel = group || '';
   const cells = _terminalGroupCells(group);
   const cell = _resolveTerminalWorkspaceCell();
   const agentTarget = _terminalTargetAgent(cell);
+  const primaryAction = _terminalPrimaryAction(groupLabel, agentTarget);
+  const topbarAction = cell && cell.session_id ? primaryAction : null;
+  const showTabs = cells.length > 1;
+  const displayPath = _terminalDisplayPath(cell);
   const dom = _ensureTerminalWorkspaceDom(root);
-  const groupLabel = group || '';
+  const title = cell && cell.name ? cell.name : 'Terminal';
   dom.topbar.innerHTML = ''
     + '<div class="terminal-topbar-left">'
-    + '  <span class="terminal-title">Terminal</span>'
+    + '  <span class="terminal-title">' + esc(title) + '</span>'
     + '  <span class="terminal-group-pill">' + esc(groupLabel || 'Standalone') + '</span>'
     + '</div>'
     + '<div class="terminal-topbar-right">'
-    + '  <button class="terminal-topbar-btn" onclick="togglePanel(\'board\')">Board</button>'
-    + (groupLabel
-      ? '  <button class="terminal-topbar-btn" onclick="openAddAgent(\'' + esc(groupLabel) + '\')">New Agent</button>'
-      : '')
-    + (agentTarget
-      ? '  <button class="terminal-topbar-btn" onclick="quickAddTerminal(\'' + esc(agentTarget.group) + '\',\'' + esc(agentTarget.id) + '\')">New Terminal</button>'
+    + (topbarAction
+      ? '  <button class="terminal-topbar-btn terminal-topbar-btn-primary" onclick="' + topbarAction.onclick + '">' + topbarAction.label + '</button>'
       : '')
     + '</div>';
-  dom.tabs.innerHTML = _renderTerminalTabs(cells, cell ? cell.id : '');
+  dom.tabs.classList.toggle('terminal-tabs-hidden', !showTabs);
+  dom.tabs.innerHTML = showTabs ? _renderTerminalTabs(cells, cell ? cell.id : '') : '';
 
   if (!cell) {
-    dom.stage.innerHTML = '<div class="terminal-empty"><div class="terminal-empty-title">No sessions yet</div><div class="terminal-empty-body">Create an agent or terminal from the sidebar to start working.</div></div>';
+    dom.stage.innerHTML = ''
+      + '<div class="terminal-empty">'
+      + '  <div class="terminal-empty-title">Open a shell</div>'
+      + '  <div class="terminal-empty-body">Start a standalone terminal for this workspace and Loom will drop you into it ready to type.</div>'
+      + (primaryAction
+        ? '  <button class="terminal-empty-btn" onclick="' + primaryAction.onclick + '">' + primaryAction.label + '</button>'
+        : '')
+      + '  <div class="terminal-empty-meta">The terminal will take focus automatically when it opens.</div>'
+      + '</div>';
     dom.statusbar.textContent = 'Standalone PTY workspace';
     _disposeEmbeddedTerminal();
     return;
@@ -276,8 +361,9 @@ function renderTerminalWorkspace() {
     dom.stage.innerHTML = ''
       + '<div class="terminal-empty">'
       + '  <div class="terminal-empty-title">' + esc(cell.name) + ' is stopped</div>'
-      + '  <div class="terminal-empty-body">Relaunch this session to reopen it in the embedded terminal.</div>'
+      + '  <div class="terminal-empty-body">Relaunch this session to put it back in the workspace and return keyboard focus to the shell.</div>'
       + '  <button class="terminal-empty-btn" onclick="relaunchAgent(\'' + esc(cell.id) + '\')">Relaunch</button>'
+      + '  <div class="terminal-empty-meta">When it comes back, Loom will focus the terminal automatically.</div>'
       + '</div>';
     dom.statusbar.textContent = _terminalStatusLabel(cell);
     _disposeEmbeddedTerminal();
@@ -289,11 +375,6 @@ function renderTerminalWorkspace() {
     _connectEmbeddedTerminal(cell, dom.stage.querySelector('.terminal-surface'));
   }
 
-  const fullPath = cell.current_path || cell.directory || '';
-  const displayPath = _formatDisplayPath(
-    fullPath,
-    cell.git_root || cell.worktree_repo_root || ''
-  );
   dom.statusbar.textContent = (displayPath || 'No directory') + '  |  ' + _terminalStatusLabel(cell);
-  dom.statusbar.title = fullPath || '';
+  dom.statusbar.title = cell.current_path || cell.directory || '';
 }

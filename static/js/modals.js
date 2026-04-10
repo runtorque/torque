@@ -182,13 +182,25 @@ function confirmNo() { _confirmResult(false); }
 /* -- Add Group -------------------------------------------------------- */
 function openAddGroup() {
   document.getElementById('modal-group').classList.add('visible');
+  const summary = document.getElementById('modal-group-summary');
+  if (summary) {
+    const standalone = !!(state && state.runtime && state.runtime.embedded_terminal);
+    summary.textContent = standalone
+      ? 'Create the workspace first — Loom will take you straight into agent setup next.'
+      : '';
+    summary.classList.toggle('hidden', !standalone);
+  }
   const inp = document.getElementById('group-name-input');
   inp.value = '';
   inp.focus();
 }
 function submitGroup() {
   const name = document.getElementById('group-name-input').value.trim();
-  if (name) { send({ cmd: 'add_group', group: name }); closeModals(); }
+  if (!name) return;
+  send({ cmd: 'add_group', group: name });
+  const standalone = !!(state && state.runtime && state.runtime.embedded_terminal);
+  closeModals();
+  if (standalone && typeof openAddAgent === 'function') openAddAgent(name);
 }
 
 /* -- Add agent / terminal modal extracted to static/js/modals/add-cell.js -- */

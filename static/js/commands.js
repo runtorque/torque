@@ -46,6 +46,7 @@ function _updateSelectedAgentContext(id) {
   var nextSelectedId = _selectionAgentRootId(id);
   var changed = selectedAgentId !== nextSelectedId;
   if (nextSelectedId) selectedAgentId = nextSelectedId;
+  else if (typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) selectedAgentId = '';
   return changed;
 }
 
@@ -57,6 +58,9 @@ function focusAgent(id) {
   _syncPanelsAfterSelectionChange(prevSelectedId);
   if (typeof renderTerminalWorkspace === 'function' && isEmbeddedTerminalMode()) {
     render();
+    if (typeof focusEmbeddedTerminalWorkspace === 'function') {
+      focusEmbeddedTerminalWorkspace(true);
+    }
   }
   send({ cmd: 'focus_agent', id });
 }
@@ -68,6 +72,9 @@ function onAgentClick(id) {
   if (typeof renderTerminalWorkspace === 'function' && isEmbeddedTerminalMode()) {
     _updateSelectedAgentContext(id);
     render();
+    if (typeof focusEmbeddedTerminalWorkspace === 'function') {
+      focusEmbeddedTerminalWorkspace(true);
+    }
     _syncPanelsAfterSelectionChange(prevSelectedId);
     send({ cmd: 'focus_agent', id });
     return;
@@ -93,6 +100,11 @@ function onAgentDblClick(id) {
   selectedTerminalId = id;
   send({ cmd: 'focus_agent', id });
   render();
+  if (typeof renderTerminalWorkspace === 'function'
+      && isEmbeddedTerminalMode()
+      && typeof focusEmbeddedTerminalWorkspace === 'function') {
+    focusEmbeddedTerminalWorkspace(true);
+  }
   _syncPanelsAfterSelectionChange(prevSelectedId);
 }
 
@@ -152,12 +164,20 @@ function _nextName(prefix) {
 }
 function quickAddAgent(group) {
   const gs = (state.group_settings || {})[group] || {};
+  if (typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {
+    openAddAgent(group);
+    return;
+  }
   if (gs.agent_always_custom_dialog) { openAddAgent(group); return; }
   send({ cmd: 'add_agent', name: _nextName('Agent'), group });
 }
 
 function newAgentFromTemplate(group, templateName) {
   const gs = (state.group_settings || {})[group] || {};
+  if (typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {
+    openAddAgent(group, templateName || '');
+    return;
+  }
   if (gs.agent_always_custom_dialog) {
     openAddAgent(group, templateName || '');
     return;

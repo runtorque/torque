@@ -47,6 +47,7 @@ class FakeElement {
     this.value = '';
     this.textContent = '';
     this.dataset = {};
+    this.attributes = {};
     this.style = {};
     this.children = [];
     this.classList = new FakeClassList();
@@ -87,6 +88,16 @@ class FakeElement {
 
   addEventListener(type, handler) {
     this.listeners[type] = handler;
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+
+  getAttribute(name) {
+    return Object.prototype.hasOwnProperty.call(this.attributes, name)
+      ? this.attributes[name]
+      : null;
   }
 
   focus() {
@@ -262,6 +273,105 @@ function loadBoardScripts(context) {
   loadScript(context, 'static/js/board/card-actions.js');
 }
 
+function createEmbeddedTerminalHarness() {
+  const sockets = [];
+  const terminals = [];
+
+  class FakeTerminal {
+    constructor() {
+      this.cols = 80;
+      this.rows = 24;
+      this.writes = [];
+      this.resetCount = 0;
+      terminals.push(this);
+    }
+
+    loadAddon(addon) {
+      this.addon = addon;
+    }
+
+    open(surface) {
+      this.surface = surface;
+    }
+
+    onData(handler) {
+      this.onDataHandler = handler;
+      return {
+        dispose: () => {
+          this.dataDisposed = true;
+        },
+      };
+    }
+
+    write(data) {
+      this.writes.push(data);
+    }
+
+    reset() {
+      this.resetCount += 1;
+      this.writes = [];
+    }
+
+    dispose() {
+      this.disposed = true;
+    }
+
+    focus() {
+      this.focusCount = (this.focusCount || 0) + 1;
+    }
+  }
+
+  class FakeFitAddon {
+    fit() {
+      this.fitCalls = (this.fitCalls || 0) + 1;
+    }
+  }
+
+  class FakeResizeObserver {
+    constructor(callback) {
+      this.callback = callback;
+    }
+
+    observe(target) {
+      this.target = target;
+    }
+
+    disconnect() {
+      this.disconnected = true;
+    }
+  }
+
+  function FakeWebSocket(url) {
+    this.url = url;
+    this.readyState = FakeWebSocket.OPEN;
+    this.sent = [];
+    sockets.push(this);
+  }
+  FakeWebSocket.OPEN = 1;
+  FakeWebSocket.prototype.send = function send(payload) {
+    this.sent.push(JSON.parse(payload));
+  };
+  FakeWebSocket.prototype.close = function close() {
+    this.closeCalled = true;
+    this.readyState = 3;
+  };
+
+  const { sandbox, document } = createSandbox({
+    Terminal: FakeTerminal,
+    FitAddon: { FitAddon: FakeFitAddon },
+    ResizeObserver: FakeResizeObserver,
+    WebSocket: FakeWebSocket,
+    location: { protocol: 'http:', host: 'localhost:9000' },
+  });
+  const workspace = document.register('terminal-workspace');
+  const status = new FakeElement('terminal-statusbar');
+  workspace.setQuerySelector('.terminal-statusbar', status);
+  document.setSelector('#terminal-workspace .terminal-statusbar', status);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/terminal.js');
+  return { context, sandbox, document, sockets, terminals, status };
+}
+
 function runInContext(context, code) {
   return vm.runInContext(code, context);
 }
@@ -412,6 +522,37 @@ function createMainRenderHarness() {
     var selectedTerminalId = null;
     getFilterByWindow = function() { return false; };
   `);
+  return { context, document, sandbox };
+}
+
+function createPanelHarness() {
+  const { sandbox, document } = createSandbox({
+    window: {
+      innerHeight: 900,
+      addEventListener() {},
+      open() {},
+    },
+    connect() {},
+    setupDrag() {},
+  });
+  [
+    'add-name-input',
+    'add-cmd-input',
+    'add-dir-input',
+    'add-args-input',
+    'add-init-input',
+    'gs-directory',
+    'gs-agent-directory',
+    'gs-terminal-prefix',
+    'gs-terminal-boot-cmd',
+    'gs-terminal-cmd-args',
+    'gs-terminal-init-script',
+    'gs-terminal-directory',
+    'gs-weaver-boot-cmd',
+    'gs-weaver-custom-instructions',
+  ].forEach((id) => document.register(id));
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/main.js');
   return { context, document, sandbox };
 }
 
@@ -825,6 +966,66 @@ test('board restores the selected lane scroll when toggling schedules', () => {
   assert.equal(runInContext(context, '_boardShowSchedules'), false);
   assert.equal(runInContext(context, '_boardSelectedLane'), 'Done');
   assert.equal(cards.scrollTop, 44);
+});
+
+test('renderBoard uses a wide multi-lane layout only for embedded wide panels', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    backlog: { id: 'backlog', group: 'alpha', task: 'Backlog task', lane: 'Backlog', position: 4 },
+    todo: { id: 'todo', group: 'alpha', task: 'To Do task', lane: 'To Do', position: 3 },
+    progress: { id: 'progress', group: 'alpha', task: 'Active task', lane: 'In Progress', position: 2 },
+    done: { id: 'done', group: 'alpha', task: 'Done task', lane: 'Done', position: 1 },
+  };
+  runInContext(context, `_boardSelectedLane = 'Backlog';`);
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-wide-grid/);
+  assert.equal((panel.innerHTML.match(/data-board-lane-column="1"/g) || []).length, 4);
+  assert.match(panel.innerHTML, /board-wide-lane-name">Backlog/);
+  assert.match(panel.innerHTML, /board-wide-lane-name">Done/);
+
+  panel.clientWidth = 820;
+  context.renderBoard();
+  assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
+
+  document.body.classList.remove('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.renderBoard();
+  assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
+});
+
+test('board keeps scroll state when changing the selected lane in wide embedded mode', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  const cards = document.register('board-cards');
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    backlog: { id: 'backlog', group: 'alpha', task: 'Backlog task', lane: 'Backlog', position: 2 },
+    done: { id: 'done', group: 'alpha', task: 'Done task', lane: 'Done', position: 1 },
+  };
+
+  runInContext(context, `_boardSelectedLane = 'Backlog';`);
+  context.renderBoard();
+
+  runInContext(context, `_boardRenderLimit = 150;`);
+  cards.scrollTop = 77;
+  cards.listeners.scroll();
+
+  context.boardSelectLane('Done');
+
+  assert.equal(runInContext(context, '_boardSelectedLane'), 'Done');
+  assert.equal(cards.scrollTop, 77);
+  assert.equal(runInContext(context, '_boardRenderLimit'), 150);
 });
 
 test('renderBoard switches to the first lane with matches when filters empty the current lane', () => {
@@ -1331,6 +1532,45 @@ test('boardCardDrop maps manual drag ordering to the expected server position', 
     cmd: 'board_reorder_task',
     id: 'top',
     position: 0,
+  });
+});
+
+test('boardCardDrop moves tasks across lanes in the wide embedded layout', () => {
+  const { context, document } = createBoardHarness();
+  document.register('panel-board').clientWidth = 1200;
+  document.body.classList.add('runtime-embedded');
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    back: { id: 'back', group: 'alpha', task: 'Backlog task', lane: 'Backlog', position: 4 },
+    done: { id: 'done', group: 'alpha', task: 'Done task', lane: 'Done', position: 1 },
+  };
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardDragId = 'back';
+  `);
+
+  const lane = new FakeElement();
+  lane.classList.add('board-wide-lane');
+  lane.dataset.lane = 'Done';
+
+  const card = new FakeElement();
+  card.dataset.taskId = 'done';
+  card.classList.add('board-card');
+  card.parentNode = lane;
+  card.getBoundingClientRect = () => ({ top: 0, height: 100 });
+
+  context.boardCardDrop({
+    preventDefault() {},
+    stopPropagation() {},
+    clientY: 20,
+    target: card,
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.at(-1))), {
+    cmd: 'board_move_task',
+    id: 'back',
+    lane: 'Done',
+    position: 1,
   });
 });
 
@@ -3333,6 +3573,201 @@ test('agent clicks rescope the board to the clicked agent group immediately', ()
   assert.equal(jsonValue(context, 'renderCalls.board'), 1);
 });
 
+test('embedded terminal selection clears stale agent selection for standalone terminals', () => {
+  const { context } = createSelectionHarness();
+  context.isEmbeddedTerminalMode = function() { return true; };
+
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent' },
+    'term-root': { id: 'term-root', name: 'Shell Root', group: 'alpha', cell_type: 'terminal' },
+  };
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+  `);
+
+  context.focusAgent('term-root');
+
+  assert.equal(jsonValue(context, 'selectedAgentId'), '');
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'term-root');
+  assert.equal(jsonValue(context, 'focusedItemId'), 'term-root');
+});
+
+test('embedded terminal selection returns keyboard focus to the terminal workspace', () => {
+  const { context } = createSelectionHarness();
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.renderTerminalWorkspace = function() {};
+  context.focusEmbeddedTerminalWorkspaceCalls = 0;
+  context.focusEmbeddedTerminalWorkspace = function(force) {
+    context.focusEmbeddedTerminalWorkspaceCalls += force ? 1 : 0;
+    return true;
+  };
+
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent', session_id: 'sess-agent' },
+    'term-root': { id: 'term-root', name: 'Shell Root', group: 'alpha', cell_type: 'terminal', session_id: 'sess-root' },
+  };
+
+  context.focusAgent('term-root');
+
+  assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 1);
+});
+
+test('classic terminal selection keeps the current agent context on the toolbelt path', () => {
+  const { context } = createSelectionHarness();
+  context.focusEmbeddedTerminalWorkspaceCalls = 0;
+  context.focusEmbeddedTerminalWorkspace = function() {
+    context.focusEmbeddedTerminalWorkspaceCalls += 1;
+  };
+
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent' },
+    'term-root': { id: 'term-root', name: 'Shell Root', group: 'alpha', cell_type: 'terminal' },
+  };
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+  `);
+
+  context.focusAgent('term-root');
+
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-1');
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'term-root');
+  assert.equal(jsonValue(context, 'focusedItemId'), 'term-root');
+  assert.equal(jsonValue(context, 'renderCalls.main'), 0);
+  assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 0);
+});
+
+test('terminal workspace stays inert when embedded runtime is disabled', () => {
+  const { context, document, sockets } = createEmbeddedTerminalHarness();
+  const workspace = document.getElementById('terminal-workspace');
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: false };
+    window.__disposeFlags = {};
+    document.getElementById('terminal-workspace').innerHTML = '<div class="terminal-shell">stale</div>';
+    document.getElementById('terminal-workspace').classList.add('active');
+    _embeddedTerminal = {
+      dispose: function() { window.__disposeFlags.terminalDisposed = true; }
+    };
+    _embeddedTerminalFit = { active: true };
+    _embeddedTerminalDataHandler = {
+      dispose: function() { window.__disposeFlags.dataDisposed = true; }
+    };
+    _embeddedTerminalWs = {
+      close: function() { window.__disposeFlags.wsClosed = true; }
+    };
+    _embeddedTerminalResizeObserver = {
+      disconnect: function() { window.__disposeFlags.observerDisconnected = true; }
+    };
+    _embeddedTerminalSessionKey = 'term-1:session-old';
+  `);
+
+  context.renderTerminalWorkspace();
+
+  assert.equal(workspace.innerHTML, '');
+  assert.equal(workspace.classList.contains('active'), false);
+  assert.deepEqual(jsonValue(context, 'window.__disposeFlags'), {
+    observerDisconnected: true,
+    wsClosed: true,
+    dataDisposed: true,
+    terminalDisposed: true,
+  });
+  assert.equal(sockets.length, 0);
+  assert.equal(jsonValue(context, '!!_embeddedTerminal'), false);
+  assert.equal(jsonValue(context, '!!_embeddedTerminalWs'), false);
+  assert.equal(jsonValue(context, '_embeddedTerminalSessionKey'), '');
+});
+
+test('embedded terminal ignores stale websocket output after a relaunch session swap', () => {
+  const { context, sockets, terminals } = createEmbeddedTerminalHarness();
+  const firstSurface = new FakeElement('surface-1');
+  const secondSurface = new FakeElement('surface-2');
+  context.__surface1 = firstSurface;
+  context.__surface2 = secondSurface;
+
+  runInContext(
+    context,
+    `_connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-old' }, __surface1);`,
+  );
+  const oldSocket = sockets[0];
+
+  runInContext(
+    context,
+    `_connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-new' }, __surface2);`,
+  );
+  const currentSocket = sockets[1];
+  const currentTerminal = terminals[1];
+
+  assert.equal(oldSocket.closeCalled, true);
+  assert.equal(oldSocket.onmessage, null);
+
+  currentSocket.onmessage({
+    data: JSON.stringify({
+      type: 'snapshot',
+      cell_id: 'term-1',
+      session_id: 'session-new',
+      data: 'clean prompt',
+    }),
+  });
+  assert.deepEqual(currentTerminal.writes, ['clean prompt']);
+
+  currentSocket.onmessage({
+    data: JSON.stringify({
+      type: 'output',
+      cell_id: 'term-1',
+      session_id: 'session-old',
+      data: 'autoload -Uz add-zsh-hook',
+    }),
+  });
+  assert.deepEqual(currentTerminal.writes, ['clean prompt']);
+
+  currentSocket.onmessage({
+    data: JSON.stringify({
+      type: 'output',
+      cell_id: 'term-1',
+      session_id: 'session-new',
+      data: '\nready',
+    }),
+  });
+  assert.deepEqual(currentTerminal.writes, ['clean prompt', '\nready']);
+});
+
+test('embedded terminal auto-focuses new sessions when standalone mode is active', () => {
+  const { context, sockets, terminals } = createEmbeddedTerminalHarness();
+  const surface = new FakeElement('surface');
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  sockets[0].onopen();
+
+  assert.equal(terminals[0].focusCount, 1);
+});
+
+test('embedded terminal does not steal focus from an active editor input', () => {
+  const { context, document, sockets, terminals } = createEmbeddedTerminalHarness();
+  const surface = new FakeElement('surface');
+  const boardSearch = new FakeElement('board-search-input');
+  boardSearch.tagName = 'INPUT';
+  document.activeElement = boardSearch;
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  sockets[0].onopen();
+
+  assert.equal(terminals[0].focusCount || 0, 0);
+});
+
 test('ws invalidation rerenders the context panel for task updates', () => {
   const { context } = createWsRenderHarness();
   runInContext(context, `_activePanelApp = 'context';`);
@@ -3827,6 +4262,49 @@ test('openEditTask resets task modal body scroll to the top', () => {
   assert.equal(taskModalBody.scrollTop, 0);
 });
 
+test('standalone quickAddAgent opens the streamlined add-agent modal instead of instant-creating', () => {
+  const { context } = createSelectionHarness();
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.openAddAgentCalls = [];
+  context.openAddAgent = function(group, templateName) {
+    context.openAddAgentCalls.push({ group, templateName: templateName || '' });
+  };
+
+  context.quickAddAgent('alpha');
+
+  assert.deepEqual(context.openAddAgentCalls, [{ group: 'alpha', templateName: '' }]);
+  assert.equal(context.sendCalls.length, 0);
+});
+
+test('classic quickAddAgent keeps the existing instant-create path', () => {
+  const { context } = createSelectionHarness();
+
+  context.quickAddAgent('alpha');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
+    cmd: 'add_agent',
+    name: 'Agent 1',
+    group: 'alpha',
+  });
+});
+
+test('standalone template creation opens the streamlined add-agent modal with the template selected', () => {
+  const { context } = createSelectionHarness();
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.openAddAgentCalls = [];
+  context.openAddAgent = function(group, templateName) {
+    context.openAddAgentCalls.push({ group, templateName: templateName || '' });
+  };
+
+  context.newAgentFromTemplate('alpha', 'worker/reviewer');
+
+  assert.deepEqual(context.openAddAgentCalls, [{
+    group: 'alpha',
+    templateName: 'worker/reviewer',
+  }]);
+  assert.equal(context.sendCalls.length, 0);
+});
+
 test('submitAdd includes worktree_name for custom agent worktrees', () => {
   const { context, document } = createModalHarness();
 
@@ -3905,6 +4383,73 @@ test('submitAdd omits worktree_name when custom worktree naming is blank or disa
     false,
   );
   assert.equal(jsonValue(context, 'sendCalls[0].worktree'), false);
+});
+
+test('standalone submitGroup immediately continues into add-agent setup', () => {
+  const { context, document } = createModalHarness();
+  document.register('group-name-input').value = 'Demo';
+  document.register('modal-group');
+  const summary = document.register('modal-group-summary');
+  summary.classList.add('hidden');
+  context.state.runtime = { embedded_terminal: true };
+  context.openAddAgentCalls = [];
+  context.openAddAgent = function(group) {
+    context.openAddAgentCalls.push(group);
+  };
+
+  context.submitGroup();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
+    cmd: 'add_group',
+    group: 'Demo',
+  });
+  assert.deepEqual(context.openAddAgentCalls, ['Demo']);
+});
+
+test('classic submitGroup keeps the existing single-step flow', () => {
+  const { context, document } = createModalHarness();
+  document.register('group-name-input').value = 'Demo';
+  document.register('modal-group');
+  document.register('modal-group-summary');
+  context.openAddAgentCalls = [];
+  context.openAddAgent = function(group) {
+    context.openAddAgentCalls.push(group);
+  };
+
+  context.submitGroup();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
+    cmd: 'add_group',
+    group: 'Demo',
+  });
+  assert.deepEqual(context.openAddAgentCalls, []);
+});
+
+test('compact standalone add-agent flow keeps advanced options collapsed by default', () => {
+  const { context, document } = createModalHarness();
+  const details = document.register('add-advanced-details');
+  const summary = document.register('add-advanced-summary');
+
+  context.state.runtime = { embedded_terminal: true };
+  runInContext(context, `_pendingModal = { advanced: false };`);
+  context._setAddAdvancedState('agent');
+
+  assert.equal(details.open, false);
+  assert.equal(summary.textContent, 'Advanced options');
+
+  runInContext(context, `_pendingModal = { advanced: true };`);
+  context._setAddAdvancedState('agent');
+  assert.equal(details.open, true);
+
+  context.state.runtime = { embedded_terminal: false };
+  runInContext(context, `_pendingModal = { advanced: false };`);
+  context._setAddAdvancedState('agent');
+  assert.equal(details.open, true);
+
+  context.state.runtime = { embedded_terminal: true };
+  runInContext(context, `_pendingModal = { advanced: false };`);
+  context._setAddAdvancedState('terminal');
+  assert.equal(details.open, true);
 });
 
 test('task modal keeps a scrollable body separate from its footer actions', () => {
@@ -4152,6 +4697,12 @@ test('diff review bulk collapse controls stay stable across refreshes', () => {
   assert.match(root.innerHTML, /0 of 3 collapsed/);
 });
 
+test('diff review overlay hides the workspace shell so standalone merge review uses the full viewport', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #broadcast,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
+});
+
 test('full state toggles embedded runtime body class', () => {
   const { context, document } = createWsRenderHarness();
 
@@ -4184,7 +4735,7 @@ test('full state toggles embedded runtime body class', () => {
   assert.equal(document.body.classList.contains('runtime-embedded'), false);
 });
 
-test('embedded runtime renders standalone sidebar and nested child terminals', () => {
+test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   const { context, document, sandbox } = createStandaloneRenderHarness();
   const main = document.getElementById('main');
 
@@ -4209,6 +4760,7 @@ test('embedded runtime renders standalone sidebar and nested child terminals', (
       name: 'Shell Child',
       group: 'alpha',
       cell_type: 'terminal',
+      parent_id: 'agent-1',
       current_process: 'zsh',
       current_path: '/tmp/child',
       status: 'idle',
@@ -4227,20 +4779,81 @@ test('embedded runtime renders standalone sidebar and nested child terminals', (
   };
 
   runInContext(context, `
+    selectedAgentId = 'agent-1';
     selectedTerminalId = 'term-child';
     render();
   `);
 
-  assert.match(main.innerHTML, /sidebar-group/);
+  assert.match(main.innerHTML, /class="group/);
+  assert.doesNotMatch(main.innerHTML, /sidebar-group/);
   assert.match(main.innerHTML, /Runner/);
+  assert.match(main.innerHTML, /Reviewing patch/);
+  assert.match(main.innerHTML, /Runner terminals/);
   assert.match(main.innerHTML, /Shell Child/);
   assert.match(main.innerHTML, /Shell Root/);
-  assert.match(main.innerHTML, /sidebar-cell-row[^"]*child/);
+  assert.match(main.innerHTML, /class="cell[^"]*selected/);
+  assert.match(main.innerHTML, /class="term-row/);
   assert.match(main.innerHTML, /newWeaver\('alpha'\)/);
-  assert.match(main.innerHTML, /openAddAgent\('alpha'\)/);
+  assert.match(main.innerHTML, /quickAddAgent\('alpha'\)/);
+  assert.match(main.innerHTML, /openAddAgentAdvanced\('alpha'\)/);
   assert.match(main.innerHTML, /quickAddTerminal\('alpha','agent-1'\)/);
   assert.match(main.innerHTML, /openAddTerminal\('alpha','agent-1'\)/);
   assert.equal(sandbox.renderTerminalWorkspaceCalls, 1);
+});
+
+test('embedded runtime hides stale agent details when a standalone terminal is selected', () => {
+  const { context, document, sandbox } = createStandaloneRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox._cachedAgentTemplates = [];
+  sandbox.state.groups = { alpha: ['agent-1', 'term-root'] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Runner',
+      group: 'alpha',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'idle',
+      session_id: 'sess-1',
+    },
+    'term-root': {
+      id: 'term-root',
+      name: 'Shell Root',
+      group: 'alpha',
+      cell_type: 'terminal',
+      current_process: 'bash',
+      current_path: '/tmp/root',
+      status: 'idle',
+      session_id: 'sess-2',
+    },
+  };
+
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'term-root';
+    render();
+  `);
+
+  assert.doesNotMatch(main.innerHTML, /Runner terminals/);
+  assert.doesNotMatch(main.innerHTML, /class="agent-details"/);
+  assert.match(main.innerHTML, /Shell Root/);
+});
+
+test('agent create menu action stays standalone-only for the advanced modal path', () => {
+  const classic = createMainRenderHarness();
+  assert.deepEqual(jsonValue(classic.context, `_agentCreateMenuAction('alpha')`), {
+    label: 'Custom…',
+    action: "openAddAgent('alpha')",
+  });
+
+  const embedded = createStandaloneRenderHarness();
+  assert.deepEqual(jsonValue(embedded.context, `_agentCreateMenuAction('alpha')`), {
+    label: 'Advanced…',
+    action: "openAddAgentAdvanced('alpha')",
+  });
 });
 
 test('standalone sidebar formats repo and home paths compactly', () => {
@@ -4295,6 +4908,56 @@ test('standalone sidebar formats repo and home paths compactly', () => {
   );
 });
 
+test('classic runtime keeps the shared left rail filtered to the current window', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.current_window_id = 'window-a';
+  sandbox.state.groups = { alpha: ['agent-a', 'agent-b', 'term-b'] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'agent-a': {
+      id: 'agent-a',
+      name: 'Worker A',
+      icon: 'A',
+      group: 'alpha',
+      cell_type: 'agent',
+      window_id: 'window-a',
+      status: 'running',
+      session_id: 'sess-a',
+    },
+    'agent-b': {
+      id: 'agent-b',
+      name: 'Worker B',
+      icon: 'B',
+      group: 'alpha',
+      cell_type: 'agent',
+      window_id: 'window-b',
+      status: 'running',
+      session_id: 'sess-b',
+    },
+    'term-b': {
+      id: 'term-b',
+      name: 'Shell B',
+      group: 'alpha',
+      cell_type: 'terminal',
+      window_id: 'window-b',
+      status: 'idle',
+      current_process: 'zsh',
+    },
+  };
+  runInContext(context, `
+    getFilterByWindow = function() { return true; };
+    render();
+  `);
+
+  assert.match(main.innerHTML, /Worker A/);
+  assert.doesNotMatch(main.innerHTML, /Worker B/);
+  assert.doesNotMatch(main.innerHTML, /Shell B/);
+  assert.deepEqual(jsonValue(context, `window._navAgents`), ['agent-a']);
+});
+
 test('main render pins the weaver first in the visible and navigable agent order', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
@@ -4342,4 +5005,59 @@ test('main render pins the weaver first in the visible and navigable agent order
     'agent-2',
   ]);
   assert.match(main.innerHTML, /Weaver Prime[\s\S]*Worker One[\s\S]*Worker Two/);
+});
+
+test('panel resize bounds stay narrow by default and expand in embedded runtime', () => {
+  const { context, document } = createPanelHarness();
+
+  assert.deepEqual(jsonValue(context, `_panelResizeBounds()`), {
+    min: 80,
+    max: 820,
+  });
+  assert.equal(jsonValue(context, `_normalizePanelHeight(120)`), 120);
+
+  document.body.classList.add('runtime-embedded');
+
+  assert.deepEqual(jsonValue(context, `_panelResizeBounds()`), {
+    min: 180,
+    max: 740,
+  });
+  assert.equal(jsonValue(context, `_normalizePanelHeight(120)`), 180);
+  assert.equal(jsonValue(context, `_normalizePanelHeight(1200)`), 740);
+});
+
+test('collapsing the embedded board returns keyboard focus to the terminal workspace', () => {
+  const { context, document } = createPanelHarness();
+  const panel = document.register('bottom-panel');
+  panel.classList.remove('collapsed');
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.focusEmbeddedTerminalWorkspaceCalls = 0;
+  context.focusEmbeddedTerminalWorkspace = function(force) {
+    context.focusEmbeddedTerminalWorkspaceCalls += force ? 1 : 0;
+    return true;
+  };
+  runInContext(context, `_activePanelApp = 'board';`);
+
+  context.togglePanel('board');
+
+  assert.equal(panel.classList.contains('collapsed'), true);
+  assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 1);
+});
+
+test('collapsing the classic board does not refocus the embedded terminal workspace', () => {
+  const { context, document } = createPanelHarness();
+  const panel = document.register('bottom-panel');
+  panel.classList.remove('collapsed');
+  context.isEmbeddedTerminalMode = function() { return false; };
+  context.focusEmbeddedTerminalWorkspaceCalls = 0;
+  context.focusEmbeddedTerminalWorkspace = function() {
+    context.focusEmbeddedTerminalWorkspaceCalls += 1;
+  };
+  runInContext(context, `_activePanelApp = 'board';`);
+
+  context.togglePanel('board');
+
+  assert.equal(panel.classList.contains('collapsed'), true);
+  assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 0);
 });

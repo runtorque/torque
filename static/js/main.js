@@ -7,6 +7,33 @@ var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
 var _panelStateRestored = false;  // true after first state message restores panel
 
 var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-context', 'panel-events', 'panel-weaver'];
+var _embeddedPanelMinHeight = 180;
+var _defaultPanelMinHeight = 80;
+var _workspaceSidebarDefaultWidth = 340;
+
+function _panelResizeBounds() {
+  var embedded = !!(typeof document !== 'undefined'
+    && document
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('runtime-embedded'));
+  var minHeight = embedded ? _embeddedPanelMinHeight : _defaultPanelMinHeight;
+  var viewportHeight = (typeof window !== 'undefined'
+    && typeof window.innerHeight === 'number'
+    && window.innerHeight > 0)
+    ? window.innerHeight
+    : minHeight;
+  var reserved = embedded ? 160 : 80;
+  var maxHeight = Math.max(minHeight, viewportHeight - reserved);
+  return { min: minHeight, max: maxHeight };
+}
+
+function _normalizePanelHeight(height) {
+  var next = parseInt(height, 10);
+  if (!Number.isFinite(next) || next <= 0) return 0;
+  var bounds = _panelResizeBounds();
+  return Math.max(bounds.min, Math.min(bounds.max, next));
+}
 
 function togglePanel(appName) {
   var panel = document.getElementById('bottom-panel');
@@ -21,6 +48,11 @@ function togglePanel(appName) {
     _activePanelApp = '';
     panel.classList.add('collapsed');
     buttons.forEach(function(b) { b.classList.remove('active'); });
+    if (typeof isEmbeddedTerminalMode === 'function'
+        && isEmbeddedTerminalMode()
+        && typeof focusEmbeddedTerminalWorkspace === 'function') {
+      focusEmbeddedTerminalWorkspace(true);
+    }
   } else {
     // Expand / switch
     if (_activePanelApp === 'board' && appName !== 'board'
@@ -69,7 +101,7 @@ function _restorePanelState() {
     active = 'board';
   }
   var height = state.board_panel_height;
-  if (height > 0) _panelHeight = height;
+  if (height > 0) _panelHeight = _normalizePanelHeight(height);
 
   if (active) {
     _activePanelApp = active;
@@ -120,7 +152,8 @@ function _restorePanelState() {
     if (!dragging) return;
     var panel = document.getElementById('bottom-panel');
     var delta = startY - e.clientY;
-    var newH = Math.max(80, Math.min(window.innerHeight - 80, startH + delta));
+    var bounds = _panelResizeBounds();
+    var newH = Math.max(bounds.min, Math.min(bounds.max, startH + delta));
     _panelHeight = newH;
     panel.style.setProperty('--panel-height', newH + 'px');
   });
@@ -138,7 +171,25 @@ function _restorePanelState() {
 
 /* -- Standalone workspace resize handle ---------------------------------- */
 
-var _workspaceSidebarWidth = 320;
+var _workspaceSidebarWidth = _workspaceSidebarDefaultWidth;
+var _workspaceBoardRenderPending = false;
+
+function _scheduleStandaloneBoardLayoutRender() {
+  if (typeof document === 'undefined'
+      || !document.body
+      || !document.body.classList
+      || !document.body.classList.contains('runtime-embedded')) {
+    return;
+  }
+  if (typeof renderBoard !== 'function') return;
+  if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') return;
+  if (_workspaceBoardRenderPending || typeof requestAnimationFrame !== 'function') return;
+  _workspaceBoardRenderPending = true;
+  requestAnimationFrame(function() {
+    _workspaceBoardRenderPending = false;
+    renderBoard();
+  });
+}
 
 function _workspaceSidebarWidthBounds() {
   var maxWidth = Math.max(320, Math.floor(window.innerWidth * 0.62));
@@ -156,13 +207,14 @@ function _persistWorkspaceSidebarWidth(width) {
 function _applyWorkspaceSidebarWidth(width) {
   var bounds = _workspaceSidebarWidthBounds();
   var next = parseInt(width, 10);
-  if (!Number.isFinite(next)) next = 320;
+  if (!Number.isFinite(next)) next = _workspaceSidebarDefaultWidth;
   next = Math.max(bounds.min, Math.min(bounds.max, next));
   _workspaceSidebarWidth = next;
   var root = document.documentElement || document.body;
   if (root && root.style) {
     root.style.setProperty('--standalone-sidebar-width', next + 'px');
   }
+  _scheduleStandaloneBoardLayoutRender();
 }
 
 (function() {
@@ -203,7 +255,7 @@ function _applyWorkspaceSidebarWidth(width) {
   });
 
   handle.addEventListener('dblclick', function() {
-    _applyWorkspaceSidebarWidth(320);
+    _applyWorkspaceSidebarWidth(_workspaceSidebarDefaultWidth);
     _persistWorkspaceSidebarWidth(_workspaceSidebarWidth);
   });
 

@@ -64,6 +64,11 @@ function _formatDisplayPath(path, repoRoot) {
     .replace(/^\/home\/[^/]+(?=\/|$)/, '~');
 }
 
+function _embeddedRuntimeEnabled() {
+  if (typeof isEmbeddedTerminalMode === 'function') return !!isEmbeddedTerminalMode();
+  return !!(state && state.runtime && state.runtime.embedded_terminal);
+}
+
 function renderSplitBtn(quickAction, customAction) {
   return `<div class="split-btn">`
     + `<button class="split-main" onclick="${quickAction}">+ New</button>`
@@ -71,6 +76,19 @@ function renderSplitBtn(quickAction, customAction) {
     + `<div class="split-menu">`
     + `  <button onclick="closeMenus();${customAction}">Custom\u2026</button>`
     + `</div></div>`;
+}
+
+function _agentCreateMenuAction(group) {
+  if (_embeddedRuntimeEnabled()) {
+    return {
+      label: 'Advanced…',
+      action: `openAddAgentAdvanced('${esc(group)}')`,
+    };
+  }
+  return {
+    label: 'Custom…',
+    action: `openAddAgent('${esc(group)}')`,
+  };
 }
 
 function _renderAgentTemplateMenuItems(group) {
@@ -86,22 +104,6 @@ function _renderAgentTemplateMenuItems(group) {
 function _renderWeaverMenuItem(group, groupSettings) {
   if ((groupSettings || {}).weaver_agent_id) return '';
   return `<button onclick="event.stopPropagation();closeMenus();newWeaver('${esc(group)}')">Weaver</button>`;
-}
-
-function _renderStandaloneAgentMenu(gname, groupSettings) {
-  let html = '<div class="split-menu">';
-  html += _renderWeaverMenuItem(gname, groupSettings);
-  html += _renderAgentTemplateMenuItems(gname);
-  html += `<button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button>`;
-  html += '</div>';
-  return html;
-}
-
-function _renderStandaloneTerminalMenu(gname, parentId) {
-  const pid = parentId ? esc(parentId) : '';
-  return '<div class="split-menu">'
-    + `<button onclick="event.stopPropagation();closeMenus();openAddTerminal('${esc(gname)}','${pid}')">Custom terminal\u2026</button>`
-    + '</div>';
 }
 
 function toggleMenu(chevron) {
@@ -297,88 +299,10 @@ function _applyFlip(main, oldRects) {
   }
 }
 
-function renderStandaloneSidebar(main, groupNames) {
-  const navItems = [];
-  const navAgents = [];
-  const navByGroup = {};
-  const navGroupOrder = [];
-  let html = '<div class="sidebar-groups">';
-
-  for (let gi = 0; gi < groupNames.length; gi++) {
-    const gname = groupNames[gi];
-    const aids = state.groups[gname] || [];
-    const gs = (state.group_settings || {})[gname] || {};
-    const agentCount = aids.filter(id => {
-      const cell = state.agents[id];
-      return cell && cell.cell_type !== 'terminal';
-    }).length;
-    const atCap = gs.max_agents > 0 && agentCount >= gs.max_agents;
-    if (!_collapsedInitialized.has(gname)) {
-      _collapsedInitialized.add(gname);
-      if (gs.collapsed_default) collapsedGroups.add(gname);
-    }
-    const collapsed = collapsedGroups.has(gname);
-    navGroupOrder.push(gname);
-    const groupNav = [];
-
-    html += '<section class="sidebar-group' + (collapsed ? ' collapsed' : '') + '" data-group-name="' + esc(gname) + '">';
-    html += '<div class="sidebar-group-hdr">';
-    html += '  <button class="sidebar-group-toggle" onclick="event.stopPropagation();toggleGroup(\'' + esc(gname) + '\')">\u25BE</button>';
-    html += '  <span class="sidebar-group-name">' + esc(gname) + '</span>';
-    html += '  <span class="sidebar-group-count">' + aids.length + '</span>';
-    html += '  <span class="sidebar-group-actions">';
-    if (atCap) {
-      html += '  <button class="sidebar-group-btn" title="Group is at max agents" disabled>+</button>';
-    } else {
-      html += '  <button class="sidebar-group-btn" title="New agent" onclick="event.stopPropagation();quickAddAgent(\'' + esc(gname) + '\')">+</button>';
-      html += '  <button class="sidebar-group-btn" title="Agent options" onclick="event.stopPropagation();toggleMenu(this)">\u25BE</button>';
-      html += _renderStandaloneAgentMenu(gname, gs);
-    }
-    html += '  <button class="sidebar-group-btn" title="Settings" onclick="event.stopPropagation();openGroupSettings(\'' + esc(gname) + '\')">\u2699</button>';
-    html += '  </span>';
-    html += '</div>';
-    html += '<div class="sidebar-group-body">';
-
-    if (!aids.length) {
-      html += '<div class="sidebar-empty-group">No cells yet</div>';
-    }
-
-    for (let i = 0; i < aids.length; i++) {
-      const cell = state.agents[aids[i]];
-      if (!cell) continue;
-      navItems.push(cell.id);
-      groupNav.push(cell.id);
-      if (cell.cell_type !== 'terminal') navAgents.push(cell.id);
-      html += renderStandaloneCellRow(cell, 0);
-      if (cell.cell_type === 'agent') {
-        const childIds = state.children[cell.id] || [];
-        for (let j = 0; j < childIds.length; j++) {
-          const child = state.agents[childIds[j]];
-          if (!child) continue;
-          navItems.push(child.id);
-          groupNav.push(child.id);
-          html += renderStandaloneCellRow(child, 1);
-        }
-      }
-    }
-
-    html += '</div>';
-    html += '</section>';
-    navByGroup[gname] = groupNav;
-  }
-
-  html += '</div>';
-  main.innerHTML = html;
-  window._navItems = navItems;
-  window._navAgents = navAgents;
-  window._navByGroup = navByGroup;
-  window._navGroupOrder = navGroupOrder;
-  if (focusedItemId && !navItems.includes(focusedItemId)) focusedItemId = null;
-}
-
 function render() {
   const main = document.getElementById('main');
   const groupNames = Object.keys(state.groups);
+  const embeddedMode = _embeddedRuntimeEnabled();
 
   if (groupNames.length === 0) {
     main.innerHTML = `
@@ -403,14 +327,6 @@ function render() {
     selectedTerminalId = null;
   }
 
-  if (typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode()) {
-    renderStandaloneSidebar(main, groupNames);
-    if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
-    _updateWeaverTaskbarBadge();
-    if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
-    return;
-  }
-
   const navItems = [];
   const navAgents = [];  // agents only, for left/right navigation
   const navByGroup = {};  // group name → [item IDs] for up/down within group
@@ -423,7 +339,7 @@ function render() {
     // Per-group window filtering based on filter_by_window setting
     const gsFilter = (state.group_settings || {})[gname] || {};
     let wid = null;
-    if (gsFilter.filter_by_window && state.current_window_id) {
+    if (!embeddedMode && gsFilter.filter_by_window && state.current_window_id) {
       // Check if any cell in this group has an active session
       const hasActive = aids.some(id => {
         const c = state.agents[id];
@@ -437,7 +353,7 @@ function render() {
       });
       // Only filter if there are active sessions; otherwise show everywhere
       if (hasActive) wid = state.current_window_id;
-    } else if (getFilterByWindow()) {
+    } else if (!embeddedMode && getFilterByWindow()) {
       wid = state.current_window_id;
     }
 
@@ -508,6 +424,7 @@ function render() {
       html += `  <div class="cell-name">Full</div>`;
       html += `</div>`;
     } else {
+      const createMenu = _agentCreateMenuAction(gname);
       html += `<div class="cell cell-add" onclick="quickAddAgent('${esc(gname)}')">`;
       html += `  <div class="cell-add-icon">+</div>`;
       html += `  <div class="cell-name">New</div>`;
@@ -515,15 +432,26 @@ function render() {
       html += `  <div class="split-menu">`;
       html += _renderWeaverMenuItem(gname, gsLocal);
       html += _renderAgentTemplateMenuItems(gname);
-      html += `<button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button>`;
+      html += `<button onclick="event.stopPropagation();closeMenus();${createMenu.action}">${createMenu.label}</button>`;
       html += `</div>`;
       html += `</div>`;
     }
     html += `</div>`;
 
     /* Details + terminal drawer for selected agent (if in this group) */
+    const selectedCell = selectedTerminalId && state.agents[selectedTerminalId];
     const selAgent = selectedAgentId && state.agents[selectedAgentId];
-    if (selAgent && selAgent.group === gname) {
+    const showAgentDetails = !!(
+      selAgent
+      && selAgent.group === gname
+      && (
+        !embeddedMode
+        || !selectedCell
+        || selectedCell.cell_type === 'agent'
+        || selectedCell.parent_id === selAgent.id
+      )
+    );
+    if (showAgentDetails) {
       /* Agent details section */
       html += renderAgentDetails(selAgent);
 
@@ -672,6 +600,19 @@ function _branchBoundaryOverviewForAgent(agent) {
   return overview;
 }
 
+function _agentCellSubtitle(a) {
+  const task = _getAgentTask(a.id);
+  if (task && task.task) return task.task;
+  if (!_embeddedRuntimeEnabled()) return '';
+  return a.activity_detail
+    || _formatDisplayPath(
+      a.current_path || a.directory || '',
+      a.git_root || a.worktree_repo_root || ''
+    )
+    || a.command
+    || '';
+}
+
 function renderAgentCell(a) {
   const active = a.session_id && a.session_id === state.active_session_id;
   const selected = a.id === selectedAgentId;
@@ -712,10 +653,9 @@ function renderAgentCell(a) {
   if (_weaverAsking) {
     h += `<div class="cell-weaver-ask" title="${esc(_weaverWs.pending_question)}">? awaiting input</div>`;
   }
-  /* Linked task */
-  const _ct = _getAgentTask(a.id);
-  if (_ct) {
-    h += `<div class="cell-task" title="${esc(_ct.task)}">${formatCode(_ct.task)}</div>`;
+  const cellSubtitle = _agentCellSubtitle(a);
+  if (cellSubtitle) {
+    h += `<div class="cell-task" title="${esc(cellSubtitle)}">${formatCode(cellSubtitle)}</div>`;
   }
   /* Agent type badge */
   if (a.agent_type) {
@@ -899,67 +839,4 @@ function renderTerminalRow(t) {
   h += `</div>`;
   h += `</div>`;
   return h;
-}
-
-function renderStandaloneCellRow(cell, depth) {
-  const active = cell.session_id && cell.session_id === state.active_session_id;
-  const selected = selectedTerminalId === cell.id;
-  const statusCls = agentStatusClass(cell);
-  const proc = cell.cell_type === 'terminal'
-    ? processInfo(cell.current_process || cell.command || '')
-    : null;
-  let subtitle = '';
-  if (cell.cell_type === 'agent') {
-    const task = _getAgentTask(cell.id);
-    subtitle = task
-      ? task.task
-      : (cell.activity_detail
-        || _formatDisplayPath(
-          cell.current_path || cell.directory || '',
-          cell.git_root || cell.worktree_repo_root || ''
-        )
-        || cell.command
-        || '');
-  } else {
-    subtitle = _formatDisplayPath(
-      cell.current_path || cell.directory || '',
-      cell.git_root || cell.worktree_repo_root || ''
-    ) || cell.command || '';
-  }
-
-  let html = '<div class="sidebar-cell-row'
-    + (active ? ' active' : '')
-    + (selected ? ' selected' : '')
-    + (cell.status === 'stopped' ? ' stopped' : '')
-    + (depth > 0 ? ' child' : '')
-    + '" data-drag-id="' + esc(cell.id) + '" data-drag-type="' + esc(cell.cell_type) + '" data-drag-group="' + esc(cell.group) + '"'
-    + ' onclick="focusAgent(\'' + esc(cell.id) + '\')"'
-    + ' oncontextmenu="onCellContextMenu(event,\'' + esc(cell.id) + '\')"'
-    + ' onauxclick="if(event.button===1){event.preventDefault();removeAgent(\'' + esc(cell.id) + '\')}">';
-  html += '<span class="sidebar-cell-indent" style="width:' + (depth * 14) + 'px"></span>';
-  html += '<span class="sidebar-cell-status ' + esc(statusCls) + '"></span>';
-  if (cell.cell_type === 'agent') {
-    html += '<span class="sidebar-cell-icon">' + esc(cell.icon || agentIcon(cell.name)) + '</span>';
-  } else {
-    html += '<span class="sidebar-cell-badge" style="background:' + esc(proc.color) + '">' + esc(proc.label) + '</span>';
-  }
-  html += '<span class="sidebar-cell-copy">';
-  html += '  <span class="sidebar-cell-name">' + esc(cell.name) + '</span>';
-  if (subtitle) {
-    html += '  <span class="sidebar-cell-subtitle" title="' + esc(subtitle) + '">' + esc(subtitle) + '</span>';
-  }
-  html += '</span>';
-  html += '<span class="sidebar-cell-actions">';
-  if (cell.cell_type === 'agent') {
-    html += '<button class="sidebar-cell-btn" onclick="event.stopPropagation();quickAddTerminal(\'' + esc(cell.group) + '\',\'' + esc(cell.id) + '\')" title="New terminal">+</button>';
-    html += '<button class="sidebar-cell-btn" onclick="event.stopPropagation();toggleMenu(this)" title="Terminal options">\u25BE</button>';
-    html += _renderStandaloneTerminalMenu(cell.group, cell.id);
-  }
-  if (cell.status === 'stopped') {
-    html += '<button class="sidebar-cell-btn" onclick="event.stopPropagation();relaunchAgent(\'' + esc(cell.id) + '\')" title="Relaunch">\u21BB</button>';
-  }
-  html += '<button class="sidebar-cell-btn danger" onclick="event.stopPropagation();removeAgent(\'' + esc(cell.id) + '\')" title="Remove">\u2715</button>';
-  html += '</span>';
-  html += '</div>';
-  return html;
 }

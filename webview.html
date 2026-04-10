@@ -40,6 +40,7 @@
 <div class="overlay" id="modal-group">
   <div class="modal">
     <h2>New Group</h2>
+    <div id="modal-group-summary" class="modal-summary hidden"></div>
     <label>Group name</label>
     <input id="group-name-input" placeholder="e.g. frontend" autocomplete="off"
            onkeydown="if(event.key==='Enter')submitGroup();if(event.key==='Escape')closeModals();">
@@ -54,13 +55,10 @@
 <div class="overlay" id="modal-add">
   <div class="modal modal-tall">
     <h2 id="modal-add-title">New Agent</h2>
+    <div id="modal-add-summary" class="modal-summary hidden"></div>
     <div class="gs-pane active" style="display:block">
       <label>Name</label>
       <input id="add-name-input" placeholder="e.g. Claude 1" autocomplete="off">
-      <div id="add-icon-row">
-        <label>Icon</label>
-        <div class="icon-picker" id="add-icon-picker"></div>
-      </div>
       <label>Group</label>
       <select id="add-group-select"></select>
       <div id="add-template-row" class="hidden">
@@ -69,65 +67,74 @@
           <option value="">None</option>
         </select>
       </div>
-      <div id="add-provider-row" class="hidden">
-        <label>Agent CLI</label>
-        <select id="add-provider-select" onchange="onAddProviderChange()"></select>
-      </div>
-      <div id="add-cmd-row" class="hidden">
-        <label>Boot command</label>
-        <input id="add-cmd-input" placeholder="e.g. npm run dev" autocomplete="off">
-      </div>
-      <div id="add-args-row" class="hidden">
-        <label>Arguments</label>
-        <input id="add-args-input" placeholder="e.g. --watch" autocomplete="off">
-      </div>
-      <div id="add-init-row" class="hidden">
-        <label>Init script</label>
-        <input id="add-init-input" placeholder="/path/to/script.sh" autocomplete="off">
-      </div>
-      <label>Directory</label>
-      <select id="add-dir-select" onchange="onDirChange()"></select>
-      <input id="add-dir-input" class="hidden" placeholder="Same as group"
-             autocomplete="off" style="margin-top:4px">
-      <label>Profile</label>
-      <select id="add-profile-select"></select>
-      <label>Shell</label>
-      <select id="add-shell-select">
-        <option value="">Same as group</option>
-        <option value="zsh">zsh</option>
-        <option value="bash">bash</option>
-        <option value="fish">fish</option>
-      </select>
-      <label>Tab color</label>
-      <div class="color-swatches" id="add-color-swatches"></div>
-      <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
-      <textarea id="add-env-vars" rows="2" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
-      <div id="add-wt-section" class="add-wt-section">
-        <label class="gs-checkbox">
-          <input id="add-wt-enabled" type="checkbox" onchange="_toggleAddWorktreeFields()"> Git worktree
-        </label>
-        <div id="add-wt-fields" style="display:none;padding-left:20px">
-          <label>Base directory <span class="label-hint">relative to repo root</span></label>
-          <input id="add-wt-base-dir" placeholder=".loom/worktrees" autocomplete="off">
-          <label>Base branch <span class="label-hint">empty = current HEAD</span></label>
-          <input id="add-wt-base-branch" placeholder="main" autocomplete="off">
-          <label>Worktree name <span class="label-hint">optional; used for both folder name and branch suffix</span></label>
-          <input id="add-wt-name" placeholder="e.g. feature-api-v2" autocomplete="off">
-          <label class="gs-checkbox">
-            <input id="add-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
-          </label>
-          <label class="gs-checkbox">
-            <input id="add-wt-checkpoint-on-progress" type="checkbox"> Checkpoint on progress
-          </label>
-          <label class="gs-checkbox">
-            <input id="add-wt-squash" type="checkbox"> Squash on merge
-          </label>
+      <details id="add-advanced-details" class="add-advanced-details" open>
+        <summary id="add-advanced-summary">Advanced options</summary>
+        <div class="add-advanced-body">
+          <div id="add-icon-row">
+            <label>Icon</label>
+            <div class="icon-picker" id="add-icon-picker"></div>
+          </div>
+          <div id="add-provider-row" class="hidden">
+            <label>Agent CLI</label>
+            <select id="add-provider-select" onchange="onAddProviderChange()"></select>
+          </div>
+          <div id="add-cmd-row" class="hidden">
+            <label>Boot command</label>
+            <input id="add-cmd-input" placeholder="e.g. npm run dev" autocomplete="off">
+          </div>
+          <div id="add-args-row" class="hidden">
+            <label>Arguments</label>
+            <input id="add-args-input" placeholder="e.g. --watch" autocomplete="off">
+          </div>
+          <div id="add-init-row" class="hidden">
+            <label>Init script</label>
+            <input id="add-init-input" placeholder="/path/to/script.sh" autocomplete="off">
+          </div>
+          <label>Directory</label>
+          <select id="add-dir-select" onchange="onDirChange()"></select>
+          <input id="add-dir-input" class="hidden" placeholder="Same as group"
+                 autocomplete="off" style="margin-top:4px">
+          <label>Profile</label>
+          <select id="add-profile-select"></select>
+          <label>Shell</label>
+          <select id="add-shell-select">
+            <option value="">Same as group</option>
+            <option value="zsh">zsh</option>
+            <option value="bash">bash</option>
+            <option value="fish">fish</option>
+          </select>
+          <label>Tab color</label>
+          <div class="color-swatches" id="add-color-swatches"></div>
+          <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
+          <textarea id="add-env-vars" rows="2" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
+          <div id="add-wt-section" class="add-wt-section">
+            <label class="gs-checkbox">
+              <input id="add-wt-enabled" type="checkbox" onchange="_toggleAddWorktreeFields()"> Git worktree
+            </label>
+            <div id="add-wt-fields" style="display:none;padding-left:20px">
+              <label>Base directory <span class="label-hint">relative to repo root</span></label>
+              <input id="add-wt-base-dir" placeholder=".loom/worktrees" autocomplete="off">
+              <label>Base branch <span class="label-hint">empty = current HEAD</span></label>
+              <input id="add-wt-base-branch" placeholder="main" autocomplete="off">
+              <label>Worktree name <span class="label-hint">optional; used for both folder name and branch suffix</span></label>
+              <input id="add-wt-name" placeholder="e.g. feature-api-v2" autocomplete="off">
+              <label class="gs-checkbox">
+                <input id="add-wt-auto-checkpoint" type="checkbox"> Auto-checkpoint on stop
+              </label>
+              <label class="gs-checkbox">
+                <input id="add-wt-checkpoint-on-progress" type="checkbox"> Checkpoint on progress
+              </label>
+              <label class="gs-checkbox">
+                <input id="add-wt-squash" type="checkbox"> Squash on merge
+              </label>
+            </div>
+          </div>
         </div>
-      </div>
+      </details>
     </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
-      <button class="btn-primary" onclick="submitAdd()">Create</button>
+      <button class="btn-primary" id="add-submit-btn" onclick="submitAdd()">Create</button>
     </div>
   </div>
 </div>

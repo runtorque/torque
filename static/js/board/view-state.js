@@ -244,10 +244,12 @@ function _boardCurrentViewKey() {
   if (_boardShowSchedules) {
     return JSON.stringify({ group: group, view: 'schedules' });
   }
+  var wideLayout = typeof _boardWideLayoutActive === 'function'
+    && _boardWideLayoutActive(document.getElementById('panel-board'));
   return JSON.stringify({
     group: group,
-    view: 'lane',
-    lane: _boardSelectedLane || '',
+    view: wideLayout ? 'wide' : 'lane',
+    lane: wideLayout ? '' : (_boardSelectedLane || ''),
     show_archived: _boardShowArchived,
     search_query: _boardSearchQuery,
     quick_view: _boardQuickView,

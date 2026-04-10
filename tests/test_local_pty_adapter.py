@@ -1,6 +1,8 @@
 import asyncio
 import importlib
+import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,6 +22,11 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.state_mod = importlib.reload(self.state_mod)
         self.pty_mod = importlib.import_module("loom.local_pty")
         self.pty_mod = importlib.reload(self.pty_mod)
+
+    def test_capabilities_expose_embedded_terminal_without_toolbelt_registration(self):
+        self.assertTrue(self.pty_mod.LocalPtyAdapter.capabilities.supports_embedded_terminal)
+        self.assertTrue(self.pty_mod.LocalPtyAdapter.capabilities.supports_focus_tracking)
+        self.assertFalse(self.pty_mod.LocalPtyAdapter.capabilities.supports_toolbelt_registration)
 
     async def test_create_session_emits_output_and_tracks_focus(self):
         state = self.state_mod.MatrixState()
@@ -215,6 +222,143 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 os.chdir(prev_cwd)
                 if cell.session_id:
                     await adapter.close_session(cell.session_id)
+
+    def test_session_environment_scrubs_iterm_markers_and_sets_standalone_defaults(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ITERM_SESSION_ID": "w1t0p0:deadbeef",
+                "ITERM_PROFILE": "Default",
+                "LC_TERMINAL": "iTerm2",
+                "LC_TERMINAL_VERSION": "3.6.7",
+                "TERM_SESSION_ID": "session-123",
+                "TERM_FEATURES": "24bitcc",
+                "TERMINFO_DIRS": "/Applications/iTerm.app/Contents/Resources/terminfo",
+                "TERM_PROGRAM": "iTerm.app",
+                "TERM_PROGRAM_VERSION": "3.6.7",
+                "TERM": "dumb",
+                "STARSHIP_SESSION_KEY": "starship-session",
+                "STARSHIP_SHELL": "zsh",
+            },
+            clear=False,
+        ):
+            env = adapter._session_environment(
+                "cell-123",
+                {"CUSTOM_PATH": "~/loom-test"},
+            )
+
+        self.assertEqual(env["LOOM_CELL_ID"], "cell-123")
+        self.assertEqual(env["LOOM_STANDALONE_PTY"], "1")
+        self.assertEqual(env["TERM"], "xterm-256color")
+        self.assertEqual(env["COLORTERM"], "truecolor")
+        self.assertEqual(env["CLAUDE_GATEWAY_NO_AUTO_UPDATE"], "true")
+        self.assertEqual(env["DISABLE_AUTOUPDATER"], "1")
+        self.assertEqual(env["CUSTOM_PATH"], os.path.expanduser("~/loom-test"))
+        self.assertNotIn("ITERM_SESSION_ID", env)
+        self.assertNotIn("ITERM_PROFILE", env)
+        self.assertNotIn("LC_TERMINAL", env)
+        self.assertNotIn("LC_TERMINAL_VERSION", env)
+        self.assertNotIn("TERM_SESSION_ID", env)
+        self.assertNotIn("TERM_FEATURES", env)
+        self.assertNotIn("TERMINFO_DIRS", env)
+        self.assertNotIn("TERM_PROGRAM", env)
+        self.assertNotIn("TERM_PROGRAM_VERSION", env)
+        self.assertNotIn("STARSHIP_SESSION_KEY", env)
+        self.assertNotIn("STARSHIP_SHELL", env)
+
+    def test_prepare_claude_config_overlay_cleans_upgrade_banner_without_mutating_real_config(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        with tempfile.TemporaryDirectory() as home_dir:
+            home_path = Path(home_dir)
+            config_path = home_path / ".claude"
+            config_path.mkdir()
+            settings_path = config_path / "settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "model": "opus",
+                        "companyAnnouncements": [
+                            "⚠️  CLAUDE GATEWAY UPDATE AVAILABLE ⚠️\n   Current: v1.7.8 → Latest: v2.1.1\n   Run: npm update -g claude-gateway-helper",
+                            "Keep shipping.",
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            history_path = config_path / "history.jsonl"
+            history_path.write_text("{}", encoding="utf-8")
+            home_level_config = home_path / ".claude.json"
+            home_level_config.write_text("{\"theme\":\"dark\"}", encoding="utf-8")
+
+            env = {"CLAUDE_CONFIG_DIR": str(config_path)}
+            with mock.patch.object(Path, "home", return_value=home_path):
+                overlay_dir = adapter._prepare_claude_config_overlay(env)
+                self.addCleanup(shutil.rmtree, overlay_dir, ignore_errors=True)
+
+                self.assertTrue(overlay_dir)
+                self.assertEqual(env["CLAUDE_CONFIG_DIR"], overlay_dir)
+                overlay_settings = json.loads(
+                    (Path(overlay_dir) / "settings.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(overlay_settings["companyAnnouncements"], ["Keep shipping."])
+                self.assertTrue((Path(overlay_dir) / "history.jsonl").is_symlink())
+                self.assertTrue((Path(overlay_dir) / ".claude.json").is_symlink())
+                self.assertEqual(
+                    settings_path.read_text(encoding="utf-8"),
+                    json.dumps(
+                        {
+                            "model": "opus",
+                            "companyAnnouncements": [
+                                "⚠️  CLAUDE GATEWAY UPDATE AVAILABLE ⚠️\n   Current: v1.7.8 → Latest: v2.1.1\n   Run: npm update -g claude-gateway-helper",
+                                "Keep shipping.",
+                            ],
+                        }
+                    ),
+                )
+
+    def test_prepare_zsh_bootstrap_wraps_original_profiles_and_installs_precmd_hook(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        with tempfile.TemporaryDirectory() as zdotdir:
+            env = {"ZDOTDIR": zdotdir}
+            bootstrap_dir = adapter._prepare_zsh_bootstrap(env)
+            self.addCleanup(shutil.rmtree, bootstrap_dir, ignore_errors=True)
+
+            self.assertEqual(env["ZDOTDIR"], bootstrap_dir)
+            self.assertEqual(env["LOOM_ORIGINAL_ZDOTDIR"], zdotdir)
+
+            zshrc = Path(bootstrap_dir) / ".zshrc"
+            zshenv = Path(bootstrap_dir) / ".zshenv"
+            self.assertTrue(zshrc.exists())
+            self.assertTrue(zshenv.exists())
+            zshrc_text = zshrc.read_text()
+            self.assertIn('source "$ZDOTDIR/.zshrc"', zshrc_text)
+            self.assertIn("add-zsh-hook precmd _loom_precmd", zshrc_text)
+            self.assertIn("printf '\\033]7;file://%s%s\\007'", zshrc_text)
+
+    def test_startup_commands_skip_typed_bootstrap_for_zsh_sessions(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Loom")
+        cell = state.add_terminal(
+            name="Terminal 1",
+            group="Loom",
+            terminal_backend="pty",
+            directory="/tmp",
+        )
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        zsh_commands = adapter._startup_commands(cell, shell_name="zsh", cwd="/tmp")
+        bash_commands = adapter._startup_commands(cell, shell_name="bash", cwd="/tmp")
+
+        self.assertEqual(zsh_commands, [])
+        self.assertTrue(any("PROMPT_COMMAND=" in command for command in bash_commands))
+        self.assertTrue(any("printf '\\033]7;file://" in command for command in bash_commands))
 
 
 if __name__ == "__main__":
