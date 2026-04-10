@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,8 @@ import urllib.error
 import urllib.request
 
 DEFAULT_PORT = 18932
+DESKTOP_DEFAULT_PORT = 18933
+DESKTOP_DEFAULT_PROFILE = "desktop"
 
 _yaml_mod = None
 
@@ -56,6 +59,107 @@ def _resolve_runtime_dir():
     if profile:
         return Path.home() / ".loom" / "profiles" / _slugify_profile(profile)
     return ITERM2_RUNTIME_DIR
+
+
+def _argv_has_flag(flag):
+    return any(arg == flag or arg.startswith(flag + "=") for arg in sys.argv[1:])
+
+
+def _resolve_desktop_port(args):
+    desktop_port = getattr(args, "desktop_port", None)
+    if desktop_port is not None:
+        return int(desktop_port)
+
+    if _argv_has_flag("--port") and getattr(args, "port", None) is not None:
+        return int(args.port)
+    env_port = (os.environ.get("LOOM_DESKTOP_PORT", "") or "").strip()
+    return int(env_port or DESKTOP_DEFAULT_PORT)
+
+
+def _resolve_desktop_profile(explicit=""):
+    profile = (explicit or "").strip() or os.environ.get("LOOM_DESKTOP_PROFILE", "").strip()
+    return profile or DESKTOP_DEFAULT_PROFILE
+
+
+def _resolve_desktop_data_dir(profile, explicit=""):
+    path = (explicit or "").strip() or os.environ.get("LOOM_DESKTOP_DATA_DIR", "").strip()
+    if path:
+        return Path(os.path.expanduser(path))
+    return Path.home() / ".loom" / "profiles" / _slugify_profile(profile)
+
+
+def _resolve_desktop_entrypoint():
+    return Path(__file__).resolve().parents[1] / "loom_desktop.py"
+
+
+def _candidate_iterm2_pythons():
+    project_candidates = {
+        path.resolve()
+        for path in Path.home().glob(
+            "Library/Application Support/iTerm2/Scripts/loom/iterm2env/versions/*/bin/python3"
+        )
+    }
+    fallback_candidates = {
+        path.resolve()
+        for pattern in (
+            "Library/Application Support/iTerm2/iterm2env-*/versions/*/bin/python3",
+            ".config/iterm2/AppSupport/iterm2env-*/versions/*/bin/python3",
+        )
+        for path in Path.home().glob(pattern)
+    }
+
+    candidates = project_candidates or fallback_candidates
+    if candidates:
+        def _sort_key(path):
+            version = path.parents[1].name
+            parts = []
+            for part in version.split("."):
+                try:
+                    parts.append(int(part))
+                except ValueError:
+                    parts.append(part)
+            return tuple(parts)
+
+        return sorted(candidates, key=_sort_key)
+    return []
+
+
+def _resolve_desktop_python(explicit=""):
+    path = (explicit or "").strip() or os.environ.get("LOOM_DESKTOP_PYTHON", "").strip()
+    if path:
+        return Path(os.path.expanduser(path))
+
+    candidates = _candidate_iterm2_pythons()
+    if candidates:
+        return candidates[-1]
+
+    return Path(sys.executable).resolve()
+
+
+def _python_has_module(python_path, module_name):
+    try:
+        result = subprocess.run(
+            [str(python_path), "-c", f"import {module_name}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+def _ensure_desktop_runtime_ready(python_path):
+    python_path = Path(python_path)
+    if not python_path.exists():
+        die(f"Desktop Python not found: {python_path}")
+    if not _python_has_module(python_path, "webview"):
+        die(
+            "pywebview is not installed in the Python runtime that will launch "
+            f"Loom desktop: {python_path}\n"
+            "  If you want the iTerm2-managed runtime, run: make desktop-deps\n"
+            "  Otherwise install pywebview into the interpreter passed via "
+            "--python or LOOM_DESKTOP_PYTHON."
+        )
 
 
 RUNTIME_DIR = _resolve_runtime_dir()
@@ -2428,6 +2532,51 @@ def cmd_logs(args):
         os.execvp("tail", ["tail", "-50", LOOM_LOG])
 
 
+def cmd_desktop(args):
+    entrypoint = _resolve_desktop_entrypoint()
+    if not entrypoint.is_file():
+        die(f"Desktop entrypoint not found: {entrypoint}")
+
+    profile = _resolve_desktop_profile(getattr(args, "profile", ""))
+    port = _resolve_desktop_port(args)
+    data_dir = _resolve_desktop_data_dir(profile, getattr(args, "data_dir", ""))
+    python_path = _resolve_desktop_python(getattr(args, "python", ""))
+    _ensure_desktop_runtime_ready(python_path)
+    launch_mode = "attach" if getattr(args, "attach", False) else "spawn"
+
+    env = os.environ.copy()
+    env["LOOM_STANDALONE"] = "1"
+    env["LOOM_DESKTOP_PROFILE"] = profile
+    env["LOOM_DESKTOP_PORT"] = str(port)
+    env["LOOM_DESKTOP_DATA_DIR"] = str(data_dir)
+    env["LOOM_PROFILE"] = profile
+    env["LOOM_PORT"] = str(port)
+    env["LOOM_DATA_DIR"] = str(data_dir)
+    env["LOOM_DESKTOP_MODE"] = launch_mode
+    env["LOOM_DESKTOP_ATTACH"] = "1" if launch_mode == "attach" else "0"
+    env.setdefault("LOOM_DESKTOP_SHELL", "pywebview")
+
+    print(f"Loom desktop {launch_mode}: http://127.0.0.1:{port}/")
+    print(f"Profile: {profile}")
+    print(f"Data dir: {data_dir}")
+    print(f"Python: {python_path}")
+
+    proc = subprocess.Popen([str(python_path), str(entrypoint)], env=env)
+    try:
+        returncode = proc.wait()
+    except KeyboardInterrupt:
+        try:
+            proc.send_signal(signal.SIGINT)
+            returncode = proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            returncode = proc.wait(timeout=5)
+        sys.exit(130)
+
+    if returncode:
+        sys.exit(returncode)
+
+
 # ---------------------------------------------------------------------------
 # Board commands
 # ---------------------------------------------------------------------------
@@ -3587,6 +3736,23 @@ def build_parser():
     p.add_argument("-a", "--all", action="store_true",
                    help="Show all windows (default: current window only)")
     p.set_defaults(func=cmd_status)
+
+    # -- desktop ------------------------------------------------------------
+    p = sub.add_parser("desktop", help="Launch Loom in the native desktop shell")
+    p.add_argument("--attach", action="store_true",
+                   help="Attach to an existing matching standalone Loom server "
+                        "instead of spawning a desktop-owned child server")
+    p.add_argument("--profile",
+                   help=f"Standalone profile for the desktop app "
+                        f"(default: {DESKTOP_DEFAULT_PROFILE})")
+    p.add_argument("--port", dest="desktop_port", type=int,
+                   help=f"Standalone port for the desktop app "
+                        f"(default: {DESKTOP_DEFAULT_PORT})")
+    p.add_argument("--data-dir",
+                   help="Standalone data directory for the desktop app")
+    p.add_argument("--python",
+                   help="Python executable to use for the desktop shell")
+    p.set_defaults(func=cmd_desktop)
 
     # -- group --------------------------------------------------------------
     grp = sub.add_parser("group", aliases=["g"],

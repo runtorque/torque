@@ -56,6 +56,32 @@ These answer three different questions:
 3. Confirm the port with `LOOM_PORT` if you changed it from the default.
 4. Check the daemon log for startup or bind errors.
 
+## The native desktop shell refuses to start or attach
+
+### Symptoms
+
+- `loom desktop` exits immediately with a `pywebview` error.
+- `loom desktop --attach` refuses to connect to a running Loom instance.
+- The desktop window closes, but you are unsure whether the server should still be running.
+
+### Recovery
+
+1. Run `make check` and confirm `pywebview` is installed.
+2. Install `pywebview` into the Python runtime that is launching the desktop shell:
+   - default runtime: `make desktop-deps`
+   - custom runtime: `YOUR_PYTHON -m pip install pywebview`
+3. If you are using `loom desktop --attach`, make sure the target server is:
+   - standalone, not the Toolbelt daemon
+   - on the exact port you passed
+   - using the same profile and data dir as the desktop shell
+4. If you only want a native window and do not need to reuse an existing server, run plain `loom desktop` so Loom spawns a desktop-owned child server with safe defaults.
+
+### Notes
+
+- Browser smoke only validates the served UI path. It does not prove native-window behavior.
+- Spawn mode shuts down the child server when the desktop window closes.
+- Attach mode keeps the external standalone server running after the desktop window closes.
+
 ## Buttons do nothing or the UI feels stale
 
 ### Symptoms

@@ -43,6 +43,49 @@ make open
 
 See [Operations](operations.md) for the differences between Toolbelt, dual-mode, and standalone-only setups.
 
+## Open the Native Desktop Shell
+
+Loom also ships a native desktop shell built with `pywebview`. Use it when you
+want a real desktop window instead of a browser tab.
+
+Install the optional dependency into the iTerm2-managed runtime:
+
+```bash
+make desktop-deps
+```
+
+Then launch the native app:
+
+```bash
+loom desktop
+```
+
+That command intentionally uses desktop-specific defaults so it does not
+accidentally target the Toolbelt daemon:
+
+- profile: `desktop`
+- port: `18933`
+- data dir: `~/.loom/profiles/desktop`
+
+If you already started a matching standalone server and want the native shell to
+reuse it instead of spawning a desktop-owned child server:
+
+```bash
+loom desktop --attach --profile desktop --port 18933
+```
+
+Important notes:
+
+- `pywebview` must be installed in the Python runtime that launches the desktop
+  shell. With the default Loom install, that means the iTerm2-managed Python
+  environment used by `loom desktop`.
+- Attach mode only reuses an existing **matching standalone** Loom runtime. It
+  will refuse to connect to the iTerm2-hosted Toolbelt daemon or to a
+  standalone server with a different profile/data dir.
+- The native shell is currently validated on macOS. Loom still depends on iTerm2,
+  so Linux and Windows are not yet full operator targets even though
+  `pywebview` itself supports them.
+
 ## First Working Session
 
 1. Create a group with **+ Group**.
