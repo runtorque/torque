@@ -959,6 +959,12 @@ body.runtime-embedded .term-row.term-add {
   padding: 16px; width: 100%; max-width: 280px;
 }
 .modal h2 { font-size: 13px; margin-bottom: 12px; }
+.modal-summary {
+  margin: -4px 0 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
 .modal label {
   display: block; font-size: 10px; color: var(--text-dim);
   margin-bottom: 3px; margin-top: 10px;
@@ -1031,6 +1037,39 @@ body.runtime-embedded .term-row.term-add {
 .add-wt-section {
   margin-top: 10px; padding-top: 10px;
   border-top: 1px solid var(--border);
+}
+.add-advanced-details {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+}
+.add-advanced-details summary {
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  cursor: pointer;
+  list-style-position: inside;
+}
+.add-advanced-details summary:hover {
+  color: var(--text);
+}
+.add-advanced-details[open] summary {
+  border-bottom: 1px solid var(--border);
+}
+.add-advanced-body {
+  padding: 0 10px 10px;
+}
+body.runtime-embedded #modal-add .modal {
+  max-width: 460px;
+}
+body.runtime-embedded #modal-group .modal {
+  max-width: 360px;
+}
+body.runtime-embedded #modal-add .modal-summary,
+body.runtime-embedded #modal-group .modal-summary {
+  color: color-mix(in srgb, var(--text-dim) 90%, white);
 }
 
 /* Group settings modal — tabbed layout */

@@ -6,6 +6,33 @@ let _pendingParentId = '';
 let _addModalConfig = null;
 let _addTemplateApplied = '';
 
+function _standaloneCreateFlowEnabled() {
+  return !!(state && state.runtime && state.runtime.embedded_terminal);
+}
+
+function _useCompactStandaloneAddFlow(mode) {
+  return _standaloneCreateFlowEnabled() && mode === 'agent';
+}
+
+function _setAddModalSummary(text) {
+  const summary = document.getElementById('modal-add-summary');
+  if (!summary) return;
+  summary.textContent = text || '';
+  summary.classList.toggle('hidden', !text);
+}
+
+function _setAddAdvancedState(mode) {
+  const details = document.getElementById('add-advanced-details');
+  const summary = document.getElementById('add-advanced-summary');
+  if (!details || !summary) return;
+  const isTerminal = mode === 'terminal';
+  const expand = isTerminal
+    || !_useCompactStandaloneAddFlow(mode)
+    || !!(_pendingModal && _pendingModal.advanced);
+  summary.textContent = isTerminal ? 'Terminal options' : 'Advanced options';
+  details.open = expand;
+}
+
 function _renderIconPicker(containerId, selectedIcon, onClickFn) {
   let html = `<button class="icon-btn${!selectedIcon ? ' selected' : ''}" data-icon="" onclick="${onClickFn}('')" title="Auto">auto</button>`;
   for (const icon of AGENT_ICONS) {
@@ -21,12 +48,13 @@ function selectIcon(icon) {
     b.classList.toggle('selected', (b.dataset.icon || '') === icon);
   });
 }
-function _openAddModal(mode, group, parentId, templateName) {
+function _openAddModal(mode, group, parentId, templateName, options) {
   _pendingModal = {
     mode,
     group,
     parentId: parentId || '',
     template: templateName || '',
+    advanced: !!(options && options.advanced),
   };
   send({ cmd: 'get_config', group });
 }
@@ -38,11 +66,14 @@ function _showAddModal(mode, group, config) {
   _selectedIcon = '';
   _addTemplateApplied = '';
   _pendingParentId = (_pendingModal && _pendingModal.parentId) || '';
+  const compactStandalone = _useCompactStandaloneAddFlow(mode);
 
   const parent = _pendingParentId ? state.agents[_pendingParentId] : null;
   document.getElementById('modal-add-title').textContent =
     parent ? `New Terminal for ${parent.name}` :
     mode === 'agent' ? 'New Agent' : 'New Terminal';
+  document.getElementById('add-submit-btn').textContent =
+    mode === 'agent' ? 'Create Agent' : 'Create Terminal';
 
   const isTerminal = mode === 'terminal';
   const cmdRow = document.getElementById('add-cmd-row');
@@ -67,6 +98,7 @@ function _showAddModal(mode, group, config) {
     templateRow.classList.remove('hidden');
     _renderIconPicker('add-icon-picker', '', 'selectIcon');
   }
+  _setAddAdvancedState(mode);
 
   /* group dropdown */
   const gsel = document.getElementById('add-group-select');
@@ -124,8 +156,23 @@ function _showAddModal(mode, group, config) {
   const isAgent = mode === 'agent';
   const prefix = isAgent ? '' : gs.terminal_name_prefix;
   const nameInput = document.getElementById('add-name-input');
-  nameInput.value = prefix ? _nextName(prefix) : '';
+  if (isTerminal) {
+    nameInput.value = prefix ? _nextName(prefix) : '';
+  } else if (_pendingModal && _pendingModal.template) {
+    nameInput.value = '';
+  } else if (compactStandalone) {
+    nameInput.value = _nextName('Agent');
+  } else {
+    nameInput.value = '';
+  }
   nameInput.placeholder = isTerminal ? 'e.g. Shell' : 'e.g. Claude 1';
+  if (compactStandalone) {
+    _setAddModalSummary('Uses this group’s defaults for CLI, shell, directory, environment, and worktree unless you expand Advanced.');
+  } else if (isTerminal) {
+    _setAddModalSummary('Terminal sessions inherit this group’s shell, directory, and profile defaults unless you override them here.');
+  } else {
+    _setAddModalSummary('');
+  }
 
   if (isTerminal) {
     document.getElementById('add-cmd-input').value = gs.terminal_boot_command || '';
@@ -196,6 +243,9 @@ function _showAddModal(mode, group, config) {
     onAddTemplateChange();
   }
   document.getElementById('add-name-input').focus();
+  if (compactStandalone || isTerminal) {
+    document.getElementById('add-name-input').select();
+  }
 }
 
 function _applyRenderedAddTemplate(config, templateName) {
@@ -285,9 +335,12 @@ function selectColor(hex) {
   });
 }
 function openAddAgent(group, templateName) {
-  _openAddModal('agent', group, '', templateName || '');
+  _openAddModal('agent', group, '', templateName || '', { advanced: false });
 }
-function openAddTerminal(group, parentId) { _openAddModal('terminal', group, parentId); }
+function openAddAgentAdvanced(group, templateName) {
+  _openAddModal('agent', group, '', templateName || '', { advanced: true });
+}
+function openAddTerminal(group, parentId) { _openAddModal('terminal', group, parentId, '', { advanced: true }); }
 
 function submitAdd() {
   const name    = document.getElementById('add-name-input').value.trim();

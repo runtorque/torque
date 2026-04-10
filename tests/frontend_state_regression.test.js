@@ -4262,6 +4262,49 @@ test('openEditTask resets task modal body scroll to the top', () => {
   assert.equal(taskModalBody.scrollTop, 0);
 });
 
+test('standalone quickAddAgent opens the streamlined add-agent modal instead of instant-creating', () => {
+  const { context } = createSelectionHarness();
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.openAddAgentCalls = [];
+  context.openAddAgent = function(group, templateName) {
+    context.openAddAgentCalls.push({ group, templateName: templateName || '' });
+  };
+
+  context.quickAddAgent('alpha');
+
+  assert.deepEqual(context.openAddAgentCalls, [{ group: 'alpha', templateName: '' }]);
+  assert.equal(context.sendCalls.length, 0);
+});
+
+test('classic quickAddAgent keeps the existing instant-create path', () => {
+  const { context } = createSelectionHarness();
+
+  context.quickAddAgent('alpha');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
+    cmd: 'add_agent',
+    name: 'Agent 1',
+    group: 'alpha',
+  });
+});
+
+test('standalone template creation opens the streamlined add-agent modal with the template selected', () => {
+  const { context } = createSelectionHarness();
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.openAddAgentCalls = [];
+  context.openAddAgent = function(group, templateName) {
+    context.openAddAgentCalls.push({ group, templateName: templateName || '' });
+  };
+
+  context.newAgentFromTemplate('alpha', 'worker/reviewer');
+
+  assert.deepEqual(context.openAddAgentCalls, [{
+    group: 'alpha',
+    templateName: 'worker/reviewer',
+  }]);
+  assert.equal(context.sendCalls.length, 0);
+});
+
 test('submitAdd includes worktree_name for custom agent worktrees', () => {
   const { context, document } = createModalHarness();
 
@@ -4340,6 +4383,73 @@ test('submitAdd omits worktree_name when custom worktree naming is blank or disa
     false,
   );
   assert.equal(jsonValue(context, 'sendCalls[0].worktree'), false);
+});
+
+test('standalone submitGroup immediately continues into add-agent setup', () => {
+  const { context, document } = createModalHarness();
+  document.register('group-name-input').value = 'Demo';
+  document.register('modal-group');
+  const summary = document.register('modal-group-summary');
+  summary.classList.add('hidden');
+  context.state.runtime = { embedded_terminal: true };
+  context.openAddAgentCalls = [];
+  context.openAddAgent = function(group) {
+    context.openAddAgentCalls.push(group);
+  };
+
+  context.submitGroup();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
+    cmd: 'add_group',
+    group: 'Demo',
+  });
+  assert.deepEqual(context.openAddAgentCalls, ['Demo']);
+});
+
+test('classic submitGroup keeps the existing single-step flow', () => {
+  const { context, document } = createModalHarness();
+  document.register('group-name-input').value = 'Demo';
+  document.register('modal-group');
+  document.register('modal-group-summary');
+  context.openAddAgentCalls = [];
+  context.openAddAgent = function(group) {
+    context.openAddAgentCalls.push(group);
+  };
+
+  context.submitGroup();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
+    cmd: 'add_group',
+    group: 'Demo',
+  });
+  assert.deepEqual(context.openAddAgentCalls, []);
+});
+
+test('compact standalone add-agent flow keeps advanced options collapsed by default', () => {
+  const { context, document } = createModalHarness();
+  const details = document.register('add-advanced-details');
+  const summary = document.register('add-advanced-summary');
+
+  context.state.runtime = { embedded_terminal: true };
+  runInContext(context, `_pendingModal = { advanced: false };`);
+  context._setAddAdvancedState('agent');
+
+  assert.equal(details.open, false);
+  assert.equal(summary.textContent, 'Advanced options');
+
+  runInContext(context, `_pendingModal = { advanced: true };`);
+  context._setAddAdvancedState('agent');
+  assert.equal(details.open, true);
+
+  context.state.runtime = { embedded_terminal: false };
+  runInContext(context, `_pendingModal = { advanced: false };`);
+  context._setAddAdvancedState('agent');
+  assert.equal(details.open, true);
+
+  context.state.runtime = { embedded_terminal: true };
+  runInContext(context, `_pendingModal = { advanced: false };`);
+  context._setAddAdvancedState('terminal');
+  assert.equal(details.open, true);
 });
 
 test('task modal keeps a scrollable body separate from its footer actions', () => {
@@ -4679,7 +4789,7 @@ test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   assert.match(main.innerHTML, /class="term-row/);
   assert.match(main.innerHTML, /newWeaver\('alpha'\)/);
   assert.match(main.innerHTML, /quickAddAgent\('alpha'\)/);
-  assert.match(main.innerHTML, /openAddAgent\('alpha'\)/);
+  assert.match(main.innerHTML, /openAddAgentAdvanced\('alpha'\)/);
   assert.match(main.innerHTML, /quickAddTerminal\('alpha','agent-1'\)/);
   assert.match(main.innerHTML, /openAddTerminal\('alpha','agent-1'\)/);
   assert.equal(sandbox.renderTerminalWorkspaceCalls, 1);
@@ -4724,6 +4834,20 @@ test('embedded runtime hides stale agent details when a standalone terminal is s
   assert.doesNotMatch(main.innerHTML, /Runner terminals/);
   assert.doesNotMatch(main.innerHTML, /class="agent-details"/);
   assert.match(main.innerHTML, /Shell Root/);
+});
+
+test('agent create menu action stays standalone-only for the advanced modal path', () => {
+  const classic = createMainRenderHarness();
+  assert.deepEqual(jsonValue(classic.context, `_agentCreateMenuAction('alpha')`), {
+    label: 'Custom…',
+    action: "openAddAgent('alpha')",
+  });
+
+  const embedded = createStandaloneRenderHarness();
+  assert.deepEqual(jsonValue(embedded.context, `_agentCreateMenuAction('alpha')`), {
+    label: 'Advanced…',
+    action: "openAddAgentAdvanced('alpha')",
+  });
 });
 
 test('standalone sidebar formats repo and home paths compactly', () => {

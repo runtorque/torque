@@ -78,6 +78,19 @@ function renderSplitBtn(quickAction, customAction) {
     + `</div></div>`;
 }
 
+function _agentCreateMenuAction(group) {
+  if (_embeddedRuntimeEnabled()) {
+    return {
+      label: 'Advanced…',
+      action: `openAddAgentAdvanced('${esc(group)}')`,
+    };
+  }
+  return {
+    label: 'Custom…',
+    action: `openAddAgent('${esc(group)}')`,
+  };
+}
+
 function _renderAgentTemplateMenuItems(group) {
   const templates = (_cachedAgentTemplates || []).filter(t => !t.shadowed);
   let html = '';
@@ -411,6 +424,7 @@ function render() {
       html += `  <div class="cell-name">Full</div>`;
       html += `</div>`;
     } else {
+      const createMenu = _agentCreateMenuAction(gname);
       html += `<div class="cell cell-add" onclick="quickAddAgent('${esc(gname)}')">`;
       html += `  <div class="cell-add-icon">+</div>`;
       html += `  <div class="cell-name">New</div>`;
@@ -418,7 +432,7 @@ function render() {
       html += `  <div class="split-menu">`;
       html += _renderWeaverMenuItem(gname, gsLocal);
       html += _renderAgentTemplateMenuItems(gname);
-      html += `<button onclick="event.stopPropagation();closeMenus();openAddAgent('${esc(gname)}')">Custom\u2026</button>`;
+      html += `<button onclick="event.stopPropagation();closeMenus();${createMenu.action}">${createMenu.label}</button>`;
       html += `</div>`;
       html += `</div>`;
     }
