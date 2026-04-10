@@ -402,6 +402,10 @@
             <option value="remove">Remove worktree only</option>
             <option value="close_remove">Close agent and remove worktree</option>
           </select>
+          <label class="gs-checkbox">
+            <input id="gs-wt-merge-preserve-diff" type="checkbox"> Preserve merge diff by default
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When a merge succeeds, save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. If no open boundary task exists, Loom warns but still completes the merge.">?</span>
+          </label>
           <label>Symlinks <span class="label-hint">symlinked from repo root</span>
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Relative paths from the repo root to symlink into each new worktree. Avoids reinstalling dependencies (e.g. node_modules, .venv). The target must exist in the repo root and should be in .gitignore.">?</span>
           </label>

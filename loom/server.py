@@ -56,6 +56,7 @@ from .server_artifacts import (
     finalize_task_attachments,
     remove_task_owned_artifacts_by_filename,
     serialize_task_artifact,
+    store_preserved_merge_diff,
     store_task_upload,
 )
 from .task_ids import is_canonical_task_id, is_draft_task_token
@@ -101,6 +102,7 @@ from .server_worktrees import (
     _generate_merge_message,
     _worktree_diff_updater,
     _worktree_full_diff,
+    _worktree_merge_diff_snapshot,
 )
 
 
@@ -154,6 +156,34 @@ def _resolve_agent_id(state, identifier: str) -> str:
         if cell.id.startswith(ident):
             return cell.id
     return ""
+
+
+def _worktree_merge_preserve_diff_enabled(
+    state: MatrixState,
+    cell,
+    data: dict,
+) -> bool:
+    if "preserve_merge_diff" in data:
+        return bool(data.get("preserve_merge_diff"))
+    if not cell:
+        return False
+    return bool(
+        state.get_group_settings(cell.group).worktree_merge_preserve_diff
+    )
+
+
+def _latest_open_boundary_task_for_cell(state: MatrixState, cell):
+    if not cell:
+        return None
+    repo_root = cell.worktree_repo_root or cell.git_root or ""
+    if not repo_root or not cell.worktree_branch:
+        return None
+    return latest_boundary_task(
+        state.board_tasks.values(),
+        repo_root=repo_root,
+        branch=cell.worktree_branch,
+        statuses={"open"},
+    )
 
 
 def _derive_handoff_accepted(dispatch_result) -> bool:
@@ -2673,6 +2703,29 @@ async def main(connection=None):
                             msg = await _generate_merge_message(
                                 cell, worktree_mgr, squash,
                                 state=state)
+                        preserve_merge_diff = (
+                            _worktree_merge_preserve_diff_enabled(
+                                state,
+                                cell,
+                                data,
+                            )
+                        )
+                        boundary_task_for_diff = None
+                        merge_diff_snapshot = None
+                        if preserve_merge_diff:
+                            boundary_task_for_diff = (
+                                _latest_open_boundary_task_for_cell(
+                                    state,
+                                    cell,
+                                )
+                            )
+                            if boundary_task_for_diff:
+                                merge_diff_snapshot = (
+                                    await _worktree_merge_diff_snapshot(
+                                        cell,
+                                        worktree_mgr,
+                                    )
+                                )
                         merge_result = \
                             await worktree_mgr.server_merge(
                                 cell, msg, squash=squash)
@@ -2681,6 +2734,90 @@ async def main(connection=None):
                                 cell, merge_result["sha"]
                             )
                             state.cleanup_stale_boundary_successors()
+                            preserve_diff_warning = ""
+                            if preserve_merge_diff:
+                                if not boundary_task_for_diff:
+                                    preserve_diff_warning = (
+                                        "Merge succeeded, but Loom could not "
+                                        "preserve the pre-merge diff because "
+                                        "no open branch boundary task was available."
+                                    )
+                                elif merge_diff_snapshot and merge_diff_snapshot.get("error"):
+                                    preserve_diff_warning = (
+                                        "Merge succeeded, but Loom could not "
+                                        "preserve the pre-merge diff because "
+                                        "capturing the patch failed."
+                                    )
+                                    log.warning(
+                                        "Preserve-merge-diff capture failed "
+                                        "for '%s': %s",
+                                        cell.name,
+                                        merge_diff_snapshot.get("error", ""),
+                                    )
+                                elif not str(
+                                        (merge_diff_snapshot or {}).get(
+                                            "patch_text",
+                                            "",
+                                        )
+                                ):
+                                    preserve_diff_warning = (
+                                        "Merge succeeded, but Loom could not "
+                                        "preserve the pre-merge diff because "
+                                        "the patch was empty."
+                                    )
+                                else:
+                                    try:
+                                        artifact = store_preserved_merge_diff(
+                                            task_id=boundary_task_for_diff.id,
+                                            patch_text=merge_diff_snapshot.get(
+                                                "patch_text",
+                                                "",
+                                            ),
+                                            worktree_branch=(
+                                                cell.worktree_branch or ""
+                                            ),
+                                            base_branch=(
+                                                cell.worktree_base_branch or ""
+                                            ),
+                                            merge_commit_sha=merge_result["sha"],
+                                            boundary_task_id=boundary_task_for_diff.id,
+                                            boundary_recorded_at=(
+                                                (
+                                                    boundary_task_for_diff.worktree_boundary
+                                                    or {}
+                                                ).get("recorded_at", "")
+                                            ),
+                                            boundary_task_title=(
+                                                boundary_task_for_diff.task
+                                            ),
+                                            diff_stats=merge_diff_snapshot.get(
+                                                "stats"
+                                            ),
+                                            diff_files=merge_diff_snapshot.get(
+                                                "files"
+                                            ),
+                                            agent_id=cell.id,
+                                            agent_name=cell.slug or cell.name,
+                                        )
+                                    except Exception:
+                                        preserve_diff_warning = (
+                                            "Merge succeeded, but Loom could "
+                                            "not save the preserved diff artifact."
+                                        )
+                                        log.exception(
+                                            "Failed to persist preserved merge "
+                                            "diff for '%s'",
+                                            cell.name,
+                                        )
+                                    else:
+                                        artifacts = normalize_artifacts(
+                                            boundary_task_for_diff.artifacts or []
+                                        )
+                                        artifacts.append(artifact)
+                                        state.board_update_task(
+                                            boundary_task_for_diff.id,
+                                            artifacts=artifacts,
+                                        )
                             cell.worktree_checkpoints = 0
                             cell.worktree_merged = True
                             cell.worktree_changed_files = []
@@ -2691,6 +2828,11 @@ async def main(connection=None):
                                 f'"{cell.name}" merged to '
                                 f"{cell.worktree_base_branch}",
                                 "success")
+                            if preserve_diff_warning:
+                                await _broadcast_toast(
+                                    preserve_diff_warning,
+                                    "warning",
+                                )
                             # Unlink completed/archive-closed tasks from this agent so
                             # they don't re-appear in future merge
                             # messages.  Tasks stay on the board as a

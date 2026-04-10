@@ -452,13 +452,14 @@ function _showWorktreePR(msg) {
     if (ok) window.open(msg.url);
   });
 }
-function _worktreeMergeCleanupDefaults(cell) {
+function _worktreeMergeDialogDefaults(cell) {
   var group = cell && cell.group ? cell.group : '';
   var gs = (state.group_settings && group) ? state.group_settings[group] : null;
   var mode = (gs && gs.worktree_merge_cleanup) || 'keep';
   return {
     close: mode === 'close' || mode === 'close_remove',
     remove: mode === 'remove' || mode === 'close_remove',
+    preserveDiff: !!(gs && gs.worktree_merge_preserve_diff),
   };
 }
 async function _confirmWorktreeMerge(id, message) {
@@ -466,14 +467,15 @@ async function _confirmWorktreeMerge(id, message) {
   if (!cell) return false;
   const base = cell.worktree_base_branch || 'main';
   const squash = cell.worktree_merge_squash !== false;
-  const cleanupDefaults = _worktreeMergeCleanupDefaults(cell);
+  const mergeDefaults = _worktreeMergeDialogDefaults(cell);
   const result = await showConfirm(
     `${squash ? 'Squash merge' : 'Merge'} "${cell.name}" into ${base}?`,
     {
       label: 'Merge', variant: 'btn-green',
       checkboxes: [
-        { key: 'close_agent_on_merge', label: 'Close agent after merge', checked: cleanupDefaults.close },
-        { key: 'remove_worktree_on_merge', label: 'Remove worktree after merge', checked: cleanupDefaults.remove },
+        { key: 'close_agent_on_merge', label: 'Close agent after merge', checked: mergeDefaults.close },
+        { key: 'remove_worktree_on_merge', label: 'Remove worktree after merge', checked: mergeDefaults.remove },
+        { key: 'preserve_merge_diff', label: 'Preserve merge diff on boundary task', checked: mergeDefaults.preserveDiff },
         { key: 'clear_context', label: 'Clear context after merge', checked: false },
       ],
     }
@@ -484,6 +486,7 @@ async function _confirmWorktreeMerge(id, message) {
       message: message || '',
       close_agent_on_merge: result.close_agent_on_merge || false,
       remove_worktree_on_merge: result.remove_worktree_on_merge || false,
+      preserve_merge_diff: result.preserve_merge_diff || false,
       clear_context: result.clear_context || false,
     });
     return true;

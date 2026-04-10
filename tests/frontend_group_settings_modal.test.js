@@ -157,7 +157,8 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
   vm.runInContext(`_showGroupSettings("alpha", {
     settings: {
       weaver_agent_id: "weaver-1",
-      worktree_merge_cleanup: "close_remove"
+      worktree_merge_cleanup: "close_remove",
+      worktree_merge_preserve_diff: true
     },
     weaver_settings: {
       weaver_provider: "codex",
@@ -187,6 +188,7 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
   assert.equal(ensure('gs-weaver-digest-verbosity').value, 'detailed');
   assert.equal(ensure('gs-weaver-escalation-style').value, 'keep_moving');
   assert.equal(ensure('gs-wt-merge-cleanup').value, 'close_remove');
+  assert.equal(ensure('gs-wt-merge-preserve-diff').checked, true);
   assert.equal(ensure('gs-weaver-agent-name').textContent, 'Weaver');
   assert.equal(ensure('gs-weaver-event-agent-started').checked, true);
   assert.equal(ensure('gs-weaver-event-agent-progress').checked, true);
@@ -205,6 +207,7 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   ensure('gs-terminal-prefix').value = 'Shell';
   ensure('gs-terminal-boot-cmd').value = 'npm run dev';
   ensure('gs-wt-merge-cleanup').value = 'remove';
+  ensure('gs-wt-merge-preserve-diff').checked = true;
   ensure('gs-weaver-provider').value = 'codex';
   ensure('gs-weaver-boot-cmd').value = 'codex --model gpt-5';
   ensure('gs-weaver-custom-instructions').value = 'Stay focused';
@@ -228,6 +231,7 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   assert.equal(sandbox.sendCalls[0].settings.terminal_name_prefix, 'Shell');
   assert.equal(sandbox.sendCalls[0].settings.terminal_boot_command, 'npm run dev');
   assert.equal(sandbox.sendCalls[0].settings.worktree_merge_cleanup, 'remove');
+  assert.equal(sandbox.sendCalls[0].settings.worktree_merge_preserve_diff, true);
   assert.equal(sandbox.sendCalls[1].cmd, 'weaver_update_settings');
   assert.equal(sandbox.sendCalls[1].group, 'alpha');
   assert.equal(sandbox.sendCalls[1].weaver_provider, 'codex');

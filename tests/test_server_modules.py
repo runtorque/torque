@@ -1,6 +1,9 @@
 import importlib
+import asyncio
+import tempfile
 import types
 import unittest
+from pathlib import Path
 
 try:
     from helpers import install_aiohttp_stub
@@ -255,6 +258,177 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
             saved,
             [('stopped', '/repo', None)],
         )
+
+
+class ServerWorktreeMergeDiffTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.reload(self.server_mod)
+        self.server_artifacts = importlib.import_module('loom.server_artifacts')
+        self.server_artifacts = importlib.reload(self.server_artifacts)
+        self.server_worktrees = importlib.import_module('loom.server_worktrees')
+        self.server_worktrees = importlib.reload(self.server_worktrees)
+        self.worktree_mod = importlib.import_module('loom.worktree')
+        self.worktree_mod = importlib.reload(self.worktree_mod)
+
+    async def asyncSetUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addAsyncCleanup(self._cleanup_tmp)
+        self.repo_root = Path(self.tmp.name)
+        self.worktree_mgr = self.worktree_mod.WorktreeManager()
+        await self._git('init', '-b', 'main')
+        await self._git('config', 'user.name', 'Loom Tests')
+        await self._git('config', 'user.email', 'loom-tests@example.com')
+        (self.repo_root / 'README.md').write_text('base\n')
+        await self._git('add', 'README.md')
+        await self._git('commit', '-m', 'Initial commit')
+
+    async def _cleanup_tmp(self):
+        self.tmp.cleanup()
+
+    async def _git(self, *args, cwd=None):
+        proc = await asyncio.create_subprocess_exec(
+            'git',
+            '-C',
+            str(cwd or self.repo_root),
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            self.fail(
+                f"git {' '.join(args)} failed: {stderr.decode().strip()}"
+            )
+        return stdout.decode().strip()
+
+    async def _make_worktree_cell(self):
+        cell = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            command='codex',
+            directory=str(self.repo_root),
+        )
+        wt_path = await self.worktree_mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch='main',
+        )
+        self.assertTrue(wt_path)
+        cell.directory = wt_path
+        return cell
+
+    async def test_merge_diff_snapshot_captures_patch_before_regular_merge(self):
+        cell = await self._make_worktree_cell()
+        readme = Path(cell.worktree_path) / 'README.md'
+        readme.write_text('branch change\n')
+        sha = await self.worktree_mgr.checkpoint(
+            cell,
+            message='Update README',
+        )
+        self.assertTrue(sha)
+
+        before = await self.server_worktrees._worktree_merge_diff_snapshot(
+            cell,
+            self.worktree_mgr,
+        )
+        self.assertIn('+branch change', before['patch_text'])
+        self.assertEqual(before['stats']['files'], 1)
+
+        merged = await self.worktree_mgr.server_merge(
+            cell,
+            'Merge README update',
+            squash=False,
+        )
+        self.assertTrue(merged['ok'], merged.get('error'))
+
+        after = await self.server_worktrees._worktree_merge_diff_snapshot(
+            cell,
+            self.worktree_mgr,
+        )
+        self.assertEqual(after['patch_text'], '')
+        self.assertEqual(after['stats']['files'], 0)
+
+    def test_merge_diff_preserve_flag_uses_group_default_until_overridden(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        state.update_group_settings(
+            'g',
+            worktree_merge_preserve_diff=True,
+        )
+        cell = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+        )
+
+        self.assertTrue(
+            self.server_mod._worktree_merge_preserve_diff_enabled(
+                state,
+                cell,
+                {},
+            )
+        )
+        self.assertFalse(
+            self.server_mod._worktree_merge_preserve_diff_enabled(
+                state,
+                cell,
+                {'preserve_merge_diff': False},
+            )
+        )
+
+    async def test_preserved_merge_diff_artifact_survives_worktree_removal(self):
+        cell = await self._make_worktree_cell()
+        readme = Path(cell.worktree_path) / 'README.md'
+        readme.write_text('branch change\n')
+        sha = await self.worktree_mgr.checkpoint(
+            cell,
+            message='Update README',
+        )
+        self.assertTrue(sha)
+
+        snapshot = await self.server_worktrees._worktree_merge_diff_snapshot(
+            cell,
+            self.worktree_mgr,
+        )
+        merged = await self.worktree_mgr.server_merge(
+            cell,
+            'Merge README update',
+            squash=False,
+        )
+        self.assertTrue(merged['ok'], merged.get('error'))
+
+        with tempfile.TemporaryDirectory() as attachments_dir:
+            original_dir = self.server_artifacts.ATTACHMENTS_DIR
+            self.server_artifacts.ATTACHMENTS_DIR = Path(attachments_dir)
+            try:
+                artifact = self.server_artifacts.store_preserved_merge_diff(
+                    task_id='task-1',
+                    patch_text=snapshot['patch_text'],
+                    worktree_branch=cell.worktree_branch,
+                    base_branch=cell.worktree_base_branch,
+                    merge_commit_sha=merged['sha'],
+                    boundary_task_id='task-1',
+                    diff_stats=snapshot.get('stats'),
+                    diff_files=snapshot.get('files'),
+                    agent_id=cell.id,
+                    agent_name=cell.name,
+                )
+                artifact_path = Path(artifact['path'])
+                wt_path = cell.worktree_path
+                removed = await self.worktree_mgr.remove(cell)
+                self.assertTrue(artifact_path.is_file())
+            finally:
+                self.server_artifacts.ATTACHMENTS_DIR = original_dir
+
+        self.assertTrue(removed)
+        self.assertFalse(Path(wt_path).exists())
 
 
 if __name__ == '__main__':
