@@ -430,6 +430,93 @@ class ServerWorktreeMergeDiffTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(removed)
         self.assertFalse(Path(wt_path).exists())
 
+    async def test_merge_success_stays_warning_only_when_diff_persistence_fails(self):
+        cell = await self._make_worktree_cell()
+        readme = Path(cell.worktree_path) / 'README.md'
+        readme.write_text('branch change\n')
+        sha = await self.worktree_mgr.checkpoint(
+            cell,
+            message='Update README',
+        )
+        self.assertTrue(sha)
+
+        snapshot = await self.server_worktrees._worktree_merge_diff_snapshot(
+            cell,
+            self.worktree_mgr,
+        )
+        merged = await self.worktree_mgr.server_merge(
+            cell,
+            'Merge README update',
+            squash=False,
+        )
+        self.assertTrue(merged['ok'], merged.get('error'))
+
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        boundary_task = self.state_mod.BoardTask(
+            id='task-1',
+            task='Boundary task',
+            group='g',
+            lane='Done',
+            updated_at='2026-04-10T00:00:00+00:00',
+            worktree_boundary={
+                'recorded_at': '2026-04-10T00:00:00+00:00',
+            },
+        )
+        state.board_tasks[boundary_task.id] = boundary_task
+
+        emitted = []
+
+        def record_emit(event, **payload):
+            emitted.append((event, payload))
+
+        state._emit = record_emit
+
+        def fail_board_update_task(tid, **fields):
+            self.assertEqual(tid, boundary_task.id)
+            boundary_task.artifacts = self.server_mod.normalize_artifacts(
+                fields.get('artifacts', [])
+            )
+            boundary_task.updated_at = 'broken'
+            record_emit('task_upsert', **self.server_mod.asdict(boundary_task))
+            raise RuntimeError('simulated save failure')
+
+        state.board_update_task = fail_board_update_task
+
+        with tempfile.TemporaryDirectory() as attachments_dir:
+            original_dir = self.server_artifacts.ATTACHMENTS_DIR
+            self.server_artifacts.ATTACHMENTS_DIR = Path(attachments_dir)
+            try:
+                warning = self.server_mod._persist_preserved_merge_diff_warning_only(
+                    state,
+                    cell,
+                    boundary_task,
+                    snapshot,
+                    merge_commit_sha=merged['sha'],
+                )
+            finally:
+                self.server_artifacts.ATTACHMENTS_DIR = original_dir
+
+        self.assertEqual(
+            warning,
+            'Merge succeeded, but Loom could not save the preserved diff artifact.',
+        )
+        self.assertEqual(boundary_task.artifacts, [])
+        self.assertEqual(boundary_task.updated_at, '2026-04-10T00:00:00+00:00')
+        self.assertEqual(
+            [event for event, _payload in emitted],
+            ['task_upsert', 'task_upsert'],
+        )
+        self.assertEqual(
+            emitted[0][1]['artifacts'][0]['type'],
+            'diff',
+        )
+        self.assertEqual(emitted[1][1]['artifacts'], [])
+        self.assertEqual(
+            list(Path(attachments_dir).rglob('*.patch')),
+            [],
+        )
+
 
 if __name__ == '__main__':
     unittest.main()
