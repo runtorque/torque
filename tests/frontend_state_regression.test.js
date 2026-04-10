@@ -521,6 +521,37 @@ function createMainRenderHarness() {
   return { context, document, sandbox };
 }
 
+function createPanelHarness() {
+  const { sandbox, document } = createSandbox({
+    window: {
+      innerHeight: 900,
+      addEventListener() {},
+      open() {},
+    },
+    connect() {},
+    setupDrag() {},
+  });
+  [
+    'add-name-input',
+    'add-cmd-input',
+    'add-dir-input',
+    'add-args-input',
+    'add-init-input',
+    'gs-directory',
+    'gs-agent-directory',
+    'gs-terminal-prefix',
+    'gs-terminal-boot-cmd',
+    'gs-terminal-cmd-args',
+    'gs-terminal-init-script',
+    'gs-terminal-directory',
+    'gs-weaver-boot-cmd',
+    'gs-weaver-custom-instructions',
+  ].forEach((id) => document.register(id));
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/main.js');
+  return { context, document, sandbox };
+}
+
 function createModalHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -4670,4 +4701,23 @@ test('main render pins the weaver first in the visible and navigable agent order
     'agent-2',
   ]);
   assert.match(main.innerHTML, /Weaver Prime[\s\S]*Worker One[\s\S]*Worker Two/);
+});
+
+test('panel resize bounds stay narrow by default and expand in embedded runtime', () => {
+  const { context, document } = createPanelHarness();
+
+  assert.deepEqual(jsonValue(context, `_panelResizeBounds()`), {
+    min: 80,
+    max: 820,
+  });
+  assert.equal(jsonValue(context, `_normalizePanelHeight(120)`), 120);
+
+  document.body.classList.add('runtime-embedded');
+
+  assert.deepEqual(jsonValue(context, `_panelResizeBounds()`), {
+    min: 180,
+    max: 740,
+  });
+  assert.equal(jsonValue(context, `_normalizePanelHeight(120)`), 180);
+  assert.equal(jsonValue(context, `_normalizePanelHeight(1200)`), 740);
 });
