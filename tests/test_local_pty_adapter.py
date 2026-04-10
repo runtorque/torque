@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -215,6 +216,78 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 os.chdir(prev_cwd)
                 if cell.session_id:
                     await adapter.close_session(cell.session_id)
+
+    def test_session_environment_scrubs_iterm_markers_and_sets_standalone_defaults(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ITERM_SESSION_ID": "w1t0p0:deadbeef",
+                "ITERM_PROFILE": "Default",
+                "LC_TERMINAL": "iTerm2",
+                "LC_TERMINAL_VERSION": "3.6.7",
+                "TERM_PROGRAM": "iTerm.app",
+                "TERM_PROGRAM_VERSION": "3.6.7",
+            },
+            clear=False,
+        ):
+            env = adapter._session_environment(
+                "cell-123",
+                {"CUSTOM_PATH": "~/loom-test"},
+            )
+
+        self.assertEqual(env["LOOM_CELL_ID"], "cell-123")
+        self.assertEqual(env["LOOM_STANDALONE_PTY"], "1")
+        self.assertEqual(env["TERM"], "xterm-256color")
+        self.assertEqual(env["COLORTERM"], "truecolor")
+        self.assertEqual(env["CUSTOM_PATH"], os.path.expanduser("~/loom-test"))
+        self.assertNotIn("ITERM_SESSION_ID", env)
+        self.assertNotIn("ITERM_PROFILE", env)
+        self.assertNotIn("LC_TERMINAL", env)
+        self.assertNotIn("LC_TERMINAL_VERSION", env)
+        self.assertNotIn("TERM_PROGRAM", env)
+        self.assertNotIn("TERM_PROGRAM_VERSION", env)
+
+    def test_prepare_zsh_bootstrap_wraps_original_profiles_and_installs_precmd_hook(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        with tempfile.TemporaryDirectory() as zdotdir:
+            env = {"ZDOTDIR": zdotdir}
+            bootstrap_dir = adapter._prepare_zsh_bootstrap(env)
+            self.addCleanup(shutil.rmtree, bootstrap_dir, ignore_errors=True)
+
+            self.assertEqual(env["ZDOTDIR"], bootstrap_dir)
+            self.assertEqual(env["LOOM_ORIGINAL_ZDOTDIR"], zdotdir)
+
+            zshrc = Path(bootstrap_dir) / ".zshrc"
+            zshenv = Path(bootstrap_dir) / ".zshenv"
+            self.assertTrue(zshrc.exists())
+            self.assertTrue(zshenv.exists())
+            zshrc_text = zshrc.read_text()
+            self.assertIn('source "$ZDOTDIR/.zshrc"', zshrc_text)
+            self.assertIn("add-zsh-hook precmd _loom_precmd", zshrc_text)
+            self.assertIn("printf '\\033]7;file://%s%s\\007'", zshrc_text)
+
+    def test_startup_commands_skip_typed_bootstrap_for_zsh_sessions(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Loom")
+        cell = state.add_terminal(
+            name="Terminal 1",
+            group="Loom",
+            terminal_backend="pty",
+            directory="/tmp",
+        )
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        zsh_commands = adapter._startup_commands(cell, shell_name="zsh", cwd="/tmp")
+        bash_commands = adapter._startup_commands(cell, shell_name="bash", cwd="/tmp")
+
+        self.assertEqual(zsh_commands, [])
+        self.assertTrue(any("PROMPT_COMMAND=" in command for command in bash_commands))
+        self.assertTrue(any("printf '\\033]7;file://" in command for command in bash_commands))
 
 
 if __name__ == "__main__":

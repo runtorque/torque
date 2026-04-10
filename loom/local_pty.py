@@ -13,6 +13,7 @@ import shlex
 import shutil
 import signal
 import struct
+import tempfile
 import termios
 import urllib.parse
 import uuid
@@ -43,6 +44,7 @@ class _PtySession:
     rows: int = 32
     closed: bool = False
     reader_task: Optional[asyncio.Task] = None
+    bootstrap_dir: str = ""
 
 
 class LocalPtyAdapter:
@@ -113,6 +115,7 @@ class LocalPtyAdapter:
     ) -> None:
         del target_session_id, target_window_id
         shell_path = self._resolve_shell(shell)
+        shell_name = os.path.basename(shell_path)
         if cell.cell_type == "agent" and not cell.agent_type and cell.command:
             adapter = detect_by_command(cell.command)
             if adapter:
@@ -124,12 +127,7 @@ class LocalPtyAdapter:
                     cell.command,
                 )
 
-        env = os.environ.copy()
-        env["LOOM_CELL_ID"] = cell.id
-        env.setdefault("TERM", "xterm-256color")
-        env.setdefault("COLORTERM", "truecolor")
-        for key, value in (env_vars or {}).items():
-            env[str(key)] = os.path.expanduser(str(value))
+        env = self._session_environment(cell.id, env_vars or {})
 
         cwd = ""
         if cell.directory:
@@ -145,13 +143,18 @@ class LocalPtyAdapter:
         if not cell.directory:
             cell.directory = cwd
 
+        bootstrap_dir = ""
+        shell_argv = [shell_path, "-i"]
+        if shell_name == "zsh":
+            bootstrap_dir = self._prepare_zsh_bootstrap(env)
+            shell_argv = [shell_path, "-il"]
+
         master_fd, slave_fd = pty.openpty()
         session_id = uuid.uuid4().hex
         self._set_winsize(master_fd, 120, 32)
         try:
             process = await asyncio.create_subprocess_exec(
-                shell_path,
-                "-i",
+                *shell_argv,
                 stdin=slave_fd,
                 stdout=slave_fd,
                 stderr=slave_fd,
@@ -159,6 +162,10 @@ class LocalPtyAdapter:
                 env=env,
                 start_new_session=True,
             )
+        except Exception:
+            if bootstrap_dir:
+                shutil.rmtree(bootstrap_dir, ignore_errors=True)
+            raise
         finally:
             with contextlib.suppress(OSError):
                 os.close(slave_fd)
@@ -169,6 +176,7 @@ class LocalPtyAdapter:
             process=process,
             master_fd=master_fd,
             shell_path=shell_path,
+            bootstrap_dir=bootstrap_dir,
         )
         self._sessions[session_id] = session
         session.reader_task = asyncio.create_task(self._read_loop(session))
@@ -187,6 +195,7 @@ class LocalPtyAdapter:
 
         setup_commands = self._startup_commands(
             cell,
+            shell_name=shell_name,
             cwd=cwd,
             env_file=env_file,
             init_script=init_script,
@@ -348,6 +357,70 @@ class LocalPtyAdapter:
                 return candidate
         return "/bin/sh"
 
+    def _session_environment(
+        self,
+        cell_id: str,
+        env_vars: dict[str, str],
+    ) -> dict[str, str]:
+        env = os.environ.copy()
+        for key in list(env.keys()):
+            if key.startswith("ITERM_"):
+                env.pop(key, None)
+        for key in (
+            "LC_TERMINAL",
+            "LC_TERMINAL_VERSION",
+            "TERM_PROGRAM",
+            "TERM_PROGRAM_VERSION",
+        ):
+            env.pop(key, None)
+        env["LOOM_CELL_ID"] = cell_id
+        env["LOOM_STANDALONE_PTY"] = "1"
+        env.setdefault("TERM", "xterm-256color")
+        env.setdefault("COLORTERM", "truecolor")
+        for key, value in env_vars.items():
+            env[str(key)] = os.path.expanduser(str(value))
+        return env
+
+    def _prepare_zsh_bootstrap(self, env: dict[str, str]) -> str:
+        original_zdotdir = os.path.expanduser(env.get("ZDOTDIR") or "~")
+        bootstrap_dir = tempfile.mkdtemp(prefix="loom-zsh-bootstrap-")
+        env["LOOM_ORIGINAL_ZDOTDIR"] = original_zdotdir
+        env["ZDOTDIR"] = bootstrap_dir
+        wrappers = {
+            ".zshenv": self._zsh_wrapper_script(".zshenv"),
+            ".zprofile": self._zsh_wrapper_script(".zprofile"),
+            ".zlogin": self._zsh_wrapper_script(".zlogin"),
+            ".zlogout": self._zsh_wrapper_script(".zlogout"),
+            ".zshrc": self._zsh_wrapper_script(
+                ".zshrc",
+                extra=(
+                    "autoload -Uz add-zsh-hook >/dev/null 2>&1\n"
+                    "function _loom_precmd() {\n"
+                    "  printf '\\033]7;file://%s%s\\007' \"${HOST:-localhost}\" \"$PWD\"\n"
+                    "}\n"
+                    "add-zsh-hook -d precmd _loom_precmd >/dev/null 2>&1\n"
+                    "add-zsh-hook precmd _loom_precmd >/dev/null 2>&1\n"
+                ),
+            ),
+        }
+        for filename, content in wrappers.items():
+            with open(os.path.join(bootstrap_dir, filename), "w", encoding="utf-8") as fh:
+                fh.write(content)
+        return bootstrap_dir
+
+    def _zsh_wrapper_script(self, filename: str, *, extra: str = "") -> str:
+        return (
+            "#!/bin/zsh\n"
+            "_loom_bootstrap_zdotdir=\"$ZDOTDIR\"\n"
+            "export ZDOTDIR=\"${LOOM_ORIGINAL_ZDOTDIR:-$HOME}\"\n"
+            f"if [ -f \"$ZDOTDIR/{filename}\" ]; then\n"
+            f"  source \"$ZDOTDIR/{filename}\"\n"
+            "fi\n"
+            "export ZDOTDIR=\"$_loom_bootstrap_zdotdir\"\n"
+            "unset _loom_bootstrap_zdotdir\n"
+            f"{extra}"
+        )
+
     def _initial_process_name(self, cell: AgentCell, shell_path: str) -> str:
         if cell.command:
             parts = shlex.split(cell.command)
@@ -359,19 +432,19 @@ class LocalPtyAdapter:
         self,
         cell: AgentCell,
         *,
+        shell_name: str = "",
         cwd: str,
         env_file: str = "",
         init_script: str = "",
         system_prompt: str = "",
     ) -> list[str]:
         commands: list[str] = []
-        shell_name = os.path.basename(self._resolve_shell(""))
-        prompt_hook = self._prompt_hook_command(shell_name)
-        if prompt_hook:
-            commands.append(prompt_hook)
-        commands.append(self._emit_cwd_command())
-        if cwd:
-            commands.append(f"cd {shlex.quote(cwd)}")
+        shell_name = shell_name or os.path.basename(self._resolve_shell(""))
+        if shell_name != "zsh":
+            prompt_hook = self._prompt_hook_command(shell_name)
+            if prompt_hook:
+                commands.append(prompt_hook)
+            commands.append(self._emit_cwd_command())
         if env_file:
             expanded = os.path.expanduser(env_file)
             commands.append(
@@ -485,6 +558,8 @@ class LocalPtyAdapter:
             return
         with contextlib.suppress(OSError):
             os.close(session.master_fd)
+        if session.bootstrap_dir:
+            shutil.rmtree(session.bootstrap_dir, ignore_errors=True)
         with contextlib.suppress(Exception):
             await session.process.wait()
         cell = self.state.agents.get(session.cell_id)
