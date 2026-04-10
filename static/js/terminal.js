@@ -142,6 +142,9 @@ function _disposeEmbeddedTerminal() {
     _embeddedTerminalResizeObserver = null;
   }
   if (_embeddedTerminalWs) {
+    _embeddedTerminalWs.onopen = null;
+    _embeddedTerminalWs.onmessage = null;
+    _embeddedTerminalWs.onerror = null;
     _embeddedTerminalWs.onclose = null;
     _embeddedTerminalWs.close();
     _embeddedTerminalWs = null;
@@ -181,7 +184,9 @@ function _scheduleEmbeddedTerminalFit() {
 
 function _connectEmbeddedTerminal(cell, surface) {
   _disposeEmbeddedTerminal();
-  _embeddedTerminalSessionKey = cell.id + ':' + (cell.session_id || '');
+  var expectedSessionId = cell.session_id || '';
+  var sessionKey = cell.id + ':' + expectedSessionId;
+  _embeddedTerminalSessionKey = sessionKey;
   _embeddedTerminal = new Terminal({
     allowTransparency: false,
     convertEol: false,
@@ -210,11 +215,22 @@ function _connectEmbeddedTerminal(cell, surface) {
   });
   _embeddedTerminalResizeObserver.observe(surface);
   _embeddedTerminalWs = new WebSocket(_embeddedTerminalUrl(cell));
+  var socket = _embeddedTerminalWs;
+  function isCurrentSessionMessage(msg) {
+    if (_embeddedTerminalSessionKey !== sessionKey) return false;
+    if (_embeddedTerminalWs !== socket) return false;
+    if (msg && typeof msg.session_id === 'string' && msg.session_id !== expectedSessionId) {
+      return false;
+    }
+    return true;
+  }
   _embeddedTerminalWs.onopen = function() {
+    if (!isCurrentSessionMessage()) return;
     _scheduleEmbeddedTerminalFit();
   };
   _embeddedTerminalWs.onmessage = function(event) {
     const msg = JSON.parse(event.data);
+    if (!isCurrentSessionMessage(msg)) return;
     if (msg.type === 'snapshot') {
       _embeddedTerminal.reset();
       if (msg.data) _embeddedTerminal.write(msg.data);
@@ -224,7 +240,7 @@ function _connectEmbeddedTerminal(cell, surface) {
     }
   };
   _embeddedTerminalWs.onclose = function() {
-    if (_embeddedTerminalSessionKey === cell.id + ':' + (cell.session_id || '')) {
+    if (isCurrentSessionMessage()) {
       const status = document.querySelector('#terminal-workspace .terminal-statusbar');
       if (status) status.setAttribute('data-closed', '1');
     }

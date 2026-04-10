@@ -47,6 +47,7 @@ class FakeElement {
     this.value = '';
     this.textContent = '';
     this.dataset = {};
+    this.attributes = {};
     this.style = {};
     this.children = [];
     this.classList = new FakeClassList();
@@ -87,6 +88,16 @@ class FakeElement {
 
   addEventListener(type, handler) {
     this.listeners[type] = handler;
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+
+  getAttribute(name) {
+    return Object.prototype.hasOwnProperty.call(this.attributes, name)
+      ? this.attributes[name]
+      : null;
   }
 
   focus() {
@@ -260,6 +271,101 @@ function loadBoardScripts(context) {
   loadScript(context, 'static/js/board/view-state.js');
   loadScript(context, 'static/js/board/card-rendering.js');
   loadScript(context, 'static/js/board/card-actions.js');
+}
+
+function createEmbeddedTerminalHarness() {
+  const sockets = [];
+  const terminals = [];
+
+  class FakeTerminal {
+    constructor() {
+      this.cols = 80;
+      this.rows = 24;
+      this.writes = [];
+      this.resetCount = 0;
+      terminals.push(this);
+    }
+
+    loadAddon(addon) {
+      this.addon = addon;
+    }
+
+    open(surface) {
+      this.surface = surface;
+    }
+
+    onData(handler) {
+      this.onDataHandler = handler;
+      return {
+        dispose: () => {
+          this.dataDisposed = true;
+        },
+      };
+    }
+
+    write(data) {
+      this.writes.push(data);
+    }
+
+    reset() {
+      this.resetCount += 1;
+      this.writes = [];
+    }
+
+    dispose() {
+      this.disposed = true;
+    }
+  }
+
+  class FakeFitAddon {
+    fit() {
+      this.fitCalls = (this.fitCalls || 0) + 1;
+    }
+  }
+
+  class FakeResizeObserver {
+    constructor(callback) {
+      this.callback = callback;
+    }
+
+    observe(target) {
+      this.target = target;
+    }
+
+    disconnect() {
+      this.disconnected = true;
+    }
+  }
+
+  function FakeWebSocket(url) {
+    this.url = url;
+    this.readyState = FakeWebSocket.OPEN;
+    this.sent = [];
+    sockets.push(this);
+  }
+  FakeWebSocket.OPEN = 1;
+  FakeWebSocket.prototype.send = function send(payload) {
+    this.sent.push(JSON.parse(payload));
+  };
+  FakeWebSocket.prototype.close = function close() {
+    this.closeCalled = true;
+    this.readyState = 3;
+  };
+
+  const { sandbox, document } = createSandbox({
+    Terminal: FakeTerminal,
+    FitAddon: { FitAddon: FakeFitAddon },
+    ResizeObserver: FakeResizeObserver,
+    WebSocket: FakeWebSocket,
+    location: { protocol: 'http:', host: 'localhost:9000' },
+  });
+  const workspace = document.register('terminal-workspace');
+  const status = new FakeElement('terminal-statusbar');
+  workspace.setQuerySelector('.terminal-statusbar', status);
+  document.setSelector('#terminal-workspace .terminal-statusbar', status);
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/terminal.js');
+  return { context, sandbox, document, sockets, terminals, status };
 }
 
 function runInContext(context, code) {
@@ -3451,6 +3557,60 @@ test('embedded terminal selection clears stale agent selection for standalone te
   assert.equal(jsonValue(context, 'selectedAgentId'), '');
   assert.equal(jsonValue(context, 'selectedTerminalId'), 'term-root');
   assert.equal(jsonValue(context, 'focusedItemId'), 'term-root');
+});
+
+test('embedded terminal ignores stale websocket output after a relaunch session swap', () => {
+  const { context, sockets, terminals } = createEmbeddedTerminalHarness();
+  const firstSurface = new FakeElement('surface-1');
+  const secondSurface = new FakeElement('surface-2');
+  context.__surface1 = firstSurface;
+  context.__surface2 = secondSurface;
+
+  runInContext(
+    context,
+    `_connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-old' }, __surface1);`,
+  );
+  const oldSocket = sockets[0];
+
+  runInContext(
+    context,
+    `_connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-new' }, __surface2);`,
+  );
+  const currentSocket = sockets[1];
+  const currentTerminal = terminals[1];
+
+  assert.equal(oldSocket.closeCalled, true);
+  assert.equal(oldSocket.onmessage, null);
+
+  currentSocket.onmessage({
+    data: JSON.stringify({
+      type: 'snapshot',
+      cell_id: 'term-1',
+      session_id: 'session-new',
+      data: 'clean prompt',
+    }),
+  });
+  assert.deepEqual(currentTerminal.writes, ['clean prompt']);
+
+  currentSocket.onmessage({
+    data: JSON.stringify({
+      type: 'output',
+      cell_id: 'term-1',
+      session_id: 'session-old',
+      data: 'autoload -Uz add-zsh-hook',
+    }),
+  });
+  assert.deepEqual(currentTerminal.writes, ['clean prompt']);
+
+  currentSocket.onmessage({
+    data: JSON.stringify({
+      type: 'output',
+      cell_id: 'term-1',
+      session_id: 'session-new',
+      data: '\nready',
+    }),
+  });
+  assert.deepEqual(currentTerminal.writes, ['clean prompt', '\nready']);
 });
 
 test('ws invalidation rerenders the context panel for task updates', () => {
