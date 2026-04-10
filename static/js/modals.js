@@ -3,6 +3,51 @@
 /* -- Provider cache (populated from get_config response) ------------------ */
 let _cachedProviders = [];  // [{name, display_name, command}, ...]
 
+function _findProviderMeta(name) {
+  return (_cachedProviders || []).find(p => p.name === name) || null;
+}
+
+function _populateReasoningEffortSelect(selectId, providerName, currentValue, emptyLabel, unsupportedLabel) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const meta = providerName ? _findProviderMeta(providerName) : null;
+  const options = meta && Array.isArray(meta.reasoning_efforts) ? meta.reasoning_efforts : [];
+  const current = String(currentValue || '').trim();
+  sel.innerHTML = '';
+
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = emptyLabel || 'Provider default';
+  sel.appendChild(empty);
+
+  for (const value of options) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = value;
+    sel.appendChild(opt);
+  }
+
+  if (!options.length) {
+    empty.textContent = unsupportedLabel || empty.textContent;
+  }
+  if (current && !options.includes(current)) {
+    const custom = document.createElement('option');
+    custom.value = current;
+    custom.textContent = current;
+    sel.appendChild(custom);
+  }
+  sel.value = current || '';
+}
+
+function _agentSettingsProviderForReasoning() {
+  return _getProviderValue('gs-agent-provider');
+}
+
+function _weaverProviderForReasoning() {
+  return _getProviderValue('gs-weaver-provider')
+    || _getProviderValue('gs-agent-provider');
+}
+
 function _populateProviderSelect(selectId, currentValue, includeGroupDefault) {
   const sel = document.getElementById(selectId);
   sel.innerHTML = '';
@@ -83,6 +128,16 @@ function onGsProviderChange() {
     label.textContent = 'Command override';
     input.placeholder = _getProviderCommand('gs-agent-provider') + ' (default)';
   }
+  _populateReasoningEffortSelect(
+    'gs-agent-reasoning-effort',
+    _agentSettingsProviderForReasoning(),
+    document.getElementById('gs-agent-reasoning-effort').value,
+    'Provider default',
+    'Not supported for this provider'
+  );
+  if (!_getProviderValue('gs-weaver-provider')) {
+    onGsWeaverProviderChange();
+  }
 }
 
 function onAddProviderChange() {
@@ -98,6 +153,22 @@ function onAddProviderChange() {
     label.textContent = 'Command override';
     input.placeholder = _getProviderCommand('add-provider-select') + ' (default)';
   }
+}
+
+function onGsWeaverProviderChange() {
+  const input = document.getElementById('gs-weaver-boot-cmd');
+  if (input) {
+    const effectiveProvider = _weaverProviderForReasoning();
+    const meta = effectiveProvider ? _findProviderMeta(effectiveProvider) : null;
+    input.placeholder = (meta ? meta.command : 'claude') + ' (default)';
+  }
+  _populateReasoningEffortSelect(
+    'gs-weaver-reasoning-effort',
+    _weaverProviderForReasoning(),
+    document.getElementById('gs-weaver-reasoning-effort').value,
+    'Provider default',
+    'Not supported for this provider'
+  );
 }
 
 /* -- Hint popover (for ? buttons) ---------------------------------------- */
@@ -418,6 +489,8 @@ function _showGroupSettings(group, data) {
   _populateProviderSelect('gs-agent-provider', s.agent_provider || '', false);
   _populateTemplateSelect('gs-default-agent-template', s.default_agent_template || '', 'None');
   document.getElementById('gs-agent-boot-cmd').value = s.agent_boot_command || '';
+  document.getElementById('gs-agent-model').value = s.agent_model || '';
+  document.getElementById('gs-agent-reasoning-effort').value = s.agent_reasoning_effort || '';
   onGsProviderChange();
   document.getElementById('gs-worktree').checked = s.git_worktree || false;
   document.getElementById('gs-wt-base-dir').value = s.worktree_base_dir || '.loom/worktrees';
@@ -463,7 +536,10 @@ function _showGroupSettings(group, data) {
   /* -- Weaver tab -- */
   _populateProviderSelect('gs-weaver-provider', ws.weaver_provider || '', true);
   document.getElementById('gs-weaver-boot-cmd').value = ws.weaver_boot_command || '';
+  document.getElementById('gs-weaver-model').value = ws.weaver_model || '';
+  document.getElementById('gs-weaver-reasoning-effort').value = ws.weaver_reasoning_effort || '';
   document.getElementById('gs-weaver-custom-instructions').value = ws.custom_instructions || '';
+  onGsWeaverProviderChange();
   _setSelectValue('gs-weaver-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
   _setSelectValue(
     'gs-weaver-default-worker-concurrency',
@@ -557,6 +633,8 @@ function submitGroupSettings() {
     default_agent_template: document.getElementById('gs-default-agent-template').value,
     agent_provider: _getProviderValue('gs-agent-provider'),
     agent_boot_command: document.getElementById('gs-agent-boot-cmd').value.trim(),
+    agent_model: document.getElementById('gs-agent-model').value.trim(),
+    agent_reasoning_effort: document.getElementById('gs-agent-reasoning-effort').value,
     agent_env_vars: _textToEnv('gs-agent-env-vars'),
     agent_env_file: document.getElementById('gs-agent-env-file').value.trim(),
     git_worktree: document.getElementById('gs-worktree').checked,
@@ -594,6 +672,8 @@ function submitGroupSettings() {
   const weaverSettings = {
     weaver_provider: _getProviderValue('gs-weaver-provider'),
     weaver_boot_command: document.getElementById('gs-weaver-boot-cmd').value.trim(),
+    weaver_model: document.getElementById('gs-weaver-model').value.trim(),
+    weaver_reasoning_effort: document.getElementById('gs-weaver-reasoning-effort').value,
     custom_instructions: document.getElementById('gs-weaver-custom-instructions').value,
     autonomy_mode: document.getElementById('gs-weaver-autonomy-mode').value,
     default_worker_concurrency: parseInt(document.getElementById('gs-weaver-default-worker-concurrency').value, 10) || 2,
