@@ -752,8 +752,8 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
                 "slug": "worker-one",
                 "type": "codex",
                 "status": "running",
-                "current_task_id": "task-progress",
-                "current_task": "Active task",
+                "current_task_id": "",
+                "current_task": "",
                 "needs_attention": False,
             }],
         )
