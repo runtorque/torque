@@ -12,6 +12,7 @@ They are not the primary user-facing docs. For day-to-day usage, start from [Get
 - [CLI & REST API](cli.md)
 - [CLI AI Commands](cli_ai_commands.md)
 - [Git Worktree Lifecycle](git-worktree-lifecycle.md)
+- [Native Desktop Packaging Roadmap](native_desktop_packaging.md)
 - [Pipelines](pipelines.md)
 - [Standalone Application](standalone_application.md)
 - [Standalone xterm.js Execution](standalone_xterm_execution.md)
