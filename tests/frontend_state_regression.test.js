@@ -4162,7 +4162,7 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
   context.state.weaver_settings = {
     alpha: { paused: false },
   };
-  runInContext(context, `focusedItemId = ''; selectedAgentId = '';`);
+  runInContext(context, `focusedItemId = ''; selectedAgentId = 'weaver-1';`);
 
   const runningHtml = context.renderAgentCell({
     id: 'weaver-1',
@@ -4181,7 +4181,7 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
     status: 'running',
   });
 
-  assert.match(runningHtml, /class="cell weaver weaver-running"/);
+  assert.match(runningHtml, /class="cell selected weaver weaver-running"/);
   assert.match(runningHtml, /class="cell-header-controls">/);
   assert.match(runningHtml, /class="cell-weaver-toggle running"/);
   assert.match(runningHtml, /Pause Weaver event delivery/);
@@ -4197,9 +4197,25 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
     status: 'running',
   });
 
-  assert.match(pausedHtml, /class="cell weaver weaver-paused"/);
+  assert.match(pausedHtml, /class="cell selected weaver weaver-paused"/);
   assert.match(pausedHtml, /class="cell-weaver-toggle paused"/);
   assert.match(pausedHtml, /Resume Weaver event delivery/);
+
+  context.state.weaver_settings.alpha = {
+    paused: false,
+    pending_question: 'Need input',
+  };
+  const askingHtml = context.renderAgentCell({
+    id: 'weaver-1',
+    name: 'Weaver',
+    icon: '🧶',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+  });
+
+  assert.match(askingHtml, /class="cell selected weaver weaver-asking weaver-running"/);
+  assert.match(askingHtml, /\? awaiting input/);
 });
 
 test('weaver agent card toggle shares the close control reveal affordances and icon-only default chrome', () => {
@@ -4213,6 +4229,19 @@ test('weaver agent card toggle shares the close control reveal affordances and i
   assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*background:/);
   assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*border-color:/);
   assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*outline:\s*none;/);
+});
+
+test('selected weaver cards keep selection chrome aligned with running and paused status colors', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /\.cell\.weaver\s*\{[^}]*--weaver-chrome:\s*transparent;[^}]*--weaver-edge-shadow:\s*none;[^}]*border-left-color:\s*var\(--weaver-chrome\);[^}]*box-shadow:\s*var\(--weaver-edge-shadow\);/);
+  assert.match(css, /\.cell\.weaver\.weaver-running\s*\{[^}]*--weaver-chrome:\s*var\(--green\);/);
+  assert.match(css, /\.cell\.weaver\.weaver-paused\s*\{[^}]*--weaver-chrome:\s*var\(--amber\);/);
+  assert.match(css, /\.cell\.weaver\.selected\s*\{[^}]*border-color:\s*var\(--weaver-chrome\);/);
+  assert.match(css, /\.cell\.weaver\.focused\s*\{[^}]*outline-color:\s*var\(--weaver-chrome\);/);
+  assert.match(css, /\.cell\.weaver\.selected\.active\s*\{[^}]*box-shadow:\s*var\(--weaver-active-glow\),\s*var\(--weaver-edge-shadow\);/);
+  assert.match(css, /\.cell\.weaver-asking\s*\{[^}]*--weaver-chrome:\s*var\(--amber\);[^}]*animation:\s*weaver-pulse 2s ease-in-out infinite;/);
+  assert.match(css, /@keyframes weaver-pulse\s*\{\s*0%,\s*100%\s*\{\s*box-shadow:\s*var\(--weaver-edge-shadow\);[^}]*\}\s*50%\s*\{\s*box-shadow:\s*var\(--weaver-edge-shadow\),\s*0 0 8px rgba\(210, 153, 34, 0\.3\);/);
 });
 
 test('renderWeaverPanel shows branch review-point summary', () => {
