@@ -1491,7 +1491,55 @@ function boardPickInlineLabel(label) {
   el.selectionStart = el.selectionEnd = el.value.length;
 }
 
+function _boardAddTaskActiveSelection(el) {
+  if (!el) return 0;
+  if (el.selectionDirection === 'backward' && typeof el.selectionStart === 'number') {
+    return el.selectionStart;
+  }
+  return typeof el.selectionEnd === 'number' ? el.selectionEnd : 0;
+}
+
+function _boardAddTaskSelectionAnchor(el) {
+  if (!el) return 0;
+  if (el.selectionDirection === 'backward' && typeof el.selectionEnd === 'number') {
+    return el.selectionEnd;
+  }
+  return typeof el.selectionStart === 'number' ? el.selectionStart : 0;
+}
+
+function _boardAddTaskLineBoundary(value, caret, toEnd) {
+  if (toEnd) {
+    var lineEnd = value.indexOf('\n', caret);
+    return lineEnd >= 0 ? lineEnd : value.length;
+  }
+  var lineStart = value.lastIndexOf('\n', Math.max(caret - 1, 0));
+  return lineStart >= 0 ? lineStart + 1 : 0;
+}
+
+function _boardMoveAddTaskCaretToLineBoundary(el, e, toEnd) {
+  if (!el || typeof el.value !== 'string') return false;
+  var active = _boardAddTaskActiveSelection(el);
+  var anchor = _boardAddTaskSelectionAnchor(el);
+  var target = _boardAddTaskLineBoundary(el.value, active, toEnd);
+  if (typeof e.preventDefault === 'function') e.preventDefault();
+  if (e.shiftKey) {
+    el.selectionStart = Math.min(anchor, target);
+    el.selectionEnd = Math.max(anchor, target);
+    if ('selectionDirection' in el) {
+      el.selectionDirection = target < anchor ? 'backward' : 'forward';
+    }
+  } else {
+    el.selectionStart = el.selectionEnd = target;
+    if ('selectionDirection' in el) el.selectionDirection = 'none';
+  }
+  boardAddTaskInput(el);
+  return true;
+}
+
 function boardAddTaskKeydown(e) {
+  var input = e.target && typeof e.target.value === 'string'
+    ? e.target
+    : document.getElementById('board-add-task-input');
   var dropdown = document.getElementById('board-add-label-dropdown');
   var visible = dropdown && dropdown.style.display !== 'none';
   if (visible) {
@@ -1521,6 +1569,9 @@ function boardAddTaskKeydown(e) {
       _boardLabelDropdownIdx = -1;
       return;
     }
+  }
+  if ((e.key === 'Home' || e.key === 'End') && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    if (_boardMoveAddTaskCaretToLineBoundary(input, e, e.key === 'End')) return;
   }
   if (e.key === 'Escape') {
     e.preventDefault();
