@@ -65,7 +65,7 @@ When worktrees are enabled, these settings control the execution environment:
 | **Checkpoint on progress / done** | Create throttled checkpoints when the agent reports progress or completion. |
 | **Squash on merge** | Prefer squash merge when merging worktree branches back to the base branch. |
 | **Merge instructions** | Extra text Loom appends to merge prompts. |
-| **Symlink paths** | Repo-relative paths that should be mirrored into every worktree as symlinks. |
+| **Symlink paths** | Repo-relative exact paths or glob patterns that should be mirrored into every worktree as symlinks. Recursive `**` is supported (for example `etl/**/node_modules`). Only existing matches inside the repo root are linked. |
 
 ### Provider and resume notes
 

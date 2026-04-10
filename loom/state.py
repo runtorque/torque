@@ -469,7 +469,7 @@ class GroupSettings:
     worktree_merge_instructions: str = ""  # additional instructions appended to merge prompt
     worktree_merge_cleanup: str = "keep"  # keep | close | remove | close_remove
     worktree_merge_preserve_diff: bool = False  # save the pre-merge patch on the latest boundary task
-    worktree_symlinks: list[str] = field(default_factory=list)  # paths to symlink from repo root
+    worktree_symlinks: list[str] = field(default_factory=list)  # repo-relative paths or glob patterns to symlink from repo root
     agent_session_resume: bool = True  # resume session on relaunch
     agent_idle_timeout: int = 5  # minutes before flagging agent as stuck (0=disable)
     agent_always_custom_dialog: bool = False

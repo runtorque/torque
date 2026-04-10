@@ -108,6 +108,7 @@ Show or update group settings.
 loom group settings backend                              # show settings
 loom group settings backend -s git_worktree=true         # enable worktrees
 loom group settings backend -s agent_boot_command=claude  # set boot command
+loom group settings backend -s 'worktree_symlinks=["etl/**/node_modules",".venv"]'
 ```
 
 Pass `-s KEY=VALUE` to update. Multiple `-s` flags are supported. Boolean values use `true`/`false`.

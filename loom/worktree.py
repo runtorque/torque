@@ -1,6 +1,7 @@
 """Git worktree lifecycle management for Loom agents."""
 
 import asyncio
+import glob
 import os
 import re
 from typing import Optional
@@ -368,7 +369,8 @@ class WorktreeManager:
             repo_root: Absolute path to the git repo root.
             base_dir: Directory name for worktrees (relative to repo root).
             base_branch: Branch to fork from (empty = current HEAD).
-            symlinks: Relative paths to symlink from repo root into worktree.
+            symlinks: Relative paths or glob patterns to symlink from repo
+                root into worktree.
             worktree_name: Optional custom name for the worktree folder and
                 branch suffix.
 
@@ -428,15 +430,79 @@ class WorktreeManager:
             log.exception("Failed to create worktree for '%s'", cell.name)
             return None
 
+    def _normalize_symlink_pattern(self, raw_path: str) -> str:
+        """Return a normalized repo-relative symlink path/pattern."""
+        raw_path = str(raw_path or "").strip()
+        if not raw_path:
+            return ""
+        if os.path.isabs(raw_path):
+            log.warning("Skipping absolute symlink path: %s", raw_path)
+            return ""
+
+        trimmed = raw_path.strip("/")
+        if not trimmed:
+            return ""
+
+        parts = [part for part in trimmed.split("/") if part]
+        if any(part == ".." for part in parts):
+            log.warning("Skipping invalid symlink path: %s", raw_path)
+            return ""
+
+        normalized = os.path.normpath(trimmed).replace(os.sep, "/")
+        if normalized in {"", "."}:
+            return ""
+        return normalized
+
+    def _expand_symlink_paths(self, repo_root: str,
+                              symlinks: list[str]) -> list[str]:
+        """Expand configured symlink paths/patterns within ``repo_root``."""
+        expanded: list[str] = []
+        seen: set[str] = set()
+
+        for raw_path in symlinks:
+            pattern = self._normalize_symlink_pattern(raw_path)
+            if not pattern:
+                continue
+
+            if not glob.has_magic(pattern):
+                matches = [pattern]
+            else:
+                full_pattern = os.path.join(repo_root, pattern)
+                resolved_matches = []
+                for match in glob.glob(full_pattern, recursive=True):
+                    rel_path = os.path.relpath(match, repo_root)
+                    if rel_path in {".", ""}:
+                        continue
+                    rel_path = os.path.normpath(rel_path).replace(
+                        os.sep, "/")
+                    if rel_path == ".." or rel_path.startswith("../"):
+                        log.warning(
+                            "Skipping symlink match outside repo root: %s",
+                            match,
+                        )
+                        continue
+                    resolved_matches.append(rel_path)
+
+                matches = sorted(set(resolved_matches))
+                if not matches:
+                    log.warning(
+                        "Symlink pattern did not match any paths, skipping: %s",
+                        pattern,
+                    )
+
+            for rel_path in matches:
+                if rel_path in seen:
+                    continue
+                seen.add(rel_path)
+                expanded.append(rel_path)
+
+        return expanded
+
     def _create_symlinks(self, wt_path: str, repo_root: str,
                          symlinks: list[str]) -> None:
         """Create symlinks in worktree pointing to repo root paths."""
         created = []
-        for rel_path in symlinks:
-            rel_path = rel_path.strip().strip("/")
-            if not rel_path or ".." in rel_path:
-                log.warning("Skipping invalid symlink path: %s", rel_path)
-                continue
+        for rel_path in self._expand_symlink_paths(repo_root, symlinks):
             target = os.path.join(repo_root, rel_path)
             link = os.path.join(wt_path, rel_path)
             if not os.path.exists(target):
