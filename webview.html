@@ -82,6 +82,14 @@
             <label>Boot command</label>
             <input id="add-cmd-input" placeholder="e.g. npm run dev" autocomplete="off">
           </div>
+          <div id="add-model-row" class="hidden">
+            <label>Model</label>
+            <input id="add-model-input" placeholder="Use provider default" autocomplete="off">
+          </div>
+          <div id="add-reasoning-row" class="hidden">
+            <label>Reasoning effort</label>
+            <select id="add-reasoning-effort"></select>
+          </div>
           <div id="add-args-row" class="hidden">
             <label>Arguments</label>
             <input id="add-args-input" placeholder="e.g. --watch" autocomplete="off">
@@ -155,6 +163,10 @@
         <select id="weaver-launch-provider" onchange="onWeaverLaunchProviderChange()"></select>
         <label>Boot command</label>
         <input id="weaver-launch-boot-cmd" placeholder="Use provider default" autocomplete="off">
+        <label>Model</label>
+        <input id="weaver-launch-model" placeholder="Use provider default" autocomplete="off">
+        <label>Reasoning effort</label>
+        <select id="weaver-launch-reasoning-effort"></select>
         <label>Custom instructions</label>
         <textarea id="weaver-launch-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Weaver policy..."></textarea>
       </div>

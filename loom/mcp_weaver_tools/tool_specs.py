@@ -445,6 +445,22 @@ WEAVER_TOOLS = [
                         "Only used when creating a new agent."
                     ),
                 },
+                "model": {
+                    "type": "string",
+                    "description": (
+                        "Model override for a new agent. Only used when "
+                        "creating a new agent and when the boot command "
+                        "is not fully overridden."
+                    ),
+                },
+                "reasoning_effort": {
+                    "type": "string",
+                    "description": (
+                        "Reasoning-effort override for a new agent. Only "
+                        "used when creating a new agent and when the boot "
+                        "command is not fully overridden."
+                    ),
+                },
             },
             "required": ["task"],
         },
@@ -556,6 +572,42 @@ WEAVER_TOOLS = [
                     "description": (
                         "Filter to specific event types. "
                         "Omit for all types."
+                    ),
+                },
+            },
+        },
+    },
+    {
+        "name": "weaver_launch_settings",
+        "description": (
+            "Update the designated Weaver's persisted launch settings. "
+            "These settings are used the next time the Weaver is created "
+            "or relaunched."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "provider": {
+                    "type": "string",
+                    "description": (
+                        "Provider/backend override for the designated "
+                        "Weaver (for example 'codex' or 'claude-code')."
+                    ),
+                },
+                "command": {
+                    "type": "string",
+                    "description": (
+                        "Boot command override for the designated Weaver."
+                    ),
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Model override for the designated Weaver.",
+                },
+                "reasoning_effort": {
+                    "type": "string",
+                    "description": (
+                        "Reasoning-effort override for the designated Weaver."
                     ),
                 },
             },

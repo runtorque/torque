@@ -3,10 +3,29 @@
 /* -- Provider cache (populated from get_config response) ------------------ */
 let _cachedProviders = [];  // [{name, display_name, command}, ...]
 
+function _providerCommandToken(command) {
+  const raw = String(command || '').trim();
+  if (!raw) return '';
+  return raw.split(/\s+/)[0] || '';
+}
 function _findProviderMeta(name) {
   return (_cachedProviders || []).find(p => p.name === name) || null;
 }
 
+function _detectProviderNameFromCommand(command) {
+  const token = _providerCommandToken(command);
+  if (!token) return '';
+  const match = (_cachedProviders || []).find((p) => _providerCommandToken(p.command) === token);
+  return match ? match.name : '';
+}
+
+function _runtimeDefaultCommand() {
+  return (state && state.runtime && state.runtime.default_command) || 'claude';
+}
+
+function _runtimeDefaultProviderName() {
+  return _detectProviderNameFromCommand(_runtimeDefaultCommand());
+}
 function _populateReasoningEffortSelect(selectId, providerName, currentValue, emptyLabel, unsupportedLabel) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
@@ -40,12 +59,15 @@ function _populateReasoningEffortSelect(selectId, providerName, currentValue, em
 }
 
 function _agentSettingsProviderForReasoning() {
-  return _getProviderValue('gs-agent-provider');
+  return _getProviderValue('gs-agent-provider') || _runtimeDefaultProviderName();
 }
 
 function _weaverProviderForReasoning() {
-  return _getProviderValue('gs-weaver-provider')
-    || _getProviderValue('gs-agent-provider');
+  return (
+    _getProviderValue('gs-weaver-provider')
+    || _getProviderValue('gs-agent-provider')
+    || _runtimeDefaultProviderName()
+  );
 }
 
 function _populateProviderSelect(selectId, currentValue, includeGroupDefault) {
@@ -57,7 +79,11 @@ function _populateProviderSelect(selectId, currentValue, includeGroupDefault) {
     sel.appendChild(opt);
   } else {
     const opt = document.createElement('option');
-    opt.value = ''; opt.textContent = 'Default (Claude Code)';
+    const defaultProvider = _findProviderMeta(_runtimeDefaultProviderName());
+    opt.value = '';
+    opt.textContent = defaultProvider
+      ? `Default (${defaultProvider.display_name})`
+      : 'Default (Claude Code)';
     sel.appendChild(opt);
   }
   for (const p of _cachedProviders) {
@@ -78,7 +104,7 @@ function _getProviderValue(selectId) {
 
 function _getProviderCommand(selectId) {
   const v = document.getElementById(selectId).value;
-  if (!v) return 'claude';  // default provider
+  if (!v) return _runtimeDefaultCommand();
   const p = _cachedProviders.find(p => p.name === v);
   return p ? p.command : '';
 }
@@ -146,6 +172,8 @@ function onAddProviderChange() {
   const label = cmdRow.querySelector('label');
   const input = document.getElementById('add-cmd-input');
   cmdRow.classList.remove('hidden');
+  document.getElementById('add-model-row').classList.remove('hidden');
+  document.getElementById('add-reasoning-row').classList.remove('hidden');
   if (v === '__custom__') {
     label.textContent = 'Boot command';
     input.placeholder = 'e.g. npm run dev';
@@ -153,6 +181,13 @@ function onAddProviderChange() {
     label.textContent = 'Command override';
     input.placeholder = _getProviderCommand('add-provider-select') + ' (default)';
   }
+  _populateReasoningEffortSelect(
+    'add-reasoning-effort',
+    _getProviderValue('add-provider-select') || _runtimeDefaultProviderName(),
+    document.getElementById('add-reasoning-effort').value,
+    'Provider default',
+    'Not supported for this provider'
+  );
 }
 
 function onGsWeaverProviderChange() {
@@ -160,7 +195,7 @@ function onGsWeaverProviderChange() {
   if (input) {
     const effectiveProvider = _weaverProviderForReasoning();
     const meta = effectiveProvider ? _findProviderMeta(effectiveProvider) : null;
-    input.placeholder = (meta ? meta.command : 'claude') + ' (default)';
+    input.placeholder = (meta ? meta.command : _runtimeDefaultCommand()) + ' (default)';
   }
   _populateReasoningEffortSelect(
     'gs-weaver-reasoning-effort',

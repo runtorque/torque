@@ -4242,7 +4242,7 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
   context.state.weaver_settings = {
     alpha: { paused: false },
   };
-  runInContext(context, `focusedItemId = ''; selectedAgentId = '';`);
+  runInContext(context, `focusedItemId = ''; selectedAgentId = 'weaver-1';`);
 
   const runningHtml = context.renderAgentCell({
     id: 'weaver-1',
@@ -4261,7 +4261,7 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
     status: 'running',
   });
 
-  assert.match(runningHtml, /class="cell weaver weaver-running"/);
+  assert.match(runningHtml, /class="cell selected weaver weaver-running"/);
   assert.match(runningHtml, /class="cell-header-controls">/);
   assert.match(runningHtml, /class="cell-weaver-toggle running"/);
   assert.match(runningHtml, /Pause Weaver event delivery/);
@@ -4277,9 +4277,25 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
     status: 'running',
   });
 
-  assert.match(pausedHtml, /class="cell weaver weaver-paused"/);
+  assert.match(pausedHtml, /class="cell selected weaver weaver-paused"/);
   assert.match(pausedHtml, /class="cell-weaver-toggle paused"/);
   assert.match(pausedHtml, /Resume Weaver event delivery/);
+
+  context.state.weaver_settings.alpha = {
+    paused: false,
+    pending_question: 'Need input',
+  };
+  const askingHtml = context.renderAgentCell({
+    id: 'weaver-1',
+    name: 'Weaver',
+    icon: '🧶',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+  });
+
+  assert.match(askingHtml, /class="cell selected weaver weaver-asking weaver-running"/);
+  assert.match(askingHtml, /\? awaiting input/);
 });
 
 test('weaver agent card toggle shares the close control reveal affordances and icon-only default chrome', () => {
@@ -4293,6 +4309,19 @@ test('weaver agent card toggle shares the close control reveal affordances and i
   assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*background:/);
   assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*border-color:/);
   assert.match(css, /\.cell-weaver-toggle:hover,\s*\.cell-weaver-toggle:focus-visible,\s*\.cell-weaver-toggle:active\s*\{[^}]*outline:\s*none;/);
+});
+
+test('selected weaver cards keep selection chrome aligned with running and paused status colors', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /\.cell\.weaver\s*\{[^}]*--weaver-chrome:\s*transparent;[^}]*--weaver-edge-shadow:\s*none;[^}]*border-left-color:\s*var\(--weaver-chrome\);[^}]*box-shadow:\s*var\(--weaver-edge-shadow\);/);
+  assert.match(css, /\.cell\.weaver\.weaver-running\s*\{[^}]*--weaver-chrome:\s*var\(--green\);/);
+  assert.match(css, /\.cell\.weaver\.weaver-paused\s*\{[^}]*--weaver-chrome:\s*var\(--amber\);/);
+  assert.match(css, /\.cell\.weaver\.selected\s*\{[^}]*border-color:\s*var\(--weaver-chrome\);/);
+  assert.match(css, /\.cell\.weaver\.focused\s*\{[^}]*outline-color:\s*var\(--weaver-chrome\);/);
+  assert.match(css, /\.cell\.weaver\.selected\.active\s*\{[^}]*box-shadow:\s*var\(--weaver-active-glow\),\s*var\(--weaver-edge-shadow\);/);
+  assert.match(css, /\.cell\.weaver-asking\s*\{[^}]*--weaver-chrome:\s*var\(--amber\);[^}]*animation:\s*weaver-pulse 2s ease-in-out infinite;/);
+  assert.match(css, /@keyframes weaver-pulse\s*\{\s*0%,\s*100%\s*\{\s*box-shadow:\s*var\(--weaver-edge-shadow\);[^}]*\}\s*50%\s*\{\s*box-shadow:\s*var\(--weaver-edge-shadow\),\s*0 0 8px rgba\(210, 153, 34, 0\.3\);/);
 });
 
 test('renderWeaverPanel shows branch review-point summary', () => {
@@ -4742,6 +4771,8 @@ test('submitAdd includes worktree_name for custom agent worktrees', () => {
   document.register('add-env-vars').value = '';
   document.register('add-template-select').value = '';
   document.register('add-provider-select').value = '';
+  document.register('add-model-input').value = 'gpt-5';
+  document.register('add-reasoning-effort').value = 'high';
   document.register('add-wt-enabled').checked = true;
   document.register('add-wt-base-dir').value = '.loom/worktrees';
   document.register('add-wt-base-branch').value = 'main';
@@ -4758,6 +4789,8 @@ test('submitAdd includes worktree_name for custom agent worktrees', () => {
     group: 'alpha',
     profile: 'Default',
     directory: '/repo',
+    model: 'gpt-5',
+    reasoning_effort: 'high',
     worktree: true,
     worktree_base_dir: '.loom/worktrees',
     worktree_base_branch: 'main',
@@ -4781,6 +4814,8 @@ test('submitAdd omits worktree_name when custom worktree naming is blank or disa
   document.register('add-env-vars').value = '';
   document.register('add-template-select').value = '';
   document.register('add-provider-select').value = '';
+  document.register('add-model-input').value = '';
+  document.register('add-reasoning-effort').value = '';
   document.register('add-wt-enabled').checked = true;
   document.register('add-wt-base-dir').value = '.loom/worktrees';
   document.register('add-wt-base-branch').value = 'main';
@@ -4807,6 +4842,57 @@ test('submitAdd omits worktree_name when custom worktree naming is blank or disa
     false,
   );
   assert.equal(jsonValue(context, 'sendCalls[0].worktree'), false);
+});
+
+test('rendered add-agent templates apply model and reasoning effort overrides', () => {
+  const { context, document } = createModalHarness();
+  [
+    'add-provider-select',
+    'add-cmd-input',
+    'add-cmd-row',
+    'add-model-row',
+    'add-reasoning-row',
+    'add-model-input',
+    'add-reasoning-effort',
+    'add-shell-select',
+    'add-env-vars',
+    'add-wt-enabled',
+    'add-wt-fields',
+    'add-wt-base-dir',
+    'add-wt-base-branch',
+    'add-wt-auto-checkpoint',
+    'add-wt-checkpoint-on-progress',
+    'add-wt-squash',
+    'add-profile-select',
+    'add-dir-select',
+    'add-dir-input',
+    'add-name-input',
+  ].forEach((id) => document.register(id));
+  document.getElementById('add-cmd-row').setQuerySelector('label', document.register('add-cmd-row-label'));
+  runInContext(context, `
+    _cachedAgentTemplates = [];
+    _cachedProviders = [{
+      name: 'codex',
+      display_name: 'Codex',
+      command: 'codex',
+      reasoning_efforts: ['low', 'medium', 'high'],
+    }];
+    addCellMode = 'agent';
+  `);
+  context._applyRenderedAddTemplate({
+    provider: 'codex',
+    command: 'codex --full-auto',
+    model: 'gpt-5',
+    reasoning_effort: 'high',
+    shell: 'zsh',
+    env_vars: {},
+    worktree: false,
+  }, 'worker/reviewer');
+
+  assert.equal(document.getElementById('add-provider-select').value, 'codex');
+  assert.equal(document.getElementById('add-cmd-input').value, 'codex --full-auto');
+  assert.equal(document.getElementById('add-model-input').value, 'gpt-5');
+  assert.equal(document.getElementById('add-reasoning-effort').value, 'high');
 });
 
 test('standalone submitGroup immediately continues into add-agent setup', () => {

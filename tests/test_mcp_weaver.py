@@ -539,6 +539,36 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["agent_type"], "codex")
         self.assertEqual(captured["command"], "codex --model gpt-5")
 
+    async def test_dispatch_forwards_model_and_reasoning_effort_for_new_agent(self):
+        state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
+        task = state.board_add_task("Investigate bug", "g")
+
+        self.assertIsNotNone(task)
+        captured = {}
+
+        async def fake_handle_command(payload):
+            captured.update(payload)
+            return {"type": "ok"}
+
+        _, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_dispatch",
+            {
+                "task": task.id,
+                "agent_type": "codex",
+                "model": "gpt-5",
+                "reasoning_effort": "high",
+            },
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(captured["agent_type"], "codex")
+        self.assertEqual(captured["model"], "gpt-5")
+        self.assertEqual(captured["reasoning_effort"], "high")
+
     async def test_dispatch_to_existing_agent_forwards_agent_id_only(self):
         state = self.state_mod.MatrixState()
         weaver = self._add_weaver(state)
@@ -2409,6 +2439,54 @@ class WeaverEventAndInteractionToolTests(unittest.IsolatedAsyncioTestCase):
         )
         settings = json.loads(text)["settings"]
         self.assertEqual(settings["heartbeat_interval"], 0)
+
+    async def test_launch_settings_update_weaver_launch_overrides(self):
+        state, weaver = self._make_state()
+        captured = {}
+
+        async def fake_handle_command(payload):
+            captured.update(payload)
+            state.update_weaver_settings(
+                payload["group"],
+                weaver_provider=payload.get("weaver_provider", ""),
+                weaver_boot_command=payload.get("weaver_boot_command", ""),
+                weaver_model=payload.get("weaver_model", ""),
+                weaver_reasoning_effort=payload.get(
+                    "weaver_reasoning_effort", ""
+                ),
+            )
+            return {"type": "ok"}
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_launch_settings",
+            {
+                "provider": "codex",
+                "command": "codex --full-auto",
+                "model": "gpt-5",
+                "reasoning_effort": "high",
+            },
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(
+            captured,
+            {
+                "cmd": "weaver_update_settings",
+                "group": "g",
+                "weaver_provider": "codex",
+                "weaver_boot_command": "codex --full-auto",
+                "weaver_model": "gpt-5",
+                "weaver_reasoning_effort": "high",
+            },
+        )
+        settings = json.loads(text)["settings"]
+        self.assertEqual(settings["weaver_provider"], "codex")
+        self.assertEqual(settings["weaver_boot_command"], "codex --full-auto")
+        self.assertEqual(settings["weaver_model"], "gpt-5")
+        self.assertEqual(settings["weaver_reasoning_effort"], "high")
 
     async def test_ask_and_resolve_forward_expected_payloads(self):
         state, weaver = self._make_state()

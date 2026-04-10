@@ -39,7 +39,8 @@ def get_providers() -> list[dict]:
     """Return known providers (excluding generic fallback)."""
     return [
         {"name": a.name, "display_name": a.display_name,
-         "command": a.default_command}
+         "command": a.default_command,
+         "reasoning_efforts": a.get_reasoning_effort_options()}
         for a in ADAPTERS if a.name and a.name != "generic"
     ]
 
