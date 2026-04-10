@@ -22,6 +22,11 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.pty_mod = importlib.import_module("loom.local_pty")
         self.pty_mod = importlib.reload(self.pty_mod)
 
+    def test_capabilities_expose_embedded_terminal_without_toolbelt_registration(self):
+        self.assertTrue(self.pty_mod.LocalPtyAdapter.capabilities.supports_embedded_terminal)
+        self.assertTrue(self.pty_mod.LocalPtyAdapter.capabilities.supports_focus_tracking)
+        self.assertFalse(self.pty_mod.LocalPtyAdapter.capabilities.supports_toolbelt_registration)
+
     async def test_create_session_emits_output_and_tracks_focus(self):
         state = self.state_mod.MatrixState()
         state.add_group("Loom")

@@ -3590,6 +3590,68 @@ test('embedded terminal selection clears stale agent selection for standalone te
   assert.equal(jsonValue(context, 'focusedItemId'), 'term-root');
 });
 
+test('classic terminal selection keeps the current agent context on the toolbelt path', () => {
+  const { context } = createSelectionHarness();
+
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent' },
+    'term-root': { id: 'term-root', name: 'Shell Root', group: 'alpha', cell_type: 'terminal' },
+  };
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    selectedTerminalId = 'agent-1';
+    focusedItemId = 'agent-1';
+  `);
+
+  context.focusAgent('term-root');
+
+  assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-1');
+  assert.equal(jsonValue(context, 'selectedTerminalId'), 'term-root');
+  assert.equal(jsonValue(context, 'focusedItemId'), 'term-root');
+  assert.equal(jsonValue(context, 'renderCalls.main'), 0);
+});
+
+test('terminal workspace stays inert when embedded runtime is disabled', () => {
+  const { context, document, sockets } = createEmbeddedTerminalHarness();
+  const workspace = document.getElementById('terminal-workspace');
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: false };
+    window.__disposeFlags = {};
+    document.getElementById('terminal-workspace').innerHTML = '<div class="terminal-shell">stale</div>';
+    document.getElementById('terminal-workspace').classList.add('active');
+    _embeddedTerminal = {
+      dispose: function() { window.__disposeFlags.terminalDisposed = true; }
+    };
+    _embeddedTerminalFit = { active: true };
+    _embeddedTerminalDataHandler = {
+      dispose: function() { window.__disposeFlags.dataDisposed = true; }
+    };
+    _embeddedTerminalWs = {
+      close: function() { window.__disposeFlags.wsClosed = true; }
+    };
+    _embeddedTerminalResizeObserver = {
+      disconnect: function() { window.__disposeFlags.observerDisconnected = true; }
+    };
+    _embeddedTerminalSessionKey = 'term-1:session-old';
+  `);
+
+  context.renderTerminalWorkspace();
+
+  assert.equal(workspace.innerHTML, '');
+  assert.equal(workspace.classList.contains('active'), false);
+  assert.deepEqual(jsonValue(context, 'window.__disposeFlags'), {
+    observerDisconnected: true,
+    wsClosed: true,
+    dataDisposed: true,
+    terminalDisposed: true,
+  });
+  assert.equal(sockets.length, 0);
+  assert.equal(jsonValue(context, '!!_embeddedTerminal'), false);
+  assert.equal(jsonValue(context, '!!_embeddedTerminalWs'), false);
+  assert.equal(jsonValue(context, '_embeddedTerminalSessionKey'), '');
+});
+
 test('embedded terminal ignores stale websocket output after a relaunch session swap', () => {
   const { context, sockets, terminals } = createEmbeddedTerminalHarness();
   const firstSurface = new FakeElement('surface-1');
@@ -4652,6 +4714,56 @@ test('standalone sidebar formats repo and home paths compactly', () => {
     ),
     'iterm2-loom/docs'
   );
+});
+
+test('classic runtime keeps the shared left rail filtered to the current window', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.current_window_id = 'window-a';
+  sandbox.state.groups = { alpha: ['agent-a', 'agent-b', 'term-b'] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'agent-a': {
+      id: 'agent-a',
+      name: 'Worker A',
+      icon: 'A',
+      group: 'alpha',
+      cell_type: 'agent',
+      window_id: 'window-a',
+      status: 'running',
+      session_id: 'sess-a',
+    },
+    'agent-b': {
+      id: 'agent-b',
+      name: 'Worker B',
+      icon: 'B',
+      group: 'alpha',
+      cell_type: 'agent',
+      window_id: 'window-b',
+      status: 'running',
+      session_id: 'sess-b',
+    },
+    'term-b': {
+      id: 'term-b',
+      name: 'Shell B',
+      group: 'alpha',
+      cell_type: 'terminal',
+      window_id: 'window-b',
+      status: 'idle',
+      current_process: 'zsh',
+    },
+  };
+  runInContext(context, `
+    getFilterByWindow = function() { return true; };
+    render();
+  `);
+
+  assert.match(main.innerHTML, /Worker A/);
+  assert.doesNotMatch(main.innerHTML, /Worker B/);
+  assert.doesNotMatch(main.innerHTML, /Shell B/);
+  assert.deepEqual(jsonValue(context, `window._navAgents`), ['agent-a']);
 });
 
 test('main render pins the weaver first in the visible and navigable agent order', () => {
