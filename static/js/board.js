@@ -21,6 +21,7 @@ var _boardActiveViewKey = '';
 var _boardNextViewDefault = null;
 var _boardSkipViewCaptureOnce = false;
 var _boardDragId = '';          // card being dragged
+var _boardHoveredTask = '';     // task_id currently hovered when DOM rerenders
 
 var _boardCollapsedTasks = {};  // task_id → true if collapsed
 var _boardFilterByGroup = true;  // When true, board shows only tasks from the current group
@@ -588,19 +589,54 @@ function boardToggleTaskCollapse(taskId) {
   renderBoard();
 }
 
+function boardCardMouseEnter(taskId) {
+  _boardHoveredTask = taskId || '';
+}
+
+function boardCardMouseLeave(taskId) {
+  if (_boardHoveredTask === taskId) _boardHoveredTask = '';
+}
+
+function _boardRestoreRenderedState() {
+  var tabsEl = document.getElementById('board-lane-tabs');
+  if (tabsEl) {
+    tabsEl.scrollLeft = _boardScrollLeft;
+    tabsEl.addEventListener('scroll', function() {
+      _boardScrollLeft = tabsEl.scrollLeft;
+      boardUpdateScrollArrows();
+    });
+    boardUpdateScrollArrows();
+  }
+
+  var cardsEl = document.getElementById('board-cards');
+  if (cardsEl) {
+    cardsEl.scrollTop = _boardCardsScrollTop;
+    cardsEl.addEventListener('scroll', function() {
+      _boardCardsScrollTop = cardsEl.scrollTop;
+      _boardSyncActiveViewState(cardsEl);
+      // Load more when within 100px of the bottom
+      if (cardsEl.scrollTop + cardsEl.clientHeight >= cardsEl.scrollHeight - 100) {
+        boardLoadMore();
+      }
+    });
+    // Click on empty space clears selection
+    cardsEl.addEventListener('click', function(e) {
+      var clickedEmptyWideLane = !!(
+        e.target
+        && e.target.classList
+        && e.target.classList.contains('board-wide-lane-body')
+      );
+      if ((e.target === cardsEl || clickedEmptyWideLane) && _boardSelectedCount() > 0) {
+        boardClearSelection();
+      }
+    });
+  }
+}
+
 function _boardAfterRenderLayout() {
   requestAnimationFrame(function() {
     var tabsEl = document.getElementById('board-lane-tabs');
     if (tabsEl) {
-      // Attach scroll listener (re-attached each render since DOM is rebuilt)
-      tabsEl.addEventListener('scroll', function() {
-        _boardScrollLeft = tabsEl.scrollLeft;
-        boardUpdateScrollArrows();
-      });
-
-      // Restore saved scroll position
-      tabsEl.scrollLeft = _boardScrollLeft;
-
       // Ensure active tab is fully visible
       var activeTab = tabsEl.querySelector('.board-lane-tab.active');
       if (activeTab) {
@@ -617,31 +653,6 @@ function _boardAfterRenderLayout() {
 
       _boardScrollLeft = tabsEl.scrollLeft;
       boardUpdateScrollArrows();
-    }
-
-    // Restore cards scroll position + infinite scroll
-    var cardsEl = document.getElementById('board-cards');
-    if (cardsEl) {
-      cardsEl.scrollTop = _boardCardsScrollTop;
-      cardsEl.addEventListener('scroll', function() {
-        _boardCardsScrollTop = cardsEl.scrollTop;
-        _boardSyncActiveViewState(cardsEl);
-        // Load more when within 100px of the bottom
-        if (cardsEl.scrollTop + cardsEl.clientHeight >= cardsEl.scrollHeight - 100) {
-          boardLoadMore();
-        }
-      });
-      // Click on empty space clears selection
-      cardsEl.addEventListener('click', function(e) {
-        var clickedEmptyWideLane = !!(
-          e.target
-          && e.target.classList
-          && e.target.classList.contains('board-wide-lane-body')
-        );
-        if ((e.target === cardsEl || clickedEmptyWideLane) && _boardSelectedCount() > 0) {
-          boardClearSelection();
-        }
-      });
     }
     if (_boardRevealFocusOnRender) {
       _boardRevealFocusOnRender = false;
@@ -1078,6 +1089,7 @@ function renderBoard() {
   if (_boardShowSchedules) {
     html += _renderSchedulesView();
     panel.innerHTML = html;
+    _boardRestoreRenderedState();
     _boardAfterRenderLayout();
     if (!skipRestoreFocus) _restoreSurfaceState(panel, panelState);
     return;
@@ -1128,6 +1140,7 @@ function renderBoard() {
   html += _renderBoardSelectionBar();
 
   panel.innerHTML = html;
+  _boardRestoreRenderedState();
 
   // Auto-focus inputs (only when user explicitly opened, not on re-renders)
   if (_boardAddingTask && _boardAddTaskFocus) {

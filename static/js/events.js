@@ -39,6 +39,78 @@ function _eventsIsDismissed(item) {
   return itemTs <= dismissedAt;
 }
 
+function _eventsEntryKey(evt, fallback) {
+  if (evt && evt.id !== undefined && evt.id !== null && evt.id !== '') {
+    return String(evt.id);
+  }
+  if (fallback !== undefined && fallback !== null && fallback !== '') {
+    return String(fallback);
+  }
+  return '';
+}
+
+function _eventsAnchorDataValue(el, dataKey) {
+  if (!el) return '';
+  if (el.dataset && el.dataset[dataKey] !== undefined && el.dataset[dataKey] !== '') {
+    return String(el.dataset[dataKey]);
+  }
+  var attrName = 'data-' + String(dataKey).replace(/[A-Z]/g, function(ch) {
+    return '-' + ch.toLowerCase();
+  });
+  if (typeof el.getAttribute === 'function') {
+    var value = el.getAttribute(attrName);
+    if (value !== null && value !== '') return String(value);
+  }
+  return '';
+}
+
+function _eventsCaptureScrollAnchor(scroller, selector, dataKey) {
+  if (!scroller) return null;
+  var snapshot = {
+    id: '',
+    offset: 0,
+    top: typeof scroller.scrollTop === 'number' ? scroller.scrollTop : 0,
+  };
+  if (typeof scroller.querySelectorAll !== 'function') return snapshot;
+  var items = scroller.querySelectorAll(selector) || [];
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var top = typeof item.offsetTop === 'number' ? item.offsetTop : 0;
+    var height = typeof item.offsetHeight === 'number' ? item.offsetHeight : 0;
+    if (top + height > snapshot.top) {
+      var id = _eventsAnchorDataValue(item, dataKey);
+      if (id) {
+        snapshot.id = id;
+        snapshot.offset = snapshot.top - top;
+      }
+      break;
+    }
+  }
+  return snapshot;
+}
+
+function _eventsFindScrollAnchor(scroller, selector, dataKey, id) {
+  if (!scroller || !id || typeof scroller.querySelectorAll !== 'function') return null;
+  var items = scroller.querySelectorAll(selector) || [];
+  for (var i = 0; i < items.length; i++) {
+    if (_eventsAnchorDataValue(items[i], dataKey) === String(id)) return items[i];
+  }
+  return null;
+}
+
+function _eventsRestoreScrollAnchor(scroller, selector, dataKey, snapshot) {
+  if (!scroller || !snapshot) return;
+  var nextTop = typeof snapshot.top === 'number' ? snapshot.top : 0;
+  if (snapshot.id) {
+    var item = _eventsFindScrollAnchor(scroller, selector, dataKey, snapshot.id);
+    if (item) {
+      var top = typeof item.offsetTop === 'number' ? item.offsetTop : 0;
+      nextTop = top + (snapshot.offset || 0);
+    }
+  }
+  scroller.scrollTop = Math.max(0, nextTop);
+}
+
 /* ---- Helpers -------------------------------------------------------- */
 
 function _eventsCurrentGroup() {
@@ -190,7 +262,53 @@ function _eventsAskAgent(task) {
 function renderEvents() {
   var panel = document.getElementById('panel-events');
   if (!panel) return;
-  var panelState = _captureSurfaceState(panel);
+  var panelStateOptions = {
+    captureFocusKey: function(active) {
+      if (active && active.classList
+          && active.classList.contains('events-search-input')) {
+        return '.events-search-input';
+      }
+      return '';
+    },
+    resolveFocus: function(root, snapshot) {
+      if (snapshot && snapshot.key === '.events-search-input'
+          && root && typeof root.querySelector === 'function') {
+        return root.querySelector('.events-search-input');
+      }
+      return null;
+    },
+    capture: function(snapshot, root) {
+      if (!snapshot || !root || typeof root.querySelector !== 'function') return;
+      snapshot.attentionAnchor = _eventsCaptureScrollAnchor(
+        root.querySelector('.events-attention'),
+        '.events-attention-card',
+        'itemId',
+      );
+      snapshot.logAnchor = _eventsCaptureScrollAnchor(
+        root.querySelector('.events-log'),
+        '.events-entry',
+        'eventId',
+      );
+    },
+    restore: function(root, snapshot) {
+      if (!snapshot || !root || typeof root.querySelector !== 'function') return;
+      _eventsRestoreScrollAnchor(
+        root.querySelector('.events-attention'),
+        '.events-attention-card',
+        'itemId',
+        snapshot.attentionAnchor,
+      );
+      _eventsRestoreScrollAnchor(
+        root.querySelector('.events-log'),
+        '.events-entry',
+        'eventId',
+        snapshot.logAnchor,
+      );
+    },
+  };
+  var panelState = _captureSurfaceState(panel, panelStateOptions);
+  var shouldRestoreSearchFocus = _eventsSearchHadFocus
+    && !(panelState && panelState.focus);
 
   // Preserve scroll position and inline ask drafts before DOM rebuild
   var logEl = panel.querySelector('.events-log');
@@ -266,23 +384,9 @@ function renderEvents() {
 
   panel.innerHTML = html;
 
-  // Restore scroll
-  logEl = panel.querySelector('.events-log');
-  if (logEl) {
-    logEl.scrollTop = _eventsScrollTop;
-    logEl.addEventListener('scroll', _eventsOnScroll);
-  }
-
   // Track oldest ID for pagination
   if (events.length > 0) {
     _eventsOldestId = events[0].id;
-  }
-
-  // Restore search input focus if it was active before re-render
-  if (_eventsSearchHadFocus) {
-    var searchInput = panel.querySelector('.events-search-input');
-    if (searchInput) { searchInput.focus(); searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length; }
-    _eventsSearchHadFocus = false;
   }
 
   // Auto-resize textareas
@@ -290,13 +394,29 @@ function renderEvents() {
     ta.style.height = 'auto';
     ta.style.height = ta.scrollHeight + 'px';
   });
-  _restoreSurfaceState(panel, panelState);
+  _restoreSurfaceState(panel, panelState, panelStateOptions);
+
+  logEl = panel.querySelector('.events-log');
+  if (logEl) {
+    _eventsScrollTop = logEl.scrollTop;
+    logEl.addEventListener('scroll', _eventsOnScroll);
+  }
+
+  if (shouldRestoreSearchFocus) {
+    var searchInput = panel.querySelector('.events-search-input');
+    if (searchInput) {
+      searchInput.focus();
+      searchInput.selectionStart = searchInput.selectionEnd = searchInput.value.length;
+    }
+  }
+  _eventsSearchHadFocus = false;
 }
 
 /* ---- Attention card rendering --------------------------------------- */
 
 function _renderAttentionCard(item) {
-  var html = '<div class="events-attention-card events-attention-' + item.type + '">';
+  var html = '<div class="events-attention-card events-attention-' + item.type + '"'
+    + ' data-item-id="' + esc(item.id) + '">';
   html += '<button class="events-dismiss-btn" onclick="event.stopPropagation();eventsDismiss(\'' + item.id + '\')" title="Dismiss">\u00D7</button>';
 
   if (item.type === 'ask') {
@@ -351,12 +471,15 @@ function _renderAttentionCard(item) {
 /* ---- Log entry rendering -------------------------------------------- */
 
 function _renderEventEntry(evt, idx) {
+  var entryKey = _eventsEntryKey(evt, idx);
+  var entryKeyJs = esc(entryKey).replace(/'/g, "\\'");
   var kindClass = _eventsKindClass(evt.kind);
-  var isExpanded = _eventsExpandedEntries[idx];
+  var isExpanded = _eventsExpandedEntries[entryKey];
   var expanded = isExpanded ? ' expanded' : '';
   var isError = (evt.kind === 'agent_error' || evt.kind === 'agent_blocked');
   var html = '<div class="events-entry ' + kindClass + expanded + '"'
-    + ' onclick="eventsToggleEntry(' + idx + ')">';
+    + ' data-event-id="' + esc(entryKey) + '"'
+    + ' onclick="eventsToggleEntry(\'' + entryKeyJs + '\')">';
   html += '<span class="events-entry-time">' + _eventsFormatTime(evt.timestamp) + '</span>';
   html += '<span class="events-entry-icon">' + _eventsKindIcon(evt.kind) + '</span>';
   if (evt.agent_name) {
@@ -365,7 +488,7 @@ function _renderEventEntry(evt, idx) {
   if (isExpanded && isError) {
     html += '<span class="events-entry-text events-entry-error-detail">'
       + esc(evt.message || evt.kind)
-      + '<button class="events-copy-btn" onclick="event.stopPropagation();eventsCopyMessage(' + idx + ')" title="Copy">Copy</button>'
+      + '<button class="events-copy-btn" onclick="event.stopPropagation();eventsCopyMessage(\'' + entryKeyJs + '\')" title="Copy">Copy</button>'
       + '</span>';
   } else {
     html += '<span class="events-entry-text">' + esc(evt.message || evt.kind) + '</span>';
@@ -396,9 +519,11 @@ function eventsFocusAgent(cellId) {
   if (typeof focusAgent === 'function') focusAgent(cellId);
 }
 
-function eventsToggleEntry(idx) {
-  if (_eventsExpandedEntries[idx]) delete _eventsExpandedEntries[idx];
-  else _eventsExpandedEntries[idx] = true;
+function eventsToggleEntry(entryKey) {
+  var key = String(entryKey || '');
+  if (!key) return;
+  if (_eventsExpandedEntries[key]) delete _eventsExpandedEntries[key];
+  else _eventsExpandedEntries[key] = true;
   renderEvents();
 }
 
@@ -436,9 +561,15 @@ function eventsDismiss(id) {
   updateEventsAttentionBadge();
 }
 
-function eventsCopyMessage(idx) {
+function eventsCopyMessage(entryKey) {
   var events = (state && state.panel_events) || [];
-  var evt = events[idx];
+  var evt = null;
+  for (var i = 0; i < events.length; i++) {
+    if (_eventsEntryKey(events[i], i) === String(entryKey || '')) {
+      evt = events[i];
+      break;
+    }
+  }
   if (evt && evt.message) {
     navigator.clipboard.writeText(evt.message);
   }
@@ -459,6 +590,7 @@ function updateEventsAttentionBadge() {
 
 function _eventsOnScroll() {
   var el = this;
+  _eventsScrollTop = el.scrollTop;
   // The log renders newest first (top) — "load more" triggers near the bottom
   if (_eventsLoading || !_eventsHasMore) return;
   if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) {

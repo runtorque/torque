@@ -48,6 +48,8 @@ The frontend is intentionally simple:
 
 Important constraint: script order in [webview.html](/Users/aleksanderarruda/dev/personal/gh/iterm2-loom/.loom/worktrees/cacfabe5/webview.html) is part of the architecture. Core files load first, then board/modal submodules, then feature panels.
 
+Live-update constraint: most panels are re-rendered from WebSocket-driven state patches. Frontend changes must preserve operator state across routine rerenders unless the view intentionally navigates away. That includes scroll position, viewport anchor when new content is inserted above the user, hover/focus/caret, inline drafts, expanded sections, and selection/highlight state.
+
 Primary files:
 
 - `static/js/ws.js`: socket client, snapshot/delta application
@@ -81,6 +83,8 @@ If you change persisted state or object shape, you usually need to update all of
 - Worktree support is a core feature. Changes in task dispatch, merge flow, or agent reuse often also affect worktree inheritance and boundary tracking.
 - Weaver behavior is not isolated to one file. Changes often span `weaver.py`, `mcp_weaver.py`, server command handling, board/event UI, and tests.
 - Runtime-generated Loom files inside repos/worktrees are intentional. Be careful around `.claude/`, `.codex/`, `.mcp.json`, and `.loom/worktrees/` behavior.
+- When changing a live frontend panel, do not replace an interactive subtree unless you either keep its DOM stable or explicitly capture and restore the operator state it owns before paint.
+- Frontend rerender-stability fixes must ship with Node frontend regression coverage in `tests/frontend_state_regression.test.js` or a nearby targeted frontend test.
 
 ## Commands
 

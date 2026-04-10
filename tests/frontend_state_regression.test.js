@@ -57,6 +57,8 @@ class FakeElement {
     this.scrollLeft = 0;
     this.scrollWidth = 600;
     this.clientWidth = 240;
+    this.offsetTop = 0;
+    this.offsetHeight = 24;
     this.offsetLeft = 0;
     this.offsetWidth = 80;
     this.selectionStart = 0;
@@ -418,16 +420,18 @@ function createSelectionHarness() {
   return { context, document };
 }
 
-function createEventsHarness() {
+function createEventsHarness(options = {}) {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
   loadScript(context, 'static/js/events.js');
-  runInContext(context, `
-    _renderAttentionCard = function(item) { return '<div class="attention-item">' + item.id + '</div>'; };
-    _renderEventEntry = function(evt) { return '<div class="event-entry">' + evt.kind + '</div>'; };
-    _eventsOnScroll = function() {};
-  `);
+  if (options.stubRenderers !== false) {
+    runInContext(context, `
+      _renderAttentionCard = function(item) { return '<div class="attention-item">' + item.id + '</div>'; };
+      _renderEventEntry = function(evt) { return '<div class="event-entry">' + evt.kind + '</div>'; };
+      _eventsOnScroll = function() {};
+    `);
+  }
   return { context, document };
 }
 
@@ -3220,6 +3224,7 @@ test('renderBoard restores focused input value and caret across rerenders', () =
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');
   document.register('board-cards');
+  document.register('board-lane-tabs');
   const input = document.register('board-search-input');
   input.value = 'deploy auth';
   input.selectionStart = 6;
@@ -3239,6 +3244,67 @@ test('renderBoard restores focused input value and caret across rerenders', () =
   assert.equal(input.value, 'deploy auth');
   assert.equal(input.selectionStart, 6);
   assert.equal(input.selectionEnd, 11);
+});
+
+test('renderBoard restores lane and card scroll before deferred layout work runs', () => {
+  const rafQueue = [];
+  const { sandbox, document } = createSandbox({
+    requestAnimationFrame(fn) {
+      rafQueue.push(fn);
+      return rafQueue.length;
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  loadBoardScripts(context);
+  runInContext(context, `
+    _renderBoardSelectionBar = function() { return ''; };
+    _renderBoardCard = function(t) { return '<div class="board-card">' + t.id + '</div>'; };
+    _boardScheduleCount = function() { return 0; };
+    boardUpdateScrollArrows = function() {};
+    boardAddTaskAutoResize = function() {};
+  `);
+
+  document.register('panel-board');
+  const cards = document.register('board-cards');
+  const tabs = document.register('board-lane-tabs');
+  tabs.setQuerySelector('.board-lane-tab.active', null);
+  cards.scrollTop = 81;
+
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    task: { id: 'task', group: 'alpha', task: 'Deploy auth flow', lane: 'Backlog', position: 1 },
+  };
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardScrollLeft = 36;
+  `);
+
+  context.renderBoard();
+
+  assert.equal(cards.scrollTop, 81);
+  assert.equal(tabs.scrollLeft, 36);
+  assert.equal(rafQueue.length > 0, true);
+});
+
+test('renderBoard preserves hovered-card chrome across rerenders', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.register('board-lane-tabs');
+
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    task: { id: 'task', group: 'alpha', task: 'Deploy auth flow', lane: 'Backlog', position: 1 },
+  };
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    boardCardMouseEnter('task');
+  `);
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-card-hovered/);
 });
 
 test('renderBoard keeps the inline add-task composer expanded across rerenders', () => {
@@ -3349,8 +3415,10 @@ test('renderEvents restores focused search input value and caret across rerender
   const { context, document } = createEventsHarness();
   const panel = document.register('panel-events');
   panel.setQuerySelector('.events-log', null);
+  panel.setQuerySelector('.events-attention', null);
   panel.setQuerySelectorAll('.events-resolve-textarea', []);
-  const input = document.register('events-search-input');
+  const input = new FakeElement();
+  input.classList.add('events-search-input');
   input.value = 'stuck';
   input.selectionStart = 2;
   input.selectionEnd = 5;
@@ -3367,6 +3435,137 @@ test('renderEvents restores focused search input value and caret across rerender
   assert.equal(input.value, 'stuck');
   assert.equal(input.selectionStart, 2);
   assert.equal(input.selectionEnd, 5);
+});
+
+test('events scroll anchors keep the same log entry visible when newer events arrive', () => {
+  const { context, document } = createEventsHarness({ stubRenderers: false });
+  const panel = document.register('panel-events');
+  const log = new FakeElement('events-log');
+  const search = new FakeElement();
+  search.classList.add('events-search-input');
+  panel.setQuerySelector('.events-log', log);
+  panel.setQuerySelector('.events-attention', null);
+  panel.setQuerySelector('.events-search-input', search);
+  panel.setQuerySelectorAll('.events-resolve-textarea', []);
+
+  let renderPhase = 'before';
+  const oldEntry = new FakeElement();
+  oldEntry.dataset.eventId = '100';
+  oldEntry.offsetTop = 100;
+  oldEntry.offsetHeight = 24;
+  const newEntry = new FakeElement();
+  newEntry.dataset.eventId = '101';
+  newEntry.offsetTop = 0;
+  newEntry.offsetHeight = 24;
+  const anchoredEntry = new FakeElement();
+  anchoredEntry.dataset.eventId = '100';
+  anchoredEntry.offsetTop = 124;
+  anchoredEntry.offsetHeight = 24;
+  log.scrollTop = 110;
+  log.querySelectorAll = function(selector) {
+    if (selector !== '.events-entry') return [];
+    return renderPhase === 'before' ? [oldEntry] : [newEntry, anchoredEntry];
+  };
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML; },
+    set(value) {
+      this._innerHTML = value;
+      this.children = [];
+      renderPhase = 'after';
+    },
+  });
+
+  context.state.panel_events = [
+    { id: 100, kind: 'agent_progress', message: 'Still working', group: 'alpha', timestamp: 1 },
+    { id: 101, kind: 'agent_progress', message: 'More work', group: 'alpha', timestamp: 2 },
+  ];
+
+  context.renderEvents();
+
+  assert.equal(log.scrollTop, 134);
+});
+
+test('events scroll anchors preserve the attention list while asks are visible', () => {
+  const { context, document } = createEventsHarness({ stubRenderers: false });
+  const panel = document.register('panel-events');
+  const attention = new FakeElement('events-attention');
+  const log = new FakeElement('events-log');
+  const search = new FakeElement();
+  search.classList.add('events-search-input');
+  panel.setQuerySelector('.events-attention', attention);
+  panel.setQuerySelector('.events-log', log);
+  panel.setQuerySelector('.events-search-input', search);
+  panel.setQuerySelectorAll('.events-resolve-textarea', []);
+
+  let renderPhase = 'before';
+  const oldCard = new FakeElement();
+  oldCard.dataset.itemId = 'ask-1';
+  oldCard.offsetTop = 60;
+  oldCard.offsetHeight = 80;
+  const newCard = new FakeElement();
+  newCard.dataset.itemId = 'ask-0';
+  newCard.offsetTop = 0;
+  newCard.offsetHeight = 80;
+  const anchoredCard = new FakeElement();
+  anchoredCard.dataset.itemId = 'ask-1';
+  anchoredCard.offsetTop = 80;
+  anchoredCard.offsetHeight = 80;
+  attention.scrollTop = 70;
+  attention.querySelectorAll = function(selector) {
+    if (selector !== '.events-attention-card') return [];
+    return renderPhase === 'before' ? [oldCard] : [newCard, anchoredCard];
+  };
+  log.querySelectorAll = function() { return []; };
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() { return this._innerHTML; },
+    set(value) {
+      this._innerHTML = value;
+      this.children = [];
+      renderPhase = 'after';
+    },
+  });
+
+  context.state.board_tasks = {
+    'ask-0': {
+      id: 'ask-0',
+      group: 'alpha',
+      task: 'Newest question',
+      lane: 'Backlog',
+      labels: ['loom:human'],
+      created_at: '2026-04-10T10:05:00+00:00',
+    },
+    'ask-1': {
+      id: 'ask-1',
+      group: 'alpha',
+      task: 'Original question',
+      lane: 'Backlog',
+      labels: ['loom:human'],
+      created_at: '2026-04-10T10:00:00+00:00',
+    },
+  };
+  context.state.panel_events = [];
+
+  context.renderEvents();
+
+  assert.equal(attention.scrollTop, 90);
+});
+
+test('events entries preserve expansion state by event id across rerenders', () => {
+  const { context } = createEventsHarness({ stubRenderers: false });
+
+  runInContext(context, `_eventsExpandedEntries = { '7': true };`);
+  const html = context._renderEventEntry({
+    id: 7,
+    kind: 'agent_error',
+    message: 'Boom',
+    timestamp: 1,
+  }, 12);
+
+  assert.match(html, /events-entry .*expanded/);
+  assert.match(html, /data-event-id="7"/);
+  assert.match(html, /eventsToggleEntry\('7'\)/);
 });
 
 test('context panel requests scoped memory and renders provenance details', () => {
@@ -3784,6 +3983,151 @@ test('ws invalidation rerenders the context panel for task updates', () => {
   });
 
   assert.equal(jsonValue(context, 'renderCalls.context'), 1);
+});
+
+test('ws invalidation skips rerendering the active board for off-group task updates', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'board';
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-1',
+      task: 'Sync memory',
+      group: 'beta',
+      lane: 'In Progress',
+    }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('ws invalidation skips rerendering the active events panel for off-group task updates', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'events';
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-1',
+      task: 'Sync memory',
+      group: 'beta',
+      lane: 'In Progress',
+    }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('ws invalidation skips rerendering the active board for off-group task removals', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'board';
+  runInContext(context, `
+    state.board_tasks = {
+      'task-1': {
+        id: 'task-1',
+        task: 'Sync memory',
+        group: 'beta',
+        lane: 'In Progress',
+      },
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_remove',
+      id: 'task-1',
+    }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('ws invalidation skips rerendering the active events panel for off-group task removals', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'events';
+  runInContext(context, `
+    state.board_tasks = {
+      'task-1': {
+        id: 'task-1',
+        task: 'Sync memory',
+        group: 'beta',
+        lane: 'In Progress',
+      },
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_remove',
+      id: 'task-1',
+    }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('ws invalidation skips rerendering the active context panel for off-group agent removals', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'context';
+  runInContext(context, `
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        name: 'Beta agent',
+        group: 'beta',
+      },
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_remove',
+      id: 'agent-1',
+    }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
 });
 
 test('renderWeaverPanel preserves focused reply draft across rerenders', () => {
