@@ -4011,6 +4011,7 @@ body.runtime-embedded .board-empty-action:focus-visible {
   background: var(--bg-surface);
 }
 body.diff-view-open #diff-view-root { display: flex; }
+body.diff-view-open #workspace-shell,
 body.diff-view-open main,
 body.diff-view-open #bottom-panel,
 body.diff-view-open #taskbar,

@@ -4697,6 +4697,12 @@ test('diff review bulk collapse controls stay stable across refreshes', () => {
   assert.match(root.innerHTML, /0 of 3 collapsed/);
 });
 
+test('diff review overlay hides the workspace shell so standalone merge review uses the full viewport', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #broadcast,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
+});
+
 test('full state toggles embedded runtime body class', () => {
   const { context, document } = createWsRenderHarness();
 
