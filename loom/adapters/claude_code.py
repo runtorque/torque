@@ -212,6 +212,15 @@ class ClaudeCodeAdapter(AgentAdapter):
             return ""
         return f" --model {shlex.quote(model)}"
 
+    def resolve_reasoning_effort_flags(self, reasoning_effort: str) -> str:
+        reasoning_effort = str(reasoning_effort or "").strip()
+        if not reasoning_effort:
+            return ""
+        return f" --effort {shlex.quote(reasoning_effort)}"
+
+    def get_reasoning_effort_options(self) -> list[str]:
+        return ["low", "medium", "high"]
+
     def get_resume_command(self, boot_cmd: str, session_id: str) -> str | None:
         import shlex
         return f"{boot_cmd} --resume {shlex.quote(session_id)}"

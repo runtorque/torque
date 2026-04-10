@@ -82,6 +82,14 @@
             <label>Boot command</label>
             <input id="add-cmd-input" placeholder="e.g. npm run dev" autocomplete="off">
           </div>
+          <div id="add-model-row" class="hidden">
+            <label>Model</label>
+            <input id="add-model-input" placeholder="Use provider default" autocomplete="off">
+          </div>
+          <div id="add-reasoning-row" class="hidden">
+            <label>Reasoning effort</label>
+            <select id="add-reasoning-effort"></select>
+          </div>
           <div id="add-args-row" class="hidden">
             <label>Arguments</label>
             <input id="add-args-input" placeholder="e.g. --watch" autocomplete="off">
@@ -155,6 +163,10 @@
         <select id="weaver-launch-provider" onchange="onWeaverLaunchProviderChange()"></select>
         <label>Boot command</label>
         <input id="weaver-launch-boot-cmd" placeholder="Use provider default" autocomplete="off">
+        <label>Model</label>
+        <input id="weaver-launch-model" placeholder="Use provider default" autocomplete="off">
+        <label>Reasoning effort</label>
+        <select id="weaver-launch-reasoning-effort"></select>
         <label>Custom instructions</label>
         <textarea id="weaver-launch-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Weaver policy..."></textarea>
       </div>
@@ -309,6 +321,10 @@
           <label>Boot command</label>
           <input id="gs-agent-boot-cmd" placeholder="e.g. my-agent-cli" autocomplete="off">
         </div>
+        <label>Default model</label>
+        <input id="gs-agent-model" placeholder="Use provider default" autocomplete="off">
+        <label>Default reasoning effort</label>
+        <select id="gs-agent-reasoning-effort"></select>
         <label>Additional environment <span class="label-hint">KEY=VALUE per line</span></label>
         <textarea id="gs-agent-env-vars" rows="3" placeholder="FOO=bar&#10;BAZ=qux"></textarea>
         <label>Env file</label>
@@ -551,9 +567,13 @@
       <div class="task-modal-section">
         <div class="task-modal-section-body">
           <label>Provider</label>
-          <select id="gs-weaver-provider"></select>
+          <select id="gs-weaver-provider" onchange="onGsWeaverProviderChange()"></select>
           <label>Command override</label>
           <input id="gs-weaver-boot-cmd" placeholder="Use provider default" autocomplete="off">
+          <label>Model</label>
+          <input id="gs-weaver-model" placeholder="Use provider default" autocomplete="off">
+          <label>Reasoning effort</label>
+          <select id="gs-weaver-reasoning-effort"></select>
           <label>Custom instructions <span class="label-hint">expert override</span></label>
           <textarea id="gs-weaver-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Weaver policy..."></textarea>
         </div>

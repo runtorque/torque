@@ -4,6 +4,8 @@ function _defaultWeaverLaunchSettings() {
   return {
     weaver_provider: '',
     weaver_boot_command: '',
+    weaver_model: '',
+    weaver_reasoning_effort: '',
     custom_instructions: '',
     autonomy_mode: 'dispatch_when_clear',
     default_worker_concurrency: 2,
@@ -19,15 +21,35 @@ function _getWeaverLaunchSettings(group) {
   return Object.assign(_defaultWeaverLaunchSettings(), current || {});
 }
 
+function _weaverLaunchProviderForReasoning(group) {
+  const groupSettings = (state.group_settings && state.group_settings[group]) || {};
+  return (
+    _getProviderValue('weaver-launch-provider')
+    || groupSettings.agent_provider
+    || _runtimeDefaultProviderName()
+  );
+}
+
 function onWeaverLaunchProviderChange() {
   const input = document.getElementById('weaver-launch-boot-cmd');
   if (!input) return;
   const v = document.getElementById('weaver-launch-provider').value;
+  const group = _weaverLaunchContext ? _weaverLaunchContext.group : '';
+  const groupSettings = (state.group_settings && state.group_settings[group]) || {};
   if (v === '__custom__') {
     input.placeholder = 'e.g. my-weaver-cli';
   } else {
-    input.placeholder = _getProviderCommand('weaver-launch-provider') + ' (default)';
+    const effectiveProvider = _getProviderValue('weaver-launch-provider') || groupSettings.agent_provider || '';
+    const meta = effectiveProvider ? _findProviderMeta(effectiveProvider) : null;
+    input.placeholder = (meta ? meta.command : _runtimeDefaultCommand()) + ' (default)';
   }
+  _populateReasoningEffortSelect(
+    'weaver-launch-reasoning-effort',
+    _weaverLaunchProviderForReasoning(group),
+    document.getElementById('weaver-launch-reasoning-effort').value,
+    'Provider default',
+    'Not supported for this provider'
+  );
 }
 
 function openWeaverLaunchDialog(group, agentId) {
@@ -52,6 +74,8 @@ function openWeaverLaunchDialog(group, agentId) {
     true
   );
   document.getElementById('weaver-launch-boot-cmd').value = ws.weaver_boot_command || '';
+  document.getElementById('weaver-launch-model').value = ws.weaver_model || '';
+  document.getElementById('weaver-launch-reasoning-effort').value = ws.weaver_reasoning_effort || '';
   document.getElementById('weaver-launch-custom-instructions').value = ws.custom_instructions || '';
   _setSelectValue('weaver-launch-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
   _setSelectValue(
@@ -93,6 +117,8 @@ function submitWeaverLaunchDialog() {
     group: group,
     weaver_provider: _getProviderValue('weaver-launch-provider'),
     weaver_boot_command: document.getElementById('weaver-launch-boot-cmd').value.trim(),
+    weaver_model: document.getElementById('weaver-launch-model').value.trim(),
+    weaver_reasoning_effort: document.getElementById('weaver-launch-reasoning-effort').value,
     custom_instructions: document.getElementById('weaver-launch-custom-instructions').value,
     autonomy_mode: document.getElementById('weaver-launch-autonomy-mode').value,
     default_worker_concurrency: parseInt(document.getElementById('weaver-launch-default-worker-concurrency').value, 10) || 2,
