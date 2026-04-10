@@ -2485,11 +2485,61 @@ class MatrixState:
         chain.sort(key=lambda t: (t.pipeline_depth, t.created_at))
         return chain
 
+    def task_open_descendants(self, task_id: str) -> list[BoardTask]:
+        """Return all unresolved descendants for ``task_id``."""
+        if not task_id:
+            return []
+        descendants = []
+        stack = self.board_get_children(task_id)
+        while stack:
+            current = stack.pop()
+            stack.extend(self.board_get_children(current.id))
+            if task_counts_as_done(current):
+                continue
+            descendants.append(current)
+        descendants.sort(key=lambda t: (t.pipeline_depth, t.created_at, t.id))
+        return descendants
+
+    def task_has_unresolved_descendants(self, task_id: str) -> bool:
+        """Return whether any descendant branch is still unresolved."""
+        return bool(self.task_open_descendants(task_id))
+
+    def task_has_live_handoff_descendants(self, task_id: str) -> bool:
+        """Return whether work has been handed off beyond this task.
+
+        A descendant counts as a live handoff once it is clearly on another
+        execution path: queued, started, assigned to an agent, or awaiting a
+        human reply. Plain non-human Backlog children do *not* count; those can
+        represent a derive that created a task before dispatch actually
+        succeeded, and should not free the current agent slot yet.
+        """
+        for descendant in self.task_open_descendants(task_id):
+            labels = set(descendant.labels or [])
+            if descendant.lane in {"To Do", "In Progress"}:
+                return True
+            if descendant.agent_id:
+                return True
+            if "loom:human" in labels:
+                return True
+        return False
+
+    def task_occupies_execution_slot(self, task: Optional[BoardTask], *,
+                                     agent_id: str = "") -> bool:
+        """Return whether ``task`` still occupies an agent's live slot."""
+        if not task or board_task_is_closed(task):
+            return False
+        if agent_id and task.agent_id != agent_id:
+            return False
+        if task.lane in {"Backlog", "Done", ARCHIVED_LANE}:
+            return False
+        if self.task_has_live_handoff_descendants(task.id):
+            return False
+        return True
+
     def agent_active_tasks(self, agent_id: str) -> list[BoardTask]:
         tasks = [
             t for t in self.board_tasks.values()
-            if t.agent_id == agent_id
-            and t.lane not in {"Backlog", "Done", ARCHIVED_LANE}
+            if self.task_occupies_execution_slot(t, agent_id=agent_id)
         ]
         tasks.sort(
             key=lambda t: (t.lane != "In Progress", t.position,
@@ -2501,7 +2551,7 @@ class MatrixState:
         cell = self.agents.get(agent_id)
         if cell and cell.current_task_id:
             task = self.board_tasks.get(cell.current_task_id)
-            if task and not board_task_is_closed(task):
+            if self.task_occupies_execution_slot(task, agent_id=agent_id):
                 return task
         tasks = self.agent_active_tasks(agent_id)
         return tasks[0] if tasks else None
@@ -2510,7 +2560,8 @@ class MatrixState:
         cell = self.agents.get(agent_id)
         if cell and cell.current_task_id:
             task = self.board_tasks.get(cell.current_task_id)
-            if not task or not board_task_is_closed(task):
+            if task and self.task_occupies_execution_slot(
+                    task, agent_id=agent_id):
                 return True
         return self.agent_current_task(agent_id) is not None
 

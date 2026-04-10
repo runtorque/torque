@@ -295,16 +295,18 @@ class EventBus:
         self._state._emit_agent(cell)
 
     def _maybe_unlink_post_derive(self, cell):
-        """Unlink agent from its task if that task has derived children.
+        """Unlink an idle agent once its task has truly handed work off.
 
         After an agent derives a subtask and then goes idle, it still holds
         current_task_id for the parent task.  This blocks future dispatches.
-        Unlinking here frees the agent without triggering auto-dispatch.
+        Unlinking here frees the agent without triggering auto-dispatch, but
+        only once the descendant branch is actually queued/started/awaiting
+        human input. Failed dispatches should keep the current task linked.
         """
         task = self._state.board_tasks.get(cell.current_task_id)
         if not task:
             return
-        if self._state.board_get_children(task.id):
+        if self._state.task_has_live_handoff_descendants(task.id):
             log.info("Auto-unlinking idle agent '%s' from post-derive task "
                      "'%s'", cell.name, task.task[:60])
             cell.current_task_id = ""
@@ -368,7 +370,7 @@ async def health_check(state, event_log: EventLog, event_bus: EventBus,
             # (catches cases where the activity_change event was missed)
             if not cell.activity and cell.current_task_id:
                 task = state.board_tasks.get(cell.current_task_id)
-                if task and state.board_get_children(task.id):
+                if task and state.task_has_live_handoff_descendants(task.id):
                     log.info("Health check: auto-unlinking idle agent '%s' "
                              "from post-derive task '%s'",
                              cell.name, task.task[:60])

@@ -488,6 +488,114 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(child.id, "LOOM:1:1")
         self.assertEqual(cross_group.id, "REVIEW_TEAM:1:2")
 
+    def test_started_descendant_handoff_frees_parent_execution_slot(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-parent",
+            agent_id="agent-1",
+        )
+        child = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="In Progress",
+            id="task-child",
+            parent_task_id="task-parent",
+            pipeline_root_id="task-parent",
+            pipeline_depth=1,
+            agent_id="agent-2",
+        )
+        state.agents["agent-1"] = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Implementer",
+            group="g",
+            cell_type="agent",
+            current_task_id="task-parent",
+        )
+
+        self.assertIsNotNone(parent)
+        self.assertIsNotNone(child)
+        self.assertTrue(state.task_has_live_handoff_descendants(parent.id))
+        self.assertIsNone(state.agent_current_task("agent-1"))
+        self.assertFalse(state.agent_is_busy("agent-1"))
+
+    def test_plain_backlog_child_does_not_free_parent_execution_slot(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-parent",
+            agent_id="agent-1",
+        )
+        child = state.board_add_task(
+            "Follow-up draft",
+            "g",
+            lane="Backlog",
+            id="task-child",
+            parent_task_id="task-parent",
+            pipeline_root_id="task-parent",
+            pipeline_depth=1,
+        )
+        state.agents["agent-1"] = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Implementer",
+            group="g",
+            cell_type="agent",
+            current_task_id="task-parent",
+        )
+
+        self.assertIsNotNone(parent)
+        self.assertIsNotNone(child)
+        self.assertFalse(state.task_has_live_handoff_descendants(parent.id))
+        self.assertEqual(state.agent_current_task("agent-1").id, parent.id)
+        self.assertTrue(state.agent_is_busy("agent-1"))
+
+    def test_queued_follow_up_becomes_current_task_over_suspended_parent(self):
+        state = self._make_state()
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-parent",
+            agent_id="agent-1",
+        )
+        review = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="In Progress",
+            id="task-review",
+            parent_task_id="task-parent",
+            pipeline_root_id="task-parent",
+            pipeline_depth=1,
+            agent_id="agent-2",
+        )
+        follow_up = state.board_add_task(
+            "Fix review issues",
+            "g",
+            lane="To Do",
+            id="task-fix",
+            parent_task_id="task-review",
+            pipeline_root_id="task-parent",
+            pipeline_depth=2,
+            agent_id="agent-1",
+        )
+        state.agents["agent-1"] = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Implementer",
+            group="g",
+            cell_type="agent",
+            current_task_id="task-parent",
+        )
+
+        self.assertIsNotNone(parent)
+        self.assertIsNotNone(review)
+        self.assertIsNotNone(follow_up)
+        self.assertEqual(state.agent_current_task("agent-1").id, follow_up.id)
+        self.assertTrue(state.agent_is_busy("agent-1"))
+
     def test_add_group_rejects_prefix_collisions(self):
         state = self.state_mod.MatrixState()
 

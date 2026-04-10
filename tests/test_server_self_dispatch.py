@@ -378,6 +378,13 @@ class ServerSelfDispatchTests(unittest.TestCase):
         owner = self._make_agent("agent-1", current_task_id="task-1")
         target = self._make_agent("agent-2")
         state.agents = {owner.id: owner, target.id: target}
+        state.board_tasks["task-1"] = self.state_mod.BoardTask(
+            id="task-1",
+            task="Active task",
+            group="g",
+            lane="In Progress",
+            agent_id=owner.id,
+        )
 
         active_owner = self.server_mod._find_active_worktree_owner(
             state, target
@@ -408,6 +415,13 @@ class ServerSelfDispatchTests(unittest.TestCase):
         owner = self._make_agent("impl-1", current_task_id="task-impl")
         reviewer = self._make_agent("review-1")
         state.agents = {owner.id: owner, reviewer.id: reviewer}
+        state.board_tasks["task-impl"] = self.state_mod.BoardTask(
+            id="task-impl",
+            task="Implementation",
+            group="g",
+            lane="In Progress",
+            agent_id=owner.id,
+        )
 
         active_owner = self.server_mod._find_active_worktree_owner(
             state, reviewer
@@ -421,6 +435,36 @@ class ServerSelfDispatchTests(unittest.TestCase):
                 handoff_from=owner.id,
             )
         )
+
+    def test_suspended_parent_does_not_claim_shared_worktree_ownership(self):
+        state = self.state_mod.MatrixState()
+        parent = self.state_mod.BoardTask(
+            id="task-parent",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            agent_id="impl-1",
+        )
+        review = self.state_mod.BoardTask(
+            id="task-review",
+            task="Review feature",
+            group="g",
+            lane="In Progress",
+            parent_task_id="task-parent",
+            pipeline_root_id="task-parent",
+            pipeline_depth=1,
+            agent_id="review-1",
+        )
+        owner = self._make_agent("impl-1", current_task_id="task-parent")
+        target = self._make_agent("impl-2")
+        state.agents = {owner.id: owner, target.id: target}
+        state.board_tasks = {parent.id: parent, review.id: review}
+
+        active_owner = self.server_mod._find_active_worktree_owner(
+            state, target
+        )
+
+        self.assertIsNone(active_owner)
 
     def test_concurrent_dispatch_detects_shared_branch_context(self):
         state = self.state_mod.MatrixState()
@@ -436,6 +480,13 @@ class ServerSelfDispatchTests(unittest.TestCase):
             worktree_branch="loom/shared-branch",
         )
         state.agents = {owner.id: owner, target.id: target}
+        state.board_tasks["task-1"] = self.state_mod.BoardTask(
+            id="task-1",
+            task="Active task",
+            group="g",
+            lane="In Progress",
+            agent_id=owner.id,
+        )
 
         active_owner = self.server_mod._find_active_worktree_owner(
             state, target
@@ -449,12 +500,209 @@ class ServerSelfDispatchTests(unittest.TestCase):
         stopped = self._make_agent("agent-2")
         stopped.status = "stopped"
         state.agents = {owner.id: owner, stopped.id: stopped}
+        state.board_tasks["task-1"] = self.state_mod.BoardTask(
+            id="task-1",
+            task="Active task",
+            group="g",
+            lane="In Progress",
+            agent_id=owner.id,
+        )
 
         active_owner = self.server_mod._find_active_worktree_owner(
             state, stopped
         )
 
         self.assertIs(active_owner, owner)
+
+    def test_promote_task_for_active_report_moves_task_into_dispatch_lane(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            dispatch_lane="In Progress"
+        )
+        cell = self._make_agent("agent-1")
+        state.agents[cell.id] = cell
+        task = state.board_add_task(
+            "Queued follow-up",
+            "g",
+            lane="To Do",
+            id="task-1",
+            agent_id=cell.id,
+        )
+
+        self.server_mod._promote_task_for_active_report(state, cell, task)
+
+        self.assertEqual(state.board_tasks["task-1"].lane, "In Progress")
+        self.assertEqual(cell.current_task_id, "task-1")
+
+    def test_nearest_ancestor_agent_for_action_stage_reuses_prior_reviewer(self):
+        state = self.state_mod.MatrixState()
+        impl = self._make_agent("impl-1")
+        reviewer = self._make_agent("review-1")
+        impl.session_id = "impl-session"
+        impl.status = "running"
+        reviewer.session_id = "review-session"
+        reviewer.status = "idle"
+        state.agents = {impl.id: impl, reviewer.id: reviewer}
+        root = self.state_mod.BoardTask(
+            id="task-root",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            action_name="feature/implement",
+            agent_id=impl.id,
+        )
+        review = self.state_mod.BoardTask(
+            id="task-review",
+            task="Review feature",
+            group="g",
+            lane="In Progress",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            agent_id=reviewer.id,
+        )
+        fix = self.state_mod.BoardTask(
+            id="task-fix",
+            task="Fix review issues",
+            group="g",
+            lane="In Progress",
+            action_name="feature/implement",
+            parent_task_id=review.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+            agent_id=impl.id,
+        )
+        state.board_tasks = {root.id: root, review.id: review, fix.id: fix}
+
+        reused = self.server_mod._nearest_ancestor_agent_for_action_stage(
+            state, fix, "feature/review"
+        )
+        first_pass = self.server_mod._nearest_ancestor_agent_for_action_stage(
+            state, root, "feature/review"
+        )
+
+        self.assertIs(reused, reviewer)
+        self.assertIsNone(first_pass)
+
+    def test_nearest_ancestor_agent_for_action_stage_skips_dead_reviewer(self):
+        state = self.state_mod.MatrixState()
+        impl = self._make_agent("impl-1")
+        reviewer = self._make_agent("review-1")
+        impl.session_id = "impl-session"
+        impl.status = "running"
+        reviewer.status = "stopped"
+        reviewer.session_id = ""
+        state.agents = {impl.id: impl, reviewer.id: reviewer}
+        root = self.state_mod.BoardTask(
+            id="task-root",
+            task="Implement feature",
+            group="g",
+            lane="In Progress",
+            action_name="feature/implement",
+            agent_id=impl.id,
+        )
+        review = self.state_mod.BoardTask(
+            id="task-review",
+            task="Review feature",
+            group="g",
+            lane="Done",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            agent_id=reviewer.id,
+        )
+        fix = self.state_mod.BoardTask(
+            id="task-fix",
+            task="Fix review issues",
+            group="g",
+            lane="In Progress",
+            action_name="feature/implement",
+            parent_task_id=review.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+            agent_id=impl.id,
+        )
+        state.board_tasks = {root.id: root, review.id: review, fix.id: fix}
+
+        reused = self.server_mod._nearest_ancestor_agent_for_action_stage(
+            state, fix, "feature/review"
+        )
+
+        self.assertIsNone(reused)
+
+    def test_resolve_ai_report_task_prefers_live_child_over_stale_parent(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        parent = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-root",
+            agent_id="agent-1",
+        )
+        child = state.board_add_task(
+            "Fix review issues",
+            "g",
+            lane="To Do",
+            id="task-fix",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+            agent_id="agent-1",
+        )
+        cell = self._make_agent("agent-1", current_task_id=parent.id)
+        state.agents[cell.id] = cell
+
+        resolved = self.server_mod._resolve_ai_report_task(state, cell)
+
+        self.assertIs(resolved, child)
+        self.assertEqual(state.agent_current_task(cell.id).id, child.id)
+
+    def test_derive_handoff_accepted_requires_explicit_success_result(self):
+        self.assertFalse(self.server_mod._derive_handoff_accepted(None))
+        self.assertFalse(self.server_mod._derive_handoff_accepted({
+            "type": "dispatch_action_missing",
+        }))
+        self.assertTrue(self.server_mod._derive_handoff_accepted({
+            "type": "ok",
+        }))
+        self.assertTrue(self.server_mod._derive_handoff_accepted({
+            "type": "queued",
+        }))
+
+    def test_reject_completion_with_open_descendants_blocks_manual_done(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        task = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="In Progress",
+            id="task-review",
+        )
+        child = state.board_add_task(
+            "Fix review issues",
+            "g",
+            lane="To Do",
+            id="task-fix",
+            parent_task_id="task-review",
+            pipeline_root_id="task-review",
+            pipeline_depth=1,
+        )
+
+        rejected = self.server_mod._reject_completion_with_open_descendants(
+            state, task, "done"
+        )
+        state.board_move_task(child.id, "Done")
+        allowed = self.server_mod._reject_completion_with_open_descendants(
+            state, task, "done"
+        )
+
+        self.assertEqual(rejected["type"], "error")
+        self.assertIn("still unresolved", rejected["message"])
+        self.assertIsNone(allowed)
 
 
 class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):

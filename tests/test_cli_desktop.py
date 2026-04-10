@@ -25,6 +25,13 @@ class CliDesktopTests(unittest.TestCase):
         self.cli = _load_cli_module()
         self.entrypoint = Path(__file__).resolve().parents[1] / "loom_desktop.py"
         self.cli._ensure_desktop_runtime_ready = lambda python_path: None
+        self._orig_popen = self.cli.subprocess.Popen
+        self.addCleanup(
+            setattr,
+            self.cli.subprocess,
+            "Popen",
+            self._orig_popen,
+        )
 
     def test_cmd_desktop_spawn_uses_desktop_defaults(self):
         calls = []

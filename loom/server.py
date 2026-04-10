@@ -156,6 +156,107 @@ def _resolve_agent_id(state, identifier: str) -> str:
     return ""
 
 
+def _derive_handoff_accepted(dispatch_result) -> bool:
+    return bool(dispatch_result) and dispatch_result.get("type") in {
+        "ok",
+        "queued",
+    }
+
+
+def _agent_can_receive_dispatch(cell) -> bool:
+    return bool(
+        cell
+        and cell.cell_type == "agent"
+        and cell.session_id
+        and (cell.status or "") not in {"stopped", "error"}
+    )
+
+
+def _promote_task_for_active_report(state: MatrixState, cell, task) -> None:
+    """Normalize a task into the dispatch lane once work has clearly started."""
+    if not cell or not task:
+        return
+    if task.agent_id and task.agent_id != cell.id:
+        return
+    fields = {}
+    if not task.agent_id:
+        fields["agent_id"] = cell.id
+    if task.lane in {"Backlog", "To Do"}:
+        fields["lane"] = (
+            state.get_group_settings(task.group).dispatch_lane
+            or "In Progress"
+        )
+    if fields:
+        state.board_update_task(task.id, **fields)
+    if cell.current_task_id != task.id:
+        cell.current_task_id = task.id
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+
+
+def _reject_completion_with_open_descendants(state: MatrixState, task,
+                                             action_name: str) -> dict | None:
+    if not task:
+        return None
+    if not state.task_has_unresolved_descendants(task.id):
+        return None
+    return {
+        "type": "error",
+        "message":
+            f"Cannot mark task {action_name}: "
+            "derived follow-up work is still unresolved",
+        "task_id": task.id,
+    }
+
+
+def _nearest_ancestor_agent_for_action_stage(state: MatrixState, task,
+                                             action_name: str):
+    """Find the closest ancestor already associated with ``action_name``."""
+    if not task or not action_name:
+        return None
+    ancestor_id = task.parent_task_id
+    while ancestor_id:
+        ancestor = state.board_tasks.get(ancestor_id)
+        if not ancestor:
+            break
+        if ancestor.action_name == action_name and ancestor.agent_id:
+            agent = state.agents.get(ancestor.agent_id)
+            if _agent_can_receive_dispatch(agent):
+                return agent
+        ancestor_id = ancestor.parent_task_id
+    return None
+
+
+def _resolve_ai_report_task(state: MatrixState, cell, *,
+                            task_id: str = "") -> Optional[BoardTask]:
+    """Resolve the task an agent report should apply to.
+
+    Prefer an explicit task id. Otherwise ignore stale ``current_task_id``
+    pointers that no longer occupy the agent's live execution slot, and fall
+    back to the state-derived active task before using the older linked-task
+    heuristic.
+    """
+    if not cell:
+        return None
+    if task_id:
+        return state.board_tasks.get(task_id)
+    if cell.current_task_id:
+        current = state.board_tasks.get(cell.current_task_id)
+        if state.task_occupies_execution_slot(current, agent_id=cell.id):
+            return current
+    current = state.agent_current_task(cell.id)
+    if current:
+        return current
+    linked = [
+        t for t in state.board_tasks.values()
+        if t.agent_id == cell.id
+        and t.lane not in ("Done", "Backlog", ARCHIVED_LANE)
+    ]
+    if len(linked) == 1:
+        return linked[0]
+    return None
+
+
 def _handle_board_archive_command(state: MatrixState, data: dict) -> dict | None:
     """Archive one board task.
 
@@ -875,7 +976,6 @@ async def main(connection=None):
         state.board_update_task(task.id, agent_id=cell.id, lane=lane)
         state.auto_dispatch_queue_remove_task(task.id)
         cell.current_task_id = task.id
-        state.history_record_dispatch(cell, task)
 
     def _iso_to_unix(ts: str) -> float | None:
         if not ts:
@@ -3223,6 +3323,14 @@ async def main(connection=None):
                                         "task_id": tid,
                                         "agent_id": cell.id}
                                     cell = None  # skip dispatch below
+                            if cell and not result \
+                                    and not _agent_can_receive_dispatch(cell):
+                                result = {
+                                    "type": "error",
+                                    "message": "Agent is not available",
+                                    "agent_id": cell.id,
+                                }
+                                cell = None
                         elif data.get("create_agent"):
                             # Create a new agent
                             from loom.state import _slugify
@@ -3335,56 +3443,16 @@ async def main(connection=None):
                                     await _create_child_terminals(
                                         group, cell, count=gs.auto_terminals)
 
-                        if cell:
-                            # Link task to agent and move to In Progress
-                            owner = _find_active_worktree_owner(state, cell)
-                            if owner:
-                                if _should_handoff_shared_worktree(
-                                        owner,
-                                        target_agent_id=cell.id,
-                                        handoff_from=handoff_from):
-                                    owner.current_task_id = ""
-                                    owner.activity = ""
-                                    owner.activity_detail = ""
-                                    state._emit_agent(owner)
-                                    state._db_save_agent(owner)
-                                else:
-                                    state.board_update_task(
-                                        tid, agent_id=cell.id)
-                                    state.board_move_task(tid, "To Do")
-                                    _panel_event(
-                                        "task_queued", cell.id,
-                                        cell.name, cell.group,
-                                        f"{task.task[:80]} "
-                                        f"(waiting for {owner.name})",
-                                        task_id=tid)
-                                    result = {
-                                        "type": "queued",
-                                        "task_id": tid,
-                                        "agent_id": cell.id,
-                                        "reason":
-                                            "shared_worktree_busy",
-                                        "blocked_by_agent_id":
-                                            owner.id,
-                                        "blocked_by_task_id":
-                                            (
-                                                state.agent_current_task(
-                                                    owner.id
-                                                ).id
-                                                if state.agent_current_task(
-                                                    owner.id
-                                                ) else ""
-                                            ),
-                                    }
-                                    cell = None
-                        if cell:
-                            # Link task to agent and move to In Progress
-                            dispatch_lane = \
-                                state.get_group_settings(group) \
-                                    .dispatch_lane or "In Progress"
-                            _record_task_dispatch(
-                                cell, task, dispatch_lane)
+                        if cell and not result \
+                                and not _agent_can_receive_dispatch(cell):
+                            result = {
+                                "type": "error",
+                                "message": "Agent is not available",
+                                "agent_id": cell.id,
+                            }
+                            cell = None
 
+                        if cell:
                             final_prompt = ""
                             shared_context_block = build_prompt_memory_block(
                                 state.db,
@@ -3456,43 +3524,105 @@ async def main(connection=None):
                                         is_clean=is_clean,
                                         cell=cell)
 
-                            if final_prompt:
-                                # Track dispatch count
-                                cell.tasks_dispatched += 1
-                                state._emit_agent(cell)
-                                state._db_save_agent(cell)
-                                _panel_event(
-                                    "task_dispatched", cell.id,
-                                    cell.name, cell.group,
-                                    task.task[:80],
-                                    task_id=task.id)
+                            if not result and not final_prompt:
+                                result = {
+                                    "type": "error",
+                                    "message": "Dispatch prompt unavailable",
+                                    "task_id": tid,
+                                }
 
-                                if agent_id and cell.session_id:
-                                    delay = 3 if data.get(
-                                        "_self_dispatch") else 0
-                                    if delay:
-                                        # Self-dispatch: delay so
-                                        # prompt arrives after current
-                                        # agent turn finishes
-                                        await _send_agent_prompt(
-                                            cell, final_prompt,
-                                            delay=delay,
-                                            background=True)
-                                    else:
-                                        # Existing agent — send now
-                                        await _send_agent_prompt(cell, final_prompt)
-                                elif data.get("create_agent") \
-                                        and cell.session_id:
-                                    for prompt_text, send_kwargs in \
-                                            _new_agent_prompt_sequence(
-                                                launch_cfg,
-                                                startup_prompt=
-                                                startup_prompt,
-                                                final_prompt=final_prompt):
-                                        await _send_agent_prompt(
-                                            cell,
-                                            prompt_text,
-                                            **send_kwargs)
+                        if cell and not result:
+                            owner = _find_active_worktree_owner(state, cell)
+                            if owner:
+                                if _should_handoff_shared_worktree(
+                                        owner,
+                                        target_agent_id=cell.id,
+                                        handoff_from=handoff_from):
+                                    owner.current_task_id = ""
+                                    owner.activity = ""
+                                    owner.activity_detail = ""
+                                    state._emit_agent(owner)
+                                    state._db_save_agent(owner)
+                                else:
+                                    state.board_update_task(
+                                        tid, agent_id=cell.id)
+                                    state.board_move_task(tid, "To Do")
+                                    _panel_event(
+                                        "task_queued", cell.id,
+                                        cell.name, cell.group,
+                                        f"{task.task[:80]} "
+                                        f"(waiting for {owner.name})",
+                                        task_id=tid)
+                                    result = {
+                                        "type": "queued",
+                                        "task_id": tid,
+                                        "agent_id": cell.id,
+                                        "reason":
+                                            "shared_worktree_busy",
+                                        "blocked_by_agent_id":
+                                            owner.id,
+                                        "blocked_by_task_id":
+                                            (
+                                                state.agent_current_task(
+                                                    owner.id
+                                                ).id
+                                                if state.agent_current_task(
+                                                    owner.id
+                                                ) else ""
+                                            ),
+                                    }
+                                    cell = None
+                        if cell and not result:
+                            dispatch_lane = \
+                                state.get_group_settings(group) \
+                                    .dispatch_lane or "In Progress"
+                            _record_task_dispatch(
+                                cell, task, dispatch_lane)
+
+                            # Track dispatch count after prompt resolution
+                            cell.tasks_dispatched += 1
+                            state._emit_agent(cell)
+                            state._db_save_agent(cell)
+
+                            if agent_id:
+                                delay = 3 if data.get(
+                                    "_self_dispatch") else 0
+                                if delay:
+                                    # Self-dispatch: delay so
+                                    # prompt arrives after current
+                                    # agent turn finishes
+                                    await _send_agent_prompt(
+                                        cell, final_prompt,
+                                        delay=delay,
+                                        background=True)
+                                else:
+                                    # Existing agent — send now
+                                    await _send_agent_prompt(
+                                        cell, final_prompt
+                                    )
+                            elif data.get("create_agent"):
+                                for prompt_text, send_kwargs in \
+                                        _new_agent_prompt_sequence(
+                                            launch_cfg,
+                                            startup_prompt=
+                                            startup_prompt,
+                                            final_prompt=final_prompt):
+                                    await _send_agent_prompt(
+                                        cell,
+                                        prompt_text,
+                                        **send_kwargs)
+
+                            state.history_record_dispatch(cell, task)
+                            _panel_event(
+                                "task_dispatched", cell.id,
+                                cell.name, cell.group,
+                                task.task[:80],
+                                task_id=task.id)
+                            result = {
+                                "type": "ok",
+                                "task_id": tid,
+                                "agent_id": cell.id,
+                            }
 
             elif cmd == "resolve_ask":
                 # Resolve an ask task: send answer to parent's agent
@@ -4105,21 +4235,11 @@ async def main(connection=None):
                     result = {"type": "error",
                               "message": f"Cell {cell_id} not found"}
                 else:
-                    # Resolve task: explicit ID → current_task_id →
-                    # auto-detect from cell's active tasks.
-                    task = None
-                    if task_id:
-                        task = state.board_tasks.get(task_id)
-                    elif cell.current_task_id:
-                        task = state.board_tasks.get(
-                            cell.current_task_id)
-                    if not task and not task_id:
-                        linked = [
-                            t for t in state.board_tasks.values()
-                            if t.agent_id == cell_id
-                            and t.lane not in ("Done", "Backlog", ARCHIVED_LANE)]
-                        if len(linked) == 1:
-                            task = linked[0]
+                    task = _resolve_ai_report_task(
+                        state,
+                        cell,
+                        task_id=task_id,
+                    )
 
                     def _add_label(t, label):
                         if label not in t.labels:
@@ -4134,7 +4254,7 @@ async def main(connection=None):
 
                     def _cascade_done(task_id):
                         """Walk up parent chain, completing ancestors
-                        whose children are all Done."""
+                        whose descendant branches are all Done."""
                         t = state.board_tasks.get(task_id)
                         if not t or not t.parent_task_id:
                             return
@@ -4146,8 +4266,7 @@ async def main(connection=None):
                             if task_is_closed(parent):
                                 pid = parent.parent_task_id
                                 continue
-                            children = state.board_get_children(pid)
-                            if all(task_counts_as_done(c) for c in children):
+                            if not state.task_has_unresolved_descendants(pid):
                                 parent.status = ""
                                 state.board_move_task(pid, "Done")
                                 _save_task(parent)
@@ -4215,79 +4334,91 @@ async def main(connection=None):
                     if result and result.get("type") == "error":
                         pass  # auto-resolve failed; skip action
 
+                    elif action in {"progress", "blocked", "error",
+                                     "verify", "derive", "ask"}:
+                        _promote_task_for_active_report(state, cell, task)
+
+                    if result and result.get("type") == "error":
+                        pass
+
                     elif action == "done":
-                        cell.activity = ""
-                        cell.activity_detail = ""
-                        cell.needs_attention = False
-                        cell.error_message = ""
-                        if message:
-                            cell.last_summary = message
-                        cell.current_task_id = ""
-                        _append_mcp(cell, "done", message or "Done")
-                        _append_task_msg(task, "done",
-                                         message or "Done", cell.name)
-                        _record_history_msg(
-                            cell, "done", message or "Done")
-                        if task:
-                            state.history_complete_task(
-                                cell.id, task.id, "done")
-                        if task:
-                            await _record_task_boundary(
-                                task, cell, message or "Done"
+                        rejected = _reject_completion_with_open_descendants(
+                            state, task, "done")
+                        if rejected:
+                            result = rejected
+                        else:
+                            cell.activity = ""
+                            cell.activity_detail = ""
+                            cell.needs_attention = False
+                            cell.error_message = ""
+                            if message:
+                                cell.last_summary = message
+                            cell.current_task_id = ""
+                            _append_mcp(cell, "done", message or "Done")
+                            _append_task_msg(task, "done",
+                                             message or "Done", cell.name)
+                            _record_history_msg(
+                                cell, "done", message or "Done")
+                            if task:
+                                state.history_complete_task(
+                                    cell.id, task.id, "done")
+                            if task:
+                                await _record_task_boundary(
+                                    task, cell, message or "Done"
+                                )
+                            state._emit_agent(cell)
+                            if task and not task_counts_as_done(task):
+                                state.board_move_task(task.id, "Done")
+                            if task:
+                                task.status = ""
+                                _save_task(task)
+                                if data.get("push_external") \
+                                        and (task.provider or task.external_url):
+                                    try:
+                                        posted = post_ticket_comment(
+                                            task,
+                                            comment=build_completion_comment(
+                                                task.task, message),
+                                        )
+                                        _append_task_msg(
+                                            task, "external_comment",
+                                            posted, "loom")
+                                        _save_task(task)
+                                        result = {
+                                            "type": "external_comment_posted",
+                                            "task_id": task.id,
+                                            "message": posted,
+                                        }
+                                    except ExternalTicketError as exc:
+                                        _append_task_msg(
+                                            task, "external_error",
+                                            str(exc), "loom")
+                                        _save_task(task)
+                                        result = {
+                                            "type": "warning",
+                                            "message": str(exc),
+                                            "task_id": task.id,
+                                        }
+                                _cascade_done(task.id)
+                                # Notify dependents that are now unblocked
+                                for _dt in state.board_get_dependents(
+                                        task.id):
+                                    if not task_is_closed(_dt) \
+                                            and state.board_deps_met(_dt):
+                                        _panel_event(
+                                            "task_unblocked", "",
+                                            "", _dt.group,
+                                            f"Task '{_dt.task[:60]}'"
+                                            " is now unblocked",
+                                            task_id=_dt.id)
+                            _panel_event(
+                                "task_completed", cell.id,
+                                cell.name, cell.group,
+                                message or "Task completed")
+                            await _auto_dispatch_next(cell)
+                            await _drain_auto_dispatch_queue(
+                                task.group if task else cell.group
                             )
-                        state._emit_agent(cell)
-                        if task and not task_counts_as_done(task):
-                            state.board_move_task(task.id, "Done")
-                        if task:
-                            task.status = ""
-                            _save_task(task)
-                            if data.get("push_external") \
-                                    and (task.provider or task.external_url):
-                                try:
-                                    posted = post_ticket_comment(
-                                        task,
-                                        comment=build_completion_comment(
-                                            task.task, message),
-                                    )
-                                    _append_task_msg(
-                                        task, "external_comment",
-                                        posted, "loom")
-                                    _save_task(task)
-                                    result = {
-                                        "type": "external_comment_posted",
-                                        "task_id": task.id,
-                                        "message": posted,
-                                    }
-                                except ExternalTicketError as exc:
-                                    _append_task_msg(
-                                        task, "external_error",
-                                        str(exc), "loom")
-                                    _save_task(task)
-                                    result = {
-                                        "type": "warning",
-                                        "message": str(exc),
-                                        "task_id": task.id,
-                                    }
-                            _cascade_done(task.id)
-                            # Notify dependents that are now unblocked
-                            for _dt in state.board_get_dependents(
-                                    task.id):
-                                if not task_is_closed(_dt) \
-                                        and state.board_deps_met(_dt):
-                                    _panel_event(
-                                        "task_unblocked", "",
-                                        "", _dt.group,
-                                        f"Task '{_dt.task[:60]}'"
-                                        " is now unblocked",
-                                        task_id=_dt.id)
-                        _panel_event(
-                            "task_completed", cell.id,
-                            cell.name, cell.group,
-                            message or "Task completed")
-                        await _auto_dispatch_next(cell)
-                        await _drain_auto_dispatch_queue(
-                            task.group if task else cell.group
-                        )
 
                     elif action == "blocked":
                         cell.needs_attention = True
@@ -4391,50 +4522,55 @@ async def main(connection=None):
                             }
 
                     elif action == "ready":
-                        cell.activity = ""
-                        cell.activity_detail = "ready"
-                        cell.needs_attention = False
-                        cell.error_message = ""
-                        cell.current_task_id = ""
-                        _append_mcp(cell, "ready", "Ready")
-                        _append_task_msg(task, "ready",
-                                         message or "Ready", cell.name)
-                        _record_history_msg(
-                            cell, "ready", message or "Ready")
-                        if task:
-                            state.history_complete_task(
-                                cell.id, task.id, "ready")
-                            await _record_task_boundary(
-                                task, cell, message or "Ready"
+                        rejected = _reject_completion_with_open_descendants(
+                            state, task, "ready")
+                        if rejected:
+                            result = rejected
+                        else:
+                            cell.activity = ""
+                            cell.activity_detail = "ready"
+                            cell.needs_attention = False
+                            cell.error_message = ""
+                            cell.current_task_id = ""
+                            _append_mcp(cell, "ready", "Ready")
+                            _append_task_msg(task, "ready",
+                                             message or "Ready", cell.name)
+                            _record_history_msg(
+                                cell, "ready", message or "Ready")
+                            if task:
+                                state.history_complete_task(
+                                    cell.id, task.id, "ready")
+                                await _record_task_boundary(
+                                    task, cell, message or "Ready"
+                                )
+                            state._emit_agent(cell)
+                            if task:
+                                if not task_counts_as_done(task):
+                                    state.board_move_task(
+                                        task.id, "Done")
+                                task.agent_id = ""
+                                task.status = ""
+                                _save_task(task)
+                                _cascade_done(task.id)
+                                # Notify dependents now unblocked
+                                for _dt in state.board_get_dependents(
+                                        task.id):
+                                    if not task_is_closed(_dt) \
+                                            and state.board_deps_met(_dt):
+                                        _panel_event(
+                                            "task_unblocked", "",
+                                            "", _dt.group,
+                                            f"Task '{_dt.task[:60]}'"
+                                            " is now unblocked",
+                                            task_id=_dt.id)
+                            _panel_event(
+                                "task_completed", cell.id,
+                                cell.name, cell.group,
+                                "Ready (task completed)")
+                            await _auto_dispatch_next(cell)
+                            await _drain_auto_dispatch_queue(
+                                task.group if task else cell.group
                             )
-                        state._emit_agent(cell)
-                        if task:
-                            if not task_counts_as_done(task):
-                                state.board_move_task(
-                                    task.id, "Done")
-                            task.agent_id = ""
-                            task.status = ""
-                            _save_task(task)
-                            _cascade_done(task.id)
-                            # Notify dependents now unblocked
-                            for _dt in state.board_get_dependents(
-                                    task.id):
-                                if not task_is_closed(_dt) \
-                                        and state.board_deps_met(_dt):
-                                    _panel_event(
-                                        "task_unblocked", "",
-                                        "", _dt.group,
-                                        f"Task '{_dt.task[:60]}'"
-                                        " is now unblocked",
-                                        task_id=_dt.id)
-                        _panel_event(
-                            "task_completed", cell.id,
-                            cell.name, cell.group,
-                            "Ready (task completed)")
-                        await _auto_dispatch_next(cell)
-                        await _drain_auto_dispatch_queue(
-                            task.group if task else cell.group
-                        )
 
                     elif action == "derive":
                         # Derive a new task and dispatch it
@@ -4615,11 +4751,27 @@ async def main(connection=None):
                                                         a.slug or a.name
                                         elif tr_target == "" \
                                                 and cur_transitions:
-                                            # No target declared — force
-                                            # new agent even if agent
-                                            # passed --self/--agent
+                                            # No explicit target declared.
+                                            # Reuse an ancestor thread only
+                                            # when this derive is clearly
+                                            # returning to a prior action
+                                            # stage (for example fix ->
+                                            # re-review). Otherwise keep the
+                                            # normal fresh-agent behavior.
                                             reuse_self = False
-                                            target_agent = ""
+                                            ancestor_agent = \
+                                                _nearest_ancestor_agent_for_action_stage(
+                                                    state,
+                                                    task,
+                                                    act_name,
+                                                )
+                                            if ancestor_agent:
+                                                target_agent = (
+                                                    ancestor_agent.slug
+                                                    or ancestor_agent.name
+                                                )
+                                            else:
+                                                target_agent = ""
                                         target_id = None
                                         if reuse_self:
                                             target_id = cell.id
@@ -4702,12 +4854,31 @@ async def main(connection=None):
                                             dr = \
                                                 await handle_command(
                                                     dispatch_data)
-                                            result = {
-                                                "type": "ok",
-                                                "task_id":
-                                                    new_task.id,
-                                                "agent_id":
-                                                    target_id}
+                                            if not _derive_handoff_accepted(dr):
+                                                result = dr or {
+                                                    "type": "error",
+                                                    "message":
+                                                        "Derived task dispatch failed",
+                                                }
+                                            else:
+                                                if cell.current_task_id == task.id:
+                                                    cell.current_task_id = ""
+                                                state._emit_agent(cell)
+                                                state._db_save_agent(cell)
+                                                result = {
+                                                    "type": (
+                                                        (dr or {}).get("type")
+                                                        or "ok"
+                                                    ),
+                                                    "task_id":
+                                                        new_task.id,
+                                                    "agent_id":
+                                                        (
+                                                            (dr or {}).get(
+                                                                "agent_id"
+                                                            )
+                                                            or target_id
+                                                        )}
                                         else:
                                             # Default: new agent
                                             dispatch_data = {
@@ -4738,12 +4909,30 @@ async def main(connection=None):
                                             dr = \
                                                 await handle_command(
                                                     dispatch_data)
-                                            result = {
-                                                "type": "ok",
-                                                "task_id":
-                                                    new_task.id,
-                                                "agent_id":
-                                                    new_task.agent_id}
+                                            if not _derive_handoff_accepted(dr):
+                                                result = dr or {
+                                                    "type": "error",
+                                                    "message":
+                                                        "Derived task dispatch failed",
+                                                }
+                                            else:
+                                                if cell.current_task_id == task.id:
+                                                    cell.current_task_id = ""
+                                                state._emit_agent(cell)
+                                                state._db_save_agent(cell)
+                                                agent_id_result = (
+                                                    (dr or {}).get("agent_id")
+                                                    or new_task.agent_id
+                                                )
+                                                result = {
+                                                    "type": (
+                                                        (dr or {}).get("type")
+                                                        or "ok"
+                                                    ),
+                                                    "task_id":
+                                                        new_task.id,
+                                                    "agent_id":
+                                                        agent_id_result}
                                     else:
                                         result = {
                                             "type": "error",

@@ -102,10 +102,11 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
             id="task-child",
             task="Derived task",
             group="g",
-            lane="Backlog",
+            lane="To Do",
             parent_task_id=parent.id,
             pipeline_root_id=parent.id,
             labels=["loom:derived"],
+            agent_id="agent-2",
         )
         cell = self.state_mod.AgentCell(
             id="agent-1",
@@ -152,3 +153,46 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(cell.needs_attention)
         self.assertIn("No activity for 5 minutes", cell.error_message)
         self.assertEqual(alerts, [("agent-1", "No activity for 5 minutes")])
+
+    async def test_idle_activity_change_does_not_unlink_plain_backlog_child(self):
+        state = self._make_state()
+        parent = self.state_mod.BoardTask(
+            id="task-parent",
+            task="Parent task",
+            group="g",
+            lane="In Progress",
+            agent_id="agent-1",
+        )
+        child = self.state_mod.BoardTask(
+            id="task-child",
+            task="Draft follow-up",
+            group="g",
+            lane="Backlog",
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            labels=["loom:derived"],
+        )
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            current_task_id=parent.id,
+            activity="thinking",
+        )
+        state.agents[cell.id] = cell
+        state.board_tasks[parent.id] = parent
+        state.board_tasks[child.id] = child
+
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=time.time(),
+                event_type="activity_change",
+                data={"activity": "", "detail": ""},
+            )
+        )
+
+        self.assertEqual(cell.current_task_id, parent.id)
