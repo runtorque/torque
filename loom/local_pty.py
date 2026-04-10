@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import errno
 import fcntl
+import json
 import os
 import pty
 import re
@@ -18,6 +19,7 @@ import termios
 import urllib.parse
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from .adapters import detect_by_command, get_adapter
@@ -45,6 +47,7 @@ class _PtySession:
     closed: bool = False
     reader_task: Optional[asyncio.Task] = None
     bootstrap_dir: str = ""
+    claude_config_dir: str = ""
 
 
 class LocalPtyAdapter:
@@ -128,6 +131,9 @@ class LocalPtyAdapter:
                 )
 
         env = self._session_environment(cell.id, env_vars or {})
+        boot_adapter = get_adapter(cell.agent_type) if cell.agent_type else None
+        if not boot_adapter and cell.command:
+            boot_adapter = detect_by_command(cell.command)
 
         cwd = ""
         if cell.directory:
@@ -144,10 +150,13 @@ class LocalPtyAdapter:
             cell.directory = cwd
 
         bootstrap_dir = ""
+        claude_config_dir = ""
         shell_argv = [shell_path, "-i"]
         if shell_name == "zsh":
             bootstrap_dir = self._prepare_zsh_bootstrap(env)
             shell_argv = [shell_path, "-il"]
+        if boot_adapter and boot_adapter.name == "claude-code":
+            claude_config_dir = self._prepare_claude_config_overlay(env)
 
         master_fd, slave_fd = pty.openpty()
         session_id = uuid.uuid4().hex
@@ -165,6 +174,8 @@ class LocalPtyAdapter:
         except Exception:
             if bootstrap_dir:
                 shutil.rmtree(bootstrap_dir, ignore_errors=True)
+            if claude_config_dir:
+                shutil.rmtree(claude_config_dir, ignore_errors=True)
             raise
         finally:
             with contextlib.suppress(OSError):
@@ -177,6 +188,7 @@ class LocalPtyAdapter:
             master_fd=master_fd,
             shell_path=shell_path,
             bootstrap_dir=bootstrap_dir,
+            claude_config_dir=claude_config_dir,
         )
         self._sessions[session_id] = session
         session.reader_task = asyncio.create_task(self._read_loop(session))
@@ -369,17 +381,72 @@ class LocalPtyAdapter:
         for key in (
             "LC_TERMINAL",
             "LC_TERMINAL_VERSION",
+            "TERM_SESSION_ID",
+            "TERM_FEATURES",
+            "TERMINFO_DIRS",
             "TERM_PROGRAM",
             "TERM_PROGRAM_VERSION",
+            "STARSHIP_SESSION_KEY",
+            "STARSHIP_SHELL",
         ):
             env.pop(key, None)
         env["LOOM_CELL_ID"] = cell_id
         env["LOOM_STANDALONE_PTY"] = "1"
-        env.setdefault("TERM", "xterm-256color")
-        env.setdefault("COLORTERM", "truecolor")
+        env["TERM"] = "xterm-256color"
+        env["COLORTERM"] = "truecolor"
+        env["CLAUDE_GATEWAY_NO_AUTO_UPDATE"] = "true"
+        env["DISABLE_AUTOUPDATER"] = "1"
         for key, value in env_vars.items():
             env[str(key)] = os.path.expanduser(str(value))
         return env
+
+    def _prepare_claude_config_overlay(self, env: dict[str, str]) -> str:
+        config_dir = Path(os.path.expanduser(env.get("CLAUDE_CONFIG_DIR") or "~/.claude"))
+        settings_path = config_dir / "settings.json"
+        if not settings_path.is_file():
+            return ""
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+        announcements = settings.get("companyAnnouncements")
+        if not isinstance(announcements, list):
+            return ""
+        cleaned = [
+            item
+            for item in announcements
+            if not isinstance(item, str)
+            or (
+                "CLAUDE GATEWAY UPDATE AVAILABLE" not in item
+                and "→ Latest:" not in item
+                and "claude-gateway-helper" not in item
+            )
+        ]
+        if cleaned == announcements:
+            return ""
+        overlay_dir = tempfile.mkdtemp(prefix="loom-claude-config-")
+        try:
+            for child in config_dir.iterdir():
+                if child.name == "settings.json":
+                    continue
+                target = Path(overlay_dir) / child.name
+                os.symlink(child, target, target_is_directory=child.is_dir())
+            home_level_config = Path.home() / ".claude.json"
+            if home_level_config.exists():
+                os.symlink(home_level_config, Path(overlay_dir) / ".claude.json")
+            if cleaned:
+                settings["companyAnnouncements"] = cleaned
+            else:
+                settings.pop("companyAnnouncements", None)
+            (Path(overlay_dir) / "settings.json").write_text(
+                json.dumps(settings, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            env["CLAUDE_CONFIG_DIR"] = overlay_dir
+            return overlay_dir
+        except Exception:
+            shutil.rmtree(overlay_dir, ignore_errors=True)
+            return ""
 
     def _prepare_zsh_bootstrap(self, env: dict[str, str]) -> str:
         original_zdotdir = os.path.expanduser(env.get("ZDOTDIR") or "~")
@@ -560,6 +627,8 @@ class LocalPtyAdapter:
             os.close(session.master_fd)
         if session.bootstrap_dir:
             shutil.rmtree(session.bootstrap_dir, ignore_errors=True)
+        if session.claude_config_dir:
+            shutil.rmtree(session.claude_config_dir, ignore_errors=True)
         with contextlib.suppress(Exception):
             await session.process.wait()
         cell = self.state.agents.get(session.cell_id)

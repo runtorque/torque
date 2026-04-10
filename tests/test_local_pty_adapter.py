@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import json
 import os
 import shutil
 import tempfile
@@ -233,8 +234,14 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 "ITERM_PROFILE": "Default",
                 "LC_TERMINAL": "iTerm2",
                 "LC_TERMINAL_VERSION": "3.6.7",
+                "TERM_SESSION_ID": "session-123",
+                "TERM_FEATURES": "24bitcc",
+                "TERMINFO_DIRS": "/Applications/iTerm.app/Contents/Resources/terminfo",
                 "TERM_PROGRAM": "iTerm.app",
                 "TERM_PROGRAM_VERSION": "3.6.7",
+                "TERM": "dumb",
+                "STARSHIP_SESSION_KEY": "starship-session",
+                "STARSHIP_SHELL": "zsh",
             },
             clear=False,
         ):
@@ -247,13 +254,72 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(env["LOOM_STANDALONE_PTY"], "1")
         self.assertEqual(env["TERM"], "xterm-256color")
         self.assertEqual(env["COLORTERM"], "truecolor")
+        self.assertEqual(env["CLAUDE_GATEWAY_NO_AUTO_UPDATE"], "true")
+        self.assertEqual(env["DISABLE_AUTOUPDATER"], "1")
         self.assertEqual(env["CUSTOM_PATH"], os.path.expanduser("~/loom-test"))
         self.assertNotIn("ITERM_SESSION_ID", env)
         self.assertNotIn("ITERM_PROFILE", env)
         self.assertNotIn("LC_TERMINAL", env)
         self.assertNotIn("LC_TERMINAL_VERSION", env)
+        self.assertNotIn("TERM_SESSION_ID", env)
+        self.assertNotIn("TERM_FEATURES", env)
+        self.assertNotIn("TERMINFO_DIRS", env)
         self.assertNotIn("TERM_PROGRAM", env)
         self.assertNotIn("TERM_PROGRAM_VERSION", env)
+        self.assertNotIn("STARSHIP_SESSION_KEY", env)
+        self.assertNotIn("STARSHIP_SHELL", env)
+
+    def test_prepare_claude_config_overlay_cleans_upgrade_banner_without_mutating_real_config(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+
+        with tempfile.TemporaryDirectory() as home_dir:
+            home_path = Path(home_dir)
+            config_path = home_path / ".claude"
+            config_path.mkdir()
+            settings_path = config_path / "settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "model": "opus",
+                        "companyAnnouncements": [
+                            "⚠️  CLAUDE GATEWAY UPDATE AVAILABLE ⚠️\n   Current: v1.7.8 → Latest: v2.1.1\n   Run: npm update -g claude-gateway-helper",
+                            "Keep shipping.",
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            history_path = config_path / "history.jsonl"
+            history_path.write_text("{}", encoding="utf-8")
+            home_level_config = home_path / ".claude.json"
+            home_level_config.write_text("{\"theme\":\"dark\"}", encoding="utf-8")
+
+            env = {"CLAUDE_CONFIG_DIR": str(config_path)}
+            with mock.patch.object(Path, "home", return_value=home_path):
+                overlay_dir = adapter._prepare_claude_config_overlay(env)
+                self.addCleanup(shutil.rmtree, overlay_dir, ignore_errors=True)
+
+                self.assertTrue(overlay_dir)
+                self.assertEqual(env["CLAUDE_CONFIG_DIR"], overlay_dir)
+                overlay_settings = json.loads(
+                    (Path(overlay_dir) / "settings.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(overlay_settings["companyAnnouncements"], ["Keep shipping."])
+                self.assertTrue((Path(overlay_dir) / "history.jsonl").is_symlink())
+                self.assertTrue((Path(overlay_dir) / ".claude.json").is_symlink())
+                self.assertEqual(
+                    settings_path.read_text(encoding="utf-8"),
+                    json.dumps(
+                        {
+                            "model": "opus",
+                            "companyAnnouncements": [
+                                "⚠️  CLAUDE GATEWAY UPDATE AVAILABLE ⚠️\n   Current: v1.7.8 → Latest: v2.1.1\n   Run: npm update -g claude-gateway-helper",
+                                "Keep shipping.",
+                            ],
+                        }
+                    ),
+                )
 
     def test_prepare_zsh_bootstrap_wraps_original_profiles_and_installs_precmd_hook(self):
         state = self.state_mod.MatrixState()
