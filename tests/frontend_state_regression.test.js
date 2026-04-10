@@ -827,6 +827,66 @@ test('board restores the selected lane scroll when toggling schedules', () => {
   assert.equal(cards.scrollTop, 44);
 });
 
+test('renderBoard uses a wide multi-lane layout only for embedded wide panels', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    backlog: { id: 'backlog', group: 'alpha', task: 'Backlog task', lane: 'Backlog', position: 4 },
+    todo: { id: 'todo', group: 'alpha', task: 'To Do task', lane: 'To Do', position: 3 },
+    progress: { id: 'progress', group: 'alpha', task: 'Active task', lane: 'In Progress', position: 2 },
+    done: { id: 'done', group: 'alpha', task: 'Done task', lane: 'Done', position: 1 },
+  };
+  runInContext(context, `_boardSelectedLane = 'Backlog';`);
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-wide-grid/);
+  assert.equal((panel.innerHTML.match(/data-board-lane-column="1"/g) || []).length, 4);
+  assert.match(panel.innerHTML, /board-wide-lane-name">Backlog/);
+  assert.match(panel.innerHTML, /board-wide-lane-name">Done/);
+
+  panel.clientWidth = 820;
+  context.renderBoard();
+  assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
+
+  document.body.classList.remove('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.renderBoard();
+  assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
+});
+
+test('board keeps scroll state when changing the selected lane in wide embedded mode', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  const cards = document.register('board-cards');
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    backlog: { id: 'backlog', group: 'alpha', task: 'Backlog task', lane: 'Backlog', position: 2 },
+    done: { id: 'done', group: 'alpha', task: 'Done task', lane: 'Done', position: 1 },
+  };
+
+  runInContext(context, `_boardSelectedLane = 'Backlog';`);
+  context.renderBoard();
+
+  runInContext(context, `_boardRenderLimit = 150;`);
+  cards.scrollTop = 77;
+  cards.listeners.scroll();
+
+  context.boardSelectLane('Done');
+
+  assert.equal(runInContext(context, '_boardSelectedLane'), 'Done');
+  assert.equal(cards.scrollTop, 77);
+  assert.equal(runInContext(context, '_boardRenderLimit'), 150);
+});
+
 test('renderBoard switches to the first lane with matches when filters empty the current lane', () => {
   const { context, document } = createBoardHarness();
   document.register('panel-board');
@@ -1331,6 +1391,45 @@ test('boardCardDrop maps manual drag ordering to the expected server position', 
     cmd: 'board_reorder_task',
     id: 'top',
     position: 0,
+  });
+});
+
+test('boardCardDrop moves tasks across lanes in the wide embedded layout', () => {
+  const { context, document } = createBoardHarness();
+  document.register('panel-board').clientWidth = 1200;
+  document.body.classList.add('runtime-embedded');
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    back: { id: 'back', group: 'alpha', task: 'Backlog task', lane: 'Backlog', position: 4 },
+    done: { id: 'done', group: 'alpha', task: 'Done task', lane: 'Done', position: 1 },
+  };
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardDragId = 'back';
+  `);
+
+  const lane = new FakeElement();
+  lane.classList.add('board-wide-lane');
+  lane.dataset.lane = 'Done';
+
+  const card = new FakeElement();
+  card.dataset.taskId = 'done';
+  card.classList.add('board-card');
+  card.parentNode = lane;
+  card.getBoundingClientRect = () => ({ top: 0, height: 100 });
+
+  context.boardCardDrop({
+    preventDefault() {},
+    stopPropagation() {},
+    clientY: 20,
+    target: card,
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls.at(-1))), {
+    cmd: 'board_move_task',
+    id: 'back',
+    lane: 'Done',
+    position: 1,
   });
 });
 

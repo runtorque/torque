@@ -139,6 +139,24 @@ function _restorePanelState() {
 /* -- Standalone workspace resize handle ---------------------------------- */
 
 var _workspaceSidebarWidth = 320;
+var _workspaceBoardRenderPending = false;
+
+function _scheduleStandaloneBoardLayoutRender() {
+  if (typeof document === 'undefined'
+      || !document.body
+      || !document.body.classList
+      || !document.body.classList.contains('runtime-embedded')) {
+    return;
+  }
+  if (typeof renderBoard !== 'function') return;
+  if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') return;
+  if (_workspaceBoardRenderPending || typeof requestAnimationFrame !== 'function') return;
+  _workspaceBoardRenderPending = true;
+  requestAnimationFrame(function() {
+    _workspaceBoardRenderPending = false;
+    renderBoard();
+  });
+}
 
 function _workspaceSidebarWidthBounds() {
   var maxWidth = Math.max(320, Math.floor(window.innerWidth * 0.62));
@@ -163,6 +181,7 @@ function _applyWorkspaceSidebarWidth(width) {
   if (root && root.style) {
     root.style.setProperty('--standalone-sidebar-width', next + 'px');
   }
+  _scheduleStandaloneBoardLayoutRender();
 }
 
 (function() {

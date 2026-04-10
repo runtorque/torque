@@ -229,6 +229,12 @@ function _boardTaskCloneFields(task) {
 }
 
 function boardFocusTask(id, evt) {
+  var task = _boardTasks()[id];
+  if (task && typeof _boardWideLayoutActive === 'function'
+      && _boardWideLayoutActive(document.getElementById('panel-board'))
+      && task.lane && task.lane !== _boardSelectedLane) {
+    _boardSelectedLane = task.lane;
+  }
   if (_boardQuickEditTask && _boardQuickEditTask !== id) {
     _boardQuickEditTask = '';
     _boardQuickEditKind = '';

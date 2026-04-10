@@ -67,6 +67,7 @@ var _boardArchivedLane = 'Archived';
 var _boardArchiveLabel = 'loom:archived'; // legacy compatibility for older state
 var _boardArchiveStaleDays = 7;
 var _boardLaneEntryRefreshTimer = 0;
+var _boardWideModeMinWidth = 960;
 var _boardEligibilityActionsByGroup = {};
 var _boardEligibilityTemplatesByGroup = {};
 var _boardEligibilityActionWaiting = false;
@@ -113,6 +114,29 @@ function _boardVisibleLanes() {
 
 function _boardTasks() {
   return (state && state.board_tasks) || {};
+}
+
+function _boardIsEmbeddedRuntime() {
+  return !!(
+    (state && state.runtime && state.runtime.embedded_terminal)
+    || (document && document.body && document.body.classList
+      && document.body.classList.contains('runtime-embedded'))
+  );
+}
+
+function _boardPanelWidth(panel) {
+  if (panel && typeof panel.clientWidth === 'number' && panel.clientWidth > 0) {
+    return panel.clientWidth;
+  }
+  if (typeof window !== 'undefined' && typeof window.innerWidth === 'number') {
+    return window.innerWidth;
+  }
+  return 0;
+}
+
+function _boardWideLayoutActive(panel) {
+  if (_boardShowSchedules || !_boardIsEmbeddedRuntime()) return false;
+  return _boardPanelWidth(panel || document.getElementById('panel-board')) >= _boardWideModeMinWidth;
 }
 
 function _boardGroupTaskCount() {
@@ -375,6 +399,7 @@ function _renderBoardMessageState(state, noteOnly) {
 }
 
 function _boardEmptyStateForLane(lane, laneTasks, rootTasks, filtersActive) {
+  var escLane = esc(lane).replace(/'/g, "\\'");
   if (filtersActive) {
     return {
       title: 'No matching tasks',
@@ -395,7 +420,7 @@ function _boardEmptyStateForLane(lane, laneTasks, rootTasks, filtersActive) {
         body: blocked + ' task' + (blocked === 1 ? ' is' : 's are')
           + ' waiting on dependencies or blockers. Resolve prerequisites to make work dispatchable.',
         actions: !_boardAddingTask
-          ? [{ label: '+ Task', onclick: 'boardStartAddTask()' }]
+          ? [{ label: '+ Task', onclick: 'boardStartAddTaskForLane(\'' + escLane + '\')' }]
           : [],
       };
     }
@@ -407,7 +432,7 @@ function _boardEmptyStateForLane(lane, laneTasks, rootTasks, filtersActive) {
             + ' scheduled for later. Wait for the dispatch window or add a ready task.'
           : 'Backlog tasks need attention before they can be dispatched.',
         actions: !_boardAddingTask
-          ? [{ label: '+ Task', onclick: 'boardStartAddTask()' }]
+          ? [{ label: '+ Task', onclick: 'boardStartAddTaskForLane(\'' + escLane + '\')' }]
           : [],
       };
     }
@@ -423,7 +448,7 @@ function _boardEmptyStateForLane(lane, laneTasks, rootTasks, filtersActive) {
   }
   var actions = [];
   if (!_boardAddingTask && lane !== 'Done') {
-    actions.push({ label: '+ Task', onclick: 'boardStartAddTask()' });
+    actions.push({ label: '+ Task', onclick: 'boardStartAddTaskForLane(\'' + escLane + '\')' });
   }
   return {
     title: 'No tasks in ' + lane,
@@ -434,8 +459,8 @@ function _boardEmptyStateForLane(lane, laneTasks, rootTasks, filtersActive) {
   };
 }
 
-function _boardBacklogDispatchNote(rootTasks) {
-  if (_boardSelectedLane !== 'Backlog' || !rootTasks.length) return null;
+function _boardBacklogDispatchNote(rootTasks, lane) {
+  if ((lane || _boardSelectedLane) !== 'Backlog' || !rootTasks.length) return null;
   var blocked = 0;
   var scheduled = 0;
   var ready = 0;
@@ -608,7 +633,12 @@ function _boardAfterRenderLayout() {
       });
       // Click on empty space clears selection
       cardsEl.addEventListener('click', function(e) {
-        if (e.target === cardsEl && _boardSelectedCount() > 0) {
+        var clickedEmptyWideLane = !!(
+          e.target
+          && e.target.classList
+          && e.target.classList.contains('board-wide-lane-body')
+        );
+        if ((e.target === cardsEl || clickedEmptyWideLane) && _boardSelectedCount() > 0) {
           boardClearSelection();
         }
       });
@@ -621,6 +651,182 @@ function _boardAfterRenderLayout() {
       }
     }
   });
+}
+
+function _boardChildrenOfVisibleTasks(allTasks) {
+  var childrenOf = {};
+  for (var taskId in allTasks) {
+    var task = allTasks[taskId];
+    if (task.parent_task_id && allTasks[task.parent_task_id]) {
+      if (!childrenOf[task.parent_task_id]) childrenOf[task.parent_task_id] = [];
+      childrenOf[task.parent_task_id].push(task);
+    }
+  }
+  for (var parentId in childrenOf) {
+    childrenOf[parentId].sort(function(a, b) {
+      return (a.pipeline_depth - b.pipeline_depth)
+        || (a.created_at || '').localeCompare(b.created_at || '');
+    });
+  }
+  return childrenOf;
+}
+
+function _boardRootTasksForLane(lane, allTasks) {
+  return _boardTasksInLane(lane).filter(function(task) {
+    return !task.parent_task_id || !allTasks[task.parent_task_id];
+  });
+}
+
+function _boardRenderActionListSection() {
+  if (_boardActList === null) return '';
+  var html = '<div class="board-tpl-list">';
+  if (_boardActList.length === 0) {
+    html += '<div class="board-tpl-empty">No actions found</div>';
+  } else {
+    var projectActs = _boardActList.filter(function(t) { return !t.global; });
+    var userActs = _boardActList.filter(function(t) { return t.global; });
+    if (projectActs.length) {
+      html += '<div class="board-tpl-group-label">Project</div>';
+      for (var pi = 0; pi < projectActs.length; pi++) {
+        html += _boardActItemHtml(projectActs[pi]);
+      }
+    }
+    if (userActs.length) {
+      html += '<div class="board-tpl-group-label">User</div>';
+      for (var ui = 0; ui < userActs.length; ui++) {
+        html += _boardActItemHtml(userActs[ui]);
+      }
+    }
+  }
+  html += '<button class="board-tpl-item board-tpl-notemplate" onclick="_boardPickNoAction()">No action</button>';
+  html += '</div>';
+  return html;
+}
+
+function _boardRenderAddTaskSection(lane) {
+  var html = '';
+  var escLane = esc(lane).replace(/'/g, "\\'");
+  var activeLane = lane === _boardSelectedLane;
+  if (_boardAddingTask && activeLane) {
+    html += '<div class="board-add-task board-add-task-active"'
+      + ' ondragover="boardInlineDragOver(event)" ondragleave="boardInlineDragLeave(event)"'
+      + ' ondrop="boardInlineDrop(event)">';
+    html += '<div style="position:relative">';
+    html += '<textarea class="board-add-input" id="board-add-task-input" rows="1"'
+      + ' placeholder="Task description..."'
+      + ' onkeydown="boardAddTaskKeydown(event)"'
+      + ' oninput="boardAddTaskInput(this)"'
+      + ' onblur="boardCancelAddTask()">' + esc(_boardAddingTaskDraft) + '</textarea>';
+    html += '<div id="board-add-label-dropdown" class="deps-dropdown" style="display:none"></div>';
+    html += '</div>';
+    if (_boardInlineAttachments.length) {
+      html += '<div class="inline-att-chips">';
+      for (var ai = 0; ai < _boardInlineAttachments.length; ai++) {
+        html += '<span class="inline-att-chip">[Image #' + (ai + 1) + ']'
+          + '<button class="inline-att-chip-remove" onmousedown="event.preventDefault();boardInlineRemoveAtt(' + ai + ')">&times;</button>'
+          + '</span>';
+      }
+      html += '</div>';
+    }
+    html += '<div class="board-add-toolbar">';
+    html += '<button class="board-add-toolbar-btn board-add-clear-btn" onmousedown="event.preventDefault();boardClearAddTask()">Clear</button>';
+    html += '<div class="board-add-toolbar-right">';
+    html += '<div class="board-add-dropdown" id="board-add-agent-wrap">';
+    var agentLabel = _boardAddingTaskAgent ? _boardAgentName(_boardAddingTaskAgent) : 'No agent';
+    html += '<button class="board-add-toolbar-btn" onmousedown="event.preventDefault();boardToggleAgentDropdown()">'
+      + esc(agentLabel) + ' &#9662;</button>';
+    html += '</div>';
+    var actionLabel = _boardAddingTaskAction || 'No action';
+    html += '<button class="board-add-toolbar-btn" onmousedown="event.preventDefault();boardToggleActionList()">'
+      + esc(actionLabel) + ' &#9662;</button>';
+    html += '<button class="board-add-toolbar-btn board-add-submit-btn" onmousedown="event.preventDefault();boardSubmitAddTask()">Submit &#10132;</button>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+    return html;
+  }
+
+  html += '<div class="board-add-task" onclick="boardStartAddTaskForLane(\'' + escLane + '\')">';
+  html += '<span>+ Add task</span>';
+  html += '<button class="board-add-tpl-btn-idle"'
+    + ' onclick="event.stopPropagation();boardStartAddTaskActionForLane(\'' + escLane + '\')">From action &#9662;</button>';
+  html += '</div>';
+  return html;
+}
+
+function _boardRenderLaneSection(lane, allTasks, childrenOf, filtersActive) {
+  var html = '';
+  var rootTasks = _boardRootTasksForLane(lane, allTasks);
+  var renderCap = Math.min(rootTasks.length, _boardRenderLimit);
+
+  html += _boardRenderAddTaskSection(lane);
+  if (lane === _boardSelectedLane) {
+    html += _boardRenderActionListSection();
+  }
+
+  var archiveSuggestion = _renderBoardArchiveSuggestion(lane);
+  if (archiveSuggestion) html += archiveSuggestion;
+
+  var backlogDispatchNote = _boardBacklogDispatchNote(rootTasks, lane);
+  if (backlogDispatchNote) {
+    html += _renderBoardMessageState(backlogDispatchNote, true);
+  }
+
+  if (rootTasks.length === 0) {
+    html += _renderBoardMessageState(
+      _boardEmptyStateForLane(
+        lane,
+        _boardLanePoolTasks(lane),
+        rootTasks,
+        filtersActive,
+      ),
+      false,
+    );
+  }
+
+  for (var j = 0; j < renderCap; j++) {
+    html += _renderBoardCard(rootTasks[j], childrenOf, 0);
+  }
+  if (rootTasks.length > renderCap) {
+    var remaining = rootTasks.length - renderCap;
+    html += '<div class="board-load-more" onclick="boardLoadMore()">'
+      + remaining + ' more task' + (remaining === 1 ? '' : 's') + ' — click or scroll to load</div>';
+  }
+
+  return {
+    html: html,
+    rootTasks: rootTasks,
+    renderCap: renderCap,
+  };
+}
+
+function _boardRenderWideLaneColumn(lane, allTasks, childrenOf, filtersActive) {
+  var escLane = esc(lane).replace(/'/g, "\\'");
+  var laneCount = _boardLaneCount(lane);
+  var active = lane === _boardSelectedLane;
+  var section = _boardRenderLaneSection(lane, allTasks, childrenOf, filtersActive);
+  var html = '<section class="board-wide-lane' + (active ? ' active' : '') + '"'
+    + ' data-lane="' + esc(lane) + '" data-board-lane-column="1">';
+  html += '<div class="board-wide-lane-head">';
+  html += '<button class="board-wide-lane-select" onclick="boardSelectLane(\'' + escLane + '\')">';
+  html += '<span class="board-wide-lane-name">' + esc(lane) + '</span>';
+  html += '<span class="board-wide-lane-count">' + laneCount + '</span>';
+  if (active) html += '<span class="board-wide-lane-badge">Active</span>';
+  html += '</button>';
+  if (filtersActive && active) {
+    html += '<div class="board-wide-lane-summary">' + esc(_boardFilterSummaryText()) + '</div>';
+  }
+  html += '</div>';
+  html += '<div class="board-wide-lane-body board-lane-drop-target"'
+    + ' data-lane="' + esc(lane) + '" data-board-lane-drop="1"'
+    + ' ondragover="boardLaneTabDragOver(event)"'
+    + ' ondragleave="boardLaneTabDragLeave(event)"'
+    + ' ondrop="boardLaneTabDrop(event)">';
+  html += section.html;
+  html += '</div>';
+  html += '</section>';
+  section.html = html;
+  return section;
 }
 
 /* ---- Render --------------------------------------------------------- */
@@ -674,6 +880,7 @@ function renderBoard() {
     _boardSelectedLane = _boardPreFilterLane;
     _boardPreFilterLane = '';
   }
+  var wideLayout = _boardWideLayoutActive(panel);
 
   // Search & filter toolbar
   var labelCounts = _boardAllLabelCounts();
@@ -846,7 +1053,7 @@ function renderBoard() {
     var cls = (!_boardShowSchedules && l === _boardSelectedLane) ? ' active' : '';
     if (filtersActive && cnt === 0) cls += ' dimmed';
     var escLane = esc(l).replace(/'/g, "\\'");
-    html += '<button class="board-lane-tab' + cls + '"'
+    html += '<button class="board-lane-tab board-lane-drop-target' + cls + '"'
       + ' data-lane="' + esc(l) + '"'
       + ' onclick="boardSelectLane(\'' + escLane + '\')"'
       + ' ondragover="boardLaneTabDragOver(event)"'
@@ -876,134 +1083,44 @@ function renderBoard() {
     return;
   }
 
-  // Cards — always show tasks in the selected lane
-  var tasks = _boardTasksInLane(_boardSelectedLane);
   var allTasks = _boardVisibleTasks();
-  var childrenOf = {};  // parent_id → [tasks]
-  for (var cid in allTasks) {
-    var ct = allTasks[cid];
-    if (ct.parent_task_id && allTasks[ct.parent_task_id]) {
-      if (!childrenOf[ct.parent_task_id]) childrenOf[ct.parent_task_id] = [];
-      childrenOf[ct.parent_task_id].push(ct);
-    }
-  }
-  // Sort children by depth then created_at
-  for (var pid in childrenOf) {
-    childrenOf[pid].sort(function(a, b) {
-      return (a.pipeline_depth - b.pipeline_depth) || (a.created_at || '').localeCompare(b.created_at || '');
-    });
-  }
-  // Root tasks: in this lane, with no parent in the visible set
-  var rootTasks = tasks.filter(function(t) {
-    return !t.parent_task_id || !allTasks[t.parent_task_id];
-  });
-
-  html += '<div class="board-cards board-density-' + _boardCardDensityMode() + '" id="board-cards">';
-
-  // Add task: inline input or button (at top)
-  if (_boardAddingTask) {
-    html += '<div class="board-add-task board-add-task-active"'
-      + ' ondragover="boardInlineDragOver(event)" ondragleave="boardInlineDragLeave(event)"'
-      + ' ondrop="boardInlineDrop(event)">';
-    html += '<div style="position:relative">';
-    html += '<textarea class="board-add-input" id="board-add-task-input" rows="1"'
-      + ' placeholder="Task description..."'
-      + ' onkeydown="boardAddTaskKeydown(event)"'
-      + ' oninput="boardAddTaskInput(this)"'
-      + ' onblur="boardCancelAddTask()">' + esc(_boardAddingTaskDraft) + '</textarea>';
-    html += '<div id="board-add-label-dropdown" class="deps-dropdown" style="display:none"></div>';
-    html += '</div>';
-    // Inline attachment chips (compact — no thumbnails)
-    if (_boardInlineAttachments.length) {
-      html += '<div class="inline-att-chips">';
-      for (var ai = 0; ai < _boardInlineAttachments.length; ai++) {
-        html += '<span class="inline-att-chip">[Image #' + (ai + 1) + ']'
-          + '<button class="inline-att-chip-remove" onmousedown="event.preventDefault();boardInlineRemoveAtt(' + ai + ')">&times;</button>'
-          + '</span>';
-      }
-      html += '</div>';
-    }
-    html += '<div class="board-add-toolbar">';
-    html += '<button class="board-add-toolbar-btn board-add-clear-btn" onmousedown="event.preventDefault();boardClearAddTask()">Clear</button>';
-    html += '<div class="board-add-toolbar-right">';
-    // Agent dropdown
-    html += '<div class="board-add-dropdown" id="board-add-agent-wrap">';
-    var agentLabel = _boardAddingTaskAgent ? _boardAgentName(_boardAddingTaskAgent) : 'No agent';
-    html += '<button class="board-add-toolbar-btn" onmousedown="event.preventDefault();boardToggleAgentDropdown()">'
-      + esc(agentLabel) + ' &#9662;</button>';
-    html += '</div>';
-    // Action dropdown
-    var actionLabel = _boardAddingTaskAction || 'No action';
-    html += '<button class="board-add-toolbar-btn" onmousedown="event.preventDefault();boardToggleActionList()">'
-      + esc(actionLabel) + ' &#9662;</button>';
-    // Submit
-    html += '<button class="board-add-toolbar-btn board-add-submit-btn" onmousedown="event.preventDefault();boardSubmitAddTask()">Submit &#10132;</button>';
-    html += '</div>';
-    html += '</div>';
-    html += '</div>';
-  } else {
-    html += '<div class="board-add-task" onclick="boardStartAddTask()">';
-    html += '<span>+ Add task</span>';
-    html += '<button class="board-add-tpl-btn-idle" onclick="event.stopPropagation();boardToggleActionList()">From action &#9662;</button>';
-    html += '</div>';
-  }
-
-  // Inline action list (shown below add-task)
-  if (_boardActList !== null) {
-    html += '<div class="board-tpl-list">';
-    if (_boardActList.length === 0) {
-      html += '<div class="board-tpl-empty">No actions found</div>';
-    } else {
-      var projectActs = _boardActList.filter(function(t) { return !t.global; });
-      var userActs = _boardActList.filter(function(t) { return t.global; });
-      if (projectActs.length) {
-        html += '<div class="board-tpl-group-label">Project</div>';
-        for (var pi = 0; pi < projectActs.length; pi++) {
-          html += _boardActItemHtml(projectActs[pi]);
-        }
-      }
-      if (userActs.length) {
-        html += '<div class="board-tpl-group-label">User</div>';
-        for (var ui = 0; ui < userActs.length; ui++) {
-          html += _boardActItemHtml(userActs[ui]);
-        }
-      }
-    }
-    html += '<button class="board-tpl-item board-tpl-notemplate" onclick="_boardPickNoAction()">No action</button>';
-    html += '</div>';
-  }
-
-  html += _renderBoardArchiveSuggestion();
-  var backlogDispatchNote = _boardBacklogDispatchNote(rootTasks);
-  if (backlogDispatchNote) {
-    html += _renderBoardMessageState(backlogDispatchNote, true);
-  }
-
-  // Task cards
-  if (rootTasks.length === 0) {
-    html += _renderBoardMessageState(
-      _boardEmptyStateForLane(
-        _boardSelectedLane,
-        _boardLanePoolTasks(_boardSelectedLane),
-        rootTasks,
+  var childrenOf = _boardChildrenOfVisibleTasks(allTasks);
+  var nextLaneEntryDelay = 0;
+  html += '<div class="board-cards board-density-' + _boardCardDensityMode()
+    + (wideLayout ? ' board-wide-grid' : '') + '" id="board-cards">';
+  if (wideLayout) {
+    for (var laneIdx = 0; laneIdx < lanes.length; laneIdx++) {
+      var wideSection = _boardRenderWideLaneColumn(
+        lanes[laneIdx],
+        allTasks,
+        childrenOf,
         filtersActive,
-      ),
-      false,
+      );
+      html += wideSection.html;
+      var wideDelay = _boardVisibleLaneEntryRefreshDelay(
+        wideSection.rootTasks,
+        childrenOf,
+        wideSection.renderCap,
+      );
+      if (wideDelay > 0 && (!nextLaneEntryDelay || wideDelay < nextLaneEntryDelay)) {
+        nextLaneEntryDelay = wideDelay;
+      }
+    }
+  } else {
+    var laneSection = _boardRenderLaneSection(
+      _boardSelectedLane,
+      allTasks,
+      childrenOf,
+      filtersActive,
+    );
+    html += laneSection.html;
+    nextLaneEntryDelay = _boardVisibleLaneEntryRefreshDelay(
+      laneSection.rootTasks,
+      childrenOf,
+      laneSection.renderCap,
     );
   }
-
-  var renderCap = Math.min(rootTasks.length, _boardRenderLimit);
-  for (var j = 0; j < renderCap; j++) {
-    html += _renderBoardCard(rootTasks[j], childrenOf, 0);
-  }
-  _boardScheduleLaneEntryRefresh(
-    _boardVisibleLaneEntryRefreshDelay(rootTasks, childrenOf, renderCap)
-  );
-  if (rootTasks.length > renderCap) {
-    var remaining = rootTasks.length - renderCap;
-    html += '<div class="board-load-more" onclick="boardLoadMore()">'
-      + remaining + ' more task' + (remaining === 1 ? '' : 's') + ' — click or scroll to load</div>';
-  }
+  _boardScheduleLaneEntryRefresh(nextLaneEntryDelay);
 
   html += '</div>';
 
@@ -1044,11 +1161,15 @@ function renderBoard() {
 /* ---- Virtual scroll ------------------------------------------------- */
 
 function boardLoadMore() {
-  var tasks = _boardTasksInLane(_boardSelectedLane || _boardVisibleLanes()[0] || '');
   var allTasks = _boardVisibleTasks();
-  var rootCount = tasks.filter(function(t) {
-    return !t.parent_task_id || !allTasks[t.parent_task_id];
-  }).length;
+  var rootCount = 0;
+  var lanes = _boardWideLayoutActive(document.getElementById('panel-board'))
+    ? _boardVisibleLanes()
+    : [_boardSelectedLane || _boardVisibleLanes()[0] || ''];
+  for (var i = 0; i < lanes.length; i++) {
+    var laneRootCount = _boardRootTasksForLane(lanes[i], allTasks).length;
+    if (laneRootCount > rootCount) rootCount = laneRootCount;
+  }
   if (_boardRenderLimit >= rootCount) return;
   _boardRenderLimit += 50;
   _boardSyncActiveViewState();
@@ -1059,7 +1180,8 @@ function boardLoadMore() {
 
 function boardSelectLane(lane) {
   if (!_boardShowSchedules && lane === _boardSelectedLane) return;
-  _boardPrepareViewChange(true);
+  var wideLayout = _boardWideLayoutActive(document.getElementById('panel-board'));
+  _boardPrepareViewChange(!wideLayout);
   _boardShowSchedules = false;  // exit schedules view on lane click
   // Save current scroll so renderBoard can restore + adjust for new active tab
   var tabs = document.getElementById('board-lane-tabs');
@@ -1161,11 +1283,45 @@ function boardUpdateScrollArrows() {
 /* ---- Add task dropdown ---------------------------------------------- */
 
 function boardStartAddTask() {
+  boardStartAddTaskForLane(_boardSelectedLane || _boardVisibleLanes()[0] || '');
+}
+
+function boardStartAddTaskForLane(lane) {
+  var nextLane = lane || _boardSelectedLane || _boardVisibleLanes()[0] || '';
+  var panel = document.getElementById('panel-board');
+  var wideLayout = _boardWideLayoutActive(panel);
+  if (_boardShowSchedules || nextLane !== _boardSelectedLane) {
+    _boardPrepareViewChange(!wideLayout);
+    _boardShowSchedules = false;
+    var tabs = document.getElementById('board-lane-tabs');
+    if (tabs) _boardScrollLeft = tabs.scrollLeft;
+    _boardSelectedLane = nextLane;
+    _boardSelectedTasks = {};
+    _boardLastSelectedTask = '';
+  }
   _boardAddingTask = true;
   _boardAddTaskFocus = true;
   _boardFocusedTask = '';
   if (!_boardInlineDraftId) _boardInlineDraftId = _generateDraftId();
   renderBoard();
+}
+
+function boardStartAddTaskActionForLane(lane) {
+  var nextLane = lane || _boardSelectedLane || _boardVisibleLanes()[0] || '';
+  if (_boardShowSchedules || nextLane !== _boardSelectedLane) {
+    var panel = document.getElementById('panel-board');
+    var wideLayout = _boardWideLayoutActive(panel);
+    _boardPrepareViewChange(!wideLayout);
+    _boardShowSchedules = false;
+    var tabs = document.getElementById('board-lane-tabs');
+    if (tabs) _boardScrollLeft = tabs.scrollLeft;
+    _boardSelectedLane = nextLane;
+    _boardFocusedTask = '';
+    _boardSelectedTasks = {};
+    _boardLastSelectedTask = '';
+    renderBoard();
+  }
+  if (_boardActList === null) boardToggleActionList();
 }
 
 function boardCancelAddTask() {
@@ -2251,7 +2407,7 @@ function boardCardDragEnd(e) {
   document.querySelectorAll('.board-card.dragging').forEach(function(el) {
     el.classList.remove('dragging');
   });
-  document.querySelectorAll('.board-lane-tab.drop-target').forEach(function(el) {
+  document.querySelectorAll('.board-lane-drop-target.drop-target').forEach(function(el) {
     el.classList.remove('drop-target');
   });
   document.querySelectorAll('.board-card.drop-before,.board-card.drop-after').forEach(function(el) {
@@ -2259,9 +2415,41 @@ function boardCardDragEnd(e) {
   });
 }
 
+function _boardClosestLaneDropTarget(node) {
+  while (node) {
+    if (node.classList && node.classList.contains('board-lane-drop-target')) return node;
+    node = node.parentNode || null;
+  }
+  return null;
+}
+
+function _boardTaskLane(taskId) {
+  var task = _boardTasks()[taskId];
+  return task ? (task.lane || '') : '';
+}
+
+function _boardDropServerPosition(lane, targetId, placeAfter, movingWithinLane) {
+  var tasks = _boardTasksInLane(lane);
+  if (!movingWithinLane) {
+    tasks = tasks.filter(function(task) { return task.id !== _boardDragId; });
+  }
+  var targetIdx = -1;
+  for (var i = 0; i < tasks.length; i++) {
+    if (tasks[i].id === targetId) {
+      targetIdx = i;
+      break;
+    }
+  }
+  if (targetIdx < 0) return null;
+  var pos = placeAfter ? targetIdx + 1 : targetIdx;
+  var serverPos = tasks.length - pos - (movingWithinLane ? 1 : 0);
+  return Math.max(0, serverPos);
+}
+
 function boardCardDragOver(e) {
   if (!_boardDragId) return;
   e.preventDefault();
+  if (e.stopPropagation) e.stopPropagation();
   e.dataTransfer.dropEffect = 'move';
 
   // Show drop indicator
@@ -2275,32 +2463,38 @@ function boardCardDragOver(e) {
 }
 
 function boardCardDragLeave(e) {
+  if (e.stopPropagation) e.stopPropagation();
   var card = e.target.closest('.board-card');
   if (card) card.classList.remove('drop-before', 'drop-after');
 }
 
 function boardCardDrop(e) {
   e.preventDefault();
-  if (_boardLaneSortMode(_boardSelectedLane) !== 'manual') return;
+  if (e.stopPropagation) e.stopPropagation();
   var card = e.target.closest('.board-card');
   if (!card || !_boardDragId) return;
   var targetId = card.dataset.taskId;
   if (targetId === _boardDragId) return;
-
-  // Find target position
-  var tasks = _boardTasksInLane(_boardSelectedLane);
-  var targetIdx = -1;
-  for (var i = 0; i < tasks.length; i++) {
-    if (tasks[i].id === targetId) { targetIdx = i; break; }
-  }
+  var sourceLane = _boardTaskLane(_boardDragId);
+  var targetLane = _boardTaskLane(targetId) || _boardSelectedLane;
+  if (!targetLane) return;
 
   var rect = card.getBoundingClientRect();
   var mid = rect.top + rect.height / 2;
-  var pos = e.clientY < mid ? targetIdx : targetIdx + 1;
-
-  // UI is sorted newest-first (descending position), invert for server
-  var serverPos = Math.max(0, tasks.length - pos - 1);
-  send({ cmd: 'board_reorder_task', id: _boardDragId, position: serverPos });
+  var placeAfter = e.clientY >= mid;
+  if (sourceLane === targetLane) {
+    if (_boardLaneSortMode(targetLane) !== 'manual') return;
+    var serverPos = _boardDropServerPosition(targetLane, targetId, placeAfter, true);
+    if (serverPos === null) return;
+    send({ cmd: 'board_reorder_task', id: _boardDragId, position: serverPos });
+  } else {
+    var move = { cmd: 'board_move_task', id: _boardDragId, lane: targetLane };
+    if (_boardLaneSortMode(targetLane) === 'manual') {
+      var targetPos = _boardDropServerPosition(targetLane, targetId, placeAfter, false);
+      if (targetPos !== null) move.position = targetPos;
+    }
+    send(move);
+  }
   card.classList.remove('drop-before', 'drop-after');
 }
 
@@ -2308,25 +2502,28 @@ function boardCardDrop(e) {
 function boardLaneTabDragOver(e) {
   if (!_boardDragId) return;
   e.preventDefault();
+  if (e.stopPropagation) e.stopPropagation();
   e.dataTransfer.dropEffect = 'move';
-  var tab = e.target.closest('.board-lane-tab');
-  if (tab) tab.classList.add('drop-target');
+  var target = _boardClosestLaneDropTarget(e.target);
+  if (target) target.classList.add('drop-target');
 }
 
 function boardLaneTabDragLeave(e) {
-  var tab = e.target.closest('.board-lane-tab');
-  if (tab) tab.classList.remove('drop-target');
+  if (e.stopPropagation) e.stopPropagation();
+  var target = _boardClosestLaneDropTarget(e.target);
+  if (target) target.classList.remove('drop-target');
 }
 
 function boardLaneTabDrop(e) {
   e.preventDefault();
-  var tab = e.target.closest('.board-lane-tab');
-  if (!tab || !_boardDragId) return;
-  var lane = tab.dataset.lane;
-  if (lane) {
+  if (e.stopPropagation) e.stopPropagation();
+  var target = _boardClosestLaneDropTarget(e.target);
+  if (!target || !_boardDragId) return;
+  var lane = target.dataset.lane;
+  if (lane && lane !== _boardTaskLane(_boardDragId)) {
     send({ cmd: 'board_move_task', id: _boardDragId, lane: lane });
   }
-  tab.classList.remove('drop-target');
+  target.classList.remove('drop-target');
 }
 
 /* ---- Search & filter ------------------------------------------------ */

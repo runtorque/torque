@@ -582,8 +582,8 @@ function _renderBoardQuickEdit(t) {
   return html;
 }
 
-function _renderBoardArchiveSuggestion() {
-  if (_boardShowArchived || _boardSelectedLane !== 'Done') return '';
+function _renderBoardArchiveSuggestion(lane) {
+  if (_boardShowArchived || (lane || _boardSelectedLane) !== 'Done') return '';
   var staleIds = _boardStaleDoneTaskIds();
   if (!staleIds.length) return '';
   return '<div class="board-archive-suggestion">'
