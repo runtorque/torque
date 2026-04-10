@@ -315,6 +315,10 @@ function createEmbeddedTerminalHarness() {
     dispose() {
       this.disposed = true;
     }
+
+    focus() {
+      this.focusCount = (this.focusCount || 0) + 1;
+    }
   }
 
   class FakeFitAddon {
@@ -3590,8 +3594,32 @@ test('embedded terminal selection clears stale agent selection for standalone te
   assert.equal(jsonValue(context, 'focusedItemId'), 'term-root');
 });
 
+test('embedded terminal selection returns keyboard focus to the terminal workspace', () => {
+  const { context } = createSelectionHarness();
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.renderTerminalWorkspace = function() {};
+  context.focusEmbeddedTerminalWorkspaceCalls = 0;
+  context.focusEmbeddedTerminalWorkspace = function(force) {
+    context.focusEmbeddedTerminalWorkspaceCalls += force ? 1 : 0;
+    return true;
+  };
+
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent', session_id: 'sess-agent' },
+    'term-root': { id: 'term-root', name: 'Shell Root', group: 'alpha', cell_type: 'terminal', session_id: 'sess-root' },
+  };
+
+  context.focusAgent('term-root');
+
+  assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 1);
+});
+
 test('classic terminal selection keeps the current agent context on the toolbelt path', () => {
   const { context } = createSelectionHarness();
+  context.focusEmbeddedTerminalWorkspaceCalls = 0;
+  context.focusEmbeddedTerminalWorkspace = function() {
+    context.focusEmbeddedTerminalWorkspaceCalls += 1;
+  };
 
   context.state.agents = {
     'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent' },
@@ -3609,6 +3637,7 @@ test('classic terminal selection keeps the current agent context on the toolbelt
   assert.equal(jsonValue(context, 'selectedTerminalId'), 'term-root');
   assert.equal(jsonValue(context, 'focusedItemId'), 'term-root');
   assert.equal(jsonValue(context, 'renderCalls.main'), 0);
+  assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 0);
 });
 
 test('terminal workspace stays inert when embedded runtime is disabled', () => {
@@ -3704,6 +3733,39 @@ test('embedded terminal ignores stale websocket output after a relaunch session 
     }),
   });
   assert.deepEqual(currentTerminal.writes, ['clean prompt', '\nready']);
+});
+
+test('embedded terminal auto-focuses new sessions when standalone mode is active', () => {
+  const { context, sockets, terminals } = createEmbeddedTerminalHarness();
+  const surface = new FakeElement('surface');
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  sockets[0].onopen();
+
+  assert.equal(terminals[0].focusCount, 1);
+});
+
+test('embedded terminal does not steal focus from an active editor input', () => {
+  const { context, document, sockets, terminals } = createEmbeddedTerminalHarness();
+  const surface = new FakeElement('surface');
+  const boardSearch = new FakeElement('board-search-input');
+  boardSearch.tagName = 'INPUT';
+  document.activeElement = boardSearch;
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  sockets[0].onopen();
+
+  assert.equal(terminals[0].focusCount || 0, 0);
 });
 
 test('ws invalidation rerenders the context panel for task updates', () => {
@@ -4832,4 +4894,40 @@ test('panel resize bounds stay narrow by default and expand in embedded runtime'
   });
   assert.equal(jsonValue(context, `_normalizePanelHeight(120)`), 180);
   assert.equal(jsonValue(context, `_normalizePanelHeight(1200)`), 740);
+});
+
+test('collapsing the embedded board returns keyboard focus to the terminal workspace', () => {
+  const { context, document } = createPanelHarness();
+  const panel = document.register('bottom-panel');
+  panel.classList.remove('collapsed');
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.focusEmbeddedTerminalWorkspaceCalls = 0;
+  context.focusEmbeddedTerminalWorkspace = function(force) {
+    context.focusEmbeddedTerminalWorkspaceCalls += force ? 1 : 0;
+    return true;
+  };
+  runInContext(context, `_activePanelApp = 'board';`);
+
+  context.togglePanel('board');
+
+  assert.equal(panel.classList.contains('collapsed'), true);
+  assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 1);
+});
+
+test('collapsing the classic board does not refocus the embedded terminal workspace', () => {
+  const { context, document } = createPanelHarness();
+  const panel = document.register('bottom-panel');
+  panel.classList.remove('collapsed');
+  context.isEmbeddedTerminalMode = function() { return false; };
+  context.focusEmbeddedTerminalWorkspaceCalls = 0;
+  context.focusEmbeddedTerminalWorkspace = function() {
+    context.focusEmbeddedTerminalWorkspaceCalls += 1;
+  };
+  runInContext(context, `_activePanelApp = 'board';`);
+
+  context.togglePanel('board');
+
+  assert.equal(panel.classList.contains('collapsed'), true);
+  assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 0);
 });

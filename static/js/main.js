@@ -48,6 +48,11 @@ function togglePanel(appName) {
     _activePanelApp = '';
     panel.classList.add('collapsed');
     buttons.forEach(function(b) { b.classList.remove('active'); });
+    if (typeof isEmbeddedTerminalMode === 'function'
+        && isEmbeddedTerminalMode()
+        && typeof focusEmbeddedTerminalWorkspace === 'function') {
+      focusEmbeddedTerminalWorkspace(true);
+    }
   } else {
     // Expand / switch
     if (_activePanelApp === 'board' && appName !== 'board'

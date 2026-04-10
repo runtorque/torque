@@ -58,6 +58,9 @@ function focusAgent(id) {
   _syncPanelsAfterSelectionChange(prevSelectedId);
   if (typeof renderTerminalWorkspace === 'function' && isEmbeddedTerminalMode()) {
     render();
+    if (typeof focusEmbeddedTerminalWorkspace === 'function') {
+      focusEmbeddedTerminalWorkspace(true);
+    }
   }
   send({ cmd: 'focus_agent', id });
 }
@@ -69,6 +72,9 @@ function onAgentClick(id) {
   if (typeof renderTerminalWorkspace === 'function' && isEmbeddedTerminalMode()) {
     _updateSelectedAgentContext(id);
     render();
+    if (typeof focusEmbeddedTerminalWorkspace === 'function') {
+      focusEmbeddedTerminalWorkspace(true);
+    }
     _syncPanelsAfterSelectionChange(prevSelectedId);
     send({ cmd: 'focus_agent', id });
     return;
@@ -94,6 +100,11 @@ function onAgentDblClick(id) {
   selectedTerminalId = id;
   send({ cmd: 'focus_agent', id });
   render();
+  if (typeof renderTerminalWorkspace === 'function'
+      && isEmbeddedTerminalMode()
+      && typeof focusEmbeddedTerminalWorkspace === 'function') {
+    focusEmbeddedTerminalWorkspace(true);
+  }
   _syncPanelsAfterSelectionChange(prevSelectedId);
 }
 

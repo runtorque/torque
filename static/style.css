@@ -220,10 +220,15 @@ body.runtime-embedded #terminal-workspace {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .terminal-title {
   font-size: 13px;
   font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .terminal-group-pill {
   font-size: 10px;
@@ -242,12 +247,20 @@ body.runtime-embedded #terminal-workspace {
   border-color: var(--accent);
   color: var(--text);
 }
+.terminal-topbar-btn-primary {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: rgba(88,166,255,.08);
+}
 .terminal-tabs {
   display: flex;
   gap: 4px;
   padding: 8px 10px;
   overflow-x: auto;
   border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.terminal-tabs-hidden {
+  display: none;
 }
 .terminal-tab {
   display: inline-flex;
@@ -327,6 +340,10 @@ body.runtime-embedded #terminal-workspace {
   max-width: 440px;
   line-height: 1.5;
 }
+.terminal-empty-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+}
 .terminal-empty-btn {
   padding: 7px 10px;
   border-radius: 8px;
@@ -337,60 +354,59 @@ body.runtime-embedded #terminal-workspace {
   color: var(--text);
 }
 body.runtime-embedded .terminal-shell {
-  padding: 12px 14px 0;
-  gap: 10px;
+  padding: 10px 12px 0;
+  gap: 8px;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 body.runtime-embedded .terminal-topbar,
 body.runtime-embedded .terminal-statusbar {
-  padding: 11px 14px;
-  border: 1px solid rgba(255,255,255,.06);
-  border-radius: 12px;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.03), transparent 120%),
-    rgba(13,17,23,.72);
-  box-shadow: 0 14px 28px rgba(0,0,0,.14);
+  padding: 8px 2px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 body.runtime-embedded .terminal-statusbar {
-  box-shadow: 0 10px 22px rgba(0,0,0,.12);
+  padding-top: 2px;
+  color: color-mix(in srgb, var(--text-dim) 92%, white);
 }
 body.runtime-embedded .terminal-topbar-btn {
-  padding: 6px 10px;
+  padding: 5px 10px;
   border-radius: 8px;
 }
 body.runtime-embedded .terminal-tabs {
-  padding: 0 2px;
+  padding: 0 0 2px;
   border-bottom: none;
 }
 body.runtime-embedded .terminal-tab {
-  padding: 7px 11px;
-  border-radius: 10px;
-  background: rgba(255,255,255,.035);
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: rgba(255,255,255,.025);
 }
 body.runtime-embedded .terminal-stage {
   padding: 0;
 }
 body.runtime-embedded .terminal-surface {
-  border-radius: 14px;
-  background: rgba(0,0,0,.22);
+  border-radius: 12px;
+  background: rgba(0,0,0,.16);
   box-shadow:
-    0 18px 36px rgba(0,0,0,.18),
+    0 16px 30px rgba(0,0,0,.15),
     inset 0 1px 0 rgba(255,255,255,.03);
 }
 body.runtime-embedded .terminal-surface .xterm {
-  padding: 12px 10px;
+  padding: 10px 8px;
 }
 body.runtime-embedded #terminal-workspace:focus-within .terminal-surface {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border) 60%);
   box-shadow:
-    0 18px 36px rgba(0,0,0,.18),
+    0 16px 30px rgba(0,0,0,.15),
     0 0 0 1px rgba(88,166,255,.12),
     inset 0 1px 0 rgba(255,255,255,.03);
 }
 body.runtime-embedded .terminal-empty {
   min-height: 280px;
   border-radius: 16px;
-  background: rgba(13,17,23,.36);
+  background: rgba(13,17,23,.28);
 }
 
 /* ------------------------------------------------------------------ */
