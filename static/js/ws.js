@@ -206,6 +206,7 @@ function _handleFullState(msg) {
 function _handleDelta(msg) {
   const prevGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
   const invalidations = _deltaSurfaceInvalidations(msg.ops);
+  const opGroupHints = _captureDeltaGroupHints(msg.ops);
   if (msg.seq !== _expectedSeq) {
     // Sequence gap — request full resync
     send({ cmd: 'resync' });
@@ -221,7 +222,7 @@ function _handleDelta(msg) {
     if (activeSurface) invalidations[activeSurface] = true;
   } else if (activeSurface
       && invalidations[activeSurface]
-      && !_opsAffectCurrentSurfaceGroup(activeSurface, nextGroup, msg.ops)) {
+      && !_opsAffectCurrentSurfaceGroup(activeSurface, nextGroup, msg.ops, opGroupHints)) {
     invalidations[activeSurface] = false;
   }
   if (!dragInProgress) {
@@ -318,13 +319,33 @@ function _surfaceUsesCurrentGroup(surface) {
   return surface === 'context' || surface === 'weaver';
 }
 
-function _opTouchesGroup(op, group) {
+function _captureDeltaGroupHints(ops) {
+  const hints = [];
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i] || {};
+    let group = '';
+    if (op.op === 'agent_remove' && state && state.agents && state.agents[op.id]) {
+      group = state.agents[op.id].group || '';
+    } else if (op.op === 'task_remove'
+        && state && state.board_tasks && state.board_tasks[op.id]) {
+      group = state.board_tasks[op.id].group || '';
+    }
+    hints.push({ group: group });
+  }
+  return hints;
+}
+
+function _opTouchesGroup(op, group, hint) {
   if (!op || !group) return true;
+  const hintedGroup = (hint && hint.group) ? hint.group : '';
   switch (op.op) {
     case 'agent_upsert':
     case 'task_upsert':
     case 'event_append':
-      return (op.group || '') === group;
+      return (op.group || hintedGroup || '') === group;
+    case 'agent_remove':
+    case 'task_remove':
+      return hintedGroup ? hintedGroup === group : true;
     case 'group_update':
     case 'group_remove':
     case 'group_settings_update':
@@ -341,10 +362,10 @@ function _opTouchesGroup(op, group) {
   }
 }
 
-function _opsAffectCurrentSurfaceGroup(surface, group, ops) {
+function _opsAffectCurrentSurfaceGroup(surface, group, ops, hints) {
   if (!surface || !_surfaceUsesCurrentGroup(surface) || !group) return true;
   for (let i = 0; i < ops.length; i++) {
-    if (_opTouchesGroup(ops[i], group)) return true;
+    if (_opTouchesGroup(ops[i], group, hints && hints[i])) return true;
   }
   return false;
 }

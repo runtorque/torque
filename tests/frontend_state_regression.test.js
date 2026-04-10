@@ -4035,6 +4035,101 @@ test('ws invalidation skips rerendering the active events panel for off-group ta
   });
 });
 
+test('ws invalidation skips rerendering the active board for off-group task removals', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'board';
+  runInContext(context, `
+    state.board_tasks = {
+      'task-1': {
+        id: 'task-1',
+        task: 'Sync memory',
+        group: 'beta',
+        lane: 'In Progress',
+      },
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_remove',
+      id: 'task-1',
+    }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('ws invalidation skips rerendering the active events panel for off-group task removals', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'events';
+  runInContext(context, `
+    state.board_tasks = {
+      'task-1': {
+        id: 'task-1',
+        task: 'Sync memory',
+        group: 'beta',
+        lane: 'In Progress',
+      },
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_remove',
+      id: 'task-1',
+    }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('ws invalidation skips rerendering the active context panel for off-group agent removals', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'context';
+  runInContext(context, `
+    state.agents = {
+      'agent-1': {
+        id: 'agent-1',
+        name: 'Beta agent',
+        group: 'beta',
+      },
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'agent_remove',
+      id: 'agent-1',
+    }],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
 test('renderWeaverPanel preserves focused reply draft across rerenders', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-weaver');
