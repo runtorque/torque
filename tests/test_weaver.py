@@ -75,7 +75,8 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("── Loom Digest (1 event)", bridge.sent[0])
+        self.assertIn("## Loom Digest (1 event)", bridge.sent[0])
+        self.assertTrue(bridge.sent[0].strip().endswith("---"))
         self.assertNotIn("Heartbeat", bridge.sent[0])
 
     async def test_idle_buffered_events_wait_for_push_interval_before_flushing(self):
@@ -110,7 +111,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("── Loom Digest (1 event)", bridge.sent[0])
+        self.assertIn("## Loom Digest (1 event)", bridge.sent[0])
         buffer.stop()
 
     async def test_max_interval_caps_buffered_digest_delay(self):
@@ -200,7 +201,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("── Loom Digest (0 events)", bridge.sent[0])
+        self.assertIn("## Loom Digest (0 events)", bridge.sent[0])
         self.assertIn("No new events since last digest.", bridge.sent[0])
         self.assertIn("Active: worker (thinking)", bridge.sent[0])
         self.assertIn("Attention: blocked: Investigate blocked review", bridge.sent[0])
@@ -238,7 +239,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("── Loom Digest (1 event)", bridge.sent[0])
+        self.assertIn("## Loom Digest (1 event)", bridge.sent[0])
 
     async def test_idle_heartbeat_does_not_fire_while_weaver_is_active(self):
         state, group, weaver = self._make_state()
@@ -274,7 +275,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         self.assertEqual(len(bridge.sent), 1)
-        self.assertIn("── Loom Digest (7 events)", bridge.sent[0])
+        self.assertIn("## Loom Digest (7 events)", bridge.sent[0])
         self.assertIn("… 2 more events", bridge.sent[0])
 
     async def test_detailed_digest_verbosity_includes_attention_even_with_events(self):
@@ -415,7 +416,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(buffer.get_buffer_stats(group)["buffered_events"], 0)
         self.assertEqual(len(bridge.sent), 1)
         digest = bridge.sent[0]
-        self.assertIn("── Loom Digest (2 events)", digest)
+        self.assertIn("## Loom Digest (2 events)", digest)
         self.assertLess(
             digest.index("first while paused"),
             digest.index("second while paused"),

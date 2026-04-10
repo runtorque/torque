@@ -328,8 +328,7 @@ def _build_policy_section(weaver_settings=None, group_settings=None) -> str:
         getattr(group_settings, "worktree_merge_cleanup", "keep")
     )
     lines = [
-        "── Operating Policy "
-        "──────────────────────────",
+        "## Operating Policy",
         f"Autonomy mode: {_autonomy_mode_label(mode)}",
         f"Default worker concurrency: {concurrency}",
         f"Wave size preference: {_wave_size_preference_label(wave_size)}",
@@ -356,7 +355,6 @@ def _build_policy_section(weaver_settings=None, group_settings=None) -> str:
             "- After a successful merge with no explicit cleanup flags, "
             f"default to: {_merge_cleanup_label(cleanup_mode)}."
         ),
-        "────────────────────────────────────────────────",
     ]
     return "\n".join(lines)
 
@@ -380,10 +378,8 @@ def build_weaver_system_prompt(group: str, weaver_settings=None,
     if weaver_settings and weaver_settings.custom_instructions:
         ci = weaver_settings.custom_instructions.strip()
         parts.append(
-            "── Custom Instructions "
-            "────────────────────────\n"
-            f"{ci}\n"
-            "────────────────────────────────────────────────"
+            "## Custom Instructions\n"
+            f"{ci}"
         )
 
     return "\n\n".join(parts) + "\n"
@@ -708,9 +704,8 @@ class WeaverEventBuffer:
             )
         )
         event_limit = 5 if verbosity == "compact" else None
-        lines = [f"── Loom Digest ({len(events)} event"
-                 f"{'s' if len(events) != 1 else ''}) "
-                 f"──────────────────────────"]
+        lines = [f"## Loom Digest ({len(events)} event"
+                 f"{'s' if len(events) != 1 else ''})"]
         if events:
             visible_events = events[:event_limit] if event_limit else events
             for evt in visible_events:
@@ -759,7 +754,7 @@ class WeaverEventBuffer:
             if ctx_warn:
                 lines.append(ctx_warn)
 
-        lines.append("────────────────────────────────────────────────")
+        lines.append("---")
         return "\n".join(lines)
 
     def _active_agents_summary(self) -> str:

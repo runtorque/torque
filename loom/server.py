@@ -5320,12 +5320,10 @@ async def main(connection=None):
                     else:
                         formatted = (
                             "\n"
-                            "── Message from Weaver "
-                            "────────────────────────\n"
+                            "## Message from Weaver\n"
                             f"{msg_text}\n\n"
                             'Reply with: loom_reply("your response")\n'
-                            "────────────────────────────────────────"
-                            "────────\n"
+                            "---\n"
                         )
                         # Pre-mark as input-ready (agent is
                         # likely idle/waiting for this message)
@@ -5458,11 +5456,9 @@ async def main(connection=None):
                         # Send answer to weaver's terminal
                         formatted = (
                             "\n"
-                            "── Human Reply "
-                            "──────────────────────────────\n"
+                            "## Human Reply\n"
                             f"{answer}\n"
-                            "────────────────────────────────────────"
-                            "────────\n"
+                            "---\n"
                         )
                         # Pre-mark as input-ready so send_text
                         # skips the wait (weaver is already idle)
