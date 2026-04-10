@@ -530,20 +530,24 @@ function onCellContextMenu(e, id) {
   e.stopPropagation();
   const cell = state.agents[id];
   if (!cell) return;
+  const gs = (state.group_settings || {})[cell.group] || {};
+  const isDesignatedWeaver = gs.weaver_agent_id === id;
 
   const items = [
     { label: 'Edit\u2026', action: `openEditCell('${id}')` },
     { label: 'Focus', action: `focusAgent('${id}')` },
   ];
   if (cell.status === 'stopped') {
-    items.push({ label: 'Relaunch', action: `relaunchAgent('${id}')` });
+    items.push({
+      label: isDesignatedWeaver ? 'Restart Weaver\u2026' : 'Relaunch',
+      action: `relaunchAgent('${id}')`,
+    });
   }
   /* Worktree submenu */
   if (cell.cell_type === 'agent') {
     if (cell.worktree_path) {
       items.push({ label: 'Worktree', submenu: `_showWorktreeSubmenu('${id}')` });
     } else {
-      const gs = (state.group_settings || {})[cell.group] || {};
       if (gs.git_worktree) {
         items.push({ label: 'Create Worktree', action: `worktreeCreate('${id}')` });
       }

@@ -1099,6 +1099,7 @@ async def main(connection=None):
             "data_dir": str(DATA_DIR),
             "desktop_shell": os.environ.get("LOOM_DESKTOP_SHELL", "").strip(),
             "port": WS_PORT,
+            "default_command": state.get_default_command(),
         }
 
     def _state_payload() -> dict:
@@ -3744,6 +3745,17 @@ async def main(connection=None):
                             if command_override:
                                 launch_overrides["command"] = (
                                     command_override)
+                            model_override = (data.get("model", "")
+                                              or "").strip()
+                            if model_override:
+                                launch_overrides["model"] = model_override
+                            reasoning_override = (
+                                data.get("reasoning_effort", "") or ""
+                            ).strip()
+                            if reasoning_override:
+                                launch_overrides["reasoning_effort"] = (
+                                    reasoning_override
+                                )
                             launch_cfg = _resolve_agent_launch_config(
                                 group,
                                 base_dir=base_dir,
@@ -5765,7 +5777,8 @@ async def main(connection=None):
                           "pending_note", "pending_note_kind",
                           "custom_instructions", "enabled_events",
                           "paused", "weaver_provider",
-                          "weaver_boot_command"):
+                          "weaver_boot_command", "weaver_model",
+                          "weaver_reasoning_effort"):
                     if k in data:
                         fields[k] = data[k]
                 state.update_weaver_settings(group, **fields)

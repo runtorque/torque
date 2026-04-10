@@ -22,6 +22,10 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         (self.repo_root / "shared" / "config.txt").write_text("shared\n")
         (self.repo_root / "local-only").mkdir()
         (self.repo_root / "local-only" / "config.json").write_text("{}\n")
+        for service in ("service-a", "service-b"):
+            path = self.repo_root / "etl" / service / "node_modules"
+            path.mkdir(parents=True)
+            (path / ".keep").write_text("\n")
         await self._git("add", "README.md", "shared/config.txt")
         await self._git("commit", "-m", "Initial commit")
 
@@ -107,6 +111,70 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(cell.worktree_dirty)
         self.assertEqual(cell.worktree_diff, {})
         self.assertEqual(cell.worktree_checkpoints, 0)
+
+    async def test_create_worktree_expands_glob_symlink_patterns(self):
+        cell = self._make_cell()
+
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+            symlinks=["etl/**/node_modules"],
+        )
+
+        self.assertIsNotNone(wt_path)
+
+        for service in ("service-a", "service-b"):
+            link = Path(wt_path) / "etl" / service / "node_modules"
+            target = self.repo_root / "etl" / service / "node_modules"
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(link.resolve(), target.resolve())
+
+        exclude = self._worktree_gitdir(wt_path) / "info" / "exclude"
+        lines = exclude.read_text().splitlines()
+        self.assertEqual(
+            [line for line in lines if line.endswith("/node_modules")],
+            [
+                "etl/service-a/node_modules",
+                "etl/service-b/node_modules",
+            ],
+        )
+
+    async def test_create_worktree_rejects_escape_glob_patterns(self):
+        cell = self._make_cell()
+
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+            symlinks=["../outside", "etl/**/../node_modules"],
+        )
+
+        self.assertIsNotNone(wt_path)
+        self.assertFalse((Path(wt_path) / "outside").exists())
+        self.assertFalse((Path(wt_path) / "etl" / "service-a" / "node_modules").exists())
+        self.assertFalse((Path(wt_path) / "etl" / "service-b" / "node_modules").exists())
+
+    async def test_create_worktree_dedupes_overlapping_exact_and_glob_symlinks(self):
+        cell = self._make_cell()
+
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+            symlinks=[
+                "etl/**/node_modules",
+                "etl/service-a/node_modules",
+                "etl/**/missing_modules",
+            ],
+        )
+
+        self.assertIsNotNone(wt_path)
+
+        exclude = self._worktree_gitdir(wt_path) / "info" / "exclude"
+        lines = exclude.read_text().splitlines()
+        self.assertEqual(lines.count("etl/service-a/node_modules"), 1)
+        self.assertEqual(lines.count("etl/service-b/node_modules"), 1)
 
     async def test_blank_custom_worktree_name_preserves_default_naming(self):
         cell = self._make_cell()

@@ -34,7 +34,7 @@ Once enabled, every new agent created in that group gets its own worktree. The a
 | **Auto-checkpoint on stop** | Automatically commit changes when an agent's session ends. |
 | **Checkpoint on progress / done** | Throttled automatic checkpoints when the agent reports progress or completion. |
 | **Squash on merge** | Use squash merge when merging worktree branches back to the base branch. Default: on. |
-| **Symlink paths** | Optional repo-relative paths to mirror into each worktree as symlinks. Useful for shared caches or large generated assets. |
+| **Symlink paths** | Optional repo-relative exact paths or glob patterns to mirror into each worktree as symlinks. Useful for shared caches or large generated assets. Recursive `**` is supported (for example `etl/**/node_modules`). Escape paths such as `..` are ignored, and only existing matches inside the repo root are linked. |
 
 Or from the CLI:
 
@@ -42,6 +42,7 @@ Or from the CLI:
 loom group settings backend -s git_worktree=true
 loom group settings backend -s worktree_base_branch=main
 loom group settings backend -s worktree_auto_checkpoint=true
+loom group settings backend -s 'worktree_symlinks=["etl/**/node_modules",".venv"]'
 ```
 
 ## How worktrees work

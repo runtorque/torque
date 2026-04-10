@@ -783,8 +783,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                  custom_instructions, restrict_to_created_agents,
                  pending_question, pending_note,
                  pending_note_kind, enabled_events,
-                 weaver_provider, weaver_boot_command)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 weaver_provider, weaver_boot_command,
+                 weaver_model, weaver_reasoning_effort)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             group_name,
             settings.get("push_interval", 60),
@@ -806,6 +807,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             enabled_events,
             settings.get("weaver_provider", ""),
             settings.get("weaver_boot_command", ""),
+            settings.get("weaver_model", ""),
+            settings.get("weaver_reasoning_effort", ""),
         ))
         self._conn.commit()
 
@@ -818,7 +821,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "digest_verbosity, escalation_style, paused, "
             "custom_instructions, restrict_to_created_agents, "
             "pending_question, pending_note, pending_note_kind, enabled_events, "
-            "weaver_provider, weaver_boot_command "
+            "weaver_provider, weaver_boot_command, "
+            "weaver_model, weaver_reasoning_effort "
             "FROM weaver_settings "
             "WHERE group_name=?", (group_name,)).fetchone()
         if not row:
@@ -853,6 +857,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "enabled_events": enabled,
             "weaver_provider": row[17] if len(row) > 17 else "",
             "weaver_boot_command": row[18] if len(row) > 18 else "",
+            "weaver_model": row[19] if len(row) > 19 else "",
+            "weaver_reasoning_effort": row[20] if len(row) > 20 else "",
         }
 
     def delete_weaver_settings(self, group_name: str):
@@ -869,7 +875,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "digest_verbosity, escalation_style, paused, "
             "custom_instructions, restrict_to_created_agents, "
             "pending_question, pending_note, pending_note_kind, enabled_events, "
-            "weaver_provider, weaver_boot_command "
+            "weaver_provider, weaver_boot_command, "
+            "weaver_model, weaver_reasoning_effort "
             "FROM weaver_settings"
         ).fetchall()
         result = {}
@@ -904,6 +911,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "enabled_events": enabled,
                 "weaver_provider": row[17] if len(row) > 17 else "",
                 "weaver_boot_command": row[18] if len(row) > 18 else "",
+                "weaver_model": row[19] if len(row) > 19 else "",
+                "weaver_reasoning_effort": row[20] if len(row) > 20 else "",
             }
         return result
 

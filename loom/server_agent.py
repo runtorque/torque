@@ -7,7 +7,11 @@ import os
 import shlex
 from typing import Any
 
-from .adapters import get_adapter, get_default_command_for_provider
+from .adapters import (
+    detect_by_command,
+    get_adapter,
+    get_default_command_for_provider,
+)
 from .artifacts import artifact_prompt_block, legacy_image_prompt_block
 
 
@@ -135,14 +139,21 @@ class AgentLaunchService:
         command, agent_type = self.resolve_provider_command(
             provider, raw_command, self.state.get_default_command()
         )
-        adapter = get_adapter(agent_type or provider)
+        detected = detect_by_command(command) if command else None
+        effective_agent_type = agent_type or provider or (
+            detected.name if detected else ""
+        )
+        adapter = get_adapter(effective_agent_type)
         if not raw_command:
             command += adapter.resolve_model_flags(resolved.get("model", ""))
+            command += adapter.resolve_reasoning_effort_flags(
+                resolved.get("reasoning_effort", "")
+            )
         max_turns = resolved.get("max_turns", 0)
         if max_turns:
             command += f" --max-turns {int(max_turns)}"
         permissions = resolved.get("permissions", "")
-        if agent_type == "claude-code" and permissions:
+        if effective_agent_type == "claude-code" and permissions:
             if permissions == "skip":
                 command += " --dangerously-skip-permissions"
             else:
@@ -185,7 +196,7 @@ class AgentLaunchService:
 
         return {
             "provider": provider,
-            "agent_type": agent_type,
+            "agent_type": effective_agent_type,
             "command": command.strip(),
             "profile": profile,
             "directory": directory,
@@ -229,6 +240,10 @@ class AgentLaunchService:
             merged["provider"] = ws.weaver_provider
         if getattr(ws, "weaver_boot_command", ""):
             merged["command"] = ws.weaver_boot_command
+        if getattr(ws, "weaver_model", ""):
+            merged["model"] = ws.weaver_model
+        if getattr(ws, "weaver_reasoning_effort", ""):
+            merged["reasoning_effort"] = ws.weaver_reasoning_effort
         resolved = self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,

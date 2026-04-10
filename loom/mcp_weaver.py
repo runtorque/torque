@@ -764,6 +764,12 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             command = args.get("command", "")
             if command:
                 payload["command"] = command
+            model = args.get("model", "")
+            if model:
+                payload["model"] = model
+            reasoning_effort = args.get("reasoning_effort", "")
+            if reasoning_effort:
+                payload["reasoning_effort"] = reasoning_effort
         agent_name = args.get("name", "")
         if agent_name:
             payload["name"] = agent_name
@@ -1015,6 +1021,27 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         cursor = events[-1]["id"] if events else since_id
         return json.dumps({"events": events, "cursor": cursor},
                           ), False
+
+    if name == "weaver_launch_settings":
+        fields = {}
+        mapping = {
+            "provider": "weaver_provider",
+            "command": "weaver_boot_command",
+            "model": "weaver_model",
+            "reasoning_effort": "weaver_reasoning_effort",
+        }
+        for src, dest in mapping.items():
+            if src in args:
+                fields[dest] = str(args.get(src, "") or "").strip()
+        result = await handle_command({
+            "cmd": "weaver_update_settings",
+            "group": _weaver_group,
+            **fields,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps({"type": "ok", "settings": asdict(
+            state.get_weaver_settings(_weaver_group))}), False
 
     if name == "weaver_notifications":
         ws = state.get_weaver_settings(_weaver_group)

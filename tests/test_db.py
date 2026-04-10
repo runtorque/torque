@@ -56,6 +56,8 @@ class LoomDBTests(unittest.TestCase):
             GroupSettings(
                 default_terminal_backend="pty",
                 notifications=True,
+                agent_model="gpt-5",
+                agent_reasoning_effort="high",
                 board_default_labels=["ready"],
                 worktree_symlinks=["shared/config.yml"],
                 agent_session_resume=False,
@@ -180,6 +182,14 @@ class LoomDBTests(unittest.TestCase):
             ["shared/config.yml"],
         )
         self.assertFalse(loaded["group_settings"]["g"]["worktree_merge_squash"])
+        self.assertEqual(
+            loaded["group_settings"]["g"]["agent_model"],
+            "gpt-5",
+        )
+        self.assertEqual(
+            loaded["group_settings"]["g"]["agent_reasoning_effort"],
+            "high",
+        )
         self.assertEqual(
             loaded["group_settings"]["g"]["worktree_merge_cleanup"],
             "close_remove",
@@ -598,6 +608,8 @@ class LoomDBTests(unittest.TestCase):
                 "enabled_events": ["task_completed"],
                 "weaver_provider": "codex",
                 "weaver_boot_command": "codex --model gpt-5",
+                "weaver_model": "gpt-5.1",
+                "weaver_reasoning_effort": "high",
             },
         )
         first = self.db.save_journal_entry("g", 10.0, "decision", "Ship it")
@@ -619,6 +631,8 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["digest_verbosity"], "detailed")
         self.assertEqual(loaded["escalation_style"], "keep_moving")
         self.assertEqual(loaded["weaver_boot_command"], "codex --model gpt-5")
+        self.assertEqual(loaded["weaver_model"], "gpt-5.1")
+        self.assertEqual(loaded["weaver_reasoning_effort"], "high")
 
         entries = self.db.load_journal_entries("g", limit=10)
 
