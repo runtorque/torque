@@ -2322,6 +2322,88 @@ test('boardCardMenu uses a dependency picker instead of inline blocker rows', ()
   assert.match(menu.innerHTML, /ctx-button-wrap/);
 });
 
+test('boardCardMenu offers mark verified only for completed tasks awaiting verification', () => {
+  const { context, document } = createBoardHarness();
+  const menu = document.register('ctx-menu');
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    pendingDone: {
+      id: 'pendingDone',
+      task: 'Ship release',
+      lane: 'Done',
+      group: 'alpha',
+      verification_state: 'pending',
+      verification_summary: {
+        human_validation_pending: 'Confirm production login',
+      },
+    },
+    pendingOpen: {
+      id: 'pendingOpen',
+      task: 'Deploy release',
+      lane: 'In Progress',
+      group: 'alpha',
+      verification_state: 'pending',
+    },
+    passedDone: {
+      id: 'passedDone',
+      task: 'Verified release',
+      lane: 'Done',
+      group: 'alpha',
+      verification_state: 'passed',
+    },
+  };
+
+  context.boardCardMenu({
+    preventDefault() {},
+    clientX: 64,
+    clientY: 32,
+  }, 'pendingDone');
+  assert.match(menu.innerHTML, /Mark verified/);
+
+  context.boardCardMenu({
+    preventDefault() {},
+    clientX: 64,
+    clientY: 32,
+  }, 'pendingOpen');
+  assert.doesNotMatch(menu.innerHTML, /Mark verified/);
+
+  context.boardCardMenu({
+    preventDefault() {},
+    clientX: 64,
+    clientY: 32,
+  }, 'passedDone');
+  assert.doesNotMatch(menu.innerHTML, /Mark verified/);
+});
+
+test('boardMarkTaskVerified uses the verification update flow', () => {
+  const { context, document } = createBoardHarness();
+  document.register('ctx-menu');
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      task: 'Ship release',
+      lane: 'Done',
+      group: 'alpha',
+      verification_state: 'pending',
+      verification_summary: {
+        human_validation_pending: 'Confirm production login',
+      },
+    },
+  };
+
+  context.boardMarkTaskVerified('task-1');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_verify_task',
+    id: 'task-1',
+    actor_name: 'Operator',
+    verification_state: 'passed',
+    manual_smoke_done: true,
+    human_validation_pending: '',
+    deploy_needed: false,
+  }]);
+});
+
 test('renderBoardCard shows verification badges and preview text', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);

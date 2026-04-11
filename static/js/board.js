@@ -2329,6 +2329,22 @@ function boardRestoreTask(taskId) {
   _boardArchiveTaskIds([taskId], false);
 }
 
+function boardMarkTaskVerified(taskId) {
+  _closeCtxMenu();
+  var task = _boardTasks()[taskId];
+  if (!task || (typeof _boardCanMarkTaskVerified === 'function'
+      && !_boardCanMarkTaskVerified(task))) return;
+  send({
+    cmd: 'board_verify_task',
+    id: taskId,
+    actor_name: 'Operator',
+    verification_state: 'passed',
+    manual_smoke_done: true,
+    human_validation_pending: '',
+    deploy_needed: false,
+  });
+}
+
 function boardUnlinkAgent(taskId) {
   _closeCtxMenu();
   send({ cmd: 'board_update_task', id: taskId, agent_id: '' });

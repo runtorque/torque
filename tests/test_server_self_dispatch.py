@@ -303,6 +303,60 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("state=failed", message)
         self.assertIn("manual smoke done", message)
 
+    def test_apply_verification_report_clears_pending_human_validation_when_passed(self):
+        root_task = self.state_mod.BoardTask(
+            id="root-1",
+            task="Release billing changes",
+            group="g",
+            lane="Done",
+            verification_mode="deploy",
+            verification_state="pending",
+            verification_summary={
+                "deploy_needed": True,
+                "human_validation_pending": "Confirm billing dashboard loads",
+                "tests_run": "python3 -m unittest",
+            },
+        )
+        task = self.state_mod.BoardTask(
+            id="task-1",
+            task="Deploy billing changes",
+            group="g",
+            lane="Done",
+            pipeline_root_id=root_task.id,
+            verification_mode="deploy",
+            verification_state="pending",
+            verification_summary={
+                "deploy_needed": True,
+                "human_validation_pending": "Confirm billing dashboard loads",
+                "tests_run": "python3 -m unittest",
+            },
+        )
+        saved = []
+
+        message, root = self.server_mod._apply_verification_report(
+            task,
+            {
+                "verification_state": "passed",
+                "manual_smoke_done": True,
+            },
+            "Operator",
+            lambda current: saved.append(current.id),
+            root_task=root_task,
+            timestamp="2026-04-11T18:10:00+00:00",
+        )
+
+        self.assertIs(root, root_task)
+        self.assertEqual(task.verification_state, "passed")
+        self.assertTrue(task.verification_summary["manual_smoke_done"])
+        self.assertNotIn("human_validation_pending", task.verification_summary)
+        self.assertNotIn("deploy_needed", task.verification_summary)
+        self.assertEqual(root_task.verification_state, "passed")
+        self.assertNotIn("human_validation_pending", root_task.verification_summary)
+        self.assertNotIn("deploy_needed", root_task.verification_summary)
+        self.assertEqual(saved, ["task-1", "root-1"])
+        self.assertIn("state=passed", message)
+        self.assertIn("manual smoke done", message)
+
     def test_loom_system_prompt_prefers_mcp_reporting_tools(self):
         prompt = self.server_prompts_mod.build_loom_system_prompt()
 
