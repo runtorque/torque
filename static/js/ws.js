@@ -163,10 +163,27 @@ function _applyRuntimeMode() {
   document.body.classList.toggle('runtime-embedded', embedded);
 }
 
+function _maybeTriggerAgentDoneFlourish(previousTask, nextTask) {
+  if (!previousTask || !nextTask) return;
+  if ((previousTask.lane || '') === 'Done' || (nextTask.lane || '') !== 'Done') return;
+  const agentId = nextTask.agent_id || previousTask.agent_id || '';
+  if (!agentId || typeof _startAgentDoneFlourish !== 'function') return;
+  _startAgentDoneFlourish(agentId, 'Done');
+}
+
+function _triggerDoneFlourishesFromTaskSnapshot(previousTasks, nextTasks) {
+  const prior = previousTasks || {};
+  const next = nextTasks || {};
+  for (const [taskId, nextTask] of Object.entries(next)) {
+    _maybeTriggerAgentDoneFlourish(prior[taskId] || null, nextTask || null);
+  }
+}
+
 /* -- Full state (initial connect + resync) -------------------------------- */
 
 function _handleFullState(msg) {
   const prevActive = state.active_session_id;
+  const prevTasks = state.board_tasks || {};
   const shouldRestorePanel = typeof _panelStateRestored !== 'undefined'
     ? !_panelStateRestored
     : false;
@@ -183,6 +200,10 @@ function _handleFullState(msg) {
   if (!state.weaver_sent_events) state.weaver_sent_events = {};
   if (!state.weaver_worklog) state.weaver_worklog = {};
   if (!state.weaver_streams) state.weaver_streams = {};
+  _triggerDoneFlourishesFromTaskSnapshot(prevTasks, state.board_tasks || {});
+  if (typeof _pruneAgentDoneFlourishes === 'function') {
+    _pruneAgentDoneFlourishes(state.agents || {});
+  }
   _expectedSeq = (msg.seq || 0) + 1;
   // Reset pagination state on full snapshot
   if (typeof _eventsHasMore !== 'undefined') {
@@ -400,6 +421,9 @@ function _applyDelta(ops) {
       }
       case 'agent_remove':
         delete state.agents[op.id];
+        if (typeof _clearAgentDoneFlourish === 'function') {
+          _clearAgentDoneFlourish(op.id);
+        }
         break;
 
       case 'group_update':
@@ -461,12 +485,16 @@ function _applyDelta(ops) {
       case 'task_upsert': {
         const id = op.id;
         if (!state.board_tasks) state.board_tasks = {};
+        const previousTask = state.board_tasks[id]
+          ? Object.assign({}, state.board_tasks[id])
+          : null;
         if (state.board_tasks[id]) {
           Object.assign(state.board_tasks[id], op);
         } else {
           state.board_tasks[id] = Object.assign({}, op);
         }
         delete state.board_tasks[id].op;
+        _maybeTriggerAgentDoneFlourish(previousTask, state.board_tasks[id]);
         break;
       }
       case 'task_remove':
@@ -648,6 +676,9 @@ function _applyDelta(ops) {
   }
   // Rebuild parent→children index
   _rebuildChildren();
+  if (typeof _pruneAgentDoneFlourishes === 'function') {
+    _pruneAgentDoneFlourishes(state.agents || {});
+  }
 }
 
 function _rebuildChildren() {

@@ -4486,6 +4486,64 @@ test('ws invalidation skips rerendering the active events panel for off-group ta
   });
 });
 
+test('task completion deltas trigger the done flourish only for live lane transitions', () => {
+  const { context } = createWsRenderHarness();
+  runInContext(context, `
+    doneFlourishCalls = [];
+    _startAgentDoneFlourish = function(agentId, label) {
+      doneFlourishCalls.push({ agentId: agentId, label: label });
+    };
+    state.board_tasks = {
+      'task-1': {
+        id: 'task-1',
+        task: 'Ship polish',
+        group: 'alpha',
+        agent_id: 'agent-1',
+        lane: 'In Progress',
+      },
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-1',
+      task: 'Ship polish',
+      group: 'alpha',
+      agent_id: 'agent-1',
+      lane: 'Done',
+    }],
+  });
+  context._handleDelta({
+    seq: 2,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-1',
+      task: 'Ship polish',
+      group: 'alpha',
+      agent_id: 'agent-1',
+      lane: 'Done',
+      status: 'reported',
+    }],
+  });
+  context._handleDelta({
+    seq: 3,
+    ops: [{
+      op: 'task_upsert',
+      id: 'task-2',
+      task: 'Already done',
+      group: 'alpha',
+      agent_id: 'agent-2',
+      lane: 'Done',
+    }],
+  });
+
+  assert.deepEqual(jsonValue(context, 'doneFlourishCalls'), [
+    { agentId: 'agent-1', label: 'Done' },
+  ]);
+});
+
 test('ws invalidation skips rerendering the active context panel for off-group agent removals', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'context';
@@ -4759,6 +4817,61 @@ test('renderAgentCell shows a weaver-only pause control with state-driven classe
 
   assert.match(askingHtml, /class="cell selected weaver weaver-asking weaver-running"/);
   assert.match(askingHtml, /\? awaiting input/);
+});
+
+test('renderAgentCell keeps done flourish timing stable across rerenders', () => {
+  let fakeNow = 1000;
+  const timers = [];
+  const { sandbox } = createSandbox({
+    Date: {
+      now() {
+        return fakeNow;
+      },
+    },
+    setTimeout(fn, delay) {
+      timers.push({ fn, delay, cleared: false });
+      return timers.length;
+    },
+    clearTimeout(id) {
+      if (timers[id - 1]) timers[id - 1].cleared = true;
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `
+    renderCalls = 0;
+    render = function() { renderCalls++; };
+    focusedItemId = '';
+    selectedAgentId = '';
+    state.children = {};
+    state.group_settings = {};
+    state.weaver_settings = {};
+    _startAgentDoneFlourish('agent-1', 'Done');
+  `);
+
+  const agent = {
+    id: 'agent-1',
+    name: 'Worker',
+    icon: '🤖',
+    group: 'alpha',
+    cell_type: 'agent',
+    status: 'running',
+  };
+
+  let html = context.renderAgentCell(agent);
+  assert.match(html, /cell-status-done-flourish/);
+  assert.match(html, /cell-status-flourish-label">Done</);
+  assert.equal(timers[0].delay, 3400);
+
+  fakeNow += 1200;
+  html = context.renderAgentCell(agent);
+  assert.match(html, /--cell-status-done-delay:-1200ms/);
+
+  fakeNow += 2200;
+  timers[0].fn();
+  html = context.renderAgentCell(agent);
+  assert.doesNotMatch(html, /cell-status-done-flourish/);
+  assert.equal(jsonValue(context, 'renderCalls'), 1);
 });
 
 test('weaver agent card toggle shares the close control reveal affordances and icon-only default chrome', () => {
