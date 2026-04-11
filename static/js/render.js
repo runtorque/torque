@@ -303,6 +303,7 @@ function render() {
   const main = document.getElementById('main');
   const groupNames = Object.keys(state.groups);
   const embeddedMode = _embeddedRuntimeEnabled();
+  _pruneAgentDoneFlourishes((state && state.agents) || {});
 
   if (groupNames.length === 0) {
     main.innerHTML = `
@@ -702,6 +703,65 @@ function _captureMainFocusKey(el) {
   return '[data-focus-key="' + CSS.escape(el.dataset.focusKey) + '"]';
 }
 
+const _AGENT_DONE_FLOURISH_DURATION_MS = 3400;
+var _agentDoneFlourishState = {};
+
+function _clearAgentDoneFlourish(agentId) {
+  const key = String(agentId || '');
+  const entry = _agentDoneFlourishState[key];
+  if (!entry) return;
+  if (entry.timeout_id) clearTimeout(entry.timeout_id);
+  delete _agentDoneFlourishState[key];
+}
+
+function _pruneAgentDoneFlourishes(agentMap) {
+  const activeAgentIds = new Set(Object.keys(agentMap || {}));
+  for (const key of Object.keys(_agentDoneFlourishState)) {
+    if (activeAgentIds.has(key)) continue;
+    _clearAgentDoneFlourish(key);
+  }
+}
+
+function _getAgentDoneFlourish(agentId) {
+  const key = String(agentId || '');
+  const entry = _agentDoneFlourishState[key];
+  if (!entry) return null;
+  const elapsedMs = Math.max(0, Date.now() - entry.started_at);
+  if (elapsedMs >= entry.duration_ms) {
+    _clearAgentDoneFlourish(key);
+    return null;
+  }
+  return {
+    duration_ms: entry.duration_ms,
+    elapsed_ms: elapsedMs,
+    label: entry.label || 'Done',
+  };
+}
+
+function _startAgentDoneFlourish(agentId, label) {
+  const key = String(agentId || '');
+  if (!key) return;
+  _clearAgentDoneFlourish(key);
+  const startedAt = Date.now();
+  const durationMs = _AGENT_DONE_FLOURISH_DURATION_MS;
+  const entry = {
+    started_at: startedAt,
+    duration_ms: durationMs,
+    label: label || 'Done',
+    timeout_id: 0,
+  };
+  entry.timeout_id = setTimeout(function() {
+    const current = _agentDoneFlourishState[key];
+    if (!current || current.started_at !== startedAt) return;
+    delete _agentDoneFlourishState[key];
+    if (typeof render === 'function'
+        && (typeof dragInProgress === 'undefined' || !dragInProgress)) {
+      render();
+    }
+  }, durationMs);
+  _agentDoneFlourishState[key] = entry;
+}
+
 function _agentCellSubtitle(a) {
   const task = _getAgentTask(a.id);
   if (task && task.task) return task.task;
@@ -719,6 +779,7 @@ function renderAgentCell(a) {
   const active = a.session_id && a.session_id === state.active_session_id;
   const selected = a.id === selectedAgentId;
   const childCount = (state.children[a.id] || []).length;
+  const doneFlourish = _getAgentDoneFlourish(a.id);
   const cls = ['cell'];
   if (active) cls.push('active');
   if (selected) cls.push('selected');
@@ -740,9 +801,24 @@ function renderAgentCell(a) {
   const titleParts = [a.name, `(${a.status})`];
   if (a.needs_attention && a.error_message) titleParts.push(`\u2014 ${a.error_message}`);
   else if (a.activity_detail) titleParts.push(`\u2014 ${a.activity_detail}`);
+  const statusClasses = ['cell-status', statusCls];
+  const statusAttrs = [];
+  const showDoneFlourish = !!(doneFlourish && statusCls !== 'attention');
+  if (showDoneFlourish) {
+    statusClasses.push('cell-status-done-flourish');
+    statusAttrs.push(
+      `style="--cell-status-done-duration:${doneFlourish.duration_ms}ms;--cell-status-done-delay:-${doneFlourish.elapsed_ms}ms"`
+    );
+  }
+  if (statusCls === 'attention') {
+    statusAttrs.push(`title="${esc(a.error_message || 'Needs attention')}"`);
+  }
 
   let h = `<div class="${cls.join(' ')}" draggable="true" data-drag-id="${a.id}" data-drag-type="agent" data-drag-group="${esc(a.group)}" onclick="onAgentClick('${a.id}')" ondblclick="onAgentDblClick('${a.id}')" oncontextmenu="onCellContextMenu(event,'${a.id}')" onauxclick="if(event.button===1){event.preventDefault();removeAgent('${a.id}')}" title="${esc(titleParts.join(' '))}">`;
-  h += `<div class="cell-status ${statusCls}"${statusCls === 'attention' ? ' title="' + esc(a.error_message || 'Needs attention') + '"' : ''}>${statusCls === 'attention' ? '!' : ''}</div>`;
+  h += `<div class="${statusClasses.join(' ')}"${statusAttrs.length ? ' ' + statusAttrs.join(' ') : ''}>`;
+  if (statusCls === 'attention') h += '!';
+  else if (showDoneFlourish) h += `<span class="cell-status-flourish-label">${esc(doneFlourish.label)}</span>`;
+  h += `</div>`;
   h += `<div class="cell-header-controls">`;
   h += `<button class="cell-close" draggable="false" onclick="event.stopPropagation();removeAgent('${a.id}')" title="Remove">\u2715</button>`;
   if (_isWeaver) {

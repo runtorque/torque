@@ -561,6 +561,13 @@ body.runtime-embedded .terminal-empty {
   position: absolute; top: 4px; right: 4px;
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--text-dim);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  pointer-events: none;
 }
 /* Three-state status: idle (gray blink), working (green pulse), disconnected (red) */
 .cell-status.idle          { background: var(--text-dim); animation: blink 3s ease-in-out infinite; }
@@ -576,6 +583,30 @@ body.runtime-embedded .terminal-empty {
 .cell-status.running       { background: var(--green); animation: pulse 1.8s ease-in-out infinite; }
 .cell-status.error         { background: var(--red); }
 .cell-status.stopped       { background: var(--amber); }
+.cell-status-flourish-label {
+  opacity: 0;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  color: #0d1117;
+  transform: translateX(4px);
+}
+.cell-status.cell-status-done-flourish {
+  width: 44px;
+  height: 14px;
+  top: 1px;
+  border-radius: 999px;
+  justify-content: flex-start;
+  padding: 0 8px;
+  background: var(--green);
+  box-shadow: 0 1px 8px rgba(63, 185, 80, 0.28);
+  animation: cell-status-done-flourish var(--cell-status-done-duration, 3400ms) ease-in-out both;
+  animation-delay: var(--cell-status-done-delay, 0ms);
+}
+.cell-status.cell-status-done-flourish .cell-status-flourish-label {
+  animation: cell-status-done-label var(--cell-status-done-duration, 3400ms) ease-in-out both;
+  animation-delay: var(--cell-status-done-delay, 0ms);
+}
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: .4; }
@@ -583,6 +614,49 @@ body.runtime-embedded .terminal-empty {
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: .25; }
+}
+@keyframes cell-status-done-flourish {
+  0% {
+    width: 7px;
+    height: 7px;
+    top: 4px;
+    padding-left: 0;
+    padding-right: 0;
+    box-shadow: none;
+  }
+  12%,
+  88% {
+    width: 44px;
+    height: 14px;
+    top: 1px;
+    padding-left: 8px;
+    padding-right: 8px;
+    box-shadow: 0 1px 8px rgba(63, 185, 80, 0.28);
+  }
+  100% {
+    width: 7px;
+    height: 7px;
+    top: 4px;
+    padding-left: 0;
+    padding-right: 0;
+    box-shadow: none;
+  }
+}
+@keyframes cell-status-done-label {
+  0%,
+  8% {
+    opacity: 0;
+    transform: translateX(4px);
+  }
+  16%,
+  82% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(2px);
+  }
 }
 .cell-header-controls {
   position: absolute;
