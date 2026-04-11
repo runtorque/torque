@@ -246,10 +246,11 @@ def _capture_auto_resume_targets(state: MatrixState, *, task=None,
     def _append_target(candidate):
         if not candidate or task_is_closed(candidate):
             return
+        candidate_group = str(getattr(candidate, "group", "") or group).strip()
         stream = compute_worktree_stream_for_task(
             state,
             getattr(candidate, "id", "") or "",
-            group=group or getattr(candidate, "group", "") or "",
+            group=candidate_group,
         )
         if not stream:
             return
@@ -259,7 +260,7 @@ def _capture_auto_resume_targets(state: MatrixState, *, task=None,
         seen_stream_ids.add(stream_id)
         targets.append({
             "task_id": getattr(candidate, "id", "") or "",
-            "group": getattr(candidate, "group", "") or group,
+            "group": candidate_group,
             "previous_stream": stream,
         })
 

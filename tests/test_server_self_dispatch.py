@@ -1169,6 +1169,129 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0]["agent_id"], owner.id)
         self.assertEqual(results[0]["type"], "stream_auto_resumed")
 
+    async def test_auto_resume_targets_capture_cross_group_dependents(self):
+        state = self._make_state()
+        weaver_b = self.state_mod.AgentCell(
+            id="weaver-b",
+            name="Weaver B",
+            group="B",
+            cell_type="agent",
+        )
+        owner_b = self.state_mod.AgentCell(
+            id="agent-b",
+            name="Worker B",
+            slug="worker-b",
+            group="B",
+            cell_type="agent",
+            status="idle",
+            worktree_path="/repo/.loom/worktrees/agent-b",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker-b",
+        )
+        state.agents[weaver_b.id] = weaver_b
+        state.agents[owner_b.id] = owner_b
+        state.groups["B"] = [weaver_b.id, owner_b.id]
+        state.group_settings["B"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver_b.id
+        )
+
+        external = state.board_add_task(
+            "External prerequisite",
+            "g",
+            lane="In Progress",
+            id="EXT:1",
+            action_name="oneshot/fix",
+        )
+        product = state.board_add_task(
+            "Add Events tab",
+            "B",
+            lane="Done",
+            id="LOOM:1",
+            agent_id=owner_b.id,
+            action_name="feature/implement",
+        )
+        review = state.board_add_task(
+            "Review Events implementation",
+            "B",
+            lane="Done",
+            id="LOOM:1:1",
+            parent_task_id="LOOM:1",
+            pipeline_root_id="LOOM:1",
+            pipeline_depth=1,
+            agent_id=owner_b.id,
+            action_name="feature/review",
+        )
+        queued = state.board_add_task(
+            "Add Worklog tab",
+            "B",
+            lane="To Do",
+            id="LOOM:2",
+            agent_id=owner_b.id,
+            action_name="feature/implement",
+            resume_after_boundary_task_id="LOOM:1:1",
+            depends_on=["EXT:1"],
+        )
+        self.assertIsNotNone(external)
+        self.assertIsNotNone(product)
+        self.assertIsNotNone(review)
+        self.assertIsNotNone(queued)
+        product.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "loom/worker-b",
+            "status": "open",
+            "recorded_at": "2026-04-07T10:00:00+00:00",
+            "commit_sha": "impl123",
+            "recorded_by_agent_id": owner_b.id,
+        }
+        review.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "loom/worker-b",
+            "status": "open",
+            "recorded_at": "2026-04-07T11:00:00+00:00",
+            "commit_sha": "rev456",
+            "recorded_by_agent_id": owner_b.id,
+        }
+
+        targets = self.server_mod._capture_auto_resume_targets(
+            state,
+            task=external,
+            group="g",
+        )
+
+        self.assertEqual([item["task_id"] for item in targets], [queued.id])
+        self.assertEqual([item["group"] for item in targets], ["B"])
+
+        state.board_move_task(external.id, "Done")
+
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            queued_task = state.board_tasks[payload["id"]]
+            queued_task.lane = "In Progress"
+            queued_task.agent_id = payload["agent_id"]
+            owner_b.current_task_id = queued_task.id
+            return {
+                "type": "ok",
+                "task_id": queued_task.id,
+                "agent_id": payload["agent_id"],
+            }
+
+        results = await self.server_mod._maybe_auto_resume_targets(
+            state,
+            handle_command,
+            lambda *args, **kwargs: None,
+            targets=targets,
+            group="g",
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["id"], queued.id)
+        self.assertEqual(calls[0]["agent_id"], owner_b.id)
+        self.assertEqual(results[0]["type"], "stream_auto_resumed")
+
     def test_find_reusable_review_fix_task_reuses_open_fix_review_shell(self):
         state = self._make_state()
         review = state.board_add_task(
