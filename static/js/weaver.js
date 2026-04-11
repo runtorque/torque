@@ -1,6 +1,7 @@
-/* Weaver panel — journal */
+/* Weaver panel — journal + events */
 
 var _weaverReplyDraft = '';
+var _weaverActiveTabByGroup = {};
 var _weaverHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
 var _weaverHealthLabels = {
   'blocked': 'Blocked',
@@ -36,11 +37,27 @@ function renderWeaverPanel() {
       }
       return '';
     },
+    capture: function(snapshot, root) {
+      if (!snapshot || !root || typeof root.querySelector !== 'function') return;
+      snapshot.anchor = _weaverCaptureScrollAnchor(
+        root.querySelector('.weaver-content')
+      );
+    },
+    restore: function(root, snapshot) {
+      if (!root || !snapshot || typeof root.querySelector !== 'function') return;
+      _weaverRestoreScrollAnchor(
+        root.querySelector('.weaver-content'),
+        snapshot.anchor
+      );
+    },
   });
 
   var group = _weaverCurrentGroup();
   var ws = _weaverGetSettings(group);
   var weaver = group ? _weaverGetAgent(group) : null;
+  var bstats = (state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null;
+  var paused = !!(ws && ws.paused);
+  var activeTab = _weaverActiveTab(group);
 
   var html = '<div class="weaver-panel">';
 
@@ -51,28 +68,13 @@ function renderWeaverPanel() {
   html += '</span>';
   // Buffer stats + Pause/Resume toggle
   if (group) {
-    var paused = ws && ws.paused;
-    var bstats = state.weaver_buffer_stats && state.weaver_buffer_stats[group];
     html += '<div class="weaver-header-right">';
     if (bstats && bstats.buffered_events > 0) {
-      var evtCount = bstats.buffered_events;
-      var nextIn = bstats.next_push_in;
-      var timeStr = '';
-      if (nextIn <= 0) {
-        timeStr = 'now';
-      } else if (nextIn < 60) {
-        timeStr = nextIn + 's';
-      } else {
-        var m = Math.floor(nextIn / 60);
-        var s = nextIn % 60;
-        timeStr = m + 'm' + (s > 0 ? String(s).padStart(2, '0') + 's' : '');
-      }
       html += '<span class="weaver-buffer-stats">'
-           + evtCount + ' event' + (evtCount !== 1 ? 's' : '')
-           + (paused ? ' paused' : ' in ' + timeStr)
+           + _esc(_weaverHeaderBufferStats(bstats, paused, weaver))
            + '</span>';
     }
-    html += '<button class="weaver-pause-btn' + (paused ? ' paused' : '') + '" '
+    html += '<button id="weaver-pause-btn" class="weaver-pause-btn' + (paused ? ' paused' : '') + '" '
          + 'onclick="weaverTogglePause()">'
          + (paused ? '&#x25B6;' : '&#x23F8;')
          + '</button>';
@@ -80,8 +82,11 @@ function renderWeaverPanel() {
   }
   html += '</div>';
 
+  html += _weaverRenderTabs(group, activeTab);
   html += '<div class="weaver-content">';
-  html += _weaverRenderJournal(group);
+  html += (activeTab === 'events')
+    ? _weaverRenderEvents(group, ws, weaver, bstats)
+    : _weaverRenderJournal(group);
   html += '</div>';
   html += '</div>';
   el.innerHTML = html;
@@ -97,6 +102,234 @@ function weaverTogglePauseForGroup(group) {
   var ws = _weaverGetSettings(group);
   var cmd = (ws && ws.paused) ? 'weaver_resume' : 'weaver_pause';
   send({ cmd: cmd, group: group });
+}
+
+function weaverSelectTab(tab, group) {
+  group = group || _weaverCurrentGroup();
+  if (!group) return;
+  _weaverActiveTabByGroup[group] = (tab === 'events') ? 'events' : 'journal';
+  renderWeaverPanel();
+}
+
+function weaverSendNow() {
+  var group = _weaverCurrentGroup();
+  if (!group) return;
+  send({ cmd: 'weaver_flush_now', group: group });
+}
+
+function _weaverActiveTab(group) {
+  if (!group) return 'journal';
+  var tab = _weaverActiveTabByGroup[group] || 'journal';
+  return tab === 'events' ? 'events' : 'journal';
+}
+
+function _weaverRenderTabs(group, activeTab) {
+  if (!group) return '';
+  var html = '<div class="weaver-tabs">';
+  html += '<button id="weaver-tab-journal" class="weaver-tab'
+    + (activeTab === 'journal' ? ' active' : '')
+    + '" onclick="weaverSelectTab(\'journal\')">Journal</button>';
+  html += '<button id="weaver-tab-events" class="weaver-tab'
+    + (activeTab === 'events' ? ' active' : '')
+    + '" onclick="weaverSelectTab(\'events\')">Events</button>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderEvents(group, ws, weaver, bstats) {
+  if (!group) {
+    return '<div class="weaver-empty">No weaver configured for any group.</div>';
+  }
+
+  var queued = (bstats && bstats.queued_events) ? bstats.queued_events.slice() : [];
+  var sent = (state.weaver_sent_events && state.weaver_sent_events[group])
+    ? state.weaver_sent_events[group].slice()
+    : [];
+  var paused = !!(ws && ws.paused);
+  var sendDisabled = paused || !queued.length;
+  var statusText = _weaverEventsStatusText(bstats, paused, weaver);
+
+  sent.sort(function(a, b) {
+    var deliveredDiff = (b.delivered_at || 0) - (a.delivered_at || 0);
+    if (deliveredDiff) return deliveredDiff;
+    return (b.id || 0) - (a.id || 0);
+  });
+
+  var html = '<div class="weaver-events-tab">';
+  html += '<div class="weaver-events-toolbar">';
+  html += '<div class="weaver-events-countdown">' + _esc(statusText) + '</div>';
+  html += '<button id="weaver-send-now-btn" class="weaver-send-now-btn"'
+    + (sendDisabled ? ' disabled' : '')
+    + ' onclick="weaverSendNow()">Send queued now</button>';
+  html += '</div>';
+  html += _weaverRenderEventSection(
+    'Queued for next digest',
+    queued,
+    'queued',
+    'No queued events.'
+  );
+  html += _weaverRenderEventSection(
+    'Already sent to Weaver',
+    sent,
+    'sent',
+    'No digested events yet.'
+  );
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderEventSection(title, events, mode, emptyText) {
+  var html = '<div class="weaver-event-section">';
+  html += '<div class="weaver-event-section-header">';
+  html += '<span class="weaver-event-section-title">' + _esc(title) + '</span>';
+  html += '<span class="weaver-event-section-count">' + events.length + '</span>';
+  html += '</div>';
+  if (!events.length) {
+    html += '<div class="weaver-event-empty">' + _esc(emptyText) + '</div>';
+    html += '</div>';
+    return html;
+  }
+  html += '<div class="weaver-event-list">';
+  for (var i = 0; i < events.length; i++) {
+    html += _weaverRenderEventItem(events[i], mode);
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderEventItem(event, mode) {
+  var kind = _weaverEventKindLabel(event && event.kind);
+  var agentName = event && event.agent_name ? String(event.agent_name) : '';
+  var message = event && event.message ? String(event.message) : '';
+  var summary = agentName && message
+    ? agentName + ' — ' + message
+    : (message || agentName || kind);
+  var meta = (mode === 'sent')
+    ? 'sent ' + _weaverTimeAgo(event && event.delivered_at)
+    : 'queued ' + _weaverTimeAgo(event && event.timestamp);
+  if (mode === 'sent' && event && event.timestamp && event.delivered_at
+      && Math.abs(event.delivered_at - event.timestamp) >= 30) {
+    meta += ' · event ' + _weaverTimeAgo(event.timestamp);
+  }
+  var anchorKey = mode + '-' + String(event && event.id ? event.id : ('idx-' + meta));
+  if (mode === 'sent' && event && event.delivered_at) {
+    anchorKey += '-' + Math.floor(event.delivered_at);
+  }
+
+  var html = '<div class="weaver-event-item weaver-event-item-' + _esc(mode) + '"'
+    + ' data-weaver-anchor="' + _esc(anchorKey) + '">';
+  html += '<div class="weaver-event-item-header">';
+  html += '<span class="weaver-event-kind">' + _esc(kind) + '</span>';
+  html += '<span class="weaver-event-meta">' + _esc(meta) + '</span>';
+  html += '</div>';
+  html += '<div class="weaver-event-message">' + _esc(summary) + '</div>';
+  if (event && event.task_id) {
+    html += '<div class="weaver-event-task">' + _esc(event.task_id) + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _weaverHeaderBufferStats(bstats, paused, weaver) {
+  if (!bstats || !bstats.buffered_events) return '';
+  var evtCount = bstats.buffered_events;
+  var label = evtCount + ' event' + (evtCount === 1 ? '' : 's');
+  if (paused) return label + ' paused';
+  if (bstats.manual_flush_requested) {
+    if (weaver && weaver.activity && weaver.activity !== 'waiting') {
+      return label + ' queued for idle send';
+    }
+    return label + ' sending';
+  }
+  if ((bstats.next_push_in || 0) <= 0) return label + ' ready';
+  return label + ' in ' + _weaverFormatCountdown(bstats.next_push_in || 0);
+}
+
+function _weaverEventsStatusText(bstats, paused, weaver) {
+  if (!bstats || !bstats.buffered_events) {
+    return 'No queued events.';
+  }
+  if (paused) {
+    return 'Delivery is paused — resume to send queued events.';
+  }
+  if (bstats.manual_flush_requested) {
+    if (weaver && weaver.activity && weaver.activity !== 'waiting') {
+      return 'Send requested — queued events will deliver when Weaver goes idle.';
+    }
+    return 'Sending queued events now.';
+  }
+  if ((bstats.next_push_in || 0) <= 0) {
+    if (weaver && weaver.activity && weaver.activity !== 'waiting') {
+      return 'Eligible now — waiting for Weaver to go idle.';
+    }
+    return 'Eligible to send now.';
+  }
+  return 'Next eligible send in ' + _weaverFormatCountdown(bstats.next_push_in || 0) + '.';
+}
+
+function _weaverFormatCountdown(seconds) {
+  var remaining = Math.max(0, Number(seconds) || 0);
+  if (remaining < 60) return remaining + 's';
+  var minutes = Math.floor(remaining / 60);
+  var secs = remaining % 60;
+  return minutes + 'm' + (secs > 0 ? String(secs).padStart(2, '0') + 's' : '');
+}
+
+function _weaverEventKindLabel(kind) {
+  kind = String(kind || '');
+  if (!kind) return 'event';
+  return kind.replace(/_/g, ' ');
+}
+
+function _weaverCaptureScrollAnchor(container) {
+  if (!container || typeof container.querySelectorAll !== 'function'
+      || typeof container.getBoundingClientRect !== 'function') {
+    return null;
+  }
+  var items = container.querySelectorAll('[data-weaver-anchor]');
+  if (!items || !items.length) return null;
+  var containerRect = container.getBoundingClientRect();
+  var best = null;
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    if (!item || typeof item.getBoundingClientRect !== 'function') continue;
+    var rect = item.getBoundingClientRect();
+    if (rect.bottom >= containerRect.top) {
+      best = item;
+      break;
+    }
+  }
+  if (!best) best = items[0];
+  if (!best || typeof best.getBoundingClientRect !== 'function') return null;
+  var anchorRect = best.getBoundingClientRect();
+  return {
+    key: best.getAttribute ? best.getAttribute('data-weaver-anchor') : '',
+    offset: anchorRect.top - containerRect.top,
+  };
+}
+
+function _weaverRestoreScrollAnchor(container, snapshot) {
+  if (!container || !snapshot || !snapshot.key
+      || typeof container.querySelectorAll !== 'function'
+      || typeof container.getBoundingClientRect !== 'function'
+      || typeof container.scrollTop !== 'number') {
+    return;
+  }
+  var items = container.querySelectorAll('[data-weaver-anchor]');
+  var target = null;
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var key = item && item.getAttribute ? item.getAttribute('data-weaver-anchor') : '';
+    if (key === snapshot.key) {
+      target = item;
+      break;
+    }
+  }
+  if (!target || typeof target.getBoundingClientRect !== 'function') return;
+  var containerRect = container.getBoundingClientRect();
+  var targetRect = target.getBoundingClientRect();
+  container.scrollTop += (targetRect.top - containerRect.top) - (snapshot.offset || 0);
 }
 
 // -- Journal tab -----------------------------------------------------------

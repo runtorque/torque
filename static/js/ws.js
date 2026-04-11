@@ -179,6 +179,8 @@ function _handleFullState(msg) {
   if (typeof _boardFilterStateGroup !== 'undefined') _boardFilterStateGroup = '';
   if (msg.providers) _cachedProviders = msg.providers;
   if (!state.panel_events) state.panel_events = [];
+  if (!state.weaver_buffer_stats) state.weaver_buffer_stats = {};
+  if (!state.weaver_sent_events) state.weaver_sent_events = {};
   _expectedSeq = (msg.seq || 0) + 1;
   // Reset pagination state on full snapshot
   if (typeof _eventsHasMore !== 'undefined') {
@@ -286,6 +288,7 @@ function _deltaSurfaceInvalidations(ops) {
       case 'journal_append':
       case 'journal_delete':
       case 'weaver_buffer_stats':
+      case 'weaver_sent_events':
         _markSurface(flags, 'weaver');
         break;
       case 'weaver_settings_update':
@@ -357,6 +360,7 @@ function _opTouchesGroup(op, group, hint) {
     case 'journal_append':
     case 'journal_delete':
     case 'weaver_buffer_stats':
+    case 'weaver_sent_events':
     case 'weaver_settings_update':
       return (op.group || '') === group;
     default:
@@ -396,6 +400,8 @@ function _applyDelta(ops) {
       case 'group_remove':
         delete state.groups[op.name];
         delete state.group_settings[op.name];
+        if (state.weaver_buffer_stats) delete state.weaver_buffer_stats[op.name];
+        if (state.weaver_sent_events) delete state.weaver_sent_events[op.name];
         break;
       case 'group_rename': {
         if (state.groups[op.old_name]) {
@@ -405,6 +411,14 @@ function _applyDelta(ops) {
         if (state.group_settings && state.group_settings[op.old_name]) {
           state.group_settings[op.new_name] = state.group_settings[op.old_name];
           delete state.group_settings[op.old_name];
+        }
+        if (state.weaver_buffer_stats && state.weaver_buffer_stats[op.old_name]) {
+          state.weaver_buffer_stats[op.new_name] = state.weaver_buffer_stats[op.old_name];
+          delete state.weaver_buffer_stats[op.old_name];
+        }
+        if (state.weaver_sent_events && state.weaver_sent_events[op.old_name]) {
+          state.weaver_sent_events[op.new_name] = state.weaver_sent_events[op.old_name];
+          delete state.weaver_sent_events[op.old_name];
         }
         break;
       }
@@ -542,7 +556,19 @@ function _applyDelta(ops) {
           state.weaver_buffer_stats[bsg] = {
             buffered_events: op.buffered_events || 0,
             next_push_in: op.next_push_in || 0,
+            next_push_at: op.next_push_at || 0,
+            queued_events: op.queued_events || [],
+            manual_flush_requested: !!op.manual_flush_requested,
           };
+        }
+        break;
+      }
+
+      case 'weaver_sent_events': {
+        if (!state.weaver_sent_events) state.weaver_sent_events = {};
+        var wsg = op.group || '';
+        if (wsg) {
+          state.weaver_sent_events[wsg] = op.events || [];
         }
         break;
       }

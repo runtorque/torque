@@ -36,7 +36,7 @@ function loadWeaver(context) {
   vm.runInContext(source, context, { filename });
 }
 
-test('renderWeaverPanel shows journal only without settings tabs', () => {
+test('renderWeaverPanel shows Journal and Events tabs without settings tabs', () => {
   const sandbox = createSandbox();
   const panel = {
     innerHTML: '',
@@ -51,8 +51,72 @@ test('renderWeaverPanel shows journal only without settings tabs', () => {
   vm.runInContext('renderWeaverPanel()', context);
 
   assert.match(panel.innerHTML, /Weaver — alpha/);
+  assert.match(panel.innerHTML, />Journal</);
+  assert.match(panel.innerHTML, />Events</);
+  assert.match(panel.innerHTML, /weaver-tabs/);
   assert.doesNotMatch(panel.innerHTML, />Settings</);
-  assert.doesNotMatch(panel.innerHTML, /weaver-tabs/);
+});
+
+test('weaver Events tab renders queued and sent digest sections', () => {
+  const sandbox = createSandbox();
+  sandbox.state.weaver_buffer_stats = {
+    alpha: {
+      buffered_events: 1,
+      next_push_in: 45,
+      queued_events: [
+        { id: 7, kind: 'task_completed', agent_name: 'Worker', message: 'Waiting for review', timestamp: 10 },
+      ],
+      manual_flush_requested: false,
+    },
+  };
+  sandbox.state.weaver_sent_events = {
+    alpha: [
+      { id: 5, kind: 'task_completed', agent_name: 'Worker', message: 'Merged cleanly', timestamp: 5, delivered_at: 12 },
+    ],
+  };
+  const panel = {
+    innerHTML: '',
+    querySelector() { return null; },
+  };
+  sandbox.document.getElementById = function(id) {
+    return id === 'panel-weaver' ? panel : null;
+  };
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+
+  vm.runInContext(`weaverSelectTab('events')`, context);
+
+  assert.match(panel.innerHTML, /Queued for next digest/);
+  assert.match(panel.innerHTML, /Already sent to Weaver/);
+  assert.match(panel.innerHTML, /Waiting for review/);
+  assert.match(panel.innerHTML, /Merged cleanly/);
+  assert.match(panel.innerHTML, /Send queued now/);
+});
+
+test('weaver Events tab disables send-now while paused', () => {
+  const sandbox = createSandbox();
+  sandbox.state.weaver_settings.alpha = { paused: true };
+  sandbox.state.weaver_buffer_stats = {
+    alpha: {
+      buffered_events: 1,
+      next_push_in: 0,
+      queued_events: [
+        { id: 9, kind: 'task_completed', message: 'Blocked by pause', timestamp: 10 },
+      ],
+      manual_flush_requested: false,
+    },
+  };
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+
+  const html = vm.runInContext(
+    `_weaverRenderEvents("alpha", state.weaver_settings.alpha, null, state.weaver_buffer_stats.alpha)`,
+    context,
+  );
+
+  assert.match(html, /Delivery is paused/);
+  assert.match(html, /Send queued now/);
+  assert.match(html, /disabled/);
 });
 
 test('weaver journal distinguishes blocking asks from non-blocking notes', () => {
@@ -102,6 +166,18 @@ test('weaverTogglePauseForGroup reuses the normal pause and resume commands', ()
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
     { cmd: 'weaver_pause', group: 'alpha' },
     { cmd: 'weaver_resume', group: 'alpha' },
+  ]);
+});
+
+test('weaverSendNow uses the explicit flush command', () => {
+  const sandbox = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+
+  vm.runInContext(`weaverSendNow()`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'weaver_flush_now', group: 'alpha' },
   ]);
 });
 

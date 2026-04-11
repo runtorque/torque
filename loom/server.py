@@ -569,6 +569,14 @@ def _handle_weaver_reply(state: MatrixState, cell, *, message: str,
     return {"type": "ok", "task_id": reply_task.id}
 
 
+def _handle_weaver_flush_now_command(weaver_buffer, data: dict) -> dict:
+    group = data.get("group", "")
+    ok, message = weaver_buffer.request_manual_flush(group)
+    if ok:
+        return {"type": "ok"}
+    return {"type": "error", "message": message or "Unable to send queued events"}
+
+
 def _resolve_ai_report_task(state: MatrixState, cell, *,
                             task_id: str = "") -> Optional[BoardTask]:
     """Resolve the task an agent report should apply to.
@@ -1107,6 +1115,7 @@ async def main(connection=None):
             "type": "state",
             "seq": state._seq,
             **state.to_dict(),
+            **weaver_buffer.export_state(),
             "providers": get_providers(),
             "runtime": _runtime_payload(),
         }
@@ -5795,6 +5804,7 @@ async def main(connection=None):
                         group,
                         pending_question=question,
                         paused=True)
+                    weaver_buffer.on_delivery_paused(group)
                     # Also log to journal
                     state.journal_append(
                         group, "observation",
@@ -5869,6 +5879,7 @@ async def main(connection=None):
             elif cmd == "weaver_pause":
                 group = data.get("group", "")
                 state.update_weaver_settings(group, paused=True)
+                weaver_buffer.on_delivery_paused(group)
                 result = {"type": "ok"}
 
             elif cmd == "weaver_resume":
@@ -5877,6 +5888,10 @@ async def main(connection=None):
                     group, paused=False, pending_question="")
                 weaver_buffer.on_delivery_resumed(group)
                 result = {"type": "ok"}
+
+            elif cmd == "weaver_flush_now":
+                result = _handle_weaver_flush_now_command(
+                    weaver_buffer, data)
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")

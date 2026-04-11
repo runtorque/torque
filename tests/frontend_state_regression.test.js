@@ -4257,6 +4257,38 @@ test('renderWeaverPanel preserves focused reply draft across rerenders', () => {
   assert.equal(input.selectionEnd, 13);
 });
 
+test('renderWeaverPanel preserves the selected Events tab across rerenders', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-weaver');
+  panel.querySelector = function() { return null; };
+  context.state.weaver_buffer_stats = {
+    alpha: {
+      buffered_events: 1,
+      next_push_in: 30,
+      queued_events: [
+        { id: 3, kind: 'task_completed', message: 'Queued event', timestamp: 10 },
+      ],
+      manual_flush_requested: false,
+    },
+  };
+  context.state.weaver_sent_events = {
+    alpha: [
+      { id: 2, kind: 'task_completed', message: 'Sent event', timestamp: 5, delivered_at: 8 },
+    ],
+  };
+
+  context.renderWeaverPanel();
+  runInContext(context, `weaverSelectTab('events')`);
+
+  assert.match(panel.innerHTML, /id="weaver-tab-events" class="weaver-tab active"/);
+  assert.match(panel.innerHTML, /Queued for next digest/);
+
+  context.renderWeaverPanel();
+
+  assert.match(panel.innerHTML, /id="weaver-tab-events" class="weaver-tab active"/);
+  assert.match(panel.innerHTML, /Already sent to Weaver/);
+});
+
 test('renderAgentCell shows a weaver-only pause control with state-driven classes', () => {
   const { context } = createWeaverHarness();
   context.state.group_settings = {
@@ -4457,6 +4489,36 @@ test('weaver settings deltas rerender the main grid for card pause state updates
     weaver: 0,
     templates: 0,
   });
+});
+
+test('weaver sent-event deltas rerender only the active Weaver panel', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'weaver';
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'weaver_sent_events',
+        group: 'alpha',
+        events: [
+          { id: 11, kind: 'task_completed', message: 'Merged cleanly', timestamp: 1, delivered_at: 2 },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 1,
+    templates: 0,
+  });
+  assert.deepEqual(jsonValue(context, 'state.weaver_sent_events.alpha'), [
+    { id: 11, kind: 'task_completed', message: 'Merged cleanly', timestamp: 1, delivered_at: 2 },
+  ]);
 });
 
 test('event deltas rerender only the active events panel', () => {
