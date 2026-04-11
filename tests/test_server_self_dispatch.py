@@ -897,6 +897,8 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
         install_iterm2_stub()
+        self.bridge_mod = importlib.import_module("loom.bridge")
+        self.bridge_mod = importlib.reload(self.bridge_mod)
         self.state_mod = importlib.import_module("loom.state")
         self.state_mod = importlib.reload(self.state_mod)
         self.server_agent_mod = importlib.import_module("loom.server_agent")
@@ -953,3 +955,107 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         bridge_release.set()
         await task
         self.assertNotIn(task, service._background_prompt_tasks)
+
+    async def test_delayed_self_dispatch_primes_ready_before_submit(self):
+        class FakeLineInfo:
+            overflow = 0
+            first_visible_line_number = 0
+            mutable_area_height = 24
+
+        class FakeSession:
+            def __init__(self, session_id):
+                self.session_id = session_id
+                self.sent = []
+                self.screen_reads = 0
+
+            async def async_set_profile_properties(self, change):
+                pass
+
+            async def async_send_text(self, text):
+                self.sent.append(text)
+
+            async def async_get_variable(self, name):
+                return None
+
+            async def async_get_line_info(self):
+                self.screen_reads += 1
+                return FakeLineInfo()
+
+            async def async_get_contents(self, first, count):
+                return []
+
+        class FakeTab:
+            def __init__(self, session):
+                self.current_session = session
+                self.sessions = [session]
+
+        class FakeWindow:
+            def __init__(self, session):
+                self.window_id = "window-1"
+                self.tabs = [FakeTab(session)]
+
+        class FakeApp:
+            def __init__(self, session):
+                window = FakeWindow(session)
+                self.current_window = window
+                self.windows = [window]
+
+        session = FakeSession("session-derive")
+
+        async def fake_get_app(conn):
+            return FakeApp(session)
+
+        self.bridge_mod.iterm2.async_get_app = fake_get_app
+        state = self.state_mod.MatrixState()
+        bridge = self.bridge_mod.ITerm2Adapter(None, state)
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=bridge,
+            worktree_mgr=None,
+            template_mgr=FakeTemplateManager(),
+        )
+        cell = self.state_mod.AgentCell(
+            id="agent-derive",
+            name="agent",
+            group="g",
+            cell_type="agent",
+            session_id="session-derive",
+            agent_type="codex",
+            command="codex",
+        )
+        state.agents[cell.id] = cell
+
+        delays = []
+
+        async def fake_sleep(delay):
+            delays.append(delay)
+
+        orig_sleep = self.server_agent_mod.asyncio.sleep
+        self.server_agent_mod.asyncio.sleep = fake_sleep
+        try:
+            task = await service.send_agent_prompt(
+                cell,
+                "Proceed with the derived task you just created.",
+                delay=3,
+                background=True,
+                prime_input_ready=True,
+            )
+            await task
+        finally:
+            self.server_agent_mod.asyncio.sleep = orig_sleep
+
+        self.assertEqual(delays, [3])
+        self.assertIn("session-derive", bridge._input_ready_sessions)
+        self.assertEqual(
+            session.sent,
+            [
+                "Proceed with the derived task you just created.",
+                "\r",
+            ],
+        )
+        self.assertEqual(session.screen_reads, 0)

@@ -205,6 +205,35 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
             "\r",
         ])
 
+    async def test_primed_self_dispatch_prompt_submits_without_screen_wait(self):
+        session = FakeSession(
+            "session-derive",
+            screen_snapshots=[["Loading Codex..."]],
+        )
+        bridge, state = await self._make_bridge(session)
+        cell = self.state_mod.AgentCell(
+            id="agent-derive",
+            name="codex",
+            group="g",
+            cell_type="agent",
+            session_id="session-derive",
+            agent_type="codex",
+            command="codex",
+        )
+        state.agents[cell.id] = cell
+        bridge.prime_input_ready("session-derive")
+
+        await bridge.send_text(
+            "session-derive",
+            "Proceed with the derived task you just created.\r",
+        )
+
+        self.assertEqual(session.sent, [
+            "Proceed with the derived task you just created.",
+            "\r",
+        ])
+        self.assertEqual(session.screen_reads, 0)
+
     async def test_send_text_waits_for_codex_ready_once(self):
         ready_screen = [
             "OpenAI Codex",
