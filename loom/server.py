@@ -903,6 +903,9 @@ def _apply_verification_report(task, payload, actor_name, save_task,
         verification_state = "attempted"
     if verification_state is not None:
         task.verification_state = verification_state
+        if verification_state == "passed":
+            summary.pop("human_validation_pending", None)
+            summary.pop("deploy_needed", None)
 
     if "verification_notes" in payload:
         task.verification_notes = str(

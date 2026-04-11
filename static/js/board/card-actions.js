@@ -81,6 +81,18 @@ function _boardCtxTaskJumpButton(label, task) {
     + esc(label) + '</button>';
 }
 
+function _boardTaskCountsAsDone(task) {
+  if (!task) return false;
+  if (task.lane === 'Done') return true;
+  return task.lane === _boardArchivedLane && task.archived_from_lane === 'Done';
+}
+
+function _boardCanMarkTaskVerified(task) {
+  var verificationState = _boardVerificationState(task);
+  if (!_boardTaskCountsAsDone(task)) return false;
+  return verificationState === 'pending' || verificationState === 'attempted';
+}
+
 function _boardRenderCardMenu(taskId) {
   var tasks = _boardTasks();
   var task = tasks[taskId];
@@ -123,6 +135,9 @@ function _boardRenderCardMenu(taskId) {
     html += '<button onclick="event.stopPropagation();boardRestoreTask(\'' + taskId + '\')">Restore</button>';
   } else if (task.lane === 'Done') {
     html += '<button onclick="event.stopPropagation();boardArchiveTask(\'' + taskId + '\')">Archive</button>';
+  }
+  if (_boardCanMarkTaskVerified(task)) {
+    html += '<button onclick="event.stopPropagation();boardMarkTaskVerified(\'' + taskId + '\')">Mark verified</button>';
   }
 
   // Preview prompt
