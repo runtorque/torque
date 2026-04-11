@@ -131,6 +131,40 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertEqual(state.board_tasks[parent.id].lane, 'Done')
         self.assertEqual(state.board_tasks[child.id].lane, 'Archived')
 
+    def test_weaver_flush_now_command_reports_success(self):
+        calls = []
+
+        class FakeBuffer:
+            def request_manual_flush(self, group):
+                calls.append(group)
+                return True, ""
+
+        result = self.server_mod._handle_weaver_flush_now_command(
+            FakeBuffer(),
+            {'group': 'g'},
+        )
+
+        self.assertEqual(calls, ['g'])
+        self.assertEqual(result, {'type': 'ok'})
+
+    def test_weaver_flush_now_command_surfaces_pause_error(self):
+        class FakeBuffer:
+            def request_manual_flush(self, group):
+                self.group = group
+                return False, "Delivery is paused"
+
+        buffer = FakeBuffer()
+        result = self.server_mod._handle_weaver_flush_now_command(
+            buffer,
+            {'group': 'g'},
+        )
+
+        self.assertEqual(buffer.group, 'g')
+        self.assertEqual(
+            result,
+            {'type': 'error', 'message': 'Delivery is paused'},
+        )
+
 
 class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -378,6 +412,10 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         }])
         self.assertEqual(
             self.db.load_agent_tasks(worker.id)[0]['task_id'],
+            follow_up.id,
+        )
+        self.assertEqual(
+            state.weaver_worklog[worker.group][0]['task_id'],
             follow_up.id,
         )
         self.assertEqual(

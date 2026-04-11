@@ -119,6 +119,9 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
                 break
 
             payload = {"cmd": "dispatch_task", "id": task.id}
+            if entry.weaver_owner_id:
+                payload["_weaver_dispatch_group"] = group_name
+                payload["_weaver_dispatch_id"] = entry.weaver_owner_id
             if target_agent_id:
                 payload["agent_id"] = target_agent_id
             else:

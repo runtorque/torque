@@ -495,6 +495,72 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(gs.worktree_merge_cleanup, "keep")
         self.assertTrue(gs.worktree_merge_preserve_diff)
 
+    def test_history_record_dispatch_persists_weaver_worklog_and_survives_reload(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+
+        state = self.state_mod.MatrixState(db=db)
+        state.groups["g"] = []
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            cell_type="agent",
+        )
+        worker = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            slug="worker",
+            group="g",
+            cell_type="agent",
+            created_by_weaver_id=weaver.id,
+        )
+        state.agents[weaver.id] = weaver
+        state.agents[worker.id] = worker
+        state.groups["g"] = [weaver.id, worker.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        state.weaver_settings["g"] = self.state_mod.WeaverSettings(group="g")
+        state._db_save_groups()
+        state._db_save_group_settings("g")
+        state._db_save_agent(weaver)
+        state._db_save_agent(worker)
+        state.history_record_agent(weaver)
+        state.history_record_agent(worker)
+
+        task = state.board_add_task(
+            "Ship Worklog tab",
+            "g",
+            lane="In Progress",
+            id="LOOM:1",
+            agent_id=worker.id,
+        )
+
+        state.history_record_dispatch(
+            worker,
+            task,
+            weaver_group="g",
+            weaver_id=weaver.id,
+        )
+
+        self.assertEqual(state.weaver_worklog["g"][0]["task_id"], task.id)
+        self.assertTrue(state.weaver_worklog["g"][0]["agent_owned"])
+
+        reloaded = self.state_mod.MatrixState(db=db)
+        reloaded.load()
+
+        self.assertEqual(reloaded.weaver_worklog["g"][0]["task_id"], task.id)
+        self.assertEqual(
+            reloaded.to_dict()["weaver_worklog"]["g"][0]["agent_name"],
+            "Worker",
+        )
+
 
 class MatrixStateBoardWorkflowTests(unittest.TestCase):
     def setUp(self):

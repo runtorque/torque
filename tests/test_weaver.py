@@ -170,6 +170,66 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(stats["buffered_events"], 1)
         self.assertEqual(stats["next_push_in"], 45)
+        self.assertEqual(stats["queued_events"][0]["message"], "count me down")
+        buffer.stop()
+
+    async def test_manual_flush_sends_queued_events_before_push_interval(self):
+        state, group, _ = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            push_interval=60,
+            max_interval=300,
+            heartbeat_interval=300,
+        )
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+            buffer.on_panel_event({
+                "group": group,
+                "kind": "task_completed",
+                "message": "send me now",
+            })
+
+        ok, message = buffer.request_manual_flush(group)
+        self.assertTrue(ok)
+        self.assertEqual(message, "")
+
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("send me now", bridge.sent[0])
+        self.assertEqual(buffer.get_buffer_stats(group)["buffered_events"], 0)
+        sent = buffer.get_sent_events(group)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["message"], "send me now")
+        self.assertGreater(sent[0]["delivered_at"], 0)
+        buffer.stop()
+
+    async def test_manual_flush_rejects_paused_delivery_without_dropping_queue(self):
+        state, group, _ = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            paused=True,
+        )
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        buffer.on_panel_event({
+            "group": group,
+            "kind": "task_completed",
+            "message": "stay queued",
+        })
+
+        ok, message = buffer.request_manual_flush(group)
+
+        self.assertFalse(ok)
+        self.assertIn("paused", message.lower())
+        self.assertEqual(buffer.get_buffer_stats(group)["buffered_events"], 1)
+        self.assertEqual(buffer.get_sent_events(group), [])
+        self.assertEqual(bridge.sent, [])
         buffer.stop()
 
     async def test_overdue_idle_push_uses_digest_format(self):

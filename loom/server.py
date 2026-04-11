@@ -497,7 +497,13 @@ async def _send_weaver_message_to_agent(state: MatrixState, bridge, target,
         follow_up.id,
         messages=list(follow_up.messages),
     )
-    state.history_record_dispatch(target, follow_up)
+    group_settings = state.get_group_settings(target.group)
+    state.history_record_dispatch(
+        target,
+        follow_up,
+        weaver_group=target.group,
+        weaver_id=group_settings.weaver_agent_id if group_settings else "",
+    )
     state.history_record_message(
         target.id,
         "weaver_message",
@@ -567,6 +573,14 @@ def _handle_weaver_reply(state: MatrixState, cell, *, message: str,
             task_id=reply_task.id,
         )
     return {"type": "ok", "task_id": reply_task.id}
+
+
+def _handle_weaver_flush_now_command(weaver_buffer, data: dict) -> dict:
+    group = data.get("group", "")
+    ok, message = weaver_buffer.request_manual_flush(group)
+    if ok:
+        return {"type": "ok"}
+    return {"type": "error", "message": message or "Unable to send queued events"}
 
 
 def _resolve_ai_report_task(state: MatrixState, cell, *,
@@ -1107,6 +1121,7 @@ async def main(connection=None):
             "type": "state",
             "seq": state._seq,
             **state.to_dict(),
+            **weaver_buffer.export_state(),
             "providers": get_providers(),
             "runtime": _runtime_payload(),
         }
@@ -4029,7 +4044,18 @@ async def main(connection=None):
                                         prompt_text,
                                         **send_kwargs)
 
-                            state.history_record_dispatch(cell, task)
+                            state.history_record_dispatch(
+                                cell,
+                                task,
+                                weaver_group=data.get(
+                                    "_weaver_dispatch_group",
+                                    "",
+                                ),
+                                weaver_id=data.get(
+                                    "_weaver_dispatch_id",
+                                    "",
+                                ),
+                            )
                             _panel_event(
                                 "task_dispatched", cell.id,
                                 cell.name, cell.group,
@@ -5801,6 +5827,7 @@ async def main(connection=None):
                         group,
                         pending_question=question,
                         paused=True)
+                    weaver_buffer.on_delivery_paused(group)
                     # Also log to journal
                     state.journal_append(
                         group, "observation",
@@ -5875,6 +5902,7 @@ async def main(connection=None):
             elif cmd == "weaver_pause":
                 group = data.get("group", "")
                 state.update_weaver_settings(group, paused=True)
+                weaver_buffer.on_delivery_paused(group)
                 result = {"type": "ok"}
 
             elif cmd == "weaver_resume":
@@ -5883,6 +5911,10 @@ async def main(connection=None):
                     group, paused=False, pending_question="")
                 weaver_buffer.on_delivery_resumed(group)
                 result = {"type": "ok"}
+
+            elif cmd == "weaver_flush_now":
+                result = _handle_weaver_flush_now_command(
+                    weaver_buffer, data)
 
             elif cmd == "restart":
                 log.info("Restart requested — cleaning up and re-executing")

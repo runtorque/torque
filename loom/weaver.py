@@ -415,10 +415,12 @@ class WeaverEventBuffer:
         self._bridge = bridge          # ITerm2Adapter — for send_text()
         self._buffers: dict[str, list[dict]] = {}   # group → buffered events
         self._buffer_started: dict[str, float] = {}  # group → oldest buffered event timestamp
+        self._sent_events: dict[str, list[dict]] = {}  # group → recently delivered events
         self._last_push: dict[str, float] = {}       # group → timestamp
         self._due_checks: dict[str, asyncio.TimerHandle] = {}  # group → next regular-digest deadline callback
         self._due_check_deadlines: dict[str, float] = {}  # group → wall-clock deadline for due check
         self._pending_flush: dict[str, bool] = {}    # group → flush task scheduled/running
+        self._manual_flush_requested: dict[str, bool] = {}  # group → operator requested immediate flush
         self._was_idle_with_question: set[str] = set()  # groups where weaver went idle with pending_question
         self._timer_handle: asyncio.TimerHandle | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -437,24 +439,82 @@ class WeaverEventBuffer:
         self._due_checks.clear()
         self._due_check_deadlines.clear()
 
+    @staticmethod
+    def _event_snapshot(event: dict, *, delivered_at: float | None = None) -> dict:
+        snapshot = {
+            "id": event.get("id", 0),
+            "timestamp": event.get("timestamp", 0),
+            "kind": event.get("kind", ""),
+            "cell_id": event.get("cell_id", ""),
+            "agent_name": event.get("agent_name", ""),
+            "group": event.get("group", ""),
+            "message": event.get("message", ""),
+            "task_id": event.get("task_id", ""),
+        }
+        if delivered_at is not None:
+            snapshot["delivered_at"] = delivered_at
+        elif "delivered_at" in event:
+            snapshot["delivered_at"] = event.get("delivered_at", 0)
+        return snapshot
+
+    def get_sent_events(self, group: str) -> list[dict]:
+        return [dict(evt) for evt in self._sent_events.get(group, [])]
+
+    def export_state(self) -> dict:
+        groups = {
+            group for group, settings in self._state.group_settings.items()
+            if settings.weaver_agent_id
+        }
+        groups.update(self._buffers.keys())
+        groups.update(self._sent_events.keys())
+
+        return {
+            "weaver_buffer_stats": {
+                group: self.get_buffer_stats(group)
+                for group in sorted(groups)
+            },
+            "weaver_sent_events": {
+                group: self.get_sent_events(group)
+                for group in sorted(groups)
+                if self._sent_events.get(group)
+            },
+        }
+
     def get_buffer_stats(self, group: str) -> dict:
         """Return buffer stats for the UI: event count + seconds until next push."""
         buf = self._buffers.get(group, [])
         ws = self._state.get_weaver_settings(group)
         last = self._last_push.get(group, 0)
         now = time.time()
+        deadline = None
+        manual_flush_requested = bool(
+            self._manual_flush_requested.get(group)
+        )
 
         if buf:
-            next_in = self._seconds_until_buffered_digest(group, ws, now=now)
+            if manual_flush_requested:
+                next_in = 0
+                deadline = now
+            else:
+                deadline = self._buffered_digest_deadline(group, ws)
+                next_in = self._seconds_until_buffered_digest(
+                    group, ws, now=now)
         elif not last:
             next_in = ws.push_interval
+            deadline = now + ws.push_interval
         else:
             elapsed = now - last
             next_in = max(0, ws.push_interval - elapsed)
+            deadline = last + ws.push_interval
 
         return {
             "buffered_events": len(buf),
             "next_push_in": int(next_in),
+            "next_push_at": int(deadline or 0),
+            "queued_events": [
+                self._event_snapshot(evt) for evt in buf
+            ],
+            "manual_flush_requested": manual_flush_requested,
         }
 
     def _buffered_digest_deadline(self, group: str, ws) -> float | None:
@@ -535,6 +595,13 @@ class WeaverEventBuffer:
             **self.get_buffer_stats(group),
         )
 
+    def _emit_sent_events(self, group: str):
+        self._state._emit(
+            "weaver_sent_events",
+            group=group,
+            events=self.get_sent_events(group),
+        )
+
     # -- Public hooks ---------------------------------------------------------
 
     def on_panel_event(self, event: dict):
@@ -584,6 +651,11 @@ class WeaverEventBuffer:
             else:
                 self._check_weaver_flush(weaver)
 
+    def on_delivery_paused(self, group: str):
+        self._manual_flush_requested.pop(group, None)
+        self._cancel_due_check(group)
+        self._emit_buffer_stats(group)
+
     def on_agent_activity_change(self, cell):
         """Called when an agent's activity changes.  Flush if weaver goes idle."""
         gs = self._state.group_settings.get(cell.group)
@@ -612,6 +684,34 @@ class WeaverEventBuffer:
             # Agent went idle — check if it's a weaver with pending events
             self._check_weaver_flush(cell)
 
+    def request_manual_flush(self, group: str) -> tuple[bool, str]:
+        if not group:
+            return False, "Group is required"
+
+        weaver = self._state.get_weaver_for_group(group)
+        if not weaver or not weaver.session_id:
+            return False, "Weaver is not running"
+
+        if not self._loop or self._loop.is_closed():
+            return False, "Weaver event delivery is unavailable right now"
+
+        ws = self._state.get_weaver_settings(group)
+        if ws.paused:
+            return (
+                False,
+                "Weaver delivery is paused. Resume it before sending queued events.",
+            )
+
+        if not self._buffers.get(group):
+            return False, "No queued events to send"
+
+        self._manual_flush_requested[group] = True
+        self._emit_buffer_stats(group)
+
+        if not weaver.activity or weaver.activity == "waiting":
+            self._check_weaver_flush(weaver)
+        return True, ""
+
     # -- Internal -------------------------------------------------------------
 
     def _check_weaver_flush(self, cell):
@@ -627,7 +727,8 @@ class WeaverEventBuffer:
 
         has_events = bool(self._buffers.get(group))
         if has_events:
-            if self._is_buffered_digest_due(group, ws):
+            if (self._manual_flush_requested.get(group)
+                    or self._is_buffered_digest_due(group, ws)):
                 self._cancel_due_check(group)
                 self._schedule_flush(group)
             else:
@@ -660,6 +761,7 @@ class WeaverEventBuffer:
     async def _flush(self, group: str):
         """Format and send buffered events as a digest to the weaver."""
         events = None
+        buffer_started_at = None
         try:
             weaver = self._state.get_weaver_for_group(group)
             if not weaver or not weaver.session_id:
@@ -673,20 +775,40 @@ class WeaverEventBuffer:
             if weaver.activity and weaver.activity != "waiting":
                 return
 
+            self._manual_flush_requested.pop(group, None)
             events = self._buffers.pop(group, [])
-            self._buffer_started.pop(group, None)
+            buffer_started_at = self._buffer_started.pop(group, None)
             board_summary = self._board_summary(group)
             text = self._format_digest(group, events, board_summary, weaver)
 
-            self._last_push[group] = time.time()
-
             try:
                 await self._bridge.send_text(weaver.session_id, text + "\n")
+                delivered_at = time.time()
+                self._last_push[group] = delivered_at
                 log.info("Weaver digest sent to '%s' (%d events)",
                          weaver.name, len(events))
+                if events:
+                    sent = self._sent_events.setdefault(group, [])
+                    sent.extend(
+                        self._event_snapshot(evt, delivered_at=delivered_at)
+                        for evt in events
+                    )
+                    if len(sent) > 200:
+                        self._sent_events[group] = sent[-200:]
+                    self._emit_sent_events(group)
             except Exception:
                 log.exception("Failed to send weaver digest to '%s'",
                               weaver.name)
+                if events:
+                    current = self._buffers.get(group, [])
+                    self._buffers[group] = events + current
+                    if buffer_started_at is not None:
+                        restored = self._buffer_started.get(group)
+                        self._buffer_started[group] = (
+                            buffer_started_at
+                            if restored is None
+                            else min(restored, buffer_started_at)
+                        )
         finally:
             self._pending_flush.pop(group, None)
 
