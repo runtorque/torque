@@ -7,8 +7,11 @@ const vm = require('node:vm');
 const repoRoot = path.resolve(__dirname, '..');
 
 function createSandbox() {
+  const intervalCalls = [];
+  const clearedIntervals = [];
   const sandbox = {
     console,
+    Date: { now: () => Date.now() },
     state: { weaver_settings: {} },
     document: {
       activeElement: null,
@@ -20,6 +23,16 @@ function createSandbox() {
     _currentGroup() { return 'alpha'; },
     _captureSurfaceState() { return null; },
     _restoreSurfaceState() {},
+    setInterval(fn, delay) {
+      const id = intervalCalls.length + 1;
+      intervalCalls.push({ id, fn, delay });
+      return id;
+    },
+    clearInterval(id) {
+      clearedIntervals.push(id);
+    },
+    intervalCalls,
+    clearedIntervals,
     sendCalls: [],
   };
   sandbox.send = function(message) {
@@ -92,6 +105,66 @@ test('weaver Events tab renders queued and sent digest sections', () => {
   assert.match(panel.innerHTML, /Waiting for review/);
   assert.match(panel.innerHTML, /Merged cleanly/);
   assert.match(panel.innerHTML, /Send queued now/);
+});
+
+test('weaver Events countdown updates in place without rerendering the whole panel', () => {
+  const sandbox = createSandbox();
+  let nowMs = 1_000_000;
+  sandbox.Date.now = () => nowMs;
+  sandbox.state.weaver_buffer_stats = {
+    alpha: {
+      buffered_events: 1,
+      next_push_in: 54,
+      next_push_at: 1054,
+      queued_events: [
+        { id: 7, kind: 'task_completed', message: 'Queued event', timestamp: 10 },
+      ],
+      manual_flush_requested: false,
+    },
+  };
+  const countdown = { textContent: '' };
+  let renderCount = 0;
+  const panel = {
+    querySelector(selector) {
+      if (selector === '.weaver-events-countdown') return countdown;
+      return null;
+    },
+  };
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      renderCount += 1;
+      this._innerHTML = value;
+    },
+  });
+  sandbox.document.getElementById = function(id) {
+    return id === 'panel-weaver' ? panel : null;
+  };
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+
+  vm.runInContext(`_weaverActiveTabByGroup.alpha = 'events'; renderWeaverPanel()`, context);
+
+  assert.equal(renderCount, 1);
+  assert.equal(sandbox.intervalCalls.length, 1);
+  assert.equal(sandbox.intervalCalls[0].delay, 1000);
+  assert.equal(countdown.textContent, 'Next eligible send in 54s.');
+
+  nowMs += 4000;
+  sandbox.intervalCalls[0].fn();
+
+  assert.equal(renderCount, 1);
+  assert.equal(countdown.textContent, 'Next eligible send in 50s.');
+
+  nowMs = 1_055_000;
+  sandbox.intervalCalls[0].fn();
+
+  assert.equal(renderCount, 1);
+  assert.equal(countdown.textContent, 'Eligible to send now.');
+  assert.deepEqual(sandbox.clearedIntervals, [1]);
 });
 
 test('weaver Events tab disables send-now while paused', () => {

@@ -16,6 +16,7 @@ var _weaverVerificationLabels = {
   'passed': 'Verified',
   'failed': 'Verify failed',
 };
+var _weaverEventsCountdownTimer = 0;
 var _weaverHealthSeverity = {
   'healthy': 0,
   'idle-risk': 1,
@@ -27,6 +28,7 @@ var _weaverHealthSeverity = {
 
 function renderWeaverPanel() {
   var el = document.getElementById('panel-weaver');
+  _weaverStopEventsCountdownTimer();
   if (!el) return;
   var panelStateOptions = {
     scrollSelectors: ['.weaver-content'],
@@ -96,6 +98,7 @@ function renderWeaverPanel() {
   html += '</div>';
   el.innerHTML = html;
   _restoreSurfaceState(el, panelState, panelStateOptions);
+  _weaverSyncEventsCountdown(el, group, activeTab);
 }
 
 function weaverTogglePause() {
@@ -245,6 +248,7 @@ function _weaverHeaderBufferStats(bstats, paused, weaver) {
   if (!bstats || !bstats.buffered_events) return '';
   var evtCount = bstats.buffered_events;
   var label = evtCount + ' event' + (evtCount === 1 ? '' : 's');
+  var nextPushIn = _weaverCountdownSeconds(bstats);
   if (paused) return label + ' paused';
   if (bstats.manual_flush_requested) {
     if (weaver && weaver.activity && weaver.activity !== 'waiting') {
@@ -252,8 +256,8 @@ function _weaverHeaderBufferStats(bstats, paused, weaver) {
     }
     return label + ' sending';
   }
-  if ((bstats.next_push_in || 0) <= 0) return label + ' ready';
-  return label + ' in ' + _weaverFormatCountdown(bstats.next_push_in || 0);
+  if (nextPushIn <= 0) return label + ' ready';
+  return label + ' in ' + _weaverFormatCountdown(nextPushIn);
 }
 
 function _weaverEventsStatusText(bstats, paused, weaver) {
@@ -269,13 +273,14 @@ function _weaverEventsStatusText(bstats, paused, weaver) {
     }
     return 'Sending queued events now.';
   }
-  if ((bstats.next_push_in || 0) <= 0) {
+  var nextPushIn = _weaverCountdownSeconds(bstats);
+  if (nextPushIn <= 0) {
     if (weaver && weaver.activity && weaver.activity !== 'waiting') {
       return 'Eligible now — waiting for Weaver to go idle.';
     }
     return 'Eligible to send now.';
   }
-  return 'Next eligible send in ' + _weaverFormatCountdown(bstats.next_push_in || 0) + '.';
+  return 'Next eligible send in ' + _weaverFormatCountdown(nextPushIn) + '.';
 }
 
 function _weaverFormatCountdown(seconds) {
@@ -284,6 +289,77 @@ function _weaverFormatCountdown(seconds) {
   var minutes = Math.floor(remaining / 60);
   var secs = remaining % 60;
   return minutes + 'm' + (secs > 0 ? String(secs).padStart(2, '0') + 's' : '');
+}
+
+function _weaverCountdownSeconds(bstats) {
+  if (!bstats) return 0;
+  var nextPushAt = Number(bstats.next_push_at || 0);
+  if (nextPushAt > 0) {
+    return Math.max(0, Math.ceil(nextPushAt - (Date.now() / 1000)));
+  }
+  return Math.max(0, Math.ceil(Number(bstats.next_push_in || 0)));
+}
+
+function _weaverShouldLiveUpdateCountdown(group, activeTab) {
+  if (!group || activeTab !== 'events') return false;
+  var ws = _weaverGetSettings(group);
+  var bstats = (state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null;
+  if (!bstats || !bstats.buffered_events) return false;
+  if (ws && ws.paused) return false;
+  if (bstats.manual_flush_requested) return false;
+  return _weaverCountdownSeconds(bstats) > 0;
+}
+
+function _weaverStopEventsCountdownTimer() {
+  if (_weaverEventsCountdownTimer && typeof clearInterval === 'function') {
+    clearInterval(_weaverEventsCountdownTimer);
+  }
+  _weaverEventsCountdownTimer = 0;
+}
+
+function _weaverSyncEventsCountdown(panel, group, activeTab) {
+  if (!panel || typeof panel.querySelector !== 'function') return;
+  var countdownEl = panel.querySelector('.weaver-events-countdown');
+  if (!countdownEl) return;
+  var ws = _weaverGetSettings(group);
+  var weaver = group ? _weaverGetAgent(group) : null;
+  var bstats = (state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null;
+  countdownEl.textContent = _weaverEventsStatusText(
+    bstats,
+    !!(ws && ws.paused),
+    weaver
+  );
+  if (!_weaverShouldLiveUpdateCountdown(group, activeTab)
+      || typeof setInterval !== 'function') {
+    return;
+  }
+  _weaverEventsCountdownTimer = setInterval(function() {
+    var currentPanel = document.getElementById('panel-weaver');
+    if (!currentPanel) {
+      _weaverStopEventsCountdownTimer();
+      return;
+    }
+    var currentGroup = _weaverCurrentGroup();
+    var currentTab = _weaverActiveTab(currentGroup);
+    var currentCountdown = currentPanel.querySelector('.weaver-events-countdown');
+    if (!currentCountdown || currentTab !== 'events') {
+      _weaverStopEventsCountdownTimer();
+      return;
+    }
+    var currentSettings = _weaverGetSettings(currentGroup);
+    var currentWeaver = currentGroup ? _weaverGetAgent(currentGroup) : null;
+    var currentStats = (
+      state.weaver_buffer_stats && state.weaver_buffer_stats[currentGroup]
+    ) || null;
+    currentCountdown.textContent = _weaverEventsStatusText(
+      currentStats,
+      !!(currentSettings && currentSettings.paused),
+      currentWeaver
+    );
+    if (!_weaverShouldLiveUpdateCountdown(currentGroup, currentTab)) {
+      _weaverStopEventsCountdownTimer();
+    }
+  }, 1000);
 }
 
 function _weaverEventKindLabel(kind) {
