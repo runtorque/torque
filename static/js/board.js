@@ -9,6 +9,7 @@ var _boardAddingTask = false;   // true when inline task input is shown
 var _boardAddingTaskDraft = '';  // preserved text across blur/reopen
 var _boardAddingTaskAction = '';  // selected action name for inline add
 var _boardAddingTaskAgent = '';   // selected agent ID for inline add
+var _boardAddingTaskLane = '';    // selected lane for inline add
 var _boardInlineDraftId = '';     // pre-generated task ID for inline attachments
 var _boardInlineAttachments = []; // attachments uploaded during inline creation
 var _boardAddTaskFocus = false;   // true only on explicit open, not re-renders
@@ -136,6 +137,19 @@ function _boardVisibleLanes() {
   return lanes.filter(function(lane) {
     return lane !== _boardArchivedLane;
   });
+}
+
+function _boardAddTaskLaneOptions() {
+  return _boardLanes().filter(function(lane) {
+    return lane && lane !== _boardArchivedLane;
+  });
+}
+
+function _boardDefaultAddTaskLane() {
+  var lanes = _boardAddTaskLaneOptions();
+  if (!lanes.length) return _boardSelectedLane || '';
+  if (lanes.indexOf('Backlog') >= 0) return 'Backlog';
+  return lanes[0];
 }
 
 function _boardTasks() {
@@ -744,6 +758,10 @@ function _boardRenderAddTaskSection(lane) {
   var escLane = esc(lane).replace(/'/g, "\\'");
   var activeLane = lane === _boardSelectedLane;
   if (_boardAddingTask && activeLane) {
+    var addTaskLaneOptions = _boardAddTaskLaneOptions();
+    if (!_boardAddingTaskLane || addTaskLaneOptions.indexOf(_boardAddingTaskLane) === -1) {
+      _boardAddingTaskLane = _boardDefaultAddTaskLane();
+    }
     html += '<div class="board-add-task board-add-task-active"'
       + ' ondragover="boardInlineDragOver(event)" ondragleave="boardInlineDragLeave(event)"'
       + ' ondrop="boardInlineDrop(event)">';
@@ -775,6 +793,10 @@ function _boardRenderAddTaskSection(lane) {
     var actionLabel = _boardAddingTaskAction || 'No action';
     html += '<button class="board-add-toolbar-btn" onmousedown="event.preventDefault();boardToggleActionList()">'
       + esc(actionLabel) + ' &#9662;</button>';
+    html += '<div class="board-add-dropdown" id="board-add-lane-wrap">';
+    html += '<button class="board-add-toolbar-btn" onmousedown="event.preventDefault();boardToggleLaneDropdown()">'
+      + esc(_boardAddingTaskLane) + ' &#9662;</button>';
+    html += '</div>';
     html += '<button class="board-add-toolbar-btn board-add-submit-btn" onmousedown="event.preventDefault();boardSubmitAddTask()">Submit &#10132;</button>';
     html += '</div>';
     html += '</div>';
@@ -1351,6 +1373,7 @@ function boardStartAddTaskForLane(lane) {
     _boardLastSelectedTask = '';
   }
   _boardAddingTask = true;
+  _boardAddingTaskLane = _boardDefaultAddTaskLane();
   _boardAddTaskFocus = true;
   _boardFocusedTask = '';
   if (!_boardInlineDraftId) _boardInlineDraftId = _generateDraftId();
@@ -1396,6 +1419,7 @@ function boardClearAddTask() {
   _boardAddingTaskDraft = '';
   _boardAddingTaskAction = '';
   _boardAddingTaskAgent = '';
+  _boardAddingTaskLane = '';
   _boardInlineDraftId = '';
   _boardInlineAttachments = [];
   _boardTplList = null;
@@ -1424,9 +1448,10 @@ function boardSubmitAddTask() {
   if (!val) return;
   var parsed = _boardParseInlineLabels(val);
   if (!parsed.title) return;
+  var targetLane = _boardAddingTaskLane || _boardDefaultAddTaskLane();
   _boardAddingTask = false;
   _boardAddingTaskDraft = '';
-  var msg = { cmd: 'board_add_task', task: parsed.title, group: _currentGroup(), lane: _boardSelectedLane };
+  var msg = { cmd: 'board_add_task', task: parsed.title, group: _currentGroup(), lane: targetLane };
   if (_boardInlineDraftId) msg.id = _boardInlineDraftId;
   if (parsed.labels.length) msg.labels = parsed.labels;
   if (_boardAddingTaskAction) msg.action_name = _boardAddingTaskAction;
@@ -1434,6 +1459,7 @@ function boardSubmitAddTask() {
   if (_boardInlineAttachments.length) msg.attachments = _boardInlineAttachments.slice();
   _boardAddingTaskAction = '';
   _boardAddingTaskAgent = '';
+  _boardAddingTaskLane = '';
   _boardInlineDraftId = '';
   _boardInlineAttachments = [];
   _boardTplList = null;
@@ -1659,6 +1685,30 @@ function boardToggleAgentDropdown() {
       btn.onclick = function() { _boardAddingTaskAgent = ag.id; listEl.remove(); renderBoard(); };
       listEl.appendChild(btn);
     })(agents[j]);
+  }
+  wrap.appendChild(listEl);
+}
+
+function boardToggleLaneDropdown() {
+  var wrap = document.getElementById('board-add-lane-wrap');
+  var existing = wrap ? wrap.querySelector('.board-add-agent-list') : null;
+  if (existing) { existing.remove(); return; }
+  var lanes = _boardAddTaskLaneOptions();
+  var listEl = document.createElement('div');
+  listEl.className = 'board-add-agent-list board-add-lane-list';
+  for (var i = 0; i < lanes.length; i++) {
+    (function(nextLane) {
+      var btn = document.createElement('button');
+      btn.className = 'board-tpl-item' + (nextLane === _boardAddingTaskLane ? ' selected' : '');
+      btn.textContent = nextLane;
+      btn.onmousedown = function(e) { e.preventDefault(); };
+      btn.onclick = function() {
+        _boardAddingTaskLane = nextLane;
+        listEl.remove();
+        renderBoard();
+      };
+      listEl.appendChild(btn);
+    })(lanes[i]);
   }
   wrap.appendChild(listEl);
 }
