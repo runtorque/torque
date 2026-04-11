@@ -3802,6 +3802,61 @@ test('renderBoard keeps the inline add-task composer expanded across rerenders',
   assert.equal(input.style.height, '72px');
 });
 
+test('renderBoard shows the inline add-task lane picker with Backlog as the default', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  runInContext(context, `
+    _boardSelectedLane = 'Done';
+    _boardAddingTask = true;
+    _boardAddingTaskLane = '';
+  `);
+
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /boardToggleLaneDropdown\(\)/);
+  assert.match(panel.innerHTML, />Backlog &#9662;<\/button>/);
+});
+
+test('boardStartAddTaskForLane defaults inline task placement to Backlog', () => {
+  const { context } = createBoardHarness();
+  context.state.board_lanes = ['Backlog', 'Done'];
+
+  runInContext(context, `
+    _boardSelectedLane = 'Done';
+    _generateDraftId = function() { return 'draft-1'; };
+  `);
+  context.boardStartAddTaskForLane('Done');
+
+  assert.equal(runInContext(context, '_boardAddingTaskLane'), 'Backlog');
+  assert.equal(runInContext(context, '_boardSelectedLane'), 'Done');
+});
+
+test('boardSubmitAddTask sends the selected inline lane instead of the viewed lane', () => {
+  const { context, document } = createBoardHarness();
+  const input = document.register('board-add-task-input');
+  input.value = 'Ship docs';
+
+  context.state.board_lanes = ['Backlog', 'In Progress', 'Done'];
+  runInContext(context, `
+    _boardAddingTask = true;
+    _boardSelectedLane = 'Done';
+    _boardAddingTaskLane = 'In Progress';
+  `);
+
+  context.boardSubmitAddTask();
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_add_task',
+    task: 'Ship docs',
+    group: 'alpha',
+    lane: 'In Progress',
+  }]);
+  assert.equal(runInContext(context, '_boardAddingTaskLane'), '');
+});
+
 test('agent history task links open the board and focus the selected task', () => {
   const { context, document } = createAgentHistoryHarness();
   document.register('panel-board');
