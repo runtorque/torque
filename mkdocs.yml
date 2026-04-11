@@ -35,6 +35,7 @@ nav:
       - Workflow Guide: workflow-guide.md
       - Task Board: board.md
       - Task Lifecycle: task-lifecycle.md
+      - Streams & Waves: streams-and-waves.md
       - Actions & Templates: actions.md
       - Agent Templates: agent-templates.md
       - Worktrees: worktrees.md

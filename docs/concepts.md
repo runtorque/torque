@@ -69,3 +69,14 @@ All agents and their child terminals in the group receive the text. This is usef
 Actions are reusable prompt templates defined in YAML files. When you dispatch a task with an action, Loom renders the prompt template with the task description and sends it to the agent. Actions can declare transitions to create multi-step pipelines where agents hand off work to each other.
 
 See [Actions & Templates](actions.md) for the full guide.
+
+## Streams and waves
+
+When Loom's Weaver is coordinating larger pieces of work, it reasons at two levels:
+
+- a **stream** is one branch/worktree execution lane that moves through implementation, review, blocker fixes, validation, and merge
+- a **wave** is the set of streams and/or standalone tasks the Weaver intentionally activates in parallel
+
+That means the Weaver can plan work across streams while each stream manages its own queue, review blockers, and validation gates.
+
+See [Streams & Waves](streams-and-waves.md) for the detailed model.

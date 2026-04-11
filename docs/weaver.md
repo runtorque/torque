@@ -65,6 +65,14 @@ The Weaver agent is visually distinct:
 
 The Weaver is most effective when it works in short control loops instead of trying to solve everything in one huge plan.
 
+Loom's newer orchestration model is **stream-centered**:
+
+- the Weaver schedules **waves**
+- each branch/worktree execution lane is represented as a **stream**
+- stream state now explains queue pauses, blocker loops, validation gates, and merge readiness more directly
+
+See [Streams & Waves](streams-and-waves.md) for the detailed model and UI interpretation guide.
+
 ### A practical day-to-day loop
 
 1. Read the current state with `weaver_board_summary`.
