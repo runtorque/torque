@@ -3005,6 +3005,137 @@ test('boardQuickAddLabel and boardQuickRemoveLabel preserve unrelated labels', (
   ]);
 });
 
+test('boardQuickAddLabel keeps the labels quick editor open and refocuses a cleared input', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.register('board-lane-tabs');
+  const input = document.register('board-quick-label-input-task-1');
+  input.value = 'ops';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  panel.appendChild(input);
+  document.activeElement = input;
+
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      lane: 'Backlog',
+      position: 1,
+      labels: ['bug'],
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardQuickEditTask = 'task-1';
+    _boardQuickEditKind = 'labels';
+    _boardQuickLabelDraft = 'ops';
+  `);
+
+  context.boardQuickAddLabel('task-1');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_update_task',
+    id: 'task-1',
+    labels: ['bug', 'ops'],
+  }]);
+  assert.equal(runInContext(context, '_boardQuickEditTask'), 'task-1');
+  assert.equal(runInContext(context, '_boardQuickEditKind'), 'labels');
+  assert.equal(runInContext(context, '_boardQuickLabelDraft'), '');
+  assert.equal(input.focused, true);
+  assert.equal(input.value, '');
+  assert.equal(input.selectionStart, 0);
+  assert.equal(input.selectionEnd, 0);
+  assert.match(panel.innerHTML, /board-card-quick-editor/);
+  assert.match(panel.innerHTML, /board-quick-label-input-task-1/);
+});
+
+test('boardQuickLabelKeydown Enter keeps the labels quick editor open', () => {
+  const { context } = createBoardHarness();
+  let prevented = false;
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      labels: ['bug'],
+    },
+  };
+
+  runInContext(context, `
+    _boardQuickEditTask = 'task-1';
+    _boardQuickEditKind = 'labels';
+    _boardQuickLabelDraft = 'ops';
+  `);
+
+  context.boardQuickLabelKeydown({
+    key: 'Enter',
+    preventDefault() { prevented = true; },
+  }, 'task-1');
+
+  assert.equal(prevented, true);
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_update_task',
+    id: 'task-1',
+    labels: ['bug', 'ops'],
+  }]);
+  assert.equal(runInContext(context, '_boardQuickEditTask'), 'task-1');
+  assert.equal(runInContext(context, '_boardQuickEditKind'), 'labels');
+});
+
+test('boardQuickRemoveLabel keeps the labels quick editor open and refocuses the draft input', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.register('board-lane-tabs');
+  const input = document.register('board-quick-label-input-task-1');
+  input.value = 'ops';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  panel.appendChild(input);
+  document.activeElement = input;
+
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      lane: 'Backlog',
+      position: 1,
+      labels: ['bug', 'docs'],
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardQuickEditTask = 'task-1';
+    _boardQuickEditKind = 'labels';
+    _boardQuickLabelDraft = 'ops';
+  `);
+
+  context.boardQuickRemoveLabel('task-1', 'bug');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_update_task',
+    id: 'task-1',
+    labels: ['docs'],
+  }]);
+  assert.equal(runInContext(context, '_boardQuickEditTask'), 'task-1');
+  assert.equal(runInContext(context, '_boardQuickEditKind'), 'labels');
+  assert.equal(runInContext(context, '_boardQuickLabelDraft'), 'ops');
+  assert.equal(input.focused, true);
+  assert.equal(input.value, 'ops');
+  assert.equal(input.selectionStart, 3);
+  assert.equal(input.selectionEnd, 3);
+  assert.match(panel.innerHTML, /board-card-quick-editor/);
+  assert.match(panel.innerHTML, /board-quick-label-input-task-1/);
+});
+
 test('_renderBoardCard includes compact quick-edit controls for focused root cards', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
