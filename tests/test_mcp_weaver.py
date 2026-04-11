@@ -4,6 +4,7 @@ import json
 import sys
 import types
 import unittest
+from unittest import mock
 
 
 def _install_aiohttp_stub():
@@ -1199,6 +1200,158 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(item["partial_review_safe"])
         self.assertFalse(item["branch_advanced"])
+
+    async def test_orphaned_historical_streams_are_hidden_from_default_open_views(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+
+        review = state.board_add_task(
+            "Historical review branch",
+            "g",
+            lane="Done",
+            id="LOOM:1",
+            action_name="feature/review",
+        )
+        self.assertIsNotNone(review)
+        review.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "loom/historical-review",
+            "status": "open",
+            "recorded_at": "2026-04-07T11:00:00+00:00",
+            "commit_sha": "abc123",
+        }
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        streams_mod = importlib.import_module("loom.worktree_streams")
+        with mock.patch.object(
+            streams_mod,
+            "_branch_exists_locally",
+            return_value=False,
+        ):
+            summary_text, summary_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+                "weaver_board_summary",
+                {},
+                fake_handle_command,
+                state,
+                cell_id=weaver.id,
+            )
+            list_text, list_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+                "weaver_streams_list",
+                {},
+                fake_handle_command,
+                state,
+                cell_id=weaver.id,
+            )
+            all_text, all_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+                "weaver_streams_list",
+                {"include_orphaned": True},
+                fake_handle_command,
+                state,
+                cell_id=weaver.id,
+            )
+            show_text, show_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+                "weaver_stream_show",
+                {"task": review.id},
+                fake_handle_command,
+                state,
+                cell_id=weaver.id,
+            )
+
+        self.assertFalse(summary_error)
+        self.assertFalse(list_error)
+        self.assertFalse(all_error)
+        self.assertFalse(show_error)
+        summary = json.loads(summary_text)
+        listing = json.loads(list_text)
+        full_listing = json.loads(all_text)
+        shown = json.loads(show_text)
+        self.assertEqual(summary["streams"]["count"], 0)
+        self.assertEqual(listing["count"], 0)
+        self.assertEqual(full_listing["count"], 1)
+        self.assertEqual(full_listing["streams"][0]["stream_presence"], "orphaned")
+        self.assertEqual(shown["stream_presence"], "orphaned")
+        self.assertFalse(shown["branch_exists_locally"])
+
+    async def test_dormant_existing_branch_stream_stays_in_open_views(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+
+        review = state.board_add_task(
+            "Dormant review branch",
+            "g",
+            lane="Done",
+            id="LOOM:1",
+            action_name="feature/review",
+        )
+        self.assertIsNotNone(review)
+        review.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "loom/dormant-review",
+            "status": "open",
+            "recorded_at": "2026-04-07T11:00:00+00:00",
+            "commit_sha": "abc123",
+        }
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        streams_mod = importlib.import_module("loom.worktree_streams")
+        with mock.patch.object(
+            streams_mod,
+            "_branch_exists_locally",
+            return_value=True,
+        ):
+            summary_text, summary_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+                "weaver_board_summary",
+                {},
+                fake_handle_command,
+                state,
+                cell_id=weaver.id,
+            )
+            list_text, list_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+                "weaver_streams_list",
+                {},
+                fake_handle_command,
+                state,
+                cell_id=weaver.id,
+            )
+
+        self.assertFalse(summary_error)
+        self.assertFalse(list_error)
+        summary = json.loads(summary_text)
+        listing = json.loads(list_text)
+        self.assertEqual(summary["streams"]["count"], 1)
+        self.assertEqual(listing["count"], 1)
+        self.assertEqual(listing["streams"][0]["stream_presence"], "dormant")
+        self.assertTrue(listing["streams"][0]["branch_exists_locally"])
 
     async def test_stream_tools_keep_visibility_items_out_of_product_members(self):
         state = self.state_mod.MatrixState()

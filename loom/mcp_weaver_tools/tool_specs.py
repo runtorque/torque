@@ -22,8 +22,11 @@ WEAVER_TOOLS = [
             "List computed branch/worktree streams for the weaver's group. "
             "Returns compact stream objects including identity, ownership, "
             "product/workflow membership, product-queue state, queue gates, "
-            "recent visibility items, state, review/boundary metadata, and "
-            "recommended next action."
+            "recent visibility items, state, live/dormant/orphaned "
+            "presence classification, review/boundary metadata, and "
+            "recommended next action. Orphaned historical streams are "
+            "suppressed by default; pass include_orphaned=true to include "
+            "them."
         ),
         "inputSchema": {
             "type": "object",
@@ -48,6 +51,14 @@ WEAVER_TOOLS = [
                     "description": (
                         "Optional repo root filter used with branch when "
                         "multiple repos may share the same branch name."
+                    ),
+                },
+                "include_orphaned": {
+                    "type": "boolean",
+                    "description": (
+                        "When true, include orphaned historical streams "
+                        "that are hidden from the default Open Streams "
+                        "operational view."
                     ),
                 },
             },

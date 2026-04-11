@@ -2,6 +2,7 @@ import importlib
 import sys
 import types
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 
 
@@ -195,6 +196,74 @@ class WorktreeStreamTests(unittest.TestCase):
         )
         self.assertEqual(streams[0]["ready_to_resume_task_id"], product_two.id)
         self.assertTrue(streams[0]["can_auto_resume"])
+
+    def test_missing_branch_historical_stream_is_marked_orphaned_and_filtered(self):
+        state = self._make_state()
+
+        review = self._task(
+            "LOOM:1",
+            "Review completed branch",
+            lane="Done",
+            action_name="feature/review",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/historical-review",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:30:00+00:00",
+                "commit_sha": "abc123",
+            },
+        )
+        state.board_tasks[review.id] = review
+
+        with mock.patch.object(
+            self.streams_mod,
+            "_branch_exists_locally",
+            return_value=False,
+        ):
+            streams = self.streams_mod.compute_worktree_streams(state)
+            operational = self.streams_mod.compute_worktree_streams(
+                state,
+                include_orphaned=False,
+            )
+
+        self.assertEqual(len(streams), 1)
+        self.assertEqual(streams[0]["stream_presence"], "orphaned")
+        self.assertFalse(streams[0]["branch_exists_locally"])
+        self.assertEqual(operational, [])
+
+    def test_existing_closed_branch_stream_stays_visible_as_dormant(self):
+        state = self._make_state()
+
+        review = self._task(
+            "LOOM:1",
+            "Review completed branch",
+            lane="Done",
+            action_name="feature/review",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/dormant-review",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:30:00+00:00",
+                "commit_sha": "abc123",
+            },
+        )
+        state.board_tasks[review.id] = review
+
+        with mock.patch.object(
+            self.streams_mod,
+            "_branch_exists_locally",
+            return_value=True,
+        ):
+            streams = self.streams_mod.compute_worktree_streams(
+                state,
+                include_orphaned=False,
+            )
+
+        self.assertEqual(len(streams), 1)
+        self.assertEqual(streams[0]["stream_presence"], "dormant")
+        self.assertTrue(streams[0]["branch_exists_locally"])
 
     def test_review_blocker_loop_becomes_fixing_blockers(self):
         state = self._make_state()
