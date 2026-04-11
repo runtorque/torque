@@ -2414,6 +2414,158 @@ test('renderAgentDetails shows branch boundary status and queued follow-ups', ()
   assert.match(html, /Implement follow-up/);
 });
 
+test('renderAgentDetails expands task details and preserves the expanded state across rerenders', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `render = function() {};`);
+
+  context.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+    },
+  };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship the `hover` stability fix',
+      description: 'Keep hover state stable while websocket updates stream in.\nDo not drop the expanded row.',
+      lane: 'In Progress',
+      agent_id: 'agent-1',
+    },
+  };
+
+  let html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.doesNotMatch(html, /Keep hover state stable/);
+
+  runInContext(context, `_toggleAgentDetailTask('agent-1')`);
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /detail-row-expanded/);
+  assert.match(html, /Keep hover state stable while websocket updates stream in\.<br>Do not drop the expanded row\./);
+  assert.match(html, /detail-link-arrow/);
+
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /Keep hover state stable while websocket updates stream in\./);
+
+  runInContext(context, `_toggleAgentDetailTask('agent-1')`);
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.doesNotMatch(html, /detail-row-expanded/);
+  assert.doesNotMatch(html, /Keep hover state stable while websocket updates stream in\./);
+});
+
+test('renderAgentDetails expands one MCP message at a time and keeps the selection across rerenders', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `render = function() {};`);
+
+  context.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      mcp_messages: [
+        { action: 'progress', message: 'Expanded line one\nExpanded line two', timestamp: 1712345678 },
+        { action: 'done', message: 'Collapsed summary', timestamp: 1712345679 },
+      ],
+    },
+  };
+
+  let html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.doesNotMatch(html, /mcp-entry-expanded/);
+
+  const messageKey = runInContext(context, `_agentDetailMessageKey(state.agents["agent-1"].mcp_messages[0], 0)`);
+  runInContext(context, `_toggleAgentDetailMessage('agent-1', ${JSON.stringify(messageKey)})`);
+
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /mcp-entry-expanded/);
+  assert.match(html, /Expanded line one<br>Expanded line two/);
+  assert.doesNotMatch(html, /Collapsed summary<\/div>/);
+
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /Expanded line one<br>Expanded line two/);
+});
+
+test('renderAgentDetails adds clickable diff, checkpoint, and preserved-merge affordances only when data exists', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+
+  context.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      worktree_repo_root: '/repo',
+      worktree_branch: 'loom/worker',
+      worktree_merged: true,
+      worktree_diff: { files: 2, insertions: 7, deletions: 3 },
+      worktree_checkpoints: 4,
+      mcp_messages: [],
+    },
+  };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship review panel polish',
+      lane: 'In Progress',
+      agent_id: 'agent-1',
+    },
+    boundary: {
+      id: 'boundary',
+      group: 'alpha',
+      task: 'Preserved merge boundary',
+      lane: 'Done',
+      agent_id: 'agent-1',
+      worktree_boundary: {
+        repo_root: '/repo',
+        branch: 'loom/worker',
+        status: 'merged',
+        merged_at: '2026-04-10T10:00:00Z',
+      },
+      artifacts: [{
+        id: 'artifact-1',
+        type: 'diff',
+        title: 'Pre-merge diff',
+        filename: 'worker-pre-merge.patch',
+        path: '/tmp/worker-pre-merge.patch',
+        storage: { kind: 'path', path: '/tmp/worker-pre-merge.patch', content: '' },
+        metadata: {
+          preserved_on_merge: true,
+          worktree_branch: 'loom/worker',
+          boundary_recorded_at: '2026-04-10T09:58:00Z',
+        },
+      }],
+    },
+  };
+
+  let html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /detail-link-arrow/);
+  assert.match(html, /showDiffView\('agent-1',true\)/);
+  assert.match(html, /worktreeHistory\('agent-1'\)/);
+  assert.match(html, /title="View preserved merge diff"/);
+  assert.match(html, /data-task-id="boundary"/);
+  assert.match(html, /data-artifact-id="artifact-1"/);
+  assert.match(html, /data-artifact-filename="worker-pre-merge\.patch"/);
+  assert.match(html, /data-artifact-path="\/tmp\/worker-pre-merge\.patch"/);
+  assert.match(html, /openTaskArtifactById\(this\.dataset\.taskId,this\.dataset\.artifactId,this\.dataset\.artifactFilename,this\.dataset\.artifactPath\)/);
+
+  context.state.board_tasks.boundary.artifacts = [];
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.doesNotMatch(html, /View preserved merge diff/);
+  assert.match(html, /<span class="detail-wt-tag detail-wt-merged">merged<\/span>/);
+});
+
 test('backlog dispatch note ignores overlap warnings for ready work', () => {
   const { context } = createBoardHarness();
   context.state.board_tasks = {
@@ -2851,6 +3003,137 @@ test('boardQuickAddLabel and boardQuickRemoveLabel preserve unrelated labels', (
       labels: ['loom:error', 'priority:medium'],
     },
   ]);
+});
+
+test('boardQuickAddLabel keeps the labels quick editor open and refocuses a cleared input', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.register('board-lane-tabs');
+  const input = document.register('board-quick-label-input-task-1');
+  input.value = 'ops';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  panel.appendChild(input);
+  document.activeElement = input;
+
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      lane: 'Backlog',
+      position: 1,
+      labels: ['bug'],
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardQuickEditTask = 'task-1';
+    _boardQuickEditKind = 'labels';
+    _boardQuickLabelDraft = 'ops';
+  `);
+
+  context.boardQuickAddLabel('task-1');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_update_task',
+    id: 'task-1',
+    labels: ['bug', 'ops'],
+  }]);
+  assert.equal(runInContext(context, '_boardQuickEditTask'), 'task-1');
+  assert.equal(runInContext(context, '_boardQuickEditKind'), 'labels');
+  assert.equal(runInContext(context, '_boardQuickLabelDraft'), '');
+  assert.equal(input.focused, true);
+  assert.equal(input.value, '');
+  assert.equal(input.selectionStart, 0);
+  assert.equal(input.selectionEnd, 0);
+  assert.match(panel.innerHTML, /board-card-quick-editor/);
+  assert.match(panel.innerHTML, /board-quick-label-input-task-1/);
+});
+
+test('boardQuickLabelKeydown Enter keeps the labels quick editor open', () => {
+  const { context } = createBoardHarness();
+  let prevented = false;
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      labels: ['bug'],
+    },
+  };
+
+  runInContext(context, `
+    _boardQuickEditTask = 'task-1';
+    _boardQuickEditKind = 'labels';
+    _boardQuickLabelDraft = 'ops';
+  `);
+
+  context.boardQuickLabelKeydown({
+    key: 'Enter',
+    preventDefault() { prevented = true; },
+  }, 'task-1');
+
+  assert.equal(prevented, true);
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_update_task',
+    id: 'task-1',
+    labels: ['bug', 'ops'],
+  }]);
+  assert.equal(runInContext(context, '_boardQuickEditTask'), 'task-1');
+  assert.equal(runInContext(context, '_boardQuickEditKind'), 'labels');
+});
+
+test('boardQuickRemoveLabel keeps the labels quick editor open and refocuses the draft input', () => {
+  const { context, document } = createBoardHarness({ stubCards: false });
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  document.register('board-lane-tabs');
+  const input = document.register('board-quick-label-input-task-1');
+  input.value = 'ops';
+  input.selectionStart = input.value.length;
+  input.selectionEnd = input.value.length;
+  panel.appendChild(input);
+  document.activeElement = input;
+
+  context.state.board_lanes = ['Backlog'];
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship release',
+      lane: 'Backlog',
+      position: 1,
+      labels: ['bug', 'docs'],
+    },
+  };
+
+  runInContext(context, `
+    _boardSelectedLane = 'Backlog';
+    _boardQuickEditTask = 'task-1';
+    _boardQuickEditKind = 'labels';
+    _boardQuickLabelDraft = 'ops';
+  `);
+
+  context.boardQuickRemoveLabel('task-1', 'bug');
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [{
+    cmd: 'board_update_task',
+    id: 'task-1',
+    labels: ['docs'],
+  }]);
+  assert.equal(runInContext(context, '_boardQuickEditTask'), 'task-1');
+  assert.equal(runInContext(context, '_boardQuickEditKind'), 'labels');
+  assert.equal(runInContext(context, '_boardQuickLabelDraft'), 'ops');
+  assert.equal(input.focused, true);
+  assert.equal(input.value, 'ops');
+  assert.equal(input.selectionStart, 3);
+  assert.equal(input.selectionEnd, 3);
+  assert.match(panel.innerHTML, /board-card-quick-editor/);
+  assert.match(panel.innerHTML, /board-quick-label-input-task-1/);
 });
 
 test('_renderBoardCard includes compact quick-edit controls for focused root cards', () => {
@@ -5099,6 +5382,80 @@ test('submitTask includes structured artifacts alongside attachments when editin
       lifecycle: { owner: 'task', cleanup: 'delete_with_task' },
     }],
   });
+});
+
+test('openTaskArtifactById opens a preserved artifact directly when a file URL is available', () => {
+  const opened = [];
+  const { sandbox } = createSandbox({
+    window: {
+      open(url) { opened.push(url); },
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/task-artifacts.js');
+
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      task: 'Review merge diff',
+      artifacts: [{
+        id: 'artifact-1',
+        type: 'diff',
+        filename: 'worker-pre-merge.patch',
+        path: '/tmp/worker-pre-merge.patch',
+        storage: { kind: 'path', path: '/tmp/worker-pre-merge.patch', content: '' },
+        prompt: { mode: 'summary' },
+      }],
+    },
+  };
+
+  assert.equal(runInContext(context, `openTaskArtifactById('task-1', 'artifact-1')`), true);
+  assert.deepEqual(opened, ['/attachments/task-1/worker-pre-merge.patch']);
+});
+
+test('openTaskArtifactById prefers filename and path when artifact ids are duplicated', () => {
+  const opened = [];
+  const { sandbox } = createSandbox({
+    window: {
+      open(url) { opened.push(url); },
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/task-artifacts.js');
+
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      task: 'Boundary task',
+      artifacts: [
+        {
+          id: 'artifact-1',
+          type: 'log',
+          filename: 'notes.txt',
+          path: '/tmp/notes.txt',
+          storage: { kind: 'path', path: '/tmp/notes.txt', content: '' },
+          prompt: { mode: 'summary' },
+        },
+        {
+          id: 'artifact-1',
+          type: 'diff',
+          filename: 'worker-pre-merge.patch',
+          path: '/tmp/worker-pre-merge.patch',
+          storage: { kind: 'path', path: '/tmp/worker-pre-merge.patch', content: '' },
+          prompt: { mode: 'summary' },
+        },
+      ],
+    },
+  };
+
+  assert.equal(
+    runInContext(
+      context,
+      `openTaskArtifactById('boundary', 'artifact-1', 'worker-pre-merge.patch', '/tmp/worker-pre-merge.patch')`
+    ),
+    true
+  );
+  assert.deepEqual(opened, ['/attachments/boundary/worker-pre-merge.patch']);
 });
 
 test('diff review surfaces related task artifacts next to the synthesized diff artifact', () => {

@@ -20,6 +20,7 @@ function _boardSetQuickEdit(taskId, kind) {
     _boardQuickEditKind = '';
     _boardQuickLabelDraft = '';
     _boardQuickDueDraft = '';
+    _boardSetQuickEditRefocus('', '');
     renderBoard();
     return;
   }
@@ -27,6 +28,7 @@ function _boardSetQuickEdit(taskId, kind) {
   _boardQuickEditKind = kind;
   _boardQuickLabelDraft = '';
   _boardQuickDueDraft = _boardScheduledInputValue(task.scheduled_at);
+  _boardSetQuickEditRefocus('', '');
   renderBoard();
   requestAnimationFrame(function() {
     var inputId = '';
@@ -42,6 +44,14 @@ function _boardCloseQuickEdit() {
   _boardQuickEditKind = '';
   _boardQuickLabelDraft = '';
   _boardQuickDueDraft = '';
+  _boardSetQuickEditRefocus('', '');
+  renderBoard();
+}
+
+function _boardKeepQuickEditOpen(taskId, kind) {
+  _boardQuickEditTask = taskId || '';
+  _boardQuickEditKind = kind || '';
+  _boardSetQuickEditRefocus(_boardQuickEditTask, _boardQuickEditKind);
   renderBoard();
 }
 
@@ -240,6 +250,7 @@ function boardFocusTask(id, evt) {
     _boardQuickEditKind = '';
     _boardQuickLabelDraft = '';
     _boardQuickDueDraft = '';
+    _boardSetQuickEditRefocus('', '');
   }
   if (evt && (evt.metaKey || evt.ctrlKey)) {
     // Cmd/Ctrl+Click: toggle in selection
@@ -363,6 +374,7 @@ function boardNavigateToTask(taskId) {
   _boardQuickEditKind = '';
   _boardQuickLabelDraft = '';
   _boardQuickDueDraft = '';
+  _boardSetQuickEditRefocus('', '');
   _boardCardsScrollTop = 0;
   _boardResetBatchEdit();
   _boardEnsureRenderLimitForTask(task.id);
@@ -400,8 +412,9 @@ function boardQuickAddLabel(taskId) {
   if (labels.indexOf(label) < 0) {
     labels.push(label);
     send({ cmd: 'board_update_task', id: taskId, labels: labels });
+    _boardQuickLabelDraft = '';
   }
-  _boardCloseQuickEdit();
+  _boardKeepQuickEditOpen(taskId, 'labels');
 }
 
 function boardQuickRemoveLabel(taskId, label) {
@@ -412,7 +425,7 @@ function boardQuickRemoveLabel(taskId, label) {
     id: taskId,
     labels: (task.labels || []).filter(function(item) { return item !== label; })
   });
-  _boardCloseQuickEdit();
+  _boardKeepQuickEditOpen(taskId, 'labels');
 }
 
 function boardQuickAssignAgent(taskId, agentId) {

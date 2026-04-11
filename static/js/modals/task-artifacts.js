@@ -584,6 +584,44 @@ function openTaskArtifactBrowser(taskId) {
   document.getElementById('modal-task-artifacts').classList.add('visible');
 }
 
+function _findTaskArtifact(taskId, artifactId, filename, artifactPath) {
+  if (!taskId) return null;
+  var tasks = (state && state.board_tasks) || {};
+  var task = tasks[taskId];
+  if (!task) return null;
+  var artifacts = _taskArtifactsCombined(task);
+  var targetId = String(artifactId || '').trim();
+  var targetFilename = String(filename || '').trim();
+  var targetPath = String(artifactPath || '').trim();
+  var idMatch = null;
+  for (var i = 0; i < artifacts.length; i++) {
+    var artifact = artifacts[i];
+    var artifactIdValue = String((artifact && artifact.id) || '').trim();
+    var artifactFilename = String((artifact && artifact.filename) || '').trim();
+    var artifactPathValue = String(
+      (artifact && artifact.path)
+      || (((artifact || {}).storage || {}).path)
+      || ''
+    ).trim();
+    if (targetPath && artifactPathValue === targetPath) return artifact;
+    if (targetFilename && artifactFilename === targetFilename) return artifact;
+    if (!idMatch && targetId && artifactIdValue === targetId) idMatch = artifact;
+  }
+  return idMatch;
+}
+
+function openTaskArtifactById(taskId, artifactId, filename, artifactPath) {
+  var artifact = _findTaskArtifact(taskId, artifactId, filename, artifactPath);
+  if (!artifact) return false;
+  var url = _artifactFileUrl(taskId, artifact);
+  if (url) {
+    window.open(url);
+    return true;
+  }
+  openTaskArtifactBrowser(taskId);
+  return true;
+}
+
 /* -- Task modal: attachment helpers -------------------------------------- */
 
 function _generateDraftId() {

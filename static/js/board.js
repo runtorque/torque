@@ -55,6 +55,8 @@ var _boardQuickEditTask = '';    // task_id with open inline quick editor
 var _boardQuickEditKind = '';    // 'labels' | 'assignee' | 'due' | 'priority' | ''
 var _boardQuickLabelDraft = '';  // pending label text for inline quick edit
 var _boardQuickDueDraft = '';    // pending datetime-local value for inline quick edit
+var _boardQuickEditRefocusTask = ''; // one-shot task_id to refocus after rerender
+var _boardQuickEditRefocusKind = ''; // one-shot quick editor kind to refocus after rerender
 var _boardBatchEditOpen = false; // selection bar batch edit panel visibility
 var _boardBatchEditLabel = '';   // add this label to every selected task
 var _boardBatchEditAssignee = '__unchanged__'; // selected assignee value
@@ -98,6 +100,29 @@ var _boardHealthReasonLabels = {
 // Extracted helpers live in static/js/board/view-state.js,
 // static/js/board/card-rendering.js, and
 // static/js/board/card-actions.js.
+
+function _boardSetQuickEditRefocus(taskId, kind) {
+  _boardQuickEditRefocusTask = taskId || '';
+  _boardQuickEditRefocusKind = kind || '';
+}
+
+function _boardRefocusQuickEditInput(taskId, kind) {
+  if (!taskId || !kind) return;
+  var inputId = '';
+  if (kind === 'labels') inputId = 'board-quick-label-input-' + taskId;
+  else if (kind === 'due') inputId = 'board-quick-due-input-' + taskId;
+  if (!inputId) return;
+  var input = document.getElementById(inputId);
+  if (!input) return;
+  if (kind === 'labels' && 'value' in input) input.value = _boardQuickLabelDraft;
+  else if (kind === 'due' && 'value' in input) input.value = _boardQuickDueDraft;
+  if (typeof input.focus === 'function') input.focus();
+  if ('selectionStart' in input && 'selectionEnd' in input) {
+    var end = ('value' in input && typeof input.value === 'string') ? input.value.length : 0;
+    input.selectionStart = end;
+    input.selectionEnd = end;
+  }
+}
 
 
 
@@ -850,7 +875,17 @@ function renderBoard() {
     return;
   }
   var panelState = _captureSurfaceState(panel);
-  var skipRestoreFocus = _boardAddTaskFocus || _boardSaveViewFocus;
+  var quickEditRefocusTask = _boardQuickEditRefocusTask;
+  var quickEditRefocusKind = _boardQuickEditRefocusKind;
+  var skipRestoreFocus = _boardAddTaskFocus || _boardSaveViewFocus || !!quickEditRefocusTask;
+  var restoreState = skipRestoreFocus ? null : panelState;
+  if (quickEditRefocusTask && panelState) {
+    restoreState = {
+      focus: null,
+      scrolls: (panelState.scrolls || []).slice(),
+    };
+  }
+  _boardSetQuickEditRefocus('', '');
   _boardSyncFiltersForCurrentGroup();
   _boardHydrateSavedViews();
   _boardHydrateLaneSorts();
@@ -1091,7 +1126,7 @@ function renderBoard() {
     panel.innerHTML = html;
     _boardRestoreRenderedState();
     _boardAfterRenderLayout();
-    if (!skipRestoreFocus) _restoreSurfaceState(panel, panelState);
+    if (restoreState) _restoreSurfaceState(panel, restoreState);
     return;
   }
 
@@ -1163,7 +1198,10 @@ function renderBoard() {
     }
   }
 
-  if (!skipRestoreFocus) _restoreSurfaceState(panel, panelState);
+  if (restoreState) _restoreSurfaceState(panel, restoreState);
+  if (quickEditRefocusTask) {
+    _boardRefocusQuickEditInput(quickEditRefocusTask, quickEditRefocusKind);
+  }
   if (_boardAddingTask) {
     var addTaskInput = document.getElementById('board-add-task-input');
     if (addTaskInput) boardAddTaskAutoResize(addTaskInput);
@@ -1888,6 +1926,7 @@ function boardClearSelection() {
   _boardQuickEditKind = '';
   _boardQuickLabelDraft = '';
   _boardQuickDueDraft = '';
+  _boardSetQuickEditRefocus('', '');
   _boardResetBatchEdit();
   renderBoard();
 }

@@ -318,6 +318,10 @@ function render() {
 
   const doFlip = Date.now() < _flipUntil;
   const oldRects = doFlip ? _captureRects(main) : null;
+  const mainState = _captureSurfaceState(main, {
+    scrollSelectors: ['.mcp-log'],
+    captureFocusKey: _captureMainFocusKey,
+  });
 
   // Clear selectedAgentId if it no longer exists
   if (selectedAgentId && !state.agents[selectedAgentId]) selectedAgentId = null;
@@ -499,6 +503,7 @@ function render() {
   if (focusedItemId && !navItems.includes(focusedItemId)) focusedItemId = null;
 
   if (oldRects) _applyFlip(main, oldRects);
+  _restoreSurfaceState(main, mainState);
   _updateWeaverTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
   if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
@@ -600,6 +605,103 @@ function _branchBoundaryOverviewForAgent(agent) {
   return overview;
 }
 
+var _agentDetailUiState = {};
+
+function _agentDetailState(agentId) {
+  const key = String(agentId || '');
+  if (!_agentDetailUiState[key]) {
+    _agentDetailUiState[key] = {
+      task_expanded: false,
+      expanded_messages: {},
+    };
+  }
+  return _agentDetailUiState[key];
+}
+
+function _agentDetailMessageKey(message, index) {
+  const action = String((message && message.action) || '');
+  const ts = Number((message && message.timestamp) || 0);
+  if (ts > 0) return `mcp:${ts}:${action}`;
+  return `mcp:${index}:${action}`;
+}
+
+function _toggleAgentDetailTask(agentId) {
+  const state = _agentDetailState(agentId);
+  state.task_expanded = !state.task_expanded;
+  render();
+}
+
+function _toggleAgentDetailMessage(agentId, messageKey) {
+  const state = _agentDetailState(agentId);
+  if (state.expanded_messages[messageKey]) delete state.expanded_messages[messageKey];
+  else state.expanded_messages[messageKey] = true;
+  render();
+}
+
+function _detailMultilineHtml(text) {
+  return formatCode(text || '').replace(/\n/g, '<br>');
+}
+
+function _detailTaskLinkHtml(taskId) {
+  if (!taskId) return '';
+  return '<button type="button" class="detail-link-arrow"'
+    + ' title="View task on board"'
+    + ' data-focus-key="detail-task-link:' + esc(taskId) + '"'
+    + ' onclick="event.stopPropagation();if(typeof boardNavigateToTask===\'function\'){boardNavigateToTask(\''
+    + esc(taskId) + '\');}">\u2192</button>';
+}
+
+function _taskPreservedMergeDiffArtifact(task, branch) {
+  const artifacts = task && Array.isArray(task.artifacts) ? task.artifacts : [];
+  for (let i = 0; i < artifacts.length; i++) {
+    const artifact = artifacts[i] || {};
+    const metadata = artifact.metadata || {};
+    if (artifact.type !== 'diff' || !metadata.preserved_on_merge) continue;
+    if (branch && metadata.worktree_branch && metadata.worktree_branch !== branch) continue;
+    return artifact;
+  }
+  return null;
+}
+
+function _preservedMergeDiffForAgent(agent) {
+  if (!agent || !state || !state.board_tasks) return null;
+  const repoRoot = agent.worktree_repo_root || agent.git_root || '';
+  const branch = agent.worktree_branch || '';
+  const branchKey = repoRoot && branch ? (repoRoot + '::' + branch) : '';
+  let winner = null;
+  let winnerArtifact = null;
+  let winnerSort = '';
+  for (const task of Object.values(state.board_tasks)) {
+    if (!task) continue;
+    const artifact = _taskPreservedMergeDiffArtifact(task, branch);
+    if (!artifact) continue;
+    const taskBranchKey = _taskBoundaryBranchKey(task);
+    if (branchKey && taskBranchKey && taskBranchKey !== branchKey) continue;
+    const boundary = _taskBoundaryMeta(task);
+    const metadata = artifact.metadata || {};
+    const sortValue = String(
+      boundary.merged_at
+      || metadata.boundary_recorded_at
+      || _taskBoundarySortValue(task)
+      || task.updated_at
+      || task.id
+      || ''
+    );
+    if (!winner || sortValue > winnerSort) {
+      winner = task;
+      winnerArtifact = artifact;
+      winnerSort = sortValue;
+    }
+  }
+  if (!winner || !winnerArtifact) return null;
+  return { task: winner, artifact: winnerArtifact };
+}
+
+function _captureMainFocusKey(el) {
+  if (!el || !el.dataset || !el.dataset.focusKey) return '';
+  return '[data-focus-key="' + CSS.escape(el.dataset.focusKey) + '"]';
+}
+
 function _agentCellSubtitle(a) {
   const task = _getAgentTask(a.id);
   if (task && task.task) return task.task;
@@ -677,6 +779,7 @@ function renderAgentCell(a) {
 function renderAgentDetails(a) {
   const statusCls = agentStatusClass(a);
   const typeInfo = a.agent_type ? (AGENT_TYPE_LABELS[a.agent_type] || { label: a.agent_type }) : null;
+  const detailState = _agentDetailState(a.id);
 
   let h = `<div class="agent-details">`;
   h += `<div class="detail-hdr">`;
@@ -695,7 +798,11 @@ function renderAgentDetails(a) {
   /* Linked task */
   const _dt = _getAgentTask(a.id);
   if (_dt) {
-    h += `<div class="detail-row detail-row-task"><span class="detail-label">Task</span><span class="detail-val detail-task" title="${esc(_dt.task)}">${formatCode(_dt.task)}</span>`;
+    const taskExpanded = !!detailState.task_expanded;
+    h += `<div class="detail-row detail-row-task${taskExpanded ? ' detail-row-expanded' : ''}"><span class="detail-label">Task</span><div class="detail-val detail-val-stack">`;
+    h += `<div class="detail-inline-actions">`;
+    h += `<button type="button" class="detail-inline-toggle" title="${esc(taskExpanded ? 'Collapse task details' : 'Expand task details')}" data-focus-key="detail-task-toggle:${esc(a.id)}" onclick="_toggleAgentDetailTask('${esc(a.id)}')">`;
+    h += `<span class="detail-task-summary" title="${esc(_dt.task)}">${formatCode(_dt.task)}</span>`;
     if (_dt.action_name) {
       h += `<span class="detail-task-action">${esc(_dt.action_name)}</span>`;
     }
@@ -704,13 +811,24 @@ function renderAgentDetails(a) {
     } else if (_dt.lane) {
       h += `<span class="detail-task-lane">${esc(_dt.lane)}</span>`;
     }
-    h += `</span></div>`;
+    h += `<span class="detail-expand-caret">${taskExpanded ? '\u25BE' : '\u25B8'}</span>`;
+    h += `</button>`;
+    h += _detailTaskLinkHtml(_dt.id || '');
+    h += `</div>`;
+    if (taskExpanded) {
+      h += `<div class="detail-expand-body">`;
+      h += `<div class="detail-expand-title">${_detailMultilineHtml(_dt.task)}</div>`;
+      if (_dt.description) {
+        h += `<div class="detail-expand-description">${_detailMultilineHtml(_dt.description)}</div>`;
+      }
+      h += `</div>`;
+    }
+    h += `</div></div>`;
   }
 
   const boundaryOverview = _branchBoundaryOverviewForAgent(a);
   if (boundaryOverview && boundaryOverview.latest_boundary_task) {
     const boundaryTask = boundaryOverview.latest_boundary_task;
-    const boundaryState = boundaryOverview.branch_advanced ? 'advanced' : 'safe';
     const boundaryBadge = boundaryOverview.branch_advanced
       ? 'Branch advanced'
       : 'Safe review point';
@@ -729,10 +847,20 @@ function renderAgentDetails(a) {
     h += `<div class="detail-row detail-row-mcp"><span class="detail-label">Messages</span>`;
     h += `<div class="mcp-log">`;
     const msgs = a.mcp_messages.slice(0, 20);
-    for (const m of msgs) {
+    for (let i = 0; i < msgs.length; i++) {
+      const m = msgs[i];
       const ico = icons[m.action] || '\u25CF';
       const ago = _relativeTime(m.timestamp);
-      h += `<div class="mcp-entry mcp-${esc(m.action)}"><span class="mcp-icon">${ico}</span><span class="mcp-text">${esc(m.message)}</span><span class="mcp-time">${esc(ago)}</span></div>`;
+      const messageKey = _agentDetailMessageKey(m, i);
+      const messageExpanded = !!detailState.expanded_messages[messageKey];
+      h += `<div class="mcp-entry-wrap${messageExpanded ? ' expanded' : ''}">`;
+      h += `<button type="button" class="mcp-entry mcp-entry-toggle mcp-${esc(m.action)}${m.message ? ' mcp-clickable' : ''}" data-focus-key="detail-message:${esc(a.id)}:${esc(messageKey)}"`;
+      if (m.message) h += ` title="${esc(messageExpanded ? 'Collapse message' : 'Expand message')}" onclick="_toggleAgentDetailMessage('${esc(a.id)}','${esc(messageKey)}')"`;
+      h += `><span class="mcp-icon">${ico}</span><span class="mcp-text">${esc(m.message)}</span><span class="mcp-time">${esc(ago)}</span></button>`;
+      if (m.message && messageExpanded) {
+        h += `<div class="mcp-entry-expanded">${_detailMultilineHtml(m.message)}</div>`;
+      }
+      h += `</div>`;
     }
     h += `</div></div>`;
   }
@@ -742,7 +870,18 @@ function renderAgentDetails(a) {
     const branch = a.worktree_branch.replace(/^loom\//, '');
     let branchExtra = '';
     if (a.worktree_merged) {
-      branchExtra += ' <span class="detail-wt-tag detail-wt-merged">merged</span>';
+      const preservedDiff = _preservedMergeDiffForAgent(a);
+      if (preservedDiff && preservedDiff.task && preservedDiff.artifact) {
+        branchExtra += ' <button type="button" class="detail-wt-tag detail-wt-merged detail-wt-tag-button"'
+          + ` title="View preserved merge diff" data-focus-key="detail-merged-diff:${esc(preservedDiff.task.id)}:${esc(preservedDiff.artifact.id || '')}"`
+          + ` data-task-id="${esc(preservedDiff.task.id)}"`
+          + ` data-artifact-id="${esc(preservedDiff.artifact.id || '')}"`
+          + ` data-artifact-filename="${esc(preservedDiff.artifact.filename || '')}"`
+          + ` data-artifact-path="${esc((preservedDiff.artifact.path || ((preservedDiff.artifact.storage || {}).path) || ''))}"`
+          + ' onclick="event.stopPropagation();if(typeof openTaskArtifactById===\'function\'){openTaskArtifactById(this.dataset.taskId,this.dataset.artifactId,this.dataset.artifactFilename,this.dataset.artifactPath);}">merged</button>';
+      } else {
+        branchExtra += ' <span class="detail-wt-tag detail-wt-merged">merged</span>';
+      }
     } else {
       branchExtra += ' <span class="detail-wt-tag">worktree</span>';
     }
@@ -757,10 +896,10 @@ function renderAgentDetails(a) {
     h += `<div class="detail-row"><span class="detail-label">Branch</span><span class="detail-val detail-branch">\u2387 ${esc(branch)}${branchExtra}</span></div>`;
     const diff = a.worktree_diff || {};
     if (diff.files) {
-      h += `<div class="detail-row"><span class="detail-label">Changes</span><span class="detail-val">${diff.files} file${diff.files !== 1 ? 's' : ''} <span class="detail-ins">+${diff.insertions || 0}</span> <span class="detail-del">-${diff.deletions || 0}</span></span></div>`;
+      h += `<button type="button" class="detail-row detail-row-button detail-row-clickable" data-focus-key="detail-diff:${esc(a.id)}" title="View branch diff" onclick="event.stopPropagation();if(typeof showDiffView==='function'){showDiffView('${esc(a.id)}',true);}"><span class="detail-label">Changes</span><span class="detail-val">${diff.files} file${diff.files !== 1 ? 's' : ''} <span class="detail-ins">+${diff.insertions || 0}</span> <span class="detail-del">-${diff.deletions || 0}</span></span></button>`;
     }
     if (a.worktree_checkpoints > 0) {
-      h += `<div class="detail-row"><span class="detail-label">Checkpoints</span><span class="detail-val">${a.worktree_checkpoints}</span></div>`;
+      h += `<button type="button" class="detail-row detail-row-button detail-row-clickable" data-focus-key="detail-history:${esc(a.id)}" title="Open checkpoint history" onclick="event.stopPropagation();if(typeof worktreeHistory==='function'){worktreeHistory('${esc(a.id)}');}"><span class="detail-label">Checkpoints</span><span class="detail-val">${a.worktree_checkpoints}</span></button>`;
     }
   } else if (a.current_branch) {
     h += `<div class="detail-row"><span class="detail-label">Branch</span><span class="detail-val detail-branch">\u2387 ${esc(a.current_branch)}</span></div>`;
