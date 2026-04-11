@@ -1536,7 +1536,7 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         finally:
             self.server_agent_mod.asyncio.sleep = orig_sleep
 
-        self.assertEqual(delays, [3])
+        self.assertEqual(delays, [3, 0.3])
         self.assertIn("session-derive", bridge._input_ready_sessions)
         self.assertEqual(
             session.sent,

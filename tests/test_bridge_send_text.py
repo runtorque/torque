@@ -183,7 +183,7 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(delays, [0.3])
 
-    async def test_send_text_single_line_sends_submit_separately(self):
+    async def test_send_text_single_line_sends_submit_separately_after_delay(self):
         session = FakeSession("session-1")
         bridge, state = await self._make_bridge(session)
         cell = self.state_mod.AgentCell(
@@ -195,15 +195,26 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         )
         state.agents[cell.id] = cell
 
-        await bridge.send_text(
-            "session-1",
-            "Proceed with the derived task you just created.\r",
-        )
+        delays = []
+
+        async def fake_sleep(delay):
+            delays.append(delay)
+
+        orig_sleep = self.bridge_mod.asyncio.sleep
+        self.bridge_mod.asyncio.sleep = fake_sleep
+        try:
+            await bridge.send_text(
+                "session-1",
+                "Proceed with the derived task you just created.\r",
+            )
+        finally:
+            self.bridge_mod.asyncio.sleep = orig_sleep
 
         self.assertEqual(session.sent, [
             "Proceed with the derived task you just created.",
             "\r",
         ])
+        self.assertEqual(delays, [0.3])
 
     async def test_primed_self_dispatch_prompt_submits_without_screen_wait(self):
         session = FakeSession(
@@ -223,15 +234,26 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         state.agents[cell.id] = cell
         bridge.prime_input_ready("session-derive")
 
-        await bridge.send_text(
-            "session-derive",
-            "Proceed with the derived task you just created.\r",
-        )
+        delays = []
+
+        async def fake_sleep(delay):
+            delays.append(delay)
+
+        orig_sleep = self.bridge_mod.asyncio.sleep
+        self.bridge_mod.asyncio.sleep = fake_sleep
+        try:
+            await bridge.send_text(
+                "session-derive",
+                "Proceed with the derived task you just created.\r",
+            )
+        finally:
+            self.bridge_mod.asyncio.sleep = orig_sleep
 
         self.assertEqual(session.sent, [
             "Proceed with the derived task you just created.",
             "\r",
         ])
+        self.assertEqual(delays, [0.3])
         self.assertEqual(session.screen_reads, 0)
 
     async def test_send_text_waits_for_codex_ready_once(self):
@@ -283,7 +305,7 @@ class BridgeSendTextTests(unittest.IsolatedAsyncioTestCase):
         ])
         self.assertEqual(first_reads, 3)
         self.assertEqual(session.screen_reads, first_reads)
-        self.assertEqual(delays, [0.25, 0.25, 0.3])
+        self.assertEqual(delays, [0.25, 0.25, 0.3, 0.3])
 
     async def test_send_text_claude_does_not_release_on_startup_banner(self):
         session = FakeSession(

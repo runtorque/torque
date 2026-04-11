@@ -193,6 +193,48 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_send_text_single_line_waits_before_submit(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Loom")
+        cell = state.add_agent(
+            name="Weaver",
+            group="Loom",
+            terminal_backend="pty",
+            command="codex",
+            directory="/tmp",
+        )
+        cell.agent_type = "codex"
+        cell.session_id = "session-1"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        adapter._sessions[cell.session_id] = SimpleNamespace(cell_id=cell.id)
+        adapter._input_ready_sessions.add(cell.session_id)
+        writes: list[tuple[str, str]] = []
+
+        async def fake_write_input(session_id, data):
+            writes.append((session_id, data))
+
+        delays = []
+
+        async def fake_sleep(delay):
+            delays.append(delay)
+
+        adapter.write_input = fake_write_input
+        orig_sleep = self.pty_mod.asyncio.sleep
+        self.pty_mod.asyncio.sleep = fake_sleep
+        try:
+            await adapter.send_text(cell.session_id, "Initial prompt")
+        finally:
+            self.pty_mod.asyncio.sleep = orig_sleep
+
+        self.assertEqual(
+            writes,
+            [
+                ("session-1", "Initial prompt"),
+                ("session-1", "\r"),
+            ],
+        )
+        self.assertEqual(delays, [0.3])
+
     async def test_create_session_installs_hooks_in_resolved_cwd_when_directory_blank(self):
         state = self.state_mod.MatrixState()
         state.add_group("Loom")
