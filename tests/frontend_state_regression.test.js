@@ -2537,6 +2537,9 @@ test('renderAgentDetails adds clickable diff, checkpoint, and preserved-merge af
         id: 'artifact-1',
         type: 'diff',
         title: 'Pre-merge diff',
+        filename: 'worker-pre-merge.patch',
+        path: '/tmp/worker-pre-merge.patch',
+        storage: { kind: 'path', path: '/tmp/worker-pre-merge.patch', content: '' },
         metadata: {
           preserved_on_merge: true,
           worktree_branch: 'loom/worker',
@@ -2551,7 +2554,11 @@ test('renderAgentDetails adds clickable diff, checkpoint, and preserved-merge af
   assert.match(html, /showDiffView\('agent-1',true\)/);
   assert.match(html, /worktreeHistory\('agent-1'\)/);
   assert.match(html, /title="View preserved merge diff"/);
-  assert.match(html, /openTaskArtifactById\('boundary','artifact-1'\)/);
+  assert.match(html, /data-task-id="boundary"/);
+  assert.match(html, /data-artifact-id="artifact-1"/);
+  assert.match(html, /data-artifact-filename="worker-pre-merge\.patch"/);
+  assert.match(html, /data-artifact-path="\/tmp\/worker-pre-merge\.patch"/);
+  assert.match(html, /openTaskArtifactById\(this\.dataset\.taskId,this\.dataset\.artifactId,this\.dataset\.artifactFilename,this\.dataset\.artifactPath\)/);
 
   context.state.board_tasks.boundary.artifacts = [];
   html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
@@ -5273,6 +5280,51 @@ test('openTaskArtifactById opens a preserved artifact directly when a file URL i
 
   assert.equal(runInContext(context, `openTaskArtifactById('task-1', 'artifact-1')`), true);
   assert.deepEqual(opened, ['/attachments/task-1/worker-pre-merge.patch']);
+});
+
+test('openTaskArtifactById prefers filename and path when artifact ids are duplicated', () => {
+  const opened = [];
+  const { sandbox } = createSandbox({
+    window: {
+      open(url) { opened.push(url); },
+    },
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/modals/task-artifacts.js');
+
+  context.state.board_tasks = {
+    boundary: {
+      id: 'boundary',
+      task: 'Boundary task',
+      artifacts: [
+        {
+          id: 'artifact-1',
+          type: 'log',
+          filename: 'notes.txt',
+          path: '/tmp/notes.txt',
+          storage: { kind: 'path', path: '/tmp/notes.txt', content: '' },
+          prompt: { mode: 'summary' },
+        },
+        {
+          id: 'artifact-1',
+          type: 'diff',
+          filename: 'worker-pre-merge.patch',
+          path: '/tmp/worker-pre-merge.patch',
+          storage: { kind: 'path', path: '/tmp/worker-pre-merge.patch', content: '' },
+          prompt: { mode: 'summary' },
+        },
+      ],
+    },
+  };
+
+  assert.equal(
+    runInContext(
+      context,
+      `openTaskArtifactById('boundary', 'artifact-1', 'worker-pre-merge.patch', '/tmp/worker-pre-merge.patch')`
+    ),
+    true
+  );
+  assert.deepEqual(opened, ['/attachments/boundary/worker-pre-merge.patch']);
 });
 
 test('diff review surfaces related task artifacts next to the synthesized diff artifact', () => {

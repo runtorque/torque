@@ -873,7 +873,12 @@ function renderAgentDetails(a) {
       const preservedDiff = _preservedMergeDiffForAgent(a);
       if (preservedDiff && preservedDiff.task && preservedDiff.artifact) {
         branchExtra += ' <button type="button" class="detail-wt-tag detail-wt-merged detail-wt-tag-button"'
-          + ` title="View preserved merge diff" data-focus-key="detail-merged-diff:${esc(preservedDiff.task.id)}:${esc(preservedDiff.artifact.id || '')}" onclick="event.stopPropagation();if(typeof openTaskArtifactById==='function'){openTaskArtifactById('${esc(preservedDiff.task.id)}','${esc(preservedDiff.artifact.id || '')}');}">merged</button>`;
+          + ` title="View preserved merge diff" data-focus-key="detail-merged-diff:${esc(preservedDiff.task.id)}:${esc(preservedDiff.artifact.id || '')}"`
+          + ` data-task-id="${esc(preservedDiff.task.id)}"`
+          + ` data-artifact-id="${esc(preservedDiff.artifact.id || '')}"`
+          + ` data-artifact-filename="${esc(preservedDiff.artifact.filename || '')}"`
+          + ` data-artifact-path="${esc((preservedDiff.artifact.path || ((preservedDiff.artifact.storage || {}).path) || ''))}"`
+          + ' onclick="event.stopPropagation();if(typeof openTaskArtifactById===\'function\'){openTaskArtifactById(this.dataset.taskId,this.dataset.artifactId,this.dataset.artifactFilename,this.dataset.artifactPath);}">merged</button>';
       } else {
         branchExtra += ' <span class="detail-wt-tag detail-wt-merged">merged</span>';
       }
