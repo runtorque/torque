@@ -425,6 +425,116 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             bridge.sent[0],
         )
 
+    async def test_idle_hint_digest_sends_without_events_and_respects_cooldown(self):
+        state, group, weaver = self._make_state()
+        for worker_id in ("worker-a", "worker-b"):
+            worker = self.state_mod.AgentCell(
+                id=worker_id,
+                name=worker_id.title(),
+                slug=worker_id,
+                group=group,
+                cell_type="agent",
+                status="idle",
+                worktree_path=f"/repo/.loom/worktrees/{worker_id}",
+                worktree_repo_root="/repo",
+                worktree_branch=f"loom/{worker_id}",
+                worktree_merged=True,
+            )
+            state.agents[worker.id] = worker
+            state.groups[group].append(worker.id)
+
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        buffer._check_weaver_flush(weaver)
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("## Loom Digest (0 events)", bridge.sent[0])
+        self.assertIn("Hints:", bridge.sent[0])
+        self.assertIn("merged branches ready for cleanup", bridge.sent[0])
+
+        buffer._check_weaver_flush(weaver)
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(bridge.sent), 1)
+
+        worker_c = self.state_mod.AgentCell(
+            id="worker-c",
+            name="Worker C",
+            slug="worker-c",
+            group=group,
+            cell_type="agent",
+            status="idle",
+            worktree_path="/repo/.loom/worktrees/worker-c",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker-c",
+            worktree_merged=True,
+        )
+        state.agents[worker_c.id] = worker_c
+        state.groups[group].append(worker_c.id)
+
+        buffer._check_weaver_flush(weaver)
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 2)
+        self.assertIn("3 idle agents have merged branches", bridge.sent[1])
+        buffer.stop()
+
+    async def test_due_hints_piggyback_on_buffered_event_digest(self):
+        state, group, weaver = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            push_interval=60,
+            max_interval=300,
+            heartbeat_interval=300,
+        )
+        for worker_id in ("worker-a", "worker-b"):
+            worker = self.state_mod.AgentCell(
+                id=worker_id,
+                name=worker_id.title(),
+                slug=worker_id,
+                group=group,
+                cell_type="agent",
+                status="idle",
+                worktree_path=f"/repo/.loom/worktrees/{worker_id}",
+                worktree_repo_root="/repo",
+                worktree_branch=f"loom/{worker_id}",
+                worktree_merged=True,
+            )
+            state.agents[worker.id] = worker
+            state.groups[group].append(worker.id)
+
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=100.0):
+            buffer.on_panel_event({
+                "group": group,
+                "kind": "task_completed",
+                "message": "batched with hint",
+            })
+
+        await asyncio.sleep(0.05)
+        self.assertEqual(bridge.sent, [])
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=159.0):
+            buffer._check_weaver_flush(weaver)
+        await asyncio.sleep(0.05)
+        self.assertEqual(bridge.sent, [])
+
+        with mock.patch.object(self.weaver_mod.time, "time", return_value=160.0):
+            buffer._check_weaver_flush(weaver)
+            await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("## Loom Digest (1 event)", bridge.sent[0])
+        self.assertIn("batched with hint", bridge.sent[0])
+        self.assertIn("Hints:", bridge.sent[0])
+        self.assertIn("merged branches ready for cleanup", bridge.sent[0])
+        buffer.stop()
+
     async def test_paused_weaver_buffers_events_without_flushing(self):
         state, group, weaver = self._make_state()
         state.weaver_settings[group] = self.state_mod.WeaverSettings(

@@ -20,6 +20,10 @@ from .state import (
     normalize_worktree_merge_cleanup,
 )
 from .task_health import HEALTH_SEVERITY
+from .weaver_hints import (
+    WEAVER_HINT_RESEND_COOLDOWN_SECS,
+    compute_weaver_hints,
+)
 
 log = logging.getLogger("loom")
 
@@ -465,6 +469,7 @@ class WeaverEventBuffer:
         self._pending_flush: dict[str, bool] = {}    # group → flush task scheduled/running
         self._manual_flush_requested: dict[str, bool] = {}  # group → operator requested immediate flush
         self._was_idle_with_question: set[str] = set()  # groups where weaver went idle with pending_question
+        self._hint_delivery: dict[str, dict[str, float]] = {}  # group → fingerprint → last sent at
         self._timer_handle: asyncio.TimerHandle | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -779,6 +784,9 @@ class WeaverEventBuffer:
             return
 
         self._cancel_due_check(group)
+        if self._due_hints(group, weaver=cell):
+            self._schedule_flush(group)
+            return
         is_overdue = self._is_heartbeat_due(group, ws)
         if is_overdue:
             self._schedule_flush(group)
@@ -821,8 +829,15 @@ class WeaverEventBuffer:
             self._manual_flush_requested.pop(group, None)
             events = self._buffers.pop(group, [])
             buffer_started_at = self._buffer_started.pop(group, None)
+            due_hints = self._due_hints(group, weaver=weaver)
             board_summary = self._board_summary(group)
-            text = self._format_digest(group, events, board_summary, weaver)
+            text = self._format_digest(
+                group,
+                events,
+                board_summary,
+                weaver,
+                hints=due_hints,
+            )
 
             try:
                 await self._bridge.send_text(weaver.session_id, text + "\n")
@@ -839,6 +854,12 @@ class WeaverEventBuffer:
                     if len(sent) > 200:
                         self._sent_events[group] = sent[-200:]
                     self._emit_sent_events(group)
+                if due_hints:
+                    self._record_sent_hints(
+                        group,
+                        due_hints,
+                        sent_at=delivered_at,
+                    )
             except Exception:
                 log.exception("Failed to send weaver digest to '%s'",
                               weaver.name)
@@ -870,7 +891,7 @@ class WeaverEventBuffer:
                     self._loop.create_task(self._state.broadcast())
 
     def _format_digest(self, group: str, events: list[dict], board_summary: str,
-                       weaver=None) -> str:
+                       weaver=None, hints: list[dict] | None = None) -> str:
         verbosity = normalize_weaver_digest_verbosity(
             getattr(
                 self._state.get_weaver_settings(group),
@@ -922,6 +943,21 @@ class WeaverEventBuffer:
             )
             if attention:
                 lines.append(attention)
+        if hints:
+            hint_limit = 1 if verbosity == "compact" else (
+                3 if verbosity == "detailed" else 2
+            )
+            lines.append(
+                "Hints: "
+                + " · ".join(
+                    self._truncate_digest_text(
+                        str((hint or {}).get("message", "") or ""),
+                        limit=72 if verbosity == "compact" else 180,
+                    )
+                    for hint in hints[:hint_limit]
+                    if str((hint or {}).get("message", "") or "").strip()
+                )
+            )
 
         # Context warning
         if weaver:
@@ -1024,6 +1060,59 @@ class WeaverEventBuffer:
             return (f"!! Context usage: ~{pct}% (~{total // 1000}K tokens). "
                     f"Consider writing a checkpoint.")
         return ""
+
+    def _current_hints(self, group: str, *, weaver=None) -> list[dict]:
+        weaver_id = ""
+        if weaver and getattr(weaver, "id", ""):
+            weaver_id = weaver.id
+        else:
+            live_weaver = self._state.get_weaver_for_group(group)
+            if live_weaver:
+                weaver_id = live_weaver.id
+        return compute_weaver_hints(
+            self._state,
+            group,
+            weaver_id=weaver_id,
+        )
+
+    def _due_hints(self, group: str, *, weaver=None,
+                   now: float | None = None) -> list[dict]:
+        current = self._current_hints(group, weaver=weaver)
+        current_fingerprints = {
+            str(hint.get("fingerprint", "") or "").strip()
+            for hint in current
+            if str(hint.get("fingerprint", "") or "").strip()
+        }
+        delivery = self._hint_delivery.setdefault(group, {})
+        stale_fingerprints = [
+            fingerprint for fingerprint in list(delivery)
+            if fingerprint not in current_fingerprints
+        ]
+        for fingerprint in stale_fingerprints:
+            delivery.pop(fingerprint, None)
+
+        sent_now = time.time() if now is None else now
+        due = []
+        for hint in current:
+            fingerprint = str(hint.get("fingerprint", "") or "").strip()
+            if not fingerprint:
+                continue
+            last_sent_at = delivery.get(fingerprint, 0.0)
+            if last_sent_at and (
+                    sent_now - last_sent_at) < WEAVER_HINT_RESEND_COOLDOWN_SECS:
+                continue
+            due.append(hint)
+        return due
+
+    def _record_sent_hints(self, group: str, hints: list[dict], *,
+                           sent_at: float) -> None:
+        if not hints:
+            return
+        delivery = self._hint_delivery.setdefault(group, {})
+        for hint in hints:
+            fingerprint = str(hint.get("fingerprint", "") or "").strip()
+            if fingerprint:
+                delivery[fingerprint] = sent_at
 
     # -- Timer ----------------------------------------------------------------
 
