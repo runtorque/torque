@@ -910,9 +910,91 @@ body.runtime-embedded .terminal-empty {
 .detail-expand-title {
   color: var(--text);
 }
-.detail-expand-description {
+.detail-expand-description-wrap {
   margin-top: 4px;
+}
+.detail-expand-description-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.detail-expand-description {
+  flex: 1;
+  min-width: 0;
   color: var(--text-dim);
+}
+.detail-expand-description-empty {
+  font-style: italic;
+}
+.detail-description-edit {
+  margin: 0;
+  padding: 0;
+  width: 18px;
+  height: 18px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: .75;
+}
+.detail-description-edit:hover,
+.detail-description-edit:focus-visible {
+  opacity: 1;
+  color: var(--text);
+  background: var(--bg-hover);
+  border-color: var(--border);
+  outline: none;
+}
+.detail-inline-description-input {
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 8px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+.detail-inline-description-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(88,166,255,.35);
+}
+.detail-inline-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
+.detail-inline-editor-btn {
+  margin: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.detail-inline-editor-btn:hover,
+.detail-inline-editor-btn:focus-visible {
+  color: var(--text);
+  border-color: var(--text-dim);
+  outline: none;
+}
+.detail-inline-editor-btn-primary {
+  color: var(--accent);
+  border-color: rgba(88,166,255,.35);
+  background: rgba(88,166,255,.08);
+}
+.detail-inline-editor-btn-primary:hover,
+.detail-inline-editor-btn-primary:focus-visible {
+  border-color: var(--accent);
 }
 .detail-task-action {
   font-size: 8px; color: var(--accent);

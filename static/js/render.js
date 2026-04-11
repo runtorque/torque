@@ -319,6 +319,7 @@ function render() {
 
   const doFlip = Date.now() < _flipUntil;
   const oldRects = doFlip ? _captureRects(main) : null;
+  _captureAgentDetailDrafts();
   const mainState = _captureSurfaceState(main, {
     scrollSelectors: ['.mcp-log'],
     captureFocusKey: _captureMainFocusKey,
@@ -614,9 +615,30 @@ function _agentDetailState(agentId) {
     _agentDetailUiState[key] = {
       task_expanded: false,
       expanded_messages: {},
+      description_editor: {
+        task_id: '',
+        open: false,
+        draft: '',
+      },
     };
   }
   return _agentDetailUiState[key];
+}
+
+function _agentDetailDescriptionState(agentId, task) {
+  const detailState = _agentDetailState(agentId);
+  const taskId = String((task && task.id) || '');
+  const currentDescription = String((task && task.description) || '');
+  if (!detailState.description_editor || detailState.description_editor.task_id !== taskId) {
+    detailState.description_editor = {
+      task_id: taskId,
+      open: false,
+      draft: currentDescription,
+    };
+  } else if (!detailState.description_editor.open) {
+    detailState.description_editor.draft = currentDescription;
+  }
+  return detailState.description_editor;
 }
 
 function _agentDetailMessageKey(message, index) {
@@ -639,6 +661,72 @@ function _toggleAgentDetailMessage(agentId, messageKey) {
   render();
 }
 
+function agentDetailEditDescription(agentId, taskId) {
+  const task = state && state.board_tasks ? state.board_tasks[taskId] : null;
+  if (!task) return;
+  const editor = _agentDetailDescriptionState(agentId, task);
+  editor.open = true;
+  editor.draft = String(task.description || '');
+  render();
+  requestAnimationFrame(function() {
+    const input = document.getElementById('detail-description-input');
+    if (!input) return;
+    if (typeof input.focus === 'function') input.focus();
+    if ('value' in input && 'selectionStart' in input) {
+      const cursor = String(input.value || '').length;
+      input.selectionStart = cursor;
+      input.selectionEnd = cursor;
+    }
+  });
+}
+
+function agentDetailDescriptionInput(agentId, taskId, value) {
+  const task = state && state.board_tasks ? state.board_tasks[taskId] : null;
+  if (!task) return;
+  const editor = _agentDetailDescriptionState(agentId, task);
+  editor.open = true;
+  editor.draft = String(value || '');
+}
+
+function agentDetailCancelDescriptionEdit(agentId, taskId) {
+  const task = state && state.board_tasks ? state.board_tasks[taskId] : null;
+  if (!task) return;
+  const editor = _agentDetailDescriptionState(agentId, task);
+  editor.open = false;
+  editor.draft = String(task.description || '');
+  render();
+}
+
+function agentDetailSaveDescription(agentId, taskId) {
+  const task = state && state.board_tasks ? state.board_tasks[taskId] : null;
+  if (!task) return;
+  const editor = _agentDetailDescriptionState(agentId, task);
+  const input = document.getElementById('detail-description-input');
+  if (input && 'value' in input) editor.draft = input.value;
+  const previousDescription = String(task.description || '');
+  const nextDescription = String(editor.draft || '').trim();
+  editor.open = false;
+  editor.draft = nextDescription;
+  if (nextDescription !== previousDescription) {
+    task.description = nextDescription;
+    send({ cmd: 'board_update_task', id: taskId, description: nextDescription });
+  }
+  render();
+}
+
+function agentDetailDescriptionKeydown(evt, agentId, taskId) {
+  if (!evt) return;
+  if (evt.key === 'Escape') {
+    evt.preventDefault();
+    evt.stopPropagation();
+    agentDetailCancelDescriptionEdit(agentId, taskId);
+  } else if (evt.key === 'Enter' && (evt.metaKey || evt.ctrlKey)) {
+    evt.preventDefault();
+    evt.stopPropagation();
+    agentDetailSaveDescription(agentId, taskId);
+  }
+}
+
 function _detailMultilineHtml(text) {
   return formatCode(text || '').replace(/\n/g, '<br>');
 }
@@ -650,6 +738,45 @@ function _detailTaskLinkHtml(taskId) {
     + ' data-focus-key="detail-task-link:' + esc(taskId) + '"'
     + ' onclick="event.stopPropagation();if(typeof boardNavigateToTask===\'function\'){boardNavigateToTask(\''
     + esc(taskId) + '\');}">\u2192</button>';
+}
+
+function _renderAgentDetailDescription(agentId, task) {
+  if (!task) return '';
+  const editor = _agentDetailDescriptionState(agentId, task);
+  const title = task.description ? 'Edit task description' : 'Add task description';
+  const agentIdJs = JSON.stringify(String(agentId || ''));
+  const taskIdJs = JSON.stringify(String(task.id || ''));
+  let html = '<div class="detail-expand-description-wrap">';
+  if (editor.open) {
+    html += `<textarea id="detail-description-input" class="detail-inline-description-input" rows="3"`
+      + ` data-focus-key="detail-description-input:${esc(task.id || '')}"`
+      + ` placeholder="Add task description..."`
+      + ` oninput='agentDetailDescriptionInput(${agentIdJs},${taskIdJs},this.value)'`
+      + ` onkeydown='agentDetailDescriptionKeydown(event,${agentIdJs},${taskIdJs})'>${esc(editor.draft || '')}</textarea>`;
+    html += `<div class="detail-inline-editor-actions">`;
+    html += `<button type="button" id="detail-description-save-btn" class="detail-inline-editor-btn detail-inline-editor-btn-primary"`
+      + ` data-focus-key="detail-description-save:${esc(task.id || '')}"`
+      + ` onclick='event.stopPropagation();agentDetailSaveDescription(${agentIdJs},${taskIdJs})'>Save</button>`;
+    html += `<button type="button" id="detail-description-cancel-btn" class="detail-inline-editor-btn"`
+      + ` data-focus-key="detail-description-cancel:${esc(task.id || '')}"`
+      + ` onclick='event.stopPropagation();agentDetailCancelDescriptionEdit(${agentIdJs},${taskIdJs})'>Cancel</button>`;
+    html += `</div>`;
+  } else {
+    html += `<div class="detail-expand-description-row">`;
+    if (task.description) {
+      html += `<div class="detail-expand-description">${_detailMultilineHtml(task.description)}</div>`;
+    } else {
+      html += `<div class="detail-expand-description detail-expand-description-empty">Add description</div>`;
+    }
+    html += `<button type="button" id="detail-description-edit-btn" class="detail-description-edit"`
+      + ` title="${esc(title)}"`
+      + ` aria-label="${esc(title)}"`
+      + ` data-focus-key="detail-description-edit:${esc(task.id || '')}"`
+      + ` onclick='event.stopPropagation();agentDetailEditDescription(${agentIdJs},${taskIdJs})'>&#x270E;</button>`;
+    html += `</div>`;
+  }
+  html += `</div>`;
+  return html;
 }
 
 function _taskPreservedMergeDiffArtifact(task, branch) {
@@ -701,6 +828,16 @@ function _preservedMergeDiffForAgent(agent) {
 function _captureMainFocusKey(el) {
   if (!el || !el.dataset || !el.dataset.focusKey) return '';
   return '[data-focus-key="' + CSS.escape(el.dataset.focusKey) + '"]';
+}
+
+function _captureAgentDetailDrafts() {
+  if (typeof selectedAgentId === 'undefined' || !selectedAgentId) return;
+  const task = _getAgentTask(selectedAgentId);
+  if (!task) return;
+  const editor = _agentDetailDescriptionState(selectedAgentId, task);
+  if (!editor.open) return;
+  const input = document.getElementById('detail-description-input');
+  if (input && 'value' in input) editor.draft = input.value;
 }
 
 const _AGENT_DONE_FLOURISH_DURATION_MS = 3400;
@@ -894,9 +1031,7 @@ function renderAgentDetails(a) {
     if (taskExpanded) {
       h += `<div class="detail-expand-body">`;
       h += `<div class="detail-expand-title">${_detailMultilineHtml(_dt.task)}</div>`;
-      if (_dt.description) {
-        h += `<div class="detail-expand-description">${_detailMultilineHtml(_dt.description)}</div>`;
-      }
+      h += _renderAgentDetailDescription(a.id, _dt);
       h += `</div>`;
     }
     h += `</div></div>`;
