@@ -743,7 +743,12 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         tid = _resolve_task(state, args.get("task", ""))
         if not tid:
             return "Task not found", True
-        payload = {"cmd": "dispatch_task", "id": tid}
+        payload = {
+            "cmd": "dispatch_task",
+            "id": tid,
+            "_weaver_dispatch_group": _weaver_group,
+            "_weaver_dispatch_id": _weaver_cell.id,
+        }
         agent_ident = args.get("agent", "")
         if agent_ident:
             agent_id = _resolve_visible_agent(state, _weaver_cell, agent_ident)
@@ -921,7 +926,12 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 results.append(item)
                 continue
 
-            payload = {"cmd": "dispatch_task", "id": tid}
+            payload = {
+                "cmd": "dispatch_task",
+                "id": tid,
+                "_weaver_dispatch_group": _weaver_group,
+                "_weaver_dispatch_id": _weaver_cell.id,
+            }
             if target_agent_id:
                 payload["agent_id"] = target_agent_id
             else:

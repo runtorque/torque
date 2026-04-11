@@ -63,6 +63,7 @@ _WORKTREE_MERGE_CLEANUP_MODES = {
     "close_remove",
 }
 _DEFAULT_WORKTREE_MERGE_CLEANUP = "keep"
+_WEAVER_WORKLOG_LIMIT = 200
 
 
 def normalize_weaver_autonomy_mode(value) -> str:
@@ -597,6 +598,7 @@ class MatrixState:
         self.panel_log = None  # PanelEventLog, set from server.py
         # Weaver settings (per-group)
         self.weaver_settings: dict[str, WeaverSettings] = {}
+        self.weaver_worklog: dict[str, list[dict]] = {}
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
         self._seq: int = 0
@@ -659,6 +661,10 @@ class MatrixState:
             "weaver_journal": {
                 g: self.journal_read(g, limit=50)
                 for g in self.weaver_settings
+            },
+            "weaver_worklog": {
+                g: [dict(entry) for entry in entries]
+                for g, entries in self.weaver_worklog.items()
             },
         }
 
@@ -954,22 +960,50 @@ class MatrixState:
         except Exception:
             log.exception("Failed to update agent history %s", cell.id)
 
-    def history_record_dispatch(self, cell: AgentCell, task: BoardTask):
+    def history_record_dispatch(self, cell: AgentCell, task: BoardTask, *,
+                                weaver_group: str = "",
+                                weaver_id: str = ""):
         """Record a task dispatch in history."""
-        if not self.db:
-            return
         import time
+        ts = time.time()
+        weaver_group = str(weaver_group or "").strip()
+        weaver_id = str(weaver_id or "").strip()
         try:
-            self.db.save_agent_task({
-                "agent_id": cell.id,
-                "task_id": task.id,
-                "task_title": task.task,
-                "started_at": time.time(),
-            })
-            self.db.update_agent_history(
-                cell.id, total_tasks=(
-                    self.db.load_agent_history_detail(cell.id) or {}
-                ).get("total_tasks", 0) + 1)
+            if self.db:
+                self.db.save_agent_task({
+                    "agent_id": cell.id,
+                    "task_id": task.id,
+                    "task_title": task.task,
+                    "started_at": ts,
+                })
+                self.db.update_agent_history(
+                    cell.id, total_tasks=(
+                        self.db.load_agent_history_detail(cell.id) or {}
+                    ).get("total_tasks", 0) + 1)
+            if weaver_group:
+                entry = {
+                    "group": weaver_group,
+                    "task_id": task.id,
+                    "task_title": task.task,
+                    "agent_id": cell.id,
+                    "agent_name": cell.name,
+                    "agent_slug": cell.slug,
+                    "agent_owned": bool(
+                        weaver_id and cell.created_by_weaver_id == weaver_id
+                    ),
+                    "started_at": ts,
+                }
+                if self.db:
+                    entry["id"] = self.db.save_weaver_task_log_entry(entry)
+                    self.db.trim_weaver_task_log(
+                        weaver_group,
+                        limit=_WEAVER_WORKLOG_LIMIT,
+                    )
+                else:
+                    entries = self.weaver_worklog.get(weaver_group, [])
+                    newest_id = entries[0]["id"] if entries else 0
+                    entry["id"] = int(newest_id or 0) + 1
+                self._append_weaver_worklog_entry(weaver_group, entry)
         except Exception:
             log.exception("Failed to record dispatch history %s → %s",
                           cell.id, task.id)
@@ -1266,6 +1300,13 @@ class MatrixState:
                                 filtered["escalation_style"])
                         )
                     self.weaver_settings[gname] = WeaverSettings(**filtered)
+                for gname in self.groups:
+                    entries = self.db.load_weaver_task_log(
+                        gname,
+                        limit=_WEAVER_WORKLOG_LIMIT,
+                    )
+                    if entries:
+                        self.weaver_worklog[gname] = entries
             cleaned = self.cleanup_orphaned_attention(emit=False)
             self.recompute_task_health(emit=False, persist=False)
             if cleaned["asks"] or cleaned["weaver_questions"]:
@@ -1543,6 +1584,25 @@ class MatrixState:
             return self.db.load_journal_entries(group, limit, entry_type)
         return []
 
+    def _append_weaver_worklog_entry(self, group: str, entry: dict):
+        """Append a Weaver worklog entry to in-memory state and emit it."""
+        if not group:
+            return
+        item = dict(entry or {})
+        item["group"] = group
+        entries = self.weaver_worklog.setdefault(group, [])
+        entries.insert(0, item)
+        if len(entries) > _WEAVER_WORKLOG_LIMIT:
+            del entries[_WEAVER_WORKLOG_LIMIT:]
+        self._emit("weaver_worklog_append", group=group, entry=dict(item))
+
+    def weaver_worklog_read(self, group: str, limit: int = 50) -> list[dict]:
+        """Return recent persisted/current Weaver worklog entries for a group."""
+        entries = self.weaver_worklog.get(group, [])
+        if limit <= 0:
+            return []
+        return [dict(entry) for entry in entries[:limit]]
+
     # -- Global settings ----------------------------------------------------
 
     def get_default_command(self) -> str:
@@ -1714,6 +1774,7 @@ class MatrixState:
             self.auto_dispatch_queues.pop(name, None)
             self._db_delete_auto_dispatch_queue(name)
             self.weaver_settings.pop(name, None)
+            self.weaver_worklog.pop(name, None)
             if self.db:
                 self.db.delete_weaver_settings(name)
             self._emit("group_remove", name=name)
@@ -1732,6 +1793,10 @@ class MatrixState:
             self.group_slugs[new] = self._unique_group_slug(new)
             if old in self.group_settings:
                 self.group_settings[new] = self.group_settings.pop(old)
+            if old in self.weaver_worklog:
+                self.weaver_worklog[new] = self.weaver_worklog.pop(old)
+                for entry in self.weaver_worklog[new]:
+                    entry["group"] = new
             if old in self.board_filters_by_group:
                 self.board_filters_by_group[new] = \
                     self.board_filters_by_group.pop(old)
@@ -1782,6 +1847,8 @@ class MatrixState:
             self._db_save_groups()
             if new in self.group_settings:
                 self._db_save_group_settings(new)
+            if self.db:
+                self.db.rename_weaver_task_log_group(old, new)
             for aid in self.groups[new]:
                 if aid in self.agents:
                     self._db_save_agent(self.agents[aid])

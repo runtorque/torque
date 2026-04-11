@@ -249,6 +249,20 @@ CREATE TABLE IF NOT EXISTS agent_messages (
 CREATE INDEX IF NOT EXISTS idx_agent_messages_agent ON agent_messages (agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_messages_task ON agent_messages (task_id);
 
+CREATE TABLE IF NOT EXISTS weaver_task_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_name  TEXT NOT NULL,
+    task_id     TEXT NOT NULL,
+    task_title  TEXT NOT NULL,
+    agent_id    TEXT NOT NULL,
+    agent_name  TEXT NOT NULL DEFAULT '',
+    agent_slug  TEXT NOT NULL DEFAULT '',
+    agent_owned INTEGER NOT NULL DEFAULT 0,
+    started_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_weaver_task_log_group
+    ON weaver_task_log(group_name, started_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS weaver_settings (
     group_name         TEXT PRIMARY KEY,
     push_interval      INTEGER NOT NULL DEFAULT 60,

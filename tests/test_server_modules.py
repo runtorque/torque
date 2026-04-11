@@ -415,6 +415,10 @@ class ServerWeaverMessageFlowTests(unittest.IsolatedAsyncioTestCase):
             follow_up.id,
         )
         self.assertEqual(
+            state.weaver_worklog[worker.group][0]['task_id'],
+            follow_up.id,
+        )
+        self.assertEqual(
             self.db.load_agent_messages_by_task(follow_up.id)[0]['action'],
             'weaver_message',
         )

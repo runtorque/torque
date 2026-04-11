@@ -4289,6 +4289,49 @@ test('renderWeaverPanel preserves the selected Events tab across rerenders', () 
   assert.match(panel.innerHTML, /Already sent to Weaver/);
 });
 
+test('renderWeaverPanel preserves the selected Worklog tab across rerenders', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-weaver');
+  panel.querySelector = function() { return null; };
+  context.state.weaver_worklog = {
+    alpha: [
+      {
+        id: 3,
+        task_id: 'LOOM:3',
+        task_title: 'Add Worklog tab',
+        agent_id: 'agent-1',
+        agent_name: 'Worker',
+        agent_owned: true,
+        started_at: 10,
+      },
+    ],
+  };
+  context.state.board_tasks = {
+    'LOOM:3': {
+      id: 'LOOM:3',
+      task: 'Add Worklog tab',
+      group: 'alpha',
+      lane: 'Review',
+      status: 'Awaiting approval',
+      agent_id: 'agent-1',
+    },
+  };
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Worker', group: 'alpha', cell_type: 'agent' },
+  };
+
+  context.renderWeaverPanel();
+  runInContext(context, `weaverSelectTab('worklog')`);
+
+  assert.match(panel.innerHTML, /id="weaver-tab-worklog" class="weaver-tab active"/);
+  assert.match(panel.innerHTML, /Dispatched tasks/);
+
+  context.renderWeaverPanel();
+
+  assert.match(panel.innerHTML, /id="weaver-tab-worklog" class="weaver-tab active"/);
+  assert.match(panel.innerHTML, /Awaiting approval/);
+});
+
 test('renderWeaverPanel keeps the same Events anchor visible when new digest rows are inserted above', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-weaver');
@@ -4599,6 +4642,50 @@ test('weaver sent-event deltas rerender only the active Weaver panel', () => {
   });
   assert.deepEqual(jsonValue(context, 'state.weaver_sent_events.alpha'), [
     { id: 11, kind: 'task_completed', message: 'Merged cleanly', timestamp: 1, delivered_at: 2 },
+  ]);
+});
+
+test('weaver worklog deltas rerender only the active Weaver panel', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'weaver';
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'weaver_worklog_append',
+        group: 'alpha',
+        entry: {
+          id: 7,
+          task_id: 'LOOM:7',
+          task_title: 'Review Worklog tab',
+          agent_id: 'agent-7',
+          agent_name: 'Worker Seven',
+          agent_owned: true,
+          started_at: 3,
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 1,
+    templates: 0,
+  });
+  assert.deepEqual(jsonValue(context, 'state.weaver_worklog.alpha'), [
+    {
+      id: 7,
+      task_id: 'LOOM:7',
+      task_title: 'Review Worklog tab',
+      agent_id: 'agent-7',
+      agent_name: 'Worker Seven',
+      agent_owned: true,
+      started_at: 3,
+    },
   ]);
 });
 

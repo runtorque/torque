@@ -680,6 +680,51 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["digest_verbosity"], "balanced")
         self.assertEqual(loaded["escalation_style"], "note_then_ask")
 
+    def test_weaver_task_log_roundtrip_and_group_rename(self):
+        first_id = self.db.save_weaver_task_log_entry(
+            {
+                "group": "g",
+                "task_id": "LOOM:1",
+                "task_title": "Implement Worklog",
+                "agent_id": "agent-1",
+                "agent_name": "Worker One",
+                "agent_slug": "worker-one",
+                "agent_owned": True,
+                "started_at": 10.0,
+            }
+        )
+        second_id = self.db.save_weaver_task_log_entry(
+            {
+                "group": "g",
+                "task_id": "LOOM:2",
+                "task_title": "Review Worklog",
+                "agent_id": "agent-2",
+                "agent_name": "Worker Two",
+                "agent_slug": "worker-two",
+                "agent_owned": False,
+                "started_at": 20.0,
+            }
+        )
+
+        loaded = self.db.load_weaver_task_log("g", limit=10)
+
+        self.assertEqual([entry["id"] for entry in loaded], [second_id, first_id])
+        self.assertEqual(loaded[0]["task_id"], "LOOM:2")
+        self.assertFalse(loaded[0]["agent_owned"])
+        self.assertEqual(loaded[1]["agent_slug"], "worker-one")
+
+        self.db.rename_weaver_task_log_group("g", "renamed")
+        renamed = self.db.load_weaver_task_log("renamed", limit=10)
+
+        self.assertEqual([entry["task_id"] for entry in renamed], ["LOOM:2", "LOOM:1"])
+        self.assertEqual(self.db.load_weaver_task_log("g", limit=10), [])
+
+        self.db.trim_weaver_task_log("renamed", limit=1)
+        self.assertEqual(
+            [entry["task_id"] for entry in self.db.load_weaver_task_log("renamed", limit=10)],
+            ["LOOM:2"],
+        )
+
     def test_playbook_candidates_roundtrip(self):
         candidate = {
             "id": "cand-1",

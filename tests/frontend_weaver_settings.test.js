@@ -53,6 +53,7 @@ test('renderWeaverPanel shows Journal and Events tabs without settings tabs', ()
   assert.match(panel.innerHTML, /Weaver — alpha/);
   assert.match(panel.innerHTML, />Journal</);
   assert.match(panel.innerHTML, />Events</);
+  assert.match(panel.innerHTML, />Worklog</);
   assert.match(panel.innerHTML, /weaver-tabs/);
   assert.doesNotMatch(panel.innerHTML, />Settings</);
 });
@@ -117,6 +118,86 @@ test('weaver Events tab disables send-now while paused', () => {
   assert.match(html, /Delivery is paused/);
   assert.match(html, /Send queued now/);
   assert.match(html, /disabled/);
+});
+
+test('weaver Worklog tab renders dispatched tasks with live lane and status', () => {
+  const sandbox = createSandbox();
+  sandbox.state.weaver_worklog = {
+    alpha: [
+      {
+        id: 4,
+        task_id: 'LOOM:9',
+        task_title: 'Add Worklog tab',
+        agent_id: 'agent-1',
+        agent_name: 'Worker One',
+        agent_slug: 'worker-one',
+        agent_owned: true,
+        started_at: 12,
+      },
+    ],
+  };
+  sandbox.state.board_tasks = {
+    'LOOM:9': {
+      id: 'LOOM:9',
+      task: 'Add Worklog tab',
+      lane: 'In Progress',
+      status: 'In review',
+      agent_id: 'agent-1',
+    },
+  };
+  sandbox.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Worker One' },
+  };
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+
+  const html = vm.runInContext(
+    `_weaverRenderWorklog("alpha", {})`,
+    context,
+  );
+
+  assert.match(html, /Dispatched tasks/);
+  assert.match(html, /Add Worklog tab/);
+  assert.match(html, /In Progress/);
+  assert.match(html, /In review/);
+  assert.match(html, /Worker One/);
+});
+
+test('weaver Worklog tab hides non-owned rows when restrict_to_created_agents is enabled', () => {
+  const sandbox = createSandbox();
+  sandbox.state.weaver_worklog = {
+    alpha: [
+      {
+        id: 2,
+        task_id: 'LOOM:2',
+        task_title: 'Owned task',
+        agent_id: 'agent-owned',
+        agent_name: 'Owned Worker',
+        agent_owned: true,
+        started_at: 20,
+      },
+      {
+        id: 1,
+        task_id: 'LOOM:1',
+        task_title: 'Legacy task',
+        agent_id: 'agent-legacy',
+        agent_name: 'Legacy Worker',
+        agent_owned: false,
+        started_at: 10,
+      },
+    ],
+  };
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+
+  const html = vm.runInContext(
+    `_weaverRenderWorklog("alpha", { restrict_to_created_agents: true })`,
+    context,
+  );
+
+  assert.match(html, /Owned task/);
+  assert.doesNotMatch(html, /Legacy task/);
+  assert.match(html, /Weaver-created agents/);
 });
 
 test('weaver journal distinguishes blocking asks from non-blocking notes', () => {

@@ -197,6 +197,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "DELETE FROM group_members WHERE group_name=?", (name,))
         self._conn.execute(
             "DELETE FROM group_settings WHERE group_name=?", (name,))
+        self._conn.execute(
+            "DELETE FROM weaver_task_log WHERE group_name=?", (name,))
         self._conn.commit()
 
     def save_groups(self, groups: dict, slugs: dict = None):
@@ -591,6 +593,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             ("schedules", "last_task_id"),
             ("agent_tasks", "task_id"),
             ("agent_messages", "task_id"),
+            ("weaver_task_log", "task_id"),
             ("memory_entries", "task_id"),
         ):
             _rewrite_single_ref(table, column)
@@ -944,6 +947,68 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 (group_name, limit)).fetchall()
         return [{"id": r[0], "group": r[1], "timestamp": r[2],
                  "type": r[3], "entry": r[4]} for r in rows]
+
+    def save_weaver_task_log_entry(self, record: dict) -> int:
+        """Insert a persisted Weaver dispatch/worklog row."""
+        c = self._conn.execute(
+            "INSERT INTO weaver_task_log "
+            "(group_name, task_id, task_title, agent_id, agent_name, "
+            "agent_slug, agent_owned, started_at) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                record["group"],
+                record["task_id"],
+                record.get("task_title", ""),
+                record["agent_id"],
+                record.get("agent_name", ""),
+                record.get("agent_slug", ""),
+                1 if record.get("agent_owned") else 0,
+                record["started_at"],
+            ),
+        )
+        self._conn.commit()
+        return c.lastrowid
+
+    def load_weaver_task_log(self, group_name: str, limit: int = 100) -> list[dict]:
+        """Load recent persisted Weaver dispatch rows for a group."""
+        rows = self._conn.execute(
+            "SELECT id, group_name, task_id, task_title, agent_id, agent_name, "
+            "agent_slug, agent_owned, started_at FROM weaver_task_log "
+            "WHERE group_name=? ORDER BY started_at DESC, id DESC LIMIT ?",
+            (group_name, limit),
+        ).fetchall()
+        return [
+            {
+                "id": row[0],
+                "group": row[1],
+                "task_id": row[2],
+                "task_title": row[3],
+                "agent_id": row[4],
+                "agent_name": row[5],
+                "agent_slug": row[6],
+                "agent_owned": bool(row[7]),
+                "started_at": row[8],
+            }
+            for row in rows
+        ]
+
+    def trim_weaver_task_log(self, group_name: str, limit: int = 200):
+        """Trim persisted Weaver worklog rows for a group to ``limit``."""
+        self._conn.execute(
+            "DELETE FROM weaver_task_log WHERE group_name=? AND id NOT IN ("
+            "SELECT id FROM weaver_task_log WHERE group_name=? "
+            "ORDER BY started_at DESC, id DESC LIMIT ?"
+            ")",
+            (group_name, group_name, limit),
+        )
+        self._conn.commit()
+
+    def rename_weaver_task_log_group(self, old_name: str, new_name: str):
+        """Move persisted Weaver worklog rows to a renamed group."""
+        self._conn.execute(
+            "UPDATE weaver_task_log SET group_name=? WHERE group_name=?",
+            (new_name, old_name),
+        )
+        self._conn.commit()
 
     def save_agent_history(self, record: dict):
         """Insert or replace an agent history record."""

@@ -4742,6 +4742,86 @@ body.diff-view-open #ctx-menu {
   color: var(--text-dim);
 }
 
+.weaver-worklog-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.weaver-worklog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.weaver-worklog-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text);
+}
+.weaver-worklog-count,
+.weaver-worklog-note {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.weaver-worklog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.weaver-worklog-item {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+}
+.weaver-worklog-item-header,
+.weaver-worklog-meta-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.weaver-worklog-task {
+  min-width: 0;
+  flex: 1;
+}
+.weaver-worklog-task-title {
+  font-size: 10px;
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.4;
+}
+.weaver-worklog-task-id,
+.weaver-worklog-meta,
+.weaver-worklog-status {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.weaver-worklog-task-id {
+  margin-top: 3px;
+}
+.weaver-worklog-lane {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.weaver-worklog-meta-row {
+  margin-top: 6px;
+}
+.weaver-worklog-agent {
+  font-size: 10px;
+  color: var(--text);
+}
+.weaver-worklog-status {
+  margin-top: 6px;
+  line-height: 1.45;
+}
+
 /* Journal entries */
 .weaver-journal { display: flex; flex-direction: column; gap: 6px; }
 .weaver-entry {

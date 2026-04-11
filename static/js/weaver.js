@@ -1,4 +1,4 @@
-/* Weaver panel — journal + events */
+/* Weaver panel — journal + events + worklog */
 
 var _weaverReplyDraft = '';
 var _weaverActiveTabByGroup = {};
@@ -85,9 +85,13 @@ function renderWeaverPanel() {
 
   html += _weaverRenderTabs(group, activeTab);
   html += '<div class="weaver-content">';
-  html += (activeTab === 'events')
-    ? _weaverRenderEvents(group, ws, weaver, bstats)
-    : _weaverRenderJournal(group);
+  if (activeTab === 'events') {
+    html += _weaverRenderEvents(group, ws, weaver, bstats);
+  } else if (activeTab === 'worklog') {
+    html += _weaverRenderWorklog(group, ws);
+  } else {
+    html += _weaverRenderJournal(group);
+  }
   html += '</div>';
   html += '</div>';
   el.innerHTML = html;
@@ -108,7 +112,8 @@ function weaverTogglePauseForGroup(group) {
 function weaverSelectTab(tab, group) {
   group = group || _weaverCurrentGroup();
   if (!group) return;
-  _weaverActiveTabByGroup[group] = (tab === 'events') ? 'events' : 'journal';
+  if (tab !== 'events' && tab !== 'worklog') tab = 'journal';
+  _weaverActiveTabByGroup[group] = tab;
   renderWeaverPanel();
 }
 
@@ -121,7 +126,8 @@ function weaverSendNow() {
 function _weaverActiveTab(group) {
   if (!group) return 'journal';
   var tab = _weaverActiveTabByGroup[group] || 'journal';
-  return tab === 'events' ? 'events' : 'journal';
+  if (tab === 'events' || tab === 'worklog') return tab;
+  return 'journal';
 }
 
 function _weaverRenderTabs(group, activeTab) {
@@ -133,6 +139,9 @@ function _weaverRenderTabs(group, activeTab) {
   html += '<button id="weaver-tab-events" class="weaver-tab'
     + (activeTab === 'events' ? ' active' : '')
     + '" onclick="weaverSelectTab(\'events\')">Events</button>';
+  html += '<button id="weaver-tab-worklog" class="weaver-tab'
+    + (activeTab === 'worklog' ? ' active' : '')
+    + '" onclick="weaverSelectTab(\'worklog\')">Worklog</button>';
   html += '</div>';
   return html;
 }
@@ -331,6 +340,99 @@ function _weaverRestoreScrollAnchor(container, snapshot) {
   var containerRect = container.getBoundingClientRect();
   var targetRect = target.getBoundingClientRect();
   container.scrollTop += (targetRect.top - containerRect.top) - (snapshot.offset || 0);
+}
+
+// -- Worklog tab ----------------------------------------------------------
+
+function _weaverRenderWorklog(group, ws) {
+  if (!group) {
+    return '<div class="weaver-empty">No weaver configured for any group.</div>';
+  }
+
+  var entries = (state.weaver_worklog && state.weaver_worklog[group])
+    ? state.weaver_worklog[group].slice()
+    : [];
+  if (ws && ws.restrict_to_created_agents) {
+    entries = entries.filter(function(entry) {
+      return !!(entry && entry.agent_owned);
+    });
+  }
+  entries.sort(function(a, b) {
+    var startedDiff = (b.started_at || 0) - (a.started_at || 0);
+    if (startedDiff) return startedDiff;
+    return (b.id || 0) - (a.id || 0);
+  });
+
+  var html = '<div class="weaver-worklog-tab">';
+  html += '<div class="weaver-worklog-header">';
+  html += '<span class="weaver-worklog-title">Dispatched tasks</span>';
+  html += '<span class="weaver-worklog-count">' + entries.length + '</span>';
+  html += '</div>';
+  if (ws && ws.restrict_to_created_agents) {
+    html += '<div class="weaver-worklog-note">Showing only tasks sent to Weaver-created agents.</div>';
+  } else {
+    html += '<div class="weaver-worklog-note">Recent tasks this Weaver dispatched in this group.</div>';
+  }
+
+  if (!entries.length) {
+    html += '<div class="weaver-event-empty">No dispatched tasks yet.</div>';
+    html += '</div>';
+    return html;
+  }
+
+  html += '<div class="weaver-worklog-list">';
+  for (var i = 0; i < entries.length; i++) {
+    html += _weaverRenderWorklogItem(entries[i]);
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderWorklogItem(entry) {
+  var task = (state.board_tasks && entry && entry.task_id)
+    ? state.board_tasks[entry.task_id]
+    : null;
+  var title = (task && task.task) || (entry && entry.task_title) || (entry && entry.task_id) || 'Task';
+  var taskId = (entry && entry.task_id) || '';
+  var lane = task ? (task.lane || '') : 'Not on board';
+  var status = task ? String(task.status || '').trim() : '';
+  var agentName = _weaverWorklogAgentLabel(entry, task);
+  var meta = 'dispatched ' + _weaverTimeAgo(entry && entry.started_at);
+  var anchorKey = 'worklog-' + String(entry && entry.id ? entry.id : taskId || meta);
+
+  var html = '<div class="weaver-worklog-item" data-weaver-anchor="' + _esc(anchorKey) + '">';
+  html += '<div class="weaver-worklog-item-header">';
+  html += '<div class="weaver-worklog-task">';
+  html += '<div class="weaver-worklog-task-title">' + _esc(title) + '</div>';
+  if (taskId) {
+    html += '<div class="weaver-worklog-task-id">' + _esc(taskId) + '</div>';
+  }
+  html += '</div>';
+  html += '<div class="weaver-worklog-lane">' + _esc(lane || 'Unknown') + '</div>';
+  html += '</div>';
+  html += '<div class="weaver-worklog-meta-row">';
+  html += '<span class="weaver-worklog-agent">' + _esc(agentName) + '</span>';
+  html += '<span class="weaver-worklog-meta">' + _esc(meta) + '</span>';
+  html += '</div>';
+  if (status) {
+    html += '<div class="weaver-worklog-status">' + _esc(status) + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _weaverWorklogAgentLabel(entry, task) {
+  var taskAgent = (task && task.agent_id && state.agents && state.agents[task.agent_id])
+    ? state.agents[task.agent_id]
+    : null;
+  if (taskAgent) {
+    return taskAgent.name || taskAgent.slug || taskAgent.id || 'Agent';
+  }
+  if (entry && entry.agent_name) return String(entry.agent_name);
+  if (entry && entry.agent_slug) return String(entry.agent_slug);
+  if (entry && entry.agent_id) return String(entry.agent_id);
+  return 'Agent';
 }
 
 // -- Journal tab -----------------------------------------------------------

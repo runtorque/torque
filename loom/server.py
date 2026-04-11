@@ -497,7 +497,13 @@ async def _send_weaver_message_to_agent(state: MatrixState, bridge, target,
         follow_up.id,
         messages=list(follow_up.messages),
     )
-    state.history_record_dispatch(target, follow_up)
+    group_settings = state.get_group_settings(target.group)
+    state.history_record_dispatch(
+        target,
+        follow_up,
+        weaver_group=target.group,
+        weaver_id=group_settings.weaver_agent_id if group_settings else "",
+    )
     state.history_record_message(
         target.id,
         "weaver_message",
@@ -4032,7 +4038,18 @@ async def main(connection=None):
                                         prompt_text,
                                         **send_kwargs)
 
-                            state.history_record_dispatch(cell, task)
+                            state.history_record_dispatch(
+                                cell,
+                                task,
+                                weaver_group=data.get(
+                                    "_weaver_dispatch_group",
+                                    "",
+                                ),
+                                weaver_id=data.get(
+                                    "_weaver_dispatch_id",
+                                    "",
+                                ),
+                            )
                             _panel_event(
                                 "task_dispatched", cell.id,
                                 cell.name, cell.group,

@@ -536,6 +536,8 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["id"], task.id)
         self.assertTrue(captured["create_agent"])
         self.assertEqual(captured["_created_by_weaver_id"], weaver.id)
+        self.assertEqual(captured["_weaver_dispatch_group"], "g")
+        self.assertEqual(captured["_weaver_dispatch_id"], weaver.id)
         self.assertEqual(captured["target_session_id"], weaver.session_id)
         self.assertEqual(captured["target_window_id"], weaver.window_id)
 
@@ -629,7 +631,13 @@ class WeaverDispatchToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error)
         self.assertEqual(
             captured,
-            {"cmd": "dispatch_task", "id": task.id, "agent_id": worker.id},
+            {
+                "cmd": "dispatch_task",
+                "id": task.id,
+                "agent_id": worker.id,
+                "_weaver_dispatch_group": "g",
+                "_weaver_dispatch_id": weaver.id,
+            },
         )
 
     async def test_dispatch_to_existing_agent_rejects_hidden_legacy_agent_when_restricted(self):
