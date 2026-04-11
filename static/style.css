@@ -2532,7 +2532,9 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 }
 /* Subordinate (derived) cards */
 .board-card-subordinate {
-  margin-left: 16px;
+  --board-card-indent-level: 1;
+  --board-card-indent-step: 16px;
+  margin-left: calc(var(--board-card-indent-step) * var(--board-card-indent-level));
   border-left: 2px solid var(--border);
   min-height: 26px;
   padding: 3px 6px;
@@ -2548,12 +2550,12 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 .board-card-subordinate .board-card-chain { font-size: 8px; }
 .board-card-subordinate .board-card-menu-btn { width: 16px; height: 16px; font-size: 10px; }
 .board-density-compact .board-card-subordinate {
-  margin-left: 12px;
+  --board-card-indent-step: 12px;
   padding: 2px 5px;
   min-height: 22px;
 }
 .board-density-detailed .board-card-subordinate {
-  margin-left: 20px;
+  --board-card-indent-step: 20px;
   padding: 5px 8px;
   min-height: 30px;
 }

@@ -1830,6 +1830,76 @@ test('_renderBoardCard hides redundant group chips and only shows execution badg
   assert.equal((html.match(/board-card-health-stalled/g) || []).length, 1);
 });
 
+test('_renderBoardCard caps subordinate indentation at depth 3', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadBoardScripts(context);
+
+  context.state.board_tasks = {
+    root: {
+      id: 'root',
+      group: 'alpha',
+      task: 'Root task',
+      lane: 'Backlog',
+      position: 5,
+    },
+    child1: {
+      id: 'child1',
+      group: 'alpha',
+      task: 'Depth 1 child',
+      lane: 'Backlog',
+      position: 4,
+      parent_task_id: 'root',
+      pipeline_depth: 1,
+    },
+    child2: {
+      id: 'child2',
+      group: 'alpha',
+      task: 'Depth 2 child',
+      lane: 'Backlog',
+      position: 3,
+      parent_task_id: 'child1',
+      pipeline_depth: 2,
+    },
+    child3: {
+      id: 'child3',
+      group: 'alpha',
+      task: 'Depth 3 child',
+      lane: 'Backlog',
+      position: 2,
+      parent_task_id: 'child2',
+      pipeline_depth: 3,
+    },
+    child4: {
+      id: 'child4',
+      group: 'alpha',
+      task: 'Depth 4 child',
+      lane: 'Backlog',
+      position: 1,
+      parent_task_id: 'child3',
+      pipeline_depth: 4,
+    },
+  };
+
+  const html = runInContext(context, `
+    _renderBoardCard(
+      state.board_tasks.root,
+      {
+        root: [state.board_tasks.child1],
+        child1: [state.board_tasks.child2],
+        child2: [state.board_tasks.child3],
+        child3: [state.board_tasks.child4],
+      },
+      0
+    )
+  `);
+
+  assert.match(html, /data-task-id="child1"[^>]*data-indent-level="1"[^>]*--board-card-indent-level:1/);
+  assert.match(html, /data-task-id="child2"[^>]*data-indent-level="2"[^>]*--board-card-indent-level:2/);
+  assert.match(html, /data-task-id="child3"[^>]*data-indent-level="3"[^>]*--board-card-indent-level:3/);
+  assert.match(html, /data-task-id="child4"[^>]*data-indent-level="3"[^>]*--board-card-indent-level:3/);
+});
+
 test('_boardLaneEntryText and refresh delay track the current lane age', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);

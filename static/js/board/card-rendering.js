@@ -120,6 +120,12 @@ function _boardVisibleLaneEntryRefreshDelay(rootTasks, childrenOf, renderCap) {
   return nextDelay;
 }
 
+function _boardCardIndentLevel(depth) {
+  var level = Number(depth) || 0;
+  if (level < 1) return 0;
+  return Math.min(level, 3);
+}
+
 function _boardStaleDoneTaskIds() {
   var tasks = _boardScopedTasks(false);
   var cutoff = Date.now() - (_boardArchiveStaleDays * 24 * 60 * 60 * 1000);
@@ -598,6 +604,7 @@ function _renderBoardArchiveSuggestion(lane) {
 
 function _renderBoardCard(t, childrenOf, depth) {
   var isSubordinate = depth > 0;
+  var indentLevel = _boardCardIndentLevel(depth);
   var hasChildren = childrenOf[t.id] && childrenOf[t.id].length > 0;
   var showExecutionState = isSubordinate || !hasChildren;
   var isCollapsed = _boardCollapsedTasks[t.id];
@@ -609,8 +616,14 @@ function _renderBoardCard(t, childrenOf, depth) {
   var quickOpen = _boardQuickEditTask === t.id ? ' board-card-quick-open' : '';
   var subClass = isSubordinate ? ' board-card-subordinate' : '';
   var doneClass = (isSubordinate && isDone) ? ' board-card-done' : '';
+  var indentAttrs = isSubordinate
+    ? ' data-depth="' + depth + '"'
+      + ' data-indent-level="' + indentLevel + '"'
+      + ' style="--board-card-indent-level:' + indentLevel + '"'
+    : '';
   var cardHtml = '<div class="board-card' + focused + selected + hovered + quickOpen + subClass + doneClass + '"'
     + ' data-task-id="' + t.id + '"'
+    + indentAttrs
     + ' draggable="true"'
     + ' ondragstart="boardCardDragStart(event,\'' + t.id + '\')"'
     + ' ondragend="boardCardDragEnd(event)"'
