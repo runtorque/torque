@@ -94,20 +94,17 @@ def compute_worktree_streams(state, *, group: str = "",
         if getattr(task, "id", "")
     }
     children_by_parent: dict[str, set[str]] = defaultdict(set)
-    root_to_task_ids: dict[str, set[str]] = defaultdict(set)
     boundary_task_to_stream_key: dict[str, str] = {}
     boundary_to_successors: dict[str, set[str]] = defaultdict(set)
     seeds_by_stream_key: dict[str, set[str]] = defaultdict(set)
     agent_ids_by_stream_key: dict[str, set[str]] = defaultdict(set)
+    agent_stream_key_by_id: dict[str, str] = {}
 
     for task in tasks:
         task_id = getattr(task, "id", "") or ""
         parent_id = getattr(task, "parent_task_id", "") or ""
         if parent_id:
             children_by_parent[parent_id].add(task_id)
-        root_id = _root_task_id(task)
-        if root_id:
-            root_to_task_ids[root_id].add(task_id)
 
         key = task_branch_key(task)
         if key:
@@ -131,10 +128,22 @@ def compute_worktree_streams(state, *, group: str = "",
             continue
         repo_root, branch = identity
         key = branch_key(repo_root, branch)
+        agent_stream_key_by_id[cell.id] = key
         agent_ids_by_stream_key[key].add(cell.id)
         current_task_id = str(getattr(cell, "current_task_id", "") or "").strip()
         if current_task_id in tasks_by_id:
             seeds_by_stream_key[key].add(current_task_id)
+
+    task_explicit_stream_keys = _build_task_explicit_stream_keys(
+        tasks=tasks,
+        boundary_task_to_stream_key=boundary_task_to_stream_key,
+        agent_stream_key_by_id=agent_stream_key_by_id,
+    )
+    task_descendant_stream_keys = _build_task_descendant_stream_keys(
+        tasks_by_id=tasks_by_id,
+        children_by_parent=children_by_parent,
+        task_explicit_stream_keys=task_explicit_stream_keys,
+    )
 
     for task in tasks:
         reply_agent_id = str(getattr(task, "reply_agent_id", "") or "").strip()
@@ -157,10 +166,12 @@ def compute_worktree_streams(state, *, group: str = "",
         repo_root, branch = key.split("::", 1)
         member_ids = _expand_stream_task_ids(
             seed_ids=seeds_by_stream_key[key],
+            target_stream_key=key,
             tasks_by_id=tasks_by_id,
             children_by_parent=children_by_parent,
-            root_to_task_ids=root_to_task_ids,
             boundary_to_successors=boundary_to_successors,
+            task_explicit_stream_keys=task_explicit_stream_keys,
+            task_descendant_stream_keys=task_descendant_stream_keys,
         )
         if not member_ids:
             continue
@@ -203,9 +214,10 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
     }
     if task_ids is None:
         children_by_parent: dict[str, set[str]] = defaultdict(set)
-        root_to_task_ids: dict[str, set[str]] = defaultdict(set)
         boundary_to_successors: dict[str, set[str]] = defaultdict(set)
+        boundary_task_to_stream_key: dict[str, str] = {}
         boundary_ids: set[str] = set()
+        agent_stream_key_by_id: dict[str, str] = {}
         task_ids = set()
 
         for task in tasks_by_id.values():
@@ -213,10 +225,10 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
             parent_id = getattr(task, "parent_task_id", "") or ""
             if parent_id:
                 children_by_parent[parent_id].add(task_id)
-            root_id = _root_task_id(task)
-            if root_id:
-                root_to_task_ids[root_id].add(task_id)
-            if task_branch_key(task) == branch_key(repo_root, branch):
+            task_key = task_branch_key(task)
+            if task_key:
+                boundary_task_to_stream_key[task_id] = task_key
+            if task_key == branch_key(repo_root, branch):
                 boundary_ids.add(task_id)
                 task_ids.add(task_id)
 
@@ -235,7 +247,12 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
                 continue
             if group and getattr(cell, "group", "") != group:
                 continue
-            if stream_identity_for_agent(cell) != (repo_root, branch):
+            identity = stream_identity_for_agent(cell)
+            if not identity:
+                continue
+            key = branch_key(*identity)
+            agent_stream_key_by_id[cell.id] = key
+            if identity != (repo_root, branch):
                 continue
             inferred_stream_agent_ids.add(cell.id)
             current_task_id = str(getattr(cell, "current_task_id", "") or "").strip()
@@ -248,13 +265,25 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
             if getattr(task, "reply_agent_id", "") in inferred_stream_agent_ids:
                 task_ids.add(task.id)
 
+        task_explicit_stream_keys = _build_task_explicit_stream_keys(
+            tasks=tasks_by_id.values(),
+            boundary_task_to_stream_key=boundary_task_to_stream_key,
+            agent_stream_key_by_id=agent_stream_key_by_id,
+        )
+        task_descendant_stream_keys = _build_task_descendant_stream_keys(
+            tasks_by_id=tasks_by_id,
+            children_by_parent=children_by_parent,
+            task_explicit_stream_keys=task_explicit_stream_keys,
+        )
         stream_agent_ids = inferred_stream_agent_ids
         task_ids = _expand_stream_task_ids(
             seed_ids=task_ids,
+            target_stream_key=branch_key(repo_root, branch),
             tasks_by_id=tasks_by_id,
             children_by_parent=children_by_parent,
-            root_to_task_ids=root_to_task_ids,
             boundary_to_successors=boundary_to_successors,
+            task_explicit_stream_keys=task_explicit_stream_keys,
+            task_descendant_stream_keys=task_descendant_stream_keys,
         )
     stream_tasks = [
         tasks_by_id[task_id]
@@ -392,6 +421,9 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         repo_root=repo_root,
         branch=branch,
         stream_agent_ids=stream_agent_ids or set(),
+        latest_boundary=latest_boundary,
+        latest_review_boundary=latest_review_boundary,
+        foreground_task=foreground_task,
     )
     visibility_items = _recent_visibility_items(
         stream_tasks,
@@ -481,10 +513,12 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
     }
 
 
-def _expand_stream_task_ids(*, seed_ids: set[str], tasks_by_id: dict[str, Any],
+def _expand_stream_task_ids(*, seed_ids: set[str], target_stream_key: str,
+                            tasks_by_id: dict[str, Any],
                             children_by_parent: dict[str, set[str]],
-                            root_to_task_ids: dict[str, set[str]],
-                            boundary_to_successors: dict[str, set[str]]
+                            boundary_to_successors: dict[str, set[str]],
+                            task_explicit_stream_keys: dict[str, set[str]],
+                            task_descendant_stream_keys: dict[str, set[str]]
                             ) -> set[str]:
     queue = [task_id for task_id in seed_ids if task_id in tasks_by_id]
     seen: set[str] = set()
@@ -500,14 +534,34 @@ def _expand_stream_task_ids(*, seed_ids: set[str], tasks_by_id: dict[str, Any],
             getattr(task, "pipeline_root_id", "") or "",
             getattr(task, "resume_after_boundary_task_id", "") or "",
         ):
-            if related_id and related_id in tasks_by_id:
+            if (
+                related_id
+                and related_id in tasks_by_id
+                and _task_matches_stream(
+                    related_id,
+                    target_stream_key=target_stream_key,
+                    task_explicit_stream_keys=task_explicit_stream_keys,
+                    task_descendant_stream_keys=task_descendant_stream_keys,
+                )
+            ):
                 queue.append(related_id)
 
-        root_id = _root_task_id(task)
-        if root_id:
-            queue.extend(root_to_task_ids.get(root_id, ()))
-        queue.extend(children_by_parent.get(task_id, ()))
-        queue.extend(boundary_to_successors.get(task_id, ()))
+        for child_id in children_by_parent.get(task_id, ()):
+            if _task_matches_stream(
+                child_id,
+                target_stream_key=target_stream_key,
+                task_explicit_stream_keys=task_explicit_stream_keys,
+                task_descendant_stream_keys=task_descendant_stream_keys,
+            ):
+                queue.append(child_id)
+        for successor_id in boundary_to_successors.get(task_id, ()):
+            if _task_matches_stream(
+                successor_id,
+                target_stream_key=target_stream_key,
+                task_explicit_stream_keys=task_explicit_stream_keys,
+                task_descendant_stream_keys=task_descendant_stream_keys,
+            ):
+                queue.append(successor_id)
     return seen
 
 
@@ -647,7 +701,9 @@ def _select_foreground_task(state, *, branch: str, repo_root: str,
 
 
 def _select_owner_agent(state, *, stream_tasks: list[Any], repo_root: str,
-                        branch: str, stream_agent_ids: set[str]):
+                        branch: str, stream_agent_ids: set[str],
+                        latest_boundary=None, latest_review_boundary=None,
+                        foreground_task=None):
     candidate_ids = set(stream_agent_ids or set())
     for task in stream_tasks:
         for agent_id in (
@@ -668,16 +724,47 @@ def _select_owner_agent(state, *, stream_tasks: list[Any], repo_root: str,
         return None
 
     stream_task_ids = {task.id for task in stream_tasks}
+    latest_mutable_boundary = _latest_mutable_boundary_task(
+        stream_tasks,
+        latest_boundary=latest_boundary,
+        latest_review_boundary=latest_review_boundary,
+    )
+    preferred_current_owner_id = _preferred_owner_agent_id(
+        stream_tasks,
+        latest_mutable_boundary=latest_mutable_boundary,
+        foreground_task=foreground_task,
+    )
+    mutable_task_ids = {
+        task.id for task in stream_tasks
+        if _is_mutable_task(task)
+    }
 
     def _sort_key(cell):
         identity = stream_identity_for_agent(cell)
         current = state.agent_current_task(cell.id)
         current_id = getattr(current, "id", "") if current else ""
+        current_mutable = bool(current_id and current_id in mutable_task_ids)
+        linked_mutable = any(
+            str(getattr(task, "agent_id", "") or "").strip() == cell.id
+            and _is_mutable_task(task)
+            for task in stream_tasks
+        )
+        boundary_owner = bool(
+            latest_mutable_boundary
+            and str(
+                task_boundary(latest_mutable_boundary).get("recorded_by_agent_id", "")
+                or ""
+            ).strip() == cell.id
+        )
         return (
-            0 if current_id in stream_task_ids else 1,
-            0 if state.agent_is_busy(cell.id) else 1,
+            0 if cell.id == preferred_current_owner_id else 1,
+            0 if boundary_owner else 1,
+            0 if current_mutable else 1,
+            0 if linked_mutable else 1,
             0 if identity == (repo_root, branch) else 1,
+            0 if current_id in stream_task_ids else 1,
             0 if getattr(cell, "status", "") == "running" else 1,
+            0 if state.agent_is_busy(cell.id) and current_mutable else 1,
             -float(getattr(cell, "last_event_at", 0.0) or 0.0),
             str(getattr(cell, "name", "") or "").lower(),
             cell.id,
@@ -685,6 +772,127 @@ def _select_owner_agent(state, *, stream_tasks: list[Any], repo_root: str,
 
     candidates.sort(key=_sort_key)
     return candidates[0]
+
+
+def _build_task_explicit_stream_keys(*, tasks, boundary_task_to_stream_key: dict[str, str],
+                                     agent_stream_key_by_id: dict[str, str]
+                                     ) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = {}
+    for task in tasks:
+        task_id = getattr(task, "id", "") or ""
+        if not task_id:
+            continue
+        keys = set()
+        direct_key = task_branch_key(task)
+        if direct_key:
+            keys.add(direct_key)
+        resume_after = str(getattr(task, "resume_after_boundary_task_id", "") or "").strip()
+        if resume_after and resume_after in boundary_task_to_stream_key:
+            keys.add(boundary_task_to_stream_key[resume_after])
+        for agent_id in (
+            str(getattr(task, "agent_id", "") or "").strip(),
+            str(getattr(task, "reply_agent_id", "") or "").strip(),
+        ):
+            key = agent_stream_key_by_id.get(agent_id, "")
+            if key:
+                keys.add(key)
+        out[task_id] = keys
+    return out
+
+
+def _build_task_descendant_stream_keys(*, tasks_by_id: dict[str, Any],
+                                       children_by_parent: dict[str, set[str]],
+                                       task_explicit_stream_keys: dict[str, set[str]]
+                                       ) -> dict[str, set[str]]:
+    cache: dict[str, set[str]] = {}
+
+    def _collect(task_id: str) -> set[str]:
+        if task_id in cache:
+            return set(cache[task_id])
+        keys = set(task_explicit_stream_keys.get(task_id, set()))
+        for child_id in children_by_parent.get(task_id, ()):
+            if child_id not in tasks_by_id:
+                continue
+            keys.update(_collect(child_id))
+        cache[task_id] = set(keys)
+        return set(keys)
+
+    for task_id in tasks_by_id:
+        _collect(task_id)
+    return cache
+
+
+def _task_matches_stream(task_id: str, *, target_stream_key: str,
+                         task_explicit_stream_keys: dict[str, set[str]],
+                         task_descendant_stream_keys: dict[str, set[str]]) -> bool:
+    explicit_keys = task_explicit_stream_keys.get(task_id, set())
+    if explicit_keys:
+        return target_stream_key in explicit_keys
+    descendant_keys = task_descendant_stream_keys.get(task_id, set())
+    if descendant_keys:
+        return target_stream_key in descendant_keys
+    return True
+
+
+def _latest_mutable_boundary_task(stream_tasks: list[Any], *,
+                                  latest_boundary=None, latest_review_boundary=None):
+    if latest_boundary and _is_mutable_task(latest_boundary):
+        return latest_boundary
+    if latest_review_boundary and latest_review_boundary in stream_tasks:
+        prior = [
+            task for task in stream_tasks
+            if task_boundary(task)
+            and _is_mutable_task(task)
+            and _task_activity_ts(task) <= _task_activity_ts(latest_review_boundary)
+        ]
+        prior = _sort_tasks(prior)
+        if prior:
+            return prior[-1]
+    boundaries = _sort_tasks(
+        task for task in stream_tasks
+        if task_boundary(task) and _is_mutable_task(task)
+    )
+    return boundaries[-1] if boundaries else None
+
+
+def _preferred_owner_agent_id(stream_tasks: list[Any], *, latest_mutable_boundary=None,
+                              foreground_task=None) -> str:
+    if foreground_task and _is_mutable_task(foreground_task):
+        agent_id = str(getattr(foreground_task, "agent_id", "") or "").strip()
+        if agent_id:
+            return agent_id
+    if latest_mutable_boundary:
+        boundary_agent_id = str(
+            task_boundary(latest_mutable_boundary).get("recorded_by_agent_id", "") or ""
+        ).strip()
+        if boundary_agent_id:
+            return boundary_agent_id
+    mutable_tasks = _sort_open_tasks(
+        task for task in stream_tasks
+        if _is_mutable_task(task)
+    )
+    for task in mutable_tasks:
+        agent_id = str(getattr(task, "agent_id", "") or "").strip()
+        if agent_id:
+            return agent_id
+    historical_tasks = _sort_tasks(
+        task for task in stream_tasks
+        if _is_mutable_task(task)
+    )
+    for task in reversed(historical_tasks):
+        agent_id = str(getattr(task, "agent_id", "") or "").strip()
+        if agent_id:
+            return agent_id
+    return ""
+
+
+def _is_mutable_task(task) -> bool:
+    return (
+        bool(task)
+        and not _is_visibility_task(task)
+        and not _is_review_task(task)
+        and not _is_validation_task(task)
+    )
 
 
 def _compute_validation_state(tasks: list[Any]) -> tuple[str, dict]:

@@ -411,3 +411,176 @@ class WorktreeStreamTests(unittest.TestCase):
             "Reprioritized blocker fix before queued work",
         )
 
+    def test_compute_streams_keeps_branch_membership_local_when_pipeline_root_spans_branches(self):
+        state = self._make_state()
+        agent_a = self._add_agent(
+            state,
+            agent_id="agent-a",
+            branch="loom/branch-a",
+            status="idle",
+        )
+        agent_b = self._add_agent(
+            state,
+            agent_id="agent-b",
+            branch="loom/branch-b",
+            status="idle",
+        )
+
+        root = self._task("LOOM:1", "Shared product root")
+        review_a = self._task(
+            "LOOM:1:1",
+            "Review branch A",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            created_at="2026-04-07T11:00:00+00:00",
+            updated_at="2026-04-07T11:05:00+00:00",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/branch-a",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:05:00+00:00",
+                "commit_sha": "aaa111",
+                "recorded_by_agent_id": agent_a.id,
+            },
+        )
+        visibility_a = self._task(
+            "LOOM:1:2",
+            "Weaver: branch A note",
+            lane="Done",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            reply_agent_id=agent_a.id,
+            labels=["loom:weaver-message"],
+            created_at="2026-04-07T11:06:00+00:00",
+            updated_at="2026-04-07T11:06:00+00:00",
+            messages=[
+                {
+                    "timestamp": _ts("2026-04-07T11:06:00+00:00"),
+                    "action": "weaver_message",
+                    "message": "Branch A note",
+                    "agent_name": "Weaver",
+                }
+            ],
+        )
+        review_b = self._task(
+            "LOOM:1:3",
+            "Review branch B",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            created_at="2026-04-07T12:00:00+00:00",
+            updated_at="2026-04-07T12:05:00+00:00",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/branch-b",
+                "status": "open",
+                "recorded_at": "2026-04-07T12:05:00+00:00",
+                "commit_sha": "bbb222",
+                "recorded_by_agent_id": agent_b.id,
+            },
+        )
+        visibility_b = self._task(
+            "LOOM:1:4",
+            "Weaver: branch B note",
+            lane="Done",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            reply_agent_id=agent_b.id,
+            labels=["loom:weaver-message"],
+            created_at="2026-04-07T12:06:00+00:00",
+            updated_at="2026-04-07T12:06:00+00:00",
+            messages=[
+                {
+                    "timestamp": _ts("2026-04-07T12:06:00+00:00"),
+                    "action": "weaver_message",
+                    "message": "Branch B note",
+                    "agent_name": "Weaver",
+                }
+            ],
+        )
+        for task in (root, review_a, visibility_a, review_b, visibility_b):
+            state.board_tasks[task.id] = task
+
+        streams = {
+            stream["branch"]: stream
+            for stream in self.streams_mod.compute_worktree_streams(state)
+        }
+
+        self.assertEqual(set(streams), {"loom/branch-a", "loom/branch-b"})
+        self.assertEqual(streams["loom/branch-a"]["workflow_task_ids"], [review_a.id])
+        self.assertEqual(
+            [item["summary"] for item in streams["loom/branch-a"]["recent_visibility_items"]],
+            ["Branch A note"],
+        )
+        self.assertEqual(streams["loom/branch-b"]["workflow_task_ids"], [review_b.id])
+        self.assertEqual(
+            [item["summary"] for item in streams["loom/branch-b"]["recent_visibility_items"]],
+            ["Branch B note"],
+        )
+
+    def test_owner_agent_prefers_branch_implementation_owner_over_busy_reviewer(self):
+        state = self._make_state()
+        impl_agent = self._add_agent(
+            state,
+            agent_id="impl-agent",
+            branch="loom/worker",
+            status="idle",
+            last_event_at="2026-04-07T12:10:00+00:00",
+        )
+        review_agent = self._add_agent(
+            state,
+            agent_id="review-agent",
+            branch="loom/worker",
+            current_task_id="LOOM:1:1",
+            status="running",
+            last_event_at="2026-04-07T12:20:00+00:00",
+        )
+
+        product = self._task(
+            "LOOM:1",
+            "Add Events tab",
+            lane="Done",
+            agent_id=impl_agent.id,
+            updated_at="2026-04-07T11:00:00+00:00",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:00:00+00:00",
+                "commit_sha": "impl123",
+                "recorded_by_agent_id": impl_agent.id,
+            },
+        )
+        review = self._task(
+            "LOOM:1:1",
+            "Review Events implementation",
+            lane="In Progress",
+            action_name="feature/review",
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+            agent_id=review_agent.id,
+            created_at="2026-04-07T11:30:00+00:00",
+            updated_at="2026-04-07T12:15:00+00:00",
+        )
+        state.board_tasks[product.id] = product
+        state.board_tasks[review.id] = review
+
+        stream = self.streams_mod.compute_worktree_stream(
+            state,
+            repo_root="/repo",
+            branch="loom/worker",
+        )
+
+        self.assertEqual(stream["state"], "reviewing")
+        self.assertEqual(stream["foreground_task_id"], review.id)
+        self.assertEqual(stream["agent_id"], impl_agent.id)
+        self.assertEqual(stream["agent_name"], impl_agent.name)
