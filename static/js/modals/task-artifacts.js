@@ -584,6 +584,30 @@ function openTaskArtifactBrowser(taskId) {
   document.getElementById('modal-task-artifacts').classList.add('visible');
 }
 
+function _findTaskArtifact(taskId, artifactId) {
+  if (!taskId || !artifactId) return null;
+  var tasks = (state && state.board_tasks) || {};
+  var task = tasks[taskId];
+  if (!task) return null;
+  var artifacts = _taskArtifactsCombined(task);
+  for (var i = 0; i < artifacts.length; i++) {
+    if ((artifacts[i].id || '') === artifactId) return artifacts[i];
+  }
+  return null;
+}
+
+function openTaskArtifactById(taskId, artifactId) {
+  var artifact = _findTaskArtifact(taskId, artifactId);
+  if (!artifact) return false;
+  var url = _artifactFileUrl(taskId, artifact);
+  if (url) {
+    window.open(url);
+    return true;
+  }
+  openTaskArtifactBrowser(taskId);
+  return true;
+}
+
 /* -- Task modal: attachment helpers -------------------------------------- */
 
 function _generateDraftId() {

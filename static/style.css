@@ -710,6 +710,30 @@ body.runtime-embedded .terminal-empty {
   display: flex; align-items: baseline; gap: 8px;
   padding: 1px 0;
 }
+.detail-row-button {
+  width: 100%;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.detail-row-clickable {
+  border-radius: 4px;
+}
+.detail-row-clickable:hover {
+  background: var(--bg-hover);
+}
+.detail-row-button:focus-visible,
+.detail-inline-toggle:focus-visible,
+.detail-link-arrow:focus-visible,
+.mcp-entry-toggle:focus-visible,
+.detail-wt-tag-button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
 .detail-label {
   font-size: 9px; color: var(--text-dim);
   flex-shrink: 0; width: 62px;
@@ -729,15 +753,92 @@ body.runtime-embedded .terminal-empty {
 .detail-wt-merged {
   color: var(--green); background: rgba(63,185,80,.12);
 }
+.detail-wt-tag-button {
+  border: none;
+  cursor: pointer;
+}
 .detail-dir { color: var(--text-dim); }
 .detail-ahead { color: var(--green); font-size: 9px; }
 .detail-behind { color: var(--amber); font-size: 9px; }
 .detail-ins { color: var(--green); }
 .detail-del { color: var(--red); }
 .detail-row-task { align-items: baseline; }
+.detail-row-expanded { align-items: flex-start; }
 .detail-task {
   white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis;
+}
+.detail-val-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+.detail-inline-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.detail-inline-toggle {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.detail-inline-toggle:hover {
+  background: var(--bg-hover);
+}
+.detail-task-summary {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.detail-expand-caret {
+  font-size: 9px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.detail-link-arrow {
+  margin: 0;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--accent);
+  opacity: .7;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.detail-link-arrow:hover {
+  opacity: 1;
+}
+.detail-expand-body {
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  padding: 5px 6px;
+  border-radius: 4px;
+  background: var(--bg);
+}
+.detail-expand-title {
+  color: var(--text);
+}
+.detail-expand-description {
+  margin-top: 4px;
+  color: var(--text-dim);
 }
 .detail-task-action {
   font-size: 8px; color: var(--accent);
@@ -773,12 +874,40 @@ body.runtime-embedded .terminal-empty {
   font-size: 9px; line-height: 14px;
   padding: 0 0;
 }
+.mcp-entry-toggle {
+  width: 100%;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  border-radius: 4px;
+}
+.mcp-entry-toggle.mcp-clickable {
+  cursor: pointer;
+}
+.mcp-entry-toggle.mcp-clickable:hover {
+  background: var(--bg-hover);
+}
 .mcp-icon { flex-shrink: 0; width: 12px; text-align: center; }
 .mcp-text {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mcp-time { color: var(--text-dim); flex-shrink: 0; font-size: 8px; }
+.mcp-entry-expanded {
+  margin: 2px 0 0 16px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 9px;
+  line-height: 1.35;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .mcp-done .mcp-icon, .mcp-ready .mcp-icon { color: var(--green); }
 .mcp-blocked .mcp-icon { color: var(--amber); }
 .mcp-error .mcp-icon { color: var(--red); }
