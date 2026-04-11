@@ -411,6 +411,7 @@ function boardQuickAddLabel(taskId) {
   var labels = (task.labels || []).slice();
   if (labels.indexOf(label) < 0) {
     labels.push(label);
+    task.labels = labels.slice();
     send({ cmd: 'board_update_task', id: taskId, labels: labels });
     _boardQuickLabelDraft = '';
   }
@@ -420,10 +421,12 @@ function boardQuickAddLabel(taskId) {
 function boardQuickRemoveLabel(taskId, label) {
   var task = _boardTasks()[taskId];
   if (!task) return;
+  var labels = (task.labels || []).filter(function(item) { return item !== label; });
+  task.labels = labels.slice();
   send({
     cmd: 'board_update_task',
     id: taskId,
-    labels: (task.labels || []).filter(function(item) { return item !== label; })
+    labels: labels
   });
   _boardKeepQuickEditOpen(taskId, 'labels');
 }
