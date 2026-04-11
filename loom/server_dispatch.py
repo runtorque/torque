@@ -237,6 +237,62 @@ async def _maybe_auto_resume_stream(state: MatrixState, handle_command,
     }
 
 
+def _capture_auto_resume_targets(state: MatrixState, *, task=None,
+                                 group: str = "") -> list[dict]:
+    """Snapshot affected streams before a mutation that may clear gates/deps."""
+    targets = []
+    seen_stream_ids: set[str] = set()
+
+    def _append_target(candidate):
+        if not candidate or task_is_closed(candidate):
+            return
+        stream = compute_worktree_stream_for_task(
+            state,
+            getattr(candidate, "id", "") or "",
+            group=group or getattr(candidate, "group", "") or "",
+        )
+        if not stream:
+            return
+        stream_id = str(stream.get("stream_id", "") or "").strip()
+        if not stream_id or stream_id in seen_stream_ids:
+            return
+        seen_stream_ids.add(stream_id)
+        targets.append({
+            "task_id": getattr(candidate, "id", "") or "",
+            "group": getattr(candidate, "group", "") or group,
+            "previous_stream": stream,
+        })
+
+    _append_target(task)
+    if task:
+        for dependent in state.board_get_dependents(getattr(task, "id", "") or ""):
+            _append_target(dependent)
+    return targets
+
+
+async def _maybe_auto_resume_targets(state: MatrixState, handle_command,
+                                     panel_event, *, targets: list[dict] | None = None,
+                                     group: str = "") -> list[dict]:
+    """Try stream auto-resume across a set of pre-snapshotted stream members."""
+    results = []
+    for item in targets or []:
+        task_id = str((item or {}).get("task_id", "") or "").strip()
+        if not task_id:
+            continue
+        task = state.board_tasks.get(task_id)
+        result = await _maybe_auto_resume_stream(
+            state,
+            handle_command,
+            panel_event,
+            task=task,
+            previous_stream=(item or {}).get("previous_stream"),
+            group=str((item or {}).get("group", "") or group).strip(),
+        )
+        if result:
+            results.append(result)
+    return results
+
+
 async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
                                     panel_event, *, group: str = "") -> list:
     """Dispatch queued tasks when concurrency allows."""

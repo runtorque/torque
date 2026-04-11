@@ -94,8 +94,9 @@ from .server_agent import (
     _startup_prompt_for_new_agent,
 )
 from .server_dispatch import (
+    _capture_auto_resume_targets,
     _find_active_worktree_owner,
-    _maybe_auto_resume_stream,
+    _maybe_auto_resume_targets,
     _pump_auto_dispatch_queue,
     _scheduler_loop,
     _should_handoff_shared_worktree,
@@ -107,7 +108,6 @@ from .server_worktrees import (
     _worktree_full_diff,
     _worktree_merge_diff_snapshot,
 )
-from .worktree_streams import compute_worktree_stream_for_task
 
 
 def _should_install_keybindings() -> bool:
@@ -420,6 +420,37 @@ def _find_reusable_review_fix_task(state: MatrixState, task,
         )
     )
     return candidates[0] if candidates else None
+
+
+def _merge_reused_task_description(existing: str, incoming: str) -> str:
+    existing = str(existing or "").strip()
+    incoming = str(incoming or "").strip()
+    if not incoming:
+        return existing
+    if not existing or existing == incoming:
+        return incoming
+    if incoming in existing:
+        return existing
+    return existing + "\n\n" + incoming
+
+
+def _refresh_reused_derived_task(task, *, message: str,
+                                 description: str = "",
+                                 action_vars: dict | None = None) -> None:
+    """Update a reused derived task so follow-up prompts use fresh guidance."""
+    if not task:
+        return
+    message = str(message or "").strip()
+    if message:
+        task.task = message
+    task.description = _merge_reused_task_description(
+        getattr(task, "description", "") or "",
+        description,
+    )
+    if action_vars:
+        merged_vars = dict(getattr(task, "action_vars", {}) or {})
+        merged_vars.update(action_vars)
+        task.action_vars = merged_vars
 
 
 def _append_mcp_message(cell, action: str, message: str = ""):
@@ -3380,13 +3411,11 @@ async def main(connection=None):
             elif cmd == "board_update_task":
                 tid = _resolve_task_id(state, data.get("id", ""))
                 _update_task = state.board_tasks.get(tid)
-                _update_previous_stream = None
-                if _update_task:
-                    _update_previous_stream = compute_worktree_stream_for_task(
-                        state,
-                        _update_task.id,
-                        group=_update_task.group,
-                    )
+                _update_resume_targets = _capture_auto_resume_targets(
+                    state,
+                    task=_update_task,
+                    group=_update_task.group if _update_task else "",
+                )
                 fields = {k: v for k, v in data.items()
                           if k not in ("cmd", "id")}
                 if {"provider", "external_id", "external_url"} & set(fields):
@@ -3412,16 +3441,13 @@ async def main(connection=None):
                         await handle_command({
                             "cmd": "dispatch_task",
                             "id": tid, "agent_id": _new_aid})
-                _updated_task = state.board_tasks.get(tid)
-                if _updated_task:
-                    await _maybe_auto_resume_stream(
-                        state,
-                        handle_command,
-                        _panel_event,
-                        task=_updated_task,
-                        previous_stream=_update_previous_stream,
-                        group=_updated_task.group,
-                    )
+                await _maybe_auto_resume_targets(
+                    state,
+                    handle_command,
+                    _panel_event,
+                    targets=_update_resume_targets,
+                    group=_update_task.group if _update_task else "",
+                )
 
             elif cmd == "board_verify_task":
                 tid = _resolve_task_id(state, data.get("id", ""))
@@ -3429,9 +3455,9 @@ async def main(connection=None):
                 if not task:
                     result = {"type": "error", "message": "Task not found"}
                 else:
-                    previous_stream = compute_worktree_stream_for_task(
+                    resume_targets = _capture_auto_resume_targets(
                         state,
-                        task.id,
+                        task=task,
                         group=task.group,
                     )
                     actor_name = str(
@@ -3484,12 +3510,11 @@ async def main(connection=None):
                         "task_id": task.id,
                         "message": verify_msg,
                     }
-                    await _maybe_auto_resume_stream(
+                    await _maybe_auto_resume_targets(
                         state,
                         handle_command,
                         _panel_event,
-                        task=task,
-                        previous_stream=previous_stream,
+                        targets=resume_targets,
                         group=task.group,
                     )
 
@@ -3743,13 +3768,11 @@ async def main(connection=None):
             elif cmd == "board_move_task":
                 _mv_id = _resolve_task_id(state, data.get("id", ""))
                 _mv_task = state.board_tasks.get(_mv_id)
-                _mv_previous_stream = None
-                if _mv_task:
-                    _mv_previous_stream = compute_worktree_stream_for_task(
-                        state,
-                        _mv_task.id,
-                        group=_mv_task.group,
-                    )
+                _mv_resume_targets = _capture_auto_resume_targets(
+                    state,
+                    task=_mv_task,
+                    group=_mv_task.group if _mv_task else "",
+                )
                 _mv_done_before = task_counts_as_done(_mv_task)
                 _mv_new = data.get("lane", "")
                 state.board_move_task(
@@ -3766,15 +3789,13 @@ async def main(connection=None):
                                 "blocked again (dependency "
                                 "moved out of Done)",
                                 task_id=_dt.id)
-                if _mv_task_after:
-                    await _maybe_auto_resume_stream(
-                        state,
-                        handle_command,
-                        _panel_event,
-                        task=_mv_task_after,
-                        previous_stream=_mv_previous_stream,
-                        group=_mv_task_after.group,
-                    )
+                await _maybe_auto_resume_targets(
+                    state,
+                    handle_command,
+                    _panel_event,
+                    targets=_mv_resume_targets,
+                    group=_mv_task_after.group if _mv_task_after else "",
+                )
 
             elif cmd == "board_reorder_task":
                 state.board_reorder_task(
@@ -4799,13 +4820,11 @@ async def main(connection=None):
                         cell,
                         task_id=task_id,
                     )
-                    previous_stream = None
-                    if task:
-                        previous_stream = compute_worktree_stream_for_task(
-                            state,
-                            task.id,
-                            group=task.group or cell.group,
-                        )
+                    resume_targets = _capture_auto_resume_targets(
+                        state,
+                        task=task,
+                        group=(task.group if task else cell.group) or "",
+                    )
 
                     def _add_label(t, label):
                         if label not in t.labels:
@@ -4956,12 +4975,11 @@ async def main(connection=None):
                                 "task_completed", cell.id,
                                 cell.name, cell.group,
                                 message or "Task completed")
-                            await _maybe_auto_resume_stream(
+                            await _maybe_auto_resume_targets(
                                 state,
                                 handle_command,
                                 _panel_event,
-                                task=task,
-                                previous_stream=previous_stream,
+                                targets=resume_targets,
                                 group=task.group if task else cell.group,
                             )
                             await _drain_auto_dispatch_queue(
@@ -5068,12 +5086,11 @@ async def main(connection=None):
                                 "task_id": task.id,
                                 "message": verify_msg,
                             }
-                            await _maybe_auto_resume_stream(
+                            await _maybe_auto_resume_targets(
                                 state,
                                 handle_command,
                                 _panel_event,
-                                task=task,
-                                previous_stream=previous_stream,
+                                targets=resume_targets,
                                 group=task.group if task else cell.group,
                             )
 
@@ -5123,12 +5140,11 @@ async def main(connection=None):
                                 "task_completed", cell.id,
                                 cell.name, cell.group,
                                 "Ready (task completed)")
-                            await _maybe_auto_resume_stream(
+                            await _maybe_auto_resume_targets(
                                 state,
                                 handle_command,
                                 _panel_event,
-                                task=task,
-                                previous_stream=previous_stream,
+                                targets=resume_targets,
                                 group=task.group if task else cell.group,
                             )
                             await _drain_auto_dispatch_queue(
@@ -5260,6 +5276,14 @@ async def main(connection=None):
                                             pipeline_root_id=root_id,
                                             description=derive_desc,
                                         )
+                                    elif reused_existing_task:
+                                        _refresh_reused_derived_task(
+                                            new_task,
+                                            message=message,
+                                            description=derive_desc,
+                                            action_vars=act_vars,
+                                        )
+                                        _save_task(new_task)
                                     if new_task:
                                         _append_mcp(
                                             cell, "derive",
