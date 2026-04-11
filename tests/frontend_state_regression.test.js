@@ -4289,6 +4289,87 @@ test('renderWeaverPanel preserves the selected Events tab across rerenders', () 
   assert.match(panel.innerHTML, /Already sent to Weaver/);
 });
 
+test('renderWeaverPanel keeps the same Events anchor visible when new digest rows are inserted above', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-weaver');
+  const oldContent = new FakeElement('weaver-content-old');
+  const newContent = new FakeElement('weaver-content-new');
+  let currentContent = oldContent;
+
+  function makeAnchor(key, top, bottom) {
+    const el = new FakeElement();
+    el.setAttribute('data-weaver-anchor', key);
+    el.getBoundingClientRect = function() {
+      return { top, bottom, left: 0, right: 200, width: 200, height: bottom - top };
+    };
+    return el;
+  }
+
+  oldContent.scrollTop = 100;
+  oldContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 120, left: 0, right: 200, width: 200, height: 120 };
+  };
+  oldContent.querySelectorAll = function(selector) {
+    if (selector === '[data-weaver-anchor]') {
+      return [
+        makeAnchor('sent-2-8', 20, 40),
+        makeAnchor('sent-1-6', 60, 80),
+      ];
+    }
+    return [];
+  };
+
+  newContent.scrollTop = 0;
+  newContent.getBoundingClientRect = function() {
+    return { top: 0, bottom: 120, left: 0, right: 200, width: 200, height: 120 };
+  };
+  newContent.querySelectorAll = function(selector) {
+    if (selector === '[data-weaver-anchor]') {
+      return [
+        makeAnchor('sent-3-10', 10, 30),
+        makeAnchor('sent-2-8', 40, 60),
+        makeAnchor('sent-1-6', 80, 100),
+      ];
+    }
+    return [];
+  };
+
+  panel.querySelector = function(selector) {
+    if (selector === '.weaver-content') return currentContent;
+    return null;
+  };
+  Object.defineProperty(panel, 'innerHTML', {
+    configurable: true,
+    get() {
+      return this._innerHTML || '';
+    },
+    set(value) {
+      this._innerHTML = value;
+      currentContent = newContent;
+    },
+  });
+
+  context.state.weaver_buffer_stats = {
+    alpha: {
+      buffered_events: 0,
+      next_push_in: 0,
+      queued_events: [],
+      manual_flush_requested: false,
+    },
+  };
+  context.state.weaver_sent_events = {
+    alpha: [
+      { id: 2, kind: 'task_completed', message: 'Older digest', timestamp: 5, delivered_at: 8 },
+      { id: 1, kind: 'task_completed', message: 'Oldest digest', timestamp: 4, delivered_at: 6 },
+    ],
+  };
+  runInContext(context, `_weaverActiveTabByGroup.alpha = 'events';`);
+
+  context.renderWeaverPanel();
+
+  assert.equal(newContent.scrollTop, 120);
+});
+
 test('renderAgentCell shows a weaver-only pause control with state-driven classes', () => {
   const { context } = createWeaverHarness();
   context.state.group_settings = {

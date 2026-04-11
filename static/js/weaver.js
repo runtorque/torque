@@ -28,7 +28,7 @@ var _weaverHealthSeverity = {
 function renderWeaverPanel() {
   var el = document.getElementById('panel-weaver');
   if (!el) return;
-  var panelState = _captureSurfaceState(el, {
+  var panelStateOptions = {
     scrollSelectors: ['.weaver-content'],
     captureFocusKey(active) {
       if (active && active.classList
@@ -50,7 +50,8 @@ function renderWeaverPanel() {
         snapshot.anchor
       );
     },
-  });
+  };
+  var panelState = _captureSurfaceState(el, panelStateOptions);
 
   var group = _weaverCurrentGroup();
   var ws = _weaverGetSettings(group);
@@ -90,7 +91,7 @@ function renderWeaverPanel() {
   html += '</div>';
   html += '</div>';
   el.innerHTML = html;
-  _restoreSurfaceState(el, panelState);
+  _restoreSurfaceState(el, panelState, panelStateOptions);
 }
 
 function weaverTogglePause() {
