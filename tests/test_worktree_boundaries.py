@@ -15,7 +15,7 @@ from loom.worktree_boundaries import (
 
 def _task(task_id, lane="Done", *, boundary=None,
           resume_after="", created_at="", updated_at="", labels=None,
-          agent_id="agent-1"):
+          agent_id="agent-1", parent_task_id="", pipeline_root_id=""):
     return SimpleNamespace(
         id=task_id,
         task=f"Task {task_id}",
@@ -27,6 +27,8 @@ def _task(task_id, lane="Done", *, boundary=None,
         updated_at=updated_at,
         worktree_boundary=boundary or {},
         resume_after_boundary_task_id=resume_after,
+        parent_task_id=parent_task_id,
+        pipeline_root_id=pipeline_root_id,
     )
 
 
@@ -258,3 +260,55 @@ class WorktreeBoundaryTests(unittest.TestCase):
         self.assertEqual(queued_followup.labels, ["ready"])
         self.assertEqual(other_branch.worktree_boundary["status"], "open")
         self.assertEqual(other_branch.labels, ["ready"])
+
+    def test_mark_branch_boundaries_merged_marks_pipeline_root_without_boundary(self):
+        root = _task("task-root", lane="In Progress", labels=["ready"])
+        review = _task(
+            "task-review",
+            labels=["reviewed"],
+            parent_task_id="task-root",
+            pipeline_root_id="task-root",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "base_branch": "main",
+                "commit_sha": "abc123",
+                "kind": "checkpoint",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "recorded_by_agent_id": "agent-1",
+                "message": "Review complete",
+                "superseded_by_task_id": "",
+            },
+        )
+        unrelated = _task("task-other", lane="Done", labels=["ready"])
+
+        updated = mark_branch_boundaries_merged(
+            [root, review, unrelated],
+            repo_root="/repo",
+            branch="loom/worker",
+            merge_sha="deadbeef",
+            merged_at="2026-04-07T11:00:00+00:00",
+        )
+
+        self.assertEqual(
+            [task.id for task in updated],
+            ["task-review", "task-root"],
+        )
+        self.assertEqual(root.labels, ["ready", "merged"])
+        self.assertEqual(root.worktree_boundary["status"], "merged")
+        self.assertEqual(root.worktree_boundary["repo_root"], "/repo")
+        self.assertEqual(root.worktree_boundary["branch"], "loom/worker")
+        self.assertEqual(root.worktree_boundary["merge_commit_sha"], "deadbeef")
+        self.assertEqual(
+            root.worktree_boundary["merged_at"],
+            "2026-04-07T11:00:00+00:00",
+        )
+        self.assertEqual(root.worktree_boundary["commit_sha"], "abc123")
+        self.assertEqual(root.worktree_boundary["recorded_at"], "")
+
+        self.assertEqual(review.labels, ["reviewed", "merged"])
+        self.assertEqual(review.worktree_boundary["status"], "merged")
+        self.assertEqual(unrelated.labels, ["ready"])
+        self.assertEqual(unrelated.worktree_boundary, {})
