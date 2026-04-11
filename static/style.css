@@ -4987,6 +4987,194 @@ body.diff-view-open #ctx-menu {
   word-break: break-word;
 }
 
+.weaver-streams-summary {
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.weaver-stream-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.weaver-stream-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.weaver-stream-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.weaver-stream-heading {
+  min-width: 0;
+  flex: 1;
+}
+.weaver-stream-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.weaver-stream-title {
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text);
+}
+.weaver-stream-branch {
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+.weaver-stream-state,
+.weaver-stream-merge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 8px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.weaver-stream-state-implementing,
+.weaver-stream-state-reviewing {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.weaver-stream-state-fixing_blockers {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+}
+.weaver-stream-state-awaiting_human_validation {
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+}
+.weaver-stream-state-ready_to_merge,
+.weaver-stream-merge-ready {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+}
+.weaver-stream-state-merged,
+.weaver-stream-merge-merged {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+}
+.weaver-stream-merge-not_ready,
+.weaver-stream-merge-unknown {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+}
+.weaver-stream-meta-list {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+}
+.weaver-stream-meta-label {
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.weaver-stream-meta-value {
+  min-width: 0;
+  font-size: 10px;
+  color: var(--text);
+  word-break: break-word;
+}
+.weaver-stream-task-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.weaver-stream-task-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.weaver-stream-section-label {
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.weaver-stream-section-label-product { color: var(--accent); }
+.weaver-stream-section-label-workflow { color: var(--amber); }
+.weaver-stream-section-label-context { color: var(--text-dim); }
+.weaver-stream-summary-count,
+.weaver-stream-visibility-more,
+.weaver-stream-empty {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.weaver-stream-task-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.weaver-stream-task-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border-radius: 999px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--text);
+  background: var(--bg-cell);
+}
+.weaver-stream-task-chip-product {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.weaver-stream-task-chip-workflow {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 35%, var(--border));
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+.weaver-stream-task-chip-more {
+  color: var(--text-dim);
+}
+.weaver-stream-visibility-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.weaver-stream-visibility-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.weaver-stream-visibility-kind {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
+}
+.weaver-stream-visibility-text {
+  min-width: 0;
+  font-size: 9px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
 .weaver-health-summary {
   background: var(--bg-cell);
   border: 1px solid var(--border);

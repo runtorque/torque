@@ -182,6 +182,7 @@ function _handleFullState(msg) {
   if (!state.weaver_buffer_stats) state.weaver_buffer_stats = {};
   if (!state.weaver_sent_events) state.weaver_sent_events = {};
   if (!state.weaver_worklog) state.weaver_worklog = {};
+  if (!state.weaver_streams) state.weaver_streams = {};
   _expectedSeq = (msg.seq || 0) + 1;
   // Reset pagination state on full snapshot
   if (typeof _eventsHasMore !== 'undefined') {
@@ -291,6 +292,8 @@ function _deltaSurfaceInvalidations(ops) {
       case 'weaver_buffer_stats':
       case 'weaver_sent_events':
       case 'weaver_worklog_append':
+      case 'weaver_streams':
+      case 'weaver_streams_update':
         _markSurface(flags, 'weaver');
         break;
       case 'weaver_settings_update':
@@ -364,6 +367,8 @@ function _opTouchesGroup(op, group, hint) {
     case 'weaver_buffer_stats':
     case 'weaver_sent_events':
     case 'weaver_worklog_append':
+    case 'weaver_streams':
+    case 'weaver_streams_update':
     case 'weaver_settings_update':
       return (op.group || '') === group;
     default:
@@ -406,6 +411,7 @@ function _applyDelta(ops) {
         if (state.weaver_buffer_stats) delete state.weaver_buffer_stats[op.name];
         if (state.weaver_sent_events) delete state.weaver_sent_events[op.name];
         if (state.weaver_worklog) delete state.weaver_worklog[op.name];
+        if (state.weaver_streams) delete state.weaver_streams[op.name];
         break;
       case 'group_rename': {
         if (state.groups[op.old_name]) {
@@ -427,6 +433,10 @@ function _applyDelta(ops) {
         if (state.weaver_worklog && state.weaver_worklog[op.old_name]) {
           state.weaver_worklog[op.new_name] = state.weaver_worklog[op.old_name];
           delete state.weaver_worklog[op.old_name];
+        }
+        if (state.weaver_streams && state.weaver_streams[op.old_name]) {
+          state.weaver_streams[op.new_name] = state.weaver_streams[op.old_name];
+          delete state.weaver_streams[op.old_name];
         }
         break;
       }
@@ -590,6 +600,22 @@ function _applyDelta(ops) {
           state.weaver_worklog[wlg].unshift(worklogEntry);
           if (state.weaver_worklog[wlg].length > 200) {
             state.weaver_worklog[wlg] = state.weaver_worklog[wlg].slice(0, 200);
+          }
+        }
+        break;
+      }
+
+      case 'weaver_streams':
+      case 'weaver_streams_update': {
+        if (!state.weaver_streams) state.weaver_streams = {};
+        var wstg = op.group || '';
+        if (wstg) {
+          if (Object.prototype.hasOwnProperty.call(op, 'streams')) {
+            state.weaver_streams[wstg] = op.streams;
+          } else if (Array.isArray(op.items)) {
+            state.weaver_streams[wstg] = { items: op.items };
+          } else {
+            state.weaver_streams[wstg] = [];
           }
         }
         break;
