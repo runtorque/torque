@@ -165,6 +165,7 @@ class FakeDocument {
   constructor() {
     this.elements = new Map();
     this.selectorMap = new Map();
+    this.selectorAllMap = new Map();
     this.body = new FakeElement('body');
     this.activeElement = null;
     this.listeners = {};
@@ -194,15 +195,23 @@ class FakeDocument {
   }
 
   querySelector(selector) {
+    if (selector === '.overlay.visible') {
+      const overlays = this.querySelectorAll('.overlay');
+      return overlays.find((element) => element.classList.contains('visible')) || null;
+    }
     return this.selectorMap.get(selector) || null;
   }
 
-  querySelectorAll() {
-    return [];
+  querySelectorAll(selector) {
+    return this.selectorAllMap.get(selector) || [];
   }
 
   setSelector(selector, element) {
     this.selectorMap.set(selector, element);
+  }
+
+  setSelectorAll(selector, elements) {
+    this.selectorAllMap.set(selector, elements);
   }
 }
 
@@ -581,6 +590,45 @@ function createDiffHarness() {
   loadScript(context, 'static/js/diff.js');
   document.register('diff-view-root');
   return { context, document };
+}
+
+function createTaskHistoryHarness(options = {}) {
+  const { sandbox, document } = createSandbox({
+    window: {
+      innerHeight: 900,
+      addEventListener() {},
+      open() {},
+    },
+    connect() {},
+    setupDrag() {},
+  });
+  const overlay = document.register('modal-task-history');
+  overlay.classList.add('overlay');
+  document.register('task-history-root');
+  document.setSelectorAll('.overlay', [overlay]);
+  const context = vm.createContext(sandbox);
+  loadModalScripts(context);
+  loadScript(context, 'static/js/taskhistory.js');
+  if (options.withMain) {
+    [
+      'add-name-input',
+      'add-cmd-input',
+      'add-dir-input',
+      'add-args-input',
+      'add-init-input',
+      'gs-directory',
+      'gs-agent-directory',
+      'gs-terminal-prefix',
+      'gs-terminal-boot-cmd',
+      'gs-terminal-cmd-args',
+      'gs-terminal-init-script',
+      'gs-terminal-directory',
+      'gs-weaver-boot-cmd',
+      'gs-weaver-custom-instructions',
+    ].forEach((id) => document.register(id));
+    loadScript(context, 'static/js/main.js');
+  }
+  return { context, document, sandbox, overlay };
 }
 
 test('board visible tasks combine group, search, label, action, and agent filters', () => {
@@ -5870,6 +5918,46 @@ test('diff review overlay hides the workspace shell so standalone merge review u
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
   assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #broadcast,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
+});
+
+test('task history opens in a visible modal overlay without taking over the whole body layout', () => {
+  const { context, document, sandbox, overlay } = createTaskHistoryHarness();
+
+  context.showTaskHistory('agent-1');
+
+  assert.equal(jsonValue(context, `_taskHistoryOpen`), true);
+  assert.equal(overlay.classList.contains('visible'), true);
+  assert.equal(document.body.classList.contains('task-history-open'), false);
+  assert.match(document.getElementById('task-history-root').innerHTML, /Close/);
+  assert.deepEqual(jsonValue(context, `sendCalls`), [
+    { cmd: 'get_agent_history_detail', agent_id: 'agent-1' },
+  ]);
+});
+
+test('closeModals clears task history modal state and content', () => {
+  const { context, document, overlay } = createTaskHistoryHarness();
+
+  context.showTaskHistory('agent-1');
+  context.closeModals();
+
+  assert.equal(jsonValue(context, `_taskHistoryOpen`), false);
+  assert.equal(overlay.classList.contains('visible'), false);
+  assert.equal(document.getElementById('task-history-root').innerHTML, '');
+});
+
+test('Escape closes task history through the shared overlay key handler', () => {
+  const { context, document, overlay } = createTaskHistoryHarness({ withMain: true });
+
+  context.showTaskHistory('agent-1');
+  document.listeners.keydown({
+    key: 'Escape',
+    preventDefault() {},
+    shiftKey: false,
+  });
+
+  assert.equal(jsonValue(context, `_taskHistoryOpen`), false);
+  assert.equal(overlay.classList.contains('visible'), false);
+  assert.equal(document.getElementById('task-history-root').innerHTML, '');
 });
 
 test('full state toggles embedded runtime body class', () => {
