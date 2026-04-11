@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import os
+import subprocess
 from typing import Any
 
 from .state import board_task_is_closed
@@ -130,7 +132,8 @@ def compute_worktree_stream_for_task(state, task_id: str, *, group: str = "",
 
 
 def compute_worktree_streams(state, *, group: str = "",
-                             visibility_limit: int = 10) -> list[dict]:
+                             visibility_limit: int = 10,
+                             include_orphaned: bool = True) -> list[dict]:
     """Return computed streams for ``state`` filtered to ``group`` when set."""
     tasks = [
         task for task in state.board_tasks.values()
@@ -155,6 +158,7 @@ def compute_worktree_streams(state, *, group: str = "",
     seeds_by_stream_key: dict[str, set[str]] = defaultdict(set)
     agent_ids_by_stream_key: dict[str, set[str]] = defaultdict(set)
     agent_stream_key_by_id: dict[str, str] = {}
+    branch_exists_cache: dict[tuple[str, str], bool] = {}
 
     for task in tasks:
         task_id = getattr(task, "id", "") or ""
@@ -239,8 +243,12 @@ def compute_worktree_streams(state, *, group: str = "",
             visibility_limit=visibility_limit,
             task_ids=member_ids,
             stream_agent_ids=agent_ids_by_stream_key.get(key, set()),
+            branch_exists_cache=branch_exists_cache,
         )
-        if stream:
+        if stream and (
+            include_orphaned
+            or stream.get("stream_presence", "") != "orphaned"
+        ):
             streams.append(stream)
 
     streams.sort(
@@ -256,7 +264,9 @@ def compute_worktree_streams(state, *, group: str = "",
 def compute_worktree_stream(state, *, repo_root: str, branch: str,
                             group: str = "", visibility_limit: int = 10,
                             task_ids: set[str] | None = None,
-                            stream_agent_ids: set[str] | None = None
+                            stream_agent_ids: set[str] | None = None,
+                            branch_exists_cache: dict[tuple[str, str], bool]
+                            | None = None,
                             ) -> dict | None:
     """Return one computed stream for ``repo_root`` + ``branch``."""
     if not repo_root or not branch:
@@ -571,12 +581,31 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
 
     group_value = _stream_group(stream_tasks, owner_agent)
     latest_boundary_info = task_boundary(latest_boundary) if latest_boundary else {}
+    branch_exists_locally = _branch_exists_locally(
+        repo_root,
+        branch,
+        cache=branch_exists_cache,
+    )
+    stream_presence = _classify_stream_presence(
+        state,
+        repo_root=repo_root,
+        branch=branch,
+        group=group,
+        stream_tasks=stream_tasks,
+        open_non_visibility_tasks=open_non_visibility_tasks,
+        latest_boundary_status=str(
+            latest_boundary_info.get("status", "") or ""
+        ).strip(),
+        branch_exists_locally=branch_exists_locally,
+    )
 
     return {
         "stream_id": stream_id(repo_root, branch),
         "group": group_value,
         "repo_root": repo_root,
         "branch": branch,
+        "stream_presence": stream_presence,
+        "branch_exists_locally": branch_exists_locally,
         "agent_id": getattr(owner_agent, "id", "") or "",
         "agent_name": getattr(owner_agent, "name", "") or "",
         "agent_slug": getattr(owner_agent, "slug", "") or "",
@@ -619,6 +648,69 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         "partial_review_safe": partial_review_safe,
         "last_activity_at": last_activity_at,
     }
+
+
+def _branch_exists_locally(repo_root: str, branch: str, *,
+                           cache: dict[tuple[str, str], bool] | None = None
+                           ) -> bool:
+    repo_root = os.path.realpath(os.path.expanduser(str(repo_root or "").strip()))
+    branch = str(branch or "").strip()
+    if not repo_root or not branch:
+        return False
+    key = (repo_root, branch)
+    if cache is not None and key in cache:
+        return cache[key]
+
+    exists = False
+    if os.path.isdir(repo_root):
+        try:
+            proc = subprocess.run(
+                [
+                    "git", "-C", repo_root, "show-ref", "--verify", "--quiet",
+                    f"refs/heads/{branch}",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            exists = proc.returncode == 0
+        except OSError:
+            exists = False
+
+    if cache is not None:
+        cache[key] = exists
+    return exists
+
+
+def _classify_stream_presence(state, *, repo_root: str, branch: str,
+                              group: str, stream_tasks: list[Any],
+                              open_non_visibility_tasks: list[Any],
+                              latest_boundary_status: str,
+                              branch_exists_locally: bool) -> str:
+    task_ids = {
+        str(getattr(task, "id", "") or "").strip()
+        for task in stream_tasks
+        if getattr(task, "id", "")
+    }
+    stream_agents = [
+        cell for cell in state.agents.values()
+        if getattr(cell, "cell_type", "") == "agent"
+        and (not group or getattr(cell, "group", "") == group)
+        and stream_identity_for_agent(cell) == (repo_root, branch)
+    ]
+    has_busy_agent = any(
+        state.agent_is_busy(cell.id)
+        or str(getattr(cell, "current_task_id", "") or "").strip() in task_ids
+        for cell in stream_agents
+    )
+
+    if open_non_visibility_tasks or has_busy_agent:
+        return "live"
+    if branch_exists_locally or stream_agents:
+        return "dormant"
+    if latest_boundary_status == "open":
+        return "orphaned"
+    return "dormant"
 
 
 def _expand_stream_task_ids(*, seed_ids: set[str], target_stream_key: str,

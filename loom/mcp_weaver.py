@@ -130,6 +130,7 @@ def _stream_state_counts(streams: list[dict]) -> dict[str, int]:
 
 def _weaver_streams(state, weaver_cell, group: str, *,
                     include_merged: bool = True,
+                    include_orphaned: bool = False,
                     visibility_limit: int = 10,
                     state_filter: str = "",
                     branch_filter: str = "",
@@ -140,6 +141,7 @@ def _weaver_streams(state, weaver_cell, group: str, *,
             state,
             group=group,
             visibility_limit=visibility_limit,
+            include_orphaned=include_orphaned,
         )
     ]
     if not include_merged:
@@ -454,6 +456,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             state_filter=str(args.get("state", "") or "").strip(),
             branch_filter=str(args.get("branch", "") or "").strip(),
             repo_root_filter=str(args.get("repo_root", "") or "").strip(),
+            include_orphaned=bool(args.get("include_orphaned", False)),
         )
         return json.dumps({
             "group": _weaver_group,
@@ -475,6 +478,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             state,
             _weaver_cell,
             _weaver_group,
+            include_orphaned=True,
         )
         stream, error_text = _resolve_stream_payload(
             streams,
