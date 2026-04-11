@@ -2628,6 +2628,64 @@ test('renderAgentDetails expands task details and preserves the expanded state a
   assert.doesNotMatch(html, /Keep hover state stable while websocket updates stream in\./);
 });
 
+test('agent detail inline description editing preserves draft state and save/cancel behavior across rerenders', () => {
+  const { sandbox } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/render.js');
+  runInContext(context, `render = function() {};`);
+
+  context.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+    },
+  };
+  context.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship inline edits',
+      description: 'Keep the inline editor stable',
+      lane: 'In Progress',
+      agent_id: 'agent-1',
+    },
+  };
+
+  runInContext(context, `_toggleAgentDetailTask('agent-1')`);
+  let html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /detail-description-edit/);
+  assert.match(html, /Keep the inline editor stable/);
+
+  runInContext(context, `agentDetailEditDescription('agent-1', 'task-1')`);
+  runInContext(context, `agentDetailDescriptionInput('agent-1', 'task-1', 'Draft text from inline editing')`);
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /detail-inline-description-input/);
+  assert.match(html, /Draft text from inline editing/);
+
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /Draft text from inline editing/);
+
+  runInContext(context, `agentDetailCancelDescriptionEdit('agent-1', 'task-1')`);
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /Keep the inline editor stable/);
+  assert.doesNotMatch(html, /Draft text from inline editing/);
+  assert.equal(jsonValue(context, 'sendCalls.length'), 0);
+
+  runInContext(context, `agentDetailEditDescription('agent-1', 'task-1')`);
+  runInContext(context, `agentDetailDescriptionInput('agent-1', 'task-1', 'Saved from inline editing')`);
+  runInContext(context, `agentDetailSaveDescription('agent-1', 'task-1')`);
+  html = runInContext(context, `renderAgentDetails(state.agents["agent-1"])`);
+  assert.match(html, /Saved from inline editing/);
+  assert.doesNotMatch(html, /detail-inline-description-input/);
+  assert.equal(jsonValue(context, 'state.board_tasks["task-1"].description'), 'Saved from inline editing');
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    { cmd: 'board_update_task', id: 'task-1', description: 'Saved from inline editing' },
+  ]);
+});
+
 test('renderAgentDetails expands one MCP message at a time and keeps the selection across rerenders', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -6632,6 +6690,64 @@ test('main render pins the weaver first in the visible and navigable agent order
     'agent-2',
   ]);
   assert.match(main.innerHTML, /Weaver Prime[\s\S]*Worker One[\s\S]*Worker Two/);
+});
+
+test('main render restores the inline task description editor caret across rerenders', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = { alpha: ['agent-1'] };
+  sandbox.state.group_settings = { alpha: { collapsed_default: false } };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'agent-1': {
+      id: 'agent-1',
+      name: 'Worker',
+      group: 'alpha',
+      cell_type: 'agent',
+      icon: 'W',
+      status: 'running',
+      session_id: 'sess-1',
+      mcp_messages: [],
+    },
+  };
+  sandbox.state.board_tasks = {
+    'task-1': {
+      id: 'task-1',
+      group: 'alpha',
+      task: 'Ship inline edits',
+      description: 'Keep this draft steady',
+      lane: 'In Progress',
+      agent_id: 'agent-1',
+    },
+  };
+
+  runInContext(context, `
+    selectedAgentId = 'agent-1';
+    _toggleAgentDetailTask('agent-1');
+    agentDetailEditDescription('agent-1', 'task-1');
+  `);
+
+  const input = document.register('detail-description-input');
+  input.value = 'Keep this draft steady across websocket refreshes';
+  input.selectionStart = 17;
+  input.selectionEnd = 22;
+  main.appendChild(input);
+  document.activeElement = input;
+
+  runInContext(context, `
+    agentDetailDescriptionInput('agent-1', 'task-1', 'Keep this draft steady across websocket refreshes');
+    render();
+  `);
+
+  assert.equal(input.focused, true);
+  assert.equal(input.value, 'Keep this draft steady across websocket refreshes');
+  assert.equal(input.selectionStart, 17);
+  assert.equal(input.selectionEnd, 22);
+  assert.equal(
+    jsonValue(context, `_agentDetailState('agent-1').description_editor.draft`),
+    'Keep this draft steady across websocket refreshes',
+  );
 });
 
 test('panel resize bounds stay narrow by default and expand in embedded runtime', () => {
