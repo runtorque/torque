@@ -592,6 +592,46 @@ function createDiffHarness() {
   return { context, document };
 }
 
+function createDiffKeyHarness() {
+  const { sandbox, document } = createSandbox({
+    window: {
+      innerHeight: 900,
+      addEventListener() {},
+      open() {},
+    },
+    connect() {},
+    setupDrag() {},
+  });
+  const confirmOverlay = document.register('modal-confirm');
+  confirmOverlay.classList.add('overlay');
+  document.register('confirm-message');
+  document.register('confirm-extras');
+  document.register('confirm-yes-btn');
+  document.register('diff-view-root');
+  document.setSelectorAll('.overlay', [confirmOverlay]);
+  [
+    'add-name-input',
+    'add-cmd-input',
+    'add-dir-input',
+    'add-args-input',
+    'add-init-input',
+    'gs-directory',
+    'gs-agent-directory',
+    'gs-terminal-prefix',
+    'gs-terminal-boot-cmd',
+    'gs-terminal-cmd-args',
+    'gs-terminal-init-script',
+    'gs-terminal-directory',
+    'gs-weaver-boot-cmd',
+    'gs-weaver-custom-instructions',
+  ].forEach((id) => document.register(id));
+  const context = vm.createContext(sandbox);
+  loadModalScripts(context);
+  loadScript(context, 'static/js/diff.js');
+  loadScript(context, 'static/js/main.js');
+  return { context, document, sandbox, confirmOverlay };
+}
+
 function createTaskHistoryHarness(options = {}) {
   const { sandbox, document } = createSandbox({
     window: {
@@ -5918,6 +5958,66 @@ test('diff review overlay hides the workspace shell so standalone merge review u
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
   assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #broadcast,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
+});
+
+test('Escape closes the read-only diff viewer through the shared key handler', () => {
+  const { context, document } = createDiffKeyHarness();
+
+  runInContext(context, `
+    _diffViewOpen = true;
+    _diffReadOnly = true;
+    _diffViewAgentId = 'agent-1';
+    _diffViewData = {
+      agent_name: 'Worker',
+      branch: 'loom/worker',
+      base_branch: 'main',
+      stats: { files: 1, insertions: 2, deletions: 1 },
+      files: [],
+    };
+    renderDiffView();
+  `);
+
+  let prevented = false;
+  document.listeners.keydown({
+    key: 'Escape',
+    preventDefault() { prevented = true; },
+    shiftKey: false,
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(jsonValue(context, `_diffViewOpen`), false);
+  assert.equal(document.getElementById('diff-view-root').innerHTML, '');
+  assert.equal(document.body.classList.contains('diff-view-open'), false);
+});
+
+test('Escape prefers the active overlay over the underlying read-only diff viewer', () => {
+  const { context, document, confirmOverlay } = createDiffKeyHarness();
+
+  runInContext(context, `
+    _diffViewOpen = true;
+    _diffReadOnly = true;
+    _diffViewAgentId = 'agent-1';
+    _diffViewData = {
+      agent_name: 'Worker',
+      branch: 'loom/worker',
+      base_branch: 'main',
+      stats: { files: 1, insertions: 2, deletions: 1 },
+      files: [],
+    };
+    renderDiffView();
+  `);
+  context.showConfirm('Close this modal first?');
+
+  document.listeners.keydown({
+    key: 'Escape',
+    preventDefault() {},
+    shiftKey: false,
+  });
+
+  assert.equal(confirmOverlay.classList.contains('visible'), false);
+  assert.equal(jsonValue(context, `_diffViewOpen`), true);
+  assert.notEqual(document.getElementById('diff-view-root').innerHTML, '');
+  assert.equal(document.body.classList.contains('diff-view-open'), true);
 });
 
 test('task history opens in a visible modal overlay without taking over the whole body layout', () => {

@@ -468,6 +468,17 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // The read-only diff viewer is a full-viewport popup outside the shared
+  // overlay stack, so it owns Escape while active.
+  if (typeof _diffViewOpen !== 'undefined' && _diffViewOpen
+      && typeof _diffReadOnly !== 'undefined' && _diffReadOnly) {
+    if (e.key === 'Escape' && typeof hideDiffView === 'function') {
+      e.preventDefault();
+      hideDiffView();
+    }
+    return;
+  }
+
   // If broadcast input is focused, let it handle its own keys
   if (document.activeElement && document.activeElement.id === 'broadcast-input') {
     if (e.key === 'Escape') closeBroadcast();
