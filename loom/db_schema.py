@@ -284,7 +284,11 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     weaver_provider    TEXT NOT NULL DEFAULT '',
     weaver_boot_command TEXT NOT NULL DEFAULT '',
     weaver_model       TEXT NOT NULL DEFAULT '',
-    weaver_reasoning_effort TEXT NOT NULL DEFAULT ''
+    weaver_reasoning_effort TEXT NOT NULL DEFAULT '',
+    weaver_directory   TEXT NOT NULL DEFAULT '',
+    weaver_profile     TEXT NOT NULL DEFAULT '',
+    weaver_shell       TEXT NOT NULL DEFAULT '',
+    weaver_tab_color   TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS weaver_journal (
@@ -772,7 +776,9 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
             pass
     # Migrate: add weaver_provider and launch override columns
     for col in ("weaver_provider", "weaver_boot_command",
-                "weaver_model", "weaver_reasoning_effort"):
+                "weaver_model", "weaver_reasoning_effort",
+                "weaver_directory", "weaver_profile",
+                "weaver_shell", "weaver_tab_color"):
         try:
             conn.execute(
                 f"SELECT {col} FROM weaver_settings LIMIT 0")

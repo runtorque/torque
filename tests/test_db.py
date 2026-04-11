@@ -610,6 +610,10 @@ class LoomDBTests(unittest.TestCase):
                 "weaver_boot_command": "codex --model gpt-5",
                 "weaver_model": "gpt-5.1",
                 "weaver_reasoning_effort": "high",
+                "weaver_directory": "/repo/.loom/weaver",
+                "weaver_profile": "Ops",
+                "weaver_shell": "fish",
+                "weaver_tab_color": "none",
             },
         )
         first = self.db.save_journal_entry("g", 10.0, "decision", "Ship it")
@@ -633,6 +637,10 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["weaver_boot_command"], "codex --model gpt-5")
         self.assertEqual(loaded["weaver_model"], "gpt-5.1")
         self.assertEqual(loaded["weaver_reasoning_effort"], "high")
+        self.assertEqual(loaded["weaver_directory"], "/repo/.loom/weaver")
+        self.assertEqual(loaded["weaver_profile"], "Ops")
+        self.assertEqual(loaded["weaver_shell"], "fish")
+        self.assertEqual(loaded["weaver_tab_color"], "none")
 
         entries = self.db.load_journal_entries("g", limit=10)
 
@@ -679,6 +687,10 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertEqual(loaded["digest_verbosity"], "balanced")
         self.assertEqual(loaded["escalation_style"], "note_then_ask")
+        self.assertEqual(loaded["weaver_directory"], "")
+        self.assertEqual(loaded["weaver_profile"], "")
+        self.assertEqual(loaded["weaver_shell"], "")
+        self.assertEqual(loaded["weaver_tab_color"], "")
 
     def test_weaver_task_log_roundtrip_and_group_rename(self):
         first_id = self.db.save_weaver_task_log_entry(

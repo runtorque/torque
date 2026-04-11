@@ -244,6 +244,14 @@ class AgentLaunchService:
             merged["model"] = ws.weaver_model
         if getattr(ws, "weaver_reasoning_effort", ""):
             merged["reasoning_effort"] = ws.weaver_reasoning_effort
+        if getattr(ws, "weaver_directory", ""):
+            merged["directory"] = ws.weaver_directory
+        if getattr(ws, "weaver_profile", ""):
+            merged["profile"] = ws.weaver_profile
+        if getattr(ws, "weaver_shell", ""):
+            merged["shell"] = ws.weaver_shell
+        if getattr(ws, "weaver_tab_color", ""):
+            merged["tab_color"] = ws.weaver_tab_color
         resolved = self.resolve_agent_launch_config(
             group,
             base_dir=base_dir,

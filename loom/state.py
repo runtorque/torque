@@ -530,6 +530,10 @@ class WeaverSettings:
     weaver_boot_command: str = ""        # boot command override (empty = use provider default)
     weaver_model: str = ""               # model override for the designated weaver
     weaver_reasoning_effort: str = ""    # reasoning-effort override for the designated weaver
+    weaver_directory: str = ""           # directory override for the designated weaver
+    weaver_profile: str = ""             # iTerm profile override for the designated weaver
+    weaver_shell: str = ""               # shell override for the designated weaver
+    weaver_tab_color: str = ""           # tab color override for the designated weaver
     enabled_events: list[str] = field(   # optional events (mandatory always on)
         default_factory=lambda: [
             "agent_started",
@@ -1390,7 +1394,10 @@ class MatrixState:
                     value = normalize_weaver_escalation_style(value)
                 elif key == "restrict_to_created_agents":
                     value = bool(value)
-                elif key in {"weaver_model", "weaver_reasoning_effort"}:
+                elif key in {
+                        "weaver_model", "weaver_reasoning_effort",
+                        "weaver_directory", "weaver_profile",
+                        "weaver_shell", "weaver_tab_color"}:
                     value = str(value or "").strip()
                 setattr(ws, key, value)
         d = asdict(ws)

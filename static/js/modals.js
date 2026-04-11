@@ -384,6 +384,7 @@ let _settingsGroup = null;
 let _gsColor = '';
 let _gsAgentColor = '';
 let _gsTerminalColor = '';
+let _gsWeaverColor = '';
 let _gsInitialTab = 'group';
 let _gsInitialSubtab = '';
 
@@ -424,6 +425,7 @@ function _populateProfileSelect(el, profiles, selected, emptyLabel) {
     if (name === selected) opt.selected = true;
     el.appendChild(opt);
   }
+  el.value = selected || '';
 }
 
 function _renderSwatches(containerId, activeColor, onClick, showInherit) {
@@ -577,7 +579,22 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-weaver-boot-cmd').value = ws.weaver_boot_command || '';
   document.getElementById('gs-weaver-model').value = ws.weaver_model || '';
   document.getElementById('gs-weaver-reasoning-effort').value = ws.weaver_reasoning_effort || '';
+  document.getElementById('gs-weaver-directory').value = ws.weaver_directory || '';
+  document.getElementById('gs-weaver-shell').value = ws.weaver_shell || '';
   document.getElementById('gs-weaver-custom-instructions').value = ws.custom_instructions || '';
+  _populateProfileSelect(
+    document.getElementById('gs-weaver-profile'),
+    data.profiles,
+    ws.weaver_profile,
+    'Same as agent/group'
+  );
+  _gsWeaverColor = ws.weaver_tab_color || '';
+  _renderSwatches(
+    'gs-weaver-color-swatches',
+    _gsWeaverColor,
+    'selectGsWeaverColor',
+    true
+  );
   onGsWeaverProviderChange();
   document.getElementById('gs-weaver-restrict-to-created-agents').checked = !!ws.restrict_to_created_agents;
   _setSelectValue('gs-weaver-autonomy-mode', ws.autonomy_mode, 'dispatch_when_clear');
@@ -649,6 +666,12 @@ function selectGsTerminalColor(hex) {
     s.classList.toggle('selected', (s.dataset.color || '') === hex);
   });
 }
+function selectGsWeaverColor(hex) {
+  _gsWeaverColor = hex;
+  document.querySelectorAll('#gs-weaver-color-swatches .swatch').forEach(s => {
+    s.classList.toggle('selected', (s.dataset.color || '') === hex);
+  });
+}
 
 function submitGroupSettings() {
   if (!_settingsGroup) return;
@@ -714,6 +737,10 @@ function submitGroupSettings() {
     weaver_boot_command: document.getElementById('gs-weaver-boot-cmd').value.trim(),
     weaver_model: document.getElementById('gs-weaver-model').value.trim(),
     weaver_reasoning_effort: document.getElementById('gs-weaver-reasoning-effort').value,
+    weaver_directory: document.getElementById('gs-weaver-directory').value.trim(),
+    weaver_profile: document.getElementById('gs-weaver-profile').value,
+    weaver_shell: document.getElementById('gs-weaver-shell').value,
+    weaver_tab_color: _gsWeaverColor,
     custom_instructions: document.getElementById('gs-weaver-custom-instructions').value,
     restrict_to_created_agents: document.getElementById('gs-weaver-restrict-to-created-agents').checked,
     autonomy_mode: document.getElementById('gs-weaver-autonomy-mode').value,
