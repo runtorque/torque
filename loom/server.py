@@ -4,7 +4,6 @@ import asyncio
 import json
 import mimetypes
 import os
-from textwrap import dedent
 import shutil
 import sys
 import time
@@ -107,6 +106,10 @@ from .server_worktrees import (
     _worktree_diff_updater,
     _worktree_full_diff,
     _worktree_merge_diff_snapshot,
+)
+from .server_prompts import (
+    build_dispatch_postscript,
+    build_loom_system_prompt,
 )
 
 
@@ -1354,53 +1357,11 @@ async def main(connection=None):
 
     # -- Persistent system prompt ---------------------------------------------
 
-    def _build_loom_system_prompt() -> str:
-        """Build the persistent Loom system prompt for dispatched agents.
-
-        Written to a file and injected via ``--append-system-prompt-file``.
-        Survives ``/clear``.  Task-specific details (transitions, pipeline
-        context) are in the dispatch postscript instead.
-        """
-        return dedent("""\
-            # Loom Agent
-
-            You are running inside Loom, an AI agent orchestration system.
-            Loom tracks your task, manages your worktree, and coordinates
-            you with other agents in a pipeline.
-
-            ## Reporting tools
-
-            Use the Loom MCP tools to report progress and completion:
-
-            - `loom_done(message="summary")` — task complete, no follow-up needed
-            - `loom_ready()` — task complete and release this agent for future work
-            - `loom_progress(message="current activity")` — update your activity status
-            - `loom_blocked(reason="reason")` — signal that you need help
-            - `loom_error(message="message")` — report an unrecoverable error
-            - `loom_verify(state="passed", tests_run="...", notes="...")` — record manual deploy/restart/smoke verification details when relevant
-            - `loom_derive(description="title", action="action-name", context="details")` — create a subtask and dispatch it according to the allowed transition
-            - `loom_ask(question="question", description="details")` — request a blocking human decision or approval when the task cannot continue safely without it
-            - `loom_context()` — view your current task, agent info, and pipeline state
-
-            ## Important
-
-            Always signal completion via one of the tools above.
-            Your dispatch prompt specifies which transitions are available —
-            use those to determine valid `derive` targets.
-            Use `loom_ask` only when a blocking human answer or approval is
-            required to continue safely. If you can keep moving, do so.
-            For status updates, non-blocking observations, or optional
-            follow-up ideas, continue working and report them via
-            `loom_progress`, `loom_done`, `loom_blocked`, or derived-task
-            context instead of pausing the task.
-            When in doubt, call `loom_context()` to see your current state.
-        """)
-
     def _build_dispatch_persistent_prompt(system_prompt: str = "") -> str:
         parts = []
         if system_prompt:
             parts.append(system_prompt.rstrip())
-        parts.append(_build_loom_system_prompt().rstrip())
+        parts.append(build_loom_system_prompt().rstrip())
         return "\n\n".join(parts) + "\n"
 
     def _build_cell_persistent_prompt(cell, launch_cfg: dict) -> str:
@@ -1712,95 +1673,20 @@ async def main(connection=None):
             transitions = amgr.get_transitions(task.action_name,
                                                base_dir)
 
-        def _derive_line(tr):
-            when = tr.get("when", "")
-            desc = f" — {when}" if when else ""
-            suffix = ""
-            if tr.get("target") == "self":
-                suffix = " (continues in the same agent)"
-            return (f"- `loom_derive(description=\"short title\", "
-                    f"context=\"details\", "
-                    f"action=\"{tr['action']}\")`{desc}{suffix}")
-
-        has_transitions = any(
-            isinstance(tr, dict) and tr.get("action")
-            for tr in transitions)
-        has_ask = any(
-            isinstance(tr, dict) and tr.get("ask")
-            for tr in transitions)
-
         commit_hint = ""
         if (cell and cell.worktree_branch
                 and not cell.worktree_auto_checkpoint
                 and not cell.checkpoint_on_progress):
-            commit_hint = ("\nBefore reporting done, commit all your "
+            commit_hint = ("Before reporting done, commit all your "
                            "changes with a descriptive commit message.")
 
-        mandate = ""
-        if has_transitions or has_ask:
-            mandate = (
-                "\n\nIMPORTANT: When you are done, you MUST use one "
-                "of the Loom MCP tools below. Do NOT ask the "
-                "user directly. Use `loom_ask(...)` only for a "
-                "blocking human decision or approval so Loom can "
-                "track it. Do not use it for status updates or "
-                "optional suggestions. Do NOT just stop — always "
-                "signal completion via one of these tools.")
-
-        if not is_clean:
-            abbrev = ("\n\n---" + mandate)
-            if has_transitions or has_ask:
-                abbrev += "\nAvailable transitions:"
-                for tr in transitions:
-                    if isinstance(tr, dict) and tr.get("action"):
-                        abbrev += "\n" + _derive_line(tr)
-                if has_ask:
-                    abbrev += ("\n- `loom_ask(question=\"title\", "
-                               "description=\"details\")` "
-                              "— blocking human decision/approval only")
-                abbrev += ("\n- `loom_done(message=\"brief summary\")` "
-                           "— task complete, no follow-up")
-            else:
-                abbrev += ("\nUse `loom_done(message=\"brief summary\")` "
-                           "when finished, or "
-                           "`loom_blocked(reason=\"reason\")` "
-                           "if stuck.")
-            return abbrev + commit_hint
-
-        lines = [
-            mandate,
-            "\nReport your progress with these Loom MCP tools:",
-            "- `loom_done(message=\"brief summary\")` — task complete, no follow-up needed",
-            "- `loom_ready()` — task complete and release this agent for new work",
-        ]
-
-        # Dynamic derive/ask lines from action transitions
-        for tr in transitions:
-            if isinstance(tr, dict) and tr.get("action"):
-                lines.append(_derive_line(tr))
-        if has_ask:
-            lines.append(
-                "- `loom_ask(question=\"title\", description=\"details\")` "
-                "— blocking human decision/approval only "
-                "(creates a task in Backlog for review; "
-                "`description` is optional)")
-        lines.extend([
-            "- `loom_blocked(reason=\"reason\")` — need user input",
-            "- `loom_error(message=\"message\")` — unrecoverable error",
-        ])
-        lines.append(
-            "- `loom_verify(state=\"pending|attempted|passed|failed\", "
-            "mode=\"deploy|restart\", tests_run=\"...\", notes=\"...\")` "
-            "— record manual deploy/restart/smoke "
-            "verification details when relevant"
-        )
-
         # Pipeline context for derived tasks
+        pipeline_context = ""
         if task.parent_task_id:
             max_d = state.global_settings.max_pipeline_depth or "∞"
             parent = state.board_tasks.get(task.parent_task_id)
             root = state.board_tasks.get(task.pipeline_root_id)
-            ctx = (f"\n\nThis task is part of a pipeline "
+            ctx = (f"This task is part of a pipeline "
                    f"(depth {task.pipeline_depth}/{max_d}).")
             if parent:
                 p_agent = ""
@@ -1815,12 +1701,14 @@ async def main(connection=None):
                         f"({parent.lane}{p_status}{p_agent})")
             if root and root.id != (parent.id if parent else ""):
                 ctx += f"\nRoot task: \"{root.task[:80]}\""
-            lines.append(ctx)
+            pipeline_context = ctx
 
-        if commit_hint:
-            lines.append(commit_hint)
-
-        return "\n".join(lines)
+        return build_dispatch_postscript(
+            transitions=transitions,
+            is_clean=is_clean,
+            commit_hint=commit_hint,
+            pipeline_context=pipeline_context,
+        )
 
     # -- Loom context builder -----------------------------------------------
 
