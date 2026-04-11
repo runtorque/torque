@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 
 from .config import log
 from .state import ARCHIVED_LANE, MatrixState, task_is_closed
+from .worktree_streams import (
+    compute_worktree_stream,
+    compute_worktree_stream_for_task,
+)
 
 
 def _should_queue_existing_agent_dispatch(active_task, *,
@@ -81,6 +85,213 @@ def _find_active_worktree_owner(state: MatrixState, cell):
         if _cells_share_worktree_context(cell, other):
             return other
     return None
+
+
+def _stream_head_queue_item(stream: dict | None) -> dict:
+    if not stream:
+        return {}
+    queue_items = stream.get("queue_items", []) or []
+    return dict(queue_items[0]) if queue_items else {}
+
+
+def _stream_ready_to_resume_task_id(stream: dict | None) -> str:
+    if not stream:
+        return ""
+    head = _stream_head_queue_item(stream)
+    if head.get("queue_state", "") == "ready_to_resume" and head.get("deps_met", False):
+        return str(head.get("task_id", "") or "").strip()
+    task_id = str(stream.get("ready_to_resume_task_id", "") or "").strip()
+    return task_id
+
+
+def _stream_became_ready_to_resume(previous_stream: dict | None,
+                                   current_stream: dict | None) -> bool:
+    current_head = _stream_head_queue_item(current_stream)
+    if current_head.get("queue_state", "") != "ready_to_resume":
+        return False
+    previous_head = _stream_head_queue_item(previous_stream)
+    if not previous_head:
+        return bool(previous_stream is not None)
+    return previous_head.get("queue_state", "") != "ready_to_resume"
+
+
+def _stream_resume_target_agent_id(state: MatrixState, stream: dict,
+                                   task) -> str:
+    candidate_ids = []
+    for agent_id in (
+        str(stream.get("agent_id", "") or "").strip(),
+        str(getattr(task, "agent_id", "") or "").strip(),
+    ):
+        if agent_id and agent_id not in candidate_ids:
+            candidate_ids.append(agent_id)
+
+    for agent_id in candidate_ids:
+        cell = state.agents.get(agent_id)
+        if not cell or cell.cell_type != "agent":
+            continue
+        if cell.group != getattr(task, "group", ""):
+            continue
+        current_task = state.agent_current_task(agent_id)
+        if current_task and getattr(current_task, "id", "") != getattr(task, "id", ""):
+            continue
+        return agent_id
+    return ""
+
+
+def _stream_resume_allowed(settings, *,
+                           previous_stream: dict | None,
+                           current_stream: dict | None) -> bool:
+    autonomy_mode = str(getattr(settings, "autonomy_mode", "") or "").strip()
+    if autonomy_mode == "suggest_only":
+        return False
+    if autonomy_mode == "aggressive_auto_continue":
+        return True
+    return _stream_became_ready_to_resume(previous_stream, current_stream)
+
+
+async def _maybe_auto_resume_stream(state: MatrixState, handle_command,
+                                    panel_event, *,
+                                    task=None,
+                                    previous_stream: dict | None = None,
+                                    group: str = "") -> dict | None:
+    """Auto-resume the next ready product task for a computed stream."""
+    if not task and not previous_stream:
+        return None
+
+    current_stream = None
+    if task:
+        current_stream = compute_worktree_stream_for_task(
+            state,
+            getattr(task, "id", "") or "",
+            group=group or getattr(task, "group", "") or "",
+        )
+    if not current_stream and previous_stream:
+        repo_root = str(previous_stream.get("repo_root", "") or "").strip()
+        branch = str(previous_stream.get("branch", "") or "").strip()
+        if repo_root and branch:
+            current_stream = compute_worktree_stream(
+                state,
+                repo_root=repo_root,
+                branch=branch,
+                group=group or previous_stream.get("group", "") or "",
+            )
+
+    if not current_stream:
+        return None
+
+    ready_task_id = _stream_ready_to_resume_task_id(current_stream)
+    if not ready_task_id:
+        return None
+    ready_task = state.board_tasks.get(ready_task_id)
+    if not ready_task or task_is_closed(ready_task):
+        return None
+    if ready_task.lane not in {"Backlog", "To Do"}:
+        return None
+    if not state.board_deps_met(ready_task):
+        return None
+
+    stream_group = (
+        str(current_stream.get("group", "") or "").strip()
+        or getattr(ready_task, "group", "")
+        or group
+    )
+    if not stream_group:
+        return None
+    settings = state.get_weaver_settings(stream_group)
+    if not _stream_resume_allowed(
+            settings,
+            previous_stream=previous_stream,
+            current_stream=current_stream):
+        return None
+
+    target_agent_id = _stream_resume_target_agent_id(
+        state,
+        current_stream,
+        ready_task,
+    )
+    if not target_agent_id:
+        return None
+
+    result = await handle_command({
+        "cmd": "dispatch_task",
+        "id": ready_task.id,
+        "agent_id": target_agent_id,
+    })
+    if result and result.get("type") == "error":
+        return result
+
+    agent = state.agents.get(target_agent_id)
+    panel_event(
+        "task_auto_dispatched",
+        target_agent_id,
+        agent.name if agent else "",
+        stream_group,
+        ready_task.task[:80],
+        task_id=ready_task.id,
+    )
+    return {
+        "type": "stream_auto_resumed",
+        "stream_id": current_stream.get("stream_id", ""),
+        "task_id": ready_task.id,
+        "agent_id": target_agent_id,
+    }
+
+
+def _capture_auto_resume_targets(state: MatrixState, *, task=None,
+                                 group: str = "") -> list[dict]:
+    """Snapshot affected streams before a mutation that may clear gates/deps."""
+    targets = []
+    seen_stream_ids: set[str] = set()
+
+    def _append_target(candidate):
+        if not candidate or task_is_closed(candidate):
+            return
+        candidate_group = str(getattr(candidate, "group", "") or group).strip()
+        stream = compute_worktree_stream_for_task(
+            state,
+            getattr(candidate, "id", "") or "",
+            group=candidate_group,
+        )
+        if not stream:
+            return
+        stream_id = str(stream.get("stream_id", "") or "").strip()
+        if not stream_id or stream_id in seen_stream_ids:
+            return
+        seen_stream_ids.add(stream_id)
+        targets.append({
+            "task_id": getattr(candidate, "id", "") or "",
+            "group": candidate_group,
+            "previous_stream": stream,
+        })
+
+    _append_target(task)
+    if task:
+        for dependent in state.board_get_dependents(getattr(task, "id", "") or ""):
+            _append_target(dependent)
+    return targets
+
+
+async def _maybe_auto_resume_targets(state: MatrixState, handle_command,
+                                     panel_event, *, targets: list[dict] | None = None,
+                                     group: str = "") -> list[dict]:
+    """Try stream auto-resume across a set of pre-snapshotted stream members."""
+    results = []
+    for item in targets or []:
+        task_id = str((item or {}).get("task_id", "") or "").strip()
+        if not task_id:
+            continue
+        task = state.board_tasks.get(task_id)
+        result = await _maybe_auto_resume_stream(
+            state,
+            handle_command,
+            panel_event,
+            task=task,
+            previous_stream=(item or {}).get("previous_stream"),
+            group=str((item or {}).get("group", "") or group).strip(),
+        )
+        if result:
+            results.append(result)
+    return results
 
 
 async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
