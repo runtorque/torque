@@ -13,8 +13,10 @@ class FeaturePipelinePromptTests(unittest.TestCase):
 
         self.assertIn("Weaver approval is enough", prompt)
         self.assertIn("Human approval is required", prompt)
+        self.assertIn("loom_ask(question=\"Clarification needed\"", prompt)
         self.assertIn("Do NOT derive to implementation before the appropriate approval", prompt)
         self.assertIn("send an immediate `loom_progress(message=\"...\")` update", prompt)
+        self.assertNotIn("ask the user for clarification before proceeding", prompt)
 
     def test_feature_review_prompts_lock_reporting_sections(self):
         sample_prompt = (REPO_ROOT / "actions" / "feature" / "review.yaml").read_text()

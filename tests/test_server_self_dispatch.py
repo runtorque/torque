@@ -4,7 +4,6 @@ import sys
 import types
 import unittest
 from enum import Enum
-from pathlib import Path
 try:
     from helpers import install_aiohttp_stub
 except ModuleNotFoundError:
@@ -60,6 +59,8 @@ class ServerSelfDispatchTests(unittest.TestCase):
         install_iterm2_stub()
         self.state_mod = importlib.import_module("loom.state")
         self.state_mod = importlib.reload(self.state_mod)
+        self.server_prompts_mod = importlib.import_module("loom.server_prompts")
+        self.server_prompts_mod = importlib.reload(self.server_prompts_mod)
         self.server_mod = importlib.import_module("loom.server")
         self.server_mod = importlib.reload(self.server_mod)
 
@@ -303,34 +304,94 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("manual smoke done", message)
 
     def test_loom_system_prompt_prefers_mcp_reporting_tools(self):
-        prompt_source = (Path(__file__).resolve().parents[1] / "loom" / "server.py").read_text()
+        prompt = self.server_prompts_mod.build_loom_system_prompt()
 
-        self.assertIn("Use the Loom MCP tools", prompt_source)
-        self.assertIn("loom_done(message=", prompt_source)
-        self.assertIn("loom_verify(state=", prompt_source)
-        self.assertIn("blocking human decision or approval", prompt_source)
-        self.assertIn("Do not use it for status updates or", prompt_source)
-        self.assertIn("loom_context()", prompt_source)
+        self.assertIn("Use the Loom MCP tools", prompt)
+        self.assertIn("loom_done(message=", prompt)
+        self.assertIn("loom_verify(state=", prompt)
+        self.assertIn("blocking human decision or approval", prompt)
+        self.assertIn("For status updates, non-blocking observations, or optional", prompt)
+        self.assertIn("loom_context()", prompt)
         self.assertEqual(
-            prompt_source.count("`loom_ask(question=\"question\", description=\"details\")`"),
+            prompt.count("`loom_ask(question=\"question\", description=\"details\")`"),
             1,
         )
-        self.assertNotIn("loom_a-", prompt_source)
+        self.assertNotIn("loom_a-", prompt)
 
-    def test_dispatch_postscript_prefers_mcp_reporting_tools(self):
-        prompt_source = (Path(__file__).resolve().parents[1] / "loom" / "server.py").read_text()
-
-        self.assertIn("Report your progress with these Loom MCP tools", prompt_source)
-        self.assertIn("loom_done(message=", prompt_source)
-        self.assertIn("loom_derive(description=", prompt_source)
-        self.assertIn("loom_verify(state=", prompt_source)
-        self.assertIn("blocking human decision/approval only", prompt_source)
-        self.assertIn("loom_blocked(reason=", prompt_source)
-        self.assertEqual(
-            prompt_source.count("`loom_ask(question=\\\"title\\\", description=\\\"details\\\")`"),
-            1,
+    def test_dispatch_postscript_clean_variant_is_compact_and_transition_aware(self):
+        prompt = self.server_prompts_mod.build_dispatch_postscript(
+            transitions=[
+                {
+                    "action": "feature/implement",
+                    "when": "the user has reviewed and approved the plan",
+                    "target": "self",
+                },
+                {
+                    "ask": True,
+                    "when": "you need clarification or approval",
+                },
+            ],
+            is_clean=True,
         )
-        self.assertNotIn("loom_a-", prompt_source)
+
+        self.assertIn("IMPORTANT: Finish this task by calling a Loom MCP tool below.", prompt)
+        self.assertIn("Available completion paths for this task:", prompt)
+        self.assertIn("loom_derive(description=", prompt)
+        self.assertIn("continues in the same agent", prompt)
+        self.assertIn("loom_ask(question=\"title\", description=\"details\")", prompt)
+        self.assertIn("loom_done(message=\"brief summary\")", prompt)
+        self.assertIn("Other reporting tools when relevant:", prompt)
+        self.assertIn("loom_blocked(reason=", prompt)
+        self.assertIn("loom_error(message=", prompt)
+        self.assertIn("loom_verify(state=", prompt)
+        self.assertNotIn("Report your progress with these Loom MCP tools", prompt)
+        self.assertNotIn("loom_ready()", prompt)
+        self.assertNotIn("loom_progress(message=", prompt)
+
+    def test_dispatch_postscript_abbreviated_variant_keeps_shared_fallback_tools(self):
+        prompt = self.server_prompts_mod.build_dispatch_postscript(
+            transitions=[
+                {
+                    "action": "feature/implement",
+                    "when": "issues were found that need to be fixed",
+                },
+            ],
+            is_clean=False,
+            pipeline_context=(
+                "This task is part of a pipeline (depth 1/∞).\n"
+                "Parent task: \"Review the auth refactor\" (In Progress)"
+            ),
+            commit_hint="Before reporting done, commit all your changes.",
+        )
+
+        self.assertTrue(prompt.startswith("\n\n---\n"))
+        self.assertIn("Available completion paths for this task:", prompt)
+        self.assertIn("issues were found that need to be fixed", prompt)
+        self.assertIn("loom_done(message=\"brief summary\")", prompt)
+        self.assertIn("Other reporting tools when relevant:", prompt)
+        self.assertIn("loom_blocked(reason=", prompt)
+        self.assertIn("loom_error(message=", prompt)
+        self.assertIn("loom_verify(state=", prompt)
+        self.assertIn("This task is part of a pipeline", prompt)
+        self.assertIn("Before reporting done, commit all your changes.", prompt)
+        self.assertNotIn("loom_ask(question=\"title\", description=\"details\")", prompt)
+        self.assertNotIn("loom_ready()", prompt)
+
+    def test_dispatch_postscript_without_transitions_stays_compact(self):
+        prompt = self.server_prompts_mod.build_dispatch_postscript(
+            transitions=[],
+            is_clean=True,
+        )
+
+        self.assertIn("Available completion paths for this task:", prompt)
+        self.assertIn("loom_done(message=\"brief summary\")", prompt)
+        self.assertIn("Other reporting tools when relevant:", prompt)
+        self.assertIn("loom_blocked(reason=", prompt)
+        self.assertIn("loom_error(message=", prompt)
+        self.assertIn("loom_verify(state=", prompt)
+        self.assertNotIn("IMPORTANT:", prompt)
+        self.assertNotIn("loom_derive(description=", prompt)
+        self.assertNotIn("loom_ask(question=\"title\", description=\"details\")", prompt)
 
     def test_startup_prompt_for_new_codex_worker_uses_persistent_prompt(self):
         self.assertEqual(

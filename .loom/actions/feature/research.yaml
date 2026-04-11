@@ -22,7 +22,7 @@ prompt: |
   - Read the codebase to understand the relevant architecture, patterns, and conventions
   - Identify the files and modules that will need to change
   - Look for existing tests, related features, and potential conflicts
-  - If the task description is unclear or missing critical details, ask the user for clarification before proceeding
+  - If the task description is unclear or missing critical details, use `loom_ask(question="Clarification needed", description="Explain what detail is missing and why it blocks planning.")` before proceeding
 
   ## Phase 2: Plan
 
