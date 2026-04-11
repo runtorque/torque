@@ -7,6 +7,8 @@ class _FakeState:
     def __init__(self, *, agent_directory="", default_directory="",
                  weaver_provider="", weaver_boot_command="",
                  weaver_model="", weaver_reasoning_effort="",
+                 weaver_directory="", weaver_profile="",
+                 weaver_shell="", weaver_tab_color="",
                  agent_provider="", agent_boot_command="",
                  agent_model="", agent_reasoning_effort="",
                  default_command="claude", git_worktree=False):
@@ -41,6 +43,10 @@ class _FakeState:
             weaver_boot_command=weaver_boot_command,
             weaver_model=weaver_model,
             weaver_reasoning_effort=weaver_reasoning_effort,
+            weaver_directory=weaver_directory,
+            weaver_profile=weaver_profile,
+            weaver_shell=weaver_shell,
+            weaver_tab_color=weaver_tab_color,
         )
         self._default_command = default_command
 
@@ -181,6 +187,29 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             resolved["command"],
             "codex --model gpt-5 -c model_reasoning_effort=high",
         )
+        self.assertFalse(resolved["worktree"])
+
+    def test_resolve_weaver_launch_config_applies_terminal_overrides(self):
+        service = self.server_agent_mod.AgentLaunchService(
+            state=_FakeState(
+                agent_directory="/repo",
+                weaver_directory="/repo/.loom/weaver",
+                weaver_profile="Ops",
+                weaver_shell="fish",
+                weaver_tab_color="none",
+            ),
+            connection=None,
+            bridge=_FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=_FakeTemplateManager(),
+        )
+
+        resolved = service.resolve_weaver_launch_config("backend")
+
+        self.assertEqual(resolved["directory"], "/repo/.loom/weaver")
+        self.assertEqual(resolved["profile"], "Ops")
+        self.assertEqual(resolved["shell"], "fish")
+        self.assertEqual(resolved["tab_color"], "")
         self.assertFalse(resolved["worktree"])
 
     def test_resolve_agent_launch_config_detects_default_provider_from_command(self):

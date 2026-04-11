@@ -483,6 +483,26 @@
 
       <div class="task-modal-section">
         <div class="task-modal-section-body">
+          <label>Terminal overrides</label>
+          <div class="label-hint" style="margin-bottom:8px">Optional launch overrides for the designated Weaver only. Leave blank to inherit the usual agent/group defaults.</div>
+          <label>Directory</label>
+          <input id="gs-weaver-directory" placeholder="Same as agent/group" autocomplete="off">
+          <label>Profile</label>
+          <select id="gs-weaver-profile"></select>
+          <label>Shell</label>
+          <select id="gs-weaver-shell">
+            <option value="">Same as agent/group</option>
+            <option value="zsh">zsh</option>
+            <option value="bash">bash</option>
+            <option value="fish">fish</option>
+          </select>
+          <label>Tab color</label>
+          <div class="color-swatches" id="gs-weaver-color-swatches"></div>
+        </div>
+      </div>
+
+      <div class="task-modal-section">
+        <div class="task-modal-section-body">
           <label>Autonomy mode
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How proactively the Weaver should continue work without waiting for you. Use a preset instead of writing custom instructions for common behavior.">?</span>
           </label>

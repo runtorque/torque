@@ -131,7 +131,8 @@ function createSandbox() {
         if (selector === '.overlay' || selector === '.hint-pop') return [];
         if (selector === '#gs-color-swatches .swatch'
           || selector === '#gs-agent-color-swatches .swatch'
-          || selector === '#gs-terminal-color-swatches .swatch') return [];
+          || selector === '#gs-terminal-color-swatches .swatch'
+          || selector === '#gs-weaver-color-swatches .swatch') return [];
         return [];
       },
       querySelector(selector) {
@@ -185,6 +186,10 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
       weaver_boot_command: "codex --model gpt-5",
       weaver_model: "gpt-5.1-codex",
       weaver_reasoning_effort: "xhigh",
+      weaver_directory: "/repo/.loom/weaver",
+      weaver_profile: "Ops",
+      weaver_shell: "fish",
+      weaver_tab_color: "none",
       custom_instructions: "Watch for regressions.",
       restrict_to_created_agents: true,
       autonomy_mode: "aggressive_auto_continue",
@@ -198,7 +203,7 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
       heartbeat_interval: 60,
       enabled_events: ["agent_started", "agent_progress"]
     },
-    profiles: ["Default"]
+    profiles: ["Default", "Ops"]
   })`, context);
 
   assert.equal(ensure('gs-weaver-provider').value, 'codex');
@@ -211,6 +216,9 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
   );
   assert.equal(ensure('gs-weaver-model').value, 'gpt-5.1-codex');
   assert.equal(ensure('gs-weaver-reasoning-effort').value, 'xhigh');
+  assert.equal(ensure('gs-weaver-directory').value, '/repo/.loom/weaver');
+  assert.equal(ensure('gs-weaver-profile').value, 'Ops');
+  assert.equal(ensure('gs-weaver-shell').value, 'fish');
   assert.deepEqual(
     ensure('gs-weaver-reasoning-effort').children.map((child) => child.value),
     ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
@@ -251,6 +259,10 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   ensure('gs-agent-reasoning-effort').value = 'minimal';
   ensure('gs-weaver-model').value = 'gpt-5.1';
   ensure('gs-weaver-reasoning-effort').value = 'xhigh';
+  ensure('gs-weaver-directory').value = '/repo/.loom/weaver';
+  ensure('gs-weaver-profile').value = 'Ops';
+  ensure('gs-weaver-shell').value = 'fish';
+  vm.runInContext(`_gsWeaverColor = 'none';`, context);
   ensure('gs-weaver-custom-instructions').value = 'Stay focused';
   ensure('gs-weaver-restrict-to-created-agents').checked = true;
   ensure('gs-weaver-autonomy-mode').value = 'suggest_only';
@@ -286,6 +298,10 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   assert.equal(sandbox.sendCalls[1].weaver_boot_command, 'codex --model gpt-5');
   assert.equal(sandbox.sendCalls[1].weaver_model, 'gpt-5.1');
   assert.equal(sandbox.sendCalls[1].weaver_reasoning_effort, 'xhigh');
+  assert.equal(sandbox.sendCalls[1].weaver_directory, '/repo/.loom/weaver');
+  assert.equal(sandbox.sendCalls[1].weaver_profile, 'Ops');
+  assert.equal(sandbox.sendCalls[1].weaver_shell, 'fish');
+  assert.equal(sandbox.sendCalls[1].weaver_tab_color, 'none');
   assert.equal(sandbox.sendCalls[1].custom_instructions, 'Stay focused');
   assert.equal(sandbox.sendCalls[1].restrict_to_created_agents, true);
   assert.equal(sandbox.sendCalls[1].autonomy_mode, 'suggest_only');

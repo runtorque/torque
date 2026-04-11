@@ -5877,7 +5877,9 @@ async def main(connection=None):
                           "custom_instructions", "enabled_events",
                           "paused", "weaver_provider",
                           "weaver_boot_command", "weaver_model",
-                          "weaver_reasoning_effort"):
+                          "weaver_reasoning_effort",
+                          "weaver_directory", "weaver_profile",
+                          "weaver_shell", "weaver_tab_color"):
                     if k in data:
                         fields[k] = data[k]
                 state.update_weaver_settings(group, **fields)
