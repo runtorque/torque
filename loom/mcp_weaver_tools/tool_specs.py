@@ -9,10 +9,86 @@ WEAVER_TOOLS = [
             "Return a compact board overview for the weaver's group. "
             "Includes lane counts, active agent status, pending asks, "
             "task-health rollups, and key label counts without embedding "
-            "full task lists. When owned-agent restriction is enabled, "
-            "agent rollups only include agents created by this Weaver."
+            "full task lists. Also includes compact computed stream "
+            "summaries derived from branch/worktree state. When owned-agent "
+            "restriction is enabled, agent rollups only include agents "
+            "created by this Weaver."
         ),
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "weaver_streams_list",
+        "description": (
+            "List computed branch/worktree streams for the weaver's group. "
+            "Returns compact stream objects including identity, ownership, "
+            "product/workflow membership, recent visibility items, state, "
+            "review/boundary metadata, and recommended next action."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "state": {
+                    "type": "string",
+                    "description": (
+                        "Optional stream state filter such as "
+                        "'implementing', 'reviewing', "
+                        "'awaiting_human_validation', or 'ready_to_merge'."
+                    ),
+                },
+                "branch": {
+                    "type": "string",
+                    "description": (
+                        "Optional branch filter to narrow the returned "
+                        "streams."
+                    ),
+                },
+                "repo_root": {
+                    "type": "string",
+                    "description": (
+                        "Optional repo root filter used with branch when "
+                        "multiple repos may share the same branch name."
+                    ),
+                },
+            },
+        },
+    },
+    {
+        "name": "weaver_stream_show",
+        "description": (
+            "Show one computed stream by stream id, branch identity, or a "
+            "related task id. Returns the full compact stream payload with "
+            "product, workflow, and visibility distinctions preserved."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "stream": {
+                    "type": "string",
+                    "description": (
+                        "Stream identifier, stream id, or repo_root::branch."
+                    ),
+                },
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "Related task id or alias to resolve the stream from."
+                    ),
+                },
+                "branch": {
+                    "type": "string",
+                    "description": (
+                        "Branch name when resolving a stream directly."
+                    ),
+                },
+                "repo_root": {
+                    "type": "string",
+                    "description": (
+                        "Repo root used with branch when stream ids are not "
+                        "provided."
+                    ),
+                },
+            },
+        },
     },
     {
         "name": "weaver_board_list",

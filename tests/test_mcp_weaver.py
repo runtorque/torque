@@ -125,6 +125,20 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("visible follow-up task", message_tool["description"])
         self.assertIn("returns its task id", message_tool["description"])
 
+    def test_stream_tools_are_registered_with_stream_contract_descriptions(self):
+        list_tool = next(
+            tool for tool in self.mcp_weaver_mod.WEAVER_TOOLS
+            if tool["name"] == "weaver_streams_list"
+        )
+        show_tool = next(
+            tool for tool in self.mcp_weaver_mod.WEAVER_TOOLS
+            if tool["name"] == "weaver_stream_show"
+        )
+
+        self.assertIn("computed branch/worktree streams", list_tool["description"])
+        self.assertIn("recent visibility items", list_tool["description"])
+        self.assertIn("product, workflow, and visibility", show_tool["description"])
+
     async def test_non_weaver_agent_cannot_call_weaver_tools(self):
         state, weaver = self._make_state()
         worker = self.state_mod.AgentCell(
@@ -1041,6 +1055,277 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item["queued_followups"][0]["id"], "task-queued")
         self.assertEqual(item["started_followups"][0]["id"], "task-current")
         self.assertFalse(item["partial_review_safe"])
+
+    async def test_board_summary_includes_computed_stream_overview(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker One",
+            group="g",
+            slug="worker-one",
+            cell_type="agent",
+            status="idle",
+            worktree_path="/repo/.loom/worktrees/worker",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker",
+        )
+        state.agents[weaver.id] = weaver
+        state.agents[worker.id] = worker
+        state.groups["g"] = [weaver.id, worker.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+
+        product = state.board_add_task(
+            "Add Events tab",
+            "g",
+            lane="Done",
+            id="LOOM:1",
+            agent_id=worker.id,
+            action_name="feature/implement",
+        )
+        review = state.board_add_task(
+            "Review Events stream",
+            "g",
+            lane="Done",
+            id="LOOM:1:1",
+            parent_task_id="LOOM:1",
+            pipeline_root_id="LOOM:1",
+            agent_id=worker.id,
+            action_name="feature/review",
+        )
+        visibility = state.board_add_task(
+            "Weaver: reprioritize blocker fix",
+            "g",
+            lane="Done",
+            id="LOOM:9",
+        )
+        self.assertIsNotNone(product)
+        self.assertIsNotNone(review)
+        self.assertIsNotNone(visibility)
+
+        product.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "loom/worker",
+            "status": "open",
+            "recorded_at": "2026-04-07T10:00:00+00:00",
+            "commit_sha": "impl123",
+            "recorded_by_agent_id": worker.id,
+        }
+        review.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "loom/worker",
+            "status": "open",
+            "recorded_at": "2026-04-07T11:00:00+00:00",
+            "commit_sha": "rev456",
+            "recorded_by_agent_id": worker.id,
+        }
+        review.verification_state = "pending"
+        review.verification_notes = "Run manual smoke"
+        review.verification_summary = {
+            "human_validation_pending": "Run manual smoke",
+        }
+        review.verification_updated_at = "2026-04-07T11:05:00+00:00"
+        visibility.reply_agent_id = worker.id
+        visibility.labels = ["loom:weaver-message"]
+        visibility.created_at = "2026-04-07T11:10:00+00:00"
+        visibility.updated_at = "2026-04-07T11:12:00+00:00"
+        visibility.messages = [
+            {
+                "timestamp": datetime.fromisoformat(
+                    "2026-04-07T11:11:00+00:00"
+                ).timestamp(),
+                "action": "weaver_message",
+                "message": "Reprioritized blocker fix before queued work",
+                "agent_name": "Weaver",
+            },
+            {
+                "timestamp": datetime.fromisoformat(
+                    "2026-04-07T11:12:00+00:00"
+                ).timestamp(),
+                "action": "reply",
+                "message": "Will handle blocker first",
+                "agent_name": "Worker One",
+            },
+        ]
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        summary = json.loads(text)
+        self.assertEqual(summary["streams"]["count"], 1)
+        self.assertEqual(
+            summary["streams"]["by_state"]["awaiting_human_validation"],
+            1,
+        )
+        item = summary["streams"]["items"][0]
+        self.assertEqual(item["stream_id"], "stream:/repo::loom/worker")
+        self.assertEqual(item["state"], "awaiting_human_validation")
+        self.assertEqual(item["code_state"], "reviewed_clean")
+        self.assertEqual(item["validation_state"], "pending_human_validation")
+        self.assertEqual(item["merge_state"], "not_ready")
+        self.assertEqual(item["gate_reason"], "Run manual smoke")
+        self.assertEqual(item["recommended_next_action"], "merge_after_validation")
+        self.assertEqual(item["latest_reviewed_commit_sha"], "rev456")
+        self.assertEqual(item["product_task_ids"], ["LOOM:1"])
+        self.assertEqual(item["workflow_task_ids"], ["LOOM:1:1"])
+        self.assertEqual(
+            [entry["kind"] for entry in item["recent_visibility_items"]],
+            ["agent_reply", "weaver_message"],
+        )
+        self.assertTrue(item["partial_review_safe"])
+        self.assertFalse(item["branch_advanced"])
+
+    async def test_stream_tools_keep_visibility_items_out_of_product_members(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker One",
+            group="g",
+            slug="worker-one",
+            cell_type="agent",
+            status="idle",
+            worktree_path="/repo/.loom/worktrees/worker",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker",
+        )
+        state.agents[weaver.id] = weaver
+        state.agents[worker.id] = worker
+        state.groups["g"] = [weaver.id, worker.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+
+        product = state.board_add_task(
+            "Add Events tab",
+            "g",
+            lane="Done",
+            id="LOOM:1",
+            agent_id=worker.id,
+            action_name="feature/implement",
+        )
+        review = state.board_add_task(
+            "Review Events stream",
+            "g",
+            lane="Done",
+            id="LOOM:1:1",
+            parent_task_id="LOOM:1",
+            pipeline_root_id="LOOM:1",
+            agent_id=worker.id,
+            action_name="feature/review",
+        )
+        visibility = state.board_add_task(
+            "Weaver: reprioritize blocker fix",
+            "g",
+            lane="Done",
+            id="LOOM:9",
+        )
+        self.assertIsNotNone(product)
+        self.assertIsNotNone(review)
+        self.assertIsNotNone(visibility)
+
+        product.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "loom/worker",
+            "status": "open",
+            "recorded_at": "2026-04-07T10:00:00+00:00",
+            "commit_sha": "impl123",
+            "recorded_by_agent_id": worker.id,
+        }
+        review.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "loom/worker",
+            "status": "open",
+            "recorded_at": "2026-04-07T11:00:00+00:00",
+            "commit_sha": "rev456",
+            "recorded_by_agent_id": worker.id,
+        }
+        visibility.reply_agent_id = worker.id
+        visibility.labels = ["loom:weaver-message"]
+        visibility.created_at = "2026-04-07T11:10:00+00:00"
+        visibility.updated_at = "2026-04-07T11:12:00+00:00"
+        visibility.messages = [
+            {
+                "timestamp": datetime.fromisoformat(
+                    "2026-04-07T11:11:00+00:00"
+                ).timestamp(),
+                "action": "weaver_message",
+                "message": "Reprioritized blocker fix before queued work",
+                "agent_name": "Weaver",
+            },
+            {
+                "timestamp": datetime.fromisoformat(
+                    "2026-04-07T11:12:00+00:00"
+                ).timestamp(),
+                "action": "reply",
+                "message": "Will handle blocker first",
+                "agent_name": "Worker One",
+            },
+        ]
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        list_text, list_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_streams_list",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+        show_text, show_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_stream_show",
+            {"task": visibility.id},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(list_error)
+        self.assertFalse(show_error)
+        payload = json.loads(list_text)
+        self.assertEqual(payload["count"], 1)
+        stream = payload["streams"][0]
+        shown = json.loads(show_text)
+        self.assertEqual(stream["stream_id"], shown["stream_id"])
+        self.assertEqual(stream["product_task_ids"], ["LOOM:1"])
+        self.assertEqual(stream["workflow_task_ids"], ["LOOM:1:1"])
+        self.assertNotIn("LOOM:9", stream["product_task_ids"])
+        self.assertNotIn("LOOM:9", stream["workflow_task_ids"])
+        self.assertEqual(shown["latest_reviewed_commit_sha"], "rev456")
+        self.assertEqual(
+            [entry["task_id"] for entry in shown["recent_visibility_items"]],
+            ["LOOM:9", "LOOM:9"],
+        )
 
     async def test_board_summary_omits_recommended_dispatch(self):
         state = self.state_mod.MatrixState()
@@ -2241,6 +2526,47 @@ class WeaverOwnedAgentRestrictionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task["agent_id"], "")
         self.assertTrue(task["agent_hidden"])
         self.assertNotIn("agent_name", task)
+
+    async def test_restricted_stream_views_hide_unowned_agent_identity(self):
+        state, weaver = self._make_state()
+        legacy = self._add_worker(
+            state,
+            agent_id="agent-legacy",
+            slug="legacy-worker",
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        list_text, list_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_streams_list",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+        show_text, show_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_stream_show",
+            {"task": legacy.current_task_id},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(list_error)
+        self.assertFalse(show_error)
+        listing = json.loads(list_text)
+        shown = json.loads(show_text)
+        self.assertEqual(listing["count"], 1)
+        item = listing["streams"][0]
+        self.assertEqual(item["agent_id"], "")
+        self.assertEqual(item["agent_name"], "")
+        self.assertEqual(item["agent_slug"], "")
+        self.assertTrue(item["agent_hidden"])
+        self.assertEqual(shown["agent_id"], "")
+        self.assertEqual(shown["agent_name"], "")
+        self.assertEqual(shown["agent_slug"], "")
+        self.assertTrue(shown["agent_hidden"])
 
     async def test_restricted_agent_and_worktree_tools_reject_unowned_agents(self):
         state, weaver = self._make_state()
