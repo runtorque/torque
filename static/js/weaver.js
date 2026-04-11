@@ -550,6 +550,7 @@ function _weaverRenderJournal(group) {
     html += '</div>';
   }
 
+  html += _weaverRenderOpenStreams(group);
   html += _weaverRenderTaskHealth(group);
   html += _weaverRenderVerificationSummary(group);
   html += _weaverRenderBoundarySummary(group);
@@ -579,6 +580,418 @@ function _weaverRenderJournal(group) {
     html += '</div>';
   }
   return html;
+}
+
+function _weaverRenderOpenStreams(group) {
+  var summary = _weaverOpenStreamsSummary(group);
+  if (!summary.show) return '';
+
+  var html = '<div class="weaver-streams-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Open Streams</span>';
+  html += '<span class="weaver-health-total">' + summary.streams.length + ' open stream'
+    + (summary.streams.length === 1 ? '' : 's') + '</span>';
+  html += '</div>';
+
+  if (!summary.streams.length) {
+    html += '<div class="weaver-stream-empty">No open streams.</div>';
+    html += '</div>';
+    return html;
+  }
+
+  html += '<div class="weaver-stream-list">';
+  for (var i = 0; i < summary.streams.length; i++) {
+    html += _weaverRenderOpenStreamCard(summary.streams[i], i);
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverOpenStreamsSummary(group) {
+  var result = { show: false, streams: [] };
+  if (!group || !state || !state.weaver_streams) return result;
+  if (!Object.prototype.hasOwnProperty.call(state.weaver_streams, group)) {
+    return result;
+  }
+  result.show = true;
+  var raw = state.weaver_streams[group];
+  var items = [];
+  if (Array.isArray(raw)) items = raw.slice();
+  else if (raw && Array.isArray(raw.items)) items = raw.items.slice();
+  for (var i = 0; i < items.length; i++) {
+    if (_weaverStreamIsOpen(items[i])) result.streams.push(items[i]);
+  }
+  return result;
+}
+
+function _weaverStreamIsOpen(stream) {
+  if (!stream) return false;
+  if (stream.is_open === false) return false;
+  var mergeState = String(_weaverStreamMergeState(stream) || '').toLowerCase();
+  var stateName = String(_weaverStreamStateName(stream) || '').toLowerCase();
+  return mergeState !== 'merged' && stateName !== 'merged';
+}
+
+function _weaverRenderOpenStreamCard(stream, index) {
+  var title = _weaverStreamTitle(stream);
+  var branch = _weaverShortBranchLabel(_weaverStreamBranch(stream));
+  var stateMeta = _weaverStreamStateMeta(stream);
+  var mergeMeta = _weaverStreamMergeMeta(stream);
+  var gateReason = _weaverStreamGateReason(stream);
+  var nextAction = _weaverStreamActionLabel(stream);
+  var latestCommit = _weaverStreamLatestReviewedCommit(stream);
+  var productTasks = _weaverStreamTaskItems(stream, 'product');
+  var workflowTasks = _weaverStreamTaskItems(stream, 'workflow');
+  var visibilityItems = _weaverStreamVisibilityItems(stream);
+  var key = _weaverStreamAnchorKey(stream, index, title, branch);
+
+  var html = '<div class="weaver-stream-card" data-weaver-anchor="' + _esc(key) + '">';
+  html += '<div class="weaver-stream-card-header">';
+  html += '<div class="weaver-stream-heading">';
+  html += '<div class="weaver-stream-title-row">';
+  html += '<span class="weaver-stream-title">' + _esc(title) + '</span>';
+  html += '<span class="weaver-stream-state weaver-stream-state-'
+    + _esc(stateMeta.className) + '">' + _esc(stateMeta.label) + '</span>';
+  html += '</div>';
+  if (branch && branch !== title) {
+    html += '<div class="weaver-stream-branch">' + _esc(branch) + '</div>';
+  }
+  html += '</div>';
+  if (mergeMeta.label) {
+    html += '<span class="weaver-stream-merge weaver-stream-merge-' + _esc(mergeMeta.className)
+      + '">' + _esc(mergeMeta.label) + '</span>';
+  }
+  html += '</div>';
+
+  var metaHtml = '';
+  if (latestCommit) {
+    metaHtml += _weaverRenderStreamMetaRow('Reviewed', latestCommit);
+  }
+  if (gateReason) {
+    metaHtml += _weaverRenderStreamMetaRow('Gate', gateReason);
+  }
+  if (nextAction) {
+    metaHtml += _weaverRenderStreamMetaRow('Next', nextAction);
+  }
+  if (metaHtml) {
+    html += '<div class="weaver-stream-meta-list">';
+    html += metaHtml;
+    html += '</div>';
+  }
+
+  if (productTasks.length) {
+    html += _weaverRenderStreamTaskGroup(
+      'Product tasks',
+      'product',
+      productTasks,
+      false
+    );
+  }
+  if (workflowTasks.length) {
+    html += _weaverRenderStreamTaskGroup(
+      'Workflow',
+      'workflow',
+      workflowTasks,
+      true
+    );
+  }
+  if (visibilityItems.length) {
+    html += _weaverRenderStreamVisibilityGroup(visibilityItems);
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderStreamMetaRow(label, value) {
+  return '<div class="weaver-stream-meta-label">' + _esc(label) + '</div>'
+    + '<div class="weaver-stream-meta-value">' + _esc(value) + '</div>';
+}
+
+function _weaverRenderStreamTaskGroup(title, kind, tasks, summarizeOnly) {
+  if (!tasks.length) return '';
+  var summary = tasks.length + ' ' + kind + ' task' + (tasks.length === 1 ? '' : 's');
+  var html = '<div class="weaver-stream-task-group">';
+  html += '<div class="weaver-stream-task-group-header">';
+  html += '<span class="weaver-stream-section-label weaver-stream-section-label-' + _esc(kind)
+    + '">' + _esc(title) + '</span>';
+  html += '<span class="weaver-stream-summary-count">' + _esc(summary) + '</span>';
+  html += '</div>';
+  html += '<div class="weaver-stream-task-list">';
+  var limit = summarizeOnly ? 2 : 3;
+  for (var i = 0; i < tasks.length && i < limit; i++) {
+    var item = tasks[i];
+    html += '<span class="weaver-stream-task-chip weaver-stream-task-chip-' + _esc(kind) + '">';
+    html += _esc(item.title || item.id || '');
+    html += '</span>';
+  }
+  if (tasks.length > limit) {
+    html += '<span class="weaver-stream-task-chip weaver-stream-task-chip-more">+'
+      + (tasks.length - limit) + ' more</span>';
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderStreamVisibilityGroup(items) {
+  if (!items.length) return '';
+  var html = '<div class="weaver-stream-task-group">';
+  html += '<div class="weaver-stream-task-group-header">';
+  html += '<span class="weaver-stream-section-label weaver-stream-section-label-context">'
+    + 'Recent context</span>';
+  html += '<span class="weaver-stream-summary-count">' + items.length + ' item'
+    + (items.length === 1 ? '' : 's') + '</span>';
+  html += '</div>';
+  html += '<div class="weaver-stream-visibility-list">';
+  for (var i = 0; i < items.length && i < 2; i++) {
+    var item = items[i];
+    var kind = _weaverVisibilityKindLabel(item);
+    html += '<div class="weaver-stream-visibility-item">';
+    if (kind) {
+      html += '<span class="weaver-stream-visibility-kind">' + _esc(kind) + '</span>';
+    }
+    html += '<span class="weaver-stream-visibility-text">' + _esc(item.summary) + '</span>';
+    html += '</div>';
+  }
+  if (items.length > 2) {
+    html += '<div class="weaver-stream-visibility-more">+' + (items.length - 2)
+      + ' more context item' + (items.length - 2 === 1 ? '' : 's') + '</div>';
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverStreamAnchorKey(stream, index, title, branch) {
+  var parts = [
+    stream && (stream.stream_id || stream.id || ''),
+    stream && (stream.agent_id || ''),
+    branch,
+    title,
+    String(index || 0),
+  ].filter(function(part) { return !!part; });
+  return 'stream-' + parts.join('-');
+}
+
+function _weaverStreamStateMeta(stream) {
+  var name = _weaverStreamStateName(stream);
+  var labels = {
+    'implementing': 'Implementing',
+    'reviewing': 'In review',
+    'fixing_blockers': 'Fixing blockers',
+    'awaiting_human_validation': 'Awaiting validation',
+    'ready_to_merge': 'Ready to merge',
+    'merged': 'Merged',
+  };
+  return {
+    raw: name,
+    label: labels[name] || _weaverHumanizeToken(name || 'implementing'),
+    className: _weaverClassSuffix(name || 'implementing'),
+  };
+}
+
+function _weaverStreamStateName(stream) {
+  var stateName = String((stream && stream.state) || '').toLowerCase();
+  var validationState = String((stream && stream.validation_state) || '').toLowerCase();
+  var mergeState = String(_weaverStreamMergeState(stream) || '').toLowerCase();
+  if (validationState === 'pending_human_validation') {
+    return 'awaiting_human_validation';
+  }
+  if (stateName) return stateName;
+  if (mergeState === 'ready') return 'ready_to_merge';
+  return 'implementing';
+}
+
+function _weaverStreamMergeState(stream) {
+  return (stream && (stream.merge_state || stream.merge_readiness)) || '';
+}
+
+function _weaverStreamMergeMeta(stream) {
+  var mergeState = String(_weaverStreamMergeState(stream) || '').toLowerCase();
+  var labels = {
+    'ready': 'Ready to merge',
+    'not_ready': 'Not ready to merge',
+    'merged': 'Merged',
+  };
+  if (!mergeState && _weaverStreamStateName(stream) === 'ready_to_merge') {
+    mergeState = 'ready';
+  }
+  return {
+    raw: mergeState,
+    label: labels[mergeState] || '',
+    className: _weaverClassSuffix(mergeState || 'unknown'),
+  };
+}
+
+function _weaverStreamGateReason(stream) {
+  return String(
+    (stream && (
+      stream.gate_reason
+      || (stream.queue_gate && stream.queue_gate.reason)
+      || stream.gate
+    )) || ''
+  );
+}
+
+function _weaverStreamActionLabel(stream) {
+  var action = String((stream && stream.recommended_next_action) || '').toLowerCase();
+  var labels = {
+    'run_manual_validation': 'Run manual validation',
+    'merge_after_validation': 'Merge after validation',
+    'merge_stream': 'Merge stream',
+    'resume_queued_work': 'Resume queued work',
+    'resume_queued_task': 'Resume queued task',
+    'review_latest_change': 'Review latest change',
+    'wait_for_review': 'Wait for review',
+    'fix_review_blocker': 'Fix review blocker',
+    'resolve_merge_conflict': 'Resolve merge conflict',
+  };
+  return labels[action] || _weaverHumanizeToken(action);
+}
+
+function _weaverStreamLatestReviewedCommit(stream) {
+  var value = '';
+  if (stream) {
+    if (stream.latest_reviewed_commit_sha) value = String(stream.latest_reviewed_commit_sha);
+    else if (stream.latest_boundary_commit_sha) value = String(stream.latest_boundary_commit_sha);
+    else if (stream.latest_reviewed_commit && stream.latest_reviewed_commit.sha) {
+      value = String(stream.latest_reviewed_commit.sha);
+    }
+  }
+  if (value.length > 10) return value.slice(0, 7);
+  return value;
+}
+
+function _weaverStreamTaskItems(stream, kind) {
+  var arrays = [];
+  if (kind === 'product') {
+    arrays = [
+      stream && stream.product_tasks,
+      stream && stream.related_product_tasks,
+      stream && stream.product_task_ids,
+    ];
+  } else {
+    arrays = [
+      stream && stream.workflow_tasks,
+      stream && stream.related_workflow_tasks,
+      stream && stream.workflow_task_ids,
+    ];
+  }
+  var raw = [];
+  for (var i = 0; i < arrays.length; i++) {
+    if (Array.isArray(arrays[i])) {
+      raw = arrays[i];
+      break;
+    }
+  }
+  var items = [];
+  var seen = {};
+  for (var j = 0; j < raw.length; j++) {
+    var item = _weaverNormalizeStreamTaskItem(raw[j]);
+    if (!item.title && !item.id) continue;
+    var key = item.id || item.title;
+    if (seen[key]) continue;
+    seen[key] = true;
+    items.push(item);
+  }
+  return items;
+}
+
+function _weaverNormalizeStreamTaskItem(item) {
+  if (typeof item === 'string' || typeof item === 'number') {
+    var taskId = String(item);
+    return _weaverStreamTaskFromId(taskId);
+  }
+  if (!item || typeof item !== 'object') return { id: '', title: '' };
+  var id = item.id || item.task_id || '';
+  var title = item.title || item.task || item.name || '';
+  if (!title && id) {
+    var resolved = _weaverStreamTaskFromId(id);
+    title = resolved.title;
+  }
+  return {
+    id: String(id || ''),
+    title: String(title || ''),
+  };
+}
+
+function _weaverStreamTaskFromId(taskId) {
+  var task = state && state.board_tasks ? state.board_tasks[taskId] : null;
+  return {
+    id: String(taskId || ''),
+    title: String((task && (task.task || task.title)) || taskId || ''),
+  };
+}
+
+function _weaverStreamVisibilityItems(stream) {
+  var raw = [];
+  if (stream) {
+    if (Array.isArray(stream.visibility_items)) raw = stream.visibility_items;
+    else if (Array.isArray(stream.recent_visibility_items)) raw = stream.recent_visibility_items;
+  }
+  var items = [];
+  for (var i = 0; i < raw.length; i++) {
+    var item = raw[i];
+    if (typeof item === 'string') {
+      items.push({ kind: '', status: '', summary: item });
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    var summary = item.summary || item.message || item.entry || item.title || '';
+    if (!summary) continue;
+    items.push({
+      kind: item.kind || item.type || '',
+      status: item.status || item.state || '',
+      summary: String(summary),
+    });
+  }
+  return items;
+}
+
+function _weaverVisibilityKindLabel(item) {
+  if (!item) return '';
+  var status = String(item.status || '').toLowerCase();
+  var kind = String(item.kind || '').toLowerCase();
+  if (status) return _weaverHumanizeToken(status);
+  if (kind) return _weaverHumanizeToken(kind);
+  return 'Note';
+}
+
+function _weaverStreamTitle(stream) {
+  var title = '';
+  if (stream) {
+    title = stream.short_label
+      || stream.friendly_title
+      || stream.display_name
+      || stream.label
+      || stream.title
+      || '';
+  }
+  if (title) return String(title);
+  return _weaverShortBranchLabel(_weaverStreamBranch(stream)) || 'Untitled stream';
+}
+
+function _weaverStreamBranch(stream) {
+  return String((stream && (stream.branch || stream.worktree_branch || stream.stream_branch)) || '');
+}
+
+function _weaverShortBranchLabel(branch) {
+  return String(branch || '').replace(/^loom\//, '');
+}
+
+function _weaverHumanizeToken(value) {
+  var text = String(value || '').trim();
+  if (!text) return '';
+  text = text.replace(/[_-]+/g, ' ');
+  return text.replace(/\b([a-z])/g, function(match, chr) {
+    return chr.toUpperCase();
+  });
+}
+
+function _weaverClassSuffix(value) {
+  return String(value || 'unknown').toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
 }
 
 function _weaverRenderTaskHealth(group) {

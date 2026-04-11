@@ -292,6 +292,82 @@ test('weaver journal distinguishes blocking asks from non-blocking notes', () =>
   assert.match(html, /weaverDismissNote/);
 });
 
+test('weaver journal renders open streams with product, workflow, and context summaries', () => {
+  const sandbox = createSandbox();
+  sandbox.state.board_tasks = {
+    'LOOM:333': { id: 'LOOM:333', task: 'Add Events tab' },
+    'LOOM:342': { id: 'LOOM:342', task: 'Keep Weaver Events next-dispatch timing accurate' },
+    'LOOM:333:4': { id: 'LOOM:333:4', task: 'Review Events stream' },
+    'LOOM:342:1': { id: 'LOOM:342:1', task: 'Validate stream after smoke testing' },
+  };
+  sandbox.state.weaver_streams = {
+    alpha: [
+      {
+        stream_id: 'stream-events',
+        branch: 'loom/events-panel',
+        short_label: 'Events panel',
+        state: 'awaiting_human_validation',
+        validation_state: 'pending_human_validation',
+        merge_state: 'not_ready',
+        gate_reason: 'Live/manual Weaver-panel smoke pending',
+        recommended_next_action: 'merge_after_validation',
+        latest_reviewed_commit_sha: 'fbcf26b1234567',
+        product_task_ids: ['LOOM:333', 'LOOM:342'],
+        workflow_task_ids: ['LOOM:333:4', 'LOOM:342:1'],
+        visibility_items: [
+          {
+            kind: 'weaver_message',
+            status: 'awaiting_reply',
+            summary: 'Reprioritized blocker fix before queued work',
+          },
+        ],
+      },
+    ],
+  };
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+
+  const html = vm.runInContext(`_weaverRenderJournal("alpha")`, context);
+
+  assert.match(html, /Open Streams/);
+  assert.match(html, /Events panel/);
+  assert.match(html, /events-panel/);
+  assert.match(html, /Awaiting validation/);
+  assert.match(html, /Not ready to merge/);
+  assert.match(html, /Live\/manual Weaver-panel smoke pending/);
+  assert.match(html, /Merge after validation/);
+  assert.match(html, /fbcf26b/);
+  assert.match(html, /Add Events tab/);
+  assert.match(html, /Keep Weaver Events next-dispatch timing accurate/);
+  assert.match(html, /2 workflow tasks/);
+  assert.match(html, /Reprioritized blocker fix before queued work/);
+  assert.match(html, /weaver-stream-section-label-product/);
+  assert.match(html, /weaver-stream-section-label-workflow/);
+  assert.match(html, /weaver-stream-section-label-context/);
+});
+
+test('weaver journal makes validation-pending streams read as awaiting validation', () => {
+  const sandbox = createSandbox();
+  sandbox.state.weaver_streams = {
+    alpha: [
+      {
+        branch: 'loom/modal-polish',
+        short_label: 'Modal polish',
+        validation_state: 'pending_human_validation',
+        recommended_next_action: 'run_manual_validation',
+      },
+    ],
+  };
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+
+  const html = vm.runInContext(`_weaverRenderJournal("alpha")`, context);
+
+  assert.match(html, /Awaiting validation/);
+  assert.match(html, /Run manual validation/);
+  assert.doesNotMatch(html, />Idle</);
+});
+
 test('weaverDismissNote clears the non-blocking banner without resuming', () => {
   const sandbox = createSandbox();
   const context = vm.createContext(sandbox);

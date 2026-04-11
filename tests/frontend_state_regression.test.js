@@ -4972,6 +4972,46 @@ test('weaver worklog deltas rerender only the active Weaver panel', () => {
   ]);
 });
 
+test('weaver stream deltas rerender only the active Weaver panel', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'weaver';
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'weaver_streams',
+        group: 'alpha',
+        streams: [
+          {
+            stream_id: 'stream-events',
+            branch: 'loom/events-panel',
+            state: 'awaiting_human_validation',
+            recommended_next_action: 'run_manual_validation',
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 1,
+    templates: 0,
+  });
+  assert.deepEqual(jsonValue(context, 'state.weaver_streams.alpha'), [
+    {
+      stream_id: 'stream-events',
+      branch: 'loom/events-panel',
+      state: 'awaiting_human_validation',
+      recommended_next_action: 'run_manual_validation',
+    },
+  ]);
+});
+
 test('event deltas rerender only the active events panel', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'board';
