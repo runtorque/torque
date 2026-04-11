@@ -1226,13 +1226,15 @@ async def main(connection=None):
     async def _send_agent_prompt(cell, prompt: str, *,
                                  delay: float = 0,
                                  persist: bool = False,
-                                 background: bool = False):
+                                 background: bool = False,
+                                 prime_input_ready: bool = False):
         return await agent_launch.send_agent_prompt(
             cell,
             prompt,
             delay=delay,
             persist=persist,
             background=background,
+            prime_input_ready=prime_input_ready,
         )
 
     # -- Persistent system prompt ---------------------------------------------
@@ -4001,11 +4003,15 @@ async def main(connection=None):
                                 if delay:
                                     # Self-dispatch: delay so
                                     # prompt arrives after current
-                                    # agent turn finishes
+                                    # agent turn finishes, then
+                                    # re-prime the existing session
+                                    # so the minimal follow-up is
+                                    # submitted as a real prompt.
                                     await _send_agent_prompt(
                                         cell, final_prompt,
                                         delay=delay,
-                                        background=True)
+                                        background=True,
+                                        prime_input_ready=True)
                                 else:
                                     # Existing agent — send now
                                     await _send_agent_prompt(

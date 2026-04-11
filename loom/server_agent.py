@@ -431,8 +431,9 @@ class AgentLaunchService:
     async def send_agent_prompt(self, cell, prompt: str, *,
                                 delay: float = 0,
                                 persist: bool = False,
-                                background: bool = False):
-        """Send a prompt to an agent session, optionally delayed."""
+                                background: bool = False,
+                                prime_input_ready: bool = False):
+        """Send a prompt to an agent session, optionally delayed/primed."""
         payload = prompt if prompt.endswith("\r") else prompt + "\r"
 
         async def _run():
@@ -441,6 +442,9 @@ class AgentLaunchService:
                     await asyncio.sleep(delay)
                 if not cell.session_id:
                     return
+                if prime_input_ready \
+                        and hasattr(self.bridge, "prime_input_ready"):
+                    self.bridge.prime_input_ready(cell.session_id)
                 await self.bridge.send_text(cell.session_id, payload)
                 cell.status = "running"
                 self.state._emit_agent(cell)
