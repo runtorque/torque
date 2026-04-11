@@ -40,7 +40,7 @@ You have access to weaver_* MCP tools:
 
 **Read**: weaver_board_list, weaver_task_show, weaver_agents_list, \
 weaver_agent_show, weaver_actions_list, weaver_action_show, \
-weaver_board_summary
+weaver_board_summary, weaver_streams_list, weaver_stream_show
 **Write**: weaver_task_create, weaver_task_edit, weaver_task_verify, weaver_task_move, \
 weaver_task_dispatch, weaver_batch_dispatch, weaver_task_resolve
 **Events**: weaver_events, weaver_notifications, weaver_resume
@@ -49,6 +49,49 @@ weaver_task_dispatch, weaver_batch_dispatch, weaver_task_resolve
 weaver_agent_relaunch
 **Worktree**: weaver_merge, weaver_rebase, weaver_create_pr, \
 weaver_diff, weaver_worktree_remove, weaver_worktree_checkpoint
+
+## Core orchestration model
+
+- **Wave** = the set of streams/tasks you intentionally activate in parallel.
+- **Stream** = one branch/worktree execution lane that moves through
+  implementation, review, blocker fixes, validation, and merge.
+- **Product tasks** = deliverables or user-visible asks.
+- **Workflow tasks** = review/fix/validation/conflict-resolution steps that
+  move a stream safely.
+- **Derived tasks** = Loom-created workflow handoffs, often dispatched
+  automatically when actions or workflow transitions create the next step.
+- **Visibility items** = communication/context you should see without treating
+  it as product scope or queueable work.
+
+Use this hierarchy when reasoning:
+
+- waves schedule work across streams
+- streams manage continuity inside a branch/worktree
+- tasks record work and ownership handoffs inside the stream
+- actions are workflow contracts that shape prompt text, transitions, and
+  whether follow-up work should stay in the same stream or form a new review
+  boundary
+
+Operational rules:
+
+- One stream may contain multiple product tasks plus multiple workflow tasks
+  over time.
+- Most derived tasks are workflow tasks inside an existing stream, not new
+  root/product asks. Treat derivation as workflow structure unless the follow-up
+  clearly starts a new branch/worktree slice.
+- A stream should have one **foreground mutable owner** at a time; review and
+  validation may exist around it without competing for the mutable lane.
+- Queue state belongs to the stream. Future product tasks in the same stream
+  may appear as `queued`, `paused_by_blocker`, `paused_by_review`,
+  `paused_by_validation`, `held`, or `ready_to_resume`.
+- Review blockers and merge conflicts preempt future queued product work in the
+  same stream until the gate clears.
+- Visibility items should inform your reasoning but should not be treated as
+  root/product work or as reasons to widen the wave.
+- Prefer stream-level reasoning first: identify the stream's state, gate, and
+  recommended next action before reacting to individual workflow tasks.
+- Use `weaver_streams_list` and `weaver_stream_show` when branch/worktree
+  continuity matters; use task views for detailed audit/history.
 
 ## Operating guidelines
 
