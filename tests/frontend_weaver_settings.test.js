@@ -301,28 +301,42 @@ test('weaver journal renders open streams with product, workflow, and context su
     'LOOM:342:1': { id: 'LOOM:342:1', task: 'Validate stream after smoke testing' },
   };
   sandbox.state.weaver_streams = {
-    alpha: [
-      {
-        stream_id: 'stream-events',
-        branch: 'loom/events-panel',
-        short_label: 'Events panel',
-        state: 'awaiting_human_validation',
-        validation_state: 'pending_human_validation',
-        merge_state: 'not_ready',
-        gate_reason: 'Live/manual Weaver-panel smoke pending',
-        recommended_next_action: 'merge_after_validation',
-        latest_reviewed_commit_sha: 'fbcf26b1234567',
-        product_task_ids: ['LOOM:333', 'LOOM:342'],
-        workflow_task_ids: ['LOOM:333:4', 'LOOM:342:1'],
-        visibility_items: [
-          {
-            kind: 'weaver_message',
-            status: 'awaiting_reply',
-            summary: 'Reprioritized blocker fix before queued work',
-          },
-        ],
-      },
-    ],
+    alpha: {
+      count: 1,
+      by_state: { awaiting_human_validation: 1 },
+      items: [
+        {
+          stream_id: 'stream:/repo::loom/events-panel',
+          branch: 'loom/events-panel',
+          foreground_task_title: 'Keep Weaver Events next-dispatch timing accurate',
+          state: 'awaiting_human_validation',
+          code_state: 'reviewed_clean',
+          validation_state: 'pending_human_validation',
+          merge_state: 'not_ready',
+          gate_reason: 'Run manual smoke',
+          recommended_next_action: 'merge_after_validation',
+          latest_reviewed_commit_sha: 'rev4561234567',
+          product_task_ids: ['LOOM:333', 'LOOM:342'],
+          workflow_task_ids: ['LOOM:333:4', 'LOOM:342:1'],
+          recent_visibility_items: [
+            {
+              kind: 'agent_reply',
+              task_id: 'LOOM:9',
+              task_title: 'Weaver: reprioritize blocker fix',
+              summary: 'Will handle blocker first',
+              timestamp: '2026-04-07T11:12:00+00:00',
+            },
+            {
+              kind: 'weaver_message',
+              task_id: 'LOOM:9',
+              task_title: 'Weaver: reprioritize blocker fix',
+              summary: 'Reprioritized blocker fix before queued work',
+              timestamp: '2026-04-07T11:11:00+00:00',
+            },
+          ],
+        },
+      ],
+    },
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
@@ -330,13 +344,13 @@ test('weaver journal renders open streams with product, workflow, and context su
   const html = vm.runInContext(`_weaverRenderJournal("alpha")`, context);
 
   assert.match(html, /Open Streams/);
-  assert.match(html, /Events panel/);
+  assert.match(html, /Keep Weaver Events next-dispatch timing accurate/);
   assert.match(html, /events-panel/);
   assert.match(html, /Awaiting validation/);
   assert.match(html, /Not ready to merge/);
-  assert.match(html, /Live\/manual Weaver-panel smoke pending/);
+  assert.match(html, /Run manual smoke/);
   assert.match(html, /Merge after validation/);
-  assert.match(html, /fbcf26b/);
+  assert.match(html, /rev4561/);
   assert.match(html, /Add Events tab/);
   assert.match(html, /Keep Weaver Events next-dispatch timing accurate/);
   assert.match(html, /2 workflow tasks/);
@@ -349,20 +363,26 @@ test('weaver journal renders open streams with product, workflow, and context su
 test('weaver journal makes validation-pending streams read as awaiting validation', () => {
   const sandbox = createSandbox();
   sandbox.state.weaver_streams = {
-    alpha: [
-      {
-        branch: 'loom/modal-polish',
-        short_label: 'Modal polish',
-        validation_state: 'pending_human_validation',
-        recommended_next_action: 'run_manual_validation',
-      },
-    ],
+    alpha: {
+      group: 'alpha',
+      count: 1,
+      streams: [
+        {
+          branch: 'loom/modal-polish',
+          foreground_task_title: 'Polish modal',
+          validation_state: 'pending_human_validation',
+          recommended_next_action: 'run_manual_validation',
+        },
+      ],
+    },
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
 
   const html = vm.runInContext(`_weaverRenderJournal("alpha")`, context);
 
+  assert.match(html, /Polish modal/);
+  assert.match(html, /modal-polish/);
   assert.match(html, /Awaiting validation/);
   assert.match(html, /Run manual validation/);
   assert.doesNotMatch(html, />Idle</);

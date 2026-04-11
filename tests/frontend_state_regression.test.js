@@ -4982,14 +4982,18 @@ test('weaver stream deltas rerender only the active Weaver panel', () => {
       {
         op: 'weaver_streams',
         group: 'alpha',
-        streams: [
-          {
-            stream_id: 'stream-events',
-            branch: 'loom/events-panel',
-            state: 'awaiting_human_validation',
-            recommended_next_action: 'run_manual_validation',
-          },
-        ],
+        streams: {
+          count: 1,
+          by_state: { awaiting_human_validation: 1 },
+          items: [
+            {
+              stream_id: 'stream-events',
+              branch: 'loom/events-panel',
+              state: 'awaiting_human_validation',
+              recommended_next_action: 'run_manual_validation',
+            },
+          ],
+        },
       },
     ],
   });
@@ -5002,14 +5006,18 @@ test('weaver stream deltas rerender only the active Weaver panel', () => {
     weaver: 1,
     templates: 0,
   });
-  assert.deepEqual(jsonValue(context, 'state.weaver_streams.alpha'), [
-    {
-      stream_id: 'stream-events',
-      branch: 'loom/events-panel',
-      state: 'awaiting_human_validation',
-      recommended_next_action: 'run_manual_validation',
-    },
-  ]);
+  assert.deepEqual(jsonValue(context, 'state.weaver_streams.alpha'), {
+    count: 1,
+    by_state: { awaiting_human_validation: 1 },
+    items: [
+      {
+        stream_id: 'stream-events',
+        branch: 'loom/events-panel',
+        state: 'awaiting_human_validation',
+        recommended_next_action: 'run_manual_validation',
+      },
+    ],
+  });
 });
 
 test('event deltas rerender only the active events panel', () => {

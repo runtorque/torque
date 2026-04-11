@@ -610,19 +610,42 @@ function _weaverRenderOpenStreams(group) {
 
 function _weaverOpenStreamsSummary(group) {
   var result = { show: false, streams: [] };
-  if (!group || !state || !state.weaver_streams) return result;
-  if (!Object.prototype.hasOwnProperty.call(state.weaver_streams, group)) {
+  if (!group || !state) return result;
+  var raw = _weaverRawStreamPayload(group);
+  if (typeof raw === 'undefined') {
     return result;
   }
   result.show = true;
-  var raw = state.weaver_streams[group];
-  var items = [];
-  if (Array.isArray(raw)) items = raw.slice();
-  else if (raw && Array.isArray(raw.items)) items = raw.items.slice();
+  var items = _weaverStreamItemsFromPayload(raw);
   for (var i = 0; i < items.length; i++) {
     if (_weaverStreamIsOpen(items[i])) result.streams.push(items[i]);
   }
   return result;
+}
+
+function _weaverRawStreamPayload(group) {
+  if (!group || !state) return undefined;
+  if (state.weaver_streams
+      && Object.prototype.hasOwnProperty.call(state.weaver_streams, group)) {
+    return state.weaver_streams[group];
+  }
+  if (state.weaver_board_summary
+      && state.weaver_board_summary[group]
+      && state.weaver_board_summary[group].streams) {
+    return state.weaver_board_summary[group].streams;
+  }
+  return undefined;
+}
+
+function _weaverStreamItemsFromPayload(raw) {
+  if (Array.isArray(raw)) return raw.slice();
+  if (!raw || typeof raw !== 'object') return [];
+  if (Array.isArray(raw.items)) return raw.items.slice();
+  if (Array.isArray(raw.streams)) return raw.streams.slice();
+  if (raw.streams && Array.isArray(raw.streams.items)) {
+    return raw.streams.items.slice();
+  }
+  return [];
 }
 
 function _weaverStreamIsOpen(stream) {
@@ -838,9 +861,12 @@ function _weaverStreamGateReason(stream) {
 function _weaverStreamActionLabel(stream) {
   var action = String((stream && stream.recommended_next_action) || '').toLowerCase();
   var labels = {
+    'continue_implementation': 'Continue implementation',
     'run_manual_validation': 'Run manual validation',
     'merge_after_validation': 'Merge after validation',
+    'merge': 'Merge stream',
     'merge_stream': 'Merge stream',
+    'address_review_blockers': 'Address review blockers',
     'resume_queued_work': 'Resume queued work',
     'resume_queued_task': 'Resume queued task',
     'review_latest_change': 'Review latest change',
@@ -964,10 +990,18 @@ function _weaverStreamTitle(stream) {
   if (stream) {
     title = stream.short_label
       || stream.friendly_title
+      || stream.foreground_task_title
       || stream.display_name
       || stream.label
       || stream.title
       || '';
+  }
+  if (!title) {
+    var productTasks = _weaverStreamTaskItems(stream, 'product');
+    if (productTasks.length) title = productTasks[0].title || '';
+  }
+  if (!title && stream && stream.latest_boundary_task_title) {
+    title = stream.latest_boundary_task_title;
   }
   if (title) return String(title);
   return _weaverShortBranchLabel(_weaverStreamBranch(stream)) || 'Untitled stream';

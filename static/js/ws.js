@@ -610,9 +610,13 @@ function _applyDelta(ops) {
         if (!state.weaver_streams) state.weaver_streams = {};
         var wstg = op.group || '';
         if (wstg) {
-          state.weaver_streams[wstg] = Array.isArray(op.streams)
-            ? op.streams
-            : (Array.isArray(op.items) ? op.items : []);
+          if (Object.prototype.hasOwnProperty.call(op, 'streams')) {
+            state.weaver_streams[wstg] = op.streams;
+          } else if (Array.isArray(op.items)) {
+            state.weaver_streams[wstg] = { items: op.items };
+          } else {
+            state.weaver_streams[wstg] = [];
+          }
         }
         break;
       }
