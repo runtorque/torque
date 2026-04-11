@@ -5523,20 +5523,19 @@ body.diff-view-open #ctx-menu {
 }
 .weaver-create-btn:hover { opacity: 0.9; }
 
-/* -- Task history overlay ------------------------------------------------ */
+/* -- Task history modal -------------------------------------------------- */
+#modal-task-history {
+  z-index: 120;
+}
+.task-history-modal {
+  padding: 0;
+  overflow: hidden;
+}
 #task-history-root {
-  display: none;
+  display: flex;
   flex: 1;
   min-height: 0;
   background: var(--bg-surface);
-}
-body.task-history-open #task-history-root { display: flex; }
-body.task-history-open main,
-body.task-history-open #bottom-panel,
-body.task-history-open #taskbar,
-body.task-history-open #broadcast,
-body.task-history-open #ctx-menu {
-  display: none !important;
 }
 .th-view {
   display: flex; flex-direction: column;

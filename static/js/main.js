@@ -462,15 +462,20 @@ function relaunchFocused() {
 /* -- Main keyboard handler ----------------------------------------------- */
 
 document.addEventListener('keydown', (e) => {
-  // If task history overlay is open, Escape closes it
-  if (typeof _taskHistoryOpen !== 'undefined' && _taskHistoryOpen) {
-    if (e.key === 'Escape') hideTaskHistory();
-    return;
-  }
-
   // If a modal is open, only handle Escape/Enter
   if (document.querySelector('.overlay.visible')) {
     if (e.key === 'Escape') closeModals();
+    return;
+  }
+
+  // The read-only diff viewer is a full-viewport popup outside the shared
+  // overlay stack, so it owns Escape while active.
+  if (typeof _diffViewOpen !== 'undefined' && _diffViewOpen
+      && typeof _diffReadOnly !== 'undefined' && _diffReadOnly) {
+    if (e.key === 'Escape' && typeof hideDiffView === 'function') {
+      e.preventDefault();
+      hideDiffView();
+    }
     return;
   }
 

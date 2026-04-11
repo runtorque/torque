@@ -238,6 +238,10 @@ function closeModals() {
   }
   // Clean up draft attachments if task modal was open in create mode
   if (typeof _cleanupDraftAttachments === 'function') _cleanupDraftAttachments();
+  if (typeof _taskHistoryOpen !== 'undefined' && _taskHistoryOpen
+      && typeof hideTaskHistory === 'function') {
+    hideTaskHistory();
+  }
   document.querySelectorAll('.overlay').forEach(o => o.classList.remove('visible'));
   document.querySelectorAll('.hint-pop').forEach(p => p.remove());
   if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }

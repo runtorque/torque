@@ -1,4 +1,4 @@
-/* Full-panel task history viewer for an agent */
+/* Task history modal for an agent */
 
 var _taskHistoryOpen = false;
 var _taskHistoryAgentId = '';
@@ -96,10 +96,12 @@ function _thRenderMessages(taskId) {
 }
 
 function renderTaskHistory() {
+  var overlay = document.getElementById('modal-task-history');
   var root = document.getElementById('task-history-root');
+  document.body.classList.remove('task-history-open');
+  if (overlay) overlay.classList.toggle('visible', _taskHistoryOpen);
   if (!root) return;
 
-  document.body.classList.toggle('task-history-open', _taskHistoryOpen);
   if (!_taskHistoryOpen) {
     root.innerHTML = '';
     return;
@@ -114,6 +116,9 @@ function renderTaskHistory() {
     html += '<button class="th-close" onclick="hideTaskHistory()">\u2715</button>';
     html += '</div>';
     html += '<div class="th-content"><div class="th-empty">Loading task history\u2026</div></div>';
+    html += '<div class="th-footer">';
+    html += '<button class="btn-cancel" onclick="hideTaskHistory()">Close</button>';
+    html += '</div>';
     html += '</div>';
     root.innerHTML = html;
     return;
