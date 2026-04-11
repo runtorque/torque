@@ -59,7 +59,10 @@ Loom has a few settings surfaces. The details live in the linked pages; this sec
 ### High-impact settings to remember
 
 - `session_resume` controls whether relaunch tries to continue the provider conversation.
+- Agent and Weaver `model` / `reasoning_effort` defaults only auto-apply when Loom is shaping the adapter's normal command path.
 - Git worktree settings decide whether agents launch in isolated branches and how those worktrees are checkpointed or merged.
+- `worktree_merge_preserve_diff` saves a pre-merge patch artifact on the latest open branch-boundary task instead of making you reconstruct the merge later.
+- `restrict_to_created_agents` limits Weaver-only tools and views to agents originally launched by that Weaver while leaving the human board view unchanged.
 - Group directory and shell settings affect where new agents and terminals start.
 - Template overrides win for the agent or task launched from that template.
 

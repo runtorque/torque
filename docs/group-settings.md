@@ -36,6 +36,8 @@ These settings override the group defaults when creating agents specifically. Le
 | **Profile** | iTerm2 profile for agents. |
 | **Shell** | Shell for agents. |
 | **Provider** | Preferred agent backend (`claude-code`, `codex`, `gemini-cli`, or empty to auto-detect from the boot command). |
+| **Default model** | Optional provider-specific model override for new agents in this group. |
+| **Default reasoning effort** | Optional provider-specific reasoning-effort override for new agents in this group. Unsupported providers ignore it. |
 | **Boot command** | Command Loom runs when the agent tab opens. Leave empty to use the provider default or global default command. |
 | **Tab color** | Tab color for agents. Select the arrow (++up++) to inherit from the group, or ++x++ for no color. |
 | **Additional environment** | Extra environment variables for agents, merged with (and can override) the group environment. |
@@ -65,12 +67,15 @@ When worktrees are enabled, these settings control the execution environment:
 | **Checkpoint on progress / done** | Create throttled checkpoints when the agent reports progress or completion. |
 | **Squash on merge** | Prefer squash merge when merging worktree branches back to the base branch. |
 | **Merge instructions** | Extra text Loom appends to merge prompts. |
+| **Default post-merge cleanup** | What Loom should do by default after a successful merge when no explicit cleanup choice is provided. |
+| **Preserve merge diff by default** | Save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. |
 | **Symlink paths** | Repo-relative exact paths or glob patterns that should be mirrored into every worktree as symlinks. Recursive `**` is supported (for example `etl/**/node_modules`). Only existing matches inside the repo root are linked. |
 
 ### Provider and resume notes
 
 - If you set **Provider**, Loom treats that adapter as authoritative even if you also override the boot command.
 - If Provider is empty, Loom tries to infer the adapter from the boot command or running process name.
+- **Default model** and **Default reasoning effort** are only auto-applied when Loom is shaping the provider's normal command path. If you fully override the boot command, include any provider-specific flags yourself.
 - Session resume only works for adapters that expose a provider session ID. Claude Code and Codex support it; generic terminals do not.
 
 See [Agents & Sessions](agents-and-sessions.md) for the end-to-end runtime model.
@@ -106,11 +111,16 @@ The **Weaver** tab owns per-group Weaver configuration.
 | Setting | Description |
 |---------|-------------|
 | **Agent** | Shows the current Weaver agent for the group. Create a Weaver from the group’s **+ New** dropdown, then manage it here. |
+| **Only show/manage agents launched by this Weaver** | Restricts Weaver-only tools and views to worker agents originally created by this Weaver. Human operators still see the full board. |
 | **Provider** | Optional backend override just for the Weaver. Leave empty to inherit the group default. |
 | **Command override** | Optional boot command override for the Weaver. |
+| **Model** | Optional provider-specific model override for the designated Weaver. |
+| **Reasoning effort** | Optional provider-specific reasoning-effort override for the designated Weaver. Unsupported providers ignore it. |
 | **Custom Instructions** | Extra instructions appended to the Weaver system prompt. |
 | **Push / Max / Heartbeat intervals** | Controls digest cadence and idle heartbeat behavior. |
 | **Events** | Choose which optional event types appear in Weaver digests. Mandatory event types are always enabled. |
+
+The designated Weaver can be restarted from its context menu. The restart flow reuses the same Weaver launch dialog, so provider, command, model, reasoning effort, and policy settings stay editable even after the Weaver already exists.
 
 ## How defaults are resolved
 

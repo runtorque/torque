@@ -34,6 +34,8 @@ Once enabled, every new agent created in that group gets its own worktree. The a
 | **Auto-checkpoint on stop** | Automatically commit changes when an agent's session ends. |
 | **Checkpoint on progress / done** | Throttled automatic checkpoints when the agent reports progress or completion. |
 | **Squash on merge** | Use squash merge when merging worktree branches back to the base branch. Default: on. |
+| **Default post-merge cleanup** | Default cleanup behavior after a successful merge when no explicit cleanup choice is supplied. |
+| **Preserve merge diff by default** | Save the full pre-merge patch as a diff artifact on the latest open branch-boundary task. |
 | **Symlink paths** | Optional repo-relative exact paths or glob patterns to mirror into each worktree as symlinks. Useful for shared caches or large generated assets. Recursive `**` is supported (for example `etl/**/node_modules`). Escape paths such as `..` are ignored, and only existing matches inside the repo root are linked. |
 
 Or from the CLI:
@@ -198,6 +200,14 @@ The **Default post-merge cleanup** worktree setting controls what Loom should do
 - close the agent session and remove the worktree
 
 If the branch still has queued same-agent follow-up tasks attached, Loom keeps the agent/worktree alive regardless so the next wave can continue on a clean branch reset.
+
+### Preserving the merge diff
+
+When **Preserve merge diff by default** is enabled, Loom captures the full pre-merge patch and stores it as a diff artifact on the latest open branch-boundary task before marking the merge successful.
+
+- The artifact is attached to the latest open merge boundary on that branch, so the diff stays with the task that defined the mergeable slice.
+- You can still override the behavior per merge if the UI or caller passes an explicit preserve-diff choice.
+- If Loom cannot find an eligible open boundary task, or if capturing/persisting the patch fails, the merge still succeeds and Loom warns instead of failing the merge after the code has already landed.
 
 ## Creating and removing worktrees manually
 

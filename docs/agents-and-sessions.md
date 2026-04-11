@@ -56,8 +56,8 @@ Loom has a provider-agnostic adapter layer. A provider tells Loom how to launch 
 
 | Provider | Default command | Hooks / activity | MCP | Resume | Notes |
 |------|------------------|------------------|-----|--------|-------|
-| **`claude-code`** | `claude` | Full | Yes | Yes | Richest integration: tool activity, permission prompts, slash skills, persistent system prompt file |
-| **`codex`** | `codex` | Partial | Yes | Yes | Command-hook integration, MCP config in `.codex/config.toml`, explicit prompt injection |
+| **`claude-code`** | `claude` | Full | Yes | Yes | Richest integration: tool activity, permission prompts, slash skills, persistent system prompt file, model + reasoning-effort flags |
+| **`codex`** | `codex` | Partial | Yes | Yes | Command-hook integration, MCP config in `.codex/config.toml`, explicit prompt injection, model + reasoning-effort flags |
 | **`gemini-cli`** | `gemini` | No | No | No | Launch + model selection only; no hook or MCP integration yet |
 | **generic fallback** | none | No | No | No | Used when Loom cannot identify a provider from the command or process |
 
@@ -77,11 +77,12 @@ Practical consequences:
 - Leaving provider empty but setting command to `claude --model sonnet` lets Loom auto-detect Claude Code from the command.
 - Supplying a custom raw command means Loom does less automatic shaping around model flags.
 
-### Model, permissions, and max turns
+### Model, reasoning effort, permissions, and max turns
 
 These settings are adapter-aware:
 
 - **`model`** is appended as provider-specific model flags when Loom is using the adapter's default command path.
+- **`reasoning_effort`** is appended as provider-specific reasoning flags when the adapter supports it. Today Claude Code and Codex expose reasoning-effort choices in Loom's create, relaunch, and group-settings flows; unsupported adapters ignore the field.
 - **`permissions`** currently affects Claude Code only:
   `skip` becomes `--dangerously-skip-permissions`; any other value becomes `--allowed-tools ...`.
 - **`max_turns`** is appended as `--max-turns N` when set.

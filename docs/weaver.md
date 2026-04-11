@@ -39,14 +39,17 @@ The panel header also shows:
 - time until the next digest push
 - a pause/resume toggle for event delivery
 
+When event delivery is paused, Loom keeps buffering matching events for that Weaver instead of dropping them. Resuming delivery flushes the buffered events in order, so pausing is safe even during busy boards.
+
 ### Group Settings → Weaver
 
 The Weaver tab in group settings contains the editable Weaver configuration:
 
 - **Agent** section shows the current Weaver agent or the create button.
+- **Launch controls** let you set or relaunch the Weaver's provider, boot command, model, reasoning effort, and custom instructions from the same modal flow.
 - **Operating style** sets the Weaver's autonomy mode and default worker concurrency.
 - **Digest details** configures push interval, max interval, heartbeat interval, and which optional event types appear in digests.
-- **Expert overrides** let you override the provider and boot command just for the Weaver and append custom instructions. If left empty, the Weaver uses the group's defaults and built-in policy.
+- **Expert overrides** let you override the provider, boot command, model, and reasoning effort just for the Weaver and append custom instructions. If left empty, the Weaver uses the group's defaults and built-in policy.
 
 ### Agent cell behavior
 
@@ -56,6 +59,7 @@ The Weaver agent is visually distinct:
 - amber left border
 - `? awaiting input` state when a human reply is pending
 - taskbar attention state when the Weaver has asked a question
+- a dedicated **Restart Weaver…** context-menu action that reopens the Weaver launch dialog instead of the generic relaunch flow
 
 ## Operating model
 
@@ -107,6 +111,8 @@ The notification controls expose three separate intervals:
 - `max_interval`: the cap for regular digest timing
 - `heartbeat_interval`: send an idle heartbeat if no digest was sent for
   this long
+
+Paused delivery does not bypass these rules. Events continue accumulating in the per-group buffer while paused, then resume normal digest scheduling when delivery is unpaused.
 
 If there are no new events, Loom can still send a heartbeat-style digest
 with a board summary, active-agent summary, and compact blocked/unhealthy
@@ -270,11 +276,26 @@ In other words, Weaver tools are group-scoped **and** Weaver-only.
 
 | Tool | What it is for |
 |------|-----------------|
-| `weaver_agent_message` | Send a message into another agent's terminal |
+| `weaver_agent_message` | Send a message into another agent's terminal and create a visible follow-up task for the reply |
 | `weaver_note` | Post a non-blocking note or soft question for the human |
 | `weaver_ask` | Ask the human a question and pause event pushes |
 | `weaver_agent_close` | Close an agent session while leaving its worktree on disk |
 | `weaver_agent_relaunch` | Relaunch a stopped agent, reusing worktree and provider resume when available |
+
+### Weaver-to-worker follow-up tasks
+
+`weaver_agent_message` is now audited on the board instead of being a purely ephemeral terminal nudge:
+
+- If the target worker already has an active task, Loom creates a derived follow-up task under that task.
+- If the worker is otherwise idle, Loom creates a standalone root follow-up task in the same group.
+- The follow-up stores the worker it expects to hear back from, so replies can be resolved unambiguously later.
+
+Workers answer through `loom_reply(...)`:
+
+- If there is only one open Weaver-message follow-up task for that worker, `loom_reply(message=\"...\")` is enough.
+- If multiple follow-ups are open, the worker must pass the specific task as well.
+
+When the worker replies, Loom appends the reply to the follow-up task's history and marks only that follow-up task as answered/done. It does **not** auto-complete the parent implementation/review task just because the side conversation is over.
 
 ### Review, merge, and worktree operations
 

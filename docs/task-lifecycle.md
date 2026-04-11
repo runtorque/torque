@@ -237,6 +237,20 @@ T1 stays in In Progress --- the test task isn't done yet.
 
 When the test task completes, all children are Done and T1 cascades to Done.
 
+### Non-cascading Weaver reply tasks
+
+Not every follow-up task should advance the main implementation pipeline.
+
+When the Weaver sends a worker a question with `weaver_agent_message(...)`, Loom creates a visible follow-up task for that side conversation. The worker answers with `loom_reply(...)`, and that follow-up task closes with an **answered** outcome.
+
+This completion is intentionally **non-cascading**:
+
+- the reply task is marked done/answered
+- the parent implementation or review task keeps whatever status it already had
+- the root task does not move to **Done** just because the side conversation was answered
+
+That keeps "please clarify this" threads visible on the board without accidentally resolving the main workflow before the real work is finished.
+
 ## Status propagation
 
 When a derived task itself derives further (creating a chain deeper than one level), the **root task's status** updates to reflect the deepest active step. This way, you always know what's happening by looking at the root card.
