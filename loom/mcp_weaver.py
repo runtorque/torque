@@ -29,6 +29,16 @@ from .state import (
     normalize_default_worker_concurrency,
 )
 from .task_health import HEALTH_SEVERITY
+from .worktree_streams import compute_worktree_streams
+
+_STREAM_STATES = (
+    "implementing",
+    "reviewing",
+    "fixing_blockers",
+    "awaiting_human_validation",
+    "ready_to_merge",
+    "merged",
+)
 
 # ---------------------------------------------------------------------------
 # Tool dispatch
@@ -90,6 +100,153 @@ def _task_agent_payload_for_weaver(state, weaver_cell, agent_id: str) -> dict:
     return {}
 
 
+def _stream_payload_for_weaver(state, weaver_cell, stream: dict) -> dict:
+    """Return a stream payload with hidden agent identity scrubbed."""
+    payload = dict(stream or {})
+    agent_id = str(payload.get("agent_id", "") or "").strip()
+    if not agent_id:
+        return payload
+    if _agent_visible_to_weaver(state, weaver_cell, agent_id):
+        return payload
+    payload["agent_id"] = ""
+    payload["agent_name"] = ""
+    payload["agent_slug"] = ""
+    if state.weaver_restricts_to_created_agents(weaver_cell.group):
+        payload["agent_hidden"] = True
+    return payload
+
+
+def _stream_state_counts(streams: list[dict]) -> dict[str, int]:
+    counts = {name: 0 for name in _STREAM_STATES}
+    for stream in streams:
+        state_name = str(stream.get("state", "") or "").strip()
+        if not state_name:
+            continue
+        if state_name not in counts:
+            counts[state_name] = 0
+        counts[state_name] += 1
+    return counts
+
+
+def _member_task_ids_for_stream(stream: dict) -> set[str]:
+    ids: set[str] = set()
+    for key in (
+        "product_task_ids",
+        "workflow_task_ids",
+        "queued_task_ids",
+        "started_task_ids",
+    ):
+        ids.update(
+            str(task_id or "").strip()
+            for task_id in stream.get(key, []) or []
+            if str(task_id or "").strip()
+        )
+    for key in (
+        "foreground_task_id",
+        "latest_boundary_task_id",
+        "active_review_task_id",
+        "active_blocker_task_id",
+    ):
+        task_id = str(stream.get(key, "") or "").strip()
+        if task_id:
+            ids.add(task_id)
+    for item in stream.get("recent_visibility_items", []) or []:
+        task_id = str((item or {}).get("task_id", "") or "").strip()
+        if task_id:
+            ids.add(task_id)
+    return ids
+
+
+def _weaver_streams(state, weaver_cell, group: str, *,
+                    include_merged: bool = True,
+                    visibility_limit: int = 10,
+                    state_filter: str = "",
+                    branch_filter: str = "",
+                    repo_root_filter: str = "") -> list[dict]:
+    streams = [
+        _stream_payload_for_weaver(state, weaver_cell, stream)
+        for stream in compute_worktree_streams(
+            state,
+            group=group,
+            visibility_limit=visibility_limit,
+        )
+    ]
+    if not include_merged:
+        streams = [
+            stream for stream in streams
+            if stream.get("state", "") != "merged"
+        ]
+    if state_filter:
+        streams = [
+            stream for stream in streams
+            if stream.get("state", "") == state_filter
+        ]
+    if branch_filter:
+        streams = [
+            stream for stream in streams
+            if stream.get("branch", "") == branch_filter
+        ]
+    if repo_root_filter:
+        streams = [
+            stream for stream in streams
+            if stream.get("repo_root", "") == repo_root_filter
+        ]
+    return streams
+
+
+def _resolve_stream_payload(streams: list[dict], *, stream_ident: str = "",
+                            repo_root: str = "", branch: str = "",
+                            task_id: str = "") -> tuple[dict | None, str]:
+    if task_id:
+        matches = [
+            stream for stream in streams
+            if task_id in _member_task_ids_for_stream(stream)
+        ]
+        if len(matches) == 1:
+            return matches[0], ""
+        if not matches:
+            return None, f"Stream not found for task: {task_id}"
+        return None, (
+            "Multiple streams reference that task; provide stream id or "
+            "repo_root + branch"
+        )
+
+    stream_ident = str(stream_ident or "").strip()
+    repo_root = str(repo_root or "").strip()
+    branch = str(branch or "").strip()
+    if not branch and stream_ident:
+        if stream_ident.startswith("stream:"):
+            matches = [
+                stream for stream in streams
+                if stream.get("stream_id", "") == stream_ident
+            ]
+            if len(matches) == 1:
+                return matches[0], ""
+            return None, f"Stream not found: {stream_ident}"
+        if "::" in stream_ident:
+            repo_root, branch = stream_ident.split("::", 1)
+        else:
+            branch = stream_ident
+
+    if not branch:
+        return None, "Provide stream, branch, or task"
+
+    matches = [
+        stream for stream in streams
+        if stream.get("branch", "") == branch
+        and (not repo_root or stream.get("repo_root", "") == repo_root)
+    ]
+    if len(matches) == 1:
+        return matches[0], ""
+    if not matches:
+        if repo_root:
+            return None, f"Stream not found for {repo_root}::{branch}"
+        return None, f"Stream not found for branch: {branch}"
+    return None, (
+        "Multiple streams match that branch; provide repo_root or stream id"
+    )
+
+
 async def _dispatch_weaver_tool(name, args, handle_command, state,
                                 cell_id=""):
     """Execute a weaver tool call and return (content_text, is_error)."""
@@ -103,6 +260,13 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
     # -- Read tools ---------------------------------------------------------
 
     if name == "weaver_board_summary":
+        summary_streams = _weaver_streams(
+            state,
+            _weaver_cell,
+            _weaver_group,
+            include_merged=False,
+            visibility_limit=5,
+        )
         tasks = [
             t for t in state.board_tasks.values()
             if t.group == _weaver_group
@@ -297,6 +461,12 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "active": active_agents[:10],
                 "truncated": len(active_agents) > 10,
             },
+            "streams": {
+                "count": len(summary_streams),
+                "by_state": _stream_state_counts(summary_streams),
+                "items": summary_streams[:10],
+                "truncated": len(summary_streams) > 10,
+            },
             "branch_boundaries": {
                 "count": len(boundary_items),
                 "items": boundary_items[:10],
@@ -304,6 +474,47 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             },
         }
         return json.dumps(summary), False
+
+    if name == "weaver_streams_list":
+        streams = _weaver_streams(
+            state,
+            _weaver_cell,
+            _weaver_group,
+            state_filter=str(args.get("state", "") or "").strip(),
+            branch_filter=str(args.get("branch", "") or "").strip(),
+            repo_root_filter=str(args.get("repo_root", "") or "").strip(),
+        )
+        return json.dumps({
+            "group": _weaver_group,
+            "count": len(streams),
+            "streams": streams,
+        }), False
+
+    if name == "weaver_stream_show":
+        task_ident = str(args.get("task", "") or "").strip()
+        task_id = ""
+        if task_ident:
+            task_id = _resolve_task(state, task_ident)
+            if not task_id:
+                return "Task not found", True
+            task = state.board_tasks.get(task_id)
+            if not task or task.group != _weaver_group:
+                return "Task not found", True
+        streams = _weaver_streams(
+            state,
+            _weaver_cell,
+            _weaver_group,
+        )
+        stream, error_text = _resolve_stream_payload(
+            streams,
+            stream_ident=str(args.get("stream", "") or "").strip(),
+            repo_root=str(args.get("repo_root", "") or "").strip(),
+            branch=str(args.get("branch", "") or "").strip(),
+            task_id=task_id,
+        )
+        if error_text:
+            return error_text, True
+        return json.dumps(stream), False
 
     if name == "weaver_board_list":
         lane_filter = args.get("lane", "")
