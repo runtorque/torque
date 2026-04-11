@@ -25,6 +25,7 @@ from .worktree_boundaries import (
 _QUEUED_LANES = {"Backlog", "To Do"}
 _VISIBILITY_LABELS = {"loom:weaver-message"}
 _WORKFLOW_LABELS = {"loom:derived", "review-fix", "loom:human"}
+_HELD_LABELS = {"loom:hold", "hold"}
 _REVIEW_HINTS = ("review", "re-review")
 _VALIDATION_HINTS = ("validate", "validation", "manual smoke", "smoke test")
 _MERGE_CONFLICT_HINTS = ("merge conflict", "resolve conflict", "conflict")
@@ -71,6 +72,61 @@ def classify_stream_task(task, tasks_by_id: dict[str, Any] | None = None) -> str
     if _is_workflow_task(task, tasks_by_id or {}):
         return "workflow"
     return "product"
+
+
+def member_task_ids_for_stream(stream: dict) -> set[str]:
+    """Return the known task ids referenced by a computed stream payload."""
+    ids: set[str] = set()
+    for key in (
+        "product_task_ids",
+        "workflow_task_ids",
+        "queued_task_ids",
+        "started_task_ids",
+    ):
+        ids.update(
+            str(task_id or "").strip()
+            for task_id in stream.get(key, []) or []
+            if str(task_id or "").strip()
+        )
+    for key in (
+        "foreground_task_id",
+        "latest_boundary_task_id",
+        "active_review_task_id",
+        "active_blocker_task_id",
+        "ready_to_resume_task_id",
+    ):
+        task_id = str(stream.get(key, "") or "").strip()
+        if task_id:
+            ids.add(task_id)
+    for item in stream.get("recent_visibility_items", []) or []:
+        task_id = str((item or {}).get("task_id", "") or "").strip()
+        if task_id:
+            ids.add(task_id)
+    for item in stream.get("queue_items", []) or []:
+        task_id = str((item or {}).get("task_id", "") or "").strip()
+        if task_id:
+            ids.add(task_id)
+    gate = stream.get("queue_gate", {}) or {}
+    for key in ("blocking_task_id", "source_task_id"):
+        task_id = str(gate.get(key, "") or "").strip()
+        if task_id:
+            ids.add(task_id)
+    return ids
+
+
+def compute_worktree_stream_for_task(state, task_id: str, *, group: str = "",
+                                     visibility_limit: int = 10) -> dict | None:
+    """Return the computed stream containing ``task_id`` when one exists."""
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return None
+    for stream in compute_worktree_streams(
+            state,
+            group=group,
+            visibility_limit=visibility_limit):
+        if task_id in member_task_ids_for_stream(stream):
+            return stream
+    return None
 
 
 def compute_worktree_streams(state, *, group: str = "",
@@ -425,6 +481,10 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         latest_review_boundary=latest_review_boundary,
         foreground_task=foreground_task,
     )
+    active_mutable_task = _select_active_mutable_task(
+        foreground_task=foreground_task,
+        started_tasks=started_tasks,
+    )
     visibility_items = _recent_visibility_items(
         stream_tasks,
         limit=visibility_limit,
@@ -441,6 +501,41 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         branch_advanced=branch_has_advanced,
         latest_review_boundary=latest_review_boundary,
     )
+    queue_gate = _compute_queue_gate(
+        queue_tasks=[
+            task for task in queued_tasks
+            if classifications.get(task.id) == "product"
+        ],
+        tasks_by_id=tasks_by_id,
+        blocker_task=active_blocker_task,
+        review_task=active_review_task,
+        validation_state=validation_state,
+        validation_record=validation_record,
+        validation_tasks=validation_tasks,
+        code_state=code_state,
+        gate_reason=gate_reason,
+        merge_conflict=merge_conflict,
+    )
+    queue_items = _compute_queue_items(
+        state,
+        queue_tasks=[
+            task for task in queued_tasks
+            if classifications.get(task.id) == "product"
+        ],
+        queue_gate=queue_gate,
+        review_task=active_review_task,
+        active_mutable_task=active_mutable_task,
+    )
+    queue_counts = _queue_state_counts(queue_items)
+    ready_to_resume_item = next(
+        (
+            item for item in queue_items
+            if item.get("queue_state", "") == "ready_to_resume"
+        ),
+        None,
+    )
+    if queue_gate:
+        gate_reason = str(queue_gate.get("reason", "") or "").strip() or gate_reason
     recommended_next_action = _recommended_next_action(
         stream_state=stream_state,
         validation_state=validation_state,
@@ -505,6 +600,19 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
         "code_state": code_state,
         "validation_state": validation_state,
         "merge_state": merge_state,
+        "queue_gate": queue_gate,
+        "queue_items": queue_items,
+        "queue_counts": queue_counts,
+        "ready_to_resume_task_id": (
+            str((ready_to_resume_item or {}).get("task_id", "") or "")
+        ),
+        "ready_to_resume_task_title": (
+            str((ready_to_resume_item or {}).get("task_title", "") or "")
+        ),
+        "can_auto_resume": bool(
+            ready_to_resume_item
+            and (ready_to_resume_item or {}).get("deps_met", False)
+        ),
         "gate_reason": gate_reason,
         "recommended_next_action": recommended_next_action,
         "branch_advanced": branch_has_advanced,
@@ -621,6 +729,12 @@ def _is_workflow_task(task, tasks_by_id: dict[str, Any]) -> bool:
 
 def _is_review_task(task) -> bool:
     action_name = str(getattr(task, "action_name", "") or "").strip().lower()
+    labels = {
+        str(label or "").strip().lower()
+        for label in (getattr(task, "labels", []) or [])
+    }
+    if action_name.endswith("fix-review") or "review-fix" in labels:
+        return False
     if "review" in action_name:
         return True
     status = str(getattr(task, "status", "") or "").strip().lower()
@@ -774,6 +888,19 @@ def _select_owner_agent(state, *, stream_tasks: list[Any], repo_root: str,
     return candidates[0]
 
 
+def _select_active_mutable_task(*, foreground_task, started_tasks: list[Any]):
+    if (
+        foreground_task
+        and _is_mutable_task(foreground_task)
+        and getattr(foreground_task, "lane", "") not in _QUEUED_LANES
+    ):
+        return foreground_task
+    for task in started_tasks:
+        if _is_mutable_task(task):
+            return task
+    return None
+
+
 def _build_task_explicit_stream_keys(*, tasks, boundary_task_to_stream_key: dict[str, str],
                                      agent_stream_key_by_id: dict[str, str]
                                      ) -> dict[str, set[str]]:
@@ -893,6 +1020,133 @@ def _is_mutable_task(task) -> bool:
         and not _is_review_task(task)
         and not _is_validation_task(task)
     )
+
+
+def _is_held_task(task) -> bool:
+    labels = {
+        str(label or "").strip().lower()
+        for label in (getattr(task, "labels", []) or [])
+    }
+    return bool(labels & _HELD_LABELS)
+
+
+def _nearest_review_ancestor_id(task, tasks_by_id: dict[str, Any]) -> str:
+    current = task
+    while current:
+        current_id = str(getattr(current, "id", "") or "").strip()
+        if current_id and _is_review_task(current):
+            return current_id
+        parent_id = str(getattr(current, "parent_task_id", "") or "").strip()
+        current = tasks_by_id.get(parent_id) if parent_id else None
+    return ""
+
+
+def _compute_queue_gate(*, queue_tasks: list[Any], tasks_by_id: dict[str, Any],
+                        blocker_task, review_task, validation_state: str,
+                        validation_record: dict, validation_tasks: list[Any],
+                        code_state: str, gate_reason: str,
+                        merge_conflict: bool) -> dict:
+    reason = str(gate_reason or "").strip()
+    if merge_conflict and blocker_task:
+        return {
+            "gate_type": "merge_conflict",
+            "blocking_task_id": getattr(blocker_task, "id", "") or "",
+            "source_task_id": (
+                _nearest_review_ancestor_id(blocker_task, tasks_by_id)
+                or getattr(review_task, "id", "") or ""
+            ),
+            "reason": reason or getattr(blocker_task, "task", "") or (
+                "Merge conflict must be resolved before resuming queued work"
+            ),
+            "clears_when": "conflict_resolved",
+        }
+    if blocker_task:
+        return {
+            "gate_type": "review_blocker",
+            "blocking_task_id": getattr(blocker_task, "id", "") or "",
+            "source_task_id": (
+                _nearest_review_ancestor_id(blocker_task, tasks_by_id)
+                or getattr(review_task, "id", "") or ""
+            ),
+            "reason": reason or getattr(blocker_task, "task", "") or (
+                "Review blockers must be fixed before queued work resumes"
+            ),
+            "clears_when": "review_passes",
+        }
+    if validation_state == "pending_human_validation" and code_state == "reviewed_clean":
+        blocking_task_id = ""
+        if validation_tasks:
+            blocking_task_id = getattr(validation_tasks[0], "id", "") or ""
+        elif validation_record:
+            blocking_task_id = str(validation_record.get("task_id", "") or "").strip()
+        return {
+            "gate_type": "human_validation",
+            "blocking_task_id": blocking_task_id,
+            "source_task_id": str(validation_record.get("task_id", "") or "").strip(),
+            "reason": reason or "Human validation must complete before queued work resumes",
+            "clears_when": "human_validation_cleared",
+        }
+    held_task = (
+        queue_tasks[0]
+        if queue_tasks and _is_held_task(queue_tasks[0])
+        else None
+    )
+    if held_task:
+        return {
+            "gate_type": "manual_hold",
+            "blocking_task_id": getattr(held_task, "id", "") or "",
+            "source_task_id": getattr(held_task, "id", "") or "",
+            "reason": getattr(held_task, "task", "") or "Queued work is on hold",
+            "clears_when": "manual_hold_released",
+        }
+    return {}
+
+
+def _compute_queue_items(state, *, queue_tasks: list[Any], queue_gate: dict,
+                         review_task, active_mutable_task) -> list[dict]:
+    items = []
+    gate_type = str((queue_gate or {}).get("gate_type", "") or "").strip()
+    gate_blocks_with_blocker = gate_type in {"review_blocker", "merge_conflict"}
+    gate_blocks_with_validation = gate_type == "human_validation"
+    held_task_id = str((queue_gate or {}).get("blocking_task_id", "") or "").strip()
+
+    for index, task in enumerate(queue_tasks):
+        queue_state = "queued"
+        deps_met = bool(state.board_deps_met(task))
+        if gate_blocks_with_blocker:
+            queue_state = "paused_by_blocker"
+        elif gate_blocks_with_validation:
+            queue_state = "paused_by_validation"
+        elif gate_type == "manual_hold" and getattr(task, "id", "") == held_task_id:
+            queue_state = "held"
+        elif review_task:
+            queue_state = "paused_by_review"
+        elif active_mutable_task:
+            queue_state = "queued"
+        elif index == 0 and deps_met:
+            queue_state = "ready_to_resume"
+
+        items.append({
+            "task_id": getattr(task, "id", "") or "",
+            "task_title": getattr(task, "task", "") or "",
+            "lane": getattr(task, "lane", "") or "",
+            "queue_state": queue_state,
+            "deps_met": deps_met,
+            "resume_after_boundary_task_id": (
+                getattr(task, "resume_after_boundary_task_id", "") or ""
+            ),
+            "held": _is_held_task(task),
+        })
+    return items
+
+
+def _queue_state_counts(items: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    for item in items:
+        state_name = str((item or {}).get("queue_state", "") or "").strip()
+        if state_name:
+            counts[state_name] += 1
+    return dict(sorted(counts.items()))
 
 
 def _compute_validation_state(tasks: list[Any]) -> tuple[str, dict]:

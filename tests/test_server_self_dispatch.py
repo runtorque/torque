@@ -892,6 +892,236 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_stream_auto_resume_dispatches_when_queue_head_becomes_ready(self):
+        state = self._make_state()
+        owner = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            slug="worker",
+            group="g",
+            cell_type="agent",
+            status="idle",
+            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker",
+        )
+        state.agents[owner.id] = owner
+        state.groups["g"].append(owner.id)
+
+        product = state.board_add_task(
+            "Add Events tab",
+            "g",
+            lane="Done",
+            id="LOOM:1",
+            agent_id=owner.id,
+            action_name="feature/implement",
+        )
+        review = state.board_add_task(
+            "Review Events implementation",
+            "g",
+            lane="In Progress",
+            id="LOOM:1:1",
+            parent_task_id="LOOM:1",
+            pipeline_root_id="LOOM:1",
+            pipeline_depth=1,
+            action_name="feature/review",
+        )
+        queued = state.board_add_task(
+            "Add Worklog tab",
+            "g",
+            lane="To Do",
+            id="LOOM:2",
+            agent_id=owner.id,
+            action_name="feature/implement",
+            resume_after_boundary_task_id="LOOM:1",
+        )
+        self.assertIsNotNone(product)
+        self.assertIsNotNone(review)
+        self.assertIsNotNone(queued)
+        product.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "loom/worker",
+            "status": "open",
+            "recorded_at": "2026-04-07T11:00:00+00:00",
+            "commit_sha": "impl123",
+            "recorded_by_agent_id": owner.id,
+        }
+        previous_stream = self.server_mod.compute_worktree_stream_for_task(
+            state,
+            review.id,
+            group="g",
+        )
+        state.board_move_task(review.id, "Done")
+
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            queued_task = state.board_tasks[payload["id"]]
+            queued_task.lane = "In Progress"
+            queued_task.agent_id = payload["agent_id"]
+            owner.current_task_id = queued_task.id
+            return {
+                "type": "ok",
+                "task_id": queued_task.id,
+                "agent_id": payload["agent_id"],
+            }
+
+        result = await self.server_mod._maybe_auto_resume_stream(
+            state,
+            handle_command,
+            lambda *args, **kwargs: None,
+            task=review,
+            previous_stream=previous_stream,
+            group="g",
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["cmd"], "dispatch_task")
+        self.assertEqual(calls[0]["id"], queued.id)
+        self.assertEqual(calls[0]["agent_id"], owner.id)
+        self.assertEqual(result["type"], "stream_auto_resumed")
+
+    async def test_stream_auto_resume_respects_suggest_only_mode(self):
+        state = self._make_state()
+        state.update_weaver_settings("g", autonomy_mode="suggest_only")
+        owner = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            slug="worker",
+            group="g",
+            cell_type="agent",
+            status="idle",
+            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker",
+        )
+        state.agents[owner.id] = owner
+        state.groups["g"].append(owner.id)
+
+        product = state.board_add_task(
+            "Add Events tab",
+            "g",
+            lane="Done",
+            id="LOOM:1",
+            agent_id=owner.id,
+            action_name="feature/implement",
+        )
+        review = state.board_add_task(
+            "Review Events implementation",
+            "g",
+            lane="In Progress",
+            id="LOOM:1:1",
+            parent_task_id="LOOM:1",
+            pipeline_root_id="LOOM:1",
+            pipeline_depth=1,
+            action_name="feature/review",
+        )
+        queued = state.board_add_task(
+            "Add Worklog tab",
+            "g",
+            lane="To Do",
+            id="LOOM:2",
+            agent_id=owner.id,
+            action_name="feature/implement",
+            resume_after_boundary_task_id="LOOM:1",
+        )
+        self.assertIsNotNone(product)
+        self.assertIsNotNone(review)
+        self.assertIsNotNone(queued)
+        product.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "loom/worker",
+            "status": "open",
+            "recorded_at": "2026-04-07T11:00:00+00:00",
+            "commit_sha": "impl123",
+            "recorded_by_agent_id": owner.id,
+        }
+        previous_stream = self.server_mod.compute_worktree_stream_for_task(
+            state,
+            review.id,
+            group="g",
+        )
+        state.board_move_task(review.id, "Done")
+
+        async def handle_command(payload):
+            self.fail(f"Unexpected auto-resume dispatch: {payload}")
+
+        result = await self.server_mod._maybe_auto_resume_stream(
+            state,
+            handle_command,
+            lambda *args, **kwargs: None,
+            task=review,
+            previous_stream=previous_stream,
+            group="g",
+        )
+
+        self.assertIsNone(result)
+
+    def test_find_reusable_review_fix_task_reuses_open_fix_review_shell(self):
+        state = self._make_state()
+        review = state.board_add_task(
+            "Review Events implementation",
+            "g",
+            lane="In Progress",
+            id="LOOM:1:1",
+            action_name="feature/review",
+        )
+        fix_task = state.board_add_task(
+            "Fix review issues",
+            "g",
+            lane="To Do",
+            id="LOOM:1:2",
+            parent_task_id="LOOM:1:1",
+            pipeline_root_id="LOOM:1",
+            pipeline_depth=1,
+            action_name="feature/fix-review",
+            labels=["loom:derived", "review-fix"],
+        )
+        self.assertIsNotNone(review)
+        self.assertIsNotNone(fix_task)
+
+        reusable = self.server_mod._find_reusable_review_fix_task(
+            state,
+            review,
+            "feature/fix-review",
+        )
+
+        self.assertIsNotNone(reusable)
+        self.assertEqual(reusable.id, fix_task.id)
+
+    def test_find_reusable_review_fix_task_does_not_promote_queued_product_task(self):
+        state = self._make_state()
+        review = state.board_add_task(
+            "Review Events implementation",
+            "g",
+            lane="In Progress",
+            id="LOOM:1:1",
+            action_name="feature/review",
+        )
+        queued_product = state.board_add_task(
+            "Add Worklog tab",
+            "g",
+            lane="To Do",
+            id="LOOM:2",
+            parent_task_id="LOOM:1:1",
+            pipeline_root_id="LOOM:1",
+            pipeline_depth=1,
+            action_name="feature/implement",
+        )
+        self.assertIsNotNone(review)
+        self.assertIsNotNone(queued_product)
+
+        reusable = self.server_mod._find_reusable_review_fix_task(
+            state,
+            review,
+            "feature/fix-review",
+        )
+
+        self.assertIsNone(reusable)
+
 
 class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

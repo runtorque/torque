@@ -179,6 +179,22 @@ class WorktreeStreamTests(unittest.TestCase):
         self.assertEqual(streams[0]["product_task_ids"], [product_one.id, product_two.id])
         self.assertEqual(streams[0]["queued_task_ids"], [product_two.id])
         self.assertEqual(streams[0]["state"], "implementing")
+        self.assertEqual(
+            streams[0]["queue_items"],
+            [
+                {
+                    "task_id": product_two.id,
+                    "task_title": product_two.task,
+                    "lane": "To Do",
+                    "queue_state": "ready_to_resume",
+                    "deps_met": True,
+                    "resume_after_boundary_task_id": review.id,
+                    "held": False,
+                }
+            ],
+        )
+        self.assertEqual(streams[0]["ready_to_resume_task_id"], product_two.id)
+        self.assertTrue(streams[0]["can_auto_resume"])
 
     def test_review_blocker_loop_becomes_fixing_blockers(self):
         state = self._make_state()
@@ -244,6 +260,137 @@ class WorktreeStreamTests(unittest.TestCase):
         self.assertEqual(stream["foreground_task_id"], blocker_fix.id)
         self.assertIn(blocker_fix.id, stream["workflow_task_ids"])
 
+    def test_review_in_progress_pauses_future_product_queue(self):
+        state = self._make_state()
+
+        product = self._task(
+            "LOOM:1",
+            "Add Events tab",
+            lane="Done",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:00:00+00:00",
+                "commit_sha": "impl123",
+            },
+        )
+        review = self._task(
+            "LOOM:1:1",
+            "Review Events implementation",
+            lane="In Progress",
+            action_name="feature/review",
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+            created_at="2026-04-07T11:10:00+00:00",
+            updated_at="2026-04-07T11:20:00+00:00",
+        )
+        queued_next = self._task(
+            "LOOM:2",
+            "Add Worklog tab",
+            lane="To Do",
+            created_at="2026-04-07T11:30:00+00:00",
+            updated_at="2026-04-07T11:30:00+00:00",
+            resume_after=product.id,
+        )
+        state.board_tasks[product.id] = product
+        state.board_tasks[review.id] = review
+        state.board_tasks[queued_next.id] = queued_next
+
+        stream = self.streams_mod.compute_worktree_stream(
+            state,
+            repo_root="/repo",
+            branch="loom/worker",
+        )
+
+        self.assertEqual(stream["state"], "reviewing")
+        self.assertEqual(stream["queue_gate"], {})
+        self.assertEqual(stream["ready_to_resume_task_id"], "")
+        self.assertEqual(
+            [item["queue_state"] for item in stream["queue_items"]],
+            ["paused_by_review"],
+        )
+
+    def test_blocker_gate_pauses_future_product_queue(self):
+        state = self._make_state()
+        worker = self._add_agent(
+            state,
+            current_task_id="LOOM:1:2",
+            status="running",
+            last_event_at="2026-04-07T12:45:00+00:00",
+        )
+
+        product = self._task(
+            "LOOM:1",
+            "Add Events tab",
+            lane="Done",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:00:00+00:00",
+                "commit_sha": "impl123",
+                "recorded_by_agent_id": worker.id,
+            },
+        )
+        review = self._task(
+            "LOOM:1:1",
+            "Review Events implementation",
+            lane="In Progress",
+            action_name="feature/review",
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+            status="Fixing",
+            created_at="2026-04-07T11:10:00+00:00",
+            updated_at="2026-04-07T11:20:00+00:00",
+        )
+        blocker_fix = self._task(
+            "LOOM:1:2",
+            "Fix the issues found",
+            lane="In Progress",
+            action_name="feature/fix-review",
+            parent_task_id=review.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=2,
+            agent_id=worker.id,
+            created_at="2026-04-07T11:30:00+00:00",
+            updated_at="2026-04-07T12:40:00+00:00",
+            resume_after=product.id,
+            labels=["loom:derived", "review-fix"],
+        )
+        queued_next = self._task(
+            "LOOM:2",
+            "Add Worklog tab",
+            lane="To Do",
+            created_at="2026-04-07T12:41:00+00:00",
+            updated_at="2026-04-07T12:41:00+00:00",
+            resume_after=review.id,
+        )
+        state.board_tasks[product.id] = product
+        state.board_tasks[review.id] = review
+        state.board_tasks[blocker_fix.id] = blocker_fix
+        state.board_tasks[queued_next.id] = queued_next
+
+        stream = self.streams_mod.compute_worktree_stream(
+            state,
+            repo_root="/repo",
+            branch="loom/worker",
+        )
+
+        self.assertEqual(stream["queue_gate"]["gate_type"], "review_blocker")
+        self.assertEqual(stream["queue_gate"]["blocking_task_id"], blocker_fix.id)
+        self.assertEqual(stream["queue_gate"]["source_task_id"], review.id)
+        self.assertEqual(
+            [item["queue_state"] for item in stream["queue_items"]],
+            ["paused_by_blocker"],
+        )
+        self.assertEqual(stream["ready_to_resume_task_id"], "")
+        self.assertFalse(stream["can_auto_resume"])
+
     def test_validation_pending_branch_is_awaiting_human_validation(self):
         state = self._make_state()
 
@@ -291,6 +438,64 @@ class WorktreeStreamTests(unittest.TestCase):
             "Live/manual Weaver-panel smoke pending",
         )
         self.assertEqual(stream["recommended_next_action"], "merge_after_validation")
+
+    def test_validation_gate_pauses_future_product_queue(self):
+        state = self._make_state()
+
+        product = self._task(
+            "LOOM:1",
+            "Add Events tab",
+            lane="Done",
+            verification_state="pending",
+            verification_summary={
+                "human_validation_pending": "Live/manual Weaver-panel smoke pending",
+            },
+            verification_updated_at="2026-04-07T11:45:00+00:00",
+        )
+        review = self._task(
+            "LOOM:1:1",
+            "Review Events implementation",
+            lane="Done",
+            action_name="feature/review",
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+            created_at="2026-04-07T11:00:00+00:00",
+            updated_at="2026-04-07T11:30:00+00:00",
+            boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:30:00+00:00",
+                "commit_sha": "review123",
+            },
+        )
+        queued_next = self._task(
+            "LOOM:2",
+            "Add Worklog tab",
+            lane="To Do",
+            created_at="2026-04-07T11:35:00+00:00",
+            updated_at="2026-04-07T11:35:00+00:00",
+            resume_after=review.id,
+        )
+        state.board_tasks[product.id] = product
+        state.board_tasks[review.id] = review
+        state.board_tasks[queued_next.id] = queued_next
+
+        stream = self.streams_mod.compute_worktree_stream(
+            state,
+            repo_root="/repo",
+            branch="loom/worker",
+        )
+
+        self.assertEqual(stream["queue_gate"]["gate_type"], "human_validation")
+        self.assertEqual(
+            [item["queue_state"] for item in stream["queue_items"]],
+            ["paused_by_validation"],
+        )
+        self.assertEqual(stream["ready_to_resume_task_id"], "")
+        self.assertFalse(stream["can_auto_resume"])
 
     def test_merge_conflict_stream_marks_branch_advanced_and_not_partial_review_safe(self):
         state = self._make_state()
@@ -402,6 +607,8 @@ class WorktreeStreamTests(unittest.TestCase):
 
         self.assertEqual(stream["product_task_ids"], [product.id])
         self.assertEqual(stream["workflow_task_ids"], [])
+        self.assertEqual(stream["queue_items"], [])
+        self.assertEqual(stream["queue_counts"], {})
         self.assertEqual(
             [item["kind"] for item in stream["recent_visibility_items"]],
             ["agent_reply", "weaver_message"],

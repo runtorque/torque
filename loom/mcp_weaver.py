@@ -29,7 +29,7 @@ from .state import (
     normalize_default_worker_concurrency,
 )
 from .task_health import HEALTH_SEVERITY
-from .worktree_streams import compute_worktree_streams
+from .worktree_streams import compute_worktree_streams, member_task_ids_for_stream
 
 _STREAM_STATES = (
     "implementing",
@@ -128,35 +128,6 @@ def _stream_state_counts(streams: list[dict]) -> dict[str, int]:
     return counts
 
 
-def _member_task_ids_for_stream(stream: dict) -> set[str]:
-    ids: set[str] = set()
-    for key in (
-        "product_task_ids",
-        "workflow_task_ids",
-        "queued_task_ids",
-        "started_task_ids",
-    ):
-        ids.update(
-            str(task_id or "").strip()
-            for task_id in stream.get(key, []) or []
-            if str(task_id or "").strip()
-        )
-    for key in (
-        "foreground_task_id",
-        "latest_boundary_task_id",
-        "active_review_task_id",
-        "active_blocker_task_id",
-    ):
-        task_id = str(stream.get(key, "") or "").strip()
-        if task_id:
-            ids.add(task_id)
-    for item in stream.get("recent_visibility_items", []) or []:
-        task_id = str((item or {}).get("task_id", "") or "").strip()
-        if task_id:
-            ids.add(task_id)
-    return ids
-
-
 def _weaver_streams(state, weaver_cell, group: str, *,
                     include_merged: bool = True,
                     visibility_limit: int = 10,
@@ -200,7 +171,7 @@ def _resolve_stream_payload(streams: list[dict], *, stream_ident: str = "",
     if task_id:
         matches = [
             stream for stream in streams
-            if task_id in _member_task_ids_for_stream(stream)
+            if task_id in member_task_ids_for_stream(stream)
         ]
         if len(matches) == 1:
             return matches[0], ""

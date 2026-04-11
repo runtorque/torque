@@ -95,6 +95,7 @@ from .server_agent import (
 )
 from .server_dispatch import (
     _find_active_worktree_owner,
+    _maybe_auto_resume_stream,
     _pump_auto_dispatch_queue,
     _scheduler_loop,
     _should_handoff_shared_worktree,
@@ -106,6 +107,7 @@ from .server_worktrees import (
     _worktree_full_diff,
     _worktree_merge_diff_snapshot,
 )
+from .worktree_streams import compute_worktree_stream_for_task
 
 
 def _should_install_keybindings() -> bool:
@@ -351,6 +353,73 @@ def _nearest_ancestor_agent_for_action_stage(state: MatrixState, task,
                 return agent
         ancestor_id = ancestor.parent_task_id
     return None
+
+
+def _looks_like_review_task(task) -> bool:
+    if not task:
+        return False
+    action_name = str(getattr(task, "action_name", "") or "").strip().lower()
+    if "review" in action_name:
+        return True
+    status = str(getattr(task, "status", "") or "").strip().lower()
+    if status == "on review":
+        return True
+    text = " ".join(
+        part.strip().lower()
+        for part in (
+            str(getattr(task, "task", "") or ""),
+            str(getattr(task, "description", "") or ""),
+            action_name,
+            status,
+        )
+        if part and part.strip()
+    )
+    return "review" in text or "re-review" in text
+
+
+def _is_generic_review_fix_task(task) -> bool:
+    if not task:
+        return False
+    action_name = str(getattr(task, "action_name", "") or "").strip().lower()
+    labels = {
+        str(label or "").strip().lower()
+        for label in (getattr(task, "labels", []) or [])
+    }
+    return action_name == "feature/fix-review" or "review-fix" in labels
+
+
+def _find_reusable_review_fix_task(state: MatrixState, task,
+                                   action_name: str):
+    """Return an unresolved generic review-fix task in the active review loop."""
+    if str(action_name or "").strip().lower() != "feature/fix-review":
+        return None
+    review_task = task if _looks_like_review_task(task) else None
+    ancestor_id = str(getattr(task, "parent_task_id", "") or "").strip() if task else ""
+    while not review_task and ancestor_id:
+        ancestor = state.board_tasks.get(ancestor_id)
+        if not ancestor:
+            break
+        if _looks_like_review_task(ancestor):
+            review_task = ancestor
+            break
+        ancestor_id = str(getattr(ancestor, "parent_task_id", "") or "").strip()
+    if not review_task:
+        return None
+
+    candidates = [
+        child for child in state.board_get_children(review_task.id)
+        if not task_is_closed(child)
+        and _is_generic_review_fix_task(child)
+    ]
+    candidates.sort(
+        key=lambda current: (
+            getattr(current, "lane", "") != "In Progress",
+            getattr(current, "lane", "") != "To Do",
+            getattr(current, "created_at", "") or "",
+            getattr(current, "id", "") or "",
+        )
+    )
+    return candidates[0] if candidates else None
 
 
 def _append_mcp_message(cell, action: str, message: str = ""):
@@ -3310,6 +3379,14 @@ async def main(connection=None):
 
             elif cmd == "board_update_task":
                 tid = _resolve_task_id(state, data.get("id", ""))
+                _update_task = state.board_tasks.get(tid)
+                _update_previous_stream = None
+                if _update_task:
+                    _update_previous_stream = compute_worktree_stream_for_task(
+                        state,
+                        _update_task.id,
+                        group=_update_task.group,
+                    )
                 fields = {k: v for k, v in data.items()
                           if k not in ("cmd", "id")}
                 if {"provider", "external_id", "external_url"} & set(fields):
@@ -3335,6 +3412,16 @@ async def main(connection=None):
                         await handle_command({
                             "cmd": "dispatch_task",
                             "id": tid, "agent_id": _new_aid})
+                _updated_task = state.board_tasks.get(tid)
+                if _updated_task:
+                    await _maybe_auto_resume_stream(
+                        state,
+                        handle_command,
+                        _panel_event,
+                        task=_updated_task,
+                        previous_stream=_update_previous_stream,
+                        group=_updated_task.group,
+                    )
 
             elif cmd == "board_verify_task":
                 tid = _resolve_task_id(state, data.get("id", ""))
@@ -3342,6 +3429,11 @@ async def main(connection=None):
                 if not task:
                     result = {"type": "error", "message": "Task not found"}
                 else:
+                    previous_stream = compute_worktree_stream_for_task(
+                        state,
+                        task.id,
+                        group=task.group,
+                    )
                     actor_name = str(
                         data.get("actor_name", "") or "loom"
                     ).strip()
@@ -3392,6 +3484,14 @@ async def main(connection=None):
                         "task_id": task.id,
                         "message": verify_msg,
                     }
+                    await _maybe_auto_resume_stream(
+                        state,
+                        handle_command,
+                        _panel_event,
+                        task=task,
+                        previous_stream=previous_stream,
+                        group=task.group,
+                    )
 
             elif cmd == "external_import_task":
                 group = data.get("group", "")
@@ -3643,6 +3743,13 @@ async def main(connection=None):
             elif cmd == "board_move_task":
                 _mv_id = _resolve_task_id(state, data.get("id", ""))
                 _mv_task = state.board_tasks.get(_mv_id)
+                _mv_previous_stream = None
+                if _mv_task:
+                    _mv_previous_stream = compute_worktree_stream_for_task(
+                        state,
+                        _mv_task.id,
+                        group=_mv_task.group,
+                    )
                 _mv_done_before = task_counts_as_done(_mv_task)
                 _mv_new = data.get("lane", "")
                 state.board_move_task(
@@ -3659,6 +3766,15 @@ async def main(connection=None):
                                 "blocked again (dependency "
                                 "moved out of Done)",
                                 task_id=_dt.id)
+                if _mv_task_after:
+                    await _maybe_auto_resume_stream(
+                        state,
+                        handle_command,
+                        _panel_event,
+                        task=_mv_task_after,
+                        previous_stream=_mv_previous_stream,
+                        group=_mv_task_after.group,
+                    )
 
             elif cmd == "board_reorder_task":
                 state.board_reorder_task(
@@ -4683,6 +4799,13 @@ async def main(connection=None):
                         cell,
                         task_id=task_id,
                     )
+                    previous_stream = None
+                    if task:
+                        previous_stream = compute_worktree_stream_for_task(
+                            state,
+                            task.id,
+                            group=task.group or cell.group,
+                        )
 
                     def _add_label(t, label):
                         if label not in t.labels:
@@ -4738,27 +4861,6 @@ async def main(connection=None):
                                 task_override.id if task_override
                                 else (task.id if task else "")
                             ))
-
-                    async def _auto_dispatch_next(c):
-                        """Pick the next queued task for this agent."""
-                        queued = sorted(
-                            [t for t in state.board_tasks.values()
-                             if t.agent_id == c.id
-                             and t.lane == "To Do"
-                             and state.board_deps_met(t)],
-                            key=lambda t: t.position)
-                        if not queued:
-                            return
-                        nxt = queued[0]
-                        _panel_event(
-                            "task_auto_dispatched", c.id,
-                            c.name, c.group,
-                            nxt.task[:80], task_id=nxt.id)
-                        await state.broadcast()
-                        await handle_command({
-                            "cmd": "dispatch_task",
-                            "id": nxt.id,
-                            "agent_id": c.id})
 
                     async def _drain_auto_dispatch_queue(group_name: str):
                         if not group_name:
@@ -4854,7 +4956,14 @@ async def main(connection=None):
                                 "task_completed", cell.id,
                                 cell.name, cell.group,
                                 message or "Task completed")
-                            await _auto_dispatch_next(cell)
+                            await _maybe_auto_resume_stream(
+                                state,
+                                handle_command,
+                                _panel_event,
+                                task=task,
+                                previous_stream=previous_stream,
+                                group=task.group if task else cell.group,
+                            )
                             await _drain_auto_dispatch_queue(
                                 task.group if task else cell.group
                             )
@@ -4959,6 +5068,14 @@ async def main(connection=None):
                                 "task_id": task.id,
                                 "message": verify_msg,
                             }
+                            await _maybe_auto_resume_stream(
+                                state,
+                                handle_command,
+                                _panel_event,
+                                task=task,
+                                previous_stream=previous_stream,
+                                group=task.group if task else cell.group,
+                            )
 
                     elif action == "ready":
                         rejected = _reject_completion_with_open_descendants(
@@ -5006,7 +5123,14 @@ async def main(connection=None):
                                 "task_completed", cell.id,
                                 cell.name, cell.group,
                                 "Ready (task completed)")
-                            await _auto_dispatch_next(cell)
+                            await _maybe_auto_resume_stream(
+                                state,
+                                handle_command,
+                                _panel_event,
+                                task=task,
+                                previous_stream=previous_stream,
+                                group=task.group if task else cell.group,
+                            )
                             await _drain_auto_dispatch_queue(
                                 task.group if task else cell.group
                             )
@@ -5116,18 +5240,26 @@ async def main(connection=None):
                                         or task.id
                                     derive_desc = data.get(
                                         "description", "")
-                                    new_task = state.board_add_task(
-                                        task=message,
-                                        group=grp,
-                                        lane="Backlog",
-                                        action_name=act_name,
-                                        action_vars=act_vars,
-                                        labels=["loom:derived"],
-                                        parent_task_id=task.id,
-                                        pipeline_depth=new_depth,
-                                        pipeline_root_id=root_id,
-                                        description=derive_desc,
+                                    reusable_task = _find_reusable_review_fix_task(
+                                        state,
+                                        task,
+                                        act_name,
                                     )
+                                    reused_existing_task = reusable_task is not None
+                                    new_task = reusable_task
+                                    if not new_task:
+                                        new_task = state.board_add_task(
+                                            task=message,
+                                            group=grp,
+                                            lane="Backlog",
+                                            action_name=act_name,
+                                            action_vars=act_vars,
+                                            labels=["loom:derived"],
+                                            parent_task_id=task.id,
+                                            pipeline_depth=new_depth,
+                                            pipeline_root_id=root_id,
+                                            description=derive_desc,
+                                        )
                                     if new_task:
                                         _append_mcp(
                                             cell, "derive",
@@ -5140,12 +5272,31 @@ async def main(connection=None):
                                             message[:80])
                                         _save_task(task)
                                         state._emit_agent(cell)
-                                        _panel_event(
-                                            "task_derived",
-                                            cell.id, cell.name,
-                                            cell.group,
-                                            message[:80],
-                                            task_id=new_task.id)
+                                        if not reused_existing_task:
+                                            _panel_event(
+                                                "task_derived",
+                                                cell.id, cell.name,
+                                                cell.group,
+                                                message[:80],
+                                                task_id=new_task.id)
+                                        elif (
+                                            new_task.agent_id
+                                            and getattr(new_task, "lane", "") == "In Progress"
+                                        ):
+                                            result = {
+                                                "type": "ok",
+                                                "task_id": new_task.id,
+                                                "agent_id": new_task.agent_id,
+                                            }
+                                        elif (
+                                            new_task.agent_id
+                                            and state.agent_is_busy(new_task.agent_id)
+                                        ):
+                                            result = {
+                                                "type": "queued",
+                                                "task_id": new_task.id,
+                                                "agent_id": new_task.agent_id,
+                                            }
                                         # Determine dispatch target
                                         # Enforce transition's declared
                                         # target — ignore --self/--agent
@@ -5227,11 +5378,15 @@ async def main(connection=None):
                                                         "found: "
                                                         + target_agent
                                                 }
+                                        elif reused_existing_task and new_task.agent_id:
+                                            target_id = new_task.agent_id
 
                                         if result and \
                                                 result.get("type") \
                                                 == "error":
                                             pass  # skip dispatch
+                                        elif result and reused_existing_task:
+                                            pass
                                         elif target_id == cell.id:
                                             # Self-dispatch through the
                                             # normal delayed same-agent

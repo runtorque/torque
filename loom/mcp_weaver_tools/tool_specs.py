@@ -21,8 +21,9 @@ WEAVER_TOOLS = [
         "description": (
             "List computed branch/worktree streams for the weaver's group. "
             "Returns compact stream objects including identity, ownership, "
-            "product/workflow membership, recent visibility items, state, "
-            "review/boundary metadata, and recommended next action."
+            "product/workflow membership, product-queue state, queue gates, "
+            "recent visibility items, state, review/boundary metadata, and "
+            "recommended next action."
         ),
         "inputSchema": {
             "type": "object",
@@ -57,7 +58,8 @@ WEAVER_TOOLS = [
         "description": (
             "Show one computed stream by stream id, branch identity, or a "
             "related task id. Returns the full compact stream payload with "
-            "product, workflow, and visibility distinctions preserved."
+            "product, workflow, and visibility distinctions preserved, "
+            "including queue items, queue gate, and auto-resume readiness."
         ),
         "inputSchema": {
             "type": "object",
