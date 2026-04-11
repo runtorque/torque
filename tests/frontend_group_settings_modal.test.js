@@ -33,6 +33,7 @@ class FakeElement {
     this.id = id;
     this.value = '';
     this.checked = false;
+    this.open = false;
     this._innerHTML = '';
     this.textContent = '';
     this.dataset = {};
@@ -234,10 +235,34 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
   assert.equal(ensure('gs-wt-merge-cleanup').value, 'close_remove');
   assert.equal(ensure('gs-wt-merge-preserve-diff').checked, true);
   assert.equal(ensure('gs-weaver-agent-name').textContent, 'Weaver');
+  assert.equal(ensure('gs-weaver-provider-section').open, true);
+  assert.equal(ensure('gs-weaver-autonomy-section').open, true);
+  assert.equal(ensure('gs-weaver-digest-section').open, false);
   assert.equal(ensure('gs-weaver-event-agent-started').checked, true);
   assert.equal(ensure('gs-weaver-event-agent-progress').checked, true);
-  assert.equal(ensure('gs-weaver-autonomy-mode').focused, true);
+  assert.equal(ensure('gs-weaver-provider').focused, true);
   assert.equal(ensure('modal-group-settings').classList.contains('visible'), true);
+});
+
+test('group settings resets the Weaver section defaults when reopened', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  ensure('gs-weaver-provider-section').open = false;
+  ensure('gs-weaver-autonomy-section').open = false;
+  ensure('gs-weaver-digest-section').open = true;
+
+  vm.runInContext(`_showGroupSettings("alpha", {
+    settings: {},
+    weaver_settings: {},
+    profiles: ["Default"]
+  })`, context);
+
+  assert.equal(ensure('gs-weaver-provider-section').open, true);
+  assert.equal(ensure('gs-weaver-autonomy-section').open, true);
+  assert.equal(ensure('gs-weaver-digest-section').open, false);
 });
 
 test('submitGroupSettings sends group and weaver updates separately', () => {

@@ -5993,6 +5993,27 @@ test('task modal keeps external and verification collapsed by default with respo
   assert.match(css, /\.task-modal-check-grid\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(160px,\s*1fr\)\);/);
 });
 
+test('weaver group settings keep provider first and digest details collapsed by default', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  const providerIndex = html.indexOf('<details id="gs-weaver-provider-section" class="task-modal-section" open>');
+  const autonomyIndex = html.indexOf('<details id="gs-weaver-autonomy-section" class="task-modal-section" open>');
+  const digestIndex = html.indexOf('<details id="gs-weaver-digest-section" class="task-modal-section">');
+
+  assert.notEqual(providerIndex, -1);
+  assert.notEqual(autonomyIndex, -1);
+  assert.notEqual(digestIndex, -1);
+  assert.ok(providerIndex < autonomyIndex);
+  assert.ok(autonomyIndex < digestIndex);
+  assert.match(html, /<details id="gs-weaver-provider-section" class="task-modal-section" open>\s*<summary>Provider<\/summary>/);
+  assert.match(html, /<details id="gs-weaver-autonomy-section" class="task-modal-section" open>\s*<summary>Autonomy mode/);
+  assert.match(html, /<details id="gs-weaver-digest-section" class="task-modal-section">\s*<summary>Digest details<\/summary>/);
+  assert.equal(html.includes('<details id="gs-weaver-digest-section" class="task-modal-section" open>'), false);
+  assert.match(css, /\.task-modal-section\[open\] summary\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/);
+  assert.match(css, /\.task-modal-section-intro\s*\{[^}]*margin-bottom:\s*8px;/);
+});
+
 test('context menu constrains width and clamps wrapped task-title rows', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 

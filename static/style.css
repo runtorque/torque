@@ -1400,6 +1400,9 @@ body.runtime-embedded #modal-group .modal-summary {
 .task-modal-section summary:hover {
   color: var(--text);
 }
+.task-modal-section[open] summary {
+  border-bottom: 1px solid var(--border);
+}
 .task-modal-section summary .hint-btn {
   display: inline-flex;
   vertical-align: middle;
@@ -1407,6 +1410,9 @@ body.runtime-embedded #modal-group .modal-summary {
 }
 .task-modal-section-body {
   padding: 2px 10px 10px;
+}
+.task-modal-section-intro {
+  margin-bottom: 8px;
 }
 .task-modal-section-body label:first-child {
   margin-top: 0;

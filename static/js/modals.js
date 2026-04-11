@@ -503,6 +503,17 @@ function _renderGsWeaverSummary(group, weaver, ws) {
   }
 }
 
+function _setDetailsOpen(id, open) {
+  const el = document.getElementById(id);
+  if (el) el.open = !!open;
+}
+
+function _resetGsWeaverSections() {
+  _setDetailsOpen('gs-weaver-provider-section', true);
+  _setDetailsOpen('gs-weaver-autonomy-section', true);
+  _setDetailsOpen('gs-weaver-digest-section', false);
+}
+
 function _showGroupSettings(group, data) {
   _settingsGroup = group;
   const s = data.settings;
@@ -632,6 +643,7 @@ function _showGroupSettings(group, data) {
   );
   _setWeaverEventCheckboxes(ws.enabled_events || []);
   _renderGsWeaverSummary(group, weaver, ws);
+  _resetGsWeaverSections();
 
   const initialTab = _gsInitialTab || 'group';
   const initialSubtab = _gsInitialSubtab || '';
@@ -643,7 +655,7 @@ function _showGroupSettings(group, data) {
   _gsInitialTab = 'group';
   _gsInitialSubtab = '';
   document.getElementById('modal-group-settings').classList.add('visible');
-  const focusId = initialTab === 'weaver' ? 'gs-weaver-autonomy-mode' : 'gs-directory';
+  const focusId = initialTab === 'weaver' ? 'gs-weaver-provider' : 'gs-directory';
   const focusEl = document.getElementById(focusId);
   if (focusEl) focusEl.focus();
 }

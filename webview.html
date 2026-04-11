@@ -464,7 +464,8 @@
 
     <!-- Weaver tab -->
     <div class="gs-pane" data-pane="weaver">
-      <div class="task-modal-section">
+      <details id="gs-weaver-provider-section" class="task-modal-section" open>
+        <summary>Provider</summary>
         <div class="task-modal-section-body">
           <label>Agent</label>
           <div id="gs-weaver-agent-summary" class="gs-inline-card">
@@ -478,13 +479,16 @@
             Only show/manage agents launched by this Weaver
             <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="When enabled, this Weaver can only list, inspect, message, close, relaunch, or use worktree tools on worker agents it originally created. Human operators still see all agents on the board.">?</span>
           </label>
-        </div>
-      </div>
-
-      <div class="task-modal-section">
-        <div class="task-modal-section-body">
+          <label>Provider</label>
+          <select id="gs-weaver-provider" onchange="onGsWeaverProviderChange()"></select>
+          <label>Command override</label>
+          <input id="gs-weaver-boot-cmd" placeholder="Use provider default" autocomplete="off">
+          <label>Model</label>
+          <input id="gs-weaver-model" placeholder="Use provider default" autocomplete="off">
+          <label>Reasoning effort</label>
+          <select id="gs-weaver-reasoning-effort"></select>
           <label>Terminal overrides</label>
-          <div class="label-hint" style="margin-bottom:8px">Optional launch overrides for the designated Weaver only. Leave blank to inherit the usual agent/group defaults.</div>
+          <div class="label-hint task-modal-section-intro">Optional launch overrides for the designated Weaver only. Leave blank to inherit the usual agent/group defaults.</div>
           <label>Directory</label>
           <input id="gs-weaver-directory" placeholder="Same as agent/group" autocomplete="off">
           <label>Profile</label>
@@ -498,14 +502,17 @@
           </select>
           <label>Tab color</label>
           <div class="color-swatches" id="gs-weaver-color-swatches"></div>
+          <label>Custom instructions <span class="label-hint">expert override</span></label>
+          <textarea id="gs-weaver-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Weaver policy..."></textarea>
         </div>
-      </div>
+      </details>
 
-      <div class="task-modal-section">
+      <details id="gs-weaver-autonomy-section" class="task-modal-section" open>
+        <summary>Autonomy mode
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How proactively the Weaver should continue work without waiting for you. Use a preset instead of writing custom instructions for common behavior.">?</span>
+        </summary>
         <div class="task-modal-section-body">
-          <label>Autonomy mode
-            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="How proactively the Weaver should continue work without waiting for you. Use a preset instead of writing custom instructions for common behavior.">?</span>
-          </label>
+          <label>Mode</label>
           <select id="gs-weaver-autonomy-mode">
             <option value="suggest_only">Suggest only</option>
             <option value="dispatch_when_clear">Dispatch when clear</option>
@@ -548,12 +555,12 @@
             <option value="keep_moving">Keep moving unless blocked</option>
           </select>
         </div>
-      </div>
+      </details>
 
-      <div class="task-modal-section">
+      <details id="gs-weaver-digest-section" class="task-modal-section">
+        <summary>Digest details</summary>
         <div class="task-modal-section-body">
-          <label>Digest details</label>
-          <div class="label-hint" style="margin-bottom:8px">Advanced notification controls. Heartbeats and optional event types affect digest noise, not the Weaver's orchestration policy presets.</div>
+          <div class="label-hint task-modal-section-intro">Advanced notification controls. Heartbeats and optional event types affect digest noise, not the Weaver's orchestration policy presets.</div>
           <label>Push interval</label>
           <select id="gs-weaver-push-interval">
             <option value="10">10s</option>
@@ -591,22 +598,7 @@
             <label class="gs-checkbox"><input id="gs-weaver-event-task-health-alert" type="checkbox"> task_health_alert</label>
           </div>
         </div>
-      </div>
-
-      <div class="task-modal-section">
-        <div class="task-modal-section-body">
-          <label>Provider</label>
-          <select id="gs-weaver-provider" onchange="onGsWeaverProviderChange()"></select>
-          <label>Command override</label>
-          <input id="gs-weaver-boot-cmd" placeholder="Use provider default" autocomplete="off">
-          <label>Model</label>
-          <input id="gs-weaver-model" placeholder="Use provider default" autocomplete="off">
-          <label>Reasoning effort</label>
-          <select id="gs-weaver-reasoning-effort"></select>
-          <label>Custom instructions <span class="label-hint">expert override</span></label>
-          <textarea id="gs-weaver-custom-instructions" rows="5" placeholder="Instructions appended after Loom's built-in Weaver policy..."></textarea>
-        </div>
-      </div>
+      </details>
     </div>
 
     <div class="modal-actions">
