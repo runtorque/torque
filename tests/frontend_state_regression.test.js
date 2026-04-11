@@ -3088,7 +3088,7 @@ test('boardQuickAddLabel and boardQuickRemoveLabel preserve unrelated labels', (
     {
       cmd: 'board_update_task',
       id: 'task-1',
-      labels: ['loom:error', 'priority:medium'],
+      labels: ['loom:error', 'priority:medium', 'ops'],
     },
   ]);
 });
@@ -3140,6 +3140,8 @@ test('boardQuickAddLabel keeps the labels quick editor open and refocuses a clea
   assert.equal(input.selectionEnd, 0);
   assert.match(panel.innerHTML, /board-card-quick-editor/);
   assert.match(panel.innerHTML, /board-quick-label-input-task-1/);
+  assert.match(panel.innerHTML, /Labels 2/);
+  assert.match(panel.innerHTML, /board-card-quick-chip">ops/);
 });
 
 test('boardQuickLabelKeydown Enter keeps the labels quick editor open', () => {
@@ -3222,6 +3224,9 @@ test('boardQuickRemoveLabel keeps the labels quick editor open and refocuses the
   assert.equal(input.selectionEnd, 3);
   assert.match(panel.innerHTML, /board-card-quick-editor/);
   assert.match(panel.innerHTML, /board-quick-label-input-task-1/);
+  assert.match(panel.innerHTML, /Labels 1/);
+  assert.match(panel.innerHTML, /board-card-quick-chip">docs/);
+  assert.doesNotMatch(panel.innerHTML, /board-card-quick-chip">bug/);
 });
 
 test('_renderBoardCard includes compact quick-edit controls for focused root cards', () => {
