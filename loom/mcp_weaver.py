@@ -29,6 +29,7 @@ from .state import (
     normalize_default_worker_concurrency,
 )
 from .task_health import HEALTH_SEVERITY
+from .weaver_hints import compute_weaver_hints
 from .worktree_streams import compute_worktree_streams, member_task_ids_for_stream
 
 _STREAM_STATES = (
@@ -416,6 +417,11 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "unhealthy": unhealthy[:10],
                 "truncated": len(unhealthy) > 10,
             },
+            "hints": {
+                "count": 0,
+                "items": [],
+                "truncated": False,
+            },
             "asks": {
                 "count": len(pending_asks),
                 "items": pending_asks[:10],
@@ -445,6 +451,16 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
                 "items": boundary_items[:10],
                 "truncated": len(boundary_items) > 10,
             },
+        }
+        hints = compute_weaver_hints(
+            state,
+            _weaver_group,
+            weaver_id=_weaver_cell.id if _weaver_cell else "",
+        )
+        summary["hints"] = {
+            "count": len(hints),
+            "items": hints[:10],
+            "truncated": len(hints) > 10,
         }
         return json.dumps(summary), False
 

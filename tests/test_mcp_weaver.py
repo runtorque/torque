@@ -873,6 +873,274 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("tasks", summary)
 
+    async def test_board_summary_includes_current_hints(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        merged_a = self.state_mod.AgentCell(
+            id="worker-a",
+            name="Worker A",
+            group="g",
+            slug="worker-a",
+            cell_type="agent",
+            status="running",
+            worktree_path="/repo/.loom/worktrees/worker-a",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker-a",
+            worktree_merged=True,
+        )
+        merged_b = self.state_mod.AgentCell(
+            id="worker-b",
+            name="Worker B",
+            group="g",
+            slug="worker-b",
+            cell_type="agent",
+            status="stopped",
+            worktree_path="/repo/.loom/worktrees/worker-b",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker-b",
+            worktree_merged=True,
+        )
+        stalled_worker = self.state_mod.AgentCell(
+            id="worker-stalled",
+            name="Worker Stalled",
+            group="g",
+            slug="worker-stalled",
+            cell_type="agent",
+            status="running",
+            current_task_id="task-stalled",
+        )
+        state.agents[weaver.id] = weaver
+        state.agents[merged_a.id] = merged_a
+        state.agents[merged_b.id] = merged_b
+        state.agents[stalled_worker.id] = stalled_worker
+        state.groups["g"] = [
+            weaver.id,
+            merged_a.id,
+            merged_b.id,
+            stalled_worker.id,
+        ]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        stalled_task = state.board_add_task(
+            "Investigate stale stream",
+            "g",
+            lane="In Progress",
+            id="task-stalled",
+            agent_id=stalled_worker.id,
+        )
+        self.assertIsNotNone(stalled_task)
+        stalled_task.health_state = "stalled"
+        stalled_task.health_details = {
+            "aggregate": False,
+            "source_task_id": stalled_task.id,
+            "silence_secs": 25 * 60,
+        }
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        summary = json.loads(text)
+        self.assertEqual(summary["hints"]["count"], 2)
+        self.assertFalse(summary["hints"]["truncated"])
+        self.assertEqual(
+            [item["kind"] for item in summary["hints"]["items"]],
+            ["merged_cleanup", "long_running_followup"],
+        )
+        self.assertIn(
+            "merged branches ready for cleanup",
+            summary["hints"]["items"][0]["message"],
+        )
+        self.assertIn(
+            "worker-a",
+            summary["hints"]["items"][0]["message"],
+        )
+        self.assertEqual(
+            summary["hints"]["items"][1]["task_ids"],
+            [stalled_task.id],
+        )
+        self.assertIn(
+            "without Weaver follow-up",
+            summary["hints"]["items"][1]["message"],
+        )
+
+    async def test_board_summary_includes_ready_to_merge_hint_for_idle_streams(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        worker_a = self.state_mod.AgentCell(
+            id="worker-a",
+            name="Worker A",
+            group="g",
+            slug="worker-a",
+            cell_type="agent",
+            status="idle",
+            worktree_path="/repo/.loom/worktrees/worker-a",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker-a",
+        )
+        worker_b = self.state_mod.AgentCell(
+            id="worker-b",
+            name="Worker B",
+            group="g",
+            slug="worker-b",
+            cell_type="agent",
+            status="idle",
+            worktree_path="/repo/.loom/worktrees/worker-b",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker-b",
+        )
+        state.agents[weaver.id] = weaver
+        state.agents[worker_a.id] = worker_a
+        state.agents[worker_b.id] = worker_b
+        state.groups["g"] = [weaver.id, worker_a.id, worker_b.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+
+        for index, (worker, suffix) in enumerate(
+                ((worker_a, "a"), (worker_b, "b")), start=1):
+            product = state.board_add_task(
+                f"Ship stream {suffix}",
+                "g",
+                lane="Done",
+                id=f"LOOM:{index}",
+                agent_id=worker.id,
+                action_name="feature/implement",
+            )
+            review = state.board_add_task(
+                f"Review stream {suffix}",
+                "g",
+                lane="Done",
+                id=f"LOOM:{index}:1",
+                parent_task_id=product.id,
+                pipeline_root_id=product.id,
+                pipeline_depth=1,
+                agent_id=worker.id,
+                action_name="feature/review",
+            )
+            self.assertIsNotNone(product)
+            self.assertIsNotNone(review)
+            review.worktree_boundary = {
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": worker.worktree_branch,
+                "status": "open",
+                "recorded_at": "2026-04-07T11:30:00+00:00",
+                "commit_sha": f"review-{suffix}",
+                "recorded_by_agent_id": worker.id,
+            }
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        summary = json.loads(text)
+        self.assertEqual(summary["hints"]["count"], 1)
+        self.assertEqual(summary["hints"]["items"][0]["kind"], "ready_to_merge")
+        self.assertIn(
+            "idle streams are ready to merge",
+            summary["hints"]["items"][0]["message"],
+        )
+        self.assertEqual(
+            sorted(summary["hints"]["items"][0]["agent_ids"]),
+            ["worker-a", "worker-b"],
+        )
+
+    async def test_board_summary_suppresses_long_running_hint_with_pending_weaver_followup(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+            status="idle",
+        )
+        worker = self.state_mod.AgentCell(
+            id="worker-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            cell_type="agent",
+            status="running",
+            current_task_id="task-stalled",
+        )
+        state.agents[weaver.id] = weaver
+        state.agents[worker.id] = worker
+        state.groups["g"] = [weaver.id, worker.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        stalled_task = state.board_add_task(
+            "Investigate stalled stream",
+            "g",
+            lane="In Progress",
+            id="task-stalled",
+            agent_id=worker.id,
+        )
+        self.assertIsNotNone(stalled_task)
+        stalled_task.health_state = "stalled"
+        stalled_task.health_details = {
+            "aggregate": False,
+            "source_task_id": stalled_task.id,
+            "silence_secs": 25 * 60,
+        }
+        state.board_add_task(
+            "Weaver: please update",
+            "g",
+            lane="Backlog",
+            id="task-followup",
+            labels=["loom:weaver-message"],
+            reply_agent_id=worker.id,
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        summary = json.loads(text)
+        self.assertEqual(summary["hints"]["count"], 0)
+        self.assertEqual(summary["hints"]["items"], [])
+
     async def test_board_summary_and_list_hide_archived_by_default(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(

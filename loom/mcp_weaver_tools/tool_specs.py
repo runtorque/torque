@@ -8,11 +8,12 @@ WEAVER_TOOLS = [
         "description": (
             "Return a compact board overview for the weaver's group. "
             "Includes lane counts, active agent status, pending asks, "
-            "task-health rollups, and key label counts without embedding "
-            "full task lists. Also includes compact computed stream "
-            "summaries derived from branch/worktree state. When owned-agent "
-            "restriction is enabled, agent rollups only include agents "
-            "created by this Weaver."
+            "task-health rollups, current non-blocking Weaver hints, and "
+            "key label counts without embedding full task lists. Also "
+            "includes compact computed stream summaries derived from "
+            "branch/worktree state. When owned-agent restriction is "
+            "enabled, hint and agent rollups only include agents this "
+            "Weaver can control."
         ),
         "inputSchema": {"type": "object", "properties": {}},
     },
