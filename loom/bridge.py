@@ -635,10 +635,12 @@ class ITerm2Adapter:
         The body is sent first and the submit key is sent separately.
         Some TUIs treat ``async_send_text()`` as a paste operation, which
         can leave an appended return sitting in the composer instead of
-        actually submitting the prompt. Multi-line sends keep a short
-        delay before submit; single-line sends submit immediately after
-        the body. The first send to adapters with an input-ready policy
-        still waits until the visible screen stabilizes.
+        actually submitting the prompt. Keep a short delay before the
+        trailing submit for any non-empty prompt body so single-line
+        follow-up prompts use the same settled submit flow as normal
+        multi-line task dispatches. The first send to adapters with an
+        input-ready policy still waits until the visible screen
+        stabilizes.
         """
         session = await self._find_session(session_id)
         if session:
@@ -658,7 +660,7 @@ class ITerm2Adapter:
             )
             for chunk in chunks:
                 await session.async_send_text(chunk)
-            if "\n" in body:
+            if body:
                 await asyncio.sleep(submit_delay)
             await session.async_send_text(submit_key)
 

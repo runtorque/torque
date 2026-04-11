@@ -281,7 +281,7 @@ class LocalPtyAdapter:
         )
         for chunk in chunks:
             await self.write_input(session_id, chunk)
-        if "\n" in body:
+        if body:
             await asyncio.sleep(submit_delay)
         await self.write_input(session_id, submit_key)
 
