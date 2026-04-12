@@ -688,18 +688,53 @@ def _handle_weaver_flush_now_command(weaver_buffer, data: dict) -> dict:
 
 async def _queue_cell_prompt_send(cell, prompt: str, send_prompt, *,
                                   prime_input_ready: bool = False,
-                                  settled_submit: bool = False) -> bool:
+                                  settled_submit: bool = False,
+                                  wait_for_delivery: bool = False) -> bool:
     """Queue prompt delivery for a live cell without blocking fast controls."""
     if not cell or not getattr(cell, "session_id", ""):
         return False
-    await send_prompt(
+    delivery = await send_prompt(
         cell,
         prompt,
         background=True,
         prime_input_ready=prime_input_ready,
         settled_submit=settled_submit,
     )
+    if wait_for_delivery and delivery is not None:
+        await delivery
     return True
+
+
+async def _deliver_weaver_reply_and_resume(state: MatrixState, weaver, *,
+                                           group: str,
+                                           answer: str,
+                                           send_prompt,
+                                           weaver_buffer) -> dict:
+    formatted = (
+        "\n"
+        "## Human Reply\n"
+        f"{answer}\n"
+        "---\n"
+    )
+    await _queue_cell_prompt_send(
+        weaver,
+        formatted,
+        send_prompt,
+        prime_input_ready=True,
+        wait_for_delivery=True,
+    )
+    state.update_weaver_settings(
+        group,
+        pending_question="",
+        paused=False,
+    )
+    weaver_buffer.on_delivery_resumed(group)
+    state.journal_append(
+        group,
+        "observation",
+        f"Human replied: {answer}",
+    )
+    return {"type": "ok"}
 
 
 def _resolve_ai_report_task(state: MatrixState, cell, *,
@@ -5977,30 +6012,14 @@ async def main(connection=None):
                         result = {"type": "error",
                                   "message": "Weaver is not running"}
                     else:
-                        # Send answer to weaver's terminal
-                        formatted = (
-                            "\n"
-                            "## Human Reply\n"
-                            f"{answer}\n"
-                            "---\n"
-                        )
-                        await _queue_cell_prompt_send(
+                        result = await _deliver_weaver_reply_and_resume(
+                            state,
                             weaver,
-                            formatted,
-                            _send_agent_prompt,
-                            prime_input_ready=True,
+                            group=group,
+                            answer=answer,
+                            send_prompt=_send_agent_prompt,
+                            weaver_buffer=weaver_buffer,
                         )
-                        # Clear question, unpause events
-                        state.update_weaver_settings(
-                            group,
-                            pending_question="",
-                            paused=False)
-                        weaver_buffer.on_delivery_resumed(group)
-                        # Log to journal
-                        state.journal_append(
-                            group, "observation",
-                            f"Human replied: {answer}")
-                        result = {"type": "ok"}
 
             elif cmd == "weaver_pause":
                 group = data.get("group", "")
