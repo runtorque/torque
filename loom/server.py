@@ -686,6 +686,46 @@ def _handle_weaver_flush_now_command(weaver_buffer, data: dict) -> dict:
     return {"type": "error", "message": message or "Unable to send queued events"}
 
 
+def _is_closing_ui_ws_error(exc: Exception) -> bool:
+    client_reset = getattr(
+        getattr(aiohttp, "client_exceptions", None),
+        "ClientConnectionResetError",
+        None,
+    )
+    if client_reset and isinstance(exc, client_reset):
+        return True
+    if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
+        return True
+    text = str(exc or "").lower()
+    return "closing transport" in text or "write eof" in text
+
+
+async def _send_ui_ws_json(ws, payload: dict) -> bool:
+    if not ws or getattr(ws, "closed", False):
+        return False
+    try:
+        await ws.send_str(json.dumps(payload))
+        return True
+    except Exception as exc:
+        if _is_closing_ui_ws_error(exc):
+            return False
+        raise
+
+
+async def _register_ready_ui_ws_client(state: MatrixState, ws,
+                                       payload_factory) -> bool:
+    async with state._ws_clients_lock:
+        state._ws_clients.discard(ws)
+    while True:
+        payload = payload_factory()
+        if not await _send_ui_ws_json(ws, payload):
+            return False
+        async with state._ws_clients_lock:
+            if state._seq == int(payload.get("seq", 0) or 0):
+                state._ws_clients.add(ws)
+                return True
+
+
 async def _queue_cell_prompt_send(cell, prompt: str, send_prompt, *,
                                   prime_input_ready: bool = False,
                                   settled_submit: bool = False,
@@ -6206,8 +6246,9 @@ async def main(connection=None):
     async def handle_ws(request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        state._ws_clients.add(ws)
-        await ws.send_str(json.dumps(_state_payload()))
+        if not await _register_ready_ui_ws_client(
+                state, ws, _state_payload):
+            return ws
         try:
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
@@ -6215,7 +6256,13 @@ async def main(connection=None):
                         result = await handle_command(
                             json.loads(msg.data))
                         if result:
-                            await ws.send_str(json.dumps(result))
+                            if result.get("type") == "state":
+                                sent = await _register_ready_ui_ws_client(
+                                    state, ws, _state_payload)
+                            else:
+                                sent = await _send_ui_ws_json(ws, result)
+                            if not sent:
+                                break
                     except json.JSONDecodeError:
                         log.warning("Received malformed JSON from webview")
                     except Exception:

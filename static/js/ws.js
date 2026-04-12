@@ -11,15 +11,21 @@ let _cachedAgentTemplates = [];
 
 var _firstStateReceived = false;
 var _expectedSeq = 0;
+var _resyncPending = false;
+var _awaitingFullState = false;
 
 function connect() {
   _firstStateReceived = false;
+  _resyncPending = false;
+  _awaitingFullState = false;
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
     document.getElementById('conn-dot').classList.add('ok');
     document.getElementById('conn-dot').title = 'Connected';
   };
   ws.onclose = () => {
+    _resyncPending = false;
+    _awaitingFullState = false;
     document.getElementById('conn-dot').classList.remove('ok');
     document.getElementById('conn-dot').title = 'Disconnected';
     setTimeout(connect, 2000);
@@ -187,6 +193,8 @@ function _handleFullState(msg) {
   const shouldRestorePanel = typeof _panelStateRestored !== 'undefined'
     ? !_panelStateRestored
     : false;
+  _resyncPending = false;
+  _awaitingFullState = false;
   state = msg;
   _applyRuntimeMode();
   if (typeof _boardFiltersByGroup !== 'undefined') _boardFiltersByGroup = null;
@@ -231,12 +239,17 @@ function _handleFullState(msg) {
 /* -- Delta patching ------------------------------------------------------- */
 
 function _handleDelta(msg) {
+  if (_awaitingFullState) return;
   const prevGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
   const invalidations = _deltaSurfaceInvalidations(msg.ops);
   const opGroupHints = _captureDeltaGroupHints(msg.ops);
   if (msg.seq !== _expectedSeq) {
     // Sequence gap — request full resync
-    send({ cmd: 'resync' });
+    if (!_resyncPending) {
+      _resyncPending = true;
+      _awaitingFullState = true;
+      send({ cmd: 'resync' });
+    }
     return;
   }
   _expectedSeq = msg.seq + 1;

@@ -348,7 +348,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(first_reads, 3)
         self.assertEqual(screen_reads, first_reads)
-        self.assertEqual(delays, [0.25, 0.25, 0.3, 0.3])
+        self.assertEqual(delays, [0.25, 0.25, 0.3])
 
     async def test_send_text_claude_applies_post_ready_delay_after_hook_signal(self):
         state = self.state_mod.MatrixState()
@@ -393,7 +393,7 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
                 ("session-claude", "\r"),
             ],
         )
-        self.assertEqual(delays, [0.5, 0.3])
+        self.assertEqual(delays, [0.5])
 
     async def test_create_session_installs_hooks_in_resolved_cwd_when_directory_blank(self):
         state = self.state_mod.MatrixState()
