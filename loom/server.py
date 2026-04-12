@@ -713,11 +713,17 @@ async def _send_ui_ws_json(ws, payload: dict) -> bool:
 
 
 async def _register_ready_ui_ws_client(state: MatrixState, ws,
-                                       payload: dict) -> bool:
-    if not await _send_ui_ws_json(ws, payload):
-        return False
-    state._ws_clients.add(ws)
-    return True
+                                       payload_factory) -> bool:
+    async with state._ws_clients_lock:
+        state._ws_clients.discard(ws)
+    while True:
+        payload = payload_factory()
+        if not await _send_ui_ws_json(ws, payload):
+            return False
+        async with state._ws_clients_lock:
+            if state._seq == int(payload.get("seq", 0) or 0):
+                state._ws_clients.add(ws)
+                return True
 
 
 async def _queue_cell_prompt_send(cell, prompt: str, send_prompt, *,
@@ -6241,7 +6247,7 @@ async def main(connection=None):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         if not await _register_ready_ui_ws_client(
-                state, ws, _state_payload()):
+                state, ws, _state_payload):
             return ws
         try:
             async for msg in ws:
@@ -6250,7 +6256,11 @@ async def main(connection=None):
                         result = await handle_command(
                             json.loads(msg.data))
                         if result:
-                            sent = await _send_ui_ws_json(ws, result)
+                            if result.get("type") == "state":
+                                sent = await _register_ready_ui_ws_client(
+                                    state, ws, _state_payload)
+                            else:
+                                sent = await _send_ui_ws_json(ws, result)
                             if not sent:
                                 break
                     except json.JSONDecodeError:

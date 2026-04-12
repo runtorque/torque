@@ -1,5 +1,6 @@
 """AgentCell dataclass and MatrixState persistence layer."""
 
+import asyncio
 import json
 import re
 import uuid
@@ -582,6 +583,7 @@ class MatrixState:
         self.current_window_id: Optional[str] = None
         self._children: dict[str, list[str]] = {}  # agent_id → [child terminal ids]
         self._ws_clients: set[web.WebSocketResponse] = set()
+        self._ws_clients_lock = asyncio.Lock()
         # Global settings
         self.global_settings: GlobalSettings = GlobalSettings()
         # Board (Phase 5)
@@ -2812,18 +2814,22 @@ class MatrixState:
         where the _emit was called), this is a no-op — the delta was
         already queued by _emit().
         """
-        if not self._delta_ops:
-            return
-        self._seq += 1
-        msg = json.dumps({
-            "type": "delta", "seq": self._seq,
-            "ops": self._delta_ops,
-        })
-        self._delta_ops = []
+        async with self._ws_clients_lock:
+            if not self._delta_ops:
+                return
+            self._seq += 1
+            msg = json.dumps({
+                "type": "delta", "seq": self._seq,
+                "ops": self._delta_ops,
+            })
+            self._delta_ops = []
+            clients = list(self._ws_clients)
         dead: set[web.WebSocketResponse] = set()
-        for ws in self._ws_clients:
+        for ws in clients:
             try:
                 await ws.send_str(msg)
             except Exception:
                 dead.add(ws)
-        self._ws_clients -= dead
+        if dead:
+            async with self._ws_clients_lock:
+                self._ws_clients -= dead
