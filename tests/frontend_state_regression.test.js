@@ -2217,6 +2217,71 @@ test('ws ignores unsolicited action lists instead of reopening task-from-action 
   assert.equal(actionModal.classList.contains('visible'), false);
 });
 
+test('sequence gaps trigger only one resync until a full state arrives', () => {
+  const { context } = createWsRenderHarness();
+
+  runInContext(context, `
+    WebSocket = { OPEN: 1 };
+    ws = {
+      readyState: 1,
+      send(payload) { sendCalls.push(JSON.parse(payload)); }
+    };
+    _expectedSeq = 2;
+  `);
+
+  context._handleDelta({ seq: 7, ops: [] });
+  context._handleDelta({ seq: 8, ops: [] });
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    { cmd: 'resync' },
+  ]);
+  assert.equal(jsonValue(context, '_resyncPending'), true);
+  assert.equal(jsonValue(context, '_awaitingFullState'), true);
+
+  runInContext(context, `
+    _handleFullState({
+      seq: 9,
+      groups: {},
+      agents: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: [],
+    });
+  `);
+
+  assert.equal(jsonValue(context, '_resyncPending'), false);
+  assert.equal(jsonValue(context, '_awaitingFullState'), false);
+
+  context._handleDelta({ seq: 12, ops: [] });
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    { cmd: 'resync' },
+    { cmd: 'resync' },
+  ]);
+});
+
+test('ws close clears pending resync guards', () => {
+  const { sandbox, document } = createSandbox({
+    WebSocket: function FakeWebSocket() {
+      this.readyState = 1;
+      this.close = function() {};
+    },
+  });
+  document.register('conn-dot');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+
+  runInContext(context, `
+    connect();
+    _resyncPending = true;
+    _awaitingFullState = true;
+    ws.onclose();
+  `);
+
+  assert.equal(jsonValue(context, '_resyncPending'), false);
+  assert.equal(jsonValue(context, '_awaitingFullState'), false);
+});
+
 test('_renderBoardCard omits the default dispatch badge while keeping warning states', () => {
   const { sandbox } = createSandbox();
   const context = vm.createContext(sandbox);

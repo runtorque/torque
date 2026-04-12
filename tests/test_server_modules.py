@@ -1,5 +1,6 @@
-import importlib
 import asyncio
+import importlib
+import json
 import tempfile
 import types
 import unittest
@@ -276,6 +277,74 @@ class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
         ws = state.get_weaver_settings('g')
         self.assertFalse(ws.paused)
         self.assertEqual(ws.pending_question, '')
+
+
+class ServerWebSocketResyncTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.reload(self.server_mod)
+
+    async def test_register_ready_ui_ws_client_hides_socket_until_snapshot_finishes(self):
+        state = self.state_mod.MatrixState()
+        release_snapshot = asyncio.Event()
+        snapshot_started = asyncio.Event()
+
+        class FakeWS:
+            closed = False
+
+            def __init__(self):
+                self.messages = []
+
+            async def send_str(self, payload):
+                data = json.loads(payload)
+                if data.get('type') == 'state':
+                    snapshot_started.set()
+                    await release_snapshot.wait()
+                self.messages.append((data.get('type'), data.get('seq')))
+
+        ws = FakeWS()
+        register = asyncio.create_task(
+            self.server_mod._register_ready_ui_ws_client(
+                state,
+                ws,
+                {'type': 'state', 'seq': 0, 'groups': {}, 'agents': {}},
+            )
+        )
+
+        await snapshot_started.wait()
+        self.assertNotIn(ws, state._ws_clients)
+
+        state._emit('group_update', name='g', agents=[])
+        await state.broadcast()
+
+        release_snapshot.set()
+        ok = await register
+
+        self.assertTrue(ok)
+        self.assertIn(ws, state._ws_clients)
+        self.assertEqual(ws.messages, [('state', 0)])
+
+    async def test_register_ready_ui_ws_client_skips_closing_socket(self):
+        state = self.state_mod.MatrixState()
+
+        class ClosingWS:
+            closed = False
+
+            async def send_str(self, _payload):
+                raise ConnectionResetError('Cannot write to closing transport')
+
+        ws = ClosingWS()
+        ok = await self.server_mod._register_ready_ui_ws_client(
+            state,
+            ws,
+            {'type': 'state', 'seq': 0},
+        )
+
+        self.assertFalse(ok)
+        self.assertNotIn(ws, state._ws_clients)
 
 
 class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
