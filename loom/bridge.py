@@ -629,18 +629,19 @@ class ITerm2Adapter:
         except Exception:
             log.exception("Failed to update tab color for '%s'", cell.name)
 
-    async def send_text(self, session_id: str, text: str):
+    async def send_text(self, session_id: str, text: str, *,
+                        settled_submit: bool = False):
         """Send text to a terminal session.
 
         The body is sent first and the submit key is sent separately.
         Some TUIs treat ``async_send_text()`` as a paste operation, which
         can leave an appended return sitting in the composer instead of
-        actually submitting the prompt. Keep a short delay before the
-        trailing submit for any non-empty prompt body so single-line
-        follow-up prompts use the same settled submit flow as normal
-        multi-line task dispatches. The first send to adapters with an
-        input-ready policy still waits until the visible screen
-        stabilizes.
+        actually submitting the prompt. By default Loom keeps a short
+        delay only for multi-line bodies. ``settled_submit=True`` forces
+        the same settled submit flow for single-line prompts that need it
+        (for example derive-to-self follow-ups). The first send to
+        adapters with an input-ready policy still waits until the visible
+        screen stabilizes.
         """
         session = await self._find_session(session_id)
         if session:
@@ -660,7 +661,7 @@ class ITerm2Adapter:
             )
             for chunk in chunks:
                 await session.async_send_text(chunk)
-            if body:
+            if body and (settled_submit or "\n" in body):
                 await asyncio.sleep(submit_delay)
             await session.async_send_text(submit_key)
 

@@ -13,6 +13,7 @@ from .adapters import (
     get_default_command_for_provider,
 )
 from .artifacts import artifact_prompt_block, legacy_image_prompt_block
+from .config import log
 
 
 def _append_task_artifacts(prompt: str, attachments, artifacts) -> str:
@@ -73,6 +74,7 @@ class AgentLaunchService:
         self.worktree_mgr = worktree_mgr
         self.template_mgr = template_mgr
         self._background_prompt_tasks: set[asyncio.Task] = set()
+        self._prompt_queue_tails: dict[str, asyncio.Task] = {}
 
     def _runtime_terminal_backend(self) -> str:
         return "pty" if self.bridge.capabilities.supports_embedded_terminal else "iterm2"
@@ -440,33 +442,65 @@ class AgentLaunchService:
                                 delay: float = 0,
                                 persist: bool = False,
                                 background: bool = False,
-                                prime_input_ready: bool = False):
-        """Send a prompt to an agent session, optionally delayed/primed."""
+                                prime_input_ready: bool = False,
+                                settled_submit: bool = False):
+        """Send a prompt to a cell session, optionally delayed/queued."""
         payload = prompt if prompt.endswith("\r") else prompt + "\r"
+        target_session_id = cell.session_id or ""
+        previous = self._prompt_queue_tails.get(target_session_id)
+        task_ref = None
 
         async def _run():
             try:
+                if previous:
+                    try:
+                        await previous
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
                 if delay:
                     await asyncio.sleep(delay)
-                if not cell.session_id:
+                if not target_session_id or cell.session_id != target_session_id:
                     return
                 if prime_input_ready \
                         and hasattr(self.bridge, "prime_input_ready"):
-                    self.bridge.prime_input_ready(cell.session_id)
-                await self.bridge.send_text(cell.session_id, payload)
+                    self.bridge.prime_input_ready(target_session_id)
+                if settled_submit:
+                    await self.bridge.send_text(
+                        target_session_id,
+                        payload,
+                        settled_submit=True,
+                    )
+                else:
+                    await self.bridge.send_text(target_session_id, payload)
                 cell.status = "running"
                 self.state._emit_agent(cell)
                 if persist:
                     self.state._db_save_agent(cell)
                 await self.state.broadcast()
             finally:
+                if target_session_id \
+                        and self._prompt_queue_tails.get(target_session_id) is task_ref:
+                    self._prompt_queue_tails.pop(target_session_id, None)
                 if task_ref is not None:
                     self._background_prompt_tasks.discard(task_ref)
 
+        task_ref = asyncio.create_task(_run())
+        if target_session_id:
+            self._prompt_queue_tails[target_session_id] = task_ref
+
         if background:
-            task_ref = asyncio.create_task(_run())
             self._background_prompt_tasks.add(task_ref)
+            task_ref.add_done_callback(self._log_background_prompt_failure)
             return task_ref
         else:
-            task_ref = None
-            await _run()
+            await task_ref
+
+    @staticmethod
+    def _log_background_prompt_failure(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            log.exception("Background prompt delivery failed", exc_info=exc)

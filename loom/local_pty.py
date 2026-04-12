@@ -264,7 +264,8 @@ class LocalPtyAdapter:
         self.state._db_save_agent(cell)
         await self.state.broadcast()
 
-    async def send_text(self, session_id: str, text: str) -> None:
+    async def send_text(self, session_id: str, text: str, *,
+                        settled_submit: bool = False) -> None:
         session = self._sessions.get(session_id)
         if not session:
             return
@@ -281,7 +282,7 @@ class LocalPtyAdapter:
         )
         for chunk in chunks:
             await self.write_input(session_id, chunk)
-        if body:
+        if body and (settled_submit or "\n" in body):
             await asyncio.sleep(submit_delay)
         await self.write_input(session_id, submit_key)
 

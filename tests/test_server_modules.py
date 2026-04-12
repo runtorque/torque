@@ -166,6 +166,55 @@ class ServerModuleExtractionTests(unittest.TestCase):
         )
 
 
+class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.reload(self.server_mod)
+
+    async def test_queue_cell_prompt_send_does_not_wait_for_slow_background_delivery(self):
+        cell = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            session_id='session-1',
+        )
+        queued_tasks = []
+        release = asyncio.Event()
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            self.assertEqual(cell.session_id, 'session-1')
+            self.assertEqual(prompt, 'hello')
+            self.assertTrue(kwargs.get('background'))
+
+            async def _deliver():
+                await release.wait()
+
+            task = asyncio.create_task(_deliver())
+            queued_tasks.append(task)
+            return task
+
+        queued = await self.server_mod._queue_cell_prompt_send(
+            cell,
+            'hello',
+            fake_send_prompt,
+        )
+
+        self.assertTrue(queued)
+        self.assertEqual(len(queued_tasks), 1)
+        self.assertFalse(queued_tasks[0].done())
+
+        state = self.state_mod.MatrixState()
+        state.update_weaver_settings('g', paused=True)
+        self.assertTrue(state.get_weaver_settings('g').paused)
+
+        release.set()
+        await queued_tasks[0]
+
+
 class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()
