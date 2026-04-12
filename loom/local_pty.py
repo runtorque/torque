@@ -29,8 +29,13 @@ from .terminal_adapter import TerminalCapabilities, TerminalLaunchContext
 from .worktree import ensure_git_exclude
 
 _OSC7_RE = re.compile("\x1b]7;file://[^/\x07\x1b]*(/.*?)(?:\x07|\x1b\\\\)")
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1B\\))",
+    re.DOTALL,
+)
 _BUFFER_LIMIT = 200_000
 _PROMPT_HOOK_LIMIT = 512
+_READINESS_BUFFER_LIMIT = 20_000
 
 
 @dataclass
@@ -273,7 +278,7 @@ class LocalPtyAdapter:
         submit_key = adapter.get_submit_key() if adapter else "\r"
         submit_delay = adapter.get_multiline_submit_delay() if adapter else 0.3
         if cell:
-            await self._wait_for_input_ready(cell)
+            await self._wait_for_input_ready(session, cell)
         body = text.rstrip("\r\n")
         chunks = (
             adapter.get_input_chunks(body)
@@ -715,7 +720,22 @@ class LocalPtyAdapter:
             cell.current_branch = ""
             cell.git_root = ""
 
-    async def _wait_for_input_ready(self, cell: AgentCell) -> None:
+    async def _read_screen_text(self, session: _PtySession) -> str:
+        raw = getattr(session, "buffer", "") or ""
+        if not raw:
+            return ""
+        text = raw[-_READINESS_BUFFER_LIMIT:]
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        text = _ANSI_ESCAPE_RE.sub("", text)
+        text = text.replace("\x00", "").replace("\x07", "")
+        text = "".join(
+            ch for ch in text
+            if ch in ("\n", "\t") or ord(ch) >= 32
+        )
+        return text
+
+    async def _wait_for_input_ready(self, session: _PtySession,
+                                    cell: AgentCell) -> None:
         if not cell.session_id or cell.session_id in self._input_ready_sessions:
             return
         if not cell.agent_type:
@@ -726,18 +746,76 @@ class LocalPtyAdapter:
         if not policy.enabled:
             self._input_ready_sessions.add(cell.session_id)
             return
-        if not policy.hook_event:
+
+        if policy.hook_event:
+            evt = self._input_ready_events.get(cell.id)
+            if not evt:
+                evt = asyncio.Event()
+                self._input_ready_events[cell.id] = evt
+            detected = False
+            if policy.screen_fallback:
+                deadline = (
+                    asyncio.get_running_loop().time() + policy.timeout_seconds
+                )
+                stable_polls = 0
+                while asyncio.get_running_loop().time() < deadline:
+                    if evt.is_set():
+                        log.info("Input-ready via hook for '%s'", cell.name)
+                        detected = True
+                        break
+                    screen_text = await self._read_screen_text(session)
+                    if screen_text and adapter.is_input_ready_screen(
+                            screen_text):
+                        stable_polls += 1
+                        if stable_polls >= max(policy.stable_polls, 1):
+                            log.info("Input-ready via screen for '%s'",
+                                     cell.name)
+                            detected = True
+                            break
+                    else:
+                        stable_polls = 0
+                    try:
+                        await asyncio.wait_for(
+                            evt.wait(), policy.poll_interval_seconds)
+                        log.info("Input-ready via hook for '%s'", cell.name)
+                        detected = True
+                        break
+                    except asyncio.TimeoutError:
+                        pass
+                if not detected:
+                    log.info("Input-ready timed out for '%s' "
+                             "(type=%s, session=%s)",
+                             cell.name, cell.agent_type, cell.session_id)
+            else:
+                try:
+                    await asyncio.wait_for(evt.wait(), policy.timeout_seconds)
+                    log.info("Input-ready via hook for '%s'", cell.name)
+                    detected = True
+                except asyncio.TimeoutError:
+                    log.info("Hook-based input-ready timed out for '%s' "
+                             "(type=%s, session=%s)",
+                             cell.name, cell.agent_type, cell.session_id)
+            if detected and policy.post_ready_delay > 0:
+                await asyncio.sleep(policy.post_ready_delay)
+            self._input_ready_events.pop(cell.id, None)
             self._input_ready_sessions.add(cell.session_id)
             return
-        evt = self._input_ready_events.get(cell.id)
-        if not evt:
-            evt = asyncio.Event()
-            self._input_ready_events[cell.id] = evt
-        try:
-            await asyncio.wait_for(evt.wait(), timeout=policy.timeout_seconds)
-        except asyncio.TimeoutError:
-            log.debug("Input-ready timeout for '%s'", cell.name)
-        self._input_ready_sessions.add(cell.session_id)
+
+        deadline = asyncio.get_running_loop().time() + policy.timeout_seconds
+        stable_polls = 0
+        while asyncio.get_running_loop().time() < deadline:
+            screen_text = await self._read_screen_text(session)
+            if screen_text and adapter.is_input_ready_screen(screen_text):
+                stable_polls += 1
+                if stable_polls >= max(policy.stable_polls, 1):
+                    self._input_ready_sessions.add(cell.session_id)
+                    return
+            else:
+                stable_polls = 0
+            await asyncio.sleep(policy.poll_interval_seconds)
+
+        log.info("Input-ready wait timed out for '%s' (type=%s, session=%s)",
+                 cell.name, cell.agent_type, cell.session_id)
 
     def _set_winsize(self, fd: int, cols: int, rows: int) -> None:
         packed = struct.pack("HHHH", max(1, rows), max(1, cols), 0, 0)

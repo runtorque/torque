@@ -235,6 +235,120 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(delays, [0.3])
 
+    async def test_send_text_waits_for_codex_ready_screen_once_in_standalone(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Loom")
+        cell = state.add_agent(
+            name="Weaver",
+            group="Loom",
+            terminal_backend="pty",
+            command="codex",
+            directory="/tmp",
+        )
+        cell.agent_type = "codex"
+        cell.session_id = "session-2"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        adapter._sessions[cell.session_id] = SimpleNamespace(
+            cell_id=cell.id,
+            session_id=cell.session_id,
+        )
+        writes: list[tuple[str, str]] = []
+        screen_reads = 0
+        ready_screen = "\n".join([
+            "OpenAI Codex",
+            "model: gpt-5.4 high",
+            "directory: ~/repo",
+            "› Ready",
+        ])
+        screen_snapshots = [
+            "Loading Codex...",
+            ready_screen,
+            ready_screen,
+        ]
+
+        async def fake_write_input(session_id, data):
+            writes.append((session_id, data))
+
+        async def fake_read_screen_text(session):
+            nonlocal screen_reads
+            idx = min(screen_reads, len(screen_snapshots) - 1)
+            screen_reads += 1
+            return screen_snapshots[idx]
+
+        delays = []
+
+        async def fake_sleep(delay):
+            delays.append(delay)
+
+        adapter.write_input = fake_write_input
+        adapter._read_screen_text = fake_read_screen_text
+        orig_sleep = self.pty_mod.asyncio.sleep
+        self.pty_mod.asyncio.sleep = fake_sleep
+        try:
+            await adapter.send_text(cell.session_id, "line one\nline two")
+            first_reads = screen_reads
+            await adapter.send_text(cell.session_id, "follow up")
+        finally:
+            self.pty_mod.asyncio.sleep = orig_sleep
+
+        self.assertEqual(
+            writes,
+            [
+                ("session-2", "line one\nline two"),
+                ("session-2", "\r"),
+                ("session-2", "follow up"),
+                ("session-2", "\r"),
+            ],
+        )
+        self.assertEqual(first_reads, 3)
+        self.assertEqual(screen_reads, first_reads)
+        self.assertEqual(delays, [0.25, 0.25, 0.3, 0.3])
+
+    async def test_send_text_claude_applies_post_ready_delay_after_hook_signal(self):
+        state = self.state_mod.MatrixState()
+        state.add_group("Loom")
+        cell = state.add_agent(
+            name="Weaver",
+            group="Loom",
+            terminal_backend="pty",
+            command="claude",
+            directory="/tmp",
+        )
+        cell.agent_type = "claude-code"
+        cell.session_id = "session-claude"
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        adapter._sessions[cell.session_id] = SimpleNamespace(
+            cell_id=cell.id,
+            session_id=cell.session_id,
+        )
+        writes: list[tuple[str, str]] = []
+
+        async def fake_write_input(session_id, data):
+            writes.append((session_id, data))
+
+        delays = []
+
+        async def fake_sleep(delay):
+            delays.append(delay)
+
+        adapter.write_input = fake_write_input
+        adapter.signal_input_ready(cell.id)
+        orig_sleep = self.pty_mod.asyncio.sleep
+        self.pty_mod.asyncio.sleep = fake_sleep
+        try:
+            await adapter.send_text(cell.session_id, "Initial prompt")
+        finally:
+            self.pty_mod.asyncio.sleep = orig_sleep
+
+        self.assertEqual(
+            writes,
+            [
+                ("session-claude", "Initial prompt"),
+                ("session-claude", "\r"),
+            ],
+        )
+        self.assertEqual(delays, [0.5, 0.3])
+
     async def test_create_session_installs_hooks_in_resolved_cwd_when_directory_blank(self):
         state = self.state_mod.MatrixState()
         state.add_group("Loom")
@@ -401,6 +515,28 @@ class LocalPtyAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(zsh_commands, [])
         self.assertTrue(any("PROMPT_COMMAND=" in command for command in bash_commands))
         self.assertTrue(any("printf '\\033]7;file://" in command for command in bash_commands))
+
+    async def test_read_screen_text_strips_ansi_sequences_for_readiness_checks(self):
+        state = self.state_mod.MatrixState()
+        adapter = self.pty_mod.LocalPtyAdapter(state)
+        session = SimpleNamespace(
+            buffer=(
+                "\x1b[2m╭────────────────╮\x1b[0m\r\n"
+                "\x1b[1mOpenAI Codex\x1b[0m\r\n"
+                "\x1b[2mmodel:\x1b[0m gpt-5.4 high\r\n"
+                "\x1b[2mdirectory:\x1b[0m ~/repo\r\n"
+                "\x1b[1m›\x1b[0m Ready\r\n"
+                "\x1b]0;title\x07"
+            )
+        )
+
+        screen_text = await adapter._read_screen_text(session)
+
+        self.assertIn("OpenAI Codex", screen_text)
+        self.assertIn("model: gpt-5.4 high", screen_text)
+        self.assertIn("directory: ~/repo", screen_text)
+        self.assertIn("› Ready", screen_text)
+        self.assertNotIn("\x1b", screen_text)
 
 
 if __name__ == "__main__":
