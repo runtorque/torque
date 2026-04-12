@@ -166,6 +166,118 @@ class ServerModuleExtractionTests(unittest.TestCase):
         )
 
 
+class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        self.state_mod = importlib.import_module('loom.state')
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module('loom.server')
+        self.server_mod = importlib.reload(self.server_mod)
+
+    async def test_queue_cell_prompt_send_does_not_wait_for_slow_background_delivery(self):
+        cell = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+            session_id='session-1',
+        )
+        queued_tasks = []
+        release = asyncio.Event()
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            self.assertEqual(cell.session_id, 'session-1')
+            self.assertEqual(prompt, 'hello')
+            self.assertTrue(kwargs.get('background'))
+
+            async def _deliver():
+                await release.wait()
+
+            task = asyncio.create_task(_deliver())
+            queued_tasks.append(task)
+            return task
+
+        queued = await self.server_mod._queue_cell_prompt_send(
+            cell,
+            'hello',
+            fake_send_prompt,
+        )
+
+        self.assertTrue(queued)
+        self.assertEqual(len(queued_tasks), 1)
+        self.assertFalse(queued_tasks[0].done())
+
+        state = self.state_mod.MatrixState()
+        state.update_weaver_settings('g', paused=True)
+        self.assertTrue(state.get_weaver_settings('g').paused)
+
+        release.set()
+        await queued_tasks[0]
+
+    async def test_deliver_weaver_reply_waits_for_prompt_before_resuming_delivery(self):
+        state = self.state_mod.MatrixState()
+        state.add_group('g')
+        state.update_weaver_settings(
+            'g',
+            pending_question='Need approval',
+            paused=True,
+        )
+        weaver = self.state_mod.AgentCell(
+            id='weaver-1',
+            name='Weaver',
+            group='g',
+            cell_type='agent',
+            session_id='session-1',
+        )
+        sequence = []
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def fake_send_prompt(cell, prompt, **kwargs):
+            self.assertIs(cell, weaver)
+            self.assertIn('## Human Reply', prompt)
+            self.assertTrue(kwargs.get('background'))
+            self.assertTrue(kwargs.get('prime_input_ready'))
+
+            async def _deliver():
+                sequence.append('reply-start')
+                started.set()
+                await release.wait()
+                sequence.append('reply-finish')
+
+            return asyncio.create_task(_deliver())
+
+        class FakeBuffer:
+            def on_delivery_resumed(self, group):
+                sequence.append(f'resume:{group}')
+
+        task = asyncio.create_task(
+            self.server_mod._deliver_weaver_reply_and_resume(
+                state,
+                weaver,
+                group='g',
+                answer='Ship it',
+                send_prompt=fake_send_prompt,
+                weaver_buffer=FakeBuffer(),
+            )
+        )
+
+        await started.wait()
+        self.assertEqual(sequence, ['reply-start'])
+        ws = state.get_weaver_settings('g')
+        self.assertTrue(ws.paused)
+        self.assertEqual(ws.pending_question, 'Need approval')
+
+        release.set()
+        result = await task
+
+        self.assertEqual(result, {'type': 'ok'})
+        self.assertEqual(sequence, ['reply-start', 'reply-finish', 'resume:g'])
+        ws = state.get_weaver_settings('g')
+        self.assertFalse(ws.paused)
+        self.assertEqual(ws.pending_question, '')
+
+
 class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         install_aiohttp_stub()

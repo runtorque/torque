@@ -686,6 +686,57 @@ def _handle_weaver_flush_now_command(weaver_buffer, data: dict) -> dict:
     return {"type": "error", "message": message or "Unable to send queued events"}
 
 
+async def _queue_cell_prompt_send(cell, prompt: str, send_prompt, *,
+                                  prime_input_ready: bool = False,
+                                  settled_submit: bool = False,
+                                  wait_for_delivery: bool = False) -> bool:
+    """Queue prompt delivery for a live cell without blocking fast controls."""
+    if not cell or not getattr(cell, "session_id", ""):
+        return False
+    delivery = await send_prompt(
+        cell,
+        prompt,
+        background=True,
+        prime_input_ready=prime_input_ready,
+        settled_submit=settled_submit,
+    )
+    if wait_for_delivery and delivery is not None:
+        await delivery
+    return True
+
+
+async def _deliver_weaver_reply_and_resume(state: MatrixState, weaver, *,
+                                           group: str,
+                                           answer: str,
+                                           send_prompt,
+                                           weaver_buffer) -> dict:
+    formatted = (
+        "\n"
+        "## Human Reply\n"
+        f"{answer}\n"
+        "---\n"
+    )
+    await _queue_cell_prompt_send(
+        weaver,
+        formatted,
+        send_prompt,
+        prime_input_ready=True,
+        wait_for_delivery=True,
+    )
+    state.update_weaver_settings(
+        group,
+        pending_question="",
+        paused=False,
+    )
+    weaver_buffer.on_delivery_resumed(group)
+    state.journal_append(
+        group,
+        "observation",
+        f"Human replied: {answer}",
+    )
+    return {"type": "ok"}
+
+
 def _resolve_ai_report_task(state: MatrixState, cell, *,
                             task_id: str = "") -> Optional[BoardTask]:
     """Resolve the task an agent report should apply to.
@@ -1348,7 +1399,8 @@ async def main(connection=None):
                                  delay: float = 0,
                                  persist: bool = False,
                                  background: bool = False,
-                                 prime_input_ready: bool = False):
+                                 prime_input_ready: bool = False,
+                                 settled_submit: bool = False):
         return await agent_launch.send_agent_prompt(
             cell,
             prompt,
@@ -1356,6 +1408,7 @@ async def main(connection=None):
             persist=persist,
             background=background,
             prime_input_ready=prime_input_ready,
+            settled_submit=settled_submit,
         )
 
     # -- Persistent system prompt ---------------------------------------------
@@ -2486,28 +2539,36 @@ async def main(connection=None):
             elif cmd == "send_text":
                 cell = state.agents.get(data["id"])
                 if cell and cell.session_id:
-                    await bridge.send_text(cell.session_id, data["text"])
                     cell.status = "running"
                     state._emit_agent(cell)
-                    # Ephemeral status — no DB write needed
+                await _queue_cell_prompt_send(
+                    cell,
+                    data.get("text", ""),
+                    _send_agent_prompt,
+                )
 
             elif cmd == "broadcast_to_group":
                 for aid in state.groups.get(data["group"], []):
                     cell = state.agents.get(aid)
                     if cell and cell.session_id:
-                        await bridge.send_text(
-                            cell.session_id, data["text"])
                         cell.status = "running"
                         state._emit_agent(cell)
+                    await _queue_cell_prompt_send(
+                        cell,
+                        data.get("text", ""),
+                        _send_agent_prompt,
+                    )
                     # Also send to child terminals
                     for child_id in state._children.get(aid, []):
                         child = state.agents.get(child_id)
                         if child and child.session_id:
-                            await bridge.send_text(
-                                child.session_id, data["text"])
                             child.status = "running"
                             state._emit_agent(child)
-                # Ephemeral status — no DB write needed
+                        await _queue_cell_prompt_send(
+                            child,
+                            data.get("text", ""),
+                            _send_agent_prompt,
+                        )
 
             elif cmd == "relaunch_agent":
                 cell = state.agents.get(data["id"])
@@ -4054,11 +4115,15 @@ async def main(connection=None):
                                         cell, final_prompt,
                                         delay=delay,
                                         background=True,
-                                        prime_input_ready=True)
+                                        prime_input_ready=True,
+                                        settled_submit=True,
+                                    )
                                 else:
-                                    # Existing agent — send now
+                                    # Existing agent — queue now
                                     await _send_agent_prompt(
-                                        cell, final_prompt
+                                        cell,
+                                        final_prompt,
+                                        background=True,
                                     )
                             elif data.get("create_agent"):
                                 for prompt_text, send_kwargs in \
@@ -5947,29 +6012,14 @@ async def main(connection=None):
                         result = {"type": "error",
                                   "message": "Weaver is not running"}
                     else:
-                        # Send answer to weaver's terminal
-                        formatted = (
-                            "\n"
-                            "## Human Reply\n"
-                            f"{answer}\n"
-                            "---\n"
+                        result = await _deliver_weaver_reply_and_resume(
+                            state,
+                            weaver,
+                            group=group,
+                            answer=answer,
+                            send_prompt=_send_agent_prompt,
+                            weaver_buffer=weaver_buffer,
                         )
-                        # Pre-mark as input-ready so send_text
-                        # skips the wait (weaver is already idle)
-                        bridge.prime_input_ready(weaver.session_id)
-                        await bridge.send_text(
-                            weaver.session_id, formatted)
-                        # Clear question, unpause events
-                        state.update_weaver_settings(
-                            group,
-                            pending_question="",
-                            paused=False)
-                        weaver_buffer.on_delivery_resumed(group)
-                        # Log to journal
-                        state.journal_append(
-                            group, "observation",
-                            f"Human replied: {answer}")
-                        result = {"type": "ok"}
 
             elif cmd == "weaver_pause":
                 group = data.get("group", "")

@@ -1558,6 +1558,67 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
         await task
         self.assertNotIn(task, service._background_prompt_tasks)
 
+    async def test_background_prompt_queue_preserves_per_session_order(self):
+        state = self.state_mod.MatrixState()
+        first_release = asyncio.Event()
+        started = []
+        finished = []
+
+        class FakeBridge:
+            async def send_text(self, session_id, payload):
+                started.append((session_id, payload))
+                if payload.startswith("first"):
+                    await first_release.wait()
+                finished.append((session_id, payload))
+
+        class FakeTemplateManager:
+            pass
+
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=FakeBridge(),
+            worktree_mgr=None,
+            template_mgr=FakeTemplateManager(),
+        )
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="agent",
+            group="g",
+            cell_type="agent",
+            session_id="session-1",
+        )
+
+        first = await service.send_agent_prompt(
+            cell,
+            "first message",
+            background=True,
+        )
+        second = await service.send_agent_prompt(
+            cell,
+            "second message",
+            background=True,
+        )
+
+        await asyncio.sleep(0)
+        self.assertEqual(
+            started,
+            [("session-1", "first message\r")],
+        )
+        self.assertEqual(finished, [])
+
+        first_release.set()
+        await asyncio.gather(first, second)
+
+        self.assertEqual(
+            started,
+            [
+                ("session-1", "first message\r"),
+                ("session-1", "second message\r"),
+            ],
+        )
+        self.assertEqual(finished, started)
+
     async def test_delayed_self_dispatch_primes_ready_before_submit(self):
         class FakeLineInfo:
             overflow = 0
@@ -1646,6 +1707,7 @@ class ServerAgentPromptDeliveryTests(unittest.IsolatedAsyncioTestCase):
                 delay=3,
                 background=True,
                 prime_input_ready=True,
+                settled_submit=True,
             )
             await task
         finally:
