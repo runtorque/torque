@@ -464,6 +464,28 @@ function createWeaverHarness() {
   return { context, document };
 }
 
+function createWeaverWsHarness() {
+  const { sandbox, document } = createSandbox({
+    _cachedProviders: [],
+    _esc(value) { return String(value); },
+  });
+  document.register('main');
+  document.register('bottom-panel');
+  document.register('panel-weaver');
+  document.register('conn-dot');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/weaver.js');
+  runInContext(context, `
+    send = function(message) { sendCalls.push(message); };
+    render = function() {};
+    _activePanelApp = 'weaver';
+    _panelStateRestored = true;
+  `);
+  return { context, document, sandbox };
+}
+
 function createAgentHistoryHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -2272,6 +2294,10 @@ test('ws close clears pending resync guards', () => {
   loadScript(context, 'static/js/ws.js');
 
   runInContext(context, `
+    _weaverResetSessionMapMetaCalls = [];
+    _weaverResetSessionMapMeta = function(options) {
+      _weaverResetSessionMapMetaCalls.push(options || {});
+    };
     connect();
     _resyncPending = true;
     _awaitingFullState = true;
@@ -2280,6 +2306,9 @@ test('ws close clears pending resync guards', () => {
 
   assert.equal(jsonValue(context, '_resyncPending'), false);
   assert.equal(jsonValue(context, '_awaitingFullState'), false);
+  assert.deepEqual(jsonValue(context, '_weaverResetSessionMapMetaCalls'), [
+    { clearStale: false },
+  ]);
 });
 
 test('_renderBoardCard omits the default dispatch badge while keeping warning states', () => {
@@ -5570,6 +5599,70 @@ test('weaver Session Map responses rerender only the active Weaver panel', () =>
     group: 'alpha',
     overview: { tasks_total: 3 },
     streams: { items: [] },
+  });
+});
+
+test('full state re-requests an open Session Map after reconnect clears cached data', () => {
+  const { context, sandbox } = createWeaverWsHarness();
+
+  runInContext(context, `
+    state.groups = { alpha: ['weaver-1'] };
+    state.agents = {
+      'weaver-1': {
+        id: 'weaver-1',
+        group: 'alpha',
+        name: 'Weaver',
+        cell_type: 'agent',
+        status: 'running'
+      }
+    };
+    state.group_settings = {
+      alpha: { weaver_agent_id: 'weaver-1' }
+    };
+  `);
+
+  context.weaverOpenSessionMap('alpha');
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'weaver_session_map_read', group: 'alpha' },
+  ]);
+  assert.deepEqual(jsonValue(context, '_weaverSessionMapMetaByGroup.alpha'), {
+    loading: true,
+    stale: false,
+  });
+
+  sandbox.sendCalls.length = 0;
+  context._handleFullState({
+    type: 'state',
+    seq: 1,
+    groups: { alpha: ['weaver-1'] },
+    agents: {
+      'weaver-1': {
+        id: 'weaver-1',
+        group: 'alpha',
+        name: 'Weaver',
+        cell_type: 'agent',
+        status: 'running',
+      },
+    },
+    group_settings: {
+      alpha: { weaver_agent_id: 'weaver-1' },
+    },
+    board_tasks: {},
+    board_lanes: [],
+    panel_events: [],
+    weaver_buffer_stats: {},
+    weaver_sent_events: {},
+    weaver_worklog: {},
+    weaver_streams: {},
+    weaver_session_maps: {},
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'weaver_session_map_read', group: 'alpha' },
+  ]);
+  assert.deepEqual(jsonValue(context, '_weaverSessionMapMetaByGroup.alpha'), {
+    loading: true,
+    stale: false,
   });
 });
 

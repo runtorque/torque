@@ -165,6 +165,30 @@ function _weaverRequestSessionMap(group, force) {
   send({ cmd: 'weaver_session_map_read', group: group });
 }
 
+function _weaverResetSessionMapMeta(options) {
+  options = options || {};
+  var groups = Object.keys(_weaverSessionMapMetaByGroup || {});
+  if (!groups.length) return;
+  var clearStale = options.clearStale !== false;
+  var refetchOpenMissing = !!options.refetchOpenMissing;
+  var shouldRender = false;
+  for (var i = 0; i < groups.length; i++) {
+    var group = groups[i];
+    if (!group) continue;
+    var meta = _weaverSessionMapMeta(group);
+    var wasLoading = !!meta.loading;
+    meta.loading = false;
+    if (clearStale) meta.stale = false;
+    if (refetchOpenMissing && _weaverIsSessionMapOpen(group) && !_weaverSessionMapData(group)) {
+      _weaverRequestSessionMap(group, true);
+      if (_weaverShouldRenderCurrentGroup(group)) shouldRender = true;
+      continue;
+    }
+    if (wasLoading && _weaverShouldRenderCurrentGroup(group)) shouldRender = true;
+  }
+  if (shouldRender && typeof renderWeaverPanel === 'function') renderWeaverPanel();
+}
+
 function _weaverIsSessionMapOpen(group) {
   return _weaverJournalSubview(group) === 'session_map';
 }

@@ -26,6 +26,9 @@ function connect() {
   ws.onclose = () => {
     _resyncPending = false;
     _awaitingFullState = false;
+    if (typeof _weaverResetSessionMapMeta === 'function') {
+      _weaverResetSessionMapMeta({ clearStale: false });
+    }
     document.getElementById('conn-dot').classList.remove('ok');
     document.getElementById('conn-dot').title = 'Disconnected';
     setTimeout(connect, 2000);
@@ -251,6 +254,9 @@ function _handleFullState(msg) {
     if (!shouldRestorePanel && typeof renderActivePanel === 'function') {
       renderActivePanel();
     }
+  }
+  if (typeof _weaverResetSessionMapMeta === 'function') {
+    _weaverResetSessionMapMeta({ refetchOpenMissing: true });
   }
   // Restore board panel state on first load
   if (typeof _restorePanelState === 'function') _restorePanelState();
