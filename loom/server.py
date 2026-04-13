@@ -10,6 +10,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional
 
 import aiohttp
@@ -41,6 +42,7 @@ from .worktree import WorktreeManager
 from .worktree_boundaries import (
     boundary_summary,
     branch_boundary_tasks,
+    latest_boundary_base_branch,
     latest_boundary_task,
     mark_branch_boundaries_merged,
     queued_successor_tasks,
@@ -193,6 +195,26 @@ def _latest_open_boundary_task_for_cell(state: MatrixState, cell):
         repo_root=repo_root,
         branch=cell.worktree_branch,
         statuses={"open"},
+    )
+
+
+def _summarize_paths(paths: list[str], limit: int = 3) -> str:
+    trimmed = [str(path or "").strip() for path in paths if str(path or "").strip()]
+    if not trimmed:
+        return ""
+    if len(trimmed) <= limit:
+        return ", ".join(trimmed)
+    remaining = len(trimmed) - limit
+    return ", ".join(trimmed[:limit]) + f" (+{remaining} more)"
+
+
+def _untracked_overwrite_message(paths: list[str], *,
+                                 operation: str,
+                                 location: str) -> str:
+    summary = _summarize_paths(paths)
+    return (
+        f"Untracked files in {location} would be overwritten by {operation}: "
+        f"{summary}. Move or remove them before retrying."
     )
 
 
@@ -1711,6 +1733,111 @@ async def main(connection=None):
         state._emit("task_upsert", **asdict(task))
         state._db_save_task(task)
 
+    def _boundary_base_branch_for_worktree(repo_root: str, branch: str) -> str:
+        if not repo_root or not branch:
+            return ""
+        return latest_boundary_base_branch(
+            state.board_tasks.values(),
+            repo_root=repo_root,
+            branch=branch,
+        )
+
+    def _worktree_owner_for_entry(repo_root: str, path: str):
+        repo_root = str(repo_root or "").strip()
+        path = str(path or "").strip()
+        if not repo_root or not path:
+            return None
+        for agent in state.agents.values():
+            if agent.cell_type != "agent":
+                continue
+            if (agent.worktree_repo_root or agent.git_root or "") != repo_root:
+                continue
+            if (agent.worktree_path or "") == path:
+                return agent
+        return None
+
+    async def _classify_repo_worktrees(repo_root: str) -> list[dict]:
+        repo_root = str(repo_root or "").strip()
+        if not repo_root:
+            return []
+        entries = await worktree_mgr.list_worktrees(repo_root)
+        items: list[dict] = []
+        for entry in entries:
+            branch = str(entry.get("branch", "") or "").strip()
+            path = str(entry.get("path", "") or "").strip()
+            is_loom_branch = branch.startswith("loom/")
+            owner = _worktree_owner_for_entry(repo_root, path)
+            if not is_loom_branch and not owner:
+                continue
+
+            exists = bool(path) and os.path.isdir(path)
+            admin_stale = bool(entry.get("prunable")) or not exists
+            base_branch = (
+                str(getattr(owner, "worktree_base_branch", "") or "").strip()
+                if owner else ""
+            )
+            if not base_branch and branch:
+                base_branch = _boundary_base_branch_for_worktree(
+                    repo_root,
+                    branch,
+                )
+
+            dirty = False
+            merged = False
+            if owner:
+                dirty = bool(getattr(owner, "worktree_dirty", False))
+                if base_branch:
+                    merged = bool(getattr(owner, "worktree_merged", False))
+            elif exists and base_branch and branch:
+                probe = SimpleNamespace(
+                    name=branch,
+                    worktree_path=path,
+                    worktree_repo_root=repo_root,
+                    worktree_branch=branch,
+                    worktree_base_branch=base_branch,
+                )
+                dirty = await worktree_mgr.has_uncommitted_changes(probe)
+                merged = await worktree_mgr.is_branch_merged(
+                    repo_root,
+                    branch=branch,
+                    base_branch=base_branch,
+                )
+
+            prunable = False
+            prune_reason = ""
+            if owner:
+                prune_reason = "owned_by_agent"
+            elif admin_stale:
+                prunable = True
+                prune_reason = "stale_admin"
+            elif not base_branch:
+                prune_reason = "unknown_base_branch"
+            elif dirty:
+                prune_reason = "dirty"
+            elif not merged:
+                prune_reason = "not_merged"
+            else:
+                prunable = True
+                prune_reason = "merged_clean"
+
+            items.append({
+                "path": path,
+                "branch": branch,
+                "branch_ref": str(entry.get("branch_ref", "") or ""),
+                "head_sha": str(entry.get("head_sha", "") or ""),
+                "base_branch": base_branch,
+                "exists": exists,
+                "admin_stale": admin_stale,
+                "dirty": dirty,
+                "merged": merged,
+                "prunable": prunable,
+                "prune_reason": prune_reason,
+                "owner_agent_id": getattr(owner, "id", "") if owner else "",
+                "owner_agent_name": getattr(owner, "name", "") if owner else "",
+            })
+        items.sort(key=lambda item: (item["branch"], item["path"]))
+        return items
+
     def _branch_boundary_tasks_for_cell(cell, statuses: set[str] | None = None
                                         ) -> list:
         repo_root = ""
@@ -2985,6 +3112,104 @@ async def main(connection=None):
                         state._emit_agent(cell)
                         state._db_save_agent(cell)
 
+            elif cmd == "worktree_list":
+                requested_root = str(data.get("repo_root", "") or "").strip()
+                repo_root = (
+                    await worktree_mgr.get_repo_root(requested_root)
+                    if requested_root else None
+                ) or requested_root
+                if not repo_root or not os.path.isdir(repo_root):
+                    result = {
+                        "type": "error",
+                        "message": "Valid repo_root required for worktree list.",
+                    }
+                else:
+                    items = await _classify_repo_worktrees(repo_root)
+                    result = {
+                        "type": "worktree_list",
+                        "repo_root": repo_root,
+                        "items": items,
+                        "prunable_count": sum(
+                            1 for item in items if item.get("prunable")
+                        ),
+                    }
+                    return result
+
+            elif cmd == "worktree_prune":
+                requested_root = str(data.get("repo_root", "") or "").strip()
+                repo_root = (
+                    await worktree_mgr.get_repo_root(requested_root)
+                    if requested_root else None
+                ) or requested_root
+                if not repo_root or not os.path.isdir(repo_root):
+                    result = {
+                        "type": "error",
+                        "message": "Valid repo_root required for worktree prune.",
+                    }
+                else:
+                    items = await _classify_repo_worktrees(repo_root)
+                    candidates = [item for item in items if item.get("prunable")]
+                    removed = []
+                    skipped = []
+                    admin_candidates = [
+                        item for item in candidates if item.get("admin_stale")
+                    ]
+                    for item in candidates:
+                        if item.get("admin_stale"):
+                            continue
+                        ok = await worktree_mgr.remove_path(
+                            repo_root,
+                            item.get("path", ""),
+                            branch=item.get("branch", ""),
+                            name=item.get("branch", "") or item.get("path", ""),
+                        )
+                        if ok:
+                            removed.append({
+                                "path": item.get("path", ""),
+                                "branch": item.get("branch", ""),
+                                "prune_reason": item.get("prune_reason", ""),
+                            })
+                        else:
+                            skipped.append({
+                                "path": item.get("path", ""),
+                                "branch": item.get("branch", ""),
+                                "prune_reason": "remove_failed",
+                            })
+
+                    prune_ran = False
+                    if admin_candidates or removed:
+                        prune_ran = await worktree_mgr.prune_admin(repo_root)
+
+                    remaining = await _classify_repo_worktrees(repo_root)
+                    remaining_keys = {
+                        (item.get("path", ""), item.get("branch", ""))
+                        for item in remaining
+                    }
+                    for item in admin_candidates:
+                        key = (item.get("path", ""), item.get("branch", ""))
+                        if key not in remaining_keys:
+                            removed.append({
+                                "path": item.get("path", ""),
+                                "branch": item.get("branch", ""),
+                                "prune_reason": item.get("prune_reason", ""),
+                            })
+                        else:
+                            skipped.append({
+                                "path": item.get("path", ""),
+                                "branch": item.get("branch", ""),
+                                "prune_reason": "stale_admin_not_pruned",
+                            })
+
+                    result = {
+                        "type": "worktree_prune",
+                        "repo_root": repo_root,
+                        "removed": removed,
+                        "skipped": skipped,
+                        "remaining": remaining,
+                        "prune_ran": prune_ran,
+                    }
+                    return result
+
             elif cmd == "worktree_checkpoint":
                 cell = state.agents.get(data["id"])
                 if cell and cell.worktree_path:
@@ -3056,6 +3281,26 @@ async def main(connection=None):
                     else:
                         check = await \
                             worktree_mgr.check_merge_conflicts(cell)
+                        if check.get("clean"):
+                            overwrite_paths = (
+                                await worktree_mgr.merge_untracked_overwrite_paths(
+                                    cell.worktree_repo_root
+                                    or cell.git_root
+                                    or "",
+                                    cell.worktree_base_branch or "",
+                                    check.get("tree_sha", ""),
+                                )
+                            )
+                            if overwrite_paths:
+                                check["clean"] = False
+                                check["tree_sha"] = ""
+                                check["conflicts"] = []
+                                check["error"] = _untracked_overwrite_message(
+                                    overwrite_paths,
+                                    operation="merge",
+                                    location="the checked-out base repo",
+                                )
+                                check["overwrite_paths"] = overwrite_paths
                         check["type"] = "worktree_check_merge"
                         check["id"] = aid
                         check["boundary"] = boundary_state.get("latest")
@@ -3079,49 +3324,78 @@ async def main(connection=None):
                 cell = state.agents.get(data.get("id", ""))
                 aid = data.get("id", "")
                 if cell and cell.worktree_path:
-                    check = await worktree_mgr.check_merge_conflicts(cell)
-                    previous_head_sha = await worktree_mgr.current_head(cell) or ""
-                    ok = await worktree_mgr.rebase_onto_base(cell)
-                    if ok:
-                        rebased_head_sha = (
-                            await worktree_mgr.current_head(cell) or ""
-                        )
-                        dirty_after_rebase = (
-                            await worktree_mgr.has_uncommitted_changes(cell)
-                        )
-                        refreshed_boundary = None
-                        if not dirty_after_rebase:
-                            refreshed_boundary = (
-                                refresh_latest_boundary_after_rebase(
-                                    state.board_tasks.values(),
-                                    repo_root=(
-                                        cell.worktree_repo_root
-                                        or cell.git_root
-                                        or ""
-                                    ),
-                                    branch=cell.worktree_branch or "",
-                                    previous_head_sha=previous_head_sha,
-                                    rebased_head_sha=rebased_head_sha,
-                                )
-                            )
-                        if refreshed_boundary:
-                            _save_task_record(refreshed_boundary)
-                        cell.worktree_checkpoints = \
-                            await worktree_mgr.count_commits(cell)
-                        cell.worktree_dirty = dirty_after_rebase
-                        cell.worktree_diff = {}
-                        cell.worktree_changed_files = []
-                        state._emit_agent(cell)
-                        result = {"type": "worktree_rebase",
-                                  "id": aid, "ok": True}
-                    else:
+                    overwrite_paths = (
+                        await worktree_mgr.rebase_untracked_overwrite_paths(cell)
+                    )
+                    if overwrite_paths:
                         result = {
                             "type": "worktree_rebase",
-                            "id": aid, "ok": False,
-                            "error": "Rebase failed — conflicts "
-                                     "require manual resolution",
-                            "conflicts": check.get("conflicts", []),
+                            "id": aid,
+                            "ok": False,
+                            "error": _untracked_overwrite_message(
+                                overwrite_paths,
+                                operation="rebase",
+                                location="the worktree",
+                            ),
+                            "overwrite_paths": overwrite_paths,
+                            "conflicts": [],
                         }
+                    elif await worktree_mgr.has_uncommitted_changes(cell):
+                        result = {
+                            "type": "worktree_rebase",
+                            "id": aid,
+                            "ok": False,
+                            "error": "Worktree has uncommitted changes. "
+                                     "Create a checkpoint or commit them "
+                                     "before rebasing.",
+                            "conflicts": [],
+                        }
+                    else:
+                        check = await worktree_mgr.check_merge_conflicts(cell)
+                        previous_head_sha = (
+                            await worktree_mgr.current_head(cell) or ""
+                        )
+                        ok = await worktree_mgr.rebase_onto_base(cell)
+                        if ok:
+                            rebased_head_sha = (
+                                await worktree_mgr.current_head(cell) or ""
+                            )
+                            dirty_after_rebase = (
+                                await worktree_mgr.has_uncommitted_changes(cell)
+                            )
+                            refreshed_boundary = None
+                            if not dirty_after_rebase:
+                                refreshed_boundary = (
+                                    refresh_latest_boundary_after_rebase(
+                                        state.board_tasks.values(),
+                                        repo_root=(
+                                            cell.worktree_repo_root
+                                            or cell.git_root
+                                            or ""
+                                        ),
+                                        branch=cell.worktree_branch or "",
+                                        previous_head_sha=previous_head_sha,
+                                        rebased_head_sha=rebased_head_sha,
+                                    )
+                                )
+                            if refreshed_boundary:
+                                _save_task_record(refreshed_boundary)
+                            cell.worktree_checkpoints = \
+                                await worktree_mgr.count_commits(cell)
+                            cell.worktree_dirty = dirty_after_rebase
+                            cell.worktree_diff = {}
+                            cell.worktree_changed_files = []
+                            state._emit_agent(cell)
+                            result = {"type": "worktree_rebase",
+                                      "id": aid, "ok": True}
+                        else:
+                            result = {
+                                "type": "worktree_rebase",
+                                "id": aid, "ok": False,
+                                "error": "Rebase failed — conflicts "
+                                         "require manual resolution",
+                                "conflicts": check.get("conflicts", []),
+                            }
                 else:
                     result = {"type": "worktree_rebase",
                               "id": aid, "error": "No worktree"}
@@ -3286,179 +3560,214 @@ async def main(connection=None):
                             ),
                         }
                     else:
-                        squash = cell.worktree_merge_squash
-                        msg = data.get("message", "").strip()
-                        if not msg:
-                            msg = await _generate_merge_message(
-                                cell, worktree_mgr, squash,
-                                state=state)
-                        preserve_merge_diff = (
-                            _worktree_merge_preserve_diff_enabled(
-                                state,
-                                cell,
-                                data,
-                            )
+                        precheck = await worktree_mgr.check_merge_conflicts(
+                            cell
                         )
-                        boundary_task_for_diff = None
-                        merge_diff_snapshot = None
-                        if preserve_merge_diff:
-                            boundary_task_for_diff = (
-                                _latest_open_boundary_task_for_cell(
-                                    state,
-                                    cell,
-                                )
-                            )
-                            if boundary_task_for_diff:
-                                merge_diff_snapshot = (
-                                    await _worktree_merge_diff_snapshot(
-                                        cell,
-                                        worktree_mgr,
-                                    )
-                                )
-                        merge_result = \
-                            await worktree_mgr.server_merge(
-                                cell, msg, squash=squash)
-                        if merge_result["ok"]:
-                            _mark_branch_boundaries_merged(
-                                cell, merge_result["sha"]
-                            )
-                            state.cleanup_stale_boundary_successors()
-                            preserve_diff_warning = ""
-                            if preserve_merge_diff:
-                                preserve_diff_warning = (
-                                    _persist_preserved_merge_diff_warning_only(
-                                        state,
-                                        cell,
-                                        boundary_task_for_diff,
-                                        merge_diff_snapshot,
-                                        merge_commit_sha=merge_result["sha"],
-                                    )
-                                )
-                            cell.worktree_checkpoints = 0
-                            cell.worktree_merged = True
-                            cell.worktree_changed_files = []
-                            state.history_update_agent(
-                                cell, status="merged")
-                            state._emit_agent(cell)
-                            await _broadcast_toast(
-                                f'"{cell.name}" merged to '
-                                f"{cell.worktree_base_branch}",
-                                "success")
-                            if preserve_diff_warning:
-                                await _broadcast_toast(
-                                    preserve_diff_warning,
-                                    "warning",
-                                )
-                            # Unlink completed/archive-closed tasks from this agent so
-                            # they don't re-appear in future merge
-                            # messages.  Tasks stay on the board as a
-                            # historical record.
-                            for t in list(
-                                    state.board_tasks.values()):
-                                if t.agent_id == cell.id \
-                                        and task_is_closed(t):
-                                    t.agent_id = ""
-                                    state._emit(
-                                        "task_upsert", **asdict(t))
-                                    state._db_save_task(t)
-
-                            legacy_close_flag = bool(
-                                data.get("close_on_merge"))
-                            explicit_close = (
-                                "close_agent_on_merge" in data
-                            )
-                            explicit_remove = (
-                                "remove_worktree_on_merge" in data
-                            )
-                            if explicit_close or explicit_remove:
-                                close_flag = bool(
-                                    data.get("close_agent_on_merge"))
-                                remove_flag = bool(
-                                    data.get("remove_worktree_on_merge"))
-                            elif legacy_close_flag:
-                                close_flag = True
-                                remove_flag = True
-                            else:
-                                close_flag, remove_flag = (
-                                    merge_cleanup_flags(
-                                        state.get_group_settings(
-                                            cell.group
-                                        ).worktree_merge_cleanup
-                                    )
-                                )
-                            queued_followups = [
-                                t for t in state.board_tasks.values()
-                                if t.agent_id == cell.id
-                                and t.lane in {"Backlog", "To Do"}
-                            ]
-                            if queued_followups:
-                                close_flag = False
-                                remove_flag = False
-                            clear_flag = bool(
-                                data.get("clear_context"))
-                            if queued_followups or close_flag \
-                                    or remove_flag:
-                                clear_flag = False
-                            cleanup = {
-                                "close_agent": close_flag,
-                                "remove_worktree": remove_flag,
-                                "agent_closed": False,
-                                "worktree_removed": False,
-                                "errors": [],
-                            }
-                            if clear_flag and not close_flag \
-                                    and not remove_flag \
-                                    and cell.session_id:
-                                await bridge.send_text(
-                                    cell.session_id, "/clear\r")
-                                cell.tasks_dispatched = 0
-                                state._emit_agent(cell)
-                                state._db_save_agent(cell)
-                                log.info(
-                                    "Cleared context for '%s' "
-                                    "after merge", cell.name)
-                            if close_flag or remove_flag:
-                                cleanup = await _cleanup_after_merge(
-                                    cell,
-                                    close_agent=close_flag,
-                                    remove_worktree=remove_flag,
-                                )
-                            elif cell.worktree_path:
-                                # Reset worktree branch to base tip
-                                # so new work starts fresh (avoids
-                                # re-merging already-merged commits)
-                                valid = await \
-                                    worktree_mgr.validate(cell)
-                                if valid:
-                                    ok = await worktree_mgr\
-                                        .reset_to_base(cell)
-                                    if ok:
-                                        cell.worktree_checkpoints =\
-                                            await worktree_mgr\
-                                            .count_commits(cell)
-                                        cell.worktree_dirty = False
-                                        cell.worktree_diff = {}
-                                        if queued_followups:
-                                            cell.worktree_merged = False
-                                        state._emit_agent(cell)
-                                    else:
-                                        log.warning(
-                                            "Post-merge reset "
-                                            "failed for '%s'",
-                                            cell.name)
+                        if not precheck.get("clean"):
                             result = {
                                 "type": "worktree_merge",
-                                "id": aid, "ok": True,
-                                "sha": merge_result["sha"],
-                                "cleanup": cleanup,
+                                "id": aid,
+                                "ok": False,
+                                "error": precheck.get(
+                                    "error", "Conflicts detected"
+                                ),
                             }
                         else:
-                            result = {
-                                "type": "worktree_merge",
-                                "id": aid, "ok": False,
-                                "error": merge_result.get(
-                                    "error", "Merge failed"),
-                            }
+                            overwrite_paths = (
+                                await worktree_mgr.merge_untracked_overwrite_paths(
+                                    cell.worktree_repo_root
+                                    or cell.git_root
+                                    or "",
+                                    cell.worktree_base_branch or "",
+                                    precheck.get("tree_sha", ""),
+                                )
+                            )
+                            if overwrite_paths:
+                                result = {
+                                    "type": "worktree_merge",
+                                    "id": aid,
+                                    "ok": False,
+                                    "error": _untracked_overwrite_message(
+                                        overwrite_paths,
+                                        operation="merge",
+                                        location="the checked-out base repo",
+                                    ),
+                                    "overwrite_paths": overwrite_paths,
+                                }
+                            else:
+                                squash = cell.worktree_merge_squash
+                                msg = data.get("message", "").strip()
+                                if not msg:
+                                    msg = await _generate_merge_message(
+                                        cell, worktree_mgr, squash,
+                                        state=state)
+                                preserve_merge_diff = (
+                                    _worktree_merge_preserve_diff_enabled(
+                                        state,
+                                        cell,
+                                        data,
+                                    )
+                                )
+                                boundary_task_for_diff = None
+                                merge_diff_snapshot = None
+                                if preserve_merge_diff:
+                                    boundary_task_for_diff = (
+                                        _latest_open_boundary_task_for_cell(
+                                            state,
+                                            cell,
+                                        )
+                                    )
+                                    if boundary_task_for_diff:
+                                        merge_diff_snapshot = (
+                                            await _worktree_merge_diff_snapshot(
+                                                cell,
+                                                worktree_mgr,
+                                            )
+                                        )
+                                merge_result = \
+                                    await worktree_mgr.server_merge(
+                                        cell, msg, squash=squash)
+                                if merge_result["ok"]:
+                                    _mark_branch_boundaries_merged(
+                                        cell, merge_result["sha"]
+                                    )
+                                    state.cleanup_stale_boundary_successors()
+                                    preserve_diff_warning = ""
+                                    if preserve_merge_diff:
+                                        preserve_diff_warning = (
+                                            _persist_preserved_merge_diff_warning_only(
+                                                state,
+                                                cell,
+                                                boundary_task_for_diff,
+                                                merge_diff_snapshot,
+                                                merge_commit_sha=merge_result["sha"],
+                                            )
+                                        )
+                                    cell.worktree_checkpoints = 0
+                                    cell.worktree_merged = True
+                                    cell.worktree_changed_files = []
+                                    state.history_update_agent(
+                                        cell, status="merged")
+                                    state._emit_agent(cell)
+                                    await _broadcast_toast(
+                                        f'"{cell.name}" merged to '
+                                        f"{cell.worktree_base_branch}",
+                                        "success")
+                                    if preserve_diff_warning:
+                                        await _broadcast_toast(
+                                            preserve_diff_warning,
+                                            "warning",
+                                        )
+                                    # Unlink completed/archive-closed tasks from this agent so
+                                    # they don't re-appear in future merge
+                                    # messages.  Tasks stay on the board as a
+                                    # historical record.
+                                    for t in list(
+                                            state.board_tasks.values()):
+                                        if t.agent_id == cell.id \
+                                                and task_is_closed(t):
+                                            t.agent_id = ""
+                                            state._emit(
+                                                "task_upsert", **asdict(t))
+                                            state._db_save_task(t)
+
+                                    legacy_close_flag = bool(
+                                        data.get("close_on_merge"))
+                                    explicit_close = (
+                                        "close_agent_on_merge" in data
+                                    )
+                                    explicit_remove = (
+                                        "remove_worktree_on_merge" in data
+                                    )
+                                    if explicit_close or explicit_remove:
+                                        close_flag = bool(
+                                            data.get("close_agent_on_merge"))
+                                        remove_flag = bool(
+                                            data.get("remove_worktree_on_merge"))
+                                    elif legacy_close_flag:
+                                        close_flag = True
+                                        remove_flag = True
+                                    else:
+                                        close_flag, remove_flag = (
+                                            merge_cleanup_flags(
+                                                state.get_group_settings(
+                                                    cell.group
+                                                ).worktree_merge_cleanup
+                                            )
+                                        )
+                                    queued_followups = [
+                                        t for t in state.board_tasks.values()
+                                        if t.agent_id == cell.id
+                                        and t.lane in {"Backlog", "To Do"}
+                                    ]
+                                    if queued_followups:
+                                        close_flag = False
+                                        remove_flag = False
+                                    clear_flag = bool(
+                                        data.get("clear_context"))
+                                    if queued_followups or close_flag \
+                                            or remove_flag:
+                                        clear_flag = False
+                                    cleanup = {
+                                        "close_agent": close_flag,
+                                        "remove_worktree": remove_flag,
+                                        "agent_closed": False,
+                                        "worktree_removed": False,
+                                        "errors": [],
+                                    }
+                                    if clear_flag and not close_flag \
+                                            and not remove_flag \
+                                            and cell.session_id:
+                                        await bridge.send_text(
+                                            cell.session_id, "/clear\r")
+                                        cell.tasks_dispatched = 0
+                                        state._emit_agent(cell)
+                                        state._db_save_agent(cell)
+                                        log.info(
+                                            "Cleared context for '%s' "
+                                            "after merge", cell.name)
+                                    if close_flag or remove_flag:
+                                        cleanup = await _cleanup_after_merge(
+                                            cell,
+                                            close_agent=close_flag,
+                                            remove_worktree=remove_flag,
+                                        )
+                                    elif cell.worktree_path:
+                                        # Reset worktree branch to base tip
+                                        # so new work starts fresh (avoids
+                                        # re-merging already-merged commits)
+                                        valid = await \
+                                            worktree_mgr.validate(cell)
+                                        if valid:
+                                            ok = await worktree_mgr\
+                                                .reset_to_base(cell)
+                                            if ok:
+                                                cell.worktree_checkpoints =\
+                                                    await worktree_mgr\
+                                                    .count_commits(cell)
+                                                cell.worktree_dirty = False
+                                                cell.worktree_diff = {}
+                                                if queued_followups:
+                                                    cell.worktree_merged = False
+                                                state._emit_agent(cell)
+                                            else:
+                                                log.warning(
+                                                    "Post-merge reset "
+                                                    "failed for '%s'",
+                                                    cell.name)
+                                    result = {
+                                        "type": "worktree_merge",
+                                        "id": aid, "ok": True,
+                                        "sha": merge_result["sha"],
+                                        "cleanup": cleanup,
+                                    }
+                                else:
+                                    result = {
+                                        "type": "worktree_merge",
+                                        "id": aid, "ok": False,
+                                        "error": merge_result.get(
+                                            "error", "Merge failed"),
+                                    }
                 else:
                     result = {
                         "type": "worktree_merge", "id": aid,

@@ -534,6 +534,35 @@ def resolve_group(state_data, identifier):
     die(f"No group matching \"{identifier}\"")
 
 
+def resolve_repo_root(identifier=""):
+    """Resolve an explicit path/current directory to Loom's common repo root."""
+    base = os.path.expanduser(identifier.strip()) if identifier else os.getcwd()
+    try:
+        proc = subprocess.run(
+            [
+                "git", "-C", base, "rev-parse",
+                "--path-format=absolute",
+                "--show-toplevel",
+                "--git-common-dir",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        die(f"Failed to run git: {exc}")
+    if proc.returncode != 0:
+        die(f"Not inside a git repository: {base}")
+    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    if not lines:
+        die(f"Could not resolve git repository root: {base}")
+    if len(lines) > 1:
+        common_dir = os.path.realpath(lines[1])
+        if os.path.basename(common_dir) == ".git":
+            return os.path.dirname(common_dir)
+    return lines[0]
+
+
 def resolve_task(state_data, identifier):
     """Resolve a task by ID, legacy alias, ID prefix, or title match."""
     tasks = state_data.get("board_tasks", {})
@@ -1672,6 +1701,77 @@ def cmd_worktree_remove(args):
     resp = api_call("worktree_remove", port=args.port, **kwargs)
     check_ok(resp)
     print(f"Worktree removed for \"{cell['name']}\"")
+
+
+def cmd_worktree_list(args):
+    repo_root = resolve_repo_root(getattr(args, "repo", ""))
+    resp = api_call("worktree_list", port=args.port, repo_root=repo_root)
+    data = check_ok(resp)
+
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return
+
+    items = data.get("items", [])
+    print(f"Worktrees for {repo_root}")
+    if not items:
+        print("  No Loom-managed worktrees")
+        return
+
+    for item in items:
+        branch = item.get("branch", "") or "(detached)"
+        status = []
+        if item.get("owner_agent_name"):
+            status.append(f"owned by {item['owner_agent_name']}")
+        if item.get("admin_stale"):
+            status.append("admin-stale")
+        elif item.get("dirty"):
+            status.append("dirty")
+        elif item.get("merged"):
+            status.append("merged")
+        else:
+            status.append("unmerged")
+        if item.get("prunable"):
+            status.append("prunable")
+        else:
+            status.append(f"keep:{item.get('prune_reason', 'unknown')}")
+        if item.get("base_branch"):
+            status.append(f"base={item['base_branch']}")
+        print(f"  {branch}")
+        print(f"    {item.get('path', '')}")
+        print(f"    {'; '.join(status)}")
+
+
+def cmd_worktree_prune(args):
+    repo_root = resolve_repo_root(getattr(args, "repo", ""))
+    resp = api_call("worktree_prune", port=args.port, repo_root=repo_root)
+    data = check_ok(resp)
+
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return
+
+    removed = data.get("removed", [])
+    skipped = data.get("skipped", [])
+    print(f"Pruned worktrees for {repo_root}")
+    if removed:
+        print("  Removed:")
+        for item in removed:
+            branch = item.get("branch", "") or "(detached)"
+            print(
+                f"    {branch} — {item.get('path', '')} "
+                f"({item.get('prune_reason', '')})"
+            )
+    else:
+        print("  Removed: none")
+    if skipped:
+        print("  Skipped:")
+        for item in skipped:
+            branch = item.get("branch", "") or "(detached)"
+            print(
+                f"    {branch} — {item.get('path', '')} "
+                f"({item.get('prune_reason', '')})"
+            )
 
 
 def cmd_worktree_checkpoint(args):
@@ -3896,6 +3996,22 @@ def build_parser():
                         help="Git worktree management")
     wt.set_defaults(func=None, _sub_parser=wt)
     wt_sub = wt.add_subparsers(dest="worktree_cmd")
+
+    p = wt_sub.add_parser("list", aliases=["ls"],
+                          help="List Loom-managed worktrees in a repo")
+    p.add_argument("--repo",
+                   help="Repo path (defaults to current git repo)")
+    p.add_argument("--json", action="store_true",
+                   help="Print JSON output")
+    p.set_defaults(func=cmd_worktree_list)
+
+    p = wt_sub.add_parser("prune",
+                          help="Prune stale Loom-managed worktrees conservatively")
+    p.add_argument("--repo",
+                   help="Repo path (defaults to current git repo)")
+    p.add_argument("--json", action="store_true",
+                   help="Print JSON output")
+    p.set_defaults(func=cmd_worktree_prune)
 
     p = wt_sub.add_parser("create", help="Create worktree for agent")
     p.add_argument("identifier", help="Agent ID, slug, or name")

@@ -18,6 +18,7 @@ from .mcp_weaver_tools.shared import (
     resolve_agent as _resolve_agent,
     resolve_task as _resolve_task,
     run_worktree_merge_check as _run_worktree_merge_check,
+    run_worktree_merge_check_with_options as _run_worktree_merge_check_with_options,
     worktree_boundary_overview as _worktree_boundary_overview,
     is_busy_agent as _is_busy_agent,
 )
@@ -1507,8 +1508,12 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         if not cell or not cell.worktree_path:
             return "Agent has no worktree", True
 
-        check, error_text, blocked = await _run_worktree_merge_check(
-            handle_command, agent_id
+        check, error_text, blocked = (
+            await _run_worktree_merge_check_with_options(
+                handle_command,
+                agent_id,
+                allow_dirty=True,
+            )
         )
         if blocked:
             return error_text, True

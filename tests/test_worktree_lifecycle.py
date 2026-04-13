@@ -176,6 +176,21 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lines.count("etl/service-a/node_modules"), 1)
         self.assertEqual(lines.count("etl/service-b/node_modules"), 1)
 
+    async def test_get_repo_root_returns_common_root_for_linked_worktree(self):
+        cell = self._make_cell()
+
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+        )
+
+        self.assertIsNotNone(wt_path)
+        self.assertEqual(
+            await self.mgr.get_repo_root(wt_path),
+            str(self.repo_root.resolve()),
+        )
+
     async def test_blank_custom_worktree_name_preserves_default_naming(self):
         cell = self._make_cell()
 
@@ -390,6 +405,130 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await self._git("rev-parse", "HEAD", cwd=wt_path),
             await self._git("rev-parse", "main"),
         )
+
+    async def test_is_branch_merged_treats_reset_to_base_branch_as_prunable(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+
+        self.assertIsNotNone(wt_path)
+
+        readme = Path(wt_path) / "README.md"
+        readme.write_text("line one\nmerged from worktree\n")
+        commit_sha = await self.mgr.checkpoint(cell, message="Finish worker change")
+        self.assertTrue(commit_sha)
+
+        merge_result = await self.mgr.server_merge(cell, "Merge worker change")
+
+        self.assertTrue(merge_result["ok"], merge_result.get("error"))
+        self.assertTrue(await self.mgr.reset_to_base(cell))
+        self.assertFalse(await self.mgr.is_merged(cell))
+        self.assertTrue(
+            await self.mgr.is_branch_merged(
+                str(self.repo_root),
+                branch=cell.worktree_branch,
+                base_branch=cell.worktree_base_branch,
+            )
+        )
+
+    async def test_check_merge_conflicts_reports_binary_add_add_details(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+
+        self.assertIsNotNone(wt_path)
+
+        worker_binary = Path(wt_path) / "assets" / "logo.bin"
+        worker_binary.parent.mkdir(parents=True)
+        worker_binary.write_bytes(b"\x00\x01\x02")
+        await self._git("add", "assets/logo.bin", cwd=wt_path)
+        await self._git("commit", "-m", "Worker adds binary", cwd=wt_path)
+
+        main_binary = self.repo_root / "assets" / "logo.bin"
+        main_binary.parent.mkdir(parents=True)
+        main_binary.write_bytes(b"\x03\x04\x05\x06")
+        await self._git("add", "assets/logo.bin")
+        await self._git("commit", "-m", "Main adds binary")
+
+        conflict_info = await self.mgr.check_merge_conflicts(cell)
+
+        self.assertFalse(conflict_info["clean"])
+        self.assertEqual(len(conflict_info["conflicts"]), 1)
+        conflict = conflict_info["conflicts"][0]
+        self.assertEqual(conflict["path"], "assets/logo.bin")
+        self.assertTrue(conflict["binary"])
+        self.assertTrue(conflict["ours_blob_sha"])
+        self.assertTrue(conflict["theirs_blob_sha"])
+        self.assertEqual(conflict["ours_size"], 4)
+        self.assertEqual(conflict["theirs_size"], 3)
+        self.assertIn("binary differs", conflict["detail"])
+        self.assertIn("main", conflict["detail"])
+        self.assertIn(cell.worktree_branch, conflict["detail"])
+
+    async def test_merge_untracked_overwrite_paths_detect_checked_out_base_collisions(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+
+        self.assertIsNotNone(wt_path)
+
+        tracked_file = Path(wt_path) / "app" / "config.yml"
+        tracked_file.parent.mkdir(parents=True)
+        tracked_file.write_text("tracked from worktree\n")
+        await self._git("add", "app/config.yml", cwd=wt_path)
+        await self._git("commit", "-m", "Add config from worktree", cwd=wt_path)
+
+        local_untracked = self.repo_root / "app" / "config.yml"
+        local_untracked.parent.mkdir(parents=True)
+        local_untracked.write_text("repo local only\n")
+
+        check = await self.mgr.check_merge_conflicts(cell)
+        overwrite_paths = await self.mgr.merge_untracked_overwrite_paths(
+            str(self.repo_root),
+            "main",
+            check["tree_sha"],
+        )
+
+        self.assertEqual(overwrite_paths, ["app/config.yml"])
+
+    async def test_rebase_untracked_overwrite_paths_detect_worktree_collisions(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+
+        self.assertIsNotNone(wt_path)
+
+        local_untracked = Path(wt_path) / "app" / "config.yml"
+        local_untracked.parent.mkdir(parents=True)
+        local_untracked.write_text("worktree local only\n")
+
+        tracked_file = self.repo_root / "app" / "config.yml"
+        tracked_file.parent.mkdir(parents=True)
+        tracked_file.write_text("tracked on main\n")
+        await self._git("add", "app/config.yml")
+        await self._git("commit", "-m", "Main adds config")
+
+        overwrite_paths = await self.mgr.rebase_untracked_overwrite_paths(cell)
+
+        self.assertEqual(overwrite_paths, ["app/config.yml"])
+
+    async def test_list_worktrees_and_prune_admin_clears_missing_paths(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+
+        self.assertIsNotNone(wt_path)
+
+        self.assertTrue(
+            any(
+                item["path"] == wt_path
+                for item in await self.mgr.list_worktrees(str(self.repo_root))
+            )
+        )
+
+        Path(wt_path).rename(Path(wt_path + "-moved"))
+        listed = await self.mgr.list_worktrees(str(self.repo_root))
+        stale_entry = next(item for item in listed if item["path"] == wt_path)
+        self.assertTrue(stale_entry["prunable"])
+
+        self.assertTrue(await self.mgr.prune_admin(str(self.repo_root)))
+        listed_after = await self.mgr.list_worktrees(str(self.repo_root))
+        self.assertFalse(any(item["path"] == wt_path for item in listed_after))
 
     async def test_conflict_detection_and_rebase_abort_leave_worktree_clean(self):
         cell = self._make_cell()

@@ -2,6 +2,8 @@ import contextlib
 import importlib.util
 import io
 import os
+import subprocess
+import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -20,6 +22,59 @@ def _load_cli_module():
 class CliExternalTicketTests(unittest.TestCase):
     def setUp(self):
         self.cli = _load_cli_module()
+
+    def test_resolve_repo_root_returns_common_root_for_linked_worktree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            subprocess.run(
+                ["git", "-C", str(repo_root), "init", "-b", "main"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_root), "config", "user.name", "Loom Test"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_root), "config", "user.email", "loom@example.com"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            (repo_root / "README.md").write_text("hello\n")
+            subprocess.run(
+                ["git", "-C", str(repo_root), "add", "README.md"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_root), "commit", "-m", "Initial commit"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            worktree_path = repo_root / ".loom" / "worktrees" / "worker"
+            worktree_path.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                [
+                    "git", "-C", str(repo_root),
+                    "worktree", "add", "-b", "loom/worker",
+                    str(worktree_path), "main",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            self.assertEqual(
+                self.cli.resolve_repo_root(str(worktree_path)),
+                str(repo_root.resolve()),
+            )
 
     def test_ai_done_forwards_post_external_flag(self):
         calls = []
@@ -292,3 +347,72 @@ class CliExternalTicketTests(unittest.TestCase):
                 },
             ),
         )
+
+    def test_worktree_list_calls_api_with_resolved_repo_root(self):
+        calls = []
+        self.cli.resolve_repo_root = lambda ident="": "/repo"
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            calls.append((cmd, kwargs))
+            return {
+                "ok": True,
+                "data": {
+                    "repo_root": "/repo",
+                    "items": [{
+                        "branch": "loom/worker",
+                        "path": "/repo/.loom/worktrees/worker",
+                        "base_branch": "main",
+                        "merged": True,
+                        "dirty": False,
+                        "admin_stale": False,
+                        "prunable": True,
+                        "prune_reason": "merged_clean",
+                        "owner_agent_name": "",
+                    }],
+                },
+            }
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(port=18932, repo="", json=False)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.cli.cmd_worktree_list(args)
+
+        self.assertEqual(
+            calls[0],
+            ("worktree_list", {"repo_root": "/repo"}),
+        )
+        self.assertIn("loom/worker", out.getvalue())
+        self.assertIn("prunable", out.getvalue())
+
+    def test_worktree_prune_calls_api_with_resolved_repo_root(self):
+        calls = []
+        self.cli.resolve_repo_root = lambda ident="": "/repo"
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            calls.append((cmd, kwargs))
+            return {
+                "ok": True,
+                "data": {
+                    "repo_root": "/repo",
+                    "removed": [{
+                        "branch": "loom/worker",
+                        "path": "/repo/.loom/worktrees/worker",
+                        "prune_reason": "merged_clean",
+                    }],
+                    "skipped": [],
+                },
+            }
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(port=18932, repo="", json=False)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.cli.cmd_worktree_prune(args)
+
+        self.assertEqual(
+            calls[0],
+            ("worktree_prune", {"repo_root": "/repo"}),
+        )
+        self.assertIn("Removed:", out.getvalue())
+        self.assertIn("loom/worker", out.getvalue())
