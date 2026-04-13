@@ -248,8 +248,6 @@ function _connectEmbeddedTerminal(cell, surface) {
     allowProposedApi: true,
     allowTransparency: false,
     convertEol: false,
-    cols: 120,
-    rows: 32,
     cursorBlink: true,
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
     fontSize: 13,
@@ -266,6 +264,7 @@ function _connectEmbeddedTerminal(cell, surface) {
   _embeddedTerminalFit = new FitAddon.FitAddon();
   _embeddedTerminal.loadAddon(_embeddedTerminalFit);
   _embeddedTerminal.open(surface);
+  try { _embeddedTerminalFit.fit(); } catch (e) { /* container not measurable yet */ }
   _embeddedTerminalDataHandler = _embeddedTerminal.onData(function(data) {
     if (_embeddedTerminalWs && _embeddedTerminalWs.readyState === WebSocket.OPEN) {
       _embeddedTerminalWs.send(JSON.stringify({ type: 'input', data: data }));
