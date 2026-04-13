@@ -8,6 +8,7 @@ from loom.worktree_boundaries import (
     latest_boundary_task,
     mark_branch_boundaries_merged,
     queued_successor_tasks,
+    refresh_latest_boundary_after_rebase,
     retarget_queued_successor_tasks,
     started_successor_tasks,
 )
@@ -195,6 +196,89 @@ class WorktreeBoundaryTests(unittest.TestCase):
         self.assertEqual(valid.resume_after_boundary_task_id, "task-a")
         self.assertEqual(stale.resume_after_boundary_task_id, "")
         self.assertEqual(missing.resume_after_boundary_task_id, "")
+
+    def test_refresh_latest_boundary_after_rebase_updates_tip_for_clean_history(self):
+        boundary_task = _task(
+            "task-a",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "commit_sha": "old-head",
+                "reason": "branch_tip_moved",
+            },
+        )
+        queued = _task("task-b", lane="To Do", resume_after="task-a")
+
+        refreshed = refresh_latest_boundary_after_rebase(
+            [boundary_task, queued],
+            repo_root="/repo",
+            branch="loom/worker",
+            previous_head_sha="old-head",
+            rebased_head_sha="new-head",
+        )
+
+        self.assertIs(refreshed, boundary_task)
+        self.assertEqual(
+            boundary_task.worktree_boundary["commit_sha"],
+            "new-head",
+        )
+        self.assertEqual(boundary_task.worktree_boundary["status"], "open")
+        self.assertNotIn("reason", boundary_task.worktree_boundary)
+
+    def test_refresh_latest_boundary_after_rebase_refuses_started_successor(self):
+        boundary_task = _task(
+            "task-a",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "commit_sha": "old-head",
+            },
+        )
+        started = _task("task-b", lane="In Progress", resume_after="task-a")
+
+        refreshed = refresh_latest_boundary_after_rebase(
+            [boundary_task, started],
+            repo_root="/repo",
+            branch="loom/worker",
+            previous_head_sha="old-head",
+            rebased_head_sha="new-head",
+        )
+
+        self.assertIsNone(refreshed)
+        self.assertEqual(
+            boundary_task.worktree_boundary["commit_sha"],
+            "old-head",
+        )
+
+    def test_refresh_latest_boundary_after_rebase_refuses_unexpected_old_tip(self):
+        boundary_task = _task(
+            "task-a",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+                "commit_sha": "recorded-tip",
+            },
+        )
+
+        refreshed = refresh_latest_boundary_after_rebase(
+            [boundary_task],
+            repo_root="/repo",
+            branch="loom/worker",
+            previous_head_sha="different-old-head",
+            rebased_head_sha="new-head",
+        )
+
+        self.assertIsNone(refreshed)
+        self.assertEqual(
+            boundary_task.worktree_boundary["commit_sha"],
+            "recorded-tip",
+        )
 
     def test_mark_branch_boundaries_merged_updates_all_branch_boundaries(self):
         open_task = _task(

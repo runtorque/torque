@@ -168,6 +168,50 @@ def boundary_summary(task, *, queued_followers: list | None = None,
     }
 
 
+def refresh_latest_boundary_after_rebase(tasks: Iterable, *,
+                                         repo_root: str,
+                                         branch: str,
+                                         previous_head_sha: str,
+                                         rebased_head_sha: str):
+    """Re-anchor the latest open boundary after a Loom-managed rebase.
+
+    This only updates boundaries that still pointed at the exact pre-rebase
+    branch tip and have no started successor tasks. That preserves the normal
+    safety model for stale or already-continued histories while letting Loom's
+    own clean rebases keep the merge boundary current.
+    """
+    previous_head_sha = str(previous_head_sha or "").strip()
+    rebased_head_sha = str(rebased_head_sha or "").strip()
+    if not repo_root or not branch:
+        return None
+    if not previous_head_sha or not rebased_head_sha:
+        return None
+    if previous_head_sha == rebased_head_sha:
+        return None
+
+    latest = latest_boundary_task(
+        tasks,
+        repo_root=repo_root,
+        branch=branch,
+        statuses={"open"},
+    )
+    if not latest:
+        return None
+
+    boundary = dict(task_boundary(latest))
+    if not boundary:
+        return None
+    if boundary.get("commit_sha", "") != previous_head_sha:
+        return None
+    if started_successor_tasks(tasks, getattr(latest, "id", "")):
+        return None
+
+    boundary["commit_sha"] = rebased_head_sha
+    boundary.pop("reason", None)
+    latest.worktree_boundary = boundary
+    return latest
+
+
 def mark_branch_boundaries_merged(tasks: Iterable, *,
                                   repo_root: str,
                                   branch: str,
