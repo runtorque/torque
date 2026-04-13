@@ -2,7 +2,7 @@
 /* Agent templates editor + history                                    */
 /* ------------------------------------------------------------------ */
 
-var _agentsPanelView = 'templates';  // 'templates' | 'history'
+var _agentsPanelView = 'history';  // 'templates' | 'history'
 
 var _agentTplList = [];
 var _agentTplSelected = '';

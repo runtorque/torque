@@ -121,7 +121,13 @@ function _restorePanelState() {
     });
     if (active === 'board') renderBoard();
     if (active === 'actions') tplEditorLoad();
-    if (active === 'templates' && typeof agentTemplateEditorLoad === 'function') agentTemplateEditorLoad();
+    if (active === 'templates') {
+      if (typeof _agentsPanelView !== 'undefined' && _agentsPanelView === 'history') {
+        if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
+      } else if (typeof agentTemplateEditorLoad === 'function') {
+        agentTemplateEditorLoad();
+      }
+    }
     if (active === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
     if (active === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();

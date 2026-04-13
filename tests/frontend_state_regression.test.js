@@ -530,6 +530,84 @@ function createWsRenderHarness() {
   return { context, document, sandbox };
 }
 
+function createTemplatesHarness() {
+  const { sandbox, document } = createSandbox({
+    _cachedProviders: [],
+  });
+  document.register('panel-templates');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/templates.js');
+  return { context, document, sandbox };
+}
+
+function createMainHarness(overrides = {}) {
+  const taskbarButtons = ['board', 'actions', 'templates', 'events', 'weaver'].map((app) => {
+    const button = new FakeElement();
+    button.dataset.app = app;
+    return button;
+  });
+  const { sandbox, document } = createSandbox(Object.assign({
+    renderBoard() {},
+    tplEditorLoad() {},
+    renderEvents() {},
+    renderWeaverPanel() {},
+    agentTemplateEditorLoad() {},
+    agentHistoryLoad() {},
+    connect() {},
+    setupDrag() {},
+    closeModals() {},
+    closeBroadcast() {},
+    closeMenus() {},
+    closeContextMenu() {},
+    boardKeydown() { return false; },
+    _boardSelectedCount() { return 0; },
+    boardClearSelection() {},
+    onAgentClick() {},
+    removeAgent() {},
+    quickAddAgent() {},
+    openAddGroup() {},
+    quickAddTerminal() {},
+    openBroadcast() {},
+    relaunchAgent() {},
+    getFilterByWindow() { return false; },
+  }, overrides));
+  [
+    'bottom-panel',
+    'panel-resize-handle',
+    'panel-board',
+    'panel-actions',
+    'panel-templates',
+    'panel-events',
+    'panel-weaver',
+    'add-name-input',
+    'add-cmd-input',
+    'add-dir-input',
+    'add-args-input',
+    'add-init-input',
+    'gs-directory',
+    'gs-agent-directory',
+    'gs-terminal-prefix',
+    'gs-terminal-boot-cmd',
+    'gs-terminal-cmd-args',
+    'gs-terminal-init-script',
+    'gs-terminal-directory',
+    'gs-weaver-boot-cmd',
+    'gs-weaver-custom-instructions',
+  ].forEach((id) => {
+    document.register(id);
+  });
+  document.selectorMap.set('.overlay.visible', null);
+  document.setSelector('.taskbar-app', taskbarButtons[0]);
+  document.querySelectorAll = function(selector) {
+    if (selector === '.taskbar-app') return taskbarButtons;
+    if (selector === '.overlay') return [];
+    return [];
+  };
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/main.js');
+  return { context, document, sandbox, taskbarButtons };
+}
+
 function createStandaloneRenderHarness() {
   const { sandbox, document } = createSandbox();
   sandbox.renderTerminalWorkspaceCalls = 0;
@@ -5767,6 +5845,39 @@ test('full state hydrates weaver streams for the journal tab', () => {
       },
     ],
   });
+});
+
+test('agents panel defaults to history view', () => {
+  const { context, document } = createTemplatesHarness();
+  const panel = document.getElementById('panel-templates');
+
+  assert.equal(jsonValue(context, '_agentsPanelView'), 'history');
+
+  context.renderAgentTemplatesPanel();
+
+  assert.match(panel.innerHTML, /History<\/button>/);
+  assert.match(panel.innerHTML, /tpled-view-btn active[^"]*" onclick="agentsPanelSwitchView\('history'\)"/);
+  assert.match(panel.innerHTML, /agent-history-container/);
+});
+
+test('opening agents panel requests history when history is the active view', () => {
+  const { context, sandbox, taskbarButtons } = createMainHarness({
+    _agentsPanelView: 'history',
+  });
+  sandbox.historyLoads = 0;
+  sandbox.templateLoads = 0;
+  context.agentHistoryLoad = function() { sandbox.historyLoads++; };
+  context.agentTemplateEditorLoad = function() { sandbox.templateLoads++; };
+
+  context.togglePanel('templates');
+
+  assert.equal(sandbox._activePanelApp, 'templates');
+  assert.equal(sandbox.historyLoads, 1);
+  assert.equal(sandbox.templateLoads, 0);
+  assert.equal(taskbarButtons[2].classList.contains('active'), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'board_set_panel', active: 'templates' },
+  ]);
 });
 
 test('event deltas rerender only the active events panel', () => {
