@@ -27,7 +27,9 @@ from .server_artifacts import serialize_task_for_mcp
 from .state import (
     ARCHIVED_LANE,
     board_task_is_closed,
+    get_weaver_notification_preset,
     normalize_default_worker_concurrency,
+    normalize_weaver_digest_verbosity,
 )
 from .task_health import HEALTH_SEVERITY
 from .weaver_hints import compute_weaver_hints
@@ -1269,6 +1271,19 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
     if name == "weaver_notifications":
         ws = state.get_weaver_settings(_weaver_group)
         fields = {}
+        preset_name = str(args.get("preset", "") or "").strip().lower()
+        if preset_name:
+            try:
+                fields.update(get_weaver_notification_preset(preset_name))
+            except ValueError:
+                return (
+                    "Unknown notification preset. Use quiet, normal, or noisy.",
+                    True,
+                )
+        if "digest_verbosity" in args:
+            fields["digest_verbosity"] = normalize_weaver_digest_verbosity(
+                args["digest_verbosity"]
+            )
         if "push_interval" in args:
             fields["push_interval"] = max(10, args["push_interval"])
         if "max_interval" in args:
@@ -1277,8 +1292,8 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             heartbeat_interval = args["heartbeat_interval"]
             fields["heartbeat_interval"] = 0 if heartbeat_interval <= 0 \
                 else max(30, heartbeat_interval)
-        if "enable" in args or "disable" in args:
-            current = set(ws.enabled_events)
+        if preset_name or "enable" in args or "disable" in args:
+            current = set(fields.get("enabled_events", ws.enabled_events))
             for e in args.get("enable", []):
                 current.add(e)
             for e in args.get("disable", []):

@@ -230,6 +230,7 @@ test('group settings modal populates weaver fields and honors weaver tab deep-li
   assert.equal(ensure('gs-weaver-default-worker-concurrency').value, '4');
   assert.equal(ensure('gs-weaver-wave-size-preference').value, 'large');
   assert.equal(ensure('gs-weaver-same-agent-follow-up-preference').value, 'prefer_same_agent');
+  assert.equal(ensure('gs-weaver-notification-preset').value, 'custom');
   assert.equal(ensure('gs-weaver-digest-verbosity').value, 'detailed');
   assert.equal(ensure('gs-weaver-escalation-style').value, 'keep_moving');
   assert.equal(ensure('gs-wt-merge-cleanup').value, 'close_remove');
@@ -263,6 +264,7 @@ test('group settings resets the Weaver section defaults when reopened', () => {
   assert.equal(ensure('gs-weaver-provider-section').open, true);
   assert.equal(ensure('gs-weaver-autonomy-section').open, true);
   assert.equal(ensure('gs-weaver-digest-section').open, false);
+  assert.equal(ensure('gs-weaver-notification-preset').value, 'normal');
 });
 
 test('submitGroupSettings sends group and weaver updates separately', () => {
@@ -336,6 +338,29 @@ test('submitGroupSettings sends group and weaver updates separately', () => {
   assert.equal(sandbox.sendCalls[1].digest_verbosity, 'compact');
   assert.equal(sandbox.sendCalls[1].escalation_style, 'ask_early');
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls[1].enabled_events)), ['agent_started', 'agent_progress']);
+});
+
+test('group settings notification presets rewrite detailed controls before submit', () => {
+  const { sandbox, ensure } = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadModals(context);
+  seedProviders(context, sandbox._cachedProviders);
+
+  vm.runInContext('_settingsGroup = "alpha";', context);
+  ensure('gs-weaver-notification-preset').value = 'quiet';
+
+  vm.runInContext('onGsWeaverNotificationPresetChange(); submitGroupSettings()', context);
+
+  assert.equal(sandbox.sendCalls[1].cmd, 'weaver_update_settings');
+  assert.equal(sandbox.sendCalls[1].digest_verbosity, 'compact');
+  assert.equal(sandbox.sendCalls[1].push_interval, 120);
+  assert.equal(sandbox.sendCalls[1].max_interval, 600);
+  assert.equal(sandbox.sendCalls[1].heartbeat_interval, 0);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(sandbox.sendCalls[1].enabled_events)),
+    ['task_derived', 'task_health_alert'],
+  );
+  assert.equal(ensure('gs-weaver-notification-preset').value, 'quiet');
 });
 
 test('group settings points Weaver creation to the + New dropdown when absent', () => {

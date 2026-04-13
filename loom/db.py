@@ -775,7 +775,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         """Upsert weaver settings for a group."""
         enabled_events = json.dumps(
             settings.get("enabled_events",
-                         ["agent_started", "task_dispatched", "task_derived"]))
+                         ["agent_started", "task_dispatched",
+                          "task_derived", "task_health_alert"]))
         self._conn.execute("""
             INSERT OR REPLACE INTO weaver_settings
                 (group_name, push_interval, max_interval, heartbeat_interval,
@@ -841,7 +842,12 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         try:
             enabled = json.loads(row[16])
         except (json.JSONDecodeError, TypeError):
-            enabled = ["agent_started", "task_dispatched", "task_derived"]
+            enabled = [
+                "agent_started",
+                "task_dispatched",
+                "task_derived",
+                "task_health_alert",
+            ]
         heartbeat_interval = row[3]
         if heartbeat_interval is None or (
                 heartbeat_interval == 300 and row[2] != 300):
@@ -901,7 +907,12 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             try:
                 enabled = json.loads(row[16])
             except (json.JSONDecodeError, TypeError):
-                enabled = ["agent_started", "task_dispatched", "task_derived"]
+                enabled = [
+                    "agent_started",
+                    "task_dispatched",
+                    "task_derived",
+                    "task_health_alert",
+                ]
             heartbeat_interval = row[3]
             if heartbeat_interval is None or (
                     heartbeat_interval == 300 and row[2] != 300):

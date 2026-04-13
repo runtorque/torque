@@ -725,14 +725,31 @@ WEAVER_TOOLS = [
     {
         "name": "weaver_notifications",
         "description": (
-            "Configure event push settings. Sets which optional events "
-            "appear in digests and the push interval. Mandatory events "
+            "Configure digest noise. Use a quiet, normal, or noisy preset "
+            "for fast tuning, or override digest verbosity, event types, "
+            "and intervals directly. Mandatory events "
             "(task_completed, agent_error, agent_reply, agent_blocked, "
             "ask_created) are always included."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
+                "preset": {
+                    "type": "string",
+                    "enum": ["quiet", "normal", "noisy"],
+                    "description": (
+                        "Named notification preset. Quiet favors major "
+                        "milestones only, normal matches Loom defaults, "
+                        "and noisy adds faster, more detailed updates."
+                    ),
+                },
+                "digest_verbosity": {
+                    "type": "string",
+                    "enum": ["compact", "balanced", "detailed"],
+                    "description": (
+                        "Digest detail level. Presets also set this."
+                    ),
+                },
                 "push_interval": {
                     "type": "integer",
                     "description": (

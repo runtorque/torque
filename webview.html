@@ -209,8 +209,18 @@
           <option value="prefer_same_agent">Prefer same agent</option>
           <option value="prefer_fresh_agent">Prefer fresh agent</option>
         </select>
+        <label>Notification noise
+          <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how chatty Weaver digests should be. You can fine-tune the detailed notification controls later in Group Settings.">?</span>
+        </label>
+        <select id="weaver-launch-notification-preset" onchange="onWeaverLaunchNotificationPresetChange()">
+          <option value="quiet">Quiet</option>
+          <option value="normal">Normal</option>
+          <option value="noisy">Noisy</option>
+          <option value="custom">Custom</option>
+        </select>
+        <div id="weaver-launch-notification-preset-hint" class="label-hint task-modal-section-intro"></div>
         <label>Digest verbosity</label>
-        <select id="weaver-launch-digest-verbosity">
+        <select id="weaver-launch-digest-verbosity" onchange="syncWeaverLaunchNotificationPreset()">
           <option value="compact">Compact</option>
           <option value="balanced">Balanced</option>
           <option value="detailed">Detailed</option>
@@ -542,8 +552,18 @@
             <option value="prefer_same_agent">Prefer same agent</option>
             <option value="prefer_fresh_agent">Prefer fresh agent</option>
           </select>
+          <label>Notification noise
+            <span class="hint-btn" onclick="event.preventDefault();toggleHint(this)" data-hint="Quick presets for how much digest noise Weaver should send. Detailed changes below switch the preset to Custom.">?</span>
+          </label>
+          <select id="gs-weaver-notification-preset" onchange="onGsWeaverNotificationPresetChange()">
+            <option value="quiet">Quiet</option>
+            <option value="normal">Normal</option>
+            <option value="noisy">Noisy</option>
+            <option value="custom">Custom</option>
+          </select>
+          <div id="gs-weaver-notification-preset-hint" class="label-hint task-modal-section-intro"></div>
           <label>Digest verbosity</label>
-          <select id="gs-weaver-digest-verbosity">
+          <select id="gs-weaver-digest-verbosity" onchange="syncGsWeaverNotificationPreset()">
             <option value="compact">Compact</option>
             <option value="balanced">Balanced</option>
             <option value="detailed">Detailed</option>
@@ -562,7 +582,7 @@
         <div class="task-modal-section-body">
           <div class="label-hint task-modal-section-intro">Advanced notification controls. Heartbeats and optional event types affect digest noise, not the Weaver's orchestration policy presets.</div>
           <label>Push interval</label>
-          <select id="gs-weaver-push-interval">
+          <select id="gs-weaver-push-interval" onchange="syncGsWeaverNotificationPreset()">
             <option value="10">10s</option>
             <option value="30">30s</option>
             <option value="60">60s</option>
@@ -570,14 +590,14 @@
             <option value="300">300s</option>
           </select>
           <label>Max interval</label>
-          <select id="gs-weaver-max-interval">
+          <select id="gs-weaver-max-interval" onchange="syncGsWeaverNotificationPreset()">
             <option value="60">60s</option>
             <option value="120">120s</option>
             <option value="300">300s</option>
             <option value="600">600s</option>
           </select>
           <label>Idle heartbeat</label>
-          <select id="gs-weaver-heartbeat-interval">
+          <select id="gs-weaver-heartbeat-interval" onchange="syncGsWeaverNotificationPreset()">
             <option value="0">Off</option>
             <option value="60">1 min</option>
             <option value="120">2 min</option>
@@ -591,11 +611,11 @@
             <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_reply <span class="label-hint">(mandatory)</span></label>
             <label class="gs-checkbox"><input type="checkbox" checked disabled> agent_blocked <span class="label-hint">(mandatory)</span></label>
             <label class="gs-checkbox"><input type="checkbox" checked disabled> ask_created <span class="label-hint">(mandatory)</span></label>
-            <label class="gs-checkbox"><input id="gs-weaver-event-agent-started" type="checkbox"> agent_started</label>
-            <label class="gs-checkbox"><input id="gs-weaver-event-task-dispatched" type="checkbox"> task_dispatched</label>
-            <label class="gs-checkbox"><input id="gs-weaver-event-task-derived" type="checkbox"> task_derived</label>
-            <label class="gs-checkbox"><input id="gs-weaver-event-agent-progress" type="checkbox"> agent_progress</label>
-            <label class="gs-checkbox"><input id="gs-weaver-event-task-health-alert" type="checkbox"> task_health_alert</label>
+            <label class="gs-checkbox"><input id="gs-weaver-event-agent-started" type="checkbox" onchange="syncGsWeaverNotificationPreset()"> agent_started</label>
+            <label class="gs-checkbox"><input id="gs-weaver-event-task-dispatched" type="checkbox" onchange="syncGsWeaverNotificationPreset()"> task_dispatched</label>
+            <label class="gs-checkbox"><input id="gs-weaver-event-task-derived" type="checkbox" onchange="syncGsWeaverNotificationPreset()"> task_derived</label>
+            <label class="gs-checkbox"><input id="gs-weaver-event-agent-progress" type="checkbox" onchange="syncGsWeaverNotificationPreset()"> agent_progress</label>
+            <label class="gs-checkbox"><input id="gs-weaver-event-task-health-alert" type="checkbox" onchange="syncGsWeaverNotificationPreset()"> task_health_alert</label>
           </div>
         </div>
       </details>

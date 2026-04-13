@@ -468,6 +468,148 @@ function _setSelectValue(id, value, fallback) {
   el.value = value != null && value !== '' ? String(value) : String(fallback);
 }
 
+const _WEAVER_NOTIFICATION_PRESETS = {
+  quiet: {
+    label: 'Quiet',
+    description: 'Major milestones only, slower digests, and no idle heartbeat.',
+    digest_verbosity: 'compact',
+    push_interval: 120,
+    max_interval: 600,
+    heartbeat_interval: 0,
+    enabled_events: ['task_derived', 'task_health_alert'],
+  },
+  normal: {
+    label: 'Normal',
+    description: 'Balanced Loom defaults with key lifecycle updates and heartbeats.',
+    digest_verbosity: 'balanced',
+    push_interval: 60,
+    max_interval: 300,
+    heartbeat_interval: 300,
+    enabled_events: [
+      'agent_started',
+      'task_dispatched',
+      'task_derived',
+      'task_health_alert',
+    ],
+  },
+  noisy: {
+    label: 'Noisy',
+    description: 'Faster, more detailed digests including ongoing progress updates.',
+    digest_verbosity: 'detailed',
+    push_interval: 30,
+    max_interval: 120,
+    heartbeat_interval: 60,
+    enabled_events: [
+      'agent_started',
+      'task_dispatched',
+      'task_derived',
+      'agent_progress',
+      'task_health_alert',
+    ],
+  },
+};
+
+function _defaultWeaverNotificationSettings() {
+  const preset = _WEAVER_NOTIFICATION_PRESETS.normal;
+  return {
+    digest_verbosity: preset.digest_verbosity,
+    push_interval: preset.push_interval,
+    max_interval: preset.max_interval,
+    heartbeat_interval: preset.heartbeat_interval,
+    enabled_events: preset.enabled_events.slice(),
+  };
+}
+
+function _getWeaverNotificationPresetSettings(name) {
+  const preset = _WEAVER_NOTIFICATION_PRESETS[String(name || '').trim().toLowerCase()];
+  if (!preset) return _defaultWeaverNotificationSettings();
+  return {
+    digest_verbosity: preset.digest_verbosity,
+    push_interval: preset.push_interval,
+    max_interval: preset.max_interval,
+    heartbeat_interval: preset.heartbeat_interval,
+    enabled_events: preset.enabled_events.slice(),
+  };
+}
+
+function _sortedWeaverEvents(events) {
+  return Array.from(new Set((events || []).map((value) => String(value || ''))))
+    .filter(Boolean)
+    .sort();
+}
+
+function _matchWeaverNotificationPreset(settings) {
+  const current = settings || {};
+  const digestVerbosity = String(
+    current.digest_verbosity != null && current.digest_verbosity !== ''
+      ? current.digest_verbosity
+      : 'balanced'
+  );
+  const pushInterval = parseInt(current.push_interval, 10);
+  const maxInterval = parseInt(current.max_interval, 10);
+  const heartbeatInterval = parseInt(current.heartbeat_interval, 10);
+  const enabledEvents = _sortedWeaverEvents(current.enabled_events);
+
+  for (const [name, preset] of Object.entries(_WEAVER_NOTIFICATION_PRESETS)) {
+    if (
+      digestVerbosity === preset.digest_verbosity
+      && pushInterval === preset.push_interval
+      && maxInterval === preset.max_interval
+      && heartbeatInterval === preset.heartbeat_interval
+      && JSON.stringify(enabledEvents) === JSON.stringify(_sortedWeaverEvents(preset.enabled_events))
+    ) {
+      return name;
+    }
+  }
+  return 'custom';
+}
+
+function _setWeaverNotificationPresetHint(id, presetName) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const preset = _WEAVER_NOTIFICATION_PRESETS[presetName];
+  if (preset) {
+    el.textContent = `${preset.label}: ${preset.description} Manual tweaks switch this to Custom.`;
+    return;
+  }
+  el.textContent = 'Custom detailed settings. Pick a preset to overwrite the detailed notification controls below.';
+}
+
+function _groupFormWeaverNotificationSettings() {
+  return {
+    digest_verbosity: document.getElementById('gs-weaver-digest-verbosity').value,
+    push_interval: parseInt(document.getElementById('gs-weaver-push-interval').value, 10) || 60,
+    max_interval: parseInt(document.getElementById('gs-weaver-max-interval').value, 10) || 300,
+    heartbeat_interval: parseInt(document.getElementById('gs-weaver-heartbeat-interval').value, 10),
+    enabled_events: _getWeaverEnabledEvents(),
+  };
+}
+
+function _applyGsWeaverNotificationPreset(name) {
+  const preset = _getWeaverNotificationPresetSettings(name);
+  _setSelectValue('gs-weaver-digest-verbosity', preset.digest_verbosity, 'balanced');
+  _setSelectValue('gs-weaver-push-interval', preset.push_interval, 60);
+  _setSelectValue('gs-weaver-max-interval', preset.max_interval, 300);
+  _setSelectValue('gs-weaver-heartbeat-interval', preset.heartbeat_interval, 300);
+  _setWeaverEventCheckboxes(preset.enabled_events);
+}
+
+function syncGsWeaverNotificationPreset() {
+  const preset = _matchWeaverNotificationPreset(_groupFormWeaverNotificationSettings());
+  _setSelectValue('gs-weaver-notification-preset', preset, 'custom');
+  _setWeaverNotificationPresetHint('gs-weaver-notification-preset-hint', preset);
+}
+
+function onGsWeaverNotificationPresetChange() {
+  const el = document.getElementById('gs-weaver-notification-preset');
+  if (!el) return;
+  const preset = el.value;
+  if (preset && preset !== 'custom') {
+    _applyGsWeaverNotificationPreset(preset);
+  }
+  syncGsWeaverNotificationPreset();
+}
+
 function _setWeaverEventCheckboxes(enabled) {
   const current = new Set(enabled || []);
   document.getElementById('gs-weaver-event-agent-started').checked = current.has('agent_started');
@@ -517,7 +659,10 @@ function _resetGsWeaverSections() {
 function _showGroupSettings(group, data) {
   _settingsGroup = group;
   const s = data.settings;
-  const ws = data.weaver_settings || {};
+  const ws = Object.assign(
+    _defaultWeaverNotificationSettings(),
+    data.weaver_settings || {}
+  );
   const weaver = s.weaver_agent_id && state.agents ? state.agents[s.weaver_agent_id] : null;
 
   document.getElementById('gs-title').textContent = group + ' Settings';
@@ -642,6 +787,7 @@ function _showGroupSettings(group, data) {
     ws.max_interval || 300
   );
   _setWeaverEventCheckboxes(ws.enabled_events || []);
+  syncGsWeaverNotificationPreset();
   _renderGsWeaverSummary(group, weaver, ws);
   _resetGsWeaverSections();
 
