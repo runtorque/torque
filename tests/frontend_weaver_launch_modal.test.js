@@ -85,6 +85,16 @@ function createSandbox() {
           same_agent_follow_up_preference: 'prefer_same_agent',
           digest_verbosity: 'detailed',
           escalation_style: 'keep_moving',
+          push_interval: 30,
+          max_interval: 120,
+          heartbeat_interval: 60,
+          enabled_events: [
+            'agent_started',
+            'task_dispatched',
+            'task_derived',
+            'agent_progress',
+            'task_health_alert',
+          ],
         },
       },
     },
@@ -151,6 +161,7 @@ test('openWeaverLaunchDialog populates persisted weaver launch settings', () => 
   assert.equal(ensure('weaver-launch-default-worker-concurrency').value, '4');
   assert.equal(ensure('weaver-launch-wave-size-preference').value, 'large');
   assert.equal(ensure('weaver-launch-same-agent-follow-up-preference').value, 'prefer_same_agent');
+  assert.equal(ensure('weaver-launch-notification-preset').value, 'noisy');
   assert.equal(ensure('weaver-launch-digest-verbosity').value, 'detailed');
   assert.equal(ensure('weaver-launch-escalation-style').value, 'keep_moving');
   assert.equal(ensure('modal-weaver-launch').classList.contains('visible'), true);
@@ -172,7 +183,8 @@ test('submitWeaverLaunchDialog persists settings then creates a Weaver', () => {
   ensure('weaver-launch-default-worker-concurrency').value = '3';
   ensure('weaver-launch-wave-size-preference').value = 'small';
   ensure('weaver-launch-same-agent-follow-up-preference').value = 'prefer_fresh_agent';
-  ensure('weaver-launch-digest-verbosity').value = 'compact';
+  ensure('weaver-launch-notification-preset').value = 'quiet';
+  vm.runInContext('onWeaverLaunchNotificationPresetChange()', context);
   ensure('weaver-launch-escalation-style').value = 'ask_early';
 
   vm.runInContext('submitWeaverLaunchDialog()', context);
@@ -192,6 +204,10 @@ test('submitWeaverLaunchDialog persists settings then creates a Weaver', () => {
       same_agent_follow_up_preference: 'prefer_fresh_agent',
       digest_verbosity: 'compact',
       escalation_style: 'ask_early',
+      push_interval: 120,
+      max_interval: 600,
+      heartbeat_interval: 0,
+      enabled_events: ['task_derived', 'task_health_alert'],
     },
     {
       cmd: 'add_agent',
@@ -229,6 +245,16 @@ test('submitWeaverLaunchDialog persists settings then relaunches the designated 
       same_agent_follow_up_preference: 'prefer_same_agent',
       digest_verbosity: 'detailed',
       escalation_style: 'keep_moving',
+      push_interval: 30,
+      max_interval: 120,
+      heartbeat_interval: 60,
+      enabled_events: [
+        'agent_started',
+        'task_dispatched',
+        'task_derived',
+        'agent_progress',
+        'task_health_alert',
+      ],
     },
     {
       cmd: 'relaunch_agent',

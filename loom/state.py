@@ -51,6 +51,43 @@ _WEAVER_DIGEST_VERBOSITIES = {
     "detailed",
 }
 _DEFAULT_WEAVER_DIGEST_VERBOSITY = "balanced"
+_WEAVER_NOTIFICATION_PRESETS = {
+    "quiet": {
+        "digest_verbosity": "compact",
+        "push_interval": 120,
+        "max_interval": 600,
+        "heartbeat_interval": 0,
+        "enabled_events": [
+            "task_derived",
+            "task_health_alert",
+        ],
+    },
+    "normal": {
+        "digest_verbosity": "balanced",
+        "push_interval": 60,
+        "max_interval": 300,
+        "heartbeat_interval": 300,
+        "enabled_events": [
+            "agent_started",
+            "task_dispatched",
+            "task_derived",
+            "task_health_alert",
+        ],
+    },
+    "noisy": {
+        "digest_verbosity": "detailed",
+        "push_interval": 30,
+        "max_interval": 120,
+        "heartbeat_interval": 60,
+        "enabled_events": [
+            "agent_started",
+            "task_dispatched",
+            "task_derived",
+            "agent_progress",
+            "task_health_alert",
+        ],
+    },
+}
 _WEAVER_ESCALATION_STYLES = {
     "ask_early",
     "note_then_ask",
@@ -112,6 +149,21 @@ def normalize_weaver_digest_verbosity(value) -> str:
     if value in _WEAVER_DIGEST_VERBOSITIES:
         return value
     return _DEFAULT_WEAVER_DIGEST_VERBOSITY
+
+
+def get_weaver_notification_preset(name) -> dict:
+    preset = _WEAVER_NOTIFICATION_PRESETS.get(
+        str(name or "").strip().lower()
+    )
+    if not preset:
+        raise ValueError(f"Unknown Weaver notification preset: {name}")
+    return {
+        "digest_verbosity": preset["digest_verbosity"],
+        "push_interval": preset["push_interval"],
+        "max_interval": preset["max_interval"],
+        "heartbeat_interval": preset["heartbeat_interval"],
+        "enabled_events": list(preset["enabled_events"]),
+    }
 
 
 def normalize_weaver_escalation_style(value) -> str:
@@ -547,12 +599,9 @@ class WeaverSettings:
     weaver_shell: str = ""               # shell override for the designated weaver
     weaver_tab_color: str = ""           # tab color override for the designated weaver
     enabled_events: list[str] = field(   # optional events (mandatory always on)
-        default_factory=lambda: [
-            "agent_started",
-            "task_dispatched",
-            "task_derived",
-            "task_health_alert",
-        ]
+        default_factory=lambda: list(
+            _WEAVER_NOTIFICATION_PRESETS["normal"]["enabled_events"]
+        )
     )
 
 

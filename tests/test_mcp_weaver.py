@@ -3906,6 +3906,92 @@ class WeaverEventAndInteractionToolTests(unittest.IsolatedAsyncioTestCase):
         settings = json.loads(text)["settings"]
         self.assertEqual(settings["heartbeat_interval"], 0)
 
+    async def test_notifications_apply_named_preset_before_overrides(self):
+        state, weaver = self._make_state()
+        state.weaver_settings["g"] = self.state_mod.WeaverSettings(
+            group="g",
+            digest_verbosity="balanced",
+            push_interval=60,
+            max_interval=300,
+            heartbeat_interval=300,
+            enabled_events=["agent_started", "task_dispatched"],
+        )
+        captured = {}
+
+        async def fake_handle_command(payload):
+            captured.update(payload)
+            state.update_weaver_settings(
+                payload["group"],
+                digest_verbosity=payload["digest_verbosity"],
+                push_interval=payload["push_interval"],
+                max_interval=payload["max_interval"],
+                heartbeat_interval=payload["heartbeat_interval"],
+                enabled_events=payload["enabled_events"],
+            )
+            return {"type": "ok"}
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_notifications",
+            {
+                "preset": "noisy",
+                "heartbeat_interval": 0,
+                "disable": ["agent_progress"],
+            },
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        self.assertEqual(
+            captured,
+            {
+                "cmd": "weaver_update_settings",
+                "group": "g",
+                "digest_verbosity": "detailed",
+                "push_interval": 30,
+                "max_interval": 120,
+                "heartbeat_interval": 0,
+                "enabled_events": [
+                    "agent_started",
+                    "task_derived",
+                    "task_dispatched",
+                    "task_health_alert",
+                ],
+            },
+        )
+        settings = json.loads(text)["settings"]
+        self.assertEqual(settings["digest_verbosity"], "detailed")
+        self.assertEqual(settings["push_interval"], 30)
+        self.assertEqual(settings["max_interval"], 120)
+        self.assertEqual(settings["heartbeat_interval"], 0)
+        self.assertEqual(
+            settings["enabled_events"],
+            [
+                "agent_started",
+                "task_derived",
+                "task_dispatched",
+                "task_health_alert",
+            ],
+        )
+
+    async def test_notifications_reject_unknown_preset(self):
+        state, weaver = self._make_state()
+
+        async def fake_handle_command(_payload):
+            return {"type": "ok"}
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_notifications",
+            {"preset": "loud"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("quiet, normal, or noisy", text)
+
     async def test_launch_settings_update_weaver_launch_overrides(self):
         state, weaver = self._make_state()
         captured = {}

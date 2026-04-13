@@ -280,7 +280,7 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     pending_question   TEXT NOT NULL DEFAULT '',
     pending_note       TEXT NOT NULL DEFAULT '',
     pending_note_kind  TEXT NOT NULL DEFAULT '',
-    enabled_events     TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived"]',
+    enabled_events     TEXT NOT NULL DEFAULT '["agent_started","task_dispatched","task_derived","task_health_alert"]',
     weaver_provider    TEXT NOT NULL DEFAULT '',
     weaver_boot_command TEXT NOT NULL DEFAULT '',
     weaver_model       TEXT NOT NULL DEFAULT '',
@@ -825,6 +825,28 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
                 conn.commit()
             except sqlite3.OperationalError:
                 pass
+    try:
+        conn.execute(
+            "UPDATE weaver_settings "
+            "SET enabled_events = ? "
+            "WHERE enabled_events = ?",
+            (
+                json.dumps([
+                    "agent_started",
+                    "task_dispatched",
+                    "task_derived",
+                    "task_health_alert",
+                ]),
+                json.dumps([
+                    "agent_started",
+                    "task_dispatched",
+                    "task_derived",
+                ]),
+            ),
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
     try:
         conn.execute(
             "SELECT weaver_owner_id FROM auto_dispatch_queue LIMIT 0")

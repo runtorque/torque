@@ -13,6 +13,10 @@ function _defaultWeaverLaunchSettings() {
     same_agent_follow_up_preference: 'balanced',
     digest_verbosity: 'balanced',
     escalation_style: 'note_then_ask',
+    push_interval: 60,
+    max_interval: 300,
+    heartbeat_interval: 300,
+    enabled_events: _defaultWeaverNotificationSettings().enabled_events,
   };
 }
 
@@ -55,13 +59,19 @@ function onWeaverLaunchProviderChange() {
 function openWeaverLaunchDialog(group, agentId) {
   if (!group) return;
   const cell = agentId && state.agents ? state.agents[agentId] : null;
+  const ws = _getWeaverLaunchSettings(group);
   _weaverLaunchContext = {
     group: group,
     agent_id: cell ? cell.id : '',
     mode: cell ? 'relaunch' : 'create',
+    notification_settings: {
+      push_interval: ws.push_interval,
+      max_interval: ws.max_interval,
+      heartbeat_interval: ws.heartbeat_interval,
+      enabled_events: (ws.enabled_events || []).slice(),
+    },
   };
 
-  const ws = _getWeaverLaunchSettings(group);
   document.getElementById('weaver-launch-title').textContent =
     cell ? 'Relaunch Weaver' : 'Create Weaver';
   document.getElementById('weaver-launch-group').textContent = group;
@@ -103,6 +113,7 @@ function openWeaverLaunchDialog(group, agentId) {
     ws.escalation_style,
     'note_then_ask'
   );
+  syncWeaverLaunchNotificationPreset();
   onWeaverLaunchProviderChange();
 
   document.getElementById('modal-weaver-launch').classList.add('visible');
@@ -112,6 +123,7 @@ function openWeaverLaunchDialog(group, agentId) {
 function submitWeaverLaunchDialog() {
   if (!_weaverLaunchContext) return;
   const group = _weaverLaunchContext.group;
+  const notificationSettings = _getWeaverLaunchNotificationSettings();
   send({
     cmd: 'weaver_update_settings',
     group: group,
@@ -126,6 +138,10 @@ function submitWeaverLaunchDialog() {
     same_agent_follow_up_preference: document.getElementById('weaver-launch-same-agent-follow-up-preference').value,
     digest_verbosity: document.getElementById('weaver-launch-digest-verbosity').value,
     escalation_style: document.getElementById('weaver-launch-escalation-style').value,
+    push_interval: notificationSettings.push_interval,
+    max_interval: notificationSettings.max_interval,
+    heartbeat_interval: notificationSettings.heartbeat_interval,
+    enabled_events: notificationSettings.enabled_events,
   });
 
   if (_weaverLaunchContext.mode === 'create') {
@@ -136,4 +152,40 @@ function submitWeaverLaunchDialog() {
 
   _weaverLaunchContext = null;
   closeModals();
+}
+
+function _getWeaverLaunchNotificationSettings() {
+  const current = Object.assign(
+    _defaultWeaverNotificationSettings(),
+    (_weaverLaunchContext && _weaverLaunchContext.notification_settings) || {}
+  );
+  current.digest_verbosity = document.getElementById('weaver-launch-digest-verbosity').value || current.digest_verbosity;
+  current.enabled_events = (current.enabled_events || []).slice();
+  return current;
+}
+
+function syncWeaverLaunchNotificationPreset() {
+  const preset = _matchWeaverNotificationPreset(_getWeaverLaunchNotificationSettings());
+  _setSelectValue('weaver-launch-notification-preset', preset, 'custom');
+  _setWeaverNotificationPresetHint('weaver-launch-notification-preset-hint', preset);
+}
+
+function onWeaverLaunchNotificationPresetChange() {
+  if (!_weaverLaunchContext) return;
+  const preset = document.getElementById('weaver-launch-notification-preset').value;
+  if (preset && preset !== 'custom') {
+    const settings = _getWeaverNotificationPresetSettings(preset);
+    _weaverLaunchContext.notification_settings = {
+      push_interval: settings.push_interval,
+      max_interval: settings.max_interval,
+      heartbeat_interval: settings.heartbeat_interval,
+      enabled_events: settings.enabled_events,
+    };
+    _setSelectValue(
+      'weaver-launch-digest-verbosity',
+      settings.digest_verbosity,
+      'balanced'
+    );
+  }
+  syncWeaverLaunchNotificationPreset();
 }
