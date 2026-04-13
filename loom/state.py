@@ -65,6 +65,17 @@ _WORKTREE_MERGE_CLEANUP_MODES = {
 }
 _DEFAULT_WORKTREE_MERGE_CLEANUP = "keep"
 _WEAVER_WORKLOG_LIMIT = 200
+_WEAVER_STREAM_CARD_LIMIT = 10
+_WEAVER_STREAM_CONTEXT_LIMIT = 5
+_WEAVER_STREAM_DELTA_TRIGGER_OPS = {
+    "agent_remove",
+    "agent_upsert",
+    "group_remove",
+    "group_rename",
+    "group_update",
+    "task_remove",
+    "task_upsert",
+}
 
 
 def normalize_weaver_autonomy_mode(value) -> str:
@@ -625,6 +636,85 @@ class MatrixState:
                    slug=self.group_slugs.get(name, ""),
                    agents=list(self.groups.get(name, [])))
 
+    def _weaver_stream_groups(self) -> list[str]:
+        groups = set(self.groups)
+        groups.update(self.group_settings)
+        groups.update(self.weaver_settings)
+        groups.update(
+            str(getattr(task, "group", "") or "").strip()
+            for task in self.board_tasks.values()
+        )
+        groups.update(
+            str(getattr(cell, "group", "") or "").strip()
+            for cell in self.agents.values()
+        )
+        groups.discard("")
+        return sorted(groups)
+
+    def _weaver_stream_counts(self, streams: list[dict]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for stream in streams:
+            state_name = str(stream.get("state", "") or "").strip()
+            if not state_name:
+                continue
+            counts[state_name] = counts.get(state_name, 0) + 1
+        return counts
+
+    def _weaver_stream_payload(self, group: str) -> dict:
+        from .worktree_streams import compute_worktree_streams
+
+        try:
+            streams = compute_worktree_streams(
+                self,
+                group=group,
+                visibility_limit=_WEAVER_STREAM_CONTEXT_LIMIT,
+                include_orphaned=False,
+            )
+        except Exception:
+            log.exception("Failed to compute weaver streams for %s", group)
+            streams = []
+        streams = [
+            stream for stream in streams
+            if str(stream.get("state", "") or "").strip() != "merged"
+        ]
+        return {
+            "count": len(streams),
+            "by_state": self._weaver_stream_counts(streams),
+            "items": streams[:_WEAVER_STREAM_CARD_LIMIT],
+            "truncated": len(streams) > _WEAVER_STREAM_CARD_LIMIT,
+        }
+
+    def _weaver_streams_snapshot(self) -> dict[str, dict]:
+        return {
+            group: self._weaver_stream_payload(group)
+            for group in self._weaver_stream_groups()
+        }
+
+    def _append_weaver_stream_delta_ops(self, ops: list[dict]) -> list[dict]:
+        if not any(
+            str((op or {}).get("op", "") or "") in _WEAVER_STREAM_DELTA_TRIGGER_OPS
+            for op in ops
+        ):
+            return list(ops)
+        next_ops = list(ops)
+        existing_groups = {
+            str((op or {}).get("group", "") or "").strip()
+            for op in next_ops
+            if str((op or {}).get("op", "") or "") in {
+                "weaver_streams",
+                "weaver_streams_update",
+            }
+        }
+        for group in self._weaver_stream_groups():
+            if group in existing_groups:
+                continue
+            next_ops.append({
+                "op": "weaver_streams",
+                "group": group,
+                "streams": self._weaver_stream_payload(group),
+            })
+        return next_ops
+
     # -- Serialization ------------------------------------------------------
 
     def to_dict(self) -> dict:
@@ -672,6 +762,7 @@ class MatrixState:
                 g: [dict(entry) for entry in entries]
                 for g, entries in self.weaver_worklog.items()
             },
+            "weaver_streams": self._weaver_streams_snapshot(),
         }
 
     # -- Targeted persistence helpers ----------------------------------------
@@ -2817,10 +2908,11 @@ class MatrixState:
         async with self._ws_clients_lock:
             if not self._delta_ops:
                 return
+            ops = self._append_weaver_stream_delta_ops(self._delta_ops)
             self._seq += 1
             msg = json.dumps({
                 "type": "delta", "seq": self._seq,
-                "ops": self._delta_ops,
+                "ops": ops,
             })
             self._delta_ops = []
             clients = list(self._ws_clients)

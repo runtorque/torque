@@ -5556,6 +5556,48 @@ test('weaver stream deltas rerender only the active Weaver panel', () => {
   });
 });
 
+test('full state hydrates weaver streams for the journal tab', () => {
+  const { context } = createWsRenderHarness();
+
+  runInContext(context, `
+    _handleFullState({
+      seq: 1,
+      groups: { alpha: [] },
+      agents: {},
+      board_lanes: [],
+      board_tasks: {},
+      panel_events: [],
+      weaver_streams: {
+        alpha: {
+          count: 1,
+          by_state: { ready_to_merge: 1 },
+          items: [
+            {
+              stream_id: 'stream:/repo::loom/events-panel',
+              branch: 'loom/events-panel',
+              state: 'ready_to_merge',
+              foreground_task_title: 'Ship the Events panel',
+            },
+          ],
+        },
+      },
+    });
+  `);
+
+  assert.deepEqual(jsonValue(context, 'state.weaver_streams.alpha'), {
+    count: 1,
+    by_state: { ready_to_merge: 1 },
+    items: [
+      {
+        stream_id: 'stream:/repo::loom/events-panel',
+        branch: 'loom/events-panel',
+        state: 'ready_to_merge',
+        foreground_task_title: 'Ship the Events panel',
+      },
+    ],
+  });
+});
+
 test('event deltas rerender only the active events panel', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'board';
