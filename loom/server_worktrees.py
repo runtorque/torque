@@ -132,29 +132,13 @@ async def _worktree_diff_updater(state, worktree_mgr):
         for cell in state.agents.values():
             if not cell.worktree_path:
                 continue
-            diff = await worktree_mgr.diff_summary(cell)
-            changed_files = await worktree_mgr.changed_files(cell)
-            dirty = await worktree_mgr.has_uncommitted_changes(cell)
-            checkpoints = await worktree_mgr.count_commits(cell)
-            ahead = checkpoints
-            behind = await worktree_mgr.count_behind(cell)
-            merged = await worktree_mgr.is_merged(cell)
-            if (
-                diff != cell.worktree_diff
-                or changed_files != cell.worktree_changed_files
-                or dirty != cell.worktree_dirty
-                or checkpoints != cell.worktree_checkpoints
-                or behind != cell.worktree_behind
-                or ahead != cell.worktree_ahead
-                or merged != cell.worktree_merged
-            ):
-                cell.worktree_diff = diff
-                cell.worktree_changed_files = changed_files
-                cell.worktree_dirty = dirty
-                cell.worktree_checkpoints = checkpoints
-                cell.worktree_behind = behind
-                cell.worktree_ahead = ahead
-                cell.worktree_merged = merged
+            try:
+                cell_changed = await worktree_mgr.refresh_state(cell)
+            except Exception:
+                log.exception(
+                    "Worktree refresh failed for '%s'", cell.name)
+                continue
+            if cell_changed:
                 state._emit_agent(cell)
                 changed = True
         if changed:

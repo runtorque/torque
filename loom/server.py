@@ -1401,6 +1401,7 @@ async def main(connection=None):
                         c.name,
                     )
             event_bus.cleanup_cell(c.id)
+            worktree_mgr.forget_refresh_state(c.id)
         return removed
 
     def _checkpoint_message(cell) -> str:
@@ -1518,6 +1519,7 @@ async def main(connection=None):
         removed = state.remove_agent(cell.id)
         for c in removed:
             event_bus.cleanup_cell(c.id)
+            worktree_mgr.forget_refresh_state(c.id)
 
     bridge.on_terminal_disconnected = _on_terminal_disconnected
     await bridge.start()
@@ -2666,6 +2668,7 @@ async def main(connection=None):
                             os.path.expanduser(c.directory),
                             _persistent_prompt_filename(c))
                     event_bus.cleanup_cell(c.id)
+                    worktree_mgr.forget_refresh_state(c.id)
                     await _safe_remove_worktree(c)
 
             elif cmd == "rename_group":

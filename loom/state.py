@@ -740,11 +740,29 @@ class MatrixState:
         }
 
     def _append_weaver_stream_delta_ops(self, ops: list[dict]) -> list[dict]:
-        if not any(
-            str((op or {}).get("op", "") or "") in _WEAVER_STREAM_DELTA_TRIGGER_OPS
-            for op in ops
-        ):
+        affected_groups: set[str] = set()
+        for op in ops:
+            op_name = str((op or {}).get("op", "") or "")
+            if op_name not in _WEAVER_STREAM_DELTA_TRIGGER_OPS:
+                continue
+            if op_name == "group_rename":
+                affected_groups.add(str(op.get("old_name", "") or "").strip())
+                affected_groups.add(str(op.get("new_name", "") or "").strip())
+                continue
+            if op_name in {"group_update", "group_remove"}:
+                affected_groups.add(str(op.get("name", "") or "").strip())
+                continue
+            # Terminal cells don't participate in weaver streams; skip them
+            # so a terminal upsert/remove doesn't force a group recompute.
+            if op_name in {"agent_upsert", "agent_remove"}:
+                cell_type = str(op.get("cell_type", "agent") or "agent").strip()
+                if cell_type and cell_type != "agent":
+                    continue
+            affected_groups.add(str(op.get("group", "") or "").strip())
+        affected_groups.discard("")
+        if not affected_groups:
             return list(ops)
+
         next_ops = list(ops)
         existing_groups = {
             str((op or {}).get("group", "") or "").strip()
@@ -754,8 +772,23 @@ class MatrixState:
                 "weaver_streams_update",
             }
         }
-        for group in self._weaver_stream_groups():
+        known_groups = set(self._weaver_stream_groups())
+        for group in affected_groups:
             if group in existing_groups:
+                continue
+            if group not in known_groups:
+                # Group was just removed; emit an empty payload so clients
+                # clear it from their local state.
+                next_ops.append({
+                    "op": "weaver_streams",
+                    "group": group,
+                    "streams": {
+                        "count": 0,
+                        "by_state": {},
+                        "items": [],
+                        "truncated": False,
+                    },
+                })
                 continue
             next_ops.append({
                 "op": "weaver_streams",
@@ -1878,13 +1911,17 @@ class MatrixState:
                 cell = self.agents.pop(aid, None)
                 if cell:
                     removed.append(cell)
-                    self._emit("agent_remove", id=aid)
+                    self._emit("agent_remove", id=aid,
+                               group=cell.group,
+                               cell_type=cell.cell_type)
                     # Cascade: remove child terminals
                     for child_id in self._children.pop(aid, []):
                         child = self.agents.pop(child_id, None)
                         if child:
                             removed.append(child)
-                            self._emit("agent_remove", id=child_id)
+                            self._emit("agent_remove", id=child_id,
+                                       group=child.group,
+                                       cell_type=child.cell_type)
             del self.groups[name]
             self.group_slugs.pop(name, None)
             self.group_settings.pop(name, None)
@@ -2119,7 +2156,8 @@ class MatrixState:
         if not cell:
             return removed
         removed.append(cell)
-        self._emit("agent_remove", id=aid)
+        self._emit("agent_remove", id=aid,
+                   group=cell.group, cell_type=cell.cell_type)
         # Remove from group list (top-level items only)
         if not cell.parent_id and cell.group in self.groups:
             self.groups[cell.group] = [
@@ -2136,7 +2174,9 @@ class MatrixState:
             child = self.agents.pop(child_id, None)
             if child:
                 removed.append(child)
-                self._emit("agent_remove", id=child_id)
+                self._emit("agent_remove", id=child_id,
+                           group=child.group,
+                           cell_type=child.cell_type)
         self.cleanup_orphaned_attention()
         # Unlink from board tasks
         for t in self.board_tasks.values():
@@ -2552,7 +2592,7 @@ class MatrixState:
         task = self.board_tasks.pop(tid, None)
         if task:
             self.auto_dispatch_queue_remove_task(tid)
-            self._emit("task_remove", id=tid)
+            self._emit("task_remove", id=tid, group=task.group)
             self._db_delete_task(tid)
             # Clean up dependency references in other tasks
             for t in self.board_tasks.values():
@@ -2965,12 +3005,17 @@ class MatrixState:
             })
             self._delta_ops = []
             clients = list(self._ws_clients)
-        dead: set[web.WebSocketResponse] = set()
-        for ws in clients:
-            try:
-                await ws.send_str(msg)
-            except Exception:
-                dead.add(ws)
+        # Send to every client concurrently so a slow/stuck client
+        # doesn't stall delivery to the others (the lock above already
+        # guarantees ordering — only one broadcast is in flight at a time).
+        results = await asyncio.gather(
+            *(ws.send_str(msg) for ws in clients),
+            return_exceptions=True,
+        )
+        dead: set[web.WebSocketResponse] = {
+            ws for ws, result in zip(clients, results)
+            if isinstance(result, BaseException)
+        }
         if dead:
             async with self._ws_clients_lock:
                 self._ws_clients -= dead

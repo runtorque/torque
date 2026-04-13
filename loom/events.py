@@ -157,7 +157,6 @@ class EventBus:
 
         prev_activity = cell.activity
         self._apply(event, cell)
-        self._state.recompute_task_health()
         self._log.append(event)
         log.info("Event: cell='%s' type=%s activity='%s' detail='%s'",
                  cell.name, event.event_type, cell.activity,
@@ -326,6 +325,13 @@ class EventBus:
     def _fire_broadcast(self):
         """Timer callback — create a task for the async broadcast."""
         self._timers.pop("_global", None)
+        # Coalesce health recompute with the throttled broadcast: any event
+        # bursts in the last 1s share a single O(tasks) recompute pass, and
+        # the resulting task_upsert deltas piggyback on the same broadcast.
+        try:
+            self._state.recompute_task_health()
+        except Exception:
+            log.exception("recompute_task_health failed")
         asyncio.create_task(self._do_broadcast())
 
     async def _do_broadcast(self):

@@ -356,6 +356,234 @@ def _repo_root_from_common_dir(common_dir: str) -> str:
 class WorktreeManager:
     """Manages git worktrees for agent isolation."""
 
+    def __init__(self):
+        # Per-cell ephemeral fingerprint of (worktree_index_mtime,
+        # base_ref_mtime). Used by `refresh_state` to skip the entire
+        # status/diff/ahead-behind/is_merged probe when neither side has
+        # advanced since the last tick.
+        self._refresh_fingerprints: dict[str, tuple[float, float]] = {}
+
+    @staticmethod
+    def _resolve_gitdir(worktree_path: str) -> str:
+        """Resolve the actual git directory for a worktree path.
+
+        For linked worktrees, ``<worktree_path>/.git`` is a file pointing
+        to the gitdir under the main repo; for non-linked dirs it is the
+        gitdir itself. Returns "" on failure.
+        """
+        if not worktree_path:
+            return ""
+        dot_git = os.path.join(worktree_path, ".git")
+        if os.path.isdir(dot_git):
+            return dot_git
+        if os.path.isfile(dot_git):
+            try:
+                with open(dot_git) as f:
+                    line = f.read().strip()
+                if line.startswith("gitdir:"):
+                    return line[len("gitdir:"):].strip()
+            except OSError:
+                return ""
+        return ""
+
+    @staticmethod
+    def _ref_mtime(repo_root: str, branch: str) -> float:
+        """Return the mtime of a branch ref (loose or packed). 0.0 on miss."""
+        if not repo_root or not branch:
+            return 0.0
+        loose = os.path.join(repo_root, ".git", "refs", "heads", branch)
+        try:
+            return os.path.getmtime(loose)
+        except OSError:
+            pass
+        packed = os.path.join(repo_root, ".git", "packed-refs")
+        try:
+            return os.path.getmtime(packed)
+        except OSError:
+            return 0.0
+
+    def _refresh_fingerprint(self, cell) -> tuple[float, float]:
+        """Cheap fingerprint that changes only when the worktree or base moved."""
+        gitdir = self._resolve_gitdir(cell.worktree_path or "")
+        index_mtime = 0.0
+        if gitdir:
+            try:
+                index_mtime = os.path.getmtime(os.path.join(gitdir, "index"))
+            except OSError:
+                index_mtime = 0.0
+        base_mtime = self._ref_mtime(
+            cell.worktree_repo_root or "",
+            cell.worktree_base_branch or "",
+        )
+        return (index_mtime, base_mtime)
+
+    async def refresh_state(self, cell) -> bool:
+        """Refresh worktree-derived ephemeral fields on ``cell`` in one pass.
+
+        Returns True if any field changed. Skips the work entirely when
+        the cheap mtime fingerprint matches the last successful refresh,
+        which is the common case (most agents are idle most ticks).
+        """
+        if not cell.worktree_path or not cell.worktree_base_branch:
+            return False
+
+        fingerprint = self._refresh_fingerprint(cell)
+        previous = self._refresh_fingerprints.get(cell.id)
+        if previous == fingerprint and previous != (0.0, 0.0):
+            return False
+
+        # Three consolidated git invocations replace the previous six:
+        #   - rev-list --left-right --count → ahead + behind
+        #   - status --porcelain=v2         → dirty + uncommitted/untracked
+        #   - diff --numstat                → committed file list + stats
+        ahead, behind = await self._ahead_behind(cell)
+        dirty, uncommitted_files, untracked_files = await self._status_v2(cell)
+        diff_stats, committed_files = await self._diff_numstat(cell)
+        # `is_merged` can fan out to several git calls (squash detection).
+        # A branch can only become "newly merged" if base has advanced past
+        # the fork point — so skip the probe when behind == 0 and we
+        # already knew it wasn't merged. Once True, stay True (idempotent).
+        if cell.worktree_merged:
+            merged = True
+        elif behind == 0:
+            merged = False
+        else:
+            merged = await self.is_merged(cell)
+
+        all_changed = sorted(
+            set(committed_files) | set(uncommitted_files) | set(untracked_files)
+        )
+
+        changed = False
+        if diff_stats != cell.worktree_diff:
+            cell.worktree_diff = diff_stats
+            changed = True
+        if all_changed != cell.worktree_changed_files:
+            cell.worktree_changed_files = all_changed
+            changed = True
+        if dirty != cell.worktree_dirty:
+            cell.worktree_dirty = dirty
+            changed = True
+        if ahead != cell.worktree_checkpoints:
+            cell.worktree_checkpoints = ahead
+            changed = True
+        if ahead != cell.worktree_ahead:
+            cell.worktree_ahead = ahead
+            changed = True
+        if behind != cell.worktree_behind:
+            cell.worktree_behind = behind
+            changed = True
+        if merged != cell.worktree_merged:
+            cell.worktree_merged = merged
+            changed = True
+
+        # Re-read the fingerprint after the git work — the index can be
+        # touched by the diff/status calls themselves on some setups, and
+        # we want the next tick to compare against the post-work state.
+        self._refresh_fingerprints[cell.id] = self._refresh_fingerprint(cell)
+        return changed
+
+    def forget_refresh_state(self, cell_id: str) -> None:
+        """Drop the cached refresh fingerprint when an agent goes away."""
+        self._refresh_fingerprints.pop(cell_id, None)
+
+    async def _ahead_behind(self, cell) -> tuple[int, int]:
+        """One git call: returns (ahead, behind) commits vs base."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", cell.worktree_path,
+                "rev-list", "--left-right", "--count",
+                f"{cell.worktree_base_branch}...HEAD",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return (0, 0)
+            parts = stdout.decode().split()
+            if len(parts) >= 2:
+                return (int(parts[1]), int(parts[0]))
+        except Exception:
+            log.debug("ahead_behind failed for '%s'", cell.name)
+        return (0, 0)
+
+    async def _status_v2(self, cell) -> tuple[bool, list[str], list[str]]:
+        """One git call: returns (dirty, uncommitted_paths, untracked_paths)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", cell.worktree_path,
+                "status", "--porcelain=v2", "--untracked-files=normal",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return (False, [], [])
+            uncommitted: list[str] = []
+            untracked: list[str] = []
+            dirty = False
+            for raw in stdout.decode().splitlines():
+                if not raw:
+                    continue
+                dirty = True
+                tag = raw[0]
+                if tag == "1":
+                    # ordinary changed entry: "1 XY ... <path>"
+                    parts = raw.split(" ", 8)
+                    if len(parts) >= 9:
+                        uncommitted.append(parts[8])
+                elif tag == "2":
+                    # rename/copy: "2 XY ... <path>\t<orig>"
+                    parts = raw.split(" ", 9)
+                    if len(parts) >= 10:
+                        path_field = parts[9].split("\t", 1)[0]
+                        uncommitted.append(path_field)
+                elif tag == "?":
+                    # untracked: "? <path>"
+                    untracked.append(raw[2:])
+            return (dirty, uncommitted, untracked)
+        except Exception:
+            log.debug("status_v2 failed for '%s'", cell.name)
+            return (False, [], [])
+
+    async def _diff_numstat(self, cell) -> tuple[dict, list[str]]:
+        """One git call: returns (diff_summary_dict, committed_paths)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", cell.worktree_path,
+                "diff", "--numstat",
+                f"{cell.worktree_base_branch}...HEAD",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return ({}, [])
+            files = 0
+            insertions = 0
+            deletions = 0
+            paths: list[str] = []
+            for line in stdout.decode().strip().splitlines():
+                parts = line.split("\t")
+                if len(parts) >= 3:
+                    try:
+                        ins = int(parts[0]) if parts[0] != "-" else 0
+                        dels = int(parts[1]) if parts[1] != "-" else 0
+                        insertions += ins
+                        deletions += dels
+                        files += 1
+                        paths.append(parts[2])
+                    except ValueError:
+                        continue
+            return (
+                {"files": files, "insertions": insertions,
+                 "deletions": deletions},
+                paths,
+            )
+        except Exception:
+            log.debug("diff_numstat failed for '%s'", cell.name)
+            return ({}, [])
+
     async def rev_parse(self, directory: str, ref: str) -> Optional[str]:
         """Resolve a git ref or object to a full SHA."""
         if not directory or not ref:
