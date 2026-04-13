@@ -201,7 +201,8 @@ LOOM_CONTEXT_STUB = {
                   "labels": [], "group": "", "status": "",
                   "worktree_boundary": {},
                   "resume_after_boundary_task_id": "",
-                  "attachments": [], "artifacts": []},
+                  "attachments": [], "artifacts": [],
+                  "upstream_artifacts": []},
     "terminals": [],
 }
 

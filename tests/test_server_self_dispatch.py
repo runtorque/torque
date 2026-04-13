@@ -93,6 +93,28 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertIn("Proceed with the derived task you just created.", prompt)
         self.assertIn("Relevant shared context", prompt)
 
+    def test_append_task_artifacts_can_include_upstream_handoff_block(self):
+        prompt = self.server_mod._append_task_artifacts(
+            "Implement the plan.",
+            [],
+            [],
+            [
+                {
+                    "type": "generated_doc",
+                    "title": "Implementation plan",
+                    "path": "/tmp/task-parent/plan.md",
+                    "summary": "Canonical downstream handoff",
+                    "source_task_id": "task-parent",
+                    "source_task_label": "Research auth patch",
+                }
+            ],
+        )
+
+        self.assertIn("Implement the plan.", prompt)
+        self.assertIn("## Upstream handoff artifacts", prompt)
+        self.assertIn("From `Research auth patch` (task-parent)", prompt)
+        self.assertIn("Canonical downstream handoff", prompt)
+
     def test_resolve_memory_cell_and_task_recovers_task_from_active_agent(self):
         state = self.state_mod.MatrixState()
         task = self.state_mod.BoardTask(

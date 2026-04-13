@@ -391,6 +391,71 @@ def artifact_prompt_blocks(artifacts) -> list[str]:
     return blocks
 
 
+def upstream_artifact_prompt_block(artifacts) -> str:
+    """Render a bounded handoff section for upstream task artifacts."""
+    if not isinstance(artifacts, list):
+        return ""
+
+    blocks = []
+    for raw in artifacts:
+        if not isinstance(raw, dict):
+            continue
+        artifact = normalize_artifact(raw)
+        if not artifact:
+            continue
+
+        source_task_label = _safe_text(raw.get("source_task_label"))
+        source_task_id = _safe_text(raw.get("source_task_id"))
+        source_label = source_task_label or source_task_id or "upstream task"
+        source_suffix = f" ({source_task_id})" if source_task_id else ""
+        title = artifact.get("title") or _TYPE_LABELS.get(
+            artifact.get("type"), artifact.get("type", "artifact")
+        )
+        atype = artifact.get("type") or "artifact"
+        ref = _artifact_reference(raw) or _artifact_reference(artifact)
+        summary = artifact.get("summary") or ""
+        metadata = artifact.get("metadata") or {}
+        content = artifact.get("content") or ""
+        effective_mode = _auto_mode_as_effective(raw)
+
+        line = (
+            f"- From `{source_label}`{source_suffix}: "
+            f"[{atype}] {title}"
+        )
+        extras = []
+        if ref:
+            extras.append(f"ref: `{ref}`")
+        if atype == ARTIFACT_TEST_REPORT:
+            total = metadata.get("total")
+            passed = metadata.get("passed")
+            failed = metadata.get("failed")
+            if total not in (None, ""):
+                extras.append(
+                    f"results: {passed or 0} passed, {failed or 0} failed, {total} total"
+                )
+        elif atype == ARTIFACT_DIFF:
+            files = metadata.get("files")
+            ins = metadata.get("insertions")
+            dels = metadata.get("deletions")
+            if files not in (None, ""):
+                extras.append(f"stats: {files} files, +{ins or 0}/-{dels or 0}")
+        if summary:
+            extras.append(f"summary: {_clip_text(summary, 240)}")
+        if effective_mode == PROMPT_MODE_INLINE and content:
+            extras.append("inline excerpt follows")
+        if extras:
+            line += " (" + "; ".join(extras) + ")"
+        if effective_mode == PROMPT_MODE_INLINE and content:
+            line += "\n" + _markdown_fenced_block(
+                _clip_text(content, _INLINE_LIMITS.get(atype, 1200))
+            )
+        blocks.append(line)
+
+    if not blocks:
+        return ""
+    return "\n\n## Upstream handoff artifacts\n" + "\n".join(blocks)
+
+
 def legacy_image_prompt_block(attachments, artifacts) -> str:
     """Preserve the existing image attachment prompt section."""
     lines = []

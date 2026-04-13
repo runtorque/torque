@@ -2217,6 +2217,60 @@ class WeaverBoardSummaryToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(shown["task_artifacts"][0]["url"], "/attachments/task-1/image.png")
         self.assertEqual(shown["task_artifacts"][1]["task_label"], "Investigate upload support")
 
+    async def test_task_show_includes_upstream_artifacts_for_derived_tasks(self):
+        state = self.state_mod.MatrixState()
+        weaver = self.state_mod.AgentCell(
+            id="weaver-1",
+            name="Weaver",
+            group="g",
+            slug="weaver",
+            cell_type="agent",
+        )
+        state.agents[weaver.id] = weaver
+        state.groups["g"] = [weaver.id]
+        state.group_settings["g"] = self.state_mod.GroupSettings(
+            weaver_agent_id=weaver.id
+        )
+        parent = state.board_add_task(
+            "Research upload support",
+            "g",
+            id="task-parent",
+            artifacts=[{
+                "type": "generated_doc",
+                "title": "Implementation plan",
+                "path": "/tmp/task-parent/plan.md",
+            }],
+        )
+        child = state.board_add_task(
+            "Implement upload support",
+            "g",
+            id="task-child",
+            parent_task_id="task-parent",
+            pipeline_root_id="task-parent",
+            pipeline_depth=1,
+        )
+        self.assertIsNotNone(parent)
+        self.assertIsNotNone(child)
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_task_show",
+            {"task": "task-child"},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertFalse(is_error)
+        shown = json.loads(text)
+        upstream = shown["upstream_artifacts"]
+        self.assertEqual(len(upstream), 1)
+        self.assertEqual(upstream[0]["source_task_id"], "task-parent")
+        self.assertEqual(upstream[0]["source_task_label"], "Research upload support")
+        self.assertEqual(upstream[0]["url"], "/attachments/task-parent/plan.md")
+
     async def test_task_upload_artifact_forwards_payload(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(

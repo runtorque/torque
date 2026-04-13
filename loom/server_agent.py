@@ -12,15 +12,21 @@ from .adapters import (
     get_adapter,
     get_default_command_for_provider,
 )
-from .artifacts import artifact_prompt_block, legacy_image_prompt_block
+from .artifacts import (
+    artifact_prompt_block,
+    legacy_image_prompt_block,
+    upstream_artifact_prompt_block,
+)
 from .config import log
 
 
-def _append_task_artifacts(prompt: str, attachments, artifacts) -> str:
+def _append_task_artifacts(prompt: str, attachments, artifacts,
+                           upstream_artifacts=None) -> str:
     """Append legacy image references plus structured artifact references."""
     final_prompt = prompt
     final_prompt += legacy_image_prompt_block(attachments, artifacts)
     final_prompt += artifact_prompt_block(artifacts)
+    final_prompt += upstream_artifact_prompt_block(upstream_artifacts)
     return final_prompt
 
 
