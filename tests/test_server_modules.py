@@ -58,6 +58,15 @@ class ServerModuleExtractionTests(unittest.TestCase):
         self.assertIn('  Line 1', yaml_text)
         self.assertIn('labels:', yaml_text)
 
+    def test_action_to_yaml_round_trips_auto_close_on_done(self):
+        yaml_text = self.server_actions._action_to_yaml('feature/review', {
+            'description': 'Review code',
+            'auto_close_on_done': True,
+            'prompt': '{{ TASK }}\n',
+        })
+
+        self.assertIn('auto_close_on_done: true', yaml_text)
+
     def test_dispatch_queue_helper_respects_self_dispatch(self):
         active = self.state_mod.BoardTask(
             id='task-1',

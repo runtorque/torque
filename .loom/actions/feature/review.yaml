@@ -8,6 +8,8 @@ agent:
 labels:
   - feature
 
+auto_close_on_done: true
+
 transitions:
   - action: feature/implement
     when: issues were found that need to be fixed

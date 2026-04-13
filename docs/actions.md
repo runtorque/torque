@@ -108,6 +108,7 @@ prompt: |
 | **agent.tab_color** | string | no | Legacy inline field. Hex tab color (deprecated). |
 | **agent.env_vars** | object | no | Legacy inline field. Environment variables to set (deprecated). |
 | **worktree** | boolean | no | If `true`, create an isolated git worktree for the agent. |
+| **auto_close_on_done** | boolean | no | If `true`, Loom may auto-close the agent after `loom_done(...)`, but only when the pipeline root task is done and no queued or reply follow-up work remains. |
 | **labels** | list | no | Labels applied to the task on the board. |
 | **transitions** | list | no | Valid next actions for pipeline chaining (see [Pipelines](#pipelines)). |
 | **max_depth** | integer | no | Override the global `max_pipeline_depth` for this action. |
@@ -818,6 +819,8 @@ agent:
 
 labels:
   - review
+
+auto_close_on_done: true
 
 transitions:
   - action: feature/fix-review

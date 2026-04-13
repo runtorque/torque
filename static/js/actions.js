@@ -223,11 +223,12 @@ function renderTemplatesEditor() {
   html += '</details>';
 
   // Settings
-  html += '<details class="tpled-section"' + (d.group || d.worktree ? ' open' : '') + '>';
+  html += '<details class="tpled-section"' + (d.group || d.worktree || d.auto_close_on_done ? ' open' : '') + '>';
   html += '<summary>Settings</summary>';
   html += '<label>Group</label>';
   html += '<input id="tpled-group" value="' + esc(d.group || '') + '" placeholder="Override target group" autocomplete="off" onchange="tplEditorMarkDirty()">';
   html += '<label class="gs-checkbox"><input id="tpled-worktree" type="checkbox"' + (d.worktree ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Git worktree per agent</label>';
+  html += '<label class="gs-checkbox"><input id="tpled-auto-close-on-done" type="checkbox"' + (d.auto_close_on_done ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Auto-close agent after root task is done</label>';
   html += '</details>';
 
   // Prompt field (coalesce old format on load)
@@ -593,6 +594,7 @@ function _tplEditorSaveInner() {
     description: (document.getElementById('tpled-desc').value || '').trim(),
     group: (document.getElementById('tpled-group').value || '').trim(),
     worktree: document.getElementById('tpled-worktree').checked,
+    auto_close_on_done: document.getElementById('tpled-auto-close-on-done').checked,
     prompt: prompt,
     labels: labels,
     transitions: transitions,
@@ -662,6 +664,7 @@ function _tplEditorReadForm() {
     },
     group: (document.getElementById('tpled-group').value || '').trim(),
     worktree: document.getElementById('tpled-worktree').checked,
+    auto_close_on_done: document.getElementById('tpled-auto-close-on-done').checked,
     prompt: document.getElementById('tpled-prompt').value || '',
     labels: labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [],
     transitions: _tplReadTransitions(),

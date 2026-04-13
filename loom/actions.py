@@ -513,10 +513,19 @@ class ActionManager:
             "group": act.get("group", ""),
             "labels": act.get("labels", []),
             "worktree": act.get("worktree", None),
+            "auto_close_on_done": bool(act.get("auto_close_on_done", False)),
             "terminals": act.get("terminals", []),
             "transitions": act.get("transitions", []),
             "max_depth": act.get("max_depth", None),
         }
+
+    def get_auto_close_on_done(self, action_name: str,
+                               base_dir: str = "") -> bool:
+        """Return whether an action opts into auto-close on task done."""
+        act = self.load_action(action_name, base_dir)
+        if not isinstance(act, dict):
+            return False
+        return bool(act.get("auto_close_on_done", False))
 
     def get_transitions(self, action_name: str,
                          base_dir: str = "") -> list[dict]:

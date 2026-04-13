@@ -112,6 +112,8 @@ When a task is marked done via `loom_done(...)`, Loom walks up the parent chain 
 
 Cascade only fires on `loom_done(...)` (and `loom_ready()`), never on derive. This prevents premature completion --- a review task that derives a fix task won't cascade the root task, because the fix task isn't done yet.
 
+Some actions also opt into `auto_close_on_done`. That cleanup is evaluated at the **root-task lifecycle** level, not just when one derived task finishes. Loom only auto-closes an opted-in agent after the root task itself is **Done**, and it skips closure when unresolved descendants, queued same-agent follow-ups, or pending Weaver reply tasks still indicate expected follow-up work.
+
 ### Example: a review cycle
 
 Consider an implement-review pipeline where the review finds issues on the first pass:

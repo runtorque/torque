@@ -458,6 +458,110 @@ def _refresh_reused_derived_task(task, *, message: str,
         task.action_vars = merged_vars
 
 
+def _agent_has_open_assigned_tasks(state: MatrixState, agent_id: str) -> bool:
+    """Return whether the agent still owns any unresolved board task."""
+    if not agent_id:
+        return False
+    for current in state.board_tasks.values():
+        if current.agent_id != agent_id:
+            continue
+        if task_is_closed(current):
+            continue
+        return True
+    return False
+
+
+def _agent_has_targeted_auto_dispatch_work(state: MatrixState,
+                                           agent_id: str) -> bool:
+    """Return whether a queued auto-dispatch entry is pinned to this agent."""
+    if not agent_id:
+        return False
+    for entries in state.auto_dispatch_queues.values():
+        for entry in entries:
+            if entry.target_agent_id != agent_id:
+                continue
+            queued = state.board_tasks.get(entry.task_id)
+            if queued and not task_is_closed(queued):
+                return True
+    return False
+
+
+def _agent_has_pending_weaver_followups(state: MatrixState,
+                                        agent_id: str) -> bool:
+    """Return whether the agent still owes the Weaver a visible reply."""
+    if not agent_id:
+        return False
+    if state.agent_pending_weaver_reply_tasks(agent_id):
+        return True
+    cell = state.agents.get(agent_id)
+    return bool(cell and cell.pending_weaver_message)
+
+
+async def _maybe_auto_close_root_done_agents(
+        state: MatrixState,
+        task,
+        *,
+        action_mgr: ActionManager,
+        resolve_base_dir,
+        close_agent,
+) -> list[str]:
+    """Auto-close agents whose completed actions opt in after root completion."""
+    if not task:
+        return []
+    root_id = str(getattr(task, "pipeline_root_id", "") or task.id).strip()
+    root_task = state.board_tasks.get(root_id) if root_id else None
+    if not root_task:
+        root_task = task
+    if not task_counts_as_done(root_task):
+        return []
+    if state.task_has_unresolved_descendants(root_task.id):
+        return []
+
+    base_dir_cache: dict[str, str] = {}
+    auto_close_cache: dict[tuple[str, str], bool] = {}
+    candidates = []
+    seen_agent_ids = set()
+
+    for chain_task in state.board_get_chain(root_task.id):
+        if not task_counts_as_done(chain_task):
+            continue
+        agent_id = str(getattr(chain_task, "agent_id", "") or "").strip()
+        action_name = str(getattr(chain_task, "action_name", "") or "").strip()
+        if not agent_id or not action_name or agent_id in seen_agent_ids:
+            continue
+
+        group = str(getattr(chain_task, "group", "") or root_task.group or "").strip()
+        if group not in base_dir_cache:
+            base_dir_cache[group] = await resolve_base_dir(group)
+        base_dir = base_dir_cache[group]
+        cache_key = (base_dir, action_name)
+        if cache_key not in auto_close_cache:
+            auto_close_cache[cache_key] = action_mgr.get_auto_close_on_done(
+                action_name,
+                base_dir=base_dir,
+            )
+        if not auto_close_cache[cache_key]:
+            continue
+        if _agent_has_open_assigned_tasks(state, agent_id):
+            continue
+        if _agent_has_targeted_auto_dispatch_work(state, agent_id):
+            continue
+        if _agent_has_pending_weaver_followups(state, agent_id):
+            continue
+
+        cell = state.agents.get(agent_id)
+        if not cell or cell.cell_type != "agent":
+            continue
+        seen_agent_ids.add(agent_id)
+        candidates.append(cell)
+
+    closed = []
+    for candidate in candidates:
+        await close_agent(candidate)
+        closed.append(candidate.id)
+    return closed
+
+
 def _append_mcp_message(cell, action: str, message: str = ""):
     """Append an MCP message to the cell log."""
     if not cell:
@@ -1193,33 +1297,11 @@ async def main(connection=None):
             return cleanup
 
         if close_agent:
-            removed = state.remove_agent(cell.id)
+            removed = await _close_agent_session_only(
+                cell,
+                errors=cleanup["errors"],
+            )
             cleanup["agent_closed"] = True
-            for c in removed:
-                if c.session_id:
-                    try:
-                        await bridge.close_session(c.session_id)
-                    except Exception as exc:
-                        cleanup["errors"].append(
-                            f"Failed to close session for '{c.name}': {exc}"
-                        )
-                if c.agent_type and c.directory:
-                    adapter = get_adapter(c.agent_type)
-                    try:
-                        if hasattr(adapter, "uninstall_hooks"):
-                            adapter.uninstall_hooks(
-                                os.path.expanduser(c.directory))
-                        if hasattr(adapter, "uninstall_mcp_config"):
-                            adapter.uninstall_mcp_config(
-                                os.path.expanduser(c.directory))
-                        adapter.uninstall_persistent_prompt(
-                            os.path.expanduser(c.directory),
-                            _persistent_prompt_filename(c))
-                    except Exception:
-                        log.exception(
-                            "Failed post-merge adapter cleanup for '%s'",
-                            c.name)
-                event_bus.cleanup_cell(c.id)
             if remove_worktree:
                 removed_worktree = False
                 for c in removed:
@@ -1259,6 +1341,44 @@ async def main(connection=None):
             state._emit_agent(cell)
             state._db_save_agent(cell)
         return cleanup
+
+    async def _close_agent_session_only(cell, *,
+                                        errors: list | None = None) -> list:
+        """Remove an agent session without removing its worktree."""
+        if not cell:
+            return []
+        removed = state.remove_agent(cell.id)
+        for c in removed:
+            if c.cell_type == "agent":
+                state.history_remove_agent(c)
+            if c.session_id:
+                try:
+                    await bridge.close_session(c.session_id)
+                except Exception as exc:
+                    if errors is not None:
+                        errors.append(
+                            f"Failed to close session for '{c.name}': {exc}"
+                        )
+                    log.exception("Failed to close session for '%s'", c.name)
+            if c.agent_type and c.directory:
+                adapter = get_adapter(c.agent_type)
+                try:
+                    if hasattr(adapter, "uninstall_hooks"):
+                        adapter.uninstall_hooks(
+                            os.path.expanduser(c.directory))
+                    if hasattr(adapter, "uninstall_mcp_config"):
+                        adapter.uninstall_mcp_config(
+                            os.path.expanduser(c.directory))
+                    adapter.uninstall_persistent_prompt(
+                        os.path.expanduser(c.directory),
+                        _persistent_prompt_filename(c))
+                except Exception:
+                    log.exception(
+                        "Failed agent cleanup while closing '%s'",
+                        c.name,
+                    )
+            event_bus.cleanup_cell(c.id)
+        return removed
 
     def _checkpoint_message(cell) -> str:
         """Build a checkpoint commit message from the agent's last summary."""
@@ -2557,26 +2677,11 @@ async def main(connection=None):
                         shell=shell)
 
             elif cmd == "remove_agent":
-                removed = state.remove_agent(data["id"])
+                cell = state.agents.get(data["id"])
+                removed = []
+                if cell:
+                    removed = await _close_agent_session_only(cell)
                 for c in removed:
-                    if c.cell_type == "agent":
-                        state.history_remove_agent(c)
-                    if c.session_id:
-                        await bridge.close_session(c.session_id)
-                    # Clean up hooks, MCP config, persistent prompt
-                    if c.agent_type and c.directory:
-                        adapter = get_adapter(c.agent_type)
-                        if hasattr(adapter, "uninstall_hooks"):
-                            adapter.uninstall_hooks(
-                                os.path.expanduser(c.directory))
-                        if hasattr(adapter, "uninstall_mcp_config"):
-                            adapter.uninstall_mcp_config(
-                                os.path.expanduser(c.directory))
-                        adapter.uninstall_persistent_prompt(
-                            os.path.expanduser(c.directory),
-                            _persistent_prompt_filename(c))
-                    # Clean up event bus state
-                    event_bus.cleanup_cell(c.id)
                     await _safe_remove_worktree(c)
 
             elif cmd == "update_agent":
@@ -5038,6 +5143,14 @@ async def main(connection=None):
                             await _drain_auto_dispatch_queue(
                                 task.group if task else cell.group
                             )
+                            if task:
+                                await _maybe_auto_close_root_done_agents(
+                                    state,
+                                    task,
+                                    action_mgr=action_mgr,
+                                    resolve_base_dir=_resolve_base_dir,
+                                    close_agent=_close_agent_session_only,
+                                )
 
                     elif action == "blocked":
                         cell.needs_attention = True
