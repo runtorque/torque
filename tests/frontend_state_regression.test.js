@@ -627,6 +627,46 @@ function createMainHarness(overrides = {}) {
   return { context, document, sandbox, taskbarButtons };
 }
 
+function createStandaloneWsSyncHarness() {
+  const { context, document, sandbox } = createMainHarness({
+    tplEditorLoad() {
+      sandbox.tplEditorLoadCalls = (sandbox.tplEditorLoadCalls || 0) + 1;
+    },
+    agentTemplateEditorLoad() {
+      sandbox.agentTemplateEditorLoadCalls = (sandbox.agentTemplateEditorLoadCalls || 0) + 1;
+    },
+    agentHistoryLoad() {
+      sandbox.agentHistoryLoadCalls = (sandbox.agentHistoryLoadCalls || 0) + 1;
+    },
+  });
+  sandbox.renderCalls = {
+    main: 0,
+    board: 0,
+    actions: 0,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  };
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/ws.js');
+  runInContext(context, `
+    render = function() { renderCalls.main++; };
+    renderBoard = function() { renderCalls.board++; };
+    renderTemplatesPanel = function() { renderCalls.actions++; };
+    renderContextPanel = function() { renderCalls.context++; };
+    renderEvents = function() { renderCalls.events++; };
+    renderWeaverPanel = function() { renderCalls.weaver++; };
+    renderAgentTemplatesPanel = function() { renderCalls.templates++; };
+    updateEventsAttentionBadge = function() {};
+    _panelStateRestored = true;
+    _expectedSeq = 1;
+  `);
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  return { context, document, sandbox };
+}
+
 function createStandaloneRenderHarness() {
   const { sandbox, document } = createSandbox();
   sandbox.renderTerminalWorkspaceCalls = 0;
@@ -7363,6 +7403,100 @@ test('standalone render tracks Actions as a visible surface', () => {
 
   context.renderActivePanel();
 
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 1,
+    actions: 1,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('standalone full-state resync loads and rerenders newly visible Actions', () => {
+  const { context, sandbox } = createStandaloneWsSyncHarness();
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: false, size: 320, tabs: ['actions'], active: 'actions' },
+      floats: {},
+      last_active: 'board',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+    tplEditorLoadCalls = 0;
+  `);
+  sandbox.renderCalls = { main: 0, board: 0, actions: 0, context: 0, events: 0, weaver: 0, templates: 0 };
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true },
+    agents: {},
+    groups: {},
+    children: {},
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: null,
+    standalone_panel_layout: {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['actions'], active: 'actions' },
+      floats: {},
+      last_active: 'actions',
+    },
+  });
+
+  assert.equal(sandbox.tplEditorLoadCalls, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 1,
+    actions: 1,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('standalone layout ui_update loads and rerenders newly visible Actions', () => {
+  const { context, sandbox } = createStandaloneWsSyncHarness();
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['actions', 'context'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+    tplEditorLoadCalls = 0;
+  `);
+  sandbox.renderCalls = { main: 0, board: 0, actions: 0, context: 0, events: 0, weaver: 0, templates: 0 };
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'ui_update',
+        key: 'standalone_panel_layout',
+        value: {
+          version: 1,
+          bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+          right: { open: true, size: 320, tabs: ['actions', 'context'], active: 'actions' },
+          floats: {},
+          last_active: 'actions',
+        },
+      },
+    ],
+  });
+
+  assert.equal(sandbox.tplEditorLoadCalls, 1);
+  assert.deepEqual(jsonValue(context, '_currentPanelSurfaces()'), ['board', 'actions']);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 0,
     board: 1,

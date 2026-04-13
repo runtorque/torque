@@ -214,6 +214,11 @@ function _triggerDoneFlourishesFromTaskSnapshot(previousTasks, nextTasks) {
 function _handleFullState(msg) {
   const prevActive = state.active_session_id;
   const prevTasks = state.board_tasks || {};
+  const prevStandaloneVisibleApps = (typeof _standaloneVisiblePanelApps === 'function'
+    && typeof _standalonePanelsEnabled === 'function'
+    && _standalonePanelsEnabled())
+    ? _standaloneVisiblePanelApps().slice()
+    : [];
   const shouldRestorePanel = typeof _panelStateRestored !== 'undefined'
     ? !_panelStateRestored
     : false;
@@ -230,6 +235,10 @@ function _handleFullState(msg) {
         : _migrateStandalonePanelLayoutFromLegacyState(),
       { fromServer: true }
     );
+    if (!shouldRestorePanel
+        && typeof _syncVisibleStandalonePanelApps === 'function') {
+      _syncVisibleStandalonePanelApps(prevStandaloneVisibleApps);
+    }
   }
   if (typeof _boardFiltersByGroup !== 'undefined') _boardFiltersByGroup = null;
   if (typeof _boardSavedViewsByGroup !== 'undefined') _boardSavedViewsByGroup = null;
@@ -391,7 +400,7 @@ function _deltaSurfaceInvalidations(ops) {
 
 function _applyUiSurfaceInvalidation(flags, key) {
   if (key === 'standalone_panel_layout') {
-    _markSurface(flags, 'board', 'context', 'events', 'weaver', 'templates');
+    _markSurface(flags, 'board', 'actions', 'context', 'events', 'weaver', 'templates');
   }
   if (key === 'events_dismissed_attention') {
     _markSurface(flags, 'events');
@@ -647,10 +656,19 @@ function _applyDelta(ops) {
         break;
 
       case 'ui_update':
+        var prevStandaloneVisibleApps = (op.key === 'standalone_panel_layout'
+          && typeof _standaloneVisiblePanelApps === 'function'
+          && typeof _standalonePanelsEnabled === 'function'
+          && _standalonePanelsEnabled())
+          ? _standaloneVisiblePanelApps().slice()
+          : [];
         state[op.key] = op.value;
         if (op.key === 'standalone_panel_layout'
             && typeof _standalonePanelSetLayoutFromState === 'function') {
           _standalonePanelSetLayoutFromState(op.value || {}, { fromServer: true });
+          if (typeof _syncVisibleStandalonePanelApps === 'function') {
+            _syncVisibleStandalonePanelApps(prevStandaloneVisibleApps);
+          }
         }
         if (op.key === 'board_filters_by_group'
             && typeof _boardFiltersByGroup !== 'undefined') {

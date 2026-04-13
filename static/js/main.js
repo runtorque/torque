@@ -46,6 +46,25 @@ function _loadVisibleStandalonePanelApps() {
   });
 }
 
+function _syncVisibleStandalonePanelApps(previousVisibleApps) {
+  if (typeof _standaloneVisiblePanelApps !== 'function'
+      || typeof _standalonePanelsEnabled !== 'function'
+      || !_standalonePanelsEnabled()) {
+    return;
+  }
+  var prev = {};
+  var list = Array.isArray(previousVisibleApps) ? previousVisibleApps : [];
+  list.forEach(function(appName) {
+    if (appName) prev[appName] = true;
+  });
+  var seen = {};
+  _standaloneVisiblePanelApps().forEach(function(appName) {
+    if (!appName || seen[appName]) return;
+    seen[appName] = true;
+    if (!previousVisibleApps || !prev[appName]) _loadPanelApp(appName);
+  });
+}
+
 function _panelResizeBounds() {
   var embedded = !!(typeof document !== 'undefined'
     && document
