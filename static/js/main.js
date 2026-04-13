@@ -36,6 +36,11 @@ function _normalizePanelHeight(height) {
 }
 
 function togglePanel(appName) {
+  if (typeof _standaloneTogglePanel === 'function'
+      && _standalonePanelsEnabled()) {
+    _activePanelApp = appName || '';
+    return _standaloneTogglePanel(appName);
+  }
   var panel = document.getElementById('bottom-panel');
   var buttons = document.querySelectorAll('.taskbar-app');
 
@@ -93,6 +98,12 @@ function togglePanel(appName) {
 function _restorePanelState() {
   if (_panelStateRestored) return;
   _panelStateRestored = true;
+
+  if (typeof _restoreStandalonePanelState === 'function'
+      && _standalonePanelsEnabled()) {
+    _restoreStandalonePanelState();
+    return;
+  }
 
   // panel_active: new key; backward compat from board_panel_open
   var active = state.panel_active || '';
@@ -188,7 +199,10 @@ function _scheduleStandaloneBoardLayoutRender() {
     return;
   }
   if (typeof renderBoard !== 'function') return;
-  if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') return;
+  if (typeof _standalonePanelSurfaceVisible === 'function'
+      && !_standalonePanelSurfaceVisible('board')) {
+    return;
+  }
   if (_workspaceBoardRenderPending || typeof requestAnimationFrame !== 'function') return;
   _workspaceBoardRenderPending = true;
   requestAnimationFrame(function() {
@@ -465,6 +479,14 @@ function relaunchFocused() {
   if (cell && cell.status === 'stopped') relaunchAgent(focusedItemId);
 }
 
+function _boardShortcutsEnabled() {
+  if (typeof _standalonePanelSurfaceVisible === 'function'
+      && _standalonePanelsEnabled()) {
+    return _standalonePanelSurfaceVisible('board');
+  }
+  return _activePanelApp === 'board';
+}
+
 /* -- Main keyboard handler ----------------------------------------------- */
 
 document.addEventListener('keydown', (e) => {
@@ -496,7 +518,7 @@ document.addEventListener('keydown', (e) => {
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
 
   // Board keyboard shortcuts (when board is open, arrows/enter/delete go to board)
-  if (_activePanelApp === 'board') {
+  if (_boardShortcutsEnabled()) {
     if (boardKeydown(e)) { e.preventDefault(); return; }
   }
 

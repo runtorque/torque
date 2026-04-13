@@ -513,10 +513,18 @@ function createWsRenderHarness() {
     templates: 0,
   };
   document.register('main');
+  document.register('standalone-sidebar-shell');
+  document.register('standalone-main-stack');
+  document.register('standalone-bottom-dock');
+  document.register('standalone-right-rail');
+  document.register('standalone-float-layer');
+  document.register('standalone-bottom-resize-handle');
+  document.register('standalone-rail-resize-handle');
   document.register('bottom-panel');
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/ws.js');
   loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/panel_manager.js');
   runInContext(context, `
     render = function() { renderCalls.main++; };
     renderBoard = function() { renderCalls.board++; };
@@ -572,11 +580,19 @@ function createMainHarness(overrides = {}) {
     getFilterByWindow() { return false; },
   }, overrides));
   [
+    'standalone-sidebar-shell',
+    'standalone-main-stack',
+    'standalone-bottom-dock',
+    'standalone-right-rail',
+    'standalone-float-layer',
+    'standalone-bottom-resize-handle',
+    'standalone-rail-resize-handle',
     'bottom-panel',
     'panel-resize-handle',
     'panel-board',
     'panel-actions',
     'panel-templates',
+    'panel-context',
     'panel-events',
     'panel-weaver',
     'add-name-input',
@@ -604,6 +620,7 @@ function createMainHarness(overrides = {}) {
     return [];
   };
   const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/panel_manager.js');
   loadScript(context, 'static/js/main.js');
   return { context, document, sandbox, taskbarButtons };
 }
@@ -650,6 +667,13 @@ function createPanelHarness() {
     setupDrag() {},
   });
   [
+    'standalone-sidebar-shell',
+    'standalone-main-stack',
+    'standalone-bottom-dock',
+    'standalone-right-rail',
+    'standalone-float-layer',
+    'standalone-bottom-resize-handle',
+    'standalone-rail-resize-handle',
     'add-name-input',
     'add-cmd-input',
     'add-dir-input',
@@ -666,6 +690,7 @@ function createPanelHarness() {
     'gs-weaver-custom-instructions',
   ].forEach((id) => document.register(id));
   const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/panel_manager.js');
   loadScript(context, 'static/js/main.js');
   return { context, document, sandbox };
 }
@@ -6750,7 +6775,7 @@ test('diff review bulk collapse controls stay stable across refreshes', () => {
 test('diff review overlay hides the workspace shell so standalone merge review uses the full viewport', () => {
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
-  assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #broadcast,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
+  assert.match(css, /body\.diff-view-open #workspace-shell,\s*body\.diff-view-open main,\s*body\.diff-view-open #standalone-bottom-dock,\s*body\.diff-view-open #standalone-right-rail,\s*body\.diff-view-open #standalone-float-layer,\s*body\.diff-view-open #bottom-panel,\s*body\.diff-view-open #taskbar,\s*body\.diff-view-open #broadcast,\s*body\.diff-view-open #ctx-menu\s*\{[^}]*display:\s*none\s*!important;/);
 });
 
 test('Escape closes the read-only diff viewer through the shared key handler', () => {
@@ -7249,10 +7274,61 @@ test('panel resize bounds stay narrow by default and expand in embedded runtime'
   assert.equal(jsonValue(context, `_normalizePanelHeight(1200)`), 740);
 });
 
+test('standalone layout restore migrates legacy panel state into bottom and right docks', () => {
+  const { context, document } = createPanelHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+
+  runInContext(context, `
+    state = {
+      panel_active: 'events',
+      board_panel_height: 310,
+      standalone_panel_layout: {},
+    };
+    _restoreStandalonePanelState();
+  `);
+
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.size`), 310);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'board');
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.active`), 'events');
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.open`), true);
+});
+
+test('standalone task deltas rerender every visible docked surface', () => {
+  const { context, sandbox } = createWsRenderHarness();
+
+  runInContext(context, `
+    isEmbeddedTerminalMode = function() { return true; };
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context', 'events'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      { op: 'task_upsert', id: 'task-1', group: 'alpha', task: 'Ship docs', lane: 'Backlog', position: 1 },
+    ],
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    board: 1,
+    context: 1,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
 test('collapsing the embedded board returns keyboard focus to the terminal workspace', () => {
   const { context, document } = createPanelHarness();
-  const panel = document.register('bottom-panel');
-  panel.classList.remove('collapsed');
   document.body.classList.add('runtime-embedded');
   context.isEmbeddedTerminalMode = function() { return true; };
   context.focusEmbeddedTerminalWorkspaceCalls = 0;
@@ -7260,11 +7336,14 @@ test('collapsing the embedded board returns keyboard focus to the terminal works
     context.focusEmbeddedTerminalWorkspaceCalls += force ? 1 : 0;
     return true;
   };
-  runInContext(context, `_activePanelApp = 'board';`);
+  runInContext(context, `
+    state = { panel_active: 'board', board_panel_height: 280, standalone_panel_layout: {} };
+    _restoreStandalonePanelState();
+  `);
 
   context.togglePanel('board');
 
-  assert.equal(panel.classList.contains('collapsed'), true);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.open`), false);
   assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 1);
 });
 

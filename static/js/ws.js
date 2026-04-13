@@ -219,6 +219,16 @@ function _handleFullState(msg) {
   _awaitingFullState = false;
   state = msg;
   _applyRuntimeMode();
+  if (typeof _standalonePanelSetLayoutFromState === 'function'
+      && typeof _standalonePanelsEnabled === 'function'
+      && _standalonePanelsEnabled()) {
+    _standalonePanelSetLayoutFromState(
+      (state && state.standalone_panel_layout && Object.keys(state.standalone_panel_layout).length)
+        ? state.standalone_panel_layout
+        : _migrateStandalonePanelLayoutFromLegacyState(),
+      { fromServer: true }
+    );
+  }
   if (typeof _boardFiltersByGroup !== 'undefined') _boardFiltersByGroup = null;
   if (typeof _boardSavedViewsByGroup !== 'undefined') _boardSavedViewsByGroup = null;
   if (typeof _boardLaneSortsByGroup !== 'undefined') _boardLaneSortsByGroup = null;
@@ -285,15 +295,21 @@ function _handleDelta(msg) {
     _weaverMarkSessionMapStale(sessionMapGroups);
   }
   const nextGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
-  const activeSurface = typeof _activePanelSurface === 'function'
-    ? _activePanelSurface()
-    : '';
+  const activeSurfaces = typeof _currentPanelSurfaces === 'function'
+    ? _currentPanelSurfaces()
+    : [];
   if (prevGroup !== nextGroup) {
-    if (activeSurface) invalidations[activeSurface] = true;
-  } else if (activeSurface
-      && invalidations[activeSurface]
-      && !_opsAffectCurrentSurfaceGroup(activeSurface, nextGroup, msg.ops, opGroupHints)) {
-    invalidations[activeSurface] = false;
+    activeSurfaces.forEach(function(surface) {
+      if (surface) invalidations[surface] = true;
+    });
+  } else {
+    activeSurfaces.forEach(function(surface) {
+      if (surface
+          && invalidations[surface]
+          && !_opsAffectCurrentSurfaceGroup(surface, nextGroup, msg.ops, opGroupHints)) {
+        invalidations[surface] = false;
+      }
+    });
   }
   if (!dragInProgress) {
     if (typeof renderInvalidatedSurfaces === 'function') {
@@ -372,6 +388,9 @@ function _deltaSurfaceInvalidations(ops) {
 }
 
 function _applyUiSurfaceInvalidation(flags, key) {
+  if (key === 'standalone_panel_layout') {
+    _markSurface(flags, 'board', 'context', 'events', 'weaver', 'templates');
+  }
   if (key === 'events_dismissed_attention') {
     _markSurface(flags, 'events');
   }
@@ -627,6 +646,10 @@ function _applyDelta(ops) {
 
       case 'ui_update':
         state[op.key] = op.value;
+        if (op.key === 'standalone_panel_layout'
+            && typeof _standalonePanelSetLayoutFromState === 'function') {
+          _standalonePanelSetLayoutFromState(op.value || {}, { fromServer: true });
+        }
         if (op.key === 'board_filters_by_group'
             && typeof _boardFiltersByGroup !== 'undefined') {
           _boardFiltersByGroup = null;

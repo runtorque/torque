@@ -662,6 +662,7 @@ class MatrixState:
         self.auto_dispatch_queues: dict[str, list[AutoDispatchQueueEntry]] = {}
         self.panel_active: str = ""  # '' | 'board' | 'actions' | 'events'
         self.board_panel_height: int = 0  # 0 = use CSS default
+        self.standalone_panel_layout: dict = {}
         self.events_dismissed_attention: dict[str, float] = {}
         self.board_filters_by_group: dict[str, dict] = {}
         self.board_saved_views_by_group: dict[str, list] = {}
@@ -891,6 +892,7 @@ class MatrixState:
             },
             "panel_active": self.panel_active,
             "board_panel_height": self.board_panel_height,
+            "standalone_panel_layout": self.standalone_panel_layout,
             "events_dismissed_attention": self.events_dismissed_attention,
             "board_filters_by_group": self.board_filters_by_group,
             "board_saved_views_by_group": self.board_saved_views_by_group,
@@ -1429,6 +1431,9 @@ class MatrixState:
                 pa = "board"
             self.panel_active = pa
             self.board_panel_height = data.get("board_panel_height", 0)
+            self.standalone_panel_layout = data.get(
+                "standalone_panel_layout", {}
+            ) or {}
             self.events_dismissed_attention = data.get(
                 "events_dismissed_attention", {}
             ) or {}

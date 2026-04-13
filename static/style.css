@@ -82,7 +82,24 @@ header h1 {
   flex: 1;
   min-height: 0;
 }
-main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; }
+#standalone-sidebar-shell {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+#standalone-main-stack {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; min-width: 0; }
+#standalone-bottom-dock,
+#standalone-right-rail,
+#standalone-bottom-resize-handle,
+#standalone-rail-resize-handle,
+#standalone-float-layer { display: none; }
 #terminal-workspace { display: none; }
 
 body.runtime-embedded #workspace-shell {
@@ -90,11 +107,28 @@ body.runtime-embedded #workspace-shell {
   grid-template-columns: var(--standalone-sidebar-width) 8px minmax(0, 1fr);
   min-height: 0;
 }
+body.runtime-embedded #standalone-sidebar-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8px var(--standalone-right-rail-width, 320px);
+  min-height: 0;
+}
+body.runtime-embedded #standalone-main-stack {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 8px var(--standalone-bottom-height, 280px);
+  min-height: 0;
+}
 body.runtime-embedded main {
   padding: 12px 12px 10px;
   background:
     linear-gradient(180deg, rgba(255,255,255,.02), transparent 180px),
     var(--bg-surface);
+}
+body.runtime-embedded #standalone-bottom-dock,
+body.runtime-embedded #standalone-right-rail,
+body.runtime-embedded #standalone-bottom-resize-handle,
+body.runtime-embedded #standalone-rail-resize-handle,
+body.runtime-embedded #standalone-float-layer {
+  display: block;
 }
 #workspace-resize-handle {
   display: none;
@@ -128,6 +162,12 @@ body.runtime-embedded #terminal-workspace {
     radial-gradient(circle at top left, rgba(88,166,255,.08), transparent 28%),
     linear-gradient(180deg, rgba(255,255,255,.015), transparent 28%),
     var(--bg);
+}
+body.runtime-embedded #standalone-float-layer {
+  position: fixed;
+  inset: 44px 0 36px 0;
+  pointer-events: none;
+  z-index: 20;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1868,6 +1908,186 @@ body.runtime-embedded .taskbar-app.active {
 @keyframes panel-attention-pulse {
   0%, 100% { box-shadow: inset 0 0 0 1px var(--amber); }
   50%      { box-shadow: inset 0 0 0 1px var(--amber), 0 0 4px var(--amber); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Standalone dock workspace                                          */
+/* ------------------------------------------------------------------ */
+body.runtime-embedded #standalone-bottom-resize-handle,
+body.runtime-embedded #standalone-rail-resize-handle {
+  position: relative;
+  background: rgba(255,255,255,.02);
+}
+body.runtime-embedded #standalone-bottom-resize-handle {
+  cursor: ns-resize;
+}
+body.runtime-embedded #standalone-rail-resize-handle {
+  cursor: col-resize;
+}
+body.runtime-embedded #standalone-bottom-resize-handle::before,
+body.runtime-embedded #standalone-rail-resize-handle::before {
+  content: '';
+  position: absolute;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 88%, transparent);
+}
+body.runtime-embedded #standalone-bottom-resize-handle::before {
+  left: 50%;
+  top: 2px;
+  width: 44px;
+  height: 3px;
+  transform: translateX(-50%);
+}
+body.runtime-embedded #standalone-rail-resize-handle::before {
+  top: 10px;
+  bottom: 10px;
+  left: 3px;
+  width: 2px;
+}
+body.runtime-embedded #standalone-bottom-resize-handle.collapsed,
+body.runtime-embedded #standalone-rail-resize-handle.collapsed {
+  opacity: 0;
+  pointer-events: none;
+}
+body.runtime-embedded #standalone-bottom-dock,
+body.runtime-embedded #standalone-right-rail {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.06);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.02), transparent 120px),
+    var(--bg-surface);
+}
+body.runtime-embedded #standalone-bottom-dock {
+  border-top-color: rgba(255,255,255,.08);
+}
+body.runtime-embedded #standalone-right-rail {
+  border-left-color: rgba(255,255,255,.08);
+}
+.standalone-panel-zone-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,.02);
+}
+.standalone-panel-zone-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+}
+.standalone-panel-tab,
+.standalone-panel-zone-btn {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  background: var(--bg-cell);
+  font: inherit;
+  font-size: 10px;
+  padding: 3px 8px;
+}
+.standalone-panel-tab:hover,
+.standalone-panel-zone-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.standalone-panel-tab.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-cell));
+}
+.standalone-panel-zone-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.standalone-panel-zone-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+#standalone-bottom-dock,
+#standalone-right-rail {
+  display: flex;
+  flex-direction: column;
+}
+#standalone-bottom-dock.collapsed,
+#standalone-right-rail.collapsed {
+  visibility: hidden;
+}
+body.runtime-embedded .standalone-panel-zone-body > #panel-board,
+body.runtime-embedded .standalone-panel-zone-body > #panel-actions,
+body.runtime-embedded .standalone-panel-zone-body > #panel-templates,
+body.runtime-embedded .standalone-panel-zone-body > #panel-context,
+body.runtime-embedded .standalone-panel-zone-body > #panel-events,
+body.runtime-embedded .standalone-panel-zone-body > #panel-weaver,
+body.runtime-embedded .standalone-float-body > #panel-board,
+body.runtime-embedded .standalone-float-body > #panel-actions,
+body.runtime-embedded .standalone-float-body > #panel-templates,
+body.runtime-embedded .standalone-float-body > #panel-context,
+body.runtime-embedded .standalone-float-body > #panel-events,
+body.runtime-embedded .standalone-float-body > #panel-weaver {
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+}
+body.runtime-embedded .standalone-panel-dragging #standalone-bottom-dock,
+body.runtime-embedded .standalone-panel-dragging #standalone-right-rail,
+body.runtime-embedded .standalone-panel-dragging #standalone-float-layer {
+  pointer-events: auto;
+}
+#standalone-bottom-dock.drag-target,
+#standalone-right-rail.drag-target,
+#standalone-float-layer.drag-target {
+  box-shadow: inset 0 0 0 2px rgba(88,166,255,.6);
+}
+.standalone-float-shell {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.03), transparent 120px),
+    var(--bg-surface);
+  box-shadow: 0 18px 60px rgba(0,0,0,.35);
+  pointer-events: auto;
+}
+.standalone-float-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: move;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.standalone-float-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.standalone-float-actions {
+  display: flex;
+  gap: 6px;
+}
+.standalone-float-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* ------------------------------------------------------------------ */
@@ -4334,6 +4554,9 @@ body.runtime-embedded .board-empty-action:focus-visible {
 body.diff-view-open #diff-view-root { display: flex; }
 body.diff-view-open #workspace-shell,
 body.diff-view-open main,
+body.diff-view-open #standalone-bottom-dock,
+body.diff-view-open #standalone-right-rail,
+body.diff-view-open #standalone-float-layer,
 body.diff-view-open #bottom-panel,
 body.diff-view-open #taskbar,
 body.diff-view-open #broadcast,

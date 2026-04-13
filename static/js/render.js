@@ -152,6 +152,18 @@ function _activePanelSurface() {
   return _surfacePanelApp(typeof _activePanelApp !== 'undefined' ? _activePanelApp : '');
 }
 
+function _currentPanelSurfaces() {
+  if (typeof _visiblePanelSurfaces === 'function'
+      && typeof _standalonePanelsEnabled === 'function'
+      && _standalonePanelsEnabled()) {
+    return _visiblePanelSurfaces().filter(function(surface, idx, arr) {
+      return _surfacePanelApp(surface) && arr.indexOf(surface) === idx;
+    });
+  }
+  var surface = _activePanelSurface();
+  return surface ? [surface] : [];
+}
+
 function _renderSurface(surface) {
   if (surface === 'board' && typeof renderBoard === 'function') renderBoard();
   if (surface === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
@@ -161,8 +173,8 @@ function _renderSurface(surface) {
 }
 
 function renderActivePanel() {
-  const surface = _activePanelSurface();
-  if (surface) _renderSurface(surface);
+  const surfaces = _currentPanelSurfaces();
+  for (let i = 0; i < surfaces.length; i++) _renderSurface(surfaces[i]);
   _updateWeaverTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
 }
@@ -170,8 +182,11 @@ function renderActivePanel() {
 function renderInvalidatedSurfaces(flags) {
   if (!flags) return;
   if (flags.main) render();
-  const surface = _activePanelSurface();
-  if (surface && flags[surface]) _renderSurface(surface);
+  const surfaces = _currentPanelSurfaces();
+  for (let i = 0; i < surfaces.length; i++) {
+    const surface = surfaces[i];
+    if (surface && flags[surface]) _renderSurface(surface);
+  }
   _updateWeaverTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
 }
