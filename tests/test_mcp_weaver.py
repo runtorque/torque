@@ -2552,6 +2552,51 @@ class WeaverMergeToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_error)
         self.assertIn("Latest task boundary", text)
 
+    async def test_merge_formats_binary_conflict_details(self):
+        state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            slug="worker",
+            cell_type="agent",
+            worktree_path="/tmp/worktree",
+            worktree_branch="loom/worker",
+            worktree_base_branch="main",
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"].append(cell.id)
+
+        async def fake_handle_command(payload):
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "clean": False,
+                    "conflicts": [{
+                        "path": "assets/logo.bin",
+                        "reason": "add/add",
+                        "detail": (
+                            "binary differs — main: 4 bytes aaaabbbbcccc, "
+                            "loom/worker: 3 bytes ddddeeeeffff"
+                        ),
+                    }],
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_merge",
+            {"agent": cell.id},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("assets/logo.bin", text)
+        self.assertIn("binary differs", text)
+        self.assertIn("aaaabbbbcccc", text)
+
 
 class WeaverDiffToolTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -2840,6 +2885,55 @@ class WeaverRebaseToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(is_error)
         self.assertEqual(text, "git executable not available")
+
+    async def test_rebase_allows_dirty_precheck_to_surface_specific_overwrite_error(self):
+        state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
+        cell = self._make_cell()
+        state.agents[cell.id] = cell
+        state.groups["g"].append(cell.id)
+
+        calls = []
+
+        async def fake_handle_command(payload):
+            calls.append(dict(payload))
+            if payload["cmd"] == "worktree_check_merge":
+                return {
+                    "type": "worktree_check_merge",
+                    "clean": False,
+                    "dirty": True,
+                    "conflicts": [],
+                }
+            if payload["cmd"] == "worktree_rebase":
+                return {
+                    "type": "worktree_rebase",
+                    "ok": False,
+                    "error": (
+                        "Untracked files in the worktree would be overwritten "
+                        "by rebase: app/config.yml. Move or remove them before "
+                        "retrying."
+                    ),
+                    "conflicts": [],
+                }
+            self.fail(f"Unexpected command: {payload}")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_rebase",
+            {"agent": cell.id},
+            fake_handle_command,
+            state,
+            cell_id=weaver.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertIn("app/config.yml", text)
+        self.assertEqual(
+            calls,
+            [
+                {"cmd": "worktree_check_merge", "id": cell.id},
+                {"cmd": "worktree_rebase", "id": cell.id},
+            ],
+        )
 
 
 class WeaverAgentLifecycleToolTests(unittest.IsolatedAsyncioTestCase):

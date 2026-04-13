@@ -292,3 +292,72 @@ class CliExternalTicketTests(unittest.TestCase):
                 },
             ),
         )
+
+    def test_worktree_list_calls_api_with_resolved_repo_root(self):
+        calls = []
+        self.cli.resolve_repo_root = lambda ident="": "/repo"
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            calls.append((cmd, kwargs))
+            return {
+                "ok": True,
+                "data": {
+                    "repo_root": "/repo",
+                    "items": [{
+                        "branch": "loom/worker",
+                        "path": "/repo/.loom/worktrees/worker",
+                        "base_branch": "main",
+                        "merged": True,
+                        "dirty": False,
+                        "admin_stale": False,
+                        "prunable": True,
+                        "prune_reason": "merged_clean",
+                        "owner_agent_name": "",
+                    }],
+                },
+            }
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(port=18932, repo="", json=False)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.cli.cmd_worktree_list(args)
+
+        self.assertEqual(
+            calls[0],
+            ("worktree_list", {"repo_root": "/repo"}),
+        )
+        self.assertIn("loom/worker", out.getvalue())
+        self.assertIn("prunable", out.getvalue())
+
+    def test_worktree_prune_calls_api_with_resolved_repo_root(self):
+        calls = []
+        self.cli.resolve_repo_root = lambda ident="": "/repo"
+
+        def fake_api_call(cmd, port=0, **kwargs):
+            calls.append((cmd, kwargs))
+            return {
+                "ok": True,
+                "data": {
+                    "repo_root": "/repo",
+                    "removed": [{
+                        "branch": "loom/worker",
+                        "path": "/repo/.loom/worktrees/worker",
+                        "prune_reason": "merged_clean",
+                    }],
+                    "skipped": [],
+                },
+            }
+
+        self.cli.api_call = fake_api_call
+        args = SimpleNamespace(port=18932, repo="", json=False)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.cli.cmd_worktree_prune(args)
+
+        self.assertEqual(
+            calls[0],
+            ("worktree_prune", {"repo_root": "/repo"}),
+        )
+        self.assertIn("Removed:", out.getvalue())
+        self.assertIn("loom/worker", out.getvalue())

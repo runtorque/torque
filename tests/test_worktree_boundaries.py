@@ -5,6 +5,7 @@ from loom.worktree_boundaries import (
     boundary_summary,
     branch_boundary_tasks,
     clear_stale_successor_references,
+    latest_boundary_base_branch,
     latest_boundary_task,
     mark_branch_boundaries_merged,
     queued_successor_tasks,
@@ -136,6 +137,45 @@ class WorktreeBoundaryTests(unittest.TestCase):
         )
 
         self.assertEqual([t.id for t in tasks], ["task-a"])
+
+    def test_latest_boundary_base_branch_uses_latest_matching_boundary(self):
+        older = _task(
+            "task-a",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "base_branch": "develop",
+                "status": "merged",
+                "recorded_at": "2026-04-07T10:00:00+00:00",
+            },
+        )
+        newer = _task(
+            "task-b",
+            boundary={
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "base_branch": "main",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:00:00+00:00",
+            },
+        )
+
+        base_branch = latest_boundary_base_branch(
+            [older, newer],
+            repo_root="/repo",
+            branch="loom/worker",
+        )
+
+        self.assertEqual(base_branch, "main")
+
+    def test_latest_boundary_base_branch_returns_blank_without_match(self):
+        base_branch = latest_boundary_base_branch(
+            [],
+            repo_root="/repo",
+            branch="loom/worker",
+        )
+
+        self.assertEqual(base_branch, "")
 
     def test_retarget_queued_successors_tracks_latest_completed_task(self):
         first = _task("task-a")

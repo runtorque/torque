@@ -70,6 +70,21 @@ def latest_boundary_task(tasks: Iterable, *,
     return matched[-1]
 
 
+def latest_boundary_base_branch(tasks: Iterable, *,
+                                repo_root: str,
+                                branch: str,
+                                statuses: set[str] | None = None) -> str:
+    latest = latest_boundary_task(
+        tasks,
+        repo_root=repo_root,
+        branch=branch,
+        statuses=statuses,
+    )
+    if not latest:
+        return ""
+    return str(task_boundary(latest).get("base_branch", "") or "").strip()
+
+
 def successor_tasks(tasks: Iterable, boundary_task_id: str) -> list:
     matched = [
         task for task in tasks

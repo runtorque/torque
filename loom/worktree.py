@@ -63,6 +63,94 @@ _BUILD_TEST_RE = re.compile(
 _WORKTREE_NAME_MAX_LEN = 40
 
 
+def _normalize_repo_rel_path(path: str) -> str:
+    normalized = os.path.normpath(str(path or "").strip()).replace(os.sep, "/")
+    if normalized in {"", "."}:
+        return ""
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _find_untracked_overwrite_paths(untracked_paths: list[str],
+                                    target_paths: list[str]) -> list[str]:
+    """Return untracked paths that collide with a checkout/update target set."""
+    normalized_untracked = sorted({
+        _normalize_repo_rel_path(path) for path in untracked_paths if path
+    })
+    normalized_targets = sorted({
+        _normalize_repo_rel_path(path) for path in target_paths if path
+    })
+    if not normalized_untracked or not normalized_targets:
+        return []
+
+    matches: set[str] = set()
+    for untracked in normalized_untracked:
+        for target in normalized_targets:
+            if (
+                untracked == target
+                or untracked.startswith(target + "/")
+                or target.startswith(untracked + "/")
+            ):
+                matches.add(untracked)
+                break
+    return sorted(matches)
+
+
+def _parse_worktree_list_porcelain(raw_text: str) -> list[dict]:
+    """Parse ``git worktree list --porcelain`` output."""
+    entries: list[dict] = []
+    current: dict | None = None
+
+    def _finish_current() -> None:
+        nonlocal current
+        if current is None:
+            return
+        entries.append(current)
+        current = None
+
+    for raw_line in raw_text.splitlines():
+        line = raw_line.rstrip("\n")
+        if not line:
+            _finish_current()
+            continue
+        if line.startswith("worktree "):
+            _finish_current()
+            current = {
+                "path": line[len("worktree "):].strip(),
+                "head_sha": "",
+                "branch_ref": "",
+                "branch": "",
+                "bare": False,
+                "detached": False,
+                "locked": False,
+                "locked_reason": "",
+                "prunable": False,
+                "prunable_reason": "",
+            }
+            continue
+        if current is None:
+            continue
+        if line.startswith("HEAD "):
+            current["head_sha"] = line[len("HEAD "):].strip()
+        elif line.startswith("branch "):
+            branch_ref = line[len("branch "):].strip()
+            current["branch_ref"] = branch_ref
+            current["branch"] = branch_ref.removeprefix("refs/heads/")
+        elif line == "bare":
+            current["bare"] = True
+        elif line == "detached":
+            current["detached"] = True
+        elif line.startswith("locked"):
+            current["locked"] = True
+            current["locked_reason"] = line[len("locked"):].strip()
+        elif line.startswith("prunable"):
+            current["prunable"] = True
+            current["prunable_reason"] = line[len("prunable"):].strip()
+    _finish_current()
+    return entries
+
+
 def _diff_status_from_name_status(code: str) -> str:
     """Normalize git ``--name-status`` codes to stable status labels."""
     return {
@@ -310,6 +398,105 @@ class WorktreeManager:
             log.debug("Could not get current branch for %s", repo_root)
         return "HEAD"
 
+    async def list_worktrees(self, repo_root: str) -> list[dict]:
+        """List git worktrees for a repository."""
+        if not repo_root:
+            return []
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root,
+                "worktree", "list", "--porcelain",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return []
+            return _parse_worktree_list_porcelain(stdout.decode())
+        except Exception:
+            log.debug("Could not list worktrees for %s", repo_root)
+            return []
+
+    async def _diff_name_only(self, directory: str, *refs: str) -> list[str]:
+        if not directory or not refs:
+            return []
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", directory,
+                "diff", "--name-only", "-z", *refs,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return []
+            return [
+                _normalize_repo_rel_path(path)
+                for path in stdout.decode("utf-8", errors="replace").split("\0")
+                if _normalize_repo_rel_path(path)
+            ]
+        except Exception:
+            log.debug("Could not diff changed paths in %s", directory)
+            return []
+
+    async def untracked_files(self, directory: str) -> list[str]:
+        """List untracked, non-ignored files for a worktree/repo."""
+        if not directory:
+            return []
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", directory,
+                "ls-files", "--others", "--exclude-standard", "-z",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode != 0:
+                return []
+            return [
+                _normalize_repo_rel_path(path)
+                for path in stdout.decode("utf-8", errors="replace").split("\0")
+                if _normalize_repo_rel_path(path)
+            ]
+        except Exception:
+            log.debug("Could not list untracked files in %s", directory)
+            return []
+
+    async def untracked_overwrite_paths(self, directory: str,
+                                        target_paths: list[str]) -> list[str]:
+        """Return untracked paths that would be overwritten by target paths."""
+        untracked = await self.untracked_files(directory)
+        return _find_untracked_overwrite_paths(untracked, target_paths)
+
+    async def merge_untracked_overwrite_paths(self, repo_root: str,
+                                              base_branch: str,
+                                              tree_sha: str) -> list[str]:
+        """Return base-repo untracked files a merge would overwrite."""
+        if not repo_root or not base_branch or not tree_sha:
+            return []
+        checked_out = await self.get_current_branch(repo_root)
+        if checked_out != base_branch:
+            return []
+        base_sha = await self.rev_parse(repo_root, base_branch)
+        if not base_sha or base_sha == tree_sha:
+            return []
+        target_paths = await self._diff_name_only(repo_root, base_sha, tree_sha)
+        return await self.untracked_overwrite_paths(repo_root, target_paths)
+
+    async def rebase_untracked_overwrite_paths(self, cell) -> list[str]:
+        """Return worktree untracked files a rebase would overwrite."""
+        if not cell.worktree_path or not cell.worktree_base_branch:
+            return []
+        target_paths = await self._diff_name_only(
+            cell.worktree_path,
+            "HEAD",
+            cell.worktree_base_branch,
+        )
+        return await self.untracked_overwrite_paths(
+            cell.worktree_path,
+            target_paths,
+        )
+
     async def _branch_exists(self, repo_root: str, branch: str) -> bool:
         """Return whether a local branch already exists."""
         if not branch:
@@ -541,6 +728,68 @@ class WorktreeManager:
         except Exception:
             log.exception("Failed to update worktree exclude file")
 
+    async def remove_path(self, repo_root: str, worktree_path: str, *,
+                          branch: str = "",
+                          name: str = "",
+                          force: bool = True) -> bool:
+        """Remove a git worktree path and optionally delete its branch."""
+        if not worktree_path:
+            return True
+        success = True
+        display_name = name or branch or worktree_path
+        try:
+            cmd = ["git", "-C", repo_root,
+                   "worktree", "remove", worktree_path]
+            if force:
+                cmd.append("--force")
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                log.warning("git worktree remove failed for '%s': %s",
+                            display_name, stderr.decode().strip())
+                success = False
+            else:
+                log.info("Removed worktree for '%s': %s",
+                         display_name, worktree_path)
+        except Exception:
+            log.exception("Failed to remove worktree for '%s'", display_name)
+            success = False
+
+        if branch:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "-C", repo_root,
+                    "branch", "-d", branch,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.communicate()
+            except Exception:
+                log.debug("Could not delete branch %s", branch)
+
+        return success
+
+    async def prune_admin(self, repo_root: str) -> bool:
+        """Prune stale git-worktree admin records for a repository."""
+        if not repo_root:
+            return False
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root,
+                "worktree", "prune",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate()
+            return proc.returncode == 0
+        except Exception:
+            log.debug("Could not prune worktree admin for %s", repo_root)
+            return False
+
     async def remove(self, cell, force: bool = True) -> bool:
         """Remove the git worktree and branch associated with a cell.
 
@@ -563,42 +812,13 @@ class WorktreeManager:
                         "trying parent directory", cell.name)
             repo_root = os.path.dirname(cell.worktree_path)
 
-        success = True
-        try:
-            cmd = ["git", "-C", repo_root,
-                   "worktree", "remove", cell.worktree_path]
-            if force:
-                cmd.append("--force")
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                log.warning("git worktree remove failed for '%s': %s",
-                            cell.name, stderr.decode().strip())
-                success = False
-            else:
-                log.info("Removed worktree for '%s': %s",
-                         cell.name, cell.worktree_path)
-        except Exception:
-            log.exception("Failed to remove worktree for '%s'", cell.name)
-            success = False
-
-        # Try to delete the branch
-        if cell.worktree_branch:
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "git", "-C", repo_root,
-                    "branch", "-d", cell.worktree_branch,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                await proc.communicate()
-                # -d may fail if not fully merged; that's OK
-            except Exception:
-                log.debug("Could not delete branch %s", cell.worktree_branch)
+        success = await self.remove_path(
+            repo_root,
+            cell.worktree_path,
+            branch=cell.worktree_branch,
+            name=cell.name,
+            force=force,
+        )
 
         if success:
             cell.worktree_path = ""
@@ -1073,6 +1293,19 @@ class WorktreeManager:
             log.debug("is_merged check failed for '%s'", cell.name)
             return False
 
+    async def is_branch_merged(self, repo_root: str, *,
+                               branch: str,
+                               base_branch: str) -> bool:
+        """Check merge status for a branch without requiring a live cell."""
+        probe = type("WorktreeProbe", (), {
+            "name": branch or "worktree",
+            "worktree_path": repo_root,
+            "worktree_repo_root": repo_root,
+            "worktree_branch": branch,
+            "worktree_base_branch": base_branch,
+        })()
+        return await self.is_merged(probe)
+
     async def check_base_advanced(self, cell, pre_merge_sha: str) -> bool:
         """Fallback merge check: did the base branch advance since
         *pre_merge_sha* and do the new commits include all files the
@@ -1149,38 +1382,101 @@ class WorktreeManager:
             log.debug("check_base_advanced failed for '%s'", cell.name)
             return False
 
-    def _parse_merge_tree_conflicts(self, output: str) -> list[dict]:
+    async def _blob_size(self, repo_root: str, blob_sha: str) -> int:
+        if not repo_root or not blob_sha:
+            return 0
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "-C", repo_root,
+                "cat-file", "-s", blob_sha,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                return int(stdout.decode().strip())
+        except Exception:
+            log.debug("Could not read blob size %s in %s", blob_sha, repo_root)
+        return 0
+
+    async def _parse_merge_tree_conflicts(self, output: str, *,
+                                          repo_root: str = "",
+                                          base_label: str = "",
+                                          branch_label: str = "") -> list[dict]:
         """Parse conflict info from ``git merge-tree`` output."""
         conflicts: list[dict] = []
-        for line in output.splitlines():
-            line = line.strip()
+        stage_blobs: dict[str, dict[int, str]] = {}
+        binary_paths: set[str] = set()
+
+        for raw_line in output.splitlines():
+            line = raw_line.strip()
+            stage_match = re.match(
+                r"^\d{6}\s+([0-9a-f]{40})\s+([123])\t(.+)$",
+                line,
+            )
+            if stage_match:
+                blob_sha, stage, path = stage_match.groups()
+                norm_path = _normalize_repo_rel_path(path)
+                if norm_path:
+                    stage_blobs.setdefault(norm_path, {})[int(stage)] = blob_sha
+                continue
+            binary_prefix = "warning: Cannot merge binary files: "
+            if line.startswith(binary_prefix):
+                path = line[len(binary_prefix):].split(" (", 1)[0].strip()
+                norm_path = _normalize_repo_rel_path(path)
+                if norm_path:
+                    binary_paths.add(norm_path)
+
+        for raw_line in output.splitlines():
+            line = raw_line.strip()
             if not line.startswith("CONFLICT"):
                 continue
-            # Format: CONFLICT (type): description
             reason = ""
             path = ""
             paren_start = line.find("(")
             paren_end = line.find(")")
             if paren_start != -1 and paren_end != -1:
                 reason = line[paren_start + 1:paren_end]
-            # Extract file path — typically the last space-separated token,
-            # or the path after "Merge conflict in "
             if "Merge conflict in " in line:
                 path = line.split("Merge conflict in ", 1)[1].strip()
             elif " deleted in " in line:
-                # "CONFLICT (modify/delete): foo.py deleted in ..."
                 colon_pos = line.find(": ")
                 if colon_pos != -1:
                     rest = line[colon_pos + 2:]
                     path = rest.split(" deleted in ")[0].strip()
             else:
-                # Fallback: last token after ": "
                 colon_pos = line.find(": ")
                 if colon_pos != -1:
                     rest = line[colon_pos + 2:].strip()
                     parts = rest.rsplit(" ", 1)
                     path = parts[-1] if parts else rest
-            conflicts.append({"path": path, "reason": reason})
+            norm_path = _normalize_repo_rel_path(path)
+            conflict = {"path": norm_path, "reason": reason}
+            if norm_path in binary_paths:
+                ours_sha = stage_blobs.get(norm_path, {}).get(2, "")
+                theirs_sha = stage_blobs.get(norm_path, {}).get(3, "")
+                ours_size = await self._blob_size(repo_root, ours_sha)
+                theirs_size = await self._blob_size(repo_root, theirs_sha)
+                base_name = base_label or "base"
+                branch_name = branch_label or "branch"
+                detail = (
+                    f"binary differs — {base_name}: {ours_size} bytes "
+                    f"{ours_sha[:12]}, {branch_name}: {theirs_size} bytes "
+                    f"{theirs_sha[:12]}"
+                ).strip()
+                conflict.update({
+                    "binary": True,
+                    "ours_blob_sha": ours_sha,
+                    "theirs_blob_sha": theirs_sha,
+                    "ours_size": ours_size,
+                    "theirs_size": theirs_size,
+                    "detail": detail,
+                })
+                if detail:
+                    conflict["reason"] = (
+                        f"{reason} — {detail}" if reason else detail
+                    )
+            conflicts.append(conflict)
         return conflicts
 
     async def check_merge_conflicts(self, cell) -> dict:
@@ -1215,7 +1511,12 @@ class WorktreeManager:
                 return {"clean": True, "tree_sha": tree_sha,
                         "conflicts": []}
             # Conflicts — parse output
-            conflicts = self._parse_merge_tree_conflicts(output)
+            conflicts = await self._parse_merge_tree_conflicts(
+                output,
+                repo_root=repo_root,
+                base_label=base,
+                branch_label=branch,
+            )
             return {"clean": False, "tree_sha": "",
                     "conflicts": conflicts}
         except Exception:

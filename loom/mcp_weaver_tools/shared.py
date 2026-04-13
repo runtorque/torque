@@ -93,6 +93,9 @@ def format_worktree_conflicts(conflicts) -> str:
         if isinstance(conflict, dict):
             path = str(conflict.get("path", "")).strip()
             reason = str(conflict.get("reason", "")).strip()
+            detail = str(conflict.get("detail", "")).strip()
+            if detail and detail not in reason:
+                reason = f"{reason} — {detail}" if reason else detail
             if path and reason:
                 lines.append(f"  - {path} ({reason})")
             elif path:
@@ -110,6 +113,15 @@ def format_worktree_conflicts(conflicts) -> str:
 
 
 async def run_worktree_merge_check(handle_command, agent_id: str):
+    return await run_worktree_merge_check_with_options(
+        handle_command,
+        agent_id,
+        allow_dirty=False,
+    )
+
+
+async def run_worktree_merge_check_with_options(handle_command, agent_id: str, *,
+                                                allow_dirty: bool = False):
     result = await handle_command({
         "cmd": "worktree_check_merge",
         "id": agent_id,
@@ -117,7 +129,7 @@ async def run_worktree_merge_check(handle_command, agent_id: str):
     if result and result.get("type") == "error":
         return result, result.get("message", "Unknown error"), True
     result = result or {}
-    if result.get("dirty"):
+    if result.get("dirty") and not allow_dirty:
         return (
             result,
             "Worktree has uncommitted changes. Create a checkpoint or "
