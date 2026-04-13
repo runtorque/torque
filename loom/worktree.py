@@ -626,6 +626,11 @@ class WorktreeManager:
             cell.worktree_branch = branch
             cell.worktree_repo_root = repo_root
             cell.worktree_base_branch = base_branch
+            try:
+                from .worktree_streams import invalidate_branch_exists_cache
+                invalidate_branch_exists_cache(repo_root, branch)
+            except Exception:
+                log.debug("Failed to invalidate branch cache", exc_info=True)
             log.info("Created worktree for '%s': %s (branch %s, base %s)",
                      cell.name, wt_path, branch, base_branch)
 
@@ -794,6 +799,11 @@ class WorktreeManager:
                 await proc.communicate()
             except Exception:
                 log.debug("Could not delete branch %s", branch)
+            try:
+                from .worktree_streams import invalidate_branch_exists_cache
+                invalidate_branch_exists_cache(repo_root, branch)
+            except Exception:
+                log.debug("Failed to invalidate branch cache", exc_info=True)
 
         return success
 

@@ -11,6 +11,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 import os
 import subprocess
+import time
 from typing import Any
 
 from .state import board_task_is_closed
@@ -45,6 +46,35 @@ _NON_PRODUCT_ACTION_HINTS = (
     "conflict",
     "research",
 )
+
+# `_branch_exists_locally` shells out to `git show-ref`. It's invoked per
+# stream on every broadcast, and broadcasts fire on every state mutation —
+# so without caching we fork() dozens of times per second on the asyncio
+# event loop. Cache the result for a short window; branch existence
+# changes infrequently and a minute of staleness is acceptable here.
+_BRANCH_EXISTS_TTL_SECONDS = 60.0
+_branch_exists_ttl_cache: dict[tuple[str, str], tuple[float, bool]] = {}
+
+
+def invalidate_branch_exists_cache(repo_root: str = "", branch: str = "") -> None:
+    """Drop cached branch-existence entries.
+
+    With no arguments, clear the whole cache. With ``repo_root`` set, clear
+    entries for that repo. With both set, clear just that entry. Call this
+    when Loom itself creates or deletes a branch so the next lookup is
+    fresh instead of waiting out the TTL.
+    """
+    repo_root = os.path.realpath(os.path.expanduser(str(repo_root or "").strip())) \
+        if repo_root else ""
+    branch = str(branch or "").strip()
+    if not repo_root:
+        _branch_exists_ttl_cache.clear()
+        return
+    if branch:
+        _branch_exists_ttl_cache.pop((repo_root, branch), None)
+        return
+    for key in [k for k in _branch_exists_ttl_cache if k[0] == repo_root]:
+        _branch_exists_ttl_cache.pop(key, None)
 
 
 def stream_id(repo_root: str, branch: str) -> str:
@@ -661,6 +691,14 @@ def _branch_exists_locally(repo_root: str, branch: str, *,
     if cache is not None and key in cache:
         return cache[key]
 
+    now = time.monotonic()
+    cached = _branch_exists_ttl_cache.get(key)
+    if cached is not None and cached[0] > now:
+        exists = cached[1]
+        if cache is not None:
+            cache[key] = exists
+        return exists
+
     exists = False
     if os.path.isdir(repo_root):
         try:
@@ -677,6 +715,7 @@ def _branch_exists_locally(repo_root: str, branch: str, *,
         except OSError:
             exists = False
 
+    _branch_exists_ttl_cache[key] = (now + _BRANCH_EXISTS_TTL_SECONDS, exists)
     if cache is not None:
         cache[key] = exists
     return exists
