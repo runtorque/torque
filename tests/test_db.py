@@ -553,6 +553,40 @@ class LoomDBTests(unittest.TestCase):
 
         self.assertEqual(loaded["events_dismissed_attention"], dismissed)
 
+    def test_load_all_restores_standalone_panel_layout(self):
+        layout = {
+            "version": 1,
+            "bottom": {
+                "open": True,
+                "size": 280,
+                "tabs": ["board", "weaver"],
+                "active": "board",
+            },
+            "right": {
+                "open": True,
+                "size": 320,
+                "tabs": ["context", "events"],
+                "active": "context",
+            },
+            "floats": {
+                "actions": {
+                    "x": 40,
+                    "y": 50,
+                    "width": 420,
+                    "height": 320,
+                    "z": 3,
+                },
+            },
+        }
+        self.db.save_ui_state(
+            "standalone_panel_layout",
+            json.dumps(layout),
+        )
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["standalone_panel_layout"], layout)
+
     def test_panel_event_paging_and_trim_keep_recent_events(self):
         for i in range(1, 6):
             self.db.save_panel_event(

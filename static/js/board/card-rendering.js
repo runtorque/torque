@@ -83,8 +83,13 @@ function _boardClearLaneEntryRefresh() {
 }
 
 function _boardScheduleLaneEntryRefresh(delayMs) {
+  var boardVisible = typeof _panelAppVisible === 'function'
+    ? _panelAppVisible('board')
+    : (typeof _activePanelApp !== 'undefined'
+      ? _activePanelApp === 'board'
+      : (typeof _boardPanelVisible === 'function' ? _boardPanelVisible() : true));
   if (_boardShowSchedules
-      || (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board')
+      || !boardVisible
       || !(delayMs > 0)) {
     _boardClearLaneEntryRefresh();
     return;
@@ -95,7 +100,12 @@ function _boardScheduleLaneEntryRefresh(delayMs) {
   }
   _boardLaneEntryRefreshTimer = window.setTimeout(function() {
     _boardLaneEntryRefreshTimer = 0;
-    if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') return;
+    var boardStillVisible = typeof _panelAppVisible === 'function'
+      ? _panelAppVisible('board')
+      : (typeof _activePanelApp !== 'undefined'
+        ? _activePanelApp === 'board'
+        : (typeof _boardPanelVisible === 'function' ? _boardPanelVisible() : true));
+    if (!boardStillVisible) return;
     renderBoard();
   }, Math.max(1000, delayMs));
 }

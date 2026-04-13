@@ -1604,9 +1604,15 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
             # UI state
             c.execute("DELETE FROM ui_state")
-            for key in ("panel_active", "board_panel_height"):
+            for key in (
+                "panel_active",
+                "board_panel_height",
+                "standalone_panel_layout",
+            ):
                 val = state_dict.get(key)
                 if val is not None:
+                    if key == "standalone_panel_layout":
+                        val = json.dumps(val)
                     c.execute(
                         "INSERT INTO ui_state (key, value) VALUES (?,?)",
                         (key, str(val)))
@@ -1835,6 +1841,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 or ("board" if ui.get("board_panel_open", "False") == "True"
                     else ""),
             "board_panel_height": int(ui.get("board_panel_height", "0")),
+            "standalone_panel_layout": (
+                json.loads(ui.get("standalone_panel_layout", "{}"))
+                if ui.get("standalone_panel_layout") else {}
+            ),
             "events_dismissed_attention": (
                 json.loads(ui.get("events_dismissed_attention", "{}"))
                 if ui.get("events_dismissed_attention") else {}

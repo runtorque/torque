@@ -3306,15 +3306,8 @@ class WeaverOwnedAgentRestrictionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(is_error)
         session_map = json.loads(text)
         self.assertEqual(session_map["agents"]["active_count"], 0)
-        stream = session_map["streams"]["items"][0]
-        self.assertEqual(stream["agent_id"], "")
-        self.assertEqual(stream["agent_name"], "")
-        self.assertEqual(stream["agent_slug"], "")
-        self.assertTrue(stream["agent_hidden"])
-        boundary = session_map["branch_boundaries"]["items"][0]
-        self.assertEqual(boundary["agent_id"], "")
-        self.assertEqual(boundary["agent_name"], "")
-        self.assertTrue(boundary["agent_hidden"])
+        self.assertEqual(session_map["streams"]["count"], 0)
+        self.assertEqual(session_map["branch_boundaries"]["count"], 0)
         queued = next(
             item for item in session_map["queued_follow_up"]["items"]
             if item["source"] == "dispatch_queue"

@@ -20,10 +20,19 @@
 
 <!-- Main area (rendered by JS) -->
 <div id="workspace-shell">
-  <main id="main"></main>
+  <div id="standalone-sidebar-shell">
+    <div id="standalone-main-stack">
+      <main id="main"></main>
+      <div id="standalone-bottom-resize-handle" title="Resize board dock"></div>
+      <section id="standalone-bottom-dock"></section>
+    </div>
+    <div id="standalone-rail-resize-handle" title="Resize utility rail"></div>
+    <aside id="standalone-right-rail"></aside>
+  </div>
   <div id="workspace-resize-handle" title="Resize sidebar"></div>
   <section id="terminal-workspace"></section>
 </div>
+<div id="standalone-float-layer"></div>
 <div id="diff-view-root"></div>
 <div class="overlay" id="modal-task-history">
   <div class="modal modal-wide modal-tall task-history-modal">
@@ -1096,6 +1105,7 @@
 <script src="/static/js/events.js"></script>
 <script src="/static/js/context.js"></script>
 <script src="/static/js/weaver.js"></script>
+<script src="/static/js/panel_manager.js"></script>
 <script src="/static/js/main.js"></script>
 </body>
 </html>

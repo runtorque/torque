@@ -5022,6 +5022,25 @@ async def main(connection=None):
                     state._db_save_ui("board_panel_height",
                                       state.board_panel_height)
 
+            elif cmd == "standalone_set_panel_layout":
+                layout = data.get("layout", {})
+                if not isinstance(layout, dict):
+                    result = {
+                        "type": "error",
+                        "message": "Invalid standalone panel layout",
+                    }
+                else:
+                    state.standalone_panel_layout = layout
+                    state._emit(
+                        "ui_update",
+                        key="standalone_panel_layout",
+                        value=state.standalone_panel_layout,
+                    )
+                    state._db_save_ui(
+                        "standalone_panel_layout",
+                        json.dumps(state.standalone_panel_layout),
+                    )
+
             elif cmd == "events_dismiss":
                 item_id = str(data.get("id", "") or "").strip()
                 if not item_id:

@@ -1,0 +1,737 @@
+/* Standalone-only panel workspace manager */
+
+var _standalonePanelApps = ['board', 'actions', 'templates', 'context', 'events', 'weaver'];
+var _standalonePanelTitles = {
+  board: 'Board',
+  actions: 'Actions',
+  templates: 'Agents',
+  context: 'Context',
+  events: 'Events',
+  weaver: 'Weaver',
+};
+var _standalonePanelDefaults = {
+  board: 'bottom',
+  actions: 'right',
+  templates: 'right',
+  context: 'right',
+  events: 'right',
+  weaver: 'bottom',
+};
+var _standalonePanelLayoutVersion = 1;
+var _standalonePanelLayout = null;
+var _standalonePanelSyncing = false;
+var _standalonePanelDragApp = '';
+var _standalonePanelFloatDrag = null;
+
+function _standalonePanelsEnabled() {
+  return typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode();
+}
+
+function _standalonePanelRootId(app) {
+  return 'panel-' + app;
+}
+
+function _standalonePanelTitle(app) {
+  return _standalonePanelTitles[app] || app;
+}
+
+function _standaloneLayoutBool(value, fallback) {
+  if (typeof value === 'boolean') return value;
+  return !!fallback;
+}
+
+function _standaloneClamp(value, min, max, fallback) {
+  var next = parseInt(value, 10);
+  if (!Number.isFinite(next)) next = fallback;
+  if (!Number.isFinite(next)) next = min;
+  return Math.max(min, Math.min(max, next));
+}
+
+function _standaloneBottomSizeBounds() {
+  var min = 180;
+  var max = Math.max(260, Math.floor(((window && window.innerHeight) || 900) * 0.55));
+  return { min: min, max: max };
+}
+
+function _standaloneRightSizeBounds() {
+  var shell = document.getElementById('standalone-sidebar-shell');
+  var width = 0;
+  if (shell && typeof shell.clientWidth === 'number') width = shell.clientWidth;
+  if (!width && typeof window !== 'undefined' && typeof window.innerWidth === 'number') {
+    width = Math.max(0, window.innerWidth - 420);
+  }
+  return {
+    min: 240,
+    max: Math.max(320, Math.floor(width * 0.62) || 420),
+  };
+}
+
+function _standaloneDefaultLayout() {
+  return {
+    version: _standalonePanelLayoutVersion,
+    bottom: {
+      open: true,
+      size: 280,
+      tabs: ['board'],
+      active: 'board',
+    },
+    right: {
+      open: true,
+      size: 320,
+      tabs: ['actions', 'templates', 'context', 'events'],
+      active: 'context',
+    },
+    floats: {},
+    last_active: 'board',
+  };
+}
+
+function _standaloneClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function _standaloneEnsureUniqueTabs(tabs) {
+  var out = [];
+  var seen = {};
+  var list = Array.isArray(tabs) ? tabs : [];
+  for (var i = 0; i < list.length; i++) {
+    var app = String(list[i] || '');
+    if (_standalonePanelApps.indexOf(app) < 0 || seen[app]) continue;
+    seen[app] = true;
+    out.push(app);
+  }
+  return out;
+}
+
+function _normalizeStandalonePanelLayout(raw) {
+  var base = _standaloneDefaultLayout();
+  var layout = raw && typeof raw === 'object' ? _standaloneClone(raw) : {};
+  var bottomBounds = _standaloneBottomSizeBounds();
+  var rightBounds = _standaloneRightSizeBounds();
+  var normalized = {
+    version: _standalonePanelLayoutVersion,
+    bottom: {
+      open: _standaloneLayoutBool(layout.bottom && layout.bottom.open, base.bottom.open),
+      size: _standaloneClamp(layout.bottom && layout.bottom.size, bottomBounds.min, bottomBounds.max, base.bottom.size),
+      tabs: _standaloneEnsureUniqueTabs(layout.bottom && layout.bottom.tabs),
+      active: String(layout.bottom && layout.bottom.active || ''),
+    },
+    right: {
+      open: _standaloneLayoutBool(layout.right && layout.right.open, base.right.open),
+      size: _standaloneClamp(layout.right && layout.right.size, rightBounds.min, rightBounds.max, base.right.size),
+      tabs: _standaloneEnsureUniqueTabs(layout.right && layout.right.tabs),
+      active: String(layout.right && layout.right.active || ''),
+    },
+    floats: {},
+    last_active: String(layout.last_active || ''),
+  };
+
+  var placements = {};
+  function claimTabs(zoneName) {
+    var zone = normalized[zoneName];
+    var filtered = [];
+    for (var i = 0; i < zone.tabs.length; i++) {
+      var app = zone.tabs[i];
+      if (placements[app]) continue;
+      placements[app] = zoneName;
+      filtered.push(app);
+    }
+    zone.tabs = filtered;
+    if (zone.tabs.indexOf(zone.active) < 0) zone.active = zone.tabs[0] || '';
+  }
+  claimTabs('bottom');
+  claimTabs('right');
+
+  var floats = layout.floats && typeof layout.floats === 'object' ? layout.floats : {};
+  var z = 1;
+  for (var appName in floats) {
+    if (_standalonePanelApps.indexOf(appName) < 0 || placements[appName]) continue;
+    var item = floats[appName] || {};
+    placements[appName] = 'float';
+    normalized.floats[appName] = {
+      x: _standaloneClamp(item.x, 12, 1600, 48 + (z * 18)),
+      y: _standaloneClamp(item.y, 12, 1000, 72 + (z * 18)),
+      width: _standaloneClamp(item.width, 280, 1200, 420),
+      height: _standaloneClamp(item.height, 220, 900, 320),
+      z: _standaloneClamp(item.z, 1, 999, z),
+    };
+    z++;
+  }
+
+  if (!placements.board) {
+    normalized.bottom.tabs.unshift('board');
+    placements.board = 'bottom';
+  }
+  normalized.bottom.tabs = _standaloneEnsureUniqueTabs(normalized.bottom.tabs);
+  if (normalized.bottom.tabs.indexOf(normalized.bottom.active) < 0) {
+    normalized.bottom.active = normalized.bottom.tabs[0] || '';
+  }
+  if (!normalized.last_active || _standalonePanelApps.indexOf(normalized.last_active) < 0) {
+    normalized.last_active = normalized.right.active || normalized.bottom.active || 'board';
+  }
+  return normalized;
+}
+
+function _migrateStandalonePanelLayoutFromLegacyState() {
+  var layout = _standaloneDefaultLayout();
+  var active = (state && state.panel_active) || '';
+  var legacyHeight = state && state.board_panel_height;
+  if (legacyHeight > 0) {
+    layout.bottom.size = _standaloneClamp(
+      legacyHeight,
+      _standaloneBottomSizeBounds().min,
+      _standaloneBottomSizeBounds().max,
+      layout.bottom.size
+    );
+  }
+  if (active === 'weaver') {
+    layout.bottom.tabs = ['board', 'weaver'];
+    layout.bottom.active = 'weaver';
+    layout.last_active = 'weaver';
+  } else if (active && layout.right.tabs.indexOf(active) >= 0) {
+    layout.right.active = active;
+    layout.last_active = active;
+  } else {
+    layout.last_active = layout.bottom.active;
+  }
+  return layout;
+}
+
+function _standalonePanelCurrentLayout() {
+  if (!_standalonePanelLayout) {
+    var source = (state && state.standalone_panel_layout) || {};
+    _standalonePanelLayout = _normalizeStandalonePanelLayout(
+      Object.keys(source).length ? source : _migrateStandalonePanelLayoutFromLegacyState()
+    );
+  }
+  return _standalonePanelLayout;
+}
+
+function _standalonePanelSaveLayout() {
+  if (_standalonePanelSyncing || !_standalonePanelsEnabled()) return;
+  if (typeof send === 'function') {
+    send({
+      cmd: 'standalone_set_panel_layout',
+      layout: _standaloneClone(_standalonePanelCurrentLayout()),
+    });
+  }
+}
+
+function _standalonePanelSetLayout(next, opts) {
+  opts = opts || {};
+  _standalonePanelLayout = _normalizeStandalonePanelLayout(next);
+  if (state) state.standalone_panel_layout = _standaloneClone(_standalonePanelLayout);
+  if (typeof _activePanelApp !== 'undefined') {
+    _activePanelApp = _standalonePanelActiveApp();
+  }
+  _standaloneRenderPanelWorkspace();
+  if (!opts.fromServer) _standalonePanelSaveLayout();
+}
+
+function _standalonePanelSetLayoutFromState(layout, opts) {
+  _standalonePanelSyncing = true;
+  try {
+    _standalonePanelSetLayout(layout, Object.assign({}, opts || {}, { fromServer: true }));
+  } finally {
+    _standalonePanelSyncing = false;
+  }
+}
+
+function _restoreStandalonePanelState() {
+  _standalonePanelSetLayoutFromState(
+    (state && state.standalone_panel_layout && Object.keys(state.standalone_panel_layout).length)
+      ? state.standalone_panel_layout
+      : _migrateStandalonePanelLayoutFromLegacyState(),
+    { fromServer: true }
+  );
+}
+
+function _standaloneVisiblePanelApps() {
+  if (!_standalonePanelsEnabled()) return [];
+  var layout = _standalonePanelCurrentLayout();
+  var out = [];
+  if (layout.bottom.open && layout.bottom.active) out.push(layout.bottom.active);
+  if (layout.right.open && layout.right.active) out.push(layout.right.active);
+  for (var app in layout.floats) out.push(app);
+  return out;
+}
+
+function _visiblePanelSurfaces() {
+  return _standaloneVisiblePanelApps();
+}
+
+function _standalonePanelSurfaceVisible(app) {
+  return _standaloneVisiblePanelApps().indexOf(app) >= 0;
+}
+
+function _standalonePanelPlacement(app) {
+  var layout = _standalonePanelCurrentLayout();
+  if (layout.bottom.tabs.indexOf(app) >= 0) return 'bottom';
+  if (layout.right.tabs.indexOf(app) >= 0) return 'right';
+  if (layout.floats[app]) return 'float';
+  return '';
+}
+
+function _standaloneRemovePanelFromLayout(layout, app) {
+  ['bottom', 'right'].forEach(function(zoneName) {
+    var zone = layout[zoneName];
+    zone.tabs = zone.tabs.filter(function(item) { return item !== app; });
+    if (zone.active === app) zone.active = zone.tabs[0] || '';
+  });
+  if (layout.floats && layout.floats[app]) delete layout.floats[app];
+}
+
+function _standaloneMovePanelToZone(app, zoneName, opts) {
+  if (_standalonePanelApps.indexOf(app) < 0) return;
+  opts = opts || {};
+  var layout = _standaloneClone(_standalonePanelCurrentLayout());
+  _standaloneRemovePanelFromLayout(layout, app);
+  if (zoneName === 'float') {
+    var existing = _standalonePanelCurrentLayout().floats[app] || {};
+    var z = 1;
+    for (var key in layout.floats) z = Math.max(z, (layout.floats[key] && layout.floats[key].z) || 1);
+    layout.floats[app] = {
+      x: _standaloneClamp(existing.x, 12, 1600, 56 + z * 16),
+      y: _standaloneClamp(existing.y, 12, 1000, 72 + z * 16),
+      width: _standaloneClamp(existing.width, 280, 1200, 460),
+      height: _standaloneClamp(existing.height, 220, 900, 320),
+      z: z + 1,
+    };
+  } else {
+    if (zoneName !== 'bottom' && zoneName !== 'right') return;
+    var zone = layout[zoneName];
+    zone.open = true;
+    if (opts.prepend) zone.tabs.unshift(app);
+    else zone.tabs.push(app);
+    zone.tabs = _standaloneEnsureUniqueTabs(zone.tabs);
+    zone.active = app;
+  }
+  layout.last_active = app;
+  _standalonePanelSetLayout(layout);
+}
+
+function _standaloneSelectPanel(app, opts) {
+  if (!_standalonePanelsEnabled()) return false;
+  opts = opts || {};
+  var layout = _standaloneClone(_standalonePanelCurrentLayout());
+  var placement = _standalonePanelPlacement(app);
+  if (!placement) {
+    _standaloneMovePanelToZone(app, _standalonePanelDefaults[app] || 'bottom');
+    return true;
+  }
+  if (placement === 'float') {
+    layout.last_active = app;
+    if (layout.floats[app]) {
+      var maxZ = 1;
+      for (var name in layout.floats) {
+        maxZ = Math.max(maxZ, layout.floats[name].z || 1);
+      }
+      layout.floats[app].z = maxZ + 1;
+    }
+    _standalonePanelSetLayout(layout, opts);
+    return true;
+  }
+  var zone = layout[placement];
+  if (!zone.open) zone.open = true;
+  if (zone.tabs.indexOf(app) < 0) zone.tabs.push(app);
+  zone.active = app;
+  layout.last_active = app;
+  _standalonePanelSetLayout(layout, opts);
+  return true;
+}
+
+function _standaloneToggleZone(zoneName) {
+  var layout = _standaloneClone(_standalonePanelCurrentLayout());
+  var zone = layout[zoneName];
+  if (!zone) return;
+  zone.open = !zone.open;
+  _standalonePanelSetLayout(layout);
+  if (!zone.open && typeof focusEmbeddedTerminalWorkspace === 'function') {
+    focusEmbeddedTerminalWorkspace(true);
+  }
+}
+
+function _standaloneTogglePanel(app) {
+  if (!_standalonePanelsEnabled()) return false;
+  var placement = _standalonePanelPlacement(app);
+  if (!placement) {
+    return _standaloneSelectPanel(app);
+  }
+  if (placement === 'float') {
+    return _standaloneSelectPanel(app);
+  }
+  var layout = _standaloneClone(_standalonePanelCurrentLayout());
+  var zone = layout[placement];
+  if (zone.active === app && zone.open) {
+    zone.open = false;
+    _standalonePanelSetLayout(layout);
+    if (typeof focusEmbeddedTerminalWorkspace === 'function') {
+      focusEmbeddedTerminalWorkspace(true);
+    }
+    return true;
+  }
+  return _standaloneSelectPanel(app);
+}
+
+function _standalonePanelActiveApp() {
+  var layout = _standalonePanelCurrentLayout();
+  return layout.last_active || layout.right.active || layout.bottom.active || '';
+}
+
+function _standaloneFocusTaskbarButton(app) {
+  var btn = document.querySelector('.taskbar-app[data-app="' + app + '"]');
+  if (btn && typeof btn.focus === 'function') btn.focus();
+}
+
+function _setStyleVar(el, key, value) {
+  if (!el || !el.style) return;
+  if (typeof el.style.setProperty === 'function') el.style.setProperty(key, value);
+  else el.style[key] = value;
+}
+
+function _removeChildFromParent(child) {
+  if (!child || !child.parentNode || !Array.isArray(child.parentNode.children)) return;
+  child.parentNode.children = child.parentNode.children.filter(function(item) {
+    return item !== child;
+  });
+  child.parentNode = null;
+}
+
+function _appendPanelRoot(host, root) {
+  if (!host || !root) return;
+  if (root.parentNode !== host) _removeChildFromParent(root);
+  host.appendChild(root);
+}
+
+function _setPanelHidden(root, hidden) {
+  if (!root || !root.classList) return;
+  root.classList.toggle('panel-hidden', !!hidden);
+}
+
+function _clearElement(el) {
+  if (!el) return;
+  el.innerHTML = '';
+}
+
+function _makeStandaloneNode(tag, classNames, text) {
+  var el = document.createElement(tag);
+  if (classNames) {
+    el.className = classNames;
+    classNames.split(/\s+/).forEach(function(name) {
+      if (name && el.classList && typeof el.classList.add === 'function') el.classList.add(name);
+    });
+  }
+  if (text != null) el.textContent = text;
+  return el;
+}
+
+function _standaloneZoneTab(app, active) {
+  var btn = _makeStandaloneNode('button', 'standalone-panel-tab' + (active ? ' active' : ''), _standalonePanelTitle(app));
+  btn.dataset.app = app;
+  btn.draggable = true;
+  btn.onclick = function() { _standaloneSelectPanel(app); };
+  btn.ondragstart = function(event) { standalonePanelDragStart(event, app); };
+  btn.ondragend = function() { standalonePanelDragEnd(); };
+  return btn;
+}
+
+function _standaloneBuildZone(zoneName, rootEl) {
+  if (!rootEl) return;
+  var layout = _standalonePanelCurrentLayout();
+  var zone = layout[zoneName];
+  _clearElement(rootEl);
+  rootEl.classList.toggle('collapsed', !zone.open || !zone.active);
+  rootEl.classList.toggle('empty', !zone.tabs.length);
+  rootEl.dataset.zone = zoneName;
+  rootEl.ondragover = function(event) { standalonePanelZoneDragOver(event, zoneName); };
+  rootEl.ondrop = function(event) { standalonePanelZoneDrop(event, zoneName); };
+  rootEl.ondragleave = function(event) {
+    if (event && event.currentTarget && event.currentTarget.classList) {
+      event.currentTarget.classList.remove('drag-target');
+    }
+  };
+
+  var header = _makeStandaloneNode('div', 'standalone-panel-zone-header');
+  var tabs = _makeStandaloneNode('div', 'standalone-panel-zone-tabs');
+  for (var i = 0; i < zone.tabs.length; i++) {
+    tabs.appendChild(_standaloneZoneTab(zone.tabs[i], zone.tabs[i] === zone.active));
+  }
+  header.appendChild(tabs);
+
+  var actions = _makeStandaloneNode('div', 'standalone-panel-zone-actions');
+  if (zone.active) {
+    var floatBtn = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Float');
+    floatBtn.onclick = function(activeApp) {
+      return function() { _standaloneMovePanelToZone(activeApp, 'float'); };
+    }(zone.active);
+    actions.appendChild(floatBtn);
+  }
+  var closeBtn = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Hide');
+  closeBtn.onclick = function() { _standaloneToggleZone(zoneName); };
+  actions.appendChild(closeBtn);
+  header.appendChild(actions);
+  rootEl.appendChild(header);
+
+  var body = _makeStandaloneNode('div', 'standalone-panel-zone-body');
+  rootEl.appendChild(body);
+
+  for (var j = 0; j < zone.tabs.length; j++) {
+    var app = zone.tabs[j];
+    var panelRoot = document.getElementById(_standalonePanelRootId(app));
+    if (!panelRoot) continue;
+    _appendPanelRoot(body, panelRoot);
+    _setPanelHidden(panelRoot, !(zone.open && app === zone.active));
+  }
+}
+
+function _standaloneFloatHeader(app) {
+  var header = _makeStandaloneNode('div', 'standalone-float-header');
+  header.onmousedown = function(event) { standalonePanelStartFloatDrag(event, app); };
+  var title = _makeStandaloneNode('div', 'standalone-float-title', _standalonePanelTitle(app));
+  header.appendChild(title);
+  var actions = _makeStandaloneNode('div', 'standalone-float-actions');
+  var dockBottom = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Dock');
+  dockBottom.onclick = function() { _standaloneMovePanelToZone(app, _standalonePanelDefaults[app] || 'bottom'); };
+  actions.appendChild(dockBottom);
+  var closeBtn = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Hide');
+  closeBtn.onclick = function() { standalonePanelClose(app); };
+  actions.appendChild(closeBtn);
+  header.appendChild(actions);
+  return header;
+}
+
+function _standaloneBuildFloats(layer) {
+  if (!layer) return;
+  _clearElement(layer);
+  layer.ondragover = standalonePanelFloatDragOver;
+  layer.ondrop = standalonePanelFloatDrop;
+  var layout = _standalonePanelCurrentLayout();
+  var apps = Object.keys(layout.floats).sort(function(a, b) {
+    return (layout.floats[a].z || 1) - (layout.floats[b].z || 1);
+  });
+  for (var i = 0; i < apps.length; i++) {
+    var app = apps[i];
+    var frame = layout.floats[app];
+    var shell = _makeStandaloneNode('div', 'standalone-float-shell');
+    shell.dataset.app = app;
+    shell.style.left = frame.x + 'px';
+    shell.style.top = frame.y + 'px';
+    shell.style.width = frame.width + 'px';
+    shell.style.height = frame.height + 'px';
+    shell.style.zIndex = String(frame.z || 1);
+    shell.appendChild(_standaloneFloatHeader(app));
+    var body = _makeStandaloneNode('div', 'standalone-float-body');
+    shell.appendChild(body);
+    var panelRoot = document.getElementById(_standalonePanelRootId(app));
+    if (panelRoot) {
+      _appendPanelRoot(body, panelRoot);
+      _setPanelHidden(panelRoot, false);
+    }
+    layer.appendChild(shell);
+  }
+}
+
+function _standaloneRenderPanelWorkspace() {
+  var bottomRoot = document.getElementById('standalone-bottom-dock');
+  var rightRoot = document.getElementById('standalone-right-rail');
+  var shell = document.getElementById('standalone-sidebar-shell');
+  var stack = document.getElementById('standalone-main-stack');
+  var layer = document.getElementById('standalone-float-layer');
+  var bottomHandle = document.getElementById('standalone-bottom-resize-handle');
+  var railHandle = document.getElementById('standalone-rail-resize-handle');
+  if (!bottomRoot || !rightRoot || !shell || !stack || !layer) return;
+
+  var layout = _standalonePanelCurrentLayout();
+  _setStyleVar(stack, '--standalone-bottom-height', (layout.bottom.open && layout.bottom.active ? layout.bottom.size : 0) + 'px');
+  _setStyleVar(shell, '--standalone-right-rail-width', (layout.right.open && layout.right.active ? layout.right.size : 0) + 'px');
+  if (bottomHandle && bottomHandle.classList) bottomHandle.classList.toggle('collapsed', !(layout.bottom.open && layout.bottom.active));
+  if (railHandle && railHandle.classList) railHandle.classList.toggle('collapsed', !(layout.right.open && layout.right.active));
+  _standaloneBuildZone('bottom', bottomRoot);
+  _standaloneBuildZone('right', rightRoot);
+  _standaloneBuildFloats(layer);
+  _standaloneUpdateTaskbarButtons();
+}
+
+function _standaloneUpdateTaskbarButtons() {
+  if (!document.querySelectorAll) return;
+  var visible = {};
+  _standaloneVisiblePanelApps().forEach(function(app) { visible[app] = true; });
+  var activeApp = _standalonePanelActiveApp();
+  document.querySelectorAll('.taskbar-app').forEach(function(btn) {
+    var app = btn && btn.dataset ? btn.dataset.app : '';
+    if (!app) return;
+    if (btn.classList) {
+      btn.classList.toggle('active', !!visible[app]);
+      btn.classList.toggle('selected', activeApp === app);
+    }
+  });
+}
+
+function standalonePanelDragStart(event, app) {
+  _standalonePanelDragApp = app;
+  if (event && event.dataTransfer) {
+    try { event.dataTransfer.setData('text/plain', app); } catch (_) {}
+    event.dataTransfer.effectAllowed = 'move';
+  }
+  document.body.classList.add('standalone-panel-dragging');
+}
+
+function standalonePanelDragEnd() {
+  _standalonePanelDragApp = '';
+  document.body.classList.remove('standalone-panel-dragging');
+  ['standalone-bottom-dock', 'standalone-right-rail', 'standalone-float-layer'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el && el.classList) el.classList.remove('drag-target');
+  });
+}
+
+function _standaloneDraggedApp(event) {
+  if (_standalonePanelDragApp) return _standalonePanelDragApp;
+  if (event && event.dataTransfer) {
+    try { return event.dataTransfer.getData('text/plain') || ''; } catch (_) { return ''; }
+  }
+  return '';
+}
+
+function standalonePanelZoneDragOver(event, zoneName) {
+  var app = _standaloneDraggedApp(event);
+  if (!app) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && event.currentTarget && event.currentTarget.classList) event.currentTarget.classList.add('drag-target');
+}
+
+function standalonePanelZoneDrop(event, zoneName) {
+  var app = _standaloneDraggedApp(event);
+  if (!app) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && event.currentTarget && event.currentTarget.classList) event.currentTarget.classList.remove('drag-target');
+  standalonePanelDragEnd();
+  _standaloneMovePanelToZone(app, zoneName);
+}
+
+function standalonePanelFloatDragOver(event) {
+  var app = _standaloneDraggedApp(event);
+  if (!app) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  var layer = document.getElementById('standalone-float-layer');
+  if (layer && layer.classList) layer.classList.add('drag-target');
+}
+
+function standalonePanelFloatDrop(event) {
+  var app = _standaloneDraggedApp(event);
+  if (!app) return;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  standalonePanelDragEnd();
+  _standaloneMovePanelToZone(app, 'float');
+}
+
+function standalonePanelClose(app) {
+  var placement = _standalonePanelPlacement(app);
+  if (!placement) return;
+  if (placement === 'float') {
+    var layout = _standaloneClone(_standalonePanelCurrentLayout());
+    delete layout.floats[app];
+    layout.last_active = layout.right.active || layout.bottom.active || 'board';
+    _standalonePanelSetLayout(layout);
+  } else {
+    _standaloneTogglePanel(app);
+  }
+}
+
+function standalonePanelStartFloatDrag(event, app) {
+  if (!event || event.button !== 0) return;
+  var layout = _standalonePanelCurrentLayout();
+  var frame = layout.floats[app];
+  if (!frame) return;
+  _standalonePanelFloatDrag = {
+    app: app,
+    startX: event.clientX,
+    startY: event.clientY,
+    left: frame.x,
+    top: frame.y,
+  };
+  document.addEventListener('mousemove', _standalonePanelOnFloatDrag);
+  document.addEventListener('mouseup', _standalonePanelStopFloatDrag);
+}
+
+function _standalonePanelOnFloatDrag(event) {
+  if (!_standalonePanelFloatDrag) return;
+  var drag = _standalonePanelFloatDrag;
+  var layout = _standaloneClone(_standalonePanelCurrentLayout());
+  if (!layout.floats[drag.app]) return;
+  layout.floats[drag.app].x = Math.max(12, drag.left + (event.clientX - drag.startX));
+  layout.floats[drag.app].y = Math.max(12, drag.top + (event.clientY - drag.startY));
+  _standalonePanelSetLayout(layout, { fromServer: true });
+}
+
+function _standalonePanelStopFloatDrag() {
+  if (!_standalonePanelFloatDrag) return;
+  document.removeEventListener('mousemove', _standalonePanelOnFloatDrag);
+  document.removeEventListener('mouseup', _standalonePanelStopFloatDrag);
+  _standalonePanelFloatDrag = null;
+  _standalonePanelSaveLayout();
+}
+
+function standalonePanelResizeBottom(clientY) {
+  var shell = document.getElementById('standalone-main-stack');
+  if (!shell || !shell.getBoundingClientRect) return;
+  var rect = shell.getBoundingClientRect();
+  var next = rect.bottom - clientY;
+  var bounds = _standaloneBottomSizeBounds();
+  var layout = _standaloneClone(_standalonePanelCurrentLayout());
+  layout.bottom.size = _standaloneClamp(next, bounds.min, bounds.max, layout.bottom.size);
+  layout.bottom.open = true;
+  _standalonePanelSetLayout(layout, { fromServer: true });
+}
+
+function standalonePanelResizeRight(clientX) {
+  var shell = document.getElementById('standalone-sidebar-shell');
+  if (!shell || !shell.getBoundingClientRect) return;
+  var rect = shell.getBoundingClientRect();
+  var next = rect.right - clientX;
+  var bounds = _standaloneRightSizeBounds();
+  var layout = _standaloneClone(_standalonePanelCurrentLayout());
+  layout.right.size = _standaloneClamp(next, bounds.min, bounds.max, layout.right.size);
+  layout.right.open = true;
+  _standalonePanelSetLayout(layout, { fromServer: true });
+}
+
+(function() {
+  function bindHandle(id, onMove, onStop) {
+    var handle = document.getElementById(id);
+    if (!handle) return;
+    var dragging = false;
+    handle.addEventListener('mousedown', function(event) {
+      if (!_standalonePanelsEnabled()) return;
+      event.preventDefault();
+      dragging = true;
+      document.body.classList.add('workspace-resizing');
+    });
+    document.addEventListener('mousemove', function(event) {
+      if (!dragging) return;
+      onMove(event);
+    });
+    document.addEventListener('mouseup', function() {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove('workspace-resizing');
+      if (typeof onStop === 'function') onStop();
+    });
+  }
+  bindHandle('standalone-bottom-resize-handle', function(event) {
+    standalonePanelResizeBottom(event.clientY);
+  }, function() {
+    _standalonePanelSaveLayout();
+  });
+  bindHandle('standalone-rail-resize-handle', function(event) {
+    standalonePanelResizeRight(event.clientX);
+  }, function() {
+    _standalonePanelSaveLayout();
+  });
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('resize', function() {
+      if (!_standalonePanelsEnabled() || !_standalonePanelLayout) return;
+      _standalonePanelSetLayout(_standalonePanelCurrentLayout(), { fromServer: true });
+    });
+  }
+})();

@@ -179,6 +179,17 @@ function _boardWideLayoutActive(panel) {
   return _boardPanelWidth(panel || document.getElementById('panel-board')) >= _boardWideModeMinWidth;
 }
 
+function _boardPanelVisible() {
+  if (typeof _standalonePanelSurfaceVisible === 'function'
+      && typeof _standalonePanelsEnabled === 'function'
+      && _standalonePanelsEnabled()) {
+    return _standalonePanelSurfaceVisible('board');
+  }
+  var panel = document.getElementById('bottom-panel');
+  if (!panel || !panel.classList) return true;
+  return !panel.classList.contains('collapsed');
+}
+
 function _boardGroupTaskCount() {
   return Object.keys(_boardScopedTasks(false)).length;
 }
@@ -892,7 +903,7 @@ function _boardRenderWideLaneColumn(lane, allTasks, childrenOf, filtersActive) {
 function renderBoard() {
   var panel = document.getElementById('panel-board');
   if (!panel) return;
-  if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') {
+  if (!_boardPanelVisible()) {
     _boardClearLaneEntryRefresh();
     return;
   }
@@ -3142,9 +3153,8 @@ function _boardCloseFilterDropdown() {
 /* ---- Keyboard nav --------------------------------------------------- */
 
 function boardKeydown(e) {
-  // Only handle if board panel is open
-  var panel = document.getElementById('bottom-panel');
-  if (!panel || panel.classList.contains('collapsed')) return false;
+  // Only handle if board panel is visible
+  if (!_boardPanelVisible()) return false;
 
   var lanes = _boardVisibleLanes();
   var tasks = _boardTasksInLane(_boardSelectedLane);

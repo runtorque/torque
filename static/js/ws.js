@@ -83,7 +83,8 @@ function connect() {
           && _boardEligibilityActionWaiting
           && typeof _boardHandleEligibilityActionList === 'function') {
         _boardHandleEligibilityActionList(msg);
-      } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
+      } else if ((typeof _panelAppVisible === 'function' && _panelAppVisible('actions'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions')) {
         tplEditorReceiveList(msg);
       } else {
         // Ignore unsolicited action lists instead of reopening the
@@ -100,18 +101,18 @@ function connect() {
           && _boardEligibilityTemplateWaiting
           && typeof _boardHandleEligibilityTemplateList === 'function') {
         _boardHandleEligibilityTemplateList(msg);
-      } else if (typeof _activePanelApp !== 'undefined'
-          && _activePanelApp === 'templates'
+      } else if (((typeof _panelAppVisible === 'function' && _panelAppVisible('templates'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates'))
           && typeof agentTemplateReceiveList === 'function') {
         agentTemplateReceiveList(msg);
-      } else if (typeof _activePanelApp !== 'undefined'
-          && _activePanelApp === 'actions'
+      } else if (((typeof _panelAppVisible === 'function' && _panelAppVisible('actions'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions'))
           && typeof renderTemplatesEditor === 'function') {
         renderTemplatesEditor();
       }
     } else if (msg.type === 'template_detail') {
-      if (typeof _activePanelApp !== 'undefined'
-          && _activePanelApp === 'templates'
+      if (((typeof _panelAppVisible === 'function' && _panelAppVisible('templates'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates'))
           && typeof agentTemplateReceiveDetail === 'function') {
         agentTemplateReceiveDetail(msg);
       }
@@ -120,7 +121,8 @@ function connect() {
         _handleRenderedTemplate(msg);
       }
     } else if (msg.type === 'action_detail') {
-      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
+      if ((typeof _panelAppVisible === 'function' && _panelAppVisible('actions'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions')) {
         tplEditorReceiveDetail(msg);
       } else {
         _showActionVarForm(msg);
@@ -178,8 +180,8 @@ function _handleWeaverSessionMapMessage(msg) {
     _weaverReceiveSessionMap(msg);
     return;
   }
-  if (typeof _activePanelApp !== 'undefined'
-      && _activePanelApp === 'weaver'
+  if (((typeof _panelAppVisible === 'function' && _panelAppVisible('weaver'))
+      || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'weaver'))
       && typeof renderWeaverPanel === 'function') {
     var currentGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
     if (!currentGroup || currentGroup === group) renderWeaverPanel();
@@ -212,6 +214,11 @@ function _triggerDoneFlourishesFromTaskSnapshot(previousTasks, nextTasks) {
 function _handleFullState(msg) {
   const prevActive = state.active_session_id;
   const prevTasks = state.board_tasks || {};
+  const prevStandaloneVisibleApps = (typeof _standaloneVisiblePanelApps === 'function'
+    && typeof _standalonePanelsEnabled === 'function'
+    && _standalonePanelsEnabled())
+    ? _standaloneVisiblePanelApps().slice()
+    : [];
   const shouldRestorePanel = typeof _panelStateRestored !== 'undefined'
     ? !_panelStateRestored
     : false;
@@ -219,6 +226,20 @@ function _handleFullState(msg) {
   _awaitingFullState = false;
   state = msg;
   _applyRuntimeMode();
+  if (typeof _standalonePanelSetLayoutFromState === 'function'
+      && typeof _standalonePanelsEnabled === 'function'
+      && _standalonePanelsEnabled()) {
+    _standalonePanelSetLayoutFromState(
+      (state && state.standalone_panel_layout && Object.keys(state.standalone_panel_layout).length)
+        ? state.standalone_panel_layout
+        : _migrateStandalonePanelLayoutFromLegacyState(),
+      { fromServer: true }
+    );
+    if (!shouldRestorePanel
+        && typeof _syncVisibleStandalonePanelApps === 'function') {
+      _syncVisibleStandalonePanelApps(prevStandaloneVisibleApps);
+    }
+  }
   if (typeof _boardFiltersByGroup !== 'undefined') _boardFiltersByGroup = null;
   if (typeof _boardSavedViewsByGroup !== 'undefined') _boardSavedViewsByGroup = null;
   if (typeof _boardLaneSortsByGroup !== 'undefined') _boardLaneSortsByGroup = null;
@@ -285,15 +306,21 @@ function _handleDelta(msg) {
     _weaverMarkSessionMapStale(sessionMapGroups);
   }
   const nextGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
-  const activeSurface = typeof _activePanelSurface === 'function'
-    ? _activePanelSurface()
-    : '';
+  const activeSurfaces = typeof _currentPanelSurfaces === 'function'
+    ? _currentPanelSurfaces()
+    : [];
   if (prevGroup !== nextGroup) {
-    if (activeSurface) invalidations[activeSurface] = true;
-  } else if (activeSurface
-      && invalidations[activeSurface]
-      && !_opsAffectCurrentSurfaceGroup(activeSurface, nextGroup, msg.ops, opGroupHints)) {
-    invalidations[activeSurface] = false;
+    activeSurfaces.forEach(function(surface) {
+      if (surface) invalidations[surface] = true;
+    });
+  } else {
+    activeSurfaces.forEach(function(surface) {
+      if (surface
+          && invalidations[surface]
+          && !_opsAffectCurrentSurfaceGroup(surface, nextGroup, msg.ops, opGroupHints)) {
+        invalidations[surface] = false;
+      }
+    });
   }
   if (!dragInProgress) {
     if (typeof renderInvalidatedSurfaces === 'function') {
@@ -372,6 +399,9 @@ function _deltaSurfaceInvalidations(ops) {
 }
 
 function _applyUiSurfaceInvalidation(flags, key) {
+  if (key === 'standalone_panel_layout') {
+    _markSurface(flags, 'board', 'actions', 'context', 'events', 'weaver', 'templates');
+  }
   if (key === 'events_dismissed_attention') {
     _markSurface(flags, 'events');
   }
@@ -626,7 +656,20 @@ function _applyDelta(ops) {
         break;
 
       case 'ui_update':
+        var prevStandaloneVisibleApps = (op.key === 'standalone_panel_layout'
+          && typeof _standaloneVisiblePanelApps === 'function'
+          && typeof _standalonePanelsEnabled === 'function'
+          && _standalonePanelsEnabled())
+          ? _standaloneVisiblePanelApps().slice()
+          : [];
         state[op.key] = op.value;
+        if (op.key === 'standalone_panel_layout'
+            && typeof _standalonePanelSetLayoutFromState === 'function') {
+          _standalonePanelSetLayoutFromState(op.value || {}, { fromServer: true });
+          if (typeof _syncVisibleStandalonePanelApps === 'function') {
+            _syncVisibleStandalonePanelApps(prevStandaloneVisibleApps);
+          }
+        }
         if (op.key === 'board_filters_by_group'
             && typeof _boardFiltersByGroup !== 'undefined') {
           _boardFiltersByGroup = null;

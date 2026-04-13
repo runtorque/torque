@@ -11,6 +11,60 @@ var _embeddedPanelMinHeight = 180;
 var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
 
+function _panelAppVisible(appName) {
+  if (!appName) return false;
+  if (typeof _standalonePanelSurfaceVisible === 'function'
+      && typeof _standalonePanelsEnabled === 'function'
+      && _standalonePanelsEnabled()) {
+    return _standalonePanelSurfaceVisible(appName);
+  }
+  return typeof _activePanelApp !== 'undefined' && _activePanelApp === appName;
+}
+
+function _loadPanelApp(appName) {
+  if (appName === 'actions' && typeof tplEditorLoad === 'function') tplEditorLoad();
+  if (appName === 'templates') {
+    if (typeof _agentsPanelView !== 'undefined' && _agentsPanelView === 'history') {
+      if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
+    } else if (typeof agentTemplateEditorLoad === 'function') {
+      agentTemplateEditorLoad();
+    }
+  }
+}
+
+function _loadVisibleStandalonePanelApps() {
+  if (typeof _standaloneVisiblePanelApps !== 'function'
+      || typeof _standalonePanelsEnabled !== 'function'
+      || !_standalonePanelsEnabled()) {
+    return;
+  }
+  var seen = {};
+  _standaloneVisiblePanelApps().forEach(function(appName) {
+    if (!appName || seen[appName]) return;
+    seen[appName] = true;
+    _loadPanelApp(appName);
+  });
+}
+
+function _syncVisibleStandalonePanelApps(previousVisibleApps) {
+  if (typeof _standaloneVisiblePanelApps !== 'function'
+      || typeof _standalonePanelsEnabled !== 'function'
+      || !_standalonePanelsEnabled()) {
+    return;
+  }
+  var prev = {};
+  var list = Array.isArray(previousVisibleApps) ? previousVisibleApps : [];
+  list.forEach(function(appName) {
+    if (appName) prev[appName] = true;
+  });
+  var seen = {};
+  _standaloneVisiblePanelApps().forEach(function(appName) {
+    if (!appName || seen[appName]) return;
+    seen[appName] = true;
+    if (!previousVisibleApps || !prev[appName]) _loadPanelApp(appName);
+  });
+}
+
 function _panelResizeBounds() {
   var embedded = !!(typeof document !== 'undefined'
     && document
@@ -36,6 +90,15 @@ function _normalizePanelHeight(height) {
 }
 
 function togglePanel(appName) {
+  if (typeof _standaloneTogglePanel === 'function'
+      && _standalonePanelsEnabled()) {
+    var handled = _standaloneTogglePanel(appName);
+    if (handled) {
+      if (_panelAppVisible(appName)) _loadPanelApp(appName);
+      if (typeof renderActivePanel === 'function') renderActivePanel();
+    }
+    return handled;
+  }
   var panel = document.getElementById('bottom-panel');
   var buttons = document.querySelectorAll('.taskbar-app');
 
@@ -74,14 +137,7 @@ function togglePanel(appName) {
     });
     // Render the active app
     if (appName === 'board') renderBoard();
-    if (appName === 'actions') tplEditorLoad();
-    if (appName === 'templates') {
-      if (typeof _agentsPanelView !== 'undefined' && _agentsPanelView === 'history') {
-        if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
-      } else if (typeof agentTemplateEditorLoad === 'function') {
-        agentTemplateEditorLoad();
-      }
-    }
+    _loadPanelApp(appName);
     if (appName === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
     if (appName === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
@@ -93,6 +149,14 @@ function togglePanel(appName) {
 function _restorePanelState() {
   if (_panelStateRestored) return;
   _panelStateRestored = true;
+
+  if (typeof _restoreStandalonePanelState === 'function'
+      && _standalonePanelsEnabled()) {
+    _restoreStandalonePanelState();
+    _loadVisibleStandalonePanelApps();
+    if (typeof renderActivePanel === 'function') renderActivePanel();
+    return;
+  }
 
   // panel_active: new key; backward compat from board_panel_open
   var active = state.panel_active || '';
@@ -120,14 +184,7 @@ function _restorePanelState() {
       b.classList.toggle('active', b.dataset.app === active);
     });
     if (active === 'board') renderBoard();
-    if (active === 'actions') tplEditorLoad();
-    if (active === 'templates') {
-      if (typeof _agentsPanelView !== 'undefined' && _agentsPanelView === 'history') {
-        if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
-      } else if (typeof agentTemplateEditorLoad === 'function') {
-        agentTemplateEditorLoad();
-      }
-    }
+    _loadPanelApp(active);
     if (active === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
     if (active === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
@@ -188,7 +245,10 @@ function _scheduleStandaloneBoardLayoutRender() {
     return;
   }
   if (typeof renderBoard !== 'function') return;
-  if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board') return;
+  if (typeof _standalonePanelSurfaceVisible === 'function'
+      && !_standalonePanelSurfaceVisible('board')) {
+    return;
+  }
   if (_workspaceBoardRenderPending || typeof requestAnimationFrame !== 'function') return;
   _workspaceBoardRenderPending = true;
   requestAnimationFrame(function() {
@@ -465,6 +525,14 @@ function relaunchFocused() {
   if (cell && cell.status === 'stopped') relaunchAgent(focusedItemId);
 }
 
+function _boardShortcutsEnabled() {
+  if (typeof _standalonePanelSurfaceVisible === 'function'
+      && _standalonePanelsEnabled()) {
+    return _standalonePanelSurfaceVisible('board');
+  }
+  return _activePanelApp === 'board';
+}
+
 /* -- Main keyboard handler ----------------------------------------------- */
 
 document.addEventListener('keydown', (e) => {
@@ -496,7 +564,7 @@ document.addEventListener('keydown', (e) => {
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
 
   // Board keyboard shortcuts (when board is open, arrows/enter/delete go to board)
-  if (_activePanelApp === 'board') {
+  if (_boardShortcutsEnabled()) {
     if (boardKeydown(e)) { e.preventDefault(); return; }
   }
 

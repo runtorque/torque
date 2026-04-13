@@ -250,7 +250,7 @@ function handleContextEntries(msg) {
   if (!_contextEditor && !_contextSelectedId) {
     _contextCompactDetailOpen = false;
   }
-  if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'context') {
+  if (typeof _panelAppVisible === 'function' ? _panelAppVisible('context') : (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'context')) {
     renderContextPanel();
   }
 }
@@ -264,7 +264,7 @@ function handleContextEntry(msg) {
   _contextEditor = null;
   _contextCompactDetailOpen = true;
   _contextRequestEntries(true);
-  if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'context') {
+  if (typeof _panelAppVisible === 'function' ? _panelAppVisible('context') : (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'context')) {
     renderContextPanel();
   }
 }
@@ -275,7 +275,7 @@ function handleContextError(msg) {
   if (typeof _showToast === 'function' && _contextListError) {
     _showToast(_contextListError, 'error');
   }
-  if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'context') {
+  if (typeof _panelAppVisible === 'function' ? _panelAppVisible('context') : (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'context')) {
     renderContextPanel();
   }
 }

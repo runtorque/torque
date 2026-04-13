@@ -35,9 +35,12 @@ function _selectionAgentRootId(id) {
 
 function _syncPanelsAfterSelectionChange(prevSelectedId) {
   if (prevSelectedId === selectedAgentId) return;
+  var standaloneVisible = typeof _standaloneVisiblePanelApps === 'function'
+    && _standalonePanelsEnabled()
+    && _standaloneVisiblePanelApps().length > 0;
   if (typeof renderActivePanel === 'function'
-      && typeof _activePanelApp !== 'undefined'
-      && _activePanelApp) {
+      && (standaloneVisible
+        || (typeof _activePanelApp !== 'undefined' && _activePanelApp))) {
     renderActivePanel();
   }
 }
