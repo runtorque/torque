@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import contextlib
 import errno
 import fcntl
@@ -38,6 +39,9 @@ _PROMPT_HOOK_LIMIT = 512
 _READINESS_BUFFER_LIMIT = 20_000
 
 
+_Utf8IncrementalDecoder = codecs.getincrementaldecoder("utf-8")
+
+
 @dataclass
 class _PtySession:
     session_id: str
@@ -53,6 +57,9 @@ class _PtySession:
     reader_task: Optional[asyncio.Task] = None
     bootstrap_dir: str = ""
     claude_config_dir: str = ""
+    decoder: codecs.IncrementalDecoder = field(
+        default_factory=lambda: _Utf8IncrementalDecoder(errors="replace")
+    )
 
 
 class LocalPtyAdapter:
@@ -586,8 +593,15 @@ class LocalPtyAdapter:
                         break
                     raise
                 if not chunk:
+                    text = session.decoder.decode(b"", final=True)
+                    if text:
+                        session.buffer = (session.buffer + text)[-_BUFFER_LIMIT:]
+                        self._process_shell_integration(session, text)
+                        await self._emit_terminal_output(session, text)
                     break
-                text = chunk.decode("utf-8", errors="replace")
+                text = session.decoder.decode(chunk)
+                if not text:
+                    continue
                 session.buffer = (session.buffer + text)[-_BUFFER_LIMIT:]
                 self._process_shell_integration(session, text)
                 await self._emit_terminal_output(session, text)
