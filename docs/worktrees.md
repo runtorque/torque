@@ -167,6 +167,8 @@ This is why a stopped agent can often be relaunched back into the same isolated 
 
 Task boundaries are reconstructed from persisted task metadata on restart. If the recorded boundary SHA no longer matches the branch tip, Loom treats that boundary as non-clean and refuses to present it as a merge target until a new clean boundary is recorded.
 
+When Loom itself performs a successful rebase for a clean shared worktree, it re-anchors the latest clean boundary to the rebased branch tip instead of leaving that boundary stale. Loom does not do this if the worktree is dirty, if the recorded boundary did not match the pre-rebase tip, or if follow-up work has already started from that boundary.
+
 ## Merging
 
 When an agent's work is complete and ready to merge back to the base branch, use the merge worktree option:

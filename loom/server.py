@@ -44,6 +44,7 @@ from .worktree_boundaries import (
     latest_boundary_task,
     mark_branch_boundaries_merged,
     queued_successor_tasks,
+    refresh_latest_boundary_after_rebase,
     retarget_queued_successor_tasks,
     started_successor_tasks,
     task_boundary,
@@ -2950,11 +2951,35 @@ async def main(connection=None):
                 aid = data.get("id", "")
                 if cell and cell.worktree_path:
                     check = await worktree_mgr.check_merge_conflicts(cell)
+                    previous_head_sha = await worktree_mgr.current_head(cell) or ""
                     ok = await worktree_mgr.rebase_onto_base(cell)
                     if ok:
+                        rebased_head_sha = (
+                            await worktree_mgr.current_head(cell) or ""
+                        )
+                        dirty_after_rebase = (
+                            await worktree_mgr.has_uncommitted_changes(cell)
+                        )
+                        refreshed_boundary = None
+                        if not dirty_after_rebase:
+                            refreshed_boundary = (
+                                refresh_latest_boundary_after_rebase(
+                                    state.board_tasks.values(),
+                                    repo_root=(
+                                        cell.worktree_repo_root
+                                        or cell.git_root
+                                        or ""
+                                    ),
+                                    branch=cell.worktree_branch or "",
+                                    previous_head_sha=previous_head_sha,
+                                    rebased_head_sha=rebased_head_sha,
+                                )
+                            )
+                        if refreshed_boundary:
+                            _save_task_record(refreshed_boundary)
                         cell.worktree_checkpoints = \
                             await worktree_mgr.count_commits(cell)
-                        cell.worktree_dirty = False
+                        cell.worktree_dirty = dirty_after_rebase
                         cell.worktree_diff = {}
                         cell.worktree_changed_files = []
                         state._emit_agent(cell)
