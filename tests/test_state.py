@@ -1,4 +1,5 @@
 import importlib
+import json
 import sys
 import tempfile
 import types
@@ -1078,4 +1079,110 @@ class MatrixStateBoardWorkflowTests(unittest.TestCase):
         self.assertEqual(
             state.schedule_get_due("2026-04-09T08:00:00+00:00"),
             [later],
+        )
+
+
+class MatrixStateWeaverStreamTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        _install_aiohttp_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+
+    def _make_state_with_open_stream(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        state.weaver_settings["g"] = self.state_mod.WeaverSettings(group="g")
+
+        worker = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            slug="worker",
+            group="g",
+            cell_type="agent",
+            status="idle",
+            worktree_path="/repo/.loom/worktrees/agent-1",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/worker",
+            git_root="/repo",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+
+        product = self.state_mod.BoardTask(
+            id="LOOM:1",
+            task="Add Events tab",
+            group="g",
+            lane="Done",
+            action_name="feature/implement",
+            agent_id=worker.id,
+            created_at="2026-04-07T10:00:00+00:00",
+            updated_at="2026-04-07T10:30:00+00:00",
+            lane_entered_at="2026-04-07T10:00:00+00:00",
+        )
+        review = self.state_mod.BoardTask(
+            id="LOOM:1:1",
+            task="Review Events implementation",
+            group="g",
+            lane="Done",
+            action_name="feature/review",
+            parent_task_id=product.id,
+            pipeline_root_id=product.id,
+            pipeline_depth=1,
+            agent_id=worker.id,
+            created_at="2026-04-07T11:00:00+00:00",
+            updated_at="2026-04-07T11:30:00+00:00",
+            lane_entered_at="2026-04-07T11:00:00+00:00",
+            worktree_boundary={
+                "version": "1",
+                "repo_root": "/repo",
+                "branch": "loom/worker",
+                "status": "open",
+                "recorded_at": "2026-04-07T11:30:00+00:00",
+                "commit_sha": "abc123",
+                "recorded_by_agent_id": worker.id,
+            },
+        )
+        state.board_tasks[product.id] = product
+        state.board_tasks[review.id] = review
+        return state, product
+
+    def test_to_dict_includes_weaver_streams_snapshot(self):
+        state, _product = self._make_state_with_open_stream()
+
+        payload = state.to_dict()
+
+        self.assertIn("weaver_streams", payload)
+        self.assertIn("g", payload["weaver_streams"])
+        summary = payload["weaver_streams"]["g"]
+        self.assertEqual(summary["count"], 1)
+        self.assertEqual(summary["items"][0]["branch"], "loom/worker")
+        self.assertEqual(summary["items"][0]["state"], "ready_to_merge")
+
+    async def test_broadcast_appends_weaver_stream_deltas_for_task_changes(self):
+        state, product = self._make_state_with_open_stream()
+
+        class FakeWS:
+            def __init__(self):
+                self.messages = []
+
+            async def send_str(self, msg):
+                self.messages.append(json.loads(msg))
+
+        ws = FakeWS()
+        state._ws_clients.add(ws)
+        state._emit("task_upsert", **self.state_mod.asdict(product))
+
+        await state.broadcast()
+
+        self.assertEqual(len(ws.messages), 1)
+        ops = ws.messages[0]["ops"]
+        task_ops = [op for op in ops if op["op"] == "task_upsert"]
+        stream_ops = [op for op in ops if op["op"] == "weaver_streams"]
+        self.assertEqual(len(task_ops), 1)
+        self.assertEqual(len(stream_ops), 1)
+        self.assertEqual(stream_ops[0]["group"], "g")
+        self.assertEqual(stream_ops[0]["streams"]["count"], 1)
+        self.assertEqual(
+            stream_ops[0]["streams"]["items"][0]["branch"],
+            "loom/worker",
         )
