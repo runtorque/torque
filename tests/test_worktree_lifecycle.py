@@ -176,6 +176,21 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lines.count("etl/service-a/node_modules"), 1)
         self.assertEqual(lines.count("etl/service-b/node_modules"), 1)
 
+    async def test_get_repo_root_returns_common_root_for_linked_worktree(self):
+        cell = self._make_cell()
+
+        wt_path = await self.mgr.create(
+            cell,
+            str(self.repo_root),
+            base_branch="main",
+        )
+
+        self.assertIsNotNone(wt_path)
+        self.assertEqual(
+            await self.mgr.get_repo_root(wt_path),
+            str(self.repo_root.resolve()),
+        )
+
     async def test_blank_custom_worktree_name_preserves_default_naming(self):
         cell = self._make_cell()
 
@@ -389,6 +404,30 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             await self._git("rev-parse", "HEAD", cwd=wt_path),
             await self._git("rev-parse", "main"),
+        )
+
+    async def test_is_branch_merged_treats_reset_to_base_branch_as_prunable(self):
+        cell = self._make_cell()
+        wt_path = await self.mgr.create(cell, str(self.repo_root), base_branch="main")
+
+        self.assertIsNotNone(wt_path)
+
+        readme = Path(wt_path) / "README.md"
+        readme.write_text("line one\nmerged from worktree\n")
+        commit_sha = await self.mgr.checkpoint(cell, message="Finish worker change")
+        self.assertTrue(commit_sha)
+
+        merge_result = await self.mgr.server_merge(cell, "Merge worker change")
+
+        self.assertTrue(merge_result["ok"], merge_result.get("error"))
+        self.assertTrue(await self.mgr.reset_to_base(cell))
+        self.assertFalse(await self.mgr.is_merged(cell))
+        self.assertTrue(
+            await self.mgr.is_branch_merged(
+                str(self.repo_root),
+                branch=cell.worktree_branch,
+                base_branch=cell.worktree_base_branch,
+            )
         )
 
     async def test_check_merge_conflicts_reports_binary_add_add_details(self):

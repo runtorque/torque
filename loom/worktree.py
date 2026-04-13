@@ -344,6 +344,15 @@ def _resolve_worktree_base_path(repo_root: str, base_dir: str) -> str:
     return os.path.realpath(os.path.join(repo_root, base_dir))
 
 
+def _repo_root_from_common_dir(common_dir: str) -> str:
+    common_dir = os.path.realpath(os.path.expanduser(common_dir or ""))
+    if not common_dir:
+        return ""
+    if os.path.basename(common_dir) == ".git":
+        return os.path.dirname(common_dir)
+    return ""
+
+
 class WorktreeManager:
     """Manages git worktrees for agent isolation."""
 
@@ -367,18 +376,33 @@ class WorktreeManager:
             return None
 
     async def get_repo_root(self, directory: str) -> Optional[str]:
-        """Find the git repo root for a directory. Returns None if not a repo."""
+        """Find Loom's common repo root for a directory.
+
+        For linked worktrees this returns the main/shared repo root rather than
+        the linked worktree path so owner and boundary lookups share one key.
+        Returns None if *directory* is not inside a git repo.
+        """
         directory = os.path.expanduser(directory)
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", "-C", directory, "rev-parse", "--show-toplevel",
+                "git", "-C", directory, "rev-parse",
+                "--path-format=absolute",
+                "--show-toplevel",
+                "--git-common-dir",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
             stdout, _ = await proc.communicate()
             if proc.returncode != 0:
                 return None
-            return stdout.decode().strip()
+            lines = [line.strip() for line in stdout.decode().splitlines()
+                     if line.strip()]
+            if not lines:
+                return None
+            common_root = _repo_root_from_common_dir(
+                lines[1] if len(lines) > 1 else ""
+            )
+            return common_root or lines[0]
         except Exception:
             log.exception("Failed to get repo root for %s", directory)
             return None
@@ -1296,7 +1320,15 @@ class WorktreeManager:
     async def is_branch_merged(self, repo_root: str, *,
                                branch: str,
                                base_branch: str) -> bool:
-        """Check merge status for a branch without requiring a live cell."""
+        """Check cleanup merge status for a branch without a live cell.
+
+        Treat a branch tip that already equals the base tip as merged so stale
+        worktrees reset to base remain safely prunable.
+        """
+        branch_sha = await self.rev_parse(repo_root, branch)
+        base_sha = await self.rev_parse(repo_root, base_branch)
+        if branch_sha and branch_sha == base_sha:
+            return True
         probe = type("WorktreeProbe", (), {
             "name": branch or "worktree",
             "worktree_path": repo_root,

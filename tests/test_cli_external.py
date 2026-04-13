@@ -2,6 +2,8 @@ import contextlib
 import importlib.util
 import io
 import os
+import subprocess
+import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -20,6 +22,59 @@ def _load_cli_module():
 class CliExternalTicketTests(unittest.TestCase):
     def setUp(self):
         self.cli = _load_cli_module()
+
+    def test_resolve_repo_root_returns_common_root_for_linked_worktree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            subprocess.run(
+                ["git", "-C", str(repo_root), "init", "-b", "main"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_root), "config", "user.name", "Loom Test"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_root), "config", "user.email", "loom@example.com"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            (repo_root / "README.md").write_text("hello\n")
+            subprocess.run(
+                ["git", "-C", str(repo_root), "add", "README.md"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo_root), "commit", "-m", "Initial commit"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            worktree_path = repo_root / ".loom" / "worktrees" / "worker"
+            worktree_path.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                [
+                    "git", "-C", str(repo_root),
+                    "worktree", "add", "-b", "loom/worker",
+                    str(worktree_path), "main",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            self.assertEqual(
+                self.cli.resolve_repo_root(str(worktree_path)),
+                str(repo_root.resolve()),
+            )
 
     def test_ai_done_forwards_post_external_flag(self):
         calls = []

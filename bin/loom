@@ -535,11 +535,16 @@ def resolve_group(state_data, identifier):
 
 
 def resolve_repo_root(identifier=""):
-    """Resolve an explicit path or current directory to a git repo root."""
+    """Resolve an explicit path/current directory to Loom's common repo root."""
     base = os.path.expanduser(identifier.strip()) if identifier else os.getcwd()
     try:
         proc = subprocess.run(
-            ["git", "-C", base, "rev-parse", "--show-toplevel"],
+            [
+                "git", "-C", base, "rev-parse",
+                "--path-format=absolute",
+                "--show-toplevel",
+                "--git-common-dir",
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -548,7 +553,14 @@ def resolve_repo_root(identifier=""):
         die(f"Failed to run git: {exc}")
     if proc.returncode != 0:
         die(f"Not inside a git repository: {base}")
-    return proc.stdout.strip()
+    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    if not lines:
+        die(f"Could not resolve git repository root: {base}")
+    if len(lines) > 1:
+        common_dir = os.path.realpath(lines[1])
+        if os.path.basename(common_dir) == ".git":
+            return os.path.dirname(common_dir)
+    return lines[0]
 
 
 def resolve_task(state_data, identifier):

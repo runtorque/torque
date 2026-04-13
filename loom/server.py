@@ -1653,7 +1653,11 @@ async def main(connection=None):
                     worktree_base_branch=base_branch,
                 )
                 dirty = await worktree_mgr.has_uncommitted_changes(probe)
-                merged = await worktree_mgr.is_merged(probe)
+                merged = await worktree_mgr.is_branch_merged(
+                    repo_root,
+                    branch=branch,
+                    base_branch=base_branch,
+                )
 
             prunable = False
             prune_reason = ""
