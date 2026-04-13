@@ -111,6 +111,7 @@ from .server_prompts import (
     build_dispatch_postscript,
     build_loom_system_prompt,
 )
+from .weaver_session_map import build_weaver_session_map
 
 
 def _should_install_keybindings() -> bool:
@@ -5957,6 +5958,20 @@ async def main(connection=None):
                 entry_type = data.get("entry_type", "")
                 entries = state.journal_read(group, tail, entry_type)
                 result = {"type": "journal", "entries": entries}
+
+            elif cmd == "weaver_session_map_read":
+                group = str(data.get("group", "") or "").strip()
+                if not group:
+                    result = {
+                        "type": "error",
+                        "message": "Group is required",
+                    }
+                else:
+                    result = {
+                        "type": "weaver_session_map",
+                        "group": group,
+                        "session_map": build_weaver_session_map(state, group),
+                    }
 
             elif cmd == "weaver_journal_delete":
                 group = data.get("group", "")

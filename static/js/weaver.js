@@ -2,6 +2,8 @@
 
 var _weaverReplyDraft = '';
 var _weaverActiveTabByGroup = {};
+var _weaverJournalSubviewByGroup = {};
+var _weaverSessionMapMetaByGroup = {};
 var _weaverHealthOrder = ['blocked', 'stale-in-progress', 'stalled', 'thrashing', 'idle-risk'];
 var _weaverHealthLabels = {
   'blocked': 'Blocked',
@@ -131,6 +133,96 @@ function _weaverActiveTab(group) {
   var tab = _weaverActiveTabByGroup[group] || 'journal';
   if (tab === 'events' || tab === 'worklog') return tab;
   return 'journal';
+}
+
+function _weaverJournalSubview(group) {
+  if (!group) return 'journal';
+  return _weaverJournalSubviewByGroup[group] === 'session_map'
+    ? 'session_map'
+    : 'journal';
+}
+
+function _weaverSessionMapMeta(group) {
+  if (!group) return { loading: false, stale: false };
+  if (!_weaverSessionMapMetaByGroup[group]) {
+    _weaverSessionMapMetaByGroup[group] = { loading: false, stale: false };
+  }
+  return _weaverSessionMapMetaByGroup[group];
+}
+
+function _weaverSessionMapData(group) {
+  if (!group || !state || !state.weaver_session_maps) return null;
+  return state.weaver_session_maps[group] || null;
+}
+
+function _weaverRequestSessionMap(group, force) {
+  if (!group) return;
+  var meta = _weaverSessionMapMeta(group);
+  var hasData = !!_weaverSessionMapData(group);
+  if (meta.loading) return;
+  if (!force && hasData && !meta.stale) return;
+  meta.loading = true;
+  send({ cmd: 'weaver_session_map_read', group: group });
+}
+
+function _weaverIsSessionMapOpen(group) {
+  return _weaverJournalSubview(group) === 'session_map';
+}
+
+function _weaverShouldRenderCurrentGroup(group) {
+  return !!group
+    && typeof _activePanelApp !== 'undefined'
+    && _activePanelApp === 'weaver'
+    && _weaverCurrentGroup() === group;
+}
+
+function weaverOpenSessionMap(group) {
+  group = group || _weaverCurrentGroup();
+  if (!group) return;
+  _weaverJournalSubviewByGroup[group] = 'session_map';
+  _weaverRequestSessionMap(group, false);
+  renderWeaverPanel();
+}
+
+function weaverCloseSessionMap(group) {
+  group = group || _weaverCurrentGroup();
+  if (!group) return;
+  _weaverJournalSubviewByGroup[group] = 'journal';
+  renderWeaverPanel();
+}
+
+function weaverRefreshSessionMap(group) {
+  group = group || _weaverCurrentGroup();
+  if (!group) return;
+  _weaverRequestSessionMap(group, true);
+  renderWeaverPanel();
+}
+
+function _weaverReceiveSessionMap(msg) {
+  var group = (msg && msg.group) || '';
+  if (!group) return;
+  var meta = _weaverSessionMapMeta(group);
+  meta.loading = false;
+  meta.stale = false;
+  if (_weaverShouldRenderCurrentGroup(group)) {
+    renderWeaverPanel();
+  }
+}
+
+function _weaverMarkSessionMapStale(groups) {
+  if (!groups || !groups.length) return;
+  var shouldRender = false;
+  for (var i = 0; i < groups.length; i++) {
+    var group = groups[i];
+    if (!group) continue;
+    var meta = _weaverSessionMapMeta(group);
+    meta.stale = true;
+    if (_weaverIsSessionMapOpen(group)) {
+      _weaverRequestSessionMap(group, false);
+      if (_weaverShouldRenderCurrentGroup(group)) shouldRender = true;
+    }
+  }
+  if (shouldRender) renderWeaverPanel();
 }
 
 function _weaverRenderTabs(group, activeTab) {
@@ -519,6 +611,7 @@ function _weaverRenderJournal(group) {
   }
 
   var html = '';
+  var subview = _weaverJournalSubview(group);
 
   // Pending question banner
   var ws = _weaverGetSettings(group);
@@ -550,36 +643,392 @@ function _weaverRenderJournal(group) {
     html += '</div>';
   }
 
-  html += _weaverRenderOpenStreams(group);
-  html += _weaverRenderTaskHealth(group);
-  html += _weaverRenderVerificationSummary(group);
-  html += _weaverRenderBoundarySummary(group);
+  html += _weaverRenderJournalToolbar(group, subview);
+  if (subview === 'session_map') {
+    html += _weaverRenderSessionMap(group);
+    return html;
+  }
 
   // Journal entries come from state.weaver_journal (populated by delta ops)
   var entries = (state.weaver_journal && state.weaver_journal[group]) || [];
-  if (!entries.length && !html) {
-    return '<div class="weaver-empty">No journal entries yet.</div>';
+  if (entries.length) {
+    html += _weaverRenderJournalEntries(entries, true);
+  } else {
+    html += '<div class="weaver-empty">No journal entries yet.</div>';
+  }
+  return html;
+}
+
+function _weaverRenderJournalToolbar(group, subview) {
+  var groupJs = JSON.stringify(String(group || ''));
+  var html = '<div class="weaver-session-map-toolbar">';
+  html += '<div class="weaver-session-map-actions">';
+  if (subview === 'session_map') {
+    html += '<button class="weaver-session-map-btn" onclick=\'weaverCloseSessionMap('
+      + groupJs + ")\'>Back to Journal</button>";
+    html += '<button class="weaver-session-map-btn primary" onclick=\'weaverRefreshSessionMap('
+      + groupJs + ")\'>Refresh</button>";
+  } else {
+    html += '<button class="weaver-session-map-btn primary" onclick=\'weaverOpenSessionMap('
+      + groupJs + ")\'>Session Map</button>";
+  }
+  html += '</div>';
+  var status = _weaverSessionMapStatus(group, subview);
+  if (status) {
+    html += '<div class="weaver-session-map-status">' + _esc(status) + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _weaverSessionMapStatus(group, subview) {
+  var meta = _weaverSessionMapMeta(group);
+  if (subview !== 'session_map') return '';
+  if (meta.loading && _weaverSessionMapData(group)) {
+    return 'Refreshing deterministic snapshot…';
+  }
+  if (meta.loading) return 'Loading deterministic snapshot…';
+  if (meta.stale) return 'Snapshot is updating…';
+  return '';
+}
+
+function _weaverRenderSessionMap(group) {
+  var sessionMap = _weaverSessionMapData(group);
+  var meta = _weaverSessionMapMeta(group);
+  if (!sessionMap) {
+    return '<div class="weaver-session-map-empty">'
+      + _esc(meta.loading
+        ? 'Loading Session Map…'
+        : 'Open Session Map to load the current deterministic orchestration snapshot.')
+      + '</div>';
   }
 
-  if (entries.length) {
-    // Sort by id descending (newest first)
-    var sorted = entries.slice().sort(function(a, b) { return b.id - a.id; });
-    html += '<div class="weaver-journal">';
-    for (var i = 0; i < sorted.length; i++) {
-      var e = sorted[i];
-      var typeClass = 'weaver-badge-' + (e.type || 'observation');
-      var ago = _weaverTimeAgo(e.timestamp);
-      html += '<div class="weaver-entry" oncontextmenu="weaverEntryCtx(event,' + e.id + ')">';
-      html += '<div class="weaver-entry-header">';
-      html += '<span class="weaver-badge ' + typeClass + '">' + _esc(e.type || '?') + '</span>';
-      html += '<span class="weaver-entry-time">' + ago + '</span>';
-      html += '</div>';
-      html += '<div class="weaver-entry-text">' + _esc(e.entry || '') + '</div>';
-      html += '</div>';
+  var html = '<div class="weaver-session-map">';
+  html += _weaverRenderSessionMapOverview(sessionMap.overview || {});
+  html += _weaverRenderSessionMapHints(sessionMap.hints || {});
+  html += _weaverRenderSessionMapStreams(sessionMap.streams || {});
+  html += _weaverRenderSessionMapAsks('Pending asks', sessionMap.asks || {}, 'Ask pending');
+  html += _weaverRenderSessionMapHumanGates(sessionMap.human_gates || {});
+  html += _weaverRenderSessionMapTaskHealth(sessionMap.task_health || {});
+  html += _weaverRenderSessionMapVerification(sessionMap.verification || {});
+  html += _weaverRenderSessionMapBoundaries(sessionMap.branch_boundaries || {});
+  html += _weaverRenderSessionMapAgents(sessionMap.agents || {});
+  html += _weaverRenderSessionMapQueuedFollowUp(sessionMap.queued_follow_up || {});
+  html += _weaverRenderSessionMapJournal(sessionMap.journal || {});
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderSessionMapOverview(overview) {
+  if (!overview || typeof overview !== 'object') return '';
+  var stats = [
+    { label: 'Tasks', value: overview.tasks_total || 0 },
+    { label: 'Streams', value: overview.active_stream_count || 0 },
+    { label: 'Active agents', value: overview.active_agent_count || 0 },
+    { label: 'Asks', value: overview.pending_ask_count || 0 },
+    { label: 'Human gates', value: overview.human_gate_count || 0 },
+    { label: 'Queued follow-up', value: overview.queued_follow_up_count || 0 },
+  ];
+  var html = '<div class="weaver-session-map-overview">';
+  for (var i = 0; i < stats.length; i++) {
+    html += '<div class="weaver-session-map-stat">';
+    html += '<div class="weaver-session-map-stat-value">' + _esc(String(stats[i].value)) + '</div>';
+    html += '<div class="weaver-session-map-stat-label">' + _esc(stats[i].label) + '</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderSessionMapHints(summary) {
+  var items = _weaverSummaryItems(summary);
+  if (!items.length) return '';
+  var html = '<div class="weaver-health-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Hints</span>';
+  html += '<span class="weaver-health-total">' + items.length + ' current hint'
+    + (items.length === 1 ? '' : 's') + '</span>';
+  html += '</div>';
+  html += '<div class="weaver-health-list">';
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    html += '<div class="weaver-session-map-list-item">';
+    html += '<span class="weaver-health-pill weaver-health-pill-notice">'
+      + _esc(_weaverHumanizeToken(item.kind || 'hint')) + '</span>';
+    html += '<span class="weaver-session-map-item-text">' + _esc(item.message || '') + '</span>';
+    html += '</div>';
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderSessionMapStreams(summary) {
+  var streams = _weaverSummaryItems(summary);
+  if (!streams.length) return '';
+  var html = '<div class="weaver-streams-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Active streams</span>';
+  html += '<span class="weaver-health-total">' + streams.length + ' active stream'
+    + (streams.length === 1 ? '' : 's') + '</span>';
+  html += '</div>';
+  html += '<div class="weaver-stream-list">';
+  for (var i = 0; i < streams.length; i++) {
+    html += _weaverRenderOpenStreamCard(streams[i], i);
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderSessionMapAsks(title, summary, pillLabel) {
+  var items = _weaverSummaryItems(summary);
+  if (!items.length) return '';
+  var html = '<div class="weaver-health-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">' + _esc(title) + '</span>';
+  html += '<span class="weaver-health-total">' + items.length + ' open</span>';
+  html += '</div>';
+  html += '<div class="weaver-health-list">';
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    html += '<div class="weaver-session-map-list-item">';
+    html += '<span class="weaver-health-pill weaver-health-pill-warning">' + _esc(pillLabel) + '</span>';
+    html += '<span class="weaver-session-map-item-text">' + _esc(item.title || '') + '</span>';
+    if (item.parent_task_id) {
+      html += '<span class="weaver-session-map-item-meta">via ' + _esc(item.parent_task_id) + '</span>';
     }
     html += '</div>';
   }
+  html += '</div>';
+  html += '</div>';
   return html;
+}
+
+function _weaverRenderSessionMapHumanGates(summary) {
+  var items = _weaverSummaryItems(summary);
+  if (!items.length) return '';
+  var html = '<div class="weaver-health-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Human gates</span>';
+  html += '<span class="weaver-health-total">' + items.length + ' waiting</span>';
+  html += '</div>';
+  html += '<div class="weaver-health-list">';
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    html += '<div class="weaver-session-map-list-item">';
+    html += '<span class="weaver-health-pill weaver-health-pill-warning">Validation gate</span>';
+    html += '<span class="weaver-session-map-item-text">'
+      + _esc(item.stream_title || item.branch || '') + '</span>';
+    if (item.branch) {
+      html += '<span class="weaver-session-map-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+    }
+    html += '</div>';
+    if (item.gate_reason) {
+      html += '<div class="weaver-session-map-item-subtext">' + _esc(item.gate_reason) + '</div>';
+    }
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderSessionMapTaskHealth(summary) {
+  var items = _weaverSummaryItems(summary);
+  if (!items.length) return '';
+
+  var html = '<div class="weaver-health-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Task health</span>';
+  html += '<span class="weaver-health-total">' + items.length + ' unhealthy</span>';
+  html += '</div>';
+  html += '<div class="weaver-health-list">';
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    html += '<div class="weaver-health-item">';
+    html += '<span class="weaver-health-item-state weaver-health-pill-' + _esc(item.health_state || 'blocked') + '">'
+      + _esc(_weaverHealthLabels[item.health_state] || item.health_state || 'Unhealthy') + '</span>';
+    html += '<span class="weaver-health-item-title">' + _esc(item.title || '') + '</span>';
+    if (item.via) {
+      html += '<span class="weaver-health-item-via">via ' + _esc(item.via) + '</span>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderSessionMapVerification(summary) {
+  var items = _weaverSummaryItems(summary);
+  if (!items.length) return '';
+  var html = '<div class="weaver-verification-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Verification</span>';
+  html += '<span class="weaver-health-total">' + items.length + ' open checkpoint'
+    + (items.length === 1 ? '' : 's') + '</span>';
+  html += '</div>';
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    html += '<div class="weaver-verification-item">';
+    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(item.verification_state || 'pending') + '">'
+      + _esc(_weaverVerificationLabels[item.verification_state] || item.verification_state || 'Verification') + '</span>';
+    html += '<span class="weaver-verification-item-title">' + _esc(item.title || '') + '</span>';
+    if (item.verification_mode) {
+      html += '<span class="weaver-verification-item-meta">' + _esc(item.verification_mode) + '</span>';
+    }
+    html += '</div>';
+    if (item.detail) {
+      html += '<div class="weaver-verification-item-meta">' + _esc(item.detail) + '</div>';
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderSessionMapBoundaries(summary) {
+  var items = _weaverSummaryItems(summary);
+  if (!items.length) return '';
+  var html = '<div class="weaver-health-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Branch review points</span>';
+  html += '<span class="weaver-health-total">' + items.length + ' branch'
+    + (items.length === 1 ? '' : 'es') + '</span>';
+  html += '</div>';
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var pillState = item.partial_review_safe ? 'passed' : 'failed';
+    var pillLabel = item.partial_review_safe ? 'Safe for partial review' : 'Branch advanced';
+    html += '<div class="weaver-verification-item">';
+    html += '<span class="weaver-health-pill weaver-health-pill-' + _esc(pillState) + '">'
+      + _esc(pillLabel) + '</span>';
+    html += '<span class="weaver-verification-item-title">'
+      + _esc(item.latest_boundary_task || item.stream_title || '') + '</span>';
+    if (item.branch) {
+      html += '<span class="weaver-verification-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+    }
+    html += '</div>';
+    if (item.foreground_task_title) {
+      html += '<div class="weaver-verification-item-meta">Current: '
+        + _esc(item.foreground_task_title) + '</div>';
+    }
+    if (item.queued_followups && item.queued_followups.length) {
+      html += '<div class="weaver-verification-item-meta">Queued next: '
+        + _esc(item.queued_followups.map(function(task) { return task.title; }).join(', '))
+        + '</div>';
+    }
+    if (item.started_followups && item.started_followups.length) {
+      html += '<div class="weaver-verification-item-meta">Beyond boundary: '
+        + _esc(item.started_followups.map(function(task) { return task.title; }).join(', '))
+        + '</div>';
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderSessionMapAgents(summary) {
+  var items = _weaverSummaryItems(summary);
+  if (!items.length) return '';
+  var html = '<div class="weaver-health-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Active agents</span>';
+  html += '<span class="weaver-health-total">' + items.length + ' active</span>';
+  html += '</div>';
+  html += '<div class="weaver-health-list">';
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    html += '<div class="weaver-session-map-list-item">';
+    html += '<span class="weaver-health-pill weaver-health-pill-notice">' + _esc(item.status || 'agent') + '</span>';
+    html += '<span class="weaver-session-map-item-text">' + _esc(item.name || item.slug || item.id || '') + '</span>';
+    if (item.current_task) {
+      html += '<span class="weaver-session-map-item-meta">' + _esc(item.current_task) + '</span>';
+    }
+    html += '</div>';
+    if (item.activity_detail) {
+      html += '<div class="weaver-session-map-item-subtext">' + _esc(item.activity_detail) + '</div>';
+    }
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderSessionMapQueuedFollowUp(summary) {
+  var items = _weaverSummaryItems(summary);
+  if (!items.length) return '';
+  var html = '<div class="weaver-health-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Queued follow-up</span>';
+  html += '<span class="weaver-health-total">' + items.length + ' queued item'
+    + (items.length === 1 ? '' : 's') + '</span>';
+  html += '</div>';
+  html += '<div class="weaver-health-list">';
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var pill = item.source === 'dispatch_queue' ? 'Dispatch queue' : _weaverHumanizeToken(item.queue_state || 'Stream queue');
+    html += '<div class="weaver-session-map-list-item">';
+    html += '<span class="weaver-health-pill weaver-health-pill-notice">' + _esc(pill) + '</span>';
+    html += '<span class="weaver-session-map-item-text">' + _esc(item.task_title || item.task_id || '') + '</span>';
+    if (item.branch) {
+      html += '<span class="weaver-session-map-item-meta">' + _esc(item.branch.replace(/^loom\//, '')) + '</span>';
+    } else if (item.target_agent_name) {
+      html += '<span class="weaver-session-map-item-meta">' + _esc(item.target_agent_name) + '</span>';
+    }
+    html += '</div>';
+    if (item.gate_reason) {
+      html += '<div class="weaver-session-map-item-subtext">' + _esc(item.gate_reason) + '</div>';
+    }
+  }
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderSessionMapJournal(summary) {
+  var items = _weaverSummaryItems(summary);
+  if (!items.length) return '';
+  var html = '<div class="weaver-health-summary">';
+  html += '<div class="weaver-health-header">';
+  html += '<span class="weaver-health-title">Recent decisions, plans, and checkpoints</span>';
+  html += '<span class="weaver-health-total">' + items.length + ' item'
+    + (items.length === 1 ? '' : 's') + '</span>';
+  html += '</div>';
+  html += _weaverRenderJournalEntries(items, false);
+  html += '</div>';
+  return html;
+}
+
+function _weaverRenderJournalEntries(entries, allowContextMenu) {
+  var sorted = (entries || []).slice().sort(function(a, b) {
+    return (b.id || 0) - (a.id || 0);
+  });
+  var html = '<div class="weaver-journal">';
+  for (var i = 0; i < sorted.length; i++) {
+    var e = sorted[i];
+    var typeClass = 'weaver-badge-' + (e.type || 'observation');
+    var ago = _weaverTimeAgo(e.timestamp);
+    html += '<div class="weaver-entry"'
+      + (allowContextMenu && e.id
+        ? ' oncontextmenu="weaverEntryCtx(event,' + e.id + ')"'
+        : '')
+      + '>';
+    html += '<div class="weaver-entry-header">';
+    html += '<span class="weaver-badge ' + typeClass + '">' + _esc(e.type || '?') + '</span>';
+    html += '<span class="weaver-entry-time">' + _esc(ago) + '</span>';
+    html += '</div>';
+    html += '<div class="weaver-entry-text">' + _esc(e.entry || '') + '</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _weaverSummaryItems(summary) {
+  if (!summary || typeof summary !== 'object') return [];
+  if (Array.isArray(summary.items)) return summary.items.slice();
+  if (Array.isArray(summary.entries)) return summary.entries.slice();
+  return [];
 }
 
 function _weaverRenderOpenStreams(group) {

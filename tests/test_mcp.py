@@ -409,6 +409,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             tool["name"] for tool in listed_weaver.payload["result"]["tools"]
         ]
         self.assertIn("weaver_board_summary", weaver_tool_names)
+        self.assertIn("weaver_session_map", weaver_tool_names)
         self.assertIn("weaver_task_verify", weaver_tool_names)
 
         missing_header = await handler(

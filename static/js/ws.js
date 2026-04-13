@@ -160,8 +160,27 @@ function connect() {
       if (typeof taskHistoryReceiveDetail === 'function') taskHistoryReceiveDetail(msg);
     } else if (msg.type === 'action') {
       handleAction(msg);
+    } else if (msg.type === 'weaver_session_map') {
+      _handleWeaverSessionMapMessage(msg);
     }
   };
+}
+
+function _handleWeaverSessionMapMessage(msg) {
+  if (!state.weaver_session_maps) state.weaver_session_maps = {};
+  var group = (msg && msg.group) || '';
+  if (!group) return;
+  state.weaver_session_maps[group] = (msg && msg.session_map) || {};
+  if (typeof _weaverReceiveSessionMap === 'function') {
+    _weaverReceiveSessionMap(msg);
+    return;
+  }
+  if (typeof _activePanelApp !== 'undefined'
+      && _activePanelApp === 'weaver'
+      && typeof renderWeaverPanel === 'function') {
+    var currentGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
+    if (!currentGroup || currentGroup === group) renderWeaverPanel();
+  }
 }
 
 function _applyRuntimeMode() {
@@ -208,6 +227,7 @@ function _handleFullState(msg) {
   if (!state.weaver_sent_events) state.weaver_sent_events = {};
   if (!state.weaver_worklog) state.weaver_worklog = {};
   if (!state.weaver_streams) state.weaver_streams = {};
+  if (!state.weaver_session_maps) state.weaver_session_maps = {};
   _triggerDoneFlourishesFromTaskSnapshot(prevTasks, state.board_tasks || {});
   if (typeof _pruneAgentDoneFlourishes === 'function') {
     _pruneAgentDoneFlourishes(state.agents || {});
@@ -254,6 +274,10 @@ function _handleDelta(msg) {
   }
   _expectedSeq = msg.seq + 1;
   _applyDelta(msg.ops);
+  const sessionMapGroups = _collectSessionMapInvalidationGroups(msg.ops, opGroupHints);
+  if (sessionMapGroups.length && typeof _weaverMarkSessionMapStale === 'function') {
+    _weaverMarkSessionMapStale(sessionMapGroups);
+  }
   const nextGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
   const activeSurface = typeof _activePanelSurface === 'function'
     ? _activePanelSurface()
@@ -353,6 +377,35 @@ function _applyUiSurfaceInvalidation(flags, key) {
   }
 }
 
+function _collectSessionMapInvalidationGroups(ops, hints) {
+  const groups = [];
+  const seen = {};
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i] || {};
+    const hint = hints && hints[i] ? hints[i] : {};
+    let group = '';
+    switch (op.op) {
+      case 'agent_upsert':
+      case 'task_upsert':
+      case 'journal_append':
+      case 'journal_delete':
+      case 'weaver_settings_update':
+        group = op.group || '';
+        break;
+      case 'agent_remove':
+      case 'task_remove':
+        group = hint.group || '';
+        break;
+      default:
+        group = '';
+    }
+    if (!group || seen[group]) continue;
+    seen[group] = true;
+    groups.push(group);
+  }
+  return groups;
+}
+
 function _surfaceUsesCurrentGroup(surface) {
   if (surface === 'board') {
     return typeof _boardFilterByGroup === 'undefined' || !!_boardFilterByGroup;
@@ -449,6 +502,7 @@ function _applyDelta(ops) {
         if (state.weaver_sent_events) delete state.weaver_sent_events[op.name];
         if (state.weaver_worklog) delete state.weaver_worklog[op.name];
         if (state.weaver_streams) delete state.weaver_streams[op.name];
+        if (state.weaver_session_maps) delete state.weaver_session_maps[op.name];
         break;
       case 'group_rename': {
         if (state.groups[op.old_name]) {
@@ -474,6 +528,10 @@ function _applyDelta(ops) {
         if (state.weaver_streams && state.weaver_streams[op.old_name]) {
           state.weaver_streams[op.new_name] = state.weaver_streams[op.old_name];
           delete state.weaver_streams[op.old_name];
+        }
+        if (state.weaver_session_maps && state.weaver_session_maps[op.old_name]) {
+          state.weaver_session_maps[op.new_name] = state.weaver_session_maps[op.old_name];
+          delete state.weaver_session_maps[op.old_name];
         }
         break;
       }

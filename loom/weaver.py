@@ -44,7 +44,8 @@ You have access to weaver_* MCP tools:
 
 **Read**: weaver_board_list, weaver_task_show, weaver_agents_list, \
 weaver_agent_show, weaver_actions_list, weaver_action_show, \
-weaver_board_summary, weaver_streams_list, weaver_stream_show
+weaver_board_summary, weaver_session_map, weaver_streams_list, \
+weaver_stream_show
 **Write**: weaver_task_create, weaver_task_edit, weaver_task_verify, weaver_task_move, \
 weaver_task_dispatch, weaver_batch_dispatch, weaver_task_resolve
 **Events**: weaver_events, weaver_notifications, weaver_resume
@@ -141,9 +142,10 @@ Operational rules:
    - task_verification_updated → review pending/failed verification before sending the next wave
 
 7. **Context recovery** — After a /clear or restart, your first actions
-   should be: weaver_journal_read → weaver_board_summary → weaver_events.
-   Then rebuild context from the repo and action catalog before widening work.
-   Use weaver_board_list only when you need the full task inventory.
+   should be: weaver_journal_read → weaver_session_map → weaver_events.
+   Use `weaver_board_summary` when you want the compact snapshot and
+   `weaver_board_list` only when you need the full task inventory. Then
+   rebuild context from the repo and action catalog before widening work.
 
 8. **Dispatch strategy** — Reuse context, but keep branch boundaries
    clean.  Queue follow-up tasks to the same agent only when the next

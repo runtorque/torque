@@ -31,7 +31,10 @@ The Weaver must be created through Loom's dedicated Weaver flow because Loom nee
 
 ### Weaver panel
 
-For now, the panel shows only the **Journal** view with the persistent journal, blocking asks, and non-blocking notes/questions from the Weaver.
+The panel's **Journal** tab keeps chronology separate from synthesis:
+
+- **Journal** keeps the persistent journal plus blocking asks and non-blocking notes/questions from the Weaver
+- **Session Map** is opened from a button at the top of Journal and shows the current deterministic orchestration snapshot on demand
 
 The panel header also shows:
 
@@ -173,10 +176,10 @@ The journal is the Weaver's persistent memory. It is what lets the Weaver recove
 After `/clear` or restart, the current product behavior is to recover in this order:
 
 ```text
-weaver_journal_read -> weaver_board_summary -> weaver_events
+weaver_journal_read -> weaver_session_map -> weaver_events
 ```
 
-Use `weaver_board_list` only when the compact summary is not enough. That keeps recovery fast and avoids blowing context on the full board when the summary already tells you what changed.
+Use `weaver_board_summary` when the compact summary is enough, and `weaver_board_list` only when you need the full task inventory. That keeps recovery fast and avoids blowing context on the full board when the summary already tells you what changed.
 
 ### Journal discipline
 
@@ -250,6 +253,7 @@ In other words, Weaver tools are group-scoped **and** Weaver-only.
 | Tool | What it is for |
 |------|-----------------|
 | `weaver_board_summary` | Compact overview of lanes, asks, labels, and agent state |
+| `weaver_session_map` | Deterministic structured recovery snapshot for the current group |
 | `weaver_board_list` | Full lane-grouped task list with optional filters |
 | `weaver_task_show` | Full details for one task, including pipeline chain plus task artifact metadata when relevant |
 | `weaver_agents_list` | Quick view of all agents in the group |

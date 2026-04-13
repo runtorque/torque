@@ -5125,6 +5125,74 @@ body.diff-view-open #ctx-menu {
 }
 
 /* Journal entries */
+.weaver-session-map-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.weaver-session-map-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.weaver-session-map-btn {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 9px;
+  font-weight: 600;
+  padding: 4px 10px;
+}
+.weaver-session-map-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.weaver-session-map-btn.primary {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.weaver-session-map-status {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.weaver-session-map-empty {
+  background: var(--bg-cell);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.weaver-session-map {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.weaver-session-map-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.weaver-session-map-stat {
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+.weaver-session-map-stat-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.weaver-session-map-stat-label {
+  margin-top: 4px;
+  font-size: 9px;
+  color: var(--text-dim);
+}
 .weaver-journal { display: flex; flex-direction: column; gap: 6px; }
 .weaver-entry {
   background: var(--bg-cell);
@@ -5428,6 +5496,31 @@ body.diff-view-open #ctx-menu {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+.weaver-session-map-list-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.weaver-session-map-item-text {
+  min-width: 0;
+  font-size: 10px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.weaver-session-map-item-meta,
+.weaver-session-map-item-subtext {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.weaver-session-map-item-meta {
+  flex-shrink: 0;
+}
+.weaver-session-map-item-subtext {
+  margin-left: 6px;
 }
 .weaver-health-item {
   display: flex;
