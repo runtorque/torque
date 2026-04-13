@@ -48,18 +48,29 @@ def now_iso(now_ts: float | None = None) -> str:
 
 def compute_task_health(tasks_by_id: dict[str, Any], agents_by_id: dict[str, Any],
                         now_ts: float | None = None) -> dict[str, TaskHealthSnapshot]:
-    """Return effective task-health snapshots for every task."""
+    """Return effective task-health snapshots for every task.
+
+    Archived tasks are out of view and are guaranteed-healthy by
+    `_compute_local_health`, so we skip them entirely instead of
+    allocating snapshots we'll never read.
+    """
     if now_ts is None:
         now_ts = datetime.now(timezone.utc).timestamp()
 
+    active_tasks = {
+        tid: task for tid, task in tasks_by_id.items()
+        if getattr(task, "lane", "") != ARCHIVED_LANE
+    }
+
     children_by_id: dict[str, list[Any]] = defaultdict(list)
-    for task in tasks_by_id.values():
-        if getattr(task, "parent_task_id", ""):
-            children_by_id[task.parent_task_id].append(task)
+    for task in active_tasks.values():
+        parent_id = getattr(task, "parent_task_id", "")
+        if parent_id and parent_id in active_tasks:
+            children_by_id[parent_id].append(task)
 
     locals_by_id = {
-        tid: _compute_local_health(task, tasks_by_id, agents_by_id, now_ts)
-        for tid, task in tasks_by_id.items()
+        tid: _compute_local_health(task, active_tasks, agents_by_id, now_ts)
+        for tid, task in active_tasks.items()
     }
 
     effective: dict[str, TaskHealthSnapshot] = {}
@@ -72,12 +83,12 @@ def compute_task_health(tasks_by_id: dict[str, Any], agents_by_id: dict[str, Any
             locals_by_id[task.id],
             [_compute_effective(child) for child in children_by_id.get(task.id, [])
              if getattr(child, "lane", "") not in {"Done", ARCHIVED_LANE}],
-            tasks_by_id,
+            active_tasks,
         )
         effective[task.id] = snapshot
         return snapshot
 
-    for task in tasks_by_id.values():
+    for task in active_tasks.values():
         _compute_effective(task)
     return effective
 

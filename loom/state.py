@@ -649,6 +649,12 @@ class MatrixState:
         # Board (Phase 5)
         self.board_lanes: list[str] = list(_DEFAULT_LANES)
         self.board_tasks: dict[str, BoardTask] = {}
+        # Secondary index: group → set of task ids. Maintained
+        # incrementally by `_index_task` / `_unindex_task` (called from
+        # the few places that mutate task identity or group). Lets
+        # hot-path consumers like compute_worktree_streams skip iterating
+        # the full task table when most tasks belong to other groups.
+        self._tasks_by_group: dict[str, set[str]] = {}
         self.task_id_aliases: dict[str, str] = {}
         self.task_id_counters: dict[str, int] = {}
         self.pipeline_task_counters: dict[str, int] = {}
@@ -685,14 +691,72 @@ class MatrixState:
                    slug=self.group_slugs.get(name, ""),
                    agents=list(self.groups.get(name, [])))
 
+    # -- Task indexes --------------------------------------------------------
+
+    def _index_task(self, task: "BoardTask") -> None:
+        """Add a task to the secondary indexes. Idempotent."""
+        group = str(getattr(task, "group", "") or "")
+        bucket = self._tasks_by_group.setdefault(group, set())
+        bucket.add(task.id)
+
+    def _unindex_task(self, task_or_id) -> None:
+        """Remove a task from the secondary indexes. Idempotent."""
+        if isinstance(task_or_id, str):
+            tid = task_or_id
+            group = ""
+            for g, members in self._tasks_by_group.items():
+                if tid in members:
+                    group = g
+                    break
+        else:
+            tid = task_or_id.id
+            group = str(getattr(task_or_id, "group", "") or "")
+        bucket = self._tasks_by_group.get(group)
+        if bucket is not None:
+            bucket.discard(tid)
+            if not bucket:
+                self._tasks_by_group.pop(group, None)
+
+    def _reindex_task_group(self, task: "BoardTask",
+                            old_group: str, new_group: str) -> None:
+        """Move a task between group buckets when its group changes."""
+        if old_group == new_group:
+            return
+        old_bucket = self._tasks_by_group.get(old_group)
+        if old_bucket is not None:
+            old_bucket.discard(task.id)
+            if not old_bucket:
+                self._tasks_by_group.pop(old_group, None)
+        self._tasks_by_group.setdefault(new_group, set()).add(task.id)
+
+    def _rebuild_task_indexes(self) -> None:
+        """Recompute all secondary indexes from scratch (used after bulk load)."""
+        self._tasks_by_group = {}
+        for task in self.board_tasks.values():
+            self._index_task(task)
+
+    def tasks_in_group(self, group: str) -> list["BoardTask"]:
+        """Return the BoardTask objects belonging to ``group`` via the index.
+
+        Avoids iterating the full task table when the caller already
+        knows which group it cares about. Falls back to a filtered scan
+        if the group bucket is unset (defensive — should not happen
+        once indexes are populated).
+        """
+        bucket = self._tasks_by_group.get(group)
+        if bucket is None:
+            # Lazy seed in case some code path bypassed the index.
+            self._rebuild_task_indexes()
+            bucket = self._tasks_by_group.get(group, set())
+        return [self.board_tasks[tid] for tid in bucket
+                if tid in self.board_tasks]
+
     def _weaver_stream_groups(self) -> list[str]:
         groups = set(self.groups)
         groups.update(self.group_settings)
         groups.update(self.weaver_settings)
-        groups.update(
-            str(getattr(task, "group", "") or "").strip()
-            for task in self.board_tasks.values()
-        )
+        # Use the per-group task index instead of iterating all tasks.
+        groups.update(self._tasks_by_group.keys())
         groups.update(
             str(getattr(cell, "group", "") or "").strip()
             for cell in self.agents.values()
@@ -1353,6 +1417,7 @@ class MatrixState:
                 ).items()
                 if root_id
             }
+            self._rebuild_task_indexes()
             self.cleanup_stale_boundary_successors(emit=False)
             for aid, cell in self.agents.items():
                 cell.pending_weaver_message = bool(
@@ -2503,6 +2568,7 @@ class MatrixState:
                 "created_at", "updated_at", "lane_entered_at")},
         )
         self.board_tasks[tid] = bt
+        self._index_task(bt)
         if explicit_id and explicit_id != tid:
             self.task_id_aliases[explicit_id] = tid
             self._db_save_task_id_alias(explicit_id)
@@ -2570,11 +2636,14 @@ class MatrixState:
                     tid, lane=new_lane, position=archive_position
                 )
             return
+        old_group = task.group
         for key, value in fields.items():
             if key in valid:
                 setattr(task, key, value)
         if "task" in fields:
             task.slug = self._unique_task_slug(task.task, exclude_id=tid)
+        if "group" in fields and task.group != old_group:
+            self._reindex_task_group(task, old_group, task.group)
         from datetime import datetime, timezone
         now_iso = datetime.now(timezone.utc).isoformat()
         task.updated_at = now_iso
@@ -2591,6 +2660,7 @@ class MatrixState:
     def board_remove_task(self, tid: str):
         task = self.board_tasks.pop(tid, None)
         if task:
+            self._unindex_task(task)
             self.auto_dispatch_queue_remove_task(tid)
             self._emit("task_remove", id=tid, group=task.group)
             self._db_delete_task(tid)

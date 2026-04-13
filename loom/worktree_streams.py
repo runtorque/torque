@@ -164,10 +164,19 @@ def compute_worktree_stream_for_task(state, task_id: str, *, group: str = "",
 def compute_worktree_streams(state, *, group: str = "",
                              visibility_limit: int = 10,
                              include_orphaned: bool = True) -> list[dict]:
-    """Return computed streams for ``state`` filtered to ``group`` when set."""
+    """Return computed streams for ``state`` filtered to ``group`` when set.
+
+    Archived tasks never participate in live streams, so they're filtered
+    here. When ``group`` is set, the per-group index is used to avoid
+    walking the full task table.
+    """
+    if group and hasattr(state, "tasks_in_group"):
+        candidate_tasks = state.tasks_in_group(group)
+    else:
+        candidate_tasks = state.board_tasks.values()
     tasks = [
-        task for task in state.board_tasks.values()
-        if not group or getattr(task, "group", "") == group
+        task for task in candidate_tasks
+        if getattr(task, "lane", "") != "Archived"
     ]
     agents = [
         cell for cell in state.agents.values()
@@ -302,11 +311,15 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
     if not repo_root or not branch:
         return None
 
+    if group and hasattr(state, "tasks_in_group"):
+        candidate_tasks = state.tasks_in_group(group)
+    else:
+        candidate_tasks = state.board_tasks.values()
     tasks_by_id = {
         getattr(task, "id", ""): task
-        for task in state.board_tasks.values()
+        for task in candidate_tasks
         if getattr(task, "id", "")
-        and (not group or getattr(task, "group", "") == group)
+        and getattr(task, "lane", "") != "Archived"
     }
     if task_ids is None:
         children_by_parent: dict[str, set[str]] = defaultdict(set)
