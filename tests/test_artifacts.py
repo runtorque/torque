@@ -111,6 +111,33 @@ class TaskArtifactTests(unittest.TestCase):
         self.assertIn("inline excerpt follows", artifact_block)
         self.assertIn("````text", artifact_block)
 
+    def test_upstream_prompt_block_honors_none_and_path_modes(self):
+        artifact_block = upstream_artifact_prompt_block([
+            {
+                "type": "generated_doc",
+                "title": "Hidden plan",
+                "path": "/tmp/task-parent/hidden.md",
+                "summary": "should not render",
+                "prompt": {"mode": "none"},
+                "source_task_id": "task-parent",
+                "source_task_label": "Research auth patch",
+            },
+            {
+                "type": "file_ref",
+                "title": "Plan path",
+                "path": "/tmp/task-parent/plan.md",
+                "summary": "path mode should not include summary text",
+                "prompt": {"mode": "path"},
+                "source_task_id": "task-parent",
+                "source_task_label": "Research auth patch",
+            },
+        ])
+
+        self.assertNotIn("Hidden plan", artifact_block)
+        self.assertIn("Plan path", artifact_block)
+        self.assertIn("ref: `/tmp/task-parent/plan.md`", artifact_block)
+        self.assertNotIn("path mode should not include summary text", artifact_block)
+
 
 if __name__ == "__main__":
     unittest.main()

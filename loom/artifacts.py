@@ -412,11 +412,13 @@ def upstream_artifact_prompt_block(artifacts) -> str:
             artifact.get("type"), artifact.get("type", "artifact")
         )
         atype = artifact.get("type") or "artifact"
-        ref = _artifact_reference(raw) or _artifact_reference(artifact)
+        ref = _artifact_reference(artifact)
         summary = artifact.get("summary") or ""
         metadata = artifact.get("metadata") or {}
         content = artifact.get("content") or ""
-        effective_mode = _auto_mode_as_effective(raw)
+        effective_mode = _auto_mode_as_effective(artifact)
+        if effective_mode == PROMPT_MODE_NONE:
+            continue
 
         line = (
             f"- From `{source_label}`{source_suffix}: "
@@ -439,6 +441,11 @@ def upstream_artifact_prompt_block(artifacts) -> str:
             dels = metadata.get("deletions")
             if files not in (None, ""):
                 extras.append(f"stats: {files} files, +{ins or 0}/-{dels or 0}")
+        if effective_mode == PROMPT_MODE_PATH:
+            if extras:
+                line += " (" + "; ".join(extras) + ")"
+            blocks.append(line)
+            continue
         if summary:
             extras.append(f"summary: {_clip_text(summary, 240)}")
         if effective_mode == PROMPT_MODE_INLINE and content:
