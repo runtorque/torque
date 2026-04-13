@@ -7,6 +7,7 @@ system prompt assembly for ``--append-system-prompt-file``.
 
 import asyncio
 import logging
+import re
 import time
 
 from .state import (
@@ -26,6 +27,31 @@ from .weaver_hints import (
 )
 
 log = logging.getLogger("loom")
+
+_ASK_DIGEST_PREFERRED_LABELS = {
+    "approval needed",
+    "ask",
+    "decision",
+    "decision needed",
+    "recommended action",
+    "recommended next action",
+    "request",
+    "summary",
+    "tl;dr",
+    "tldr",
+}
+_ASK_DIGEST_SECTION_LABELS = {
+    "background",
+    "context",
+    "details",
+    "reason",
+}
+_ASK_DIGEST_MARKUP_PREFIX_RE = re.compile(
+    r"^(?:[-*+]\s+|-\s*\[[ xX]\]\s+|>\s*|#{1,6}\s+|\d+[.)]\s+)"
+)
+_ASK_DIGEST_LABEL_RE = re.compile(
+    r"^(?P<label>[A-Za-z][A-Za-z0-9 /;_-]{0,40}?):\s*(?P<value>.+)$"
+)
 
 # ---------------------------------------------------------------------------
 # Base system prompt (the weaver's "firmware")
@@ -905,21 +931,12 @@ class WeaverEventBuffer:
         if events:
             visible_events = events[:event_limit] if event_limit else events
             for evt in visible_events:
-                kind = evt.get("kind", "")
-                agent = self._truncate_digest_text(
-                    evt.get("agent_name", ""),
-                    limit=24 if verbosity == "compact" else 80,
+                lines.append(
+                    self._format_digest_event_line(
+                        evt,
+                        verbosity=verbosity,
+                    )
                 )
-                msg = self._truncate_digest_text(
-                    evt.get("message", ""),
-                    limit=72 if verbosity == "compact" else 240,
-                )
-                if agent and msg:
-                    lines.append(f"  {kind}: {agent} — {msg}")
-                elif msg:
-                    lines.append(f"  {kind}: {msg}")
-                else:
-                    lines.append(f"  {kind}: {agent}")
             hidden = len(events) - len(visible_events)
             if hidden > 0:
                 lines.append(
@@ -967,6 +984,126 @@ class WeaverEventBuffer:
 
         lines.append("---")
         return "\n".join(lines)
+
+    def _format_digest_event_line(self, evt: dict, *, verbosity: str) -> str:
+        kind = evt.get("kind", "")
+        agent = self._truncate_digest_text(
+            self._normalize_digest_text(evt.get("agent_name", "")),
+            limit=24 if verbosity == "compact" else 80,
+        )
+        msg = self._format_digest_event_message(evt, verbosity=verbosity)
+        if agent and msg:
+            return f"  {kind}: {agent} — {msg}"
+        if msg:
+            return f"  {kind}: {msg}"
+        return f"  {kind}: {agent}"
+
+    def _format_digest_event_message(self, evt: dict, *, verbosity: str) -> str:
+        limit = 72 if verbosity == "compact" else 240
+        message = self._normalize_digest_text(evt.get("message", ""))
+        if evt.get("kind") != "ask_created":
+            return self._truncate_digest_text(message, limit=limit)
+
+        task_id = str(evt.get("task_id", "") or "").strip()
+        ask_task = self._state.board_tasks.get(task_id) if task_id else None
+        ask_context = self._ask_digest_summary(
+            getattr(ask_task, "description", "") or ""
+        )
+        if not ask_context:
+            return self._truncate_digest_text(message, limit=limit)
+
+        if verbosity == "compact":
+            title_limit = 30
+            summary_limit = 38
+        elif verbosity == "detailed":
+            title_limit = 80
+            summary_limit = 150
+        else:
+            title_limit = 56
+            summary_limit = 110
+
+        title = self._truncate_digest_text(message, limit=title_limit)
+        summary = self._normalize_digest_text(ask_context)
+
+        if summary.casefold().startswith(message.casefold()):
+            summary = summary[len(message):].lstrip(" —-:;,")
+        elif message.casefold().startswith(summary.casefold()):
+            summary = ""
+
+        if not summary:
+            return self._truncate_digest_text(message, limit=limit)
+
+        summary = self._truncate_digest_text(summary, limit=summary_limit)
+        return f"{title} — {summary}"
+
+    @classmethod
+    def _ask_digest_summary(cls, description: str) -> str:
+        text = str(description or "").replace("\r\n", "\n").replace("\r", "\n")
+        if not text.strip():
+            return ""
+
+        preferred = ""
+        fallback = ""
+        for raw_line in text.split("\n"):
+            line = cls._normalize_digest_text(raw_line)
+            if not line:
+                continue
+            line = cls._strip_ask_digest_markup(line)
+            if not line:
+                continue
+
+            label_match = _ASK_DIGEST_LABEL_RE.match(line)
+            if label_match:
+                label = cls._normalize_digest_text(
+                    label_match.group("label")
+                ).casefold()
+                value = cls._normalize_digest_text(
+                    label_match.group("value")
+                )
+                if not value:
+                    continue
+                if label in _ASK_DIGEST_PREFERRED_LABELS:
+                    preferred = value
+                    break
+                if label in _ASK_DIGEST_SECTION_LABELS:
+                    if not fallback:
+                        fallback = value
+                    continue
+                if not fallback:
+                    fallback = value
+                continue
+
+            if line.endswith(":") and len(line.split()) <= 4:
+                continue
+            if not fallback:
+                fallback = line
+
+        candidate = preferred or fallback or cls._normalize_digest_text(text)
+        return cls._first_sentence(candidate)
+
+    @staticmethod
+    def _strip_ask_digest_markup(text: str) -> str:
+        cleaned = str(text or "").strip()
+        while True:
+            updated = _ASK_DIGEST_MARKUP_PREFIX_RE.sub("", cleaned, count=1)
+            if updated == cleaned:
+                break
+            cleaned = updated.strip()
+        return cleaned.strip("`")
+
+    @staticmethod
+    def _normalize_digest_text(text: str) -> str:
+        return " ".join(str(text or "").split())
+
+    @classmethod
+    def _first_sentence(cls, text: str) -> str:
+        normalized = cls._normalize_digest_text(text)
+        if not normalized:
+            return ""
+        match = re.search(r"(?<=[.!?])\s+", normalized)
+        if match and match.start() <= 160:
+            return normalized[:match.start()].strip()
+        return normalized
 
     def _active_agents_summary(self) -> str:
         actives = []
