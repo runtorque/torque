@@ -141,6 +141,7 @@ let _flipUntil = 0;
 
 function _surfacePanelApp(surface) {
   if (surface === 'board') return 'board';
+  if (surface === 'actions') return 'actions';
   if (surface === 'context') return 'context';
   if (surface === 'events') return 'events';
   if (surface === 'weaver') return 'weaver';
@@ -166,6 +167,7 @@ function _currentPanelSurfaces() {
 
 function _renderSurface(surface) {
   if (surface === 'board' && typeof renderBoard === 'function') renderBoard();
+  if (surface === 'actions' && typeof renderTemplatesPanel === 'function') renderTemplatesPanel();
   if (surface === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
   if (surface === 'events' && typeof renderEvents === 'function') renderEvents();
   if (surface === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();

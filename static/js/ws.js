@@ -83,7 +83,8 @@ function connect() {
           && _boardEligibilityActionWaiting
           && typeof _boardHandleEligibilityActionList === 'function') {
         _boardHandleEligibilityActionList(msg);
-      } else if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
+      } else if ((typeof _panelAppVisible === 'function' && _panelAppVisible('actions'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions')) {
         tplEditorReceiveList(msg);
       } else {
         // Ignore unsolicited action lists instead of reopening the
@@ -100,18 +101,18 @@ function connect() {
           && _boardEligibilityTemplateWaiting
           && typeof _boardHandleEligibilityTemplateList === 'function') {
         _boardHandleEligibilityTemplateList(msg);
-      } else if (typeof _activePanelApp !== 'undefined'
-          && _activePanelApp === 'templates'
+      } else if (((typeof _panelAppVisible === 'function' && _panelAppVisible('templates'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates'))
           && typeof agentTemplateReceiveList === 'function') {
         agentTemplateReceiveList(msg);
-      } else if (typeof _activePanelApp !== 'undefined'
-          && _activePanelApp === 'actions'
+      } else if (((typeof _panelAppVisible === 'function' && _panelAppVisible('actions'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions'))
           && typeof renderTemplatesEditor === 'function') {
         renderTemplatesEditor();
       }
     } else if (msg.type === 'template_detail') {
-      if (typeof _activePanelApp !== 'undefined'
-          && _activePanelApp === 'templates'
+      if (((typeof _panelAppVisible === 'function' && _panelAppVisible('templates'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'templates'))
           && typeof agentTemplateReceiveDetail === 'function') {
         agentTemplateReceiveDetail(msg);
       }
@@ -120,7 +121,8 @@ function connect() {
         _handleRenderedTemplate(msg);
       }
     } else if (msg.type === 'action_detail') {
-      if (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions') {
+      if ((typeof _panelAppVisible === 'function' && _panelAppVisible('actions'))
+          || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'actions')) {
         tplEditorReceiveDetail(msg);
       } else {
         _showActionVarForm(msg);
@@ -178,8 +180,8 @@ function _handleWeaverSessionMapMessage(msg) {
     _weaverReceiveSessionMap(msg);
     return;
   }
-  if (typeof _activePanelApp !== 'undefined'
-      && _activePanelApp === 'weaver'
+  if (((typeof _panelAppVisible === 'function' && _panelAppVisible('weaver'))
+      || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'weaver'))
       && typeof renderWeaverPanel === 'function') {
     var currentGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
     if (!currentGroup || currentGroup === group) renderWeaverPanel();

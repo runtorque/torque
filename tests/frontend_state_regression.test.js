@@ -507,6 +507,7 @@ function createWsRenderHarness() {
   sandbox.renderCalls = {
     main: 0,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 0,
@@ -528,6 +529,7 @@ function createWsRenderHarness() {
   runInContext(context, `
     render = function() { renderCalls.main++; };
     renderBoard = function() { renderCalls.board++; };
+    renderTemplatesPanel = function() { renderCalls.actions++; };
     renderContextPanel = function() { renderCalls.context++; };
     renderEvents = function() { renderCalls.events++; };
     renderWeaverPanel = function() { renderCalls.weaver++; };
@@ -549,7 +551,7 @@ function createTemplatesHarness() {
 }
 
 function createMainHarness(overrides = {}) {
-  const taskbarButtons = ['board', 'actions', 'templates', 'events', 'weaver'].map((app) => {
+  const taskbarButtons = ['board', 'actions', 'templates', 'context', 'events', 'weaver'].map((app) => {
     const button = new FakeElement();
     button.dataset.app = app;
     return button;
@@ -4981,6 +4983,7 @@ test('ws invalidation skips rerendering the active board for off-group task upda
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 1,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 0,
@@ -5006,6 +5009,7 @@ test('ws invalidation skips rerendering the active events panel for off-group ta
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 1,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 0,
@@ -5038,6 +5042,7 @@ test('ws invalidation skips rerendering the active board for off-group task remo
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 1,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 0,
@@ -5070,6 +5075,7 @@ test('ws invalidation skips rerendering the active events panel for off-group ta
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 1,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 0,
@@ -5159,6 +5165,7 @@ test('ws invalidation skips rerendering the active context panel for off-group a
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 1,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 0,
@@ -5559,6 +5566,7 @@ test('task deltas do not rerender the templates panel when it is active', () => 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 1,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 0,
@@ -5580,6 +5588,7 @@ test('weaver settings deltas rerender the main grid for card pause state updates
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 1,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 0,
@@ -5607,6 +5616,7 @@ test('weaver sent-event deltas rerender only the active Weaver panel', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 0,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 1,
@@ -5643,6 +5653,7 @@ test('weaver worklog deltas rerender only the active Weaver panel', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 0,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 1,
@@ -5690,6 +5701,7 @@ test('weaver stream deltas rerender only the active Weaver panel', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 0,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 1,
@@ -5729,6 +5741,7 @@ test('weaver Session Map responses rerender only the active Weaver panel', () =>
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 0,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 1,
@@ -5919,6 +5932,7 @@ test('event deltas rerender only the active events panel', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 0,
     board: 0,
+    actions: 0,
     context: 0,
     events: 0,
     weaver: 0,
@@ -5937,6 +5951,7 @@ test('event deltas rerender only the active events panel', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 0,
     board: 0,
+    actions: 0,
     context: 0,
     events: 1,
     weaver: 0,
@@ -7320,11 +7335,154 @@ test('standalone task deltas rerender every visible docked surface', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
     main: 1,
     board: 1,
+    actions: 0,
     context: 1,
     events: 0,
     weaver: 0,
     templates: 0,
   });
+});
+
+test('standalone render tracks Actions as a visible surface', () => {
+  const { context, sandbox } = createWsRenderHarness();
+
+  runInContext(context, `
+    isEmbeddedTerminalMode = function() { return true; };
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['actions'], active: 'actions' },
+      floats: {},
+      last_active: 'actions',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  assert.deepEqual(jsonValue(context, '_currentPanelSurfaces()'), ['board', 'actions']);
+
+  context.renderActivePanel();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 1,
+    actions: 1,
+    context: 0,
+    events: 0,
+    weaver: 0,
+    templates: 0,
+  });
+});
+
+test('opening Actions in standalone loads the actions editor', () => {
+  const { context, document, sandbox } = createMainHarness({
+    tplEditorLoad() {
+      sandbox.tplEditorLoadCalls = (sandbox.tplEditorLoadCalls || 0) + 1;
+    },
+    renderActivePanel() {
+      sandbox.renderActivePanelCalls = (sandbox.renderActivePanelCalls || 0) + 1;
+    },
+  });
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+
+  runInContext(context, `
+    state = {
+      runtime: { embedded_terminal: true },
+      standalone_panel_layout: {
+        version: 1,
+        bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+        right: { open: true, size: 320, tabs: ['actions', 'context'], active: 'context' },
+        floats: {},
+        last_active: 'context',
+      },
+    };
+    _restoreStandalonePanelState();
+  `);
+
+  context.togglePanel('actions');
+
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.active`), 'actions');
+  assert.equal(jsonValue(context, `_standalonePanelSurfaceVisible('actions')`), true);
+  assert.equal(sandbox.tplEditorLoadCalls, 1);
+  assert.equal(sandbox.renderActivePanelCalls, 1);
+});
+
+test('visible standalone context rerenders even when it is not last active', () => {
+  const { context, document } = createMainHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  loadScript(context, 'static/js/context.js');
+
+  runInContext(context, `
+    var renderContextPanelCalls = 0;
+    renderContextPanel = function() { renderContextPanelCalls++; };
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {},
+      last_active: 'board',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  context.handleContextEntries({
+    entries: [
+      { id: 'entry-1', entry_type: 'note', content: 'Remember the fix' },
+    ],
+  });
+
+  assert.equal(jsonValue(context, 'renderContextPanelCalls'), 1);
+});
+
+test('board navigation does not collapse an already visible standalone board', () => {
+  const { context, document, sandbox } = createMainHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  loadScript(context, 'static/js/render.js');
+  loadBoardScripts(context);
+
+  runInContext(context, `
+    var renderBoardCalls = 0;
+    renderBoard = function() { renderBoardCalls++; };
+    _renderBoardSelectionBar = function() { return ''; };
+    _boardScheduleCount = function() { return 0; };
+    boardUpdateScrollArrows = function() {};
+    boardAddTaskAutoResize = function() {};
+    state.runtime = { embedded_terminal: true };
+    state.board_tasks = {
+      'task-1': {
+        id: 'task-1',
+        group: 'alpha',
+        task: 'Ship docs',
+        lane: 'Backlog',
+        position: 1,
+      },
+    };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  const originalTogglePanel = context.togglePanel;
+  sandbox.togglePanelCalls = [];
+  context.togglePanel = function(appName) {
+    sandbox.togglePanelCalls.push(appName);
+    return originalTogglePanel.call(this, appName);
+  };
+
+  context.boardNavigateToTask('task-1');
+
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.open`), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.togglePanelCalls)), []);
+  assert.equal(jsonValue(context, 'renderBoardCalls'), 1);
 });
 
 test('collapsing the embedded board returns keyboard focus to the terminal workspace', () => {

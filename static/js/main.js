@@ -11,6 +11,41 @@ var _embeddedPanelMinHeight = 180;
 var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
 
+function _panelAppVisible(appName) {
+  if (!appName) return false;
+  if (typeof _standalonePanelSurfaceVisible === 'function'
+      && typeof _standalonePanelsEnabled === 'function'
+      && _standalonePanelsEnabled()) {
+    return _standalonePanelSurfaceVisible(appName);
+  }
+  return typeof _activePanelApp !== 'undefined' && _activePanelApp === appName;
+}
+
+function _loadPanelApp(appName) {
+  if (appName === 'actions' && typeof tplEditorLoad === 'function') tplEditorLoad();
+  if (appName === 'templates') {
+    if (typeof _agentsPanelView !== 'undefined' && _agentsPanelView === 'history') {
+      if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
+    } else if (typeof agentTemplateEditorLoad === 'function') {
+      agentTemplateEditorLoad();
+    }
+  }
+}
+
+function _loadVisibleStandalonePanelApps() {
+  if (typeof _standaloneVisiblePanelApps !== 'function'
+      || typeof _standalonePanelsEnabled !== 'function'
+      || !_standalonePanelsEnabled()) {
+    return;
+  }
+  var seen = {};
+  _standaloneVisiblePanelApps().forEach(function(appName) {
+    if (!appName || seen[appName]) return;
+    seen[appName] = true;
+    _loadPanelApp(appName);
+  });
+}
+
 function _panelResizeBounds() {
   var embedded = !!(typeof document !== 'undefined'
     && document
@@ -38,8 +73,12 @@ function _normalizePanelHeight(height) {
 function togglePanel(appName) {
   if (typeof _standaloneTogglePanel === 'function'
       && _standalonePanelsEnabled()) {
-    _activePanelApp = appName || '';
-    return _standaloneTogglePanel(appName);
+    var handled = _standaloneTogglePanel(appName);
+    if (handled) {
+      if (_panelAppVisible(appName)) _loadPanelApp(appName);
+      if (typeof renderActivePanel === 'function') renderActivePanel();
+    }
+    return handled;
   }
   var panel = document.getElementById('bottom-panel');
   var buttons = document.querySelectorAll('.taskbar-app');
@@ -79,14 +118,7 @@ function togglePanel(appName) {
     });
     // Render the active app
     if (appName === 'board') renderBoard();
-    if (appName === 'actions') tplEditorLoad();
-    if (appName === 'templates') {
-      if (typeof _agentsPanelView !== 'undefined' && _agentsPanelView === 'history') {
-        if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
-      } else if (typeof agentTemplateEditorLoad === 'function') {
-        agentTemplateEditorLoad();
-      }
-    }
+    _loadPanelApp(appName);
     if (appName === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
     if (appName === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
@@ -102,6 +134,8 @@ function _restorePanelState() {
   if (typeof _restoreStandalonePanelState === 'function'
       && _standalonePanelsEnabled()) {
     _restoreStandalonePanelState();
+    _loadVisibleStandalonePanelApps();
+    if (typeof renderActivePanel === 'function') renderActivePanel();
     return;
   }
 
@@ -131,14 +165,7 @@ function _restorePanelState() {
       b.classList.toggle('active', b.dataset.app === active);
     });
     if (active === 'board') renderBoard();
-    if (active === 'actions') tplEditorLoad();
-    if (active === 'templates') {
-      if (typeof _agentsPanelView !== 'undefined' && _agentsPanelView === 'history') {
-        if (typeof agentHistoryLoad === 'function') agentHistoryLoad();
-      } else if (typeof agentTemplateEditorLoad === 'function') {
-        agentTemplateEditorLoad();
-      }
-    }
+    _loadPanelApp(active);
     if (active === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
     if (active === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();

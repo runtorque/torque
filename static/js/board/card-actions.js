@@ -396,8 +396,12 @@ function boardNavigateToTask(taskId) {
   _boardRevealFocusOnRender = true;
   _boardPersistFilterState();
 
-  if (typeof _activePanelApp !== 'undefined' && _activePanelApp !== 'board'
-      && typeof togglePanel === 'function') {
+  var boardVisible = typeof _panelAppVisible === 'function'
+    ? _panelAppVisible('board')
+    : (typeof _activePanelApp !== 'undefined'
+      ? _activePanelApp === 'board'
+      : (typeof _boardPanelVisible === 'function' ? _boardPanelVisible() : true));
+  if (!boardVisible && typeof togglePanel === 'function') {
     togglePanel('board');
     return;
   }

@@ -195,8 +195,8 @@ function _weaverIsSessionMapOpen(group) {
 
 function _weaverShouldRenderCurrentGroup(group) {
   return !!group
-    && typeof _activePanelApp !== 'undefined'
-    && _activePanelApp === 'weaver'
+    && ((typeof _panelAppVisible === 'function' && _panelAppVisible('weaver'))
+      || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'weaver'))
     && _weaverCurrentGroup() === group;
 }
 
