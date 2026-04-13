@@ -42,6 +42,21 @@ _READINESS_BUFFER_LIMIT = 20_000
 _Utf8IncrementalDecoder = codecs.getincrementaldecoder("utf-8")
 
 
+def _preexec_acquire_ctty() -> None:
+    """Make the PTY slave (stdin after dup2) the controlling terminal.
+
+    subprocess with ``start_new_session=True`` calls ``setsid()`` which
+    detaches from any inherited controlling tty. On macOS/BSD the first
+    ``open()`` of a tty by a session leader does NOT auto-acquire it as
+    ctty — we must explicitly ioctl TIOCSCTTY. Without this, the kernel
+    has no foreground process group to signal on ``TIOCSWINSZ``, so
+    ``SIGWINCH`` never reaches the child and TUIs (Claude Code, vim, etc.)
+    don't re-render on resize.
+    """
+    with contextlib.suppress(OSError):
+        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+
 @dataclass
 class _PtySession:
     session_id: str
@@ -183,6 +198,7 @@ class LocalPtyAdapter:
                 cwd=cwd,
                 env=env,
                 start_new_session=True,
+                preexec_fn=_preexec_acquire_ctty,
             )
         except Exception:
             if bootstrap_dir:
