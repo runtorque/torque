@@ -245,12 +245,16 @@ function _connectEmbeddedTerminal(cell, surface) {
   _embeddedTerminalSessionKey = sessionKey;
   _embeddedTerminalPendingFocusKey = sessionKey;
   _embeddedTerminal = new Terminal({
+    allowProposedApi: true,
     allowTransparency: false,
     convertEol: false,
+    cols: 120,
+    rows: 32,
     cursorBlink: true,
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-    fontSize: 12,
-    lineHeight: 1.25,
+    fontSize: 13,
+    lineHeight: 1.0,
+    letterSpacing: 0,
     scrollback: 5000,
     theme: {
       background: '#0d1117',
