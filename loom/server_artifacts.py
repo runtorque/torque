@@ -202,6 +202,122 @@ def serialize_task_artifact(
     return payload
 
 
+def _clip_display_text(text: str, *, limit: int) -> str:
+    body = " ".join(str(text or "").split())
+    if not body or limit <= 0:
+        return ""
+    if len(body) <= limit:
+        return body
+    return body[: max(limit - 1, 0)].rstrip() + "…"
+
+
+def _contains_ci(haystack: str, needle: str) -> bool:
+    return bool(haystack and needle and needle.casefold() in haystack.casefold())
+
+
+def _artifact_diff_preview(metadata: dict) -> str:
+    files = metadata.get("files")
+    if not isinstance(files, list):
+        return ""
+
+    visible = []
+    for entry in files:
+        if not isinstance(entry, dict):
+            continue
+        path = _clip_display_text(entry.get("path", ""), limit=72)
+        if not path:
+            continue
+        parts = []
+        status = str(entry.get("status", "") or "").strip()
+        if status and status != "modified":
+            parts.append(status)
+        if entry.get("binary"):
+            parts.append("binary")
+        else:
+            insertions = int(entry.get("insertions", 0) or 0)
+            deletions = int(entry.get("deletions", 0) or 0)
+            if insertions or deletions:
+                parts.append(f"+{insertions}/-{deletions}")
+        visible.append(path + (f" ({', '.join(parts)})" if parts else ""))
+        if len(visible) >= 1:
+            break
+
+    if not visible:
+        return ""
+    remaining = sum(
+        1 for entry in files
+        if isinstance(entry, dict)
+        and str(entry.get("path", "") or "").strip()
+    ) - len(visible)
+    preview = visible[0]
+    if remaining > 0:
+        preview += f" +{remaining} more"
+    return preview
+
+
+def _artifact_inline_preview(payload: dict) -> str:
+    content = str(
+        payload.get("content")
+        or ((payload.get("storage") or {}).get("content"))
+        or ""
+    )
+    if not content.strip():
+        return ""
+    for raw_line in content.splitlines():
+        line = " ".join(raw_line.split())
+        if not line or line.startswith("<?xml"):
+            continue
+        return _clip_display_text(line, limit=96)
+    return ""
+
+
+def describe_task_artifact_for_digest(
+    artifact: dict,
+    *,
+    task_id: str = "",
+    task_label: str = "",
+) -> str:
+    payload = serialize_task_artifact(
+        artifact,
+        task_id=task_id,
+        task_label=task_label,
+    )
+    if not payload:
+        return ""
+
+    atype = str(payload.get("type", "") or "artifact").replace("_", " ")
+    title = _clip_display_text(
+        payload.get("title")
+        or payload.get("filename")
+        or payload.get("path")
+        or atype,
+        limit=56,
+    )
+    ref = _clip_display_text(
+        payload.get("url") or payload.get("path") or payload.get("filename"),
+        limit=120,
+    )
+    summary = _clip_display_text(payload.get("summary", ""), limit=88)
+    preview = ""
+    if payload.get("type") == "diff":
+        preview = _artifact_diff_preview(payload.get("metadata") or {})
+    if not preview:
+        preview = _artifact_inline_preview(payload)
+
+    parts = [f"[{atype}] {title}" if title else f"[{atype}]"]
+    if ref and not _contains_ci(title, ref):
+        parts.append(ref)
+    if summary and not _contains_ci(parts[-1], summary) and not _contains_ci(
+        title, summary
+    ):
+        parts.append(summary)
+    if preview and not _contains_ci(summary, preview) and not _contains_ci(
+        title, preview
+    ):
+        parts.append(preview)
+    return _clip_display_text(" — ".join(parts), limit=280)
+
+
 def serialize_task_artifacts(attachments, artifacts, *, task_id: str = "",
                              task_label: str = "") -> list[dict]:
     combined = []

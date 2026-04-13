@@ -41,6 +41,16 @@ class ServerArtifactHelperTests(unittest.TestCase):
         self.assertEqual(serialized["url"], "/attachments/task-1/pytest.log")
         self.assertEqual(serialized["task_label"], "Investigate flaky run")
 
+        digest_text = self.helper.describe_task_artifact_for_digest(
+            artifact,
+            task_id="task-1",
+            task_label="Investigate flaky run",
+        )
+        self.assertIn("[test report] pytest.log", digest_text)
+        self.assertIn("/attachments/task-1/pytest.log", digest_text)
+        self.assertIn("uploaded report", digest_text)
+        self.assertIn("E assert 1 == 2", digest_text)
+
     def test_store_task_upload_dedupes_existing_filenames(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_dir = self.helper.ATTACHMENTS_DIR
@@ -153,6 +163,13 @@ class ServerArtifactHelperTests(unittest.TestCase):
         self.assertEqual(artifact["metadata"]["stats"]["files"], 1)
         self.assertEqual(artifact["metadata"]["files"][0]["path"], "README.md")
         self.assertIn("pre-merge patch", artifact["summary"])
+        digest_text = self.helper.describe_task_artifact_for_digest(
+            artifact,
+            task_id="task-1",
+            task_label="Review worker patch",
+        )
+        self.assertIn("/attachments/task-1/loom_worker-pre-merge.patch", digest_text)
+        self.assertIn("README.md (+1/-0)", digest_text)
 
     def test_finalize_task_attachments_moves_draft_uploads_to_canonical_task_id(self):
         with tempfile.TemporaryDirectory() as tmpdir:

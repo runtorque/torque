@@ -166,6 +166,52 @@ class ServerModuleExtractionTests(unittest.TestCase):
             {'type': 'error', 'message': 'Delivery is paused'},
         )
 
+    def test_emit_task_artifact_uploaded_event_uses_digest_friendly_summary(self):
+        task = self.state_mod.BoardTask(
+            id='task-1',
+            task='Review uploaded evidence',
+            group='g',
+            lane='In Progress',
+        )
+        actor = self.state_mod.AgentCell(
+            id='agent-1',
+            name='Worker',
+            group='g',
+            cell_type='agent',
+        )
+        calls = []
+
+        def fake_panel_event(kind, cell_id, agent_name, group, message, task_id=""):
+            calls.append({
+                'kind': kind,
+                'cell_id': cell_id,
+                'agent_name': agent_name,
+                'group': group,
+                'message': message,
+                'task_id': task_id,
+            })
+
+        self.server_mod._emit_task_artifact_uploaded_event(
+            fake_panel_event,
+            task,
+            actor,
+            {
+                'type': 'test_report',
+                'title': 'pytest.log',
+                'filename': 'pytest.log',
+                'url': '/attachments/task-1/pytest.log',
+                'summary': '15 B | uploaded report',
+                'content': 'E assert 1 == 2\n',
+            },
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]['kind'], 'task_artifact_uploaded')
+        self.assertEqual(calls[0]['cell_id'], 'agent-1')
+        self.assertEqual(calls[0]['task_id'], 'task-1')
+        self.assertIn('/attachments/task-1/pytest.log', calls[0]['message'])
+        self.assertIn('E assert 1 == 2', calls[0]['message'])
+
 
 class ServerPromptQueueTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

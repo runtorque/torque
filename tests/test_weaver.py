@@ -441,6 +441,34 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("…", digest)
         self.assertNotIn("support signs off", digest)
 
+    async def test_task_artifact_uploaded_digest_includes_ref_and_preview(self):
+        state, group, _ = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            enabled_events=["task_artifact_uploaded"],
+        )
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[group] = time.time() - 61
+
+        buffer.on_panel_event({
+            "group": group,
+            "kind": "task_artifact_uploaded",
+            "agent_name": "Worker",
+            "message": (
+                "[test report] pytest.log — /attachments/task-1/pytest.log — "
+                "15 B | uploaded report — E assert 1 == 2"
+            ),
+            "task_id": "task-1",
+        })
+
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("/attachments/task-1/pytest.log", bridge.sent[0])
+        self.assertIn("E assert 1 == 2", bridge.sent[0])
+
     async def test_board_summary_in_digest_mentions_task_health(self):
         state, group, _ = self._make_state()
         task = state.board_add_task(

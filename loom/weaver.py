@@ -999,9 +999,15 @@ class WeaverEventBuffer:
         return f"  {kind}: {agent}"
 
     def _format_digest_event_message(self, evt: dict, *, verbosity: str) -> str:
-        limit = 72 if verbosity == "compact" else 240
+        kind = evt.get("kind")
+        if kind == "task_artifact_uploaded":
+            limit = 96 if verbosity == "compact" else (
+                320 if verbosity == "detailed" else 260
+            )
+        else:
+            limit = 72 if verbosity == "compact" else 240
         message = self._normalize_digest_text(evt.get("message", ""))
-        if evt.get("kind") != "ask_created":
+        if kind != "ask_created":
             return self._truncate_digest_text(message, limit=limit)
 
         task_id = str(evt.get("task_id", "") or "").strip()
