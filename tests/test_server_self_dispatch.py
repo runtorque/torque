@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import sys
+import tempfile
 import types
 import unittest
 from enum import Enum
@@ -818,6 +819,327 @@ class ServerSelfDispatchTests(unittest.TestCase):
         self.assertEqual(rejected["type"], "error")
         self.assertIn("still unresolved", rejected["message"])
         self.assertIsNone(allowed)
+
+
+class ServerAutoCloseOnDoneTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        install_aiohttp_stub()
+        install_iterm2_stub()
+        self.state_mod = importlib.import_module("loom.state")
+        self.state_mod = importlib.reload(self.state_mod)
+        self.server_mod = importlib.import_module("loom.server")
+        self.server_mod = importlib.reload(self.server_mod)
+
+    def _make_state(self):
+        state = self.state_mod.MatrixState()
+        state.groups["g"] = []
+        return state
+
+    def _write_action(self, base_dir, name, *,
+                      auto_close_on_done=False) -> None:
+        import os
+
+        action_path = os.path.join(base_dir, ".loom", "actions",
+                                   name + ".yaml")
+        os.makedirs(os.path.dirname(action_path), exist_ok=True)
+        with open(action_path, "w", encoding="utf-8") as handle:
+            handle.write(f"name: {name}\n")
+            if auto_close_on_done:
+                handle.write("auto_close_on_done: true\n")
+            handle.write("prompt: |\n")
+            handle.write("  {{ TASK }}\n")
+
+    async def test_auto_close_on_done_closes_opt_in_reviewers_after_root_finishes(self):
+        state = self._make_state()
+        impl = self.state_mod.AgentCell(
+            id="impl-1",
+            name="Implementer",
+            group="g",
+            cell_type="agent",
+        )
+        reviewer_one = self.state_mod.AgentCell(
+            id="review-1",
+            name="Reviewer One",
+            group="g",
+            cell_type="agent",
+            session_id="review-1-session",
+            status="idle",
+        )
+        reviewer_two = self.state_mod.AgentCell(
+            id="review-2",
+            name="Reviewer Two",
+            group="g",
+            cell_type="agent",
+            session_id="review-2-session",
+            status="idle",
+        )
+        state.agents = {
+            impl.id: impl,
+            reviewer_one.id: reviewer_one,
+            reviewer_two.id: reviewer_two,
+        }
+        root = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="Done",
+            id="task-root",
+            action_name="feature/implement",
+            agent_id=impl.id,
+        )
+        review_one = state.board_add_task(
+            "Initial review",
+            "g",
+            lane="Done",
+            id="task-review-1",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            agent_id=reviewer_one.id,
+        )
+        fix = state.board_add_task(
+            "Fix issues",
+            "g",
+            lane="Done",
+            id="task-fix",
+            action_name="feature/implement",
+            parent_task_id=review_one.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+            agent_id=impl.id,
+        )
+        re_review = state.board_add_task(
+            "Re-review after fixes",
+            "g",
+            lane="Done",
+            id="task-review-2",
+            action_name="feature/review",
+            parent_task_id=fix.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=3,
+            agent_id=reviewer_two.id,
+        )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            self._write_action(tempdir, "feature/implement")
+            self._write_action(
+                tempdir,
+                "feature/review",
+                auto_close_on_done=True,
+            )
+            closed = []
+
+            async def resolve_base_dir(_group):
+                return tempdir
+
+            async def close_agent(cell):
+                closed.append(cell.id)
+
+            result = await self.server_mod._maybe_auto_close_root_done_agents(
+                state,
+                re_review,
+                action_mgr=self.server_mod.ActionManager(),
+                resolve_base_dir=resolve_base_dir,
+                close_agent=close_agent,
+            )
+
+        self.assertEqual(result, [reviewer_one.id, reviewer_two.id])
+        self.assertEqual(closed, [reviewer_one.id, reviewer_two.id])
+
+    async def test_auto_close_on_done_waits_for_root_resolution(self):
+        state = self._make_state()
+        reviewer = self.state_mod.AgentCell(
+            id="review-1",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            session_id="review-session",
+            status="idle",
+        )
+        impl = self.state_mod.AgentCell(
+            id="impl-1",
+            name="Implementer",
+            group="g",
+            cell_type="agent",
+        )
+        state.agents = {reviewer.id: reviewer, impl.id: impl}
+        root = state.board_add_task(
+            "Implement feature",
+            "g",
+            lane="In Progress",
+            id="task-root",
+            action_name="feature/implement",
+            agent_id=impl.id,
+        )
+        review = state.board_add_task(
+            "Review feature",
+            "g",
+            lane="Done",
+            id="task-review",
+            action_name="feature/review",
+            parent_task_id=root.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=1,
+            agent_id=reviewer.id,
+        )
+        state.board_add_task(
+            "Fix issues",
+            "g",
+            lane="In Progress",
+            id="task-fix",
+            action_name="feature/implement",
+            parent_task_id=review.id,
+            pipeline_root_id=root.id,
+            pipeline_depth=2,
+            agent_id=impl.id,
+        )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            self._write_action(tempdir, "feature/implement")
+            self._write_action(
+                tempdir,
+                "feature/review",
+                auto_close_on_done=True,
+            )
+            closed = []
+
+            async def resolve_base_dir(_group):
+                return tempdir
+
+            async def close_agent(cell):
+                closed.append(cell.id)
+
+            result = await self.server_mod._maybe_auto_close_root_done_agents(
+                state,
+                review,
+                action_mgr=self.server_mod.ActionManager(),
+                resolve_base_dir=resolve_base_dir,
+                close_agent=close_agent,
+            )
+
+        self.assertEqual(result, [])
+        self.assertEqual(closed, [])
+
+    async def test_auto_close_on_done_skips_same_agent_queue_and_weaver_followups(self):
+        state = self._make_state()
+        reviewer = self.state_mod.AgentCell(
+            id="review-1",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            session_id="review-session",
+            status="idle",
+        )
+        state.agents = {reviewer.id: reviewer}
+        root = state.board_add_task(
+            "Review root",
+            "g",
+            lane="Done",
+            id="task-root",
+            action_name="feature/review",
+            agent_id=reviewer.id,
+        )
+        queued = state.board_add_task(
+            "Queued follow-up",
+            "g",
+            lane="Backlog",
+            id="task-queued",
+            action_name="feature/implement",
+        )
+        state.auto_dispatch_queue_add(
+            "g",
+            queued.id,
+            target_agent_id=reviewer.id,
+        )
+        state.board_add_task(
+            "Weaver: need reply",
+            "g",
+            lane="Backlog",
+            id="task-reply",
+            reply_agent_id=reviewer.id,
+            labels=["loom:weaver-message"],
+            status="Awaiting Reply",
+        )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            self._write_action(
+                tempdir,
+                "feature/review",
+                auto_close_on_done=True,
+            )
+            self._write_action(tempdir, "feature/implement")
+            closed = []
+
+            async def resolve_base_dir(_group):
+                return tempdir
+
+            async def close_agent(cell):
+                closed.append(cell.id)
+
+            result = await self.server_mod._maybe_auto_close_root_done_agents(
+                state,
+                root,
+                action_mgr=self.server_mod.ActionManager(),
+                resolve_base_dir=resolve_base_dir,
+                close_agent=close_agent,
+            )
+
+        self.assertEqual(result, [])
+        self.assertEqual(closed, [])
+
+    async def test_auto_close_on_done_skips_agents_with_open_assigned_tasks(self):
+        state = self._make_state()
+        reviewer = self.state_mod.AgentCell(
+            id="review-1",
+            name="Reviewer",
+            group="g",
+            cell_type="agent",
+            session_id="review-session",
+            status="idle",
+        )
+        state.agents = {reviewer.id: reviewer}
+        root = state.board_add_task(
+            "Review root",
+            "g",
+            lane="Done",
+            id="task-root",
+            action_name="feature/review",
+            agent_id=reviewer.id,
+        )
+        state.board_add_task(
+            "Queued follow-up",
+            "g",
+            lane="To Do",
+            id="task-next",
+            action_name="feature/implement",
+            agent_id=reviewer.id,
+        )
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            self._write_action(
+                tempdir,
+                "feature/review",
+                auto_close_on_done=True,
+            )
+            self._write_action(tempdir, "feature/implement")
+            closed = []
+
+            async def resolve_base_dir(_group):
+                return tempdir
+
+            async def close_agent(cell):
+                closed.append(cell.id)
+
+            result = await self.server_mod._maybe_auto_close_root_done_agents(
+                state,
+                root,
+                action_mgr=self.server_mod.ActionManager(),
+                resolve_base_dir=resolve_base_dir,
+                close_agent=close_agent,
+            )
+
+        self.assertEqual(result, [])
+        self.assertEqual(closed, [])
 
 
 class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):

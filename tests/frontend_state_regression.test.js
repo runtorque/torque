@@ -896,6 +896,42 @@ test('board search matches title, description, labels, action, and linked agent 
   assert.deepEqual(jsonValue(context, 'Object.keys(_boardVisibleTasks())'), ['agentTask']);
 });
 
+test('actions editor save payload preserves auto_close_on_done', () => {
+  const { sandbox, document } = createSandbox({
+    _showToast() {},
+    _cachedAgentTemplates: [],
+  });
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/actions.js');
+
+  document.register('tpled-name').value = 'feature/review';
+  document.register('tpled-desc').value = 'Review code';
+  document.register('tpled-agent-template').value = '';
+  document.register('tpled-agent-prefix').value = '';
+  document.register('tpled-agent-color').value = '';
+  document.register('tpled-agent-cmd').value = '';
+  document.register('tpled-agent-dir').value = '';
+  document.register('tpled-group').value = '';
+  document.register('tpled-worktree').checked = false;
+  document.register('tpled-auto-close-on-done').checked = true;
+  document.register('tpled-prompt').value = '{{ TASK }}';
+  document.register('tpled-labels').value = 'review';
+  document.register('tpled-scope').value = 'project';
+  const transitions = document.register('tpled-transitions');
+  transitions.setQuerySelectorAll('.tpled-transition-entry', []);
+
+  runInContext(context, `_tplEditorSelected = 'project:feature/review';`);
+  runInContext(context, `_tplEditorScope = 'project';`);
+  runInContext(context, `_tplEditorSaveInner();`);
+
+  assert.equal(jsonValue(context, 'sendCalls.length'), 1);
+  assert.equal(
+    jsonValue(context, 'sendCalls[0].action.auto_close_on_done'),
+    true,
+  );
+  assert.deepEqual(jsonValue(context, 'sendCalls[0].action.transitions'), []);
+});
+
 test('board lane counts ignore subordinate tasks in the same lane', () => {
   const { context } = createBoardHarness();
   context.state.board_tasks = {

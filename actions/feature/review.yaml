@@ -8,6 +8,8 @@ agent:
 labels:
   - review
 
+auto_close_on_done: true
+
 transitions:
   - action: feature/fix-review
     when: issues were found that need to be fixed
