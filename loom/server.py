@@ -55,6 +55,7 @@ from .artifacts import (
     task_artifacts,
 )
 from .server_artifacts import (
+    describe_task_artifact_for_digest,
     finalize_task_attachments,
     remove_task_owned_artifacts_by_filename,
     serialize_task_artifact,
@@ -502,6 +503,28 @@ def _format_weaver_message_prompt(message: str, task_id: str) -> str:
         f"Task: {task_id}\n"
         f'Reply with: loom_reply(task="{task_id}", message="your response")\n'
         "---\n"
+    )
+
+
+def _emit_task_artifact_uploaded_event(panel_event, task, actor, artifact) -> None:
+    if not panel_event or not task or not artifact:
+        return
+    agent_name = ""
+    cell_id = ""
+    if actor:
+        agent_name = str(getattr(actor, "name", "") or "").strip()
+        cell_id = str(getattr(actor, "id", "") or "").strip()
+    panel_event(
+        "task_artifact_uploaded",
+        cell_id,
+        agent_name,
+        task.group,
+        describe_task_artifact_for_digest(
+            artifact,
+            task_id=task.id,
+            task_label=task.task,
+        ),
+        task_id=task.id,
     )
 
 
@@ -3772,14 +3795,23 @@ async def main(connection=None):
                         artifacts.append(artifact)
                         state.board_update_task(tid, artifacts=artifacts)
                         refreshed = state.board_tasks.get(tid)
+                        serialized_artifact = serialize_task_artifact(
+                            artifact,
+                            task_id=tid,
+                            task_label=(
+                                refreshed.task if refreshed else task.task
+                            ),
+                        )
+                        _emit_task_artifact_uploaded_event(
+                            _panel_event,
+                            refreshed or task,
+                            actor,
+                            serialized_artifact,
+                        )
                         result = {
                             "type": "task_artifact_uploaded",
                             "task_id": tid,
-                            "artifact": serialize_task_artifact(
-                                artifact,
-                                task_id=tid,
-                                task_label=refreshed.task if refreshed else task.task,
-                            ),
+                            "artifact": serialized_artifact,
                         }
 
             elif cmd == "board_move_task":

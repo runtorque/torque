@@ -371,6 +371,104 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
             bridge.sent[0],
         )
 
+    def test_ask_created_digest_includes_recommended_action_summary(self):
+        state, group, _ = self._make_state()
+        ask = state.board_add_task(
+            "Need approval to merge release branch",
+            group,
+            id="ask-1",
+            description=(
+                "Context: Smoke tests already passed.\n"
+                "Recommended action: Approve merge to main after docs review.\n"
+                "Background: Support already has the rollback note."
+            ),
+        )
+        self.assertIsNotNone(ask)
+
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        digest = buffer._format_digest(
+            group,
+            [{
+                "group": group,
+                "kind": "ask_created",
+                "message": ask.task,
+                "task_id": ask.id,
+            }],
+            buffer._board_summary(group),
+        )
+
+        self.assertIn(
+            "ask_created: Need approval to merge release branch — "
+            "Approve merge to main after docs review.",
+            digest,
+        )
+        self.assertNotIn("Smoke tests already passed", digest)
+
+    def test_compact_ask_created_digest_clips_long_context(self):
+        state, group, _ = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            digest_verbosity="compact",
+        )
+        ask = state.board_add_task(
+            "Need go-live approval",
+            group,
+            id="ask-1",
+            description=(
+                "Context: Approve the production rollout window after smoke "
+                "tests finish in staging and support signs off on the "
+                "incident playbook updates for the migration."
+            ),
+        )
+        self.assertIsNotNone(ask)
+
+        buffer = self.weaver_mod.WeaverEventBuffer(state, FakeBridge())
+        digest = buffer._format_digest(
+            group,
+            [{
+                "group": group,
+                "kind": "ask_created",
+                "message": ask.task,
+                "task_id": ask.id,
+            }],
+            buffer._board_summary(group),
+        )
+
+        self.assertIn(
+            "ask_created: Need go-live approval — Approve the production rollout",
+            digest,
+        )
+        self.assertIn("…", digest)
+        self.assertNotIn("support signs off", digest)
+
+    async def test_task_artifact_uploaded_digest_includes_ref_and_preview(self):
+        state, group, _ = self._make_state()
+        state.weaver_settings[group] = self.state_mod.WeaverSettings(
+            group=group,
+            enabled_events=["task_artifact_uploaded"],
+        )
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer._last_push[group] = time.time() - 61
+
+        buffer.on_panel_event({
+            "group": group,
+            "kind": "task_artifact_uploaded",
+            "agent_name": "Worker",
+            "message": (
+                "[test report] pytest.log — /attachments/task-1/pytest.log — "
+                "15 B | uploaded report — E assert 1 == 2"
+            ),
+            "task_id": "task-1",
+        })
+
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("/attachments/task-1/pytest.log", bridge.sent[0])
+        self.assertIn("E assert 1 == 2", bridge.sent[0])
+
     async def test_board_summary_in_digest_mentions_task_health(self):
         state, group, _ = self._make_state()
         task = state.board_add_task(
