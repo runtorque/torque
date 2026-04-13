@@ -292,7 +292,7 @@ test('weaver journal distinguishes blocking asks from non-blocking notes', () =>
   assert.match(html, /weaverDismissNote/);
 });
 
-test('weaver journal renders open streams with product, workflow, and context summaries', () => {
+test('weaver journal keeps chronology separate and shows a Session Map button', () => {
   const sandbox = createSandbox();
   sandbox.state.board_tasks = {
     'LOOM:333': { id: 'LOOM:333', task: 'Add Events tab' },
@@ -343,41 +343,91 @@ test('weaver journal renders open streams with product, workflow, and context su
 
   const html = vm.runInContext(`_weaverRenderJournal("alpha")`, context);
 
-  assert.match(html, /Open Streams/);
-  assert.match(html, /Keep Weaver Events next-dispatch timing accurate/);
-  assert.match(html, /events-panel/);
-  assert.match(html, /Awaiting validation/);
-  assert.match(html, /Not ready to merge/);
-  assert.match(html, /Run manual smoke/);
-  assert.match(html, /Merge after validation/);
-  assert.match(html, /rev4561/);
-  assert.match(html, /Add Events tab/);
-  assert.match(html, /Keep Weaver Events next-dispatch timing accurate/);
-  assert.match(html, /2 workflow tasks/);
-  assert.match(html, /Reprioritized blocker fix before queued work/);
-  assert.match(html, /weaver-stream-section-label-product/);
-  assert.match(html, /weaver-stream-section-label-workflow/);
-  assert.match(html, /weaver-stream-section-label-context/);
+  assert.match(html, />Session Map</);
+  assert.match(html, /No journal entries yet/);
+  assert.doesNotMatch(html, /Open Streams/);
+  assert.doesNotMatch(html, /Awaiting validation/);
+  assert.doesNotMatch(html, /weaver-stream-section-label-product/);
 });
 
-test('weaver journal makes validation-pending streams read as awaiting validation', () => {
+test('weaver session map renders deterministic stream and recovery sections', () => {
   const sandbox = createSandbox();
-  sandbox.state.weaver_streams = {
+  sandbox.state.weaver_session_maps = {
     alpha: {
       group: 'alpha',
-      count: 1,
-      streams: [
-        {
+      overview: {
+        tasks_total: 4,
+        active_stream_count: 1,
+        active_agent_count: 1,
+        pending_ask_count: 1,
+        human_gate_count: 1,
+        queued_follow_up_count: 2,
+      },
+      streams: {
+        items: [
+          {
+            stream_id: 'stream:/repo::loom/modal-polish',
+            branch: 'loom/modal-polish',
+            foreground_task_title: 'Polish modal',
+            state: 'awaiting_human_validation',
+            validation_state: 'pending_human_validation',
+            merge_state: 'not_ready',
+            gate_reason: 'Run manual smoke',
+            recommended_next_action: 'run_manual_validation',
+            latest_reviewed_commit_sha: 'abc1234567',
+            product_task_ids: ['LOOM:1'],
+            workflow_task_ids: ['LOOM:1:1'],
+            recent_visibility_items: [
+              { kind: 'weaver_message', summary: 'Paused queued work until validation clears' },
+            ],
+          },
+        ],
+      },
+      asks: {
+        items: [{ id: 'ASK:1', title: 'Approve release plan', parent_task_id: 'LOOM:1' }],
+      },
+      human_gates: {
+        items: [{ stream_title: 'Polish modal', branch: 'loom/modal-polish', gate_reason: 'Run manual smoke' }],
+      },
+      task_health: {
+        items: [{ id: 'LOOM:9', title: 'Investigate flaky smoke', health_state: 'blocked', via: '' }],
+      },
+      verification: {
+        items: [{ id: 'LOOM:1', title: 'Polish modal', verification_state: 'pending', verification_mode: 'deploy', detail: 'Run manual smoke' }],
+      },
+      branch_boundaries: {
+        items: [{
+          latest_boundary_task: 'Review modal polish',
           branch: 'loom/modal-polish',
+          partial_review_safe: true,
           foreground_task_title: 'Polish modal',
-          validation_state: 'pending_human_validation',
-          recommended_next_action: 'run_manual_validation',
-        },
-      ],
+          queued_followups: [{ title: 'Ship follow-up copy tweak' }],
+          started_followups: [],
+        }],
+      },
+      agents: {
+        items: [{ id: 'agent-1', name: 'Worker One', status: 'running', current_task: 'Polish modal', activity_detail: 'Waiting on smoke results' }],
+      },
+      queued_follow_up: {
+        items: [
+          { source: 'stream_queue', task_id: 'LOOM:2', task_title: 'Ship follow-up copy tweak', queue_state: 'paused_by_validation', branch: 'loom/modal-polish', gate_reason: 'Run manual smoke' },
+          { source: 'dispatch_queue', task_id: 'LOOM:3', task_title: 'Prepare release notes', target_agent_name: 'Worker One' },
+        ],
+      },
+      journal: {
+        items: [
+          { id: 9, type: 'checkpoint', timestamp: 100, entry: 'Checkpoint: validation pending before merge.' },
+          { id: 8, type: 'decision', timestamp: 90, entry: 'Decision: pause queued work until smoke passes.' },
+        ],
+      },
+      hints: {
+        items: [{ kind: 'ready_to_merge', message: '1 stream will be ready to merge once validation clears.' }],
+      },
     },
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
+  vm.runInContext(`_weaverJournalSubviewByGroup.alpha = 'session_map'`, context);
 
   const html = vm.runInContext(`_weaverRenderJournal("alpha")`, context);
 
@@ -385,7 +435,29 @@ test('weaver journal makes validation-pending streams read as awaiting validatio
   assert.match(html, /modal-polish/);
   assert.match(html, /Awaiting validation/);
   assert.match(html, /Run manual validation/);
-  assert.doesNotMatch(html, />Idle</);
+  assert.match(html, /Pending asks/);
+  assert.match(html, /Approve release plan/);
+  assert.match(html, /Human gates/);
+  assert.match(html, /Task health/);
+  assert.match(html, /Verification/);
+  assert.match(html, /Branch review points/);
+  assert.match(html, /Active agents/);
+  assert.match(html, /Queued follow-up/);
+  assert.match(html, /Recent decisions, plans, and checkpoints/);
+  assert.match(html, /Back to Journal/);
+});
+
+test('weaverOpenSessionMap requests the on-demand Session Map payload', () => {
+  const sandbox = createSandbox();
+  const context = vm.createContext(sandbox);
+  loadWeaver(context);
+
+  vm.runInContext(`weaverOpenSessionMap('alpha')`, context);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'weaver_session_map_read', group: 'alpha' },
+  ]);
+  assert.equal(vm.runInContext(`_weaverJournalSubviewByGroup.alpha`, context), 'session_map');
 });
 
 test('weaverDismissNote clears the non-blocking banner without resuming', () => {

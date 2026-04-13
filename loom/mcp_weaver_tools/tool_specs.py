@@ -18,6 +18,20 @@ WEAVER_TOOLS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "weaver_session_map",
+        "description": (
+            "Return a deterministic structured Session Map for the "
+            "weaver's group. This is the current orchestration snapshot "
+            "used for recovery: active streams, pending asks and human "
+            "gates, unhealthy tasks, verification gates, branch-boundary "
+            "state, active agents, queued follow-up work, recent "
+            "decision/plan/checkpoint journal entries, and current "
+            "deterministic hints. Prefer this when you need synthesis "
+            "without rereading the full journal tail."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "weaver_streams_list",
         "description": (
             "List computed branch/worktree streams for the weaver's group. "

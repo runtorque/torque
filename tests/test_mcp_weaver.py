@@ -127,6 +127,10 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("returns its task id", message_tool["description"])
 
     def test_stream_tools_are_registered_with_stream_contract_descriptions(self):
+        session_map_tool = next(
+            tool for tool in self.mcp_weaver_mod.WEAVER_TOOLS
+            if tool["name"] == "weaver_session_map"
+        )
         list_tool = next(
             tool for tool in self.mcp_weaver_mod.WEAVER_TOOLS
             if tool["name"] == "weaver_streams_list"
@@ -136,6 +140,8 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
             if tool["name"] == "weaver_stream_show"
         )
 
+        self.assertIn("deterministic structured Session Map", session_map_tool["description"])
+        self.assertIn("current orchestration snapshot", session_map_tool["description"])
         self.assertIn("computed branch/worktree streams", list_tool["description"])
         self.assertIn("recent visibility items", list_tool["description"])
         self.assertIn("product, workflow, and visibility", show_tool["description"])
@@ -3107,6 +3113,68 @@ class WeaverOwnedAgentRestrictionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(shown["agent_slug"], "")
         self.assertTrue(shown["agent_hidden"])
 
+    async def test_restricted_session_map_scrubs_unowned_agent_identity(self):
+        state, weaver = self._make_state()
+        legacy = self._add_worker(
+            state,
+            agent_id="agent-legacy",
+            slug="legacy-worker",
+        )
+        legacy_task = state.board_tasks[legacy.current_task_id]
+        legacy_task.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": legacy.worktree_branch,
+            "status": "open",
+            "recorded_at": "2026-04-07T11:30:00+00:00",
+            "commit_sha": "hidden123",
+            "recorded_by_agent_id": legacy.id,
+        }
+        dispatch_task = state.board_add_task(
+            "Queued hidden follow-up",
+            "g",
+            lane="To Do",
+            id="task-hidden-queue",
+        )
+        self.assertIsNotNone(dispatch_task)
+        state.auto_dispatch_queue_add(
+            "g",
+            dispatch_task.id,
+            target_agent_id=legacy.id,
+        )
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        with mock.patch.object(state, "journal_read", return_value=[]):
+            text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+                "weaver_session_map",
+                {},
+                fake_handle_command,
+                state,
+                cell_id=weaver.id,
+            )
+
+        self.assertFalse(is_error)
+        session_map = json.loads(text)
+        self.assertEqual(session_map["agents"]["active_count"], 0)
+        stream = session_map["streams"]["items"][0]
+        self.assertEqual(stream["agent_id"], "")
+        self.assertEqual(stream["agent_name"], "")
+        self.assertEqual(stream["agent_slug"], "")
+        self.assertTrue(stream["agent_hidden"])
+        boundary = session_map["branch_boundaries"]["items"][0]
+        self.assertEqual(boundary["agent_id"], "")
+        self.assertEqual(boundary["agent_name"], "")
+        self.assertTrue(boundary["agent_hidden"])
+        queued = next(
+            item for item in session_map["queued_follow_up"]["items"]
+            if item["source"] == "dispatch_queue"
+        )
+        self.assertEqual(queued["target_agent_id"], "")
+        self.assertEqual(queued["target_agent_name"], "")
+        self.assertTrue(queued["target_agent_hidden"])
+
     async def test_restricted_agent_and_worktree_tools_reject_unowned_agents(self):
         state, weaver = self._make_state()
         legacy = self._add_worker(
@@ -3182,6 +3250,152 @@ class WeaverRecoveryToolTests(unittest.IsolatedAsyncioTestCase):
             weaver_agent_id=weaver.id
         )
         return weaver
+
+    async def test_session_map_returns_structured_recovery_snapshot(self):
+        state = self.state_mod.MatrixState()
+        weaver = self._add_weaver(state)
+        active = self.state_mod.AgentCell(
+            id="agent-active",
+            name="Active Worker",
+            slug="active-worker",
+            group="g",
+            cell_type="agent",
+            agent_type="codex",
+            status="running",
+            current_task_id="task-active",
+            worktree_path="/tmp/active",
+            worktree_repo_root="/repo",
+            worktree_branch="loom/active",
+            worktree_base_branch="main",
+        )
+        state.agents[active.id] = active
+        state.groups["g"].append(active.id)
+
+        active_task = state.board_add_task(
+            "Investigate blocked release",
+            "g",
+            lane="In Progress",
+            id="task-active",
+            agent_id=active.id,
+        )
+        self.assertIsNotNone(active_task)
+        active_task.health_state = "blocked"
+        active_task.health_since = "2026-04-07T12:10:00+00:00"
+
+        validated = state.board_add_task(
+            "Ship Events panel",
+            "g",
+            lane="Done",
+            id="task-validate",
+        )
+        self.assertIsNotNone(validated)
+        validated.verification_state = "pending"
+        validated.verification_summary = {
+            "human_validation_pending": "Run manual smoke",
+        }
+        validated.verification_updated_at = "2026-04-07T11:45:00+00:00"
+
+        review = state.board_add_task(
+            "Review Events panel",
+            "g",
+            lane="Done",
+            id="task-validate:1",
+            action_name="feature/review",
+            parent_task_id=validated.id,
+            pipeline_root_id=validated.id,
+            pipeline_depth=1,
+        )
+        self.assertIsNotNone(review)
+        review.worktree_boundary = {
+            "version": "1",
+            "repo_root": "/repo",
+            "branch": "loom/events",
+            "status": "open",
+            "recorded_at": "2026-04-07T11:30:00+00:00",
+            "commit_sha": "review123",
+            "recorded_by_agent_id": active.id,
+        }
+
+        queued_stream = state.board_add_task(
+            "Polish Events follow-up",
+            "g",
+            lane="To Do",
+            id="task-queued-stream",
+            resume_after_boundary_task_id=review.id,
+        )
+        self.assertIsNotNone(queued_stream)
+
+        ask = state.board_add_task(
+            "Approve release plan",
+            "g",
+            lane="Backlog",
+            id="ask-1",
+            labels=["loom:human"],
+            parent_task_id=active_task.id,
+        )
+        self.assertIsNotNone(ask)
+
+        queued_dispatch = state.board_add_task(
+            "Run release smoke",
+            "g",
+            lane="To Do",
+            id="task-queued-dispatch",
+        )
+        self.assertIsNotNone(queued_dispatch)
+        state.auto_dispatch_queue_add(
+            "g",
+            queued_dispatch.id,
+            target_agent_id=active.id,
+            max_concurrent=2,
+        )
+
+        journal_entries = [
+            {"id": 40, "group": "g", "timestamp": 40, "type": "checkpoint", "entry": "One blocked stream and one validation gate."},
+            {"id": 30, "group": "g", "timestamp": 30, "type": "plan", "entry": "Validate after review before widening work."},
+            {"id": 20, "group": "g", "timestamp": 20, "type": "observation", "entry": "This should not appear in Session Map."},
+            {"id": 10, "group": "g", "timestamp": 10, "type": "decision", "entry": "Prioritize the blocked release first."},
+        ]
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        with mock.patch.object(state, "journal_read", return_value=journal_entries):
+            text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+                "weaver_session_map",
+                {},
+                fake_handle_command,
+                state,
+                cell_id=weaver.id,
+            )
+
+        self.assertFalse(is_error)
+        session_map = json.loads(text)
+        self.assertEqual(session_map["group"], "g")
+        self.assertEqual(session_map["overview"]["pending_ask_count"], 1)
+        self.assertEqual(session_map["streams"]["count"], 2)
+        self.assertEqual(session_map["human_gates"]["count"], 1)
+        self.assertEqual(
+            session_map["human_gates"]["items"][0]["gate_reason"],
+            "Run manual smoke",
+        )
+        self.assertEqual(
+            session_map["task_health"]["items"][0]["id"],
+            active_task.id,
+        )
+        self.assertEqual(session_map["verification"]["counts"]["pending"], 1)
+        self.assertEqual(session_map["branch_boundaries"]["count"], 1)
+        self.assertEqual(session_map["agents"]["active_count"], 1)
+        self.assertEqual(
+            {item["source"] for item in session_map["queued_follow_up"]["items"]},
+            {"dispatch_queue", "stream_queue"},
+        )
+        self.assertEqual(
+            [item["type"] for item in session_map["journal"]["items"]],
+            ["checkpoint", "plan", "decision"],
+        )
+        self.assertEqual(session_map["journal"]["counts"]["decision"], 1)
+        self.assertEqual(session_map["journal"]["counts"]["plan"], 1)
+        self.assertEqual(session_map["journal"]["counts"]["checkpoint"], 1)
 
     async def test_agent_show_includes_worktree_terminals_and_task_history(self):
         state = self.state_mod.MatrixState()

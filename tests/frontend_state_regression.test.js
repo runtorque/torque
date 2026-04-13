@@ -464,6 +464,28 @@ function createWeaverHarness() {
   return { context, document };
 }
 
+function createWeaverWsHarness() {
+  const { sandbox, document } = createSandbox({
+    _cachedProviders: [],
+    _esc(value) { return String(value); },
+  });
+  document.register('main');
+  document.register('bottom-panel');
+  document.register('panel-weaver');
+  document.register('conn-dot');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/ws.js');
+  loadScript(context, 'static/js/render.js');
+  loadScript(context, 'static/js/weaver.js');
+  runInContext(context, `
+    send = function(message) { sendCalls.push(message); };
+    render = function() {};
+    _activePanelApp = 'weaver';
+    _panelStateRestored = true;
+  `);
+  return { context, document, sandbox };
+}
+
 function createAgentHistoryHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -2308,6 +2330,10 @@ test('ws close clears pending resync guards', () => {
   loadScript(context, 'static/js/ws.js');
 
   runInContext(context, `
+    _weaverResetSessionMapMetaCalls = [];
+    _weaverResetSessionMapMeta = function(options) {
+      _weaverResetSessionMapMetaCalls.push(options || {});
+    };
     connect();
     _resyncPending = true;
     _awaitingFullState = true;
@@ -2316,6 +2342,9 @@ test('ws close clears pending resync guards', () => {
 
   assert.equal(jsonValue(context, '_resyncPending'), false);
   assert.equal(jsonValue(context, '_awaitingFullState'), false);
+  assert.deepEqual(jsonValue(context, '_weaverResetSessionMapMetaCalls'), [
+    { clearStale: false },
+  ]);
 });
 
 test('_renderBoardCard omits the default dispatch badge while keeping warning states', () => {
@@ -5359,7 +5388,7 @@ test('selected weaver cards keep selection chrome aligned with running and pause
   assert.match(css, /@keyframes weaver-pulse\s*\{\s*0%,\s*100%\s*\{\s*box-shadow:\s*var\(--weaver-edge-shadow\);[^}]*\}\s*50%\s*\{\s*box-shadow:\s*var\(--weaver-edge-shadow\),\s*0 0 8px rgba\(210, 153, 34, 0\.3\);/);
 });
 
-test('renderWeaverPanel shows branch review-point summary', () => {
+test('renderWeaverPanel shows branch review-point summary in Session Map view', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-weaver');
 
@@ -5387,37 +5416,22 @@ test('renderWeaverPanel shows branch review-point summary', () => {
       weaver_agent_id: 'weaver-1',
     },
   };
-  context.state.board_tasks = {
-    boundary: {
-      id: 'boundary',
-      group: 'alpha',
-      task: 'Stable review point',
-      lane: 'Done',
-      agent_id: 'agent-1',
-      worktree_boundary: {
-        repo_root: '/repo',
-        branch: 'loom/worker',
-        status: 'open',
-        recorded_at: '2026-04-07T10:00:00+00:00',
+  context.state.weaver_session_maps = {
+    alpha: {
+      branch_boundaries: {
+        items: [
+          {
+            branch: 'loom/worker',
+            latest_boundary_task: 'Stable review point',
+            partial_review_safe: false,
+            foreground_task_title: 'Implement follow-up',
+            queued_followups: [{ title: 'Queue release notes' }],
+          },
+        ],
       },
     },
-    current: {
-      id: 'current',
-      group: 'alpha',
-      task: 'Implement follow-up',
-      lane: 'In Progress',
-      agent_id: 'agent-1',
-      resume_after_boundary_task_id: 'boundary',
-    },
-    queued: {
-      id: 'queued',
-      group: 'alpha',
-      task: 'Queue release notes',
-      lane: 'To Do',
-      agent_id: 'agent-1',
-      resume_after_boundary_task_id: 'boundary',
-    },
   };
+  context._weaverJournalSubviewByGroup.alpha = 'session_map';
 
   context.renderWeaverPanel();
 
@@ -5590,6 +5604,127 @@ test('weaver stream deltas rerender only the active Weaver panel', () => {
       },
     ],
   });
+});
+
+test('weaver Session Map responses rerender only the active Weaver panel', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'weaver';
+  runInContext(context, `
+    _currentGroup = function() { return 'alpha'; };
+  `);
+
+  context._handleWeaverSessionMapMessage({
+    type: 'weaver_session_map',
+    group: 'alpha',
+    session_map: {
+      group: 'alpha',
+      overview: { tasks_total: 3 },
+      streams: { items: [] },
+    },
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 0,
+    board: 0,
+    context: 0,
+    events: 0,
+    weaver: 1,
+    templates: 0,
+  });
+  assert.deepEqual(jsonValue(context, 'state.weaver_session_maps.alpha'), {
+    group: 'alpha',
+    overview: { tasks_total: 3 },
+    streams: { items: [] },
+  });
+});
+
+test('full state re-requests an open Session Map after reconnect clears cached data', () => {
+  const { context, sandbox } = createWeaverWsHarness();
+
+  runInContext(context, `
+    state.groups = { alpha: ['weaver-1'] };
+    state.agents = {
+      'weaver-1': {
+        id: 'weaver-1',
+        group: 'alpha',
+        name: 'Weaver',
+        cell_type: 'agent',
+        status: 'running'
+      }
+    };
+    state.group_settings = {
+      alpha: { weaver_agent_id: 'weaver-1' }
+    };
+  `);
+
+  context.weaverOpenSessionMap('alpha');
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'weaver_session_map_read', group: 'alpha' },
+  ]);
+  assert.deepEqual(jsonValue(context, '_weaverSessionMapMetaByGroup.alpha'), {
+    loading: true,
+    stale: false,
+  });
+
+  sandbox.sendCalls.length = 0;
+  context._handleFullState({
+    type: 'state',
+    seq: 1,
+    groups: { alpha: ['weaver-1'] },
+    agents: {
+      'weaver-1': {
+        id: 'weaver-1',
+        group: 'alpha',
+        name: 'Weaver',
+        cell_type: 'agent',
+        status: 'running',
+      },
+    },
+    group_settings: {
+      alpha: { weaver_agent_id: 'weaver-1' },
+    },
+    board_tasks: {},
+    board_lanes: [],
+    panel_events: [],
+    weaver_buffer_stats: {},
+    weaver_sent_events: {},
+    weaver_worklog: {},
+    weaver_streams: {},
+    weaver_session_maps: {},
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'weaver_session_map_read', group: 'alpha' },
+  ]);
+  assert.deepEqual(jsonValue(context, '_weaverSessionMapMetaByGroup.alpha'), {
+    loading: true,
+    stale: false,
+  });
+});
+
+test('task deltas mark the current group Session Map stale', () => {
+  const { context } = createWsRenderHarness();
+  runInContext(context, `
+    _weaverMarkedGroups = [];
+    _weaverMarkSessionMapStale = function(groups) {
+      _weaverMarkedGroups = groups.slice();
+    };
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'task_upsert',
+        id: 'LOOM:1',
+        group: 'alpha',
+        task: 'Refresh Session Map',
+        lane: 'Backlog',
+      },
+    ],
+  });
+
+  assert.deepEqual(jsonValue(context, '_weaverMarkedGroups'), ['alpha']);
 });
 
 test('full state hydrates weaver streams for the journal tab', () => {

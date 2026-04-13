@@ -30,6 +30,7 @@ from .state import (
 )
 from .task_health import HEALTH_SEVERITY
 from .weaver_hints import compute_weaver_hints
+from .weaver_session_map import build_weaver_session_map
 from .worktree_streams import compute_worktree_streams, member_task_ids_for_stream
 
 _STREAM_STATES = (
@@ -463,6 +464,15 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
             "truncated": len(hints) > 10,
         }
         return json.dumps(summary), False
+
+    if name == "weaver_session_map":
+        return json.dumps(
+            build_weaver_session_map(
+                state,
+                _weaver_group,
+                weaver_cell=_weaver_cell,
+            )
+        ), False
 
     if name == "weaver_streams_list":
         streams = _weaver_streams(
