@@ -60,6 +60,7 @@ from .server_artifacts import (
     describe_task_artifact_for_digest,
     finalize_task_attachments,
     remove_task_owned_artifacts_by_filename,
+    serialize_upstream_task_artifacts,
     serialize_task_artifact,
     store_preserved_merge_diff,
     store_task_upload,
@@ -2166,6 +2167,10 @@ async def main(connection=None):
             ],
             "artifacts": task_artifacts(task.attachments or [],
                                          task.artifacts or []),
+            "upstream_artifacts": serialize_upstream_task_artifacts(
+                task,
+                tasks_by_id=state.board_tasks,
+            ),
         }
 
         # Child terminals of the target agent
@@ -4540,10 +4545,14 @@ async def main(connection=None):
                                     prompt = task.task
 
                                 if prompt:
+                                    upstream_artifacts = (
+                                        loom_ctx["task"]["upstream_artifacts"]
+                                    )
                                     prompt = _append_task_artifacts(
                                         prompt,
                                         task.attachments,
                                         task.artifacts,
+                                        upstream_artifacts,
                                     )
                                     is_clean = \
                                         loom_ctx["context"]["is_clean"]
@@ -4790,6 +4799,16 @@ async def main(connection=None):
                     if t:
                         task_desc = t.description or ""
 
+                preview_task = None
+                if tid:
+                    preview_task = state.board_tasks.get(tid)
+                preview_upstream_artifacts = serialize_upstream_task_artifacts(
+                    preview_task or {
+                        "parent_task_id": data.get("parent_task_id", ""),
+                    },
+                    tasks_by_id=state.board_tasks,
+                )
+
                 if act_name:
                     base_dir = await _resolve_base_dir(act_group)
                     loom_ctx = {
@@ -4808,6 +4827,7 @@ async def main(connection=None):
                                 attachments or [],
                                 artifacts or [],
                             ),
+                            "upstream_artifacts": preview_upstream_artifacts,
                         },
                     }
                     rendered = action_mgr.render_prompt(
@@ -4826,6 +4846,7 @@ async def main(connection=None):
                                       rendered,
                                       attachments,
                                       artifacts,
+                                      preview_upstream_artifacts,
                                   )}
                 else:
                     result = {"type": "prompt_preview",
@@ -4833,6 +4854,7 @@ async def main(connection=None):
                                   task_text,
                                   attachments,
                                   artifacts,
+                                  preview_upstream_artifacts,
                               )}
 
             elif cmd == "memory_list":

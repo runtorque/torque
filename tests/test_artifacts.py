@@ -5,6 +5,7 @@ from loom.artifacts import (
     legacy_image_prompt_block,
     normalize_artifact,
     task_artifacts,
+    upstream_artifact_prompt_block,
 )
 
 
@@ -83,6 +84,59 @@ class TaskArtifactTests(unittest.TestCase):
         self.assertIn("````text", artifact_block)
         self.assertIn("\n````", artifact_block)
         self.assertIn("before\n```\nafter", artifact_block)
+
+    def test_upstream_prompt_block_labels_parent_task_and_reuses_safe_shaping(self):
+        artifact_block = upstream_artifact_prompt_block([
+            {
+                "type": "generated_doc",
+                "title": "Implementation plan",
+                "path": "/tmp/task-parent/plan.md",
+                "summary": "Canonical plan for the downstream task",
+                "source_task_id": "task-parent",
+                "source_task_label": "Research auth patch",
+            },
+            {
+                "type": "snippet",
+                "title": "Acceptance criteria",
+                "content": "Line 1\n```\nLine 2",
+                "prompt": {"mode": "inline"},
+                "source_task_id": "task-parent",
+                "source_task_label": "Research auth patch",
+            },
+        ])
+
+        self.assertIn("## Upstream handoff artifacts", artifact_block)
+        self.assertIn("From `Research auth patch` (task-parent)", artifact_block)
+        self.assertIn("summary: Canonical plan for the downstream task", artifact_block)
+        self.assertIn("inline excerpt follows", artifact_block)
+        self.assertIn("````text", artifact_block)
+
+    def test_upstream_prompt_block_honors_none_and_path_modes(self):
+        artifact_block = upstream_artifact_prompt_block([
+            {
+                "type": "generated_doc",
+                "title": "Hidden plan",
+                "path": "/tmp/task-parent/hidden.md",
+                "summary": "should not render",
+                "prompt": {"mode": "none"},
+                "source_task_id": "task-parent",
+                "source_task_label": "Research auth patch",
+            },
+            {
+                "type": "file_ref",
+                "title": "Plan path",
+                "path": "/tmp/task-parent/plan.md",
+                "summary": "path mode should not include summary text",
+                "prompt": {"mode": "path"},
+                "source_task_id": "task-parent",
+                "source_task_label": "Research auth patch",
+            },
+        ])
+
+        self.assertNotIn("Hidden plan", artifact_block)
+        self.assertIn("Plan path", artifact_block)
+        self.assertIn("ref: `/tmp/task-parent/plan.md`", artifact_block)
+        self.assertNotIn("path mode should not include summary text", artifact_block)
 
 
 if __name__ == "__main__":

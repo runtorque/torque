@@ -342,7 +342,44 @@ def serialize_task_artifacts(attachments, artifacts, *, task_id: str = "",
     return combined
 
 
-def serialize_task_for_mcp(task) -> dict:
+def _task_value(task, field: str, default=""):
+    if isinstance(task, dict):
+        return task.get(field, default)
+    return getattr(task, field, default)
+
+
+def serialize_upstream_task_artifacts(task, tasks_by_id=None) -> list[dict]:
+    """Return direct-parent artifacts with explicit handoff metadata."""
+    if not tasks_by_id:
+        return []
+    parent_task_id = str(_task_value(task, "parent_task_id", "") or "").strip()
+    if not parent_task_id:
+        return []
+    parent = tasks_by_id.get(parent_task_id)
+    if not parent:
+        return []
+
+    parent_id = str(_task_value(parent, "id", "") or "").strip()
+    parent_label = str(_task_value(parent, "task", "") or "").strip()
+    parent_depth = int(_task_value(parent, "pipeline_depth", 0) or 0)
+    payloads = serialize_task_artifacts(
+        _task_value(parent, "attachments", []) or [],
+        _task_value(parent, "artifacts", []) or [],
+        task_id=parent_id,
+        task_label=parent_label,
+    )
+    enriched = []
+    for payload in payloads:
+        item = dict(payload)
+        item["source_task_id"] = parent_id
+        item["source_task_label"] = parent_label
+        item["source_task_depth"] = parent_depth
+        item["source_relation"] = "direct_parent"
+        enriched.append(item)
+    return enriched
+
+
+def serialize_task_for_mcp(task, *, tasks_by_id=None) -> dict:
     data = asdict(task) if is_dataclass(task) else dict(task or {})
     attachments = normalize_attachments(data.get("attachments", []))
     raw_artifacts = normalize_artifacts(data.get("artifacts", []))
@@ -353,6 +390,10 @@ def serialize_task_for_mcp(task) -> dict:
         raw_artifacts,
         task_id=str(data.get("id", "") or ""),
         task_label=str(data.get("task", "") or ""),
+    )
+    data["upstream_artifacts"] = serialize_upstream_task_artifacts(
+        data,
+        tasks_by_id=tasks_by_id,
     )
     return data
 

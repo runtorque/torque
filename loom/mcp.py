@@ -541,7 +541,8 @@ async def _dispatch_tool(name, args, cell_id, handle_command, state):
         if not cell:
             return f"Agent {cell_id} not found", True
         from dataclasses import asdict
-        tasks = {tid: serialize_task_for_mcp(t) for tid, t in state.board_tasks.items()
+        tasks = {tid: serialize_task_for_mcp(t, tasks_by_id=state.board_tasks)
+                 for tid, t in state.board_tasks.items()
                  if t.agent_id == cell_id}
         return json.dumps({"agent": asdict(cell), "tasks": tasks},
                           indent=2), False

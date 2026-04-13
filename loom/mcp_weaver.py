@@ -599,7 +599,7 @@ async def _dispatch_weaver_tool(name, args, handle_command, state,
         task = state.board_tasks.get(tid)
         if not task or task.group != _weaver_group:
             return "Task not found", True
-        d = serialize_task_for_mcp(task)
+        d = serialize_task_for_mcp(task, tasks_by_id=state.board_tasks)
         d["title"] = task.task
         d["action"] = task.action_name
         if task.agent_id and not _agent_visible_to_weaver(

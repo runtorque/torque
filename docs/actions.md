@@ -355,6 +355,7 @@ prompt: |
 | `loom.task.group` | string | Task's group name. |
 | `loom.task.attachments` | list | Legacy image attachments with `path` and `filename`. |
 | `loom.task.artifacts` | list | Combined task artifacts, including synthetic image artifacts plus structured refs like logs, diffs, reports, snippets, docs, and file refs. |
+| `loom.task.upstream_artifacts` | list | Direct-parent handoff artifacts for derived tasks, including source-task metadata plus the same combined artifact payload and task-owned URLs used in MCP views. Empty for root tasks or when the parent has no artifacts. |
 
 When you inspect tasks through MCP (`loom_context` or `weaver_task_show`), Loom also returns a `task_artifacts` combined view with task linkage and derived file URLs for task-owned uploads.
 
@@ -376,6 +377,7 @@ Loom appends task-owned artifact references after the rendered action prompt. Th
 
 - legacy image attachments still render under `## Attached images`
 - structured non-image artifacts render under `## Task artifacts`
+- derived tasks with direct-parent artifact outputs also render a bounded `## Upstream handoff artifacts` section
 
 Artifact prompt inclusion is explicit and type-aware:
 
@@ -394,6 +396,8 @@ Each structured artifact record stores:
 - `prompt.mode` (`auto`, `none`, `path`, `summary`, `inline`)
 - `provenance` (`source`, timestamps, optional agent/task origin)
 - `lifecycle` (`owner`, `cleanup`)
+
+Upstream handoff artifacts are intentionally narrow: Loom only forwards the direct parent task's combined artifact set, annotated with `source_task_id`, `source_task_label`, and `source_relation`. It does not dump every ancestor artifact into downstream prompts.
 
 ### `loom.terminals` --- child terminal sessions
 

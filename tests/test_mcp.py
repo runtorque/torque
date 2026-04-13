@@ -528,3 +528,56 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(text)
         self.assertEqual(len(payload["tasks"]["task-1"]["task_artifacts"]), 2)
         self.assertEqual(payload["tasks"]["task-1"]["task_artifacts"][0]["url"], "/attachments/task-1/image.png")
+
+    async def test_loom_context_includes_upstream_artifacts_for_derived_tasks(self):
+        state = self.state_mod.MatrixState()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+        )
+        parent = self.state_mod.BoardTask(
+            id="task-parent",
+            task="Research auth patch",
+            group="g",
+            lane="Done",
+            artifacts=[{
+                "type": "generated_doc",
+                "title": "Implementation plan",
+                "path": "/tmp/task-parent/plan.md",
+            }],
+        )
+        child = self.state_mod.BoardTask(
+            id="task-child",
+            task="Implement auth patch",
+            group="g",
+            lane="In Progress",
+            agent_id=cell.id,
+            parent_task_id=parent.id,
+            pipeline_root_id=parent.id,
+            pipeline_depth=1,
+        )
+        state.agents[cell.id] = cell
+        state.groups["g"] = [cell.id]
+        state.board_tasks[parent.id] = parent
+        state.board_tasks[child.id] = child
+
+        async def fake_handle_command(payload):
+            self.fail(f"Unexpected handle_command call: {payload}")
+
+        text, is_error = await self.mcp_mod._dispatch_tool(
+            "loom_context",
+            {},
+            cell.id,
+            fake_handle_command,
+            state,
+        )
+
+        self.assertFalse(is_error)
+        payload = json.loads(text)
+        upstream = payload["tasks"]["task-child"]["upstream_artifacts"]
+        self.assertEqual(len(upstream), 1)
+        self.assertEqual(upstream[0]["source_task_id"], "task-parent")
+        self.assertEqual(upstream[0]["source_task_label"], "Research auth patch")
+        self.assertEqual(upstream[0]["url"], "/attachments/task-parent/plan.md")

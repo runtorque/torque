@@ -119,6 +119,95 @@ class ServerArtifactHelperTests(unittest.TestCase):
         )
         self.assertEqual(serialized["task_artifacts"][1]["task_label"], "Review auth patch")
 
+    def test_serialize_upstream_task_artifacts_only_uses_direct_parent(self):
+        parent = {
+            "id": "task-parent",
+            "task": "Research auth patch",
+            "pipeline_depth": 1,
+            "attachments": [
+                {"path": "/tmp/task-parent/diagram.png", "filename": "diagram.png"}
+            ],
+            "artifacts": [
+                {
+                    "type": "generated_doc",
+                    "title": "Implementation plan",
+                    "path": "/tmp/task-parent/plan.md",
+                    "summary": "Canonical execution plan",
+                }
+            ],
+        }
+        grandparent = {
+            "id": "task-root",
+            "task": "Root task",
+            "pipeline_depth": 0,
+            "artifacts": [
+                {"type": "log", "title": "ignored.log", "path": "/tmp/task-root/ignored.log"}
+            ],
+        }
+        task = {
+            "id": "task-child",
+            "task": "Implement auth patch",
+            "parent_task_id": "task-parent",
+            "pipeline_depth": 2,
+        }
+
+        serialized = self.helper.serialize_upstream_task_artifacts(
+            task,
+            tasks_by_id={
+                "task-child": task,
+                "task-parent": parent,
+                "task-root": grandparent,
+            },
+        )
+
+        self.assertEqual(len(serialized), 2)
+        self.assertEqual({item["source_task_id"] for item in serialized}, {"task-parent"})
+        self.assertEqual(
+            {item["source_task_label"] for item in serialized},
+            {"Research auth patch"},
+        )
+        self.assertEqual({item["source_relation"] for item in serialized}, {"direct_parent"})
+        self.assertEqual(
+            {item["type"] for item in serialized},
+            {"image", "generated_doc"},
+        )
+        self.assertNotIn("task-root", {item["source_task_id"] for item in serialized})
+
+    def test_serialize_task_for_mcp_adds_upstream_artifacts_for_derived_tasks(self):
+        parent = {
+            "id": "task-parent",
+            "task": "Investigate upload support",
+            "attachments": [],
+            "artifacts": [
+                {
+                    "type": "log",
+                    "title": "pytest.log",
+                    "path": "/tmp/task-parent/pytest.log",
+                }
+            ],
+        }
+        task = {
+            "id": "task-child",
+            "task": "Implement upload support",
+            "parent_task_id": "task-parent",
+            "artifacts": [],
+        }
+
+        serialized = self.helper.serialize_task_for_mcp(
+            task,
+            tasks_by_id={"task-parent": parent, "task-child": task},
+        )
+
+        self.assertEqual(len(serialized["upstream_artifacts"]), 1)
+        self.assertEqual(
+            serialized["upstream_artifacts"][0]["source_task_label"],
+            "Investigate upload support",
+        )
+        self.assertEqual(
+            serialized["upstream_artifacts"][0]["url"],
+            "/attachments/task-parent/pytest.log",
+        )
+
     def test_store_task_upload_rejects_remote_urls(self):
         with self.assertRaises(ValueError):
             self.helper.store_task_upload(
