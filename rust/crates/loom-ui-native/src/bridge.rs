@@ -89,6 +89,8 @@ impl EngineBridge {
                     .collect(),
                 board_lanes: st.board_lanes.clone(),
                 board_tasks: st.board_tasks.values().cloned().collect(),
+                global_default_command: st.global_settings.default_command.clone(),
+                selected_agent_id: st.selected_agent_id.clone(),
             }
         })
     }
@@ -104,4 +106,103 @@ pub struct MatrixStateSnapshot {
     pub groups: std::collections::HashMap<String, Vec<String>>,
     pub board_lanes: Vec<String>,
     pub board_tasks: Vec<loom_core::state::BoardTask>,
+    /// `GlobalSettings.default_command` — empty if unset.
+    pub global_default_command: String,
+    pub selected_agent_id: Option<String>,
+}
+
+impl MatrixStateSnapshot {
+    pub fn find_agent(&self, id: &str) -> Option<&loom_core::state::AgentCell> {
+        self.agents.iter().find(|a| a.id == id)
+    }
+}
+
+/// Resolve the command + working directory for a given agent cell.
+///
+/// Priority:
+///   1. `cell.command` override if explicitly set.
+///   2. `global_settings.default_command` if cell is an agent and override is
+///      empty.
+///   3. Fallback per cell_type: `"claude"` for agents, `"/bin/zsh"` for
+///      terminals.
+pub fn resolve_command(cell: &loom_core::state::AgentCell, global_default: &str) -> String {
+    if !cell.command.is_empty() {
+        return cell.command.clone();
+    }
+    let is_agent = cell.cell_type != "terminal";
+    if is_agent && !global_default.is_empty() {
+        return global_default.to_string();
+    }
+    if is_agent {
+        "claude".to_string()
+    } else {
+        "/bin/zsh".to_string()
+    }
+}
+
+/// Working directory for the PTY — `cell.directory` if set, else None (lets
+/// the shell inherit the current process's cwd).
+pub fn resolve_cwd(cell: &loom_core::state::AgentCell) -> Option<String> {
+    if cell.directory.is_empty() {
+        None
+    } else {
+        Some(cell.directory.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_core::state::AgentCell;
+
+    #[test]
+    fn resolve_command_agent_uses_claude_fallback() {
+        let mut cell = AgentCell::new("a", "Worker", "g");
+        cell.cell_type = "agent".into();
+        assert_eq!(resolve_command(&cell, ""), "claude");
+    }
+
+    #[test]
+    fn resolve_command_terminal_uses_zsh_fallback() {
+        let mut cell = AgentCell::new("a", "Logs", "g");
+        cell.cell_type = "terminal".into();
+        assert_eq!(resolve_command(&cell, ""), "/bin/zsh");
+    }
+
+    #[test]
+    fn resolve_command_agent_honors_global_default() {
+        let mut cell = AgentCell::new("a", "Worker", "g");
+        cell.cell_type = "agent".into();
+        assert_eq!(resolve_command(&cell, "codex"), "codex");
+    }
+
+    #[test]
+    fn resolve_command_terminal_ignores_global_default() {
+        // global_default is "boot command for agents" — terminals shouldn't
+        // inherit `claude` from it.
+        let mut cell = AgentCell::new("a", "Logs", "g");
+        cell.cell_type = "terminal".into();
+        assert_eq!(resolve_command(&cell, "codex"), "/bin/zsh");
+    }
+
+    #[test]
+    fn resolve_command_cell_override_wins() {
+        let mut cell = AgentCell::new("a", "Worker", "g");
+        cell.cell_type = "agent".into();
+        cell.command = "gemini".into();
+        assert_eq!(resolve_command(&cell, "codex"), "gemini");
+    }
+
+    #[test]
+    fn resolve_cwd_empty_returns_none() {
+        let cell = AgentCell::new("a", "Worker", "g");
+        assert_eq!(resolve_cwd(&cell), None);
+    }
+
+    #[test]
+    fn resolve_cwd_propagates_directory() {
+        let mut cell = AgentCell::new("a", "Worker", "g");
+        cell.directory = "/tmp/x".into();
+        assert_eq!(resolve_cwd(&cell).as_deref(), Some("/tmp/x"));
+    }
 }

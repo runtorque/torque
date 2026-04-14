@@ -25,6 +25,7 @@ pub async fn remove_group(ctx: &CmdContext, req: &Value) -> CmdResult {
         ctx.db.delete_agent(rid).await?;
     }
     ctx.db.delete_group(&name).await?;
+    super::agents::persist_selection(ctx).await?;
     flush(ctx).await;
     Ok(json!({ "ok": true, "removed_agents": removed_ids }))
 }

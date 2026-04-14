@@ -73,9 +73,17 @@ mod ffi_smoke {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    /// Serialize tests that share the process-wide `SURFACES` map —
+    /// otherwise parallel runs of `register_then_release_roundtrip` and
+    /// `duplicate_rejected` see each other's entries and the counts race.
+    static SURFACES_LOCK: StdMutex<()> = StdMutex::new(());
 
     #[test]
     fn register_then_release_roundtrip() {
+        let _g = SURFACES_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(surface_count(), 0, "test isolation broken — unexpected entries");
         register_cell_surface("cell-x").unwrap();
         register_cell_surface("cell-y").unwrap();
         assert_eq!(surface_count(), 2);
@@ -87,6 +95,7 @@ mod tests {
 
     #[test]
     fn duplicate_rejected() {
+        let _g = SURFACES_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         register_cell_surface("cell-dup").unwrap();
         assert!(register_cell_surface("cell-dup").is_err());
         release_cell_surface("cell-dup");

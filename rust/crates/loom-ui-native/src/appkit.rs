@@ -7,13 +7,21 @@
 //! ├─ menubar → App menu → Quit (Cmd-Q)
 //! └─ NSWindow (Titled, Closable, Resizable, Miniaturizable)
 //!    └─ NSSplitView (vertical)
-//!       ├─ NSScrollView → NSTextView (sidebar, monospace, read-only)
-//!       └─ NSScrollView → NSTextView (content, monospace, read-only)
+//!       ├─ NSScrollView → NSTextView        (sidebar, read-only)
+//!       └─ Content container NSView
+//!          ├─ GhosttyView                   (when an agent is selected)
+//!          └─ placeholder NSScrollView+TV   (when nothing is selected)
 //! ```
 //!
 //! Live updates: an `NSTimer` fires every 500 ms on the main run loop; the
-//! callback pulls a fresh snapshot from the engine and repaints both text
-//! views. Everything stays on the main thread — no cross-thread marshalling.
+//! callback pulls a fresh snapshot from the engine and repaints the sidebar
+//! text + reconciles the content container with the engine's
+//! `selected_agent_id`. Each agent gets a GhosttyView cached by id — flipping
+//! selection just swaps which one is the content container's subview; the
+//! underlying libghostty surface + PTY stay alive so we preserve scrollback.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use anyhow::Result;
 use objc2::rc::Retained;
@@ -22,7 +30,7 @@ use objc2::{declare_class, msg_send_id, mutability, sel, ClassType, DeclaredClas
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSBackingStoreType,
     NSBorderType, NSColor, NSFont, NSMenu, NSMenuItem, NSScrollView, NSSplitView,
-    NSSplitViewDividerStyle, NSTextView, NSWindow, NSWindowStyleMask,
+    NSSplitViewDividerStyle, NSTextView, NSView, NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::{
     MainThreadMarker, NSObject, NSPoint, NSRect, NSSize, NSString, NSTimer,
@@ -30,7 +38,8 @@ use objc2_foundation::{
 
 use loom_server::app::AppState;
 
-use crate::bridge::EngineBridge;
+use crate::bridge::{resolve_command, resolve_cwd, EngineBridge, MatrixStateSnapshot};
+use crate::ghostty_view::GhosttyView;
 use crate::render;
 
 const REFRESH_INTERVAL_SECS: f64 = 0.5;
@@ -50,7 +59,6 @@ pub fn run(engine: AppState) -> Result<()> {
     let views = build_window(mtm);
     let window = views.window.clone();
 
-    refresh_views(&bridge, &views);
     install_refresh_timer(mtm, bridge, views);
 
     unsafe {
@@ -70,7 +78,13 @@ pub fn run(engine: AppState) -> Result<()> {
 struct Views {
     window: Retained<NSWindow>,
     sidebar_tv: Retained<NSTextView>,
-    content_tv: Retained<NSTextView>,
+    /// Container for the active content. Exactly one child at a time: either a
+    /// `GhosttyView` (agent selected) or `placeholder_scroll` (nothing
+    /// selected).
+    content_container: Retained<NSView>,
+    /// Shown when no agent is selected.
+    placeholder_scroll: Retained<NSScrollView>,
+    placeholder_tv: Retained<NSTextView>,
 }
 
 fn build_window(mtm: MainThreadMarker) -> Views {
@@ -108,36 +122,40 @@ fn build_window(mtm: MainThreadMarker) -> Views {
     let sidebar_tv = make_text_view(mtm, sidebar_frame);
     unsafe { sidebar_scroll.setDocumentView(Some(&sidebar_tv)) };
 
-    // Content area — libghostty-backed terminal.
+    // Content container — plain NSView that hosts either a GhosttyView or the
+    // placeholder. Flips based on selection on each refresh tick.
     let content_frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(920.0, 760.0));
-    let ghostty_view = crate::ghostty_view::GhosttyView::new(
-        mtm,
-        content_frame,
-        "/bin/zsh",
-        None,
-    );
-    unsafe {
-        ghostty_view.setAutoresizingMask(
+    let content_container: Retained<NSView> = unsafe {
+        let alloc = mtm.alloc::<NSView>();
+        let v = NSView::initWithFrame(alloc, content_frame);
+        v.setAutoresizingMask(
             NSAutoresizingMaskOptions::NSViewWidthSizable
                 | NSAutoresizingMaskOptions::NSViewHeightSizable,
         );
-    }
+        v
+    };
 
-    // Keep a hidden content_tv so the existing refresh pipeline still has
-    // something to talk to. It sits in a zero-size invisible subview.
-    let content_tv = make_text_view(
-        mtm,
-        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0)),
-    );
-    unsafe { content_tv.setHidden(true) };
+    // Placeholder (shown when nothing is selected).
+    let placeholder_scroll = make_scroll_view(mtm, content_frame);
+    let placeholder_tv = make_text_view(mtm, content_frame);
+    unsafe {
+        placeholder_tv.setString(&NSString::from_str(render::initial_content_placeholder()));
+        placeholder_scroll.setDocumentView(Some(&placeholder_tv));
+    }
 
     unsafe {
         split.addSubview(&sidebar_scroll);
-        split.addSubview(&*ghostty_view);
+        split.addSubview(&content_container);
         window.setContentView(Some(&split));
     }
 
-    Views { window, sidebar_tv, content_tv }
+    Views {
+        window,
+        sidebar_tv,
+        content_container,
+        placeholder_scroll,
+        placeholder_tv,
+    }
 }
 
 fn make_scroll_view(mtm: MainThreadMarker, frame: NSRect) -> Retained<NSScrollView> {
@@ -147,6 +165,10 @@ fn make_scroll_view(mtm: MainThreadMarker, frame: NSRect) -> Retained<NSScrollVi
         scroll.setHasVerticalScroller(true);
         scroll.setAutohidesScrollers(true);
         scroll.setBorderType(NSBorderType::NSNoBorder);
+        scroll.setAutoresizingMask(
+            NSAutoresizingMaskOptions::NSViewWidthSizable
+                | NSAutoresizingMaskOptions::NSViewHeightSizable,
+        );
         scroll
     }
 }
@@ -206,19 +228,137 @@ fn install_menubar(app: &NSApplication, mtm: MainThreadMarker) {
 // Refresh pipeline
 // ---------------------------------------------------------------------------
 
-fn refresh_views(bridge: &EngineBridge, views: &Views) {
+/// Holds per-window UI state that mutates across refresh ticks:
+/// which agent's GhosttyView is currently mounted, and the cache of
+/// `agent_id → GhosttyView`.
+struct ContentState {
+    current_mounted: Option<String>,
+    cache: HashMap<String, Retained<GhosttyView>>,
+    /// True the first tick — forces us to mount whatever matches selection
+    /// (including placeholder) even if `current_mounted == selection` (both
+    /// None at init).
+    first_tick: bool,
+}
+
+impl ContentState {
+    fn new() -> Self {
+        Self {
+            current_mounted: None,
+            cache: HashMap::new(),
+            first_tick: true,
+        }
+    }
+}
+
+fn tick(mtm: MainThreadMarker, bridge: &EngineBridge, views: &Views, state: &RefCell<ContentState>) {
     let snapshot = bridge.snapshot();
+
+    // 1. Sidebar text.
     let sidebar_text = render::render_sidebar(&snapshot);
-    let content_text = render::render_content(&snapshot);
+    unsafe { views.sidebar_tv.setString(&NSString::from_str(&sidebar_text)) };
+
+    // 2. Reconcile content container against snapshot.selected_agent_id.
+    reconcile_content(mtm, views, &snapshot, state);
+}
+
+fn reconcile_content(
+    mtm: MainThreadMarker,
+    views: &Views,
+    snapshot: &MatrixStateSnapshot,
+    state: &RefCell<ContentState>,
+) {
+    let mut st = state.borrow_mut();
+
+    // Drop cached views for agents that no longer exist.
+    let live_ids: std::collections::HashSet<&str> =
+        snapshot.agents.iter().map(|a| a.id.as_str()).collect();
+    st.cache.retain(|id, _view| live_ids.contains(id.as_str()));
+
+    let desired: Option<String> = snapshot
+        .selected_agent_id
+        .as_ref()
+        .filter(|id| snapshot.agents.iter().any(|a| &a.id == *id))
+        .cloned();
+
+    if !st.first_tick && st.current_mounted == desired {
+        return;
+    }
+    st.first_tick = false;
+
+    // Remove whatever's currently mounted in the container.
+    remove_container_children(&views.content_container);
+
+    match &desired {
+        Some(agent_id) => {
+            // Get-or-create GhosttyView for this agent.
+            if !st.cache.contains_key(agent_id) {
+                let Some(agent) = snapshot.find_agent(agent_id) else {
+                    // race: snapshot changed between the lookup above and
+                    // here. Show placeholder and bail.
+                    mount_placeholder(views);
+                    st.current_mounted = None;
+                    return;
+                };
+                let command = resolve_command(agent, &snapshot.global_default_command);
+                let cwd = resolve_cwd(agent);
+                let frame = container_frame(&views.content_container);
+                let gv = GhosttyView::new(mtm, frame, command, cwd);
+                unsafe {
+                    gv.setAutoresizingMask(
+                        NSAutoresizingMaskOptions::NSViewWidthSizable
+                            | NSAutoresizingMaskOptions::NSViewHeightSizable,
+                    );
+                }
+                st.cache.insert(agent_id.clone(), gv);
+            }
+            let gv = st.cache.get(agent_id).unwrap();
+            let gv_as_view: &NSView = &**gv;
+            unsafe {
+                gv_as_view.setFrame(container_frame(&views.content_container));
+                views.content_container.addSubview(gv_as_view);
+                // Make the surface key — typing into the terminal just works.
+                let _ = views.window.makeFirstResponder(Some(gv_as_view));
+            }
+        }
+        None => mount_placeholder(views),
+    }
+
+    st.current_mounted = desired;
+}
+
+fn mount_placeholder(views: &Views) {
     unsafe {
-        views.sidebar_tv.setString(&NSString::from_str(&sidebar_text));
-        views.content_tv.setString(&NSString::from_str(&content_text));
+        views.placeholder_scroll.setFrame(container_frame(&views.content_container));
+        views
+            .content_container
+            .addSubview(&views.placeholder_scroll);
+        // Refresh the placeholder text on every remount — cheap + keeps it
+        // accurate if the hint text ever changes.
+        views
+            .placeholder_tv
+            .setString(&NSString::from_str(render::initial_content_placeholder()));
+    }
+}
+
+fn container_frame(container: &NSView) -> NSRect {
+    let bounds = container.bounds();
+    NSRect::new(NSPoint::new(0.0, 0.0), bounds.size)
+}
+
+fn remove_container_children(container: &NSView) {
+    unsafe {
+        let subviews = container.subviews();
+        let count = subviews.count();
+        for i in 0..count {
+            let v = subviews.objectAtIndex(i);
+            v.removeFromSuperview();
+        }
     }
 }
 
 /// Install a repeating NSTimer on the main run loop. Fires every 500ms.
 fn install_refresh_timer(mtm: MainThreadMarker, bridge: EngineBridge, views: Views) {
-    let target = RefreshTarget::new(mtm, bridge, views);
+    let target = RefreshTarget::new(bridge, views);
     unsafe {
         let _timer: Retained<NSTimer> =
             NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(
@@ -229,20 +369,20 @@ fn install_refresh_timer(mtm: MainThreadMarker, bridge: EngineBridge, views: Vie
                 true,
             );
     }
+    let _ = mtm; // captured to prove main-thread provenance; unused directly
     // Target is kept alive by the run loop's retain of the timer, which
     // retains its target.
 }
 
 // Custom NSObject subclass that carries the engine bridge + views across
-// the Obj-C boundary. `InteriorMutable` lets us allocate via the standard
-// `ClassType::alloc()` path; main-thread-only safety is enforced by the
-// fact that NSTimer fires on whichever run loop scheduled it (main here).
+// the Obj-C boundary. MainThreadOnly — NSTimer scheduled on the main run loop
+// always fires on main, and we touch AppKit state during tick.
 declare_class!(
     struct RefreshTarget;
 
     unsafe impl ClassType for RefreshTarget {
         type Super = NSObject;
-        type Mutability = mutability::InteriorMutable;
+        type Mutability = mutability::MainThreadOnly;
         const NAME: &'static str = "LoomRefreshTarget";
     }
 
@@ -252,9 +392,12 @@ declare_class!(
 
     unsafe impl RefreshTarget {
         #[method(tick:)]
-        fn tick(&self, _timer: *mut AnyObject) {
+        fn tick_method(&self, _timer: *mut AnyObject) {
             let ivars = self.ivars();
-            refresh_views(&ivars.bridge, &ivars.views);
+            // Safe: NSTimer fires on the main run loop; MainThreadMarker here
+            // proves we're on main so we can call into AppKit APIs.
+            let mtm = MainThreadMarker::from(self);
+            tick(mtm, &ivars.bridge, &ivars.views, &ivars.state);
         }
     }
 );
@@ -262,11 +405,19 @@ declare_class!(
 struct RefreshIvars {
     bridge: EngineBridge,
     views: Views,
+    state: RefCell<ContentState>,
 }
 
 impl RefreshTarget {
-    fn new(_mtm: MainThreadMarker, bridge: EngineBridge, views: Views) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(RefreshIvars { bridge, views });
+    fn new(bridge: EngineBridge, views: Views) -> Retained<Self> {
+        let mtm = MainThreadMarker::new()
+            .expect("RefreshTarget::new must be called on the main thread");
+        let ivars = RefreshIvars {
+            bridge,
+            views,
+            state: RefCell::new(ContentState::new()),
+        };
+        let this = mtm.alloc::<Self>().set_ivars(ivars);
         unsafe { msg_send_id![super(this), init] }
     }
 }

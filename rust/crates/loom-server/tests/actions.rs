@@ -6,8 +6,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
+use once_cell::sync::Lazy;
 use serde_json::{json, Value};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
@@ -16,6 +17,15 @@ use loom_server::commands;
 use loom_server::events as evt;
 use loom_server::uploads;
 use loom_server::ws;
+
+/// Serialize tests that mutate `LOOM_PROJECT_ROOT` — two concurrent
+/// `std::env::set_var` calls race and one test ends up pointing at the other
+/// test's tempdir. Hold this across the entire test body.
+static ENV_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+async fn env_lock() -> MutexGuard<'static, ()> {
+    ENV_LOCK.lock().await
+}
 
 fn repo_root() -> PathBuf {
     // crate dir → rust/crates/loom-server → two up = rust/, three up = repo root
@@ -63,6 +73,7 @@ async fn post(addr: SocketAddr, body: Value) -> Value {
 
 #[tokio::test]
 async fn list_actions_finds_feature_and_oneshot_fixtures() {
+    let _g = env_lock().await;
     let addr = spawn_with_actions().await;
     let v = post(addr, json!({"cmd": "list_actions"})).await;
     let names: Vec<String> = v["actions"]
@@ -85,6 +96,7 @@ async fn list_actions_finds_feature_and_oneshot_fixtures() {
 
 #[tokio::test]
 async fn get_action_returns_prompt_and_discovered_vars() {
+    let _g = env_lock().await;
     let addr = spawn_with_actions().await;
     // Grab first feature/ action discovered.
     let list = post(addr, json!({"cmd": "list_actions"})).await;
@@ -117,6 +129,7 @@ async fn get_action_returns_prompt_and_discovered_vars() {
 
 #[tokio::test]
 async fn render_action_substitutes_task_variable() {
+    let _g = env_lock().await;
     let addr = spawn_with_actions().await;
     let list = post(addr, json!({"cmd": "list_actions"})).await;
     let name = list["actions"].as_array().unwrap()[0]["name"]
@@ -149,6 +162,7 @@ async fn render_action_substitutes_task_variable() {
 
 #[tokio::test]
 async fn save_action_creates_file_then_delete_removes_it() {
+    let _g = env_lock().await;
     let addr = spawn_with_actions().await;
 
     // Save to a tempdir-backed project root so we don't pollute fixtures.
@@ -177,6 +191,7 @@ async fn save_action_creates_file_then_delete_removes_it() {
 
 #[tokio::test]
 async fn save_action_rejects_missing_task() {
+    let _g = env_lock().await;
     let addr = spawn_with_actions().await;
     let tmp = tempfile::tempdir().unwrap();
     std::env::set_var("LOOM_PROJECT_ROOT", tmp.path());

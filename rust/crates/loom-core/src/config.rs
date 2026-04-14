@@ -57,9 +57,15 @@ pub fn ensure_data_dir() -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Serialize env-mutating tests — without this, parallel execution races
+    // (`remove_var` in one test while another has just `set_var`ed).
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn data_dir_respects_override() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var(ENV_INSTALL_DIR, "/tmp/loom-test-data");
         assert_eq!(data_dir(), PathBuf::from("/tmp/loom-test-data"));
         std::env::remove_var(ENV_INSTALL_DIR);
@@ -67,12 +73,14 @@ mod tests {
 
     #[test]
     fn default_command_falls_back_to_claude() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var(ENV_DEFAULT_CMD);
         assert_eq!(default_command(), "claude");
     }
 
     #[test]
     fn default_command_respects_env() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var(ENV_DEFAULT_CMD, "codex");
         assert_eq!(default_command(), "codex");
         std::env::remove_var(ENV_DEFAULT_CMD);

@@ -66,8 +66,20 @@ pub async fn remove_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
         ctx.db.delete_agent(rid).await?;
     }
     persist_group_members(ctx, &group).await?;
+    persist_selection(ctx).await?;
     flush(ctx).await;
     Ok(json!({ "ok": true, "removed": removed }))
+}
+
+/// Mirror the in-memory `selected_agent_id` to the `ui_state` table. Call after
+/// cascade-removing agents/groups, since selection may have been auto-cleared.
+pub(crate) async fn persist_selection(ctx: &CmdContext) -> Result<(), CmdError> {
+    let value = {
+        let st = ctx.state.lock().await;
+        st.selected_agent_id.clone().unwrap_or_default()
+    };
+    ctx.db.set_ui_state("selected_agent_id", &value).await?;
+    Ok(())
 }
 
 pub async fn update_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
@@ -209,6 +221,26 @@ pub async fn reparent_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
     let _ = group;
     flush(ctx).await;
     ok()
+}
+
+/// Set (or clear) the UI's selected agent. Persists to `ui_state` and emits a
+/// `ui_update` delta. Passing `id: null` (or omitting it) clears selection.
+pub async fn select_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let id = req.get("id").and_then(|v| match v {
+        Value::Null => None,
+        Value::String(s) if s.is_empty() => None,
+        Value::String(s) => Some(s.clone()),
+        _ => None,
+    });
+    {
+        let mut st = ctx.state.lock().await;
+        st.select_agent(id.as_deref())?;
+    }
+    // persist
+    let stored = id.clone().unwrap_or_default();
+    ctx.db.set_ui_state("selected_agent_id", &stored).await?;
+    flush(ctx).await;
+    Ok(json!({ "ok": true, "selected_agent_id": id }))
 }
 
 pub async fn reorder_child(ctx: &CmdContext, req: &Value) -> CmdResult {

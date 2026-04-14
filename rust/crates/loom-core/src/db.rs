@@ -433,6 +433,23 @@ impl LoomDb {
             }
         }
 
+        // ui_state — restore the handful of keys the UI cares about.
+        {
+            let sel: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM ui_state WHERE key = 'selected_agent_id'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(v) = sel {
+                // only restore if the agent still exists — otherwise silently drop
+                if state.agents.contains_key(&v) {
+                    state.selected_agent_id = Some(v);
+                }
+            }
+        }
+
         Ok(state)
     }
 }

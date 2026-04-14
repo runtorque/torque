@@ -125,5 +125,6 @@ async fn build_snapshot_locked(
         "lanes": st.board_lanes,
         "tasks": tasks,
         "global_settings": st.global_settings,
+        "selected_agent_id": st.selected_agent_id,
     })
 }

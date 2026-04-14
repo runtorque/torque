@@ -135,6 +135,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "move_agent" => agents::move_agent(ctx, req).await,
         "reparent_terminal" => agents::reparent_terminal(ctx, req).await,
         "reorder_child" => agents::reorder_child(ctx, req).await,
+        "select_agent" => agents::select_agent(ctx, req).await,
 
         // actions
         "list_actions" => actions::list_actions(ctx, req).await,

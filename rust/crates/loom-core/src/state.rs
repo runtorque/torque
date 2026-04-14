@@ -868,6 +868,9 @@ pub struct MatrixState {
     pub weaver_settings: HashMap<String, WeaverSettings>,
     pub weaver_worklog: HashMap<String, Vec<serde_json::Value>>,
 
+    // UI state (persisted)
+    pub selected_agent_id: Option<String>,
+
     // Delta accumulator
     delta_ops: Vec<DeltaOp>,
     seq: u64,
@@ -908,6 +911,7 @@ impl MatrixState {
             board_card_density_by_group: HashMap::new(),
             weaver_settings: HashMap::new(),
             weaver_worklog: HashMap::new(),
+            selected_agent_id: None,
             delta_ops: Vec::new(),
             seq: 0,
         }
@@ -1029,6 +1033,7 @@ impl MatrixState {
         for aid in &removed {
             self.emit(DeltaOp::AgentRemove { id: aid.clone() });
         }
+        self.clear_selection_if_removed(&removed);
         Ok(removed)
     }
 
@@ -1160,7 +1165,39 @@ impl MatrixState {
             self.emit(DeltaOp::AgentRemove { id: rid.clone() });
         }
         self.emit_group(&group);
+        self.clear_selection_if_removed(&removed);
         Ok(removed)
+    }
+
+    /// Set (or clear) the UI's selected agent. `None` deselects.
+    pub fn select_agent(&mut self, id: Option<&str>) -> crate::Result<()> {
+        if let Some(aid) = id {
+            if !self.agents.contains_key(aid) {
+                return Err(crate::Error::not_found(format!("agent '{aid}'")));
+            }
+        }
+        let new = id.map(|s| s.to_string());
+        if self.selected_agent_id == new {
+            return Ok(());
+        }
+        self.selected_agent_id = new.clone();
+        self.emit(DeltaOp::UiUpdate(serde_json::json!({
+            "selected_agent_id": new,
+        })));
+        Ok(())
+    }
+
+    /// Clear selection if the selected agent is in the removed set.
+    fn clear_selection_if_removed(&mut self, removed: &[String]) {
+        let Some(selected) = self.selected_agent_id.as_ref() else {
+            return;
+        };
+        if removed.iter().any(|r| r == selected) {
+            self.selected_agent_id = None;
+            self.emit(DeltaOp::UiUpdate(serde_json::json!({
+                "selected_agent_id": serde_json::Value::Null,
+            })));
+        }
     }
 
     /// Rename an agent. Regenerates slug and cascades to children (child slugs
@@ -1427,6 +1464,82 @@ mod tests {
         s.add_group("Ops").unwrap();
         let (seq2, _) = s.drain_deltas().unwrap();
         assert_eq!(seq2, 2);
+    }
+
+    #[test]
+    fn select_agent_sets_field_and_emits_ui_update() {
+        let mut s = fresh_state_with_group("Eng");
+        s.add_agent(AgentCell::new("a1", "Worker", "Eng")).unwrap();
+        s.drain_deltas();
+
+        s.select_agent(Some("a1")).unwrap();
+        assert_eq!(s.selected_agent_id.as_deref(), Some("a1"));
+        let (_, ops) = s.drain_deltas().unwrap();
+        let v = serde_json::to_value(&ops[0]).unwrap();
+        assert_eq!(v["op"], "ui_update");
+        assert_eq!(v["selected_agent_id"], "a1");
+    }
+
+    #[test]
+    fn select_agent_unknown_id_rejected() {
+        let mut s = MatrixState::new();
+        assert!(s.select_agent(Some("nope")).is_err());
+    }
+
+    #[test]
+    fn select_agent_none_clears() {
+        let mut s = fresh_state_with_group("Eng");
+        s.add_agent(AgentCell::new("a1", "Worker", "Eng")).unwrap();
+        s.select_agent(Some("a1")).unwrap();
+        s.drain_deltas();
+
+        s.select_agent(None).unwrap();
+        assert!(s.selected_agent_id.is_none());
+        let (_, ops) = s.drain_deltas().unwrap();
+        let v = serde_json::to_value(&ops[0]).unwrap();
+        assert_eq!(v["op"], "ui_update");
+        assert!(v["selected_agent_id"].is_null());
+    }
+
+    #[test]
+    fn select_agent_idempotent_when_unchanged() {
+        let mut s = fresh_state_with_group("Eng");
+        s.add_agent(AgentCell::new("a1", "Worker", "Eng")).unwrap();
+        s.select_agent(Some("a1")).unwrap();
+        s.drain_deltas();
+        s.select_agent(Some("a1")).unwrap();
+        assert!(s.drain_deltas().is_none(), "no delta for identical reselect");
+    }
+
+    #[test]
+    fn removing_selected_agent_clears_selection() {
+        let mut s = fresh_state_with_group("Eng");
+        s.add_agent(AgentCell::new("a1", "Worker", "Eng")).unwrap();
+        s.select_agent(Some("a1")).unwrap();
+        s.drain_deltas();
+
+        s.remove_agent("a1").unwrap();
+        assert!(s.selected_agent_id.is_none());
+        let (_, ops) = s.drain_deltas().unwrap();
+        let has_ui_clear = ops.iter().any(|op| {
+            let v = serde_json::to_value(op).unwrap();
+            v["op"] == "ui_update" && v["selected_agent_id"].is_null()
+        });
+        assert!(has_ui_clear, "expected ui_update clearing selection, got: {:?}", ops);
+    }
+
+    #[test]
+    fn removing_group_cascades_selection_clear() {
+        let mut s = fresh_state_with_group("Eng");
+        s.add_agent(AgentCell::new("a1", "Worker", "Eng")).unwrap();
+        let mut child = AgentCell::new("c1", "Logs", "Eng");
+        child.parent_id = "a1".into();
+        s.add_agent(child).unwrap();
+        s.select_agent(Some("c1")).unwrap();
+        s.drain_deltas();
+
+        s.remove_group("Eng").unwrap();
+        assert!(s.selected_agent_id.is_none());
     }
 
     #[test]

@@ -54,12 +54,11 @@ declare_class!(
 
         #[method(keyDown:)]
         fn key_down(&self, event: &NSEvent) {
-            let Some(surface_ref) = self.ivars().surface.borrow().as_ref().map(|s| s.raw()) else {
+            // Bail if no surface yet — first keystroke might arrive before
+            // viewDidMoveToWindow.
+            if self.ivars().surface.borrow().is_none() {
                 return;
-            };
-            // Keep the surface borrow released before calling into ghostty —
-            // callbacks may re-enter Rust.
-            drop(surface_ref);
+            }
             forward_key(self, event, true);
         }
 
@@ -106,9 +105,7 @@ impl GhosttyView {
         };
         let this = mtm.alloc::<Self>().set_ivars(ivars);
         let this: Retained<Self> = unsafe { msg_send_id![super(this), initWithFrame: frame] };
-        unsafe {
-            this.setWantsLayer(true);
-        }
+        this.setWantsLayer(true);
         this
     }
 
