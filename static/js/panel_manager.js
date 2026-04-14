@@ -25,6 +25,7 @@ var _standalonePanelFloatDrag = null;
 var _standalonePanelPointerDrag = null;
 var _standalonePanelSuppressClick = false;
 var _standalonePanelRoots = {};
+var _standalonePrimaryMinWidth = 240;
 
 function _standalonePanelsEnabled() {
   return typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode();
@@ -121,11 +122,7 @@ function _standaloneBottomSizeBounds() {
 }
 
 function _standaloneMainStackMinWidth() {
-  if (typeof _workspaceSidebarWidthBounds === 'function') {
-    var bounds = _workspaceSidebarWidthBounds();
-    if (bounds && Number.isFinite(bounds.min) && bounds.min > 0) return bounds.min;
-  }
-  return 240;
+  return _standalonePrimaryMinWidth;
 }
 
 function _standaloneMeasuredShellWidth() {
@@ -969,7 +966,12 @@ function standalonePanelResizeRight(clientX) {
   if (!shell || !shell.getBoundingClientRect) return;
   var rect = shell.getBoundingClientRect();
   var next = rect.right - clientX;
-  var bounds = _standaloneRightSizeBounds(rect.width);
+  var shellWidth = (typeof _workspaceSidebarWidth !== 'undefined'
+      && Number.isFinite(_workspaceSidebarWidth)
+      && _workspaceSidebarWidth > 0)
+    ? _workspaceSidebarWidth
+    : rect.width;
+  var bounds = _standaloneRightSizeBounds(shellWidth);
   var layout = _standaloneClone(_standalonePanelCurrentLayout());
   layout.right.size = _standaloneClamp(next, bounds.min, bounds.max, layout.right.size);
   layout.right.open = true;

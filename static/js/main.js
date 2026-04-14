@@ -260,11 +260,23 @@ function _scheduleStandaloneBoardLayoutRender() {
 }
 
 function _workspaceSidebarWidthBounds() {
+  var minWidth = 240;
+  var embedded = !!(typeof document !== 'undefined'
+    && document
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('runtime-embedded'));
+  if (embedded && typeof _standaloneMinimumShellWidthForLayout === 'function') {
+    var layout = (typeof _standalonePanelLayout !== 'undefined' && _standalonePanelLayout)
+      ? _standalonePanelLayout
+      : (state && state.standalone_panel_layout);
+    if (layout) minWidth = Math.max(minWidth, _standaloneMinimumShellWidthForLayout(layout));
+  }
   var viewportWidth = (typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth > 0)
     ? window.innerWidth
     : 1280;
   var maxWidth = Math.max(320, Math.floor(viewportWidth * 0.62));
-  return { min: 240, max: maxWidth };
+  return { min: minWidth, max: Math.max(minWidth, maxWidth) };
 }
 
 function _readWorkspaceSidebarWidth() {
@@ -316,7 +328,14 @@ function _restoreStandaloneWorkspaceSidebarWidth(opts) {
   var saved = _readWorkspaceSidebarWidth();
   if (!opts.forceDefault && saved > 0) {
     _applyWorkspaceSidebarWidth(saved);
-    return { width: _workspaceSidebarWidth, source: 'persisted', shouldPersist: false };
+    var adjusted = _workspaceSidebarWidth;
+    var savedAdjusted = adjusted !== saved;
+    if (savedAdjusted) _persistWorkspaceSidebarWidth(adjusted);
+    return {
+      width: adjusted,
+      source: savedAdjusted ? 'persisted-adjusted' : 'persisted',
+      shouldPersist: savedAdjusted,
+    };
   }
   var hasPersistedLayout = typeof _standaloneHasPersistedLayout === 'function'
     && _standaloneHasPersistedLayout(state && state.standalone_panel_layout);

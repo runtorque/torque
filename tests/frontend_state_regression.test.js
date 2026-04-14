@@ -7478,6 +7478,10 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
 
   assert.match(
+    css,
+    /body\.runtime-embedded #workspace-shell\s*\{[^}]*grid-template-columns:\s*max\(var\(--standalone-sidebar-width\),\s*calc\(240px\s*\+\s*8px\s*\+\s*var\(--standalone-right-rail-width,\s*0px\)\)\)\s+8px\s+minmax\(0,\s*1fr\);/s,
+  );
+  assert.match(
     html,
     /<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>/s,
   );
@@ -7562,15 +7566,16 @@ test('standalone right resize preserves the main stack minimum width', () => {
   context.isEmbeddedTerminalMode = function() { return true; };
 
   const shell = document.getElementById('standalone-sidebar-shell');
-  shell.clientWidth = 700;
-  shell.getBoundingClientRect = () => ({ top: 20, bottom: 720, left: 0, right: 700, width: 700, height: 700 });
+  shell.clientWidth = 900;
+  shell.getBoundingClientRect = () => ({ top: 20, bottom: 720, left: 0, right: 900, width: 900, height: 700 });
 
   runInContext(context, `
+    _workspaceSidebarWidth = 568;
     state.runtime = { embedded_terminal: true };
     state.standalone_panel_layout = {
       version: 1,
       bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
-      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      right: { open: true, size: 280, tabs: ['context'], active: 'context' },
       floats: {},
       last_active: 'context',
     };
@@ -7578,8 +7583,8 @@ test('standalone right resize preserves the main stack minimum width', () => {
     standalonePanelResizeRight(0);
   `);
 
-  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 452);
-  assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '452px');
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 320);
+  assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '320px');
 });
 
 test('standalone first full-state restore persists responsive defaults once', () => {
@@ -7656,6 +7661,32 @@ test('standalone startup preserves persisted layouts by widening the sidebar whe
     floats: {},
     last_active: 'events',
   });
+});
+
+test('standalone startup widens a saved sidebar width that cannot fit the open right rail', () => {
+  const { context, document } = createPanelHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.window.innerWidth = 1400;
+  context.localStorage.setItem('loom.ide.sidebar_width', '340');
+
+  runInContext(context, `
+    state = {
+      runtime: { embedded_terminal: true },
+      standalone_panel_layout: {
+        version: 1,
+        bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+        right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+        floats: {},
+        last_active: 'context',
+      },
+    };
+    _restorePanelState();
+  `);
+
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 568);
+  assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), '568');
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 320);
 });
 
 test('standalone startup preserves a saved sidebar width', () => {

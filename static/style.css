@@ -104,7 +104,10 @@ main { padding: 8px; overflow-y: auto; flex: 1; min-height: 0; min-width: 0; }
 
 body.runtime-embedded #workspace-shell {
   display: grid;
-  grid-template-columns: var(--standalone-sidebar-width) 8px minmax(0, 1fr);
+  grid-template-columns:
+    max(var(--standalone-sidebar-width), calc(240px + 8px + var(--standalone-right-rail-width, 0px)))
+    8px
+    minmax(0, 1fr);
   min-height: 0;
 }
 body.runtime-embedded #standalone-sidebar-shell {
