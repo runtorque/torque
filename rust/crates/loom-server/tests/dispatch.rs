@@ -277,3 +277,135 @@ async fn dispatch_missing_action_returns_warning() {
     let v = post(addr, json!({"cmd": "dispatch_task", "task_id": &task_id})).await;
     assert_eq!(v["warning"], "dispatch_action_missing", "got: {v:?}");
 }
+
+#[tokio::test]
+async fn clear_agent_context_resets_counters_and_link() {
+    let (addr, state) = spawn_test_server().await;
+    post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let v = post(addr, json!({"cmd": "add_agent", "name": "W", "group": "Eng"})).await;
+    let agent_id = v["agent_id"].as_str().unwrap().to_string();
+    let t = post(
+        addr,
+        json!({"cmd": "board_add_task", "task": "X", "group": "Eng"}),
+    )
+    .await;
+    let task_id = t["task_id"].as_str().unwrap().to_string();
+    post(
+        addr,
+        json!({"cmd": "dispatch_task", "task_id": &task_id, "force_no_action": true}),
+    )
+    .await;
+
+    let v = post(addr, json!({"cmd": "clear_agent_context", "id": &agent_id})).await;
+    assert_eq!(v["ok"], true);
+
+    let st = state.lock().await;
+    let agent = st.agents.get(&agent_id).unwrap();
+    assert_eq!(agent.tasks_dispatched, 0);
+    assert_eq!(agent.current_task_id, "");
+    assert!(!agent.needs_attention);
+}
+
+#[tokio::test]
+async fn board_verify_task_updates_verification_state() {
+    let (addr, state) = spawn_test_server().await;
+    post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let t = post(
+        addr,
+        json!({"cmd": "board_add_task", "task": "X", "group": "Eng"}),
+    )
+    .await;
+    let task_id = t["task_id"].as_str().unwrap().to_string();
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "board_verify_task",
+            "id": &task_id,
+            "state": "verified",
+            "mode": "manual",
+            "notes": "looks good",
+            "updated_by": "human",
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "response: {v:?}");
+
+    let st = state.lock().await;
+    let task = st.board_tasks.get(&task_id).unwrap();
+    assert_eq!(task.verification_state, "verified");
+    assert_eq!(task.verification_mode, "manual");
+    assert_eq!(task.verification_notes, "looks good");
+    assert_eq!(task.verification_updated_by, "human");
+    assert!(!task.verification_updated_at.is_empty());
+}
+
+#[tokio::test]
+async fn board_set_panel_persists_and_idempotent_returns_early() {
+    let (addr, state) = spawn_test_server().await;
+    let v = post(addr, json!({"cmd": "board_set_panel", "panel": "weaver"})).await;
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["panel"], "weaver");
+
+    {
+        let st = state.lock().await;
+        assert_eq!(st.panel_active, "weaver");
+    }
+
+    // Idempotent reselect: still OK but doesn't emit a fresh delta.
+    let v = post(addr, json!({"cmd": "board_set_panel", "panel": "weaver"})).await;
+    assert_eq!(v["ok"], true);
+}
+
+#[tokio::test]
+async fn resolve_ask_moves_ask_to_done_and_logs_reply() {
+    let (addr, state) = spawn_test_server().await;
+    post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+
+    // Create a parent task + an ask child.
+    let parent = post(
+        addr,
+        json!({"cmd": "board_add_task", "task": "Parent", "group": "Eng"}),
+    )
+    .await;
+    let parent_id = parent["task_id"].as_str().unwrap().to_string();
+
+    let ask = post(
+        addr,
+        json!({"cmd": "board_add_task", "task": "Need info", "group": "Eng"}),
+    )
+    .await;
+    let ask_id = ask["task_id"].as_str().unwrap().to_string();
+
+    // Link ask to parent + flag it as human via update.
+    post(
+        addr,
+        json!({
+            "cmd": "board_update_task",
+            "id": &ask_id,
+            "fields": {"parent_task_id": &parent_id, "labels": ["human"]}
+        }),
+    )
+    .await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "resolve_ask",
+            "task_id": &ask_id,
+            "reply": "Go with option B"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "response: {v:?}");
+    assert_eq!(v["parent_task_id"], parent_id);
+
+    let st = state.lock().await;
+    assert_eq!(st.board_tasks.get(&ask_id).unwrap().lane, "Done");
+
+    let parent = st.board_tasks.get(&parent_id).unwrap();
+    let last = parent.messages.last().expect("reply should be appended");
+    assert_eq!(last["action"], "ask_reply");
+    assert_eq!(last["message"], "Go with option B");
+    assert_eq!(last["from_task_id"], ask_id);
+}

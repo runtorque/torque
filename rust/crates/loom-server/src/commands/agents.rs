@@ -223,6 +223,35 @@ pub async fn reparent_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
     ok()
 }
 
+/// Reset an agent's session-level context: clears dispatched-tasks counter,
+/// clears the linked task, and drops the session id so the next dispatch
+/// treats it as a fresh boot. Does not kill the PTY — use `relaunch_agent`
+/// for that.
+pub async fn clear_agent_context(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let id = required_str(req, "id")?.to_string();
+    let agent = {
+        let mut st = ctx.state.lock().await;
+        if !st.agents.contains_key(&id) {
+            return Err(CmdError::BadRequest(format!("agent '{id}' not found")));
+        }
+        if let Some(cell) = st.agents.get_mut(&id) {
+            cell.tasks_dispatched = 0;
+            cell.current_task_id.clear();
+            cell.session_id = None;
+            cell.activity.clear();
+            cell.activity_detail.clear();
+            cell.error_message.clear();
+            cell.needs_attention = false;
+            cell.last_summary.clear();
+        }
+        st.emit_agent(&id);
+        st.agents.get(&id).cloned().unwrap()
+    };
+    ctx.db.save_agent(&agent).await?;
+    flush(ctx).await;
+    ok()
+}
+
 /// Set (or clear) the UI's selected agent. Persists to `ui_state` and emits a
 /// `ui_update` delta. Passing `id: null` (or omitting it) clears selection.
 pub async fn select_agent(ctx: &CmdContext, req: &Value) -> CmdResult {

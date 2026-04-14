@@ -307,3 +307,187 @@ pub async fn task_chain(ctx: &CmdContext, req: &Value) -> CmdResult {
         .collect();
     Ok(json!({ "chain": chain }))
 }
+
+/// Set or clear a task's verification state. Emits a task_upsert delta with
+/// the updated verification_* fields populated. `state` must be one of the
+/// known values; the UI uses this to draw the "On Review / Verified / Failed"
+/// badge.
+pub async fn verify_task(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let id = required_str(req, "id")?.to_string();
+    let state_field = req
+        .get("state")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let mode = req
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let notes = req
+        .get("notes")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let updated_by = req
+        .get("updated_by")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let task = {
+        let mut st = ctx.state.lock().await;
+        let Some(mut task) = st.board_tasks.get(&id).cloned() else {
+            return Err(CmdError::BadRequest(format!("task '{id}' not found")));
+        };
+        task.verification_state = state_field;
+        if !mode.is_empty() {
+            task.verification_mode = mode;
+        }
+        task.verification_notes = notes;
+        task.verification_updated_by = updated_by;
+        task.verification_updated_at = chrono::Utc::now().to_rfc3339();
+        task.updated_at = task.verification_updated_at.clone();
+        st.upsert_task(task.clone())?;
+        task
+    };
+    ctx.db.save_board_task(&task).await?;
+    flush(ctx).await;
+    Ok(json!({ "ok": true, "task_id": task.id }))
+}
+
+/// Set the active panel in the UI (one of `board`, `actions`, `templates`,
+/// `context`, `events`, `weaver`, `memory`, etc). Persisted to `ui_state` and
+/// broadcast via a `ui_update` delta so other WS clients (e.g. the Python
+/// browser UI) stay in sync.
+pub async fn set_panel(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let panel = req
+        .get("panel")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    {
+        let mut st = ctx.state.lock().await;
+        if st.panel_active == panel {
+            return ok();
+        }
+        st.panel_active = panel.clone();
+        st.emit(loom_core::delta::DeltaOp::UiUpdate(json!({
+            "panel_active": panel,
+        })));
+    }
+    ctx.db.set_ui_state("panel_active", &panel).await?;
+    flush(ctx).await;
+    Ok(json!({ "ok": true, "panel": panel }))
+}
+
+/// Set per-group board filter state. Payload: `{ "group": "Eng", "filters": {...} }`.
+/// Persisted as JSON in `ui_state[board_filters_by_group]`.
+pub async fn set_filters(ctx: &CmdContext, req: &Value) -> CmdResult {
+    set_per_group_ui(
+        ctx,
+        req,
+        "filters",
+        "board_filters_by_group",
+        |st| &mut st.board_filters_by_group,
+    )
+    .await
+}
+
+/// Set per-group saved views. Payload: `{ "group": "Eng", "views": [...] }`.
+pub async fn set_saved_views(ctx: &CmdContext, req: &Value) -> CmdResult {
+    set_per_group_ui(
+        ctx,
+        req,
+        "views",
+        "board_saved_views_by_group",
+        |st| &mut st.board_saved_views_by_group,
+    )
+    .await
+}
+
+/// Set per-group lane sort rules. Payload: `{ "group": "Eng", "sorts": {...} }`.
+pub async fn set_lane_sorts(ctx: &CmdContext, req: &Value) -> CmdResult {
+    set_per_group_ui(
+        ctx,
+        req,
+        "sorts",
+        "board_lane_sorts_by_group",
+        |st| &mut st.board_lane_sorts_by_group,
+    )
+    .await
+}
+
+/// Set per-group card density. Payload: `{ "group": "Eng", "density": "compact" }`.
+pub async fn set_card_density(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let density = required_str(req, "density")?.to_string();
+
+    let full_map = {
+        let mut st = ctx.state.lock().await;
+        st.board_card_density_by_group
+            .insert(group.clone(), density.clone());
+        // Broadcast the whole map (matches the Python wire shape: a ui_update
+        // with the by-group dict).
+        let map = st.board_card_density_by_group.clone();
+        let payload = json!({ "board_card_density_by_group": map });
+        st.emit(loom_core::delta::DeltaOp::UiUpdate(payload));
+        map
+    };
+
+    let encoded = serde_json::to_string(&full_map)
+        .map_err(|e| CmdError::BadRequest(format!("encode: {e}")))?;
+    ctx.db
+        .set_ui_state("board_card_density_by_group", &encoded)
+        .await?;
+    flush(ctx).await;
+    Ok(json!({ "ok": true, "group": group, "density": density }))
+}
+
+async fn set_per_group_ui(
+    ctx: &CmdContext,
+    req: &Value,
+    payload_key: &str,
+    ui_state_key: &str,
+    select: impl FnOnce(
+        &mut loom_core::state::MatrixState,
+    )
+        -> &mut std::collections::HashMap<String, Value>,
+) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let value = req.get(payload_key).cloned().ok_or_else(|| {
+        CmdError::BadRequest(format!("missing '{payload_key}'"))
+    })?;
+
+    let full_map = {
+        let mut st = ctx.state.lock().await;
+        let map = select(&mut st);
+        map.insert(group.clone(), value.clone());
+        let clone = map.clone();
+        st.emit(loom_core::delta::DeltaOp::UiUpdate(json!({
+            ui_state_key: clone,
+        })));
+        st_map_clone(&st, ui_state_key)
+    };
+
+    let encoded = serde_json::to_string(&full_map)
+        .map_err(|e| CmdError::BadRequest(format!("encode: {e}")))?;
+    ctx.db.set_ui_state(ui_state_key, &encoded).await?;
+    flush(ctx).await;
+    Ok(json!({ "ok": true, "group": group }))
+}
+
+/// Snapshot the relevant map by key name. Needed because the closure in
+/// `set_per_group_ui` holds a `&mut` on the state and we need to clone before
+/// releasing the lock.
+fn st_map_clone(
+    st: &loom_core::state::MatrixState,
+    key: &str,
+) -> std::collections::HashMap<String, Value> {
+    match key {
+        "board_filters_by_group" => st.board_filters_by_group.clone(),
+        "board_saved_views_by_group" => st.board_saved_views_by_group.clone(),
+        "board_lane_sorts_by_group" => st.board_lane_sorts_by_group.clone(),
+        _ => Default::default(),
+    }
+}

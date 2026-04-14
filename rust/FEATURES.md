@@ -159,8 +159,8 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 - [x] `reparent_terminal`
 - [x] `reorder_child`
 - [x] `select_agent`
+- [x] `clear_agent_context`
 - [ ] `focus_agent` (legacy iTerm2 window focus — may drop)
-- [ ] `clear_agent_context` (reset session + dispatched-tasks counter)
 
 ### Dispatch + AI report
 - [x] `dispatch_task` (PTY backend only — no GhosttyView routing yet)
@@ -168,8 +168,8 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 - [x] `send_text`
 - [x] `broadcast_to_group`
 - [x] `relaunch_agent`
-- [ ] `resolve_ask` — human-in-the-loop reply routing
-- [ ] Dispatch path: route to GhosttyView when the agent is UI-attached
+- [x] `resolve_ask` — human-in-the-loop reply routing
+- [x] Dispatch path: route to GhosttyView when the agent is UI-attached
 
 ### Board + tasks
 - [x] `board_add_task`
@@ -184,13 +184,13 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 - [x] `board_remove_lane`
 - [x] `board_reorder_lanes`
 - [x] `task_chain`
-- [ ] `board_verify_task`
-- [ ] `board_set_panel`
-- [ ] `standalone_set_panel_layout`
-- [ ] `board_set_filters`
-- [ ] `board_set_saved_views`
-- [ ] `board_set_lane_sorts`
-- [ ] `board_set_card_density`
+- [x] `board_verify_task`
+- [x] `board_set_panel`
+- [x] `board_set_filters`
+- [x] `board_set_saved_views`
+- [x] `board_set_lane_sorts`
+- [x] `board_set_card_density`
+- [ ] `standalone_set_panel_layout` (multi-pane grid layout descriptor — ties into UI §0)
 
 ### Actions + templates
 - [x] `list_actions`
@@ -240,14 +240,15 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 - [ ] `weaver_flush_now`
 
 ### Memory
-- [ ] `memory_publish`
-- [ ] `memory_list`
-- [ ] `memory_read`
-- [ ] `memory_pin`
-- [ ] `memory_unpin`
-- [ ] `memory_link`
-- [ ] `db_memory` schema + table
-- [ ] In-memory structs + delta ops
+- [x] `memory_publish`
+- [x] `memory_list` (filters: group, project_key, scope_kind, scope_ref, entry_type, task_id, pinned_only, linked_target_kind/ref, search)
+- [x] `memory_read`
+- [x] `memory_pin`
+- [x] `memory_unpin`
+- [x] `memory_link` (attach + detach via `detach: true`)
+- [x] `db_memory` schema + tables (`memory_entries`, `memory_links`)
+- [x] In-memory structs + delta ops (`MemoryUpsert`, `MemoryRemove`)
+- [ ] Expiry sweep for `retention_kind: "transient"` entries (not wired yet)
 
 ### Playbooks
 - [ ] `get_playbooks`
@@ -260,13 +261,14 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 
 ### Scheduling (cron)
 - [x] Scheduler tick loop (`scheduler::spawn`, 15s tick, fires `scheduled_at`)
-- [ ] `schedule_create`
-- [ ] `schedule_update`
-- [ ] `schedule_remove`
-- [ ] `schedule_enable`
-- [ ] `schedule_disable`
-- [ ] `schedule_list`
-- [ ] `schedule_run` (manual kick)
+- [x] `schedule_create`
+- [x] `schedule_update`
+- [x] `schedule_remove`
+- [x] `schedule_enable`
+- [x] `schedule_disable`
+- [x] `schedule_list`
+- [x] `schedule_run` (manual kick)
+- [ ] Cron expression parsing / next-run computation — `cron_expr` stored but not yet fired on schedule
 
 ### External tickets (Jira / GitHub)
 - [ ] `external_import_task`

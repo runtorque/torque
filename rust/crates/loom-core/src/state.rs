@@ -829,6 +829,75 @@ pub struct AutoDispatchQueueEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Memory
+// ---------------------------------------------------------------------------
+
+/// A shared memory entry — finding, decision, warning, handoff, or note.
+/// Lightly scoped (project / group / pipeline / task) so agents can retrieve
+/// the ones relevant to their current context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryEntry {
+    pub id: String,
+    #[serde(default)]
+    pub project_key: String,
+    #[serde(default)]
+    pub group_name: String,
+    /// `task` | `pipeline` | `group` | `project` — what the scope_ref refers to.
+    #[serde(default)]
+    pub scope_kind: String,
+    /// ID of the referenced scope (task id, pipeline root id, group name,
+    /// project key). Empty if `scope_kind == "project"` for a global entry.
+    #[serde(default)]
+    pub scope_ref: String,
+    /// `finding` | `decision` | `warning` | `handoff` | `note`.
+    #[serde(default)]
+    pub entry_type: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub pinned: bool,
+    #[serde(default)]
+    pub task_id: String,
+    /// What produced this entry (e.g. `agent`, `weaver`, `human`).
+    #[serde(default)]
+    pub source_kind: String,
+    #[serde(default)]
+    pub source_id: String,
+    #[serde(default)]
+    pub source_name: String,
+    /// `durable` | `transient`. Transient entries may be expired.
+    #[serde(default = "default_durable")]
+    pub retention_kind: String,
+    /// RFC3339 timestamp or empty.
+    #[serde(default)]
+    pub expires_at: String,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
+    /// Denormalized link targets, populated on load (`memory_links` join).
+    #[serde(default)]
+    pub links: Vec<MemoryLink>,
+}
+
+fn default_durable() -> String {
+    "durable".to_string()
+}
+
+/// A many-to-many association between a memory entry and another Loom object.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryLink {
+    pub entry_id: String,
+    /// `task` | `agent` | `pipeline`.
+    pub target_kind: String,
+    pub target_ref: String,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+// ---------------------------------------------------------------------------
 // MatrixState
 // ---------------------------------------------------------------------------
 
@@ -867,6 +936,9 @@ pub struct MatrixState {
 
     pub weaver_settings: HashMap<String, WeaverSettings>,
     pub weaver_worklog: HashMap<String, Vec<serde_json::Value>>,
+
+    /// Memory entries, keyed by id. Links are denormalized onto each entry.
+    pub memory_entries: HashMap<String, MemoryEntry>,
 
     // UI state (persisted)
     pub selected_agent_id: Option<String>,
@@ -911,6 +983,7 @@ impl MatrixState {
             board_card_density_by_group: HashMap::new(),
             weaver_settings: HashMap::new(),
             weaver_worklog: HashMap::new(),
+            memory_entries: HashMap::new(),
             selected_agent_id: None,
             delta_ops: Vec::new(),
             seq: 0,

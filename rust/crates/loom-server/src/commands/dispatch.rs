@@ -380,6 +380,68 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
 }
 
 // ---------------------------------------------------------------------------
+// resolve_ask — human replies to a `loom_ask` from an agent
+// ---------------------------------------------------------------------------
+
+/// The operator answers a pending ask from an agent. The ask task (in Backlog
+/// with a `human` label) is marked Done; the parent task's "Awaiting Input"
+/// status clears; the reply is appended to the parent task's message log so
+/// the agent sees it on next tick.
+pub async fn resolve_ask(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let task_id = required_str(req, "task_id")?.to_string();
+    let reply = required_str(req, "reply")?.to_string();
+
+    let (ask_task, parent) = {
+        let mut st = ctx.state.lock().await;
+        let Some(mut ask_task) = st.board_tasks.get(&task_id).cloned() else {
+            return Err(CmdError::BadRequest(format!("task '{task_id}' not found")));
+        };
+        // Mark the ask resolved: move to Done.
+        ask_task.lane = "Done".into();
+        ask_task.lane_entered_at = chrono::Utc::now().to_rfc3339();
+        ask_task.updated_at = ask_task.lane_entered_at.clone();
+        ask_task.messages.push(json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "action": "reply",
+            "message": reply,
+        }));
+        st.upsert_task(ask_task.clone())?;
+
+        // Update the parent (if any): clear ask status, append reply to its
+        // message log.
+        let parent = if !ask_task.parent_task_id.is_empty() {
+            if let Some(mut parent) = st.board_tasks.get(&ask_task.parent_task_id).cloned() {
+                parent.messages.push(json!({
+                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "action": "ask_reply",
+                    "message": reply,
+                    "from_task_id": ask_task.id,
+                }));
+                parent.updated_at = chrono::Utc::now().to_rfc3339();
+                st.upsert_task(parent.clone())?;
+                Some(parent)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        (ask_task, parent)
+    };
+
+    ctx.db.save_board_task(&ask_task).await?;
+    if let Some(p) = &parent {
+        ctx.db.save_board_task(p).await?;
+    }
+    flush(ctx).await;
+    Ok(json!({
+        "ok": true,
+        "task_id": ask_task.id,
+        "parent_task_id": parent.as_ref().map(|p| p.id.clone()),
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 

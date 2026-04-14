@@ -27,6 +27,8 @@ pub mod agents;
 pub mod board;
 pub mod dispatch;
 pub mod groups;
+pub mod memory;
+pub mod schedule;
 pub mod settings;
 pub mod worktree;
 
@@ -138,6 +140,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "reparent_terminal" => agents::reparent_terminal(ctx, req).await,
         "reorder_child" => agents::reorder_child(ctx, req).await,
         "select_agent" => agents::select_agent(ctx, req).await,
+        "clear_agent_context" => agents::clear_agent_context(ctx, req).await,
 
         // actions
         "list_actions" => actions::list_actions(ctx, req).await,
@@ -160,6 +163,12 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "board_rename_lane" => board::rename_lane(ctx, req).await,
         "board_remove_lane" => board::remove_lane(ctx, req).await,
         "board_reorder_lanes" => board::reorder_lanes(ctx, req).await,
+        "board_verify_task" => board::verify_task(ctx, req).await,
+        "board_set_panel" => board::set_panel(ctx, req).await,
+        "board_set_filters" => board::set_filters(ctx, req).await,
+        "board_set_saved_views" => board::set_saved_views(ctx, req).await,
+        "board_set_lane_sorts" => board::set_lane_sorts(ctx, req).await,
+        "board_set_card_density" => board::set_card_density(ctx, req).await,
         "task_chain" => board::task_chain(ctx, req).await,
 
         // worktree
@@ -179,6 +188,24 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "broadcast_to_group" => dispatch::broadcast_to_group(ctx, req).await,
         "relaunch_agent" => dispatch::relaunch_agent(ctx, req).await,
         "ai_report" => dispatch::ai_report(ctx, req).await,
+        "resolve_ask" => dispatch::resolve_ask(ctx, req).await,
+
+        // schedules
+        "schedule_create" => schedule::create(ctx, req).await,
+        "schedule_update" => schedule::update(ctx, req).await,
+        "schedule_remove" => schedule::remove(ctx, req).await,
+        "schedule_enable" => schedule::enable(ctx, req).await,
+        "schedule_disable" => schedule::disable(ctx, req).await,
+        "schedule_list" => schedule::list(ctx, req).await,
+        "schedule_run" => schedule::run(ctx, req).await,
+
+        // memory
+        "memory_publish" => memory::publish(ctx, req).await,
+        "memory_list" => memory::list(ctx, req).await,
+        "memory_read" => memory::read(ctx, req).await,
+        "memory_pin" => memory::pin(ctx, req).await,
+        "memory_unpin" => memory::unpin(ctx, req).await,
+        "memory_link" => memory::link(ctx, req).await,
 
         // resync / state
         "refresh" | "resync" => {

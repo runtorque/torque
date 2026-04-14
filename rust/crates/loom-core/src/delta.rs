@@ -61,6 +61,8 @@ pub enum DeltaOp {
     },
     EventsUpdate(serde_json::Value),
     PanelUpdate(serde_json::Value),
+    MemoryUpsert(serde_json::Value),
+    MemoryRemove { id: String },
 }
 
 /// A full delta message sent to WS clients.

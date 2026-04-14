@@ -12,7 +12,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use tokio::sync::Mutex;
 
 use crate::state::{
-    AgentCell, BoardTask, GlobalSettings, GroupSettings, MatrixState, Schedule, WeaverSettings,
+    AgentCell, BoardTask, GlobalSettings, GroupSettings, MatrixState, MemoryEntry, MemoryLink,
+    Schedule, WeaverSettings,
 };
 
 const SCHEMA_SQL: &str = r#"
@@ -82,10 +83,37 @@ CREATE TABLE IF NOT EXISTS weaver_worklog (
     ts REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS memory_entries (
+    id TEXT PRIMARY KEY,
+    project_key TEXT NOT NULL DEFAULT '',
+    group_name TEXT NOT NULL DEFAULT '',
+    scope_kind TEXT NOT NULL DEFAULT '',
+    scope_ref TEXT NOT NULL DEFAULT '',
+    entry_type TEXT NOT NULL DEFAULT '',
+    task_id TEXT NOT NULL DEFAULT '',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    retention_kind TEXT NOT NULL DEFAULT 'durable',
+    data TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS memory_links (
+    entry_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    target_ref TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (entry_id, target_kind, target_ref),
+    FOREIGN KEY (entry_id) REFERENCES memory_entries(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_name);
 CREATE INDEX IF NOT EXISTS idx_agents_group ON agents(group_name);
 CREATE INDEX IF NOT EXISTS idx_board_tasks_group ON board_tasks(group_name);
 CREATE INDEX IF NOT EXISTS idx_worklog_group ON weaver_worklog(group_name);
+CREATE INDEX IF NOT EXISTS idx_memory_group ON memory_entries(group_name);
+CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory_entries(scope_kind, scope_ref);
+CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entries(entry_type);
+CREATE INDEX IF NOT EXISTS idx_memory_pinned ON memory_entries(pinned);
+CREATE INDEX IF NOT EXISTS idx_memory_links_target ON memory_links(target_kind, target_ref);
 "#;
 
 /// Thread-safe handle around a single sqlite connection.
@@ -247,6 +275,58 @@ impl LoomDb {
         conn.execute(
             "INSERT OR REPLACE INTO weaver_settings(group_name, data) VALUES (?1, ?2)",
             params![group, data],
+        )?;
+        Ok(())
+    }
+
+    pub async fn save_memory_entry(&self, entry: &MemoryEntry) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        let data = serde_json::to_string(entry)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO memory_entries(
+                id, project_key, group_name, scope_kind, scope_ref, entry_type,
+                task_id, pinned, retention_kind, data
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                entry.id,
+                entry.project_key,
+                entry.group_name,
+                entry.scope_kind,
+                entry.scope_ref,
+                entry.entry_type,
+                entry.task_id,
+                entry.pinned as i64,
+                entry.retention_kind,
+                data,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub async fn delete_memory_entry(&self, id: &str) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute("DELETE FROM memory_entries WHERE id = ?1", params![id])?;
+        // Cascading delete via FK handles memory_links; emit explicit DELETE
+        // as a belt-and-suspenders guard in case FK pragmas aren't on.
+        conn.execute("DELETE FROM memory_links WHERE entry_id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub async fn save_memory_link(&self, link: &MemoryLink) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT OR IGNORE INTO memory_links(entry_id, target_kind, target_ref, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![link.entry_id, link.target_kind, link.target_ref, link.created_at],
+        )?;
+        Ok(())
+    }
+
+    pub async fn delete_memory_links(&self, entry_id: &str) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "DELETE FROM memory_links WHERE entry_id = ?1",
+            params![entry_id],
         )?;
         Ok(())
     }
@@ -433,6 +513,48 @@ impl LoomDb {
             }
         }
 
+        // memory entries + denormalized links
+        {
+            // Pull links first so we can slot them into each entry as we go.
+            let mut links_by_entry: std::collections::HashMap<String, Vec<MemoryLink>> =
+                Default::default();
+            {
+                let mut stmt = conn.prepare(
+                    "SELECT entry_id, target_kind, target_ref, created_at FROM memory_links",
+                )?;
+                let rows = stmt.query_map([], |r| {
+                    Ok(MemoryLink {
+                        entry_id: r.get::<_, String>(0)?,
+                        target_kind: r.get::<_, String>(1)?,
+                        target_ref: r.get::<_, String>(2)?,
+                        created_at: r.get::<_, String>(3)?,
+                    })
+                })?;
+                for row in rows {
+                    let link = row?;
+                    links_by_entry
+                        .entry(link.entry_id.clone())
+                        .or_default()
+                        .push(link);
+                }
+            }
+
+            let mut stmt = conn.prepare("SELECT data FROM memory_entries")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            for r in rows {
+                let data = r?;
+                match serde_json::from_str::<MemoryEntry>(&data) {
+                    Ok(mut entry) => {
+                        if let Some(links) = links_by_entry.remove(&entry.id) {
+                            entry.links = links;
+                        }
+                        state.memory_entries.insert(entry.id.clone(), entry);
+                    }
+                    Err(err) => tracing::warn!("failed to deserialize memory row: {err}"),
+                }
+            }
+        }
+
         // ui_state — restore the handful of keys the UI cares about.
         {
             let sel: Option<String> = conn
@@ -446,6 +568,58 @@ impl LoomDb {
                 // only restore if the agent still exists — otherwise silently drop
                 if state.agents.contains_key(&v) {
                     state.selected_agent_id = Some(v);
+                }
+            }
+            let panel: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM ui_state WHERE key = 'panel_active'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(v) = panel {
+                state.panel_active = v;
+            }
+
+            // Per-group board view state — each is a JSON-encoded map.
+            for (key, target) in [
+                ("board_filters_by_group", "filters"),
+                ("board_saved_views_by_group", "views"),
+                ("board_lane_sorts_by_group", "sorts"),
+            ] {
+                let row: Option<String> = conn
+                    .query_row(
+                        "SELECT value FROM ui_state WHERE key = ?1",
+                        rusqlite::params![key],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .optional()?;
+                if let Some(s) = row {
+                    if let Ok(map) =
+                        serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(&s)
+                    {
+                        match target {
+                            "filters" => state.board_filters_by_group = map,
+                            "views" => state.board_saved_views_by_group = map,
+                            "sorts" => state.board_lane_sorts_by_group = map,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            // Card density is String, not Value.
+            let row: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM ui_state WHERE key = 'board_card_density_by_group'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(s) = row {
+                if let Ok(map) =
+                    serde_json::from_str::<std::collections::HashMap<String, String>>(&s)
+                {
+                    state.board_card_density_by_group = map;
                 }
             }
         }
