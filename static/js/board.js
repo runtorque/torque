@@ -1122,24 +1122,30 @@ function renderBoard() {
 
   _boardActivateViewState(_boardCurrentViewKey());
 
-  // Lane tab bar
-  html += '<div class="board-lane-bar">';
-  html += '<button class="board-lane-scroll-btn" id="board-scroll-left" onclick="boardScrollLanes(-1)" title="Scroll left">&#9664;</button>';
+  // Lane tab bar. In wide layout, every lane is rendered as a column, so the
+  // per-lane tabs and their scroll arrows are redundant — only keep the
+  // Schedules toggle so that view stays reachable.
+  html += '<div class="board-lane-bar' + (wideLayout ? ' board-lane-bar-wide' : '') + '">';
+  if (!wideLayout) {
+    html += '<button class="board-lane-scroll-btn" id="board-scroll-left" onclick="boardScrollLanes(-1)" title="Scroll left">&#9664;</button>';
+  }
   html += '<div class="board-lane-tabs" id="board-lane-tabs">';
-  for (var i = 0; i < lanes.length; i++) {
-    var l = lanes[i];
-    var cnt = _boardLaneCount(l);
-    var cls = (!_boardShowSchedules && l === _boardSelectedLane) ? ' active' : '';
-    if (filtersActive && cnt === 0) cls += ' dimmed';
-    var escLane = esc(l).replace(/'/g, "\\'");
-    html += '<button class="board-lane-tab board-lane-drop-target' + cls + '"'
-      + ' data-lane="' + esc(l) + '"'
-      + ' onclick="boardSelectLane(\'' + escLane + '\')"'
-      + ' ondragover="boardLaneTabDragOver(event)"'
-      + ' ondragleave="boardLaneTabDragLeave(event)"'
-      + ' ondrop="boardLaneTabDrop(event)">'
-      + esc(l) + '<span class="lane-count">' + cnt + '</span>'
-      + '</button>';
+  if (!wideLayout) {
+    for (var i = 0; i < lanes.length; i++) {
+      var l = lanes[i];
+      var cnt = _boardLaneCount(l);
+      var cls = (!_boardShowSchedules && l === _boardSelectedLane) ? ' active' : '';
+      if (filtersActive && cnt === 0) cls += ' dimmed';
+      var escLane = esc(l).replace(/'/g, "\\'");
+      html += '<button class="board-lane-tab board-lane-drop-target' + cls + '"'
+        + ' data-lane="' + esc(l) + '"'
+        + ' onclick="boardSelectLane(\'' + escLane + '\')"'
+        + ' ondragover="boardLaneTabDragOver(event)"'
+        + ' ondragleave="boardLaneTabDragLeave(event)"'
+        + ' ondrop="boardLaneTabDrop(event)">'
+        + esc(l) + '<span class="lane-count">' + cnt + '</span>'
+        + '</button>';
+    }
   }
   // Schedules tab (after lane tabs)
   var schedCount = _boardScheduleCount();
@@ -1150,7 +1156,9 @@ function renderBoard() {
     + '</button>';
 
   html += '</div>';
-  html += '<button class="board-lane-scroll-btn" id="board-scroll-right" onclick="boardScrollLanes(1)" title="Scroll right">&#9654;</button>';
+  if (!wideLayout) {
+    html += '<button class="board-lane-scroll-btn" id="board-scroll-right" onclick="boardScrollLanes(1)" title="Scroll right">&#9654;</button>';
+  }
   html += '</div>';
 
   // Schedules view (replaces cards when active)
