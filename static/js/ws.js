@@ -228,15 +228,19 @@ function _handleFullState(msg) {
   _applyRuntimeMode();
   if (typeof _standalonePanelSetLayoutFromState === 'function'
       && typeof _standalonePanelsEnabled === 'function'
-      && _standalonePanelsEnabled()) {
-    _standalonePanelSetLayoutFromState(
-      (state && state.standalone_panel_layout && Object.keys(state.standalone_panel_layout).length)
-        ? state.standalone_panel_layout
-        : _migrateStandalonePanelLayoutFromLegacyState(),
-      { fromServer: true }
-    );
-    if (!shouldRestorePanel
-        && typeof _syncVisibleStandalonePanelApps === 'function') {
+      && _standalonePanelsEnabled()
+      && !shouldRestorePanel) {
+    if (typeof _restoreStandalonePanelState === 'function') {
+      _restoreStandalonePanelState({ persistResolved: false });
+    } else {
+      _standalonePanelSetLayoutFromState(
+        (state && state.standalone_panel_layout && Object.keys(state.standalone_panel_layout).length)
+          ? state.standalone_panel_layout
+          : _migrateStandalonePanelLayoutFromLegacyState(),
+        { fromServer: true }
+      );
+    }
+    if (typeof _syncVisibleStandalonePanelApps === 'function') {
       _syncVisibleStandalonePanelApps(prevStandaloneVisibleApps);
     }
   }

@@ -10,6 +10,7 @@ var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-conte
 var _embeddedPanelMinHeight = 180;
 var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
+var _workspaceSidebarStorageKey = 'loom.ide.sidebar_width';
 
 function _panelAppVisible(appName) {
   if (!appName) return false;
@@ -152,7 +153,8 @@ function _restorePanelState() {
 
   if (typeof _restoreStandalonePanelState === 'function'
       && _standalonePanelsEnabled()) {
-    _restoreStandalonePanelState();
+    _restoreStandaloneWorkspaceSidebarWidth({ persistResolved: true });
+    _restoreStandalonePanelState({ persistResolved: true });
     _loadVisibleStandalonePanelApps();
     if (typeof renderActivePanel === 'function') renderActivePanel();
     return;
@@ -258,14 +260,36 @@ function _scheduleStandaloneBoardLayoutRender() {
 }
 
 function _workspaceSidebarWidthBounds() {
-  var maxWidth = Math.max(320, Math.floor(window.innerWidth * 0.62));
+  var viewportWidth = (typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth > 0)
+    ? window.innerWidth
+    : 1280;
+  var maxWidth = Math.max(320, Math.floor(viewportWidth * 0.62));
   return { min: 240, max: maxWidth };
+}
+
+function _readWorkspaceSidebarWidth() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      var saved = parseInt(localStorage.getItem(_workspaceSidebarStorageKey) || '', 10);
+      if (Number.isFinite(saved) && saved > 0) return saved;
+    }
+  } catch (_) {}
+  return 0;
+}
+
+function _standalonePreferredSidebarWidth() {
+  var bounds = _workspaceSidebarWidthBounds();
+  var viewportWidth = (typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth > 0)
+    ? window.innerWidth
+    : 1280;
+  var preferred = Math.max(640, Math.floor(viewportWidth * 0.56));
+  return Math.max(bounds.min, Math.min(bounds.max, preferred));
 }
 
 function _persistWorkspaceSidebarWidth(width) {
   try {
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('loom.ide.sidebar_width', String(width));
+      localStorage.setItem(_workspaceSidebarStorageKey, String(width));
     }
   } catch (_) {}
 }
@@ -278,9 +302,52 @@ function _applyWorkspaceSidebarWidth(width) {
   _workspaceSidebarWidth = next;
   var root = document.documentElement || document.body;
   if (root && root.style) {
-    root.style.setProperty('--standalone-sidebar-width', next + 'px');
+    if (typeof root.style.setProperty === 'function') {
+      root.style.setProperty('--standalone-sidebar-width', next + 'px');
+    } else {
+      root.style['--standalone-sidebar-width'] = next + 'px';
+    }
   }
   _scheduleStandaloneBoardLayoutRender();
+}
+
+function _restoreStandaloneWorkspaceSidebarWidth(opts) {
+  opts = opts || {};
+  var saved = _readWorkspaceSidebarWidth();
+  if (!opts.forceDefault && saved > 0) {
+    _applyWorkspaceSidebarWidth(saved);
+    return { width: _workspaceSidebarWidth, source: 'persisted', shouldPersist: false };
+  }
+  var hasPersistedLayout = typeof _standaloneHasPersistedLayout === 'function'
+    && _standaloneHasPersistedLayout(state && state.standalone_panel_layout);
+  var next = (opts.forceDefault || !hasPersistedLayout)
+    ? _standalonePreferredSidebarWidth()
+    : _workspaceSidebarDefaultWidth;
+  _applyWorkspaceSidebarWidth(next);
+  var shouldPersist = !!opts.persistResolved && (opts.forceDefault || !hasPersistedLayout);
+  if (shouldPersist) _persistWorkspaceSidebarWidth(_workspaceSidebarWidth);
+  return {
+    width: _workspaceSidebarWidth,
+    source: opts.forceDefault ? 'default' : (hasPersistedLayout ? 'legacy' : 'fresh-default'),
+    shouldPersist: shouldPersist,
+  };
+}
+
+function restoreStandaloneLayoutDefaults() {
+  if (typeof _standalonePanelsEnabled !== 'function' || !_standalonePanelsEnabled()) return false;
+  _restoreStandaloneWorkspaceSidebarWidth({
+    forceDefault: true,
+    persistResolved: true,
+  });
+  if (typeof _restoreStandalonePanelState === 'function') {
+    _restoreStandalonePanelState({
+      forceDefault: true,
+      persistResolved: true,
+    });
+  }
+  _loadVisibleStandalonePanelApps();
+  if (typeof renderActivePanel === 'function') renderActivePanel();
+  return true;
 }
 
 (function() {
@@ -288,12 +355,8 @@ function _applyWorkspaceSidebarWidth(width) {
   var shell = document.getElementById('workspace-shell');
   if (!handle || !shell) return;
 
-  try {
-    if (typeof localStorage !== 'undefined') {
-      var saved = parseInt(localStorage.getItem('loom.ide.sidebar_width') || '', 10);
-      if (Number.isFinite(saved) && saved > 0) _workspaceSidebarWidth = saved;
-    }
-  } catch (_) {}
+  var saved = _readWorkspaceSidebarWidth();
+  if (saved > 0) _workspaceSidebarWidth = saved;
   _applyWorkspaceSidebarWidth(_workspaceSidebarWidth);
 
   var dragging = false;

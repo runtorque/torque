@@ -1900,6 +1900,32 @@ body.runtime-embedded .taskbar-app {
 body.runtime-embedded .taskbar-app.active {
   box-shadow: inset 0 0 0 1px rgba(88,166,255,.24);
 }
+.taskbar-spacer {
+  flex: 1;
+  min-width: 0;
+}
+.taskbar-aux-btn {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-cell);
+  transition: color .15s, border-color .15s, background .15s;
+}
+body.runtime-embedded .taskbar-aux-btn {
+  display: inline-flex;
+  font-size: 11px;
+}
+.taskbar-aux-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+  background: var(--bg-hover);
+}
 .taskbar-app.panel-attention,
 .taskbar-app.has-badge {
   box-shadow: inset 0 0 0 1px var(--amber);

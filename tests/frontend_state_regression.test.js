@@ -246,6 +246,7 @@ const PANEL_ROOT_IDS = [
 
 function createSandbox(overrides = {}) {
   const document = new FakeDocument();
+  const localStorageState = new Map();
   const sandbox = {
     console,
     Date,
@@ -255,6 +256,20 @@ function createSandbox(overrides = {}) {
     window: { open() {} },
     location: { host: 'localhost:9000' },
     navigator: { clipboard: { writeText() {} } },
+    localStorage: {
+      getItem(key) {
+        return localStorageState.has(key) ? localStorageState.get(key) : null;
+      },
+      setItem(key, value) {
+        localStorageState.set(String(key), String(value));
+      },
+      removeItem(key) {
+        localStorageState.delete(String(key));
+      },
+      clear() {
+        localStorageState.clear();
+      },
+    },
     requestAnimationFrame(fn) { fn(); },
     setTimeout(fn) { fn(); return 1; },
     clearTimeout() {},
@@ -7452,6 +7467,166 @@ test('standalone layout restore migrates legacy panel state into bottom and righ
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'board');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.active`), 'events');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.open`), true);
+});
+
+test('standalone first full-state restore persists responsive defaults once', () => {
+  const { context } = createStandaloneWsSyncHarness();
+  context.window.innerWidth = 1400;
+  context.window.innerHeight = 900;
+  runInContext(context, `
+    _panelStateRestored = false;
+    sendCalls = [];
+    send = function(message) { sendCalls.push(message); };
+  `);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true },
+    agents: {},
+    groups: {},
+    children: {},
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: null,
+    standalone_panel_layout: {},
+  });
+
+  assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), '784');
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 784);
+  assert.equal(jsonValue(context, `sendCalls.length`), 1);
+  assert.deepEqual(jsonValue(context, `sendCalls[0]`), {
+    cmd: 'standalone_set_panel_layout',
+    layout: {
+      version: 1,
+      bottom: { open: true, size: 306, tabs: ['board'], active: 'board' },
+      right: {
+        open: true,
+        size: 298,
+        tabs: ['actions', 'templates', 'context', 'events'],
+        active: 'context',
+      },
+      floats: {},
+      last_active: 'board',
+    },
+  });
+});
+
+test('standalone startup preserves persisted layouts without rewriting defaults', () => {
+  const { context, document } = createPanelHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.window.innerWidth = 1400;
+
+  runInContext(context, `
+    state = {
+      runtime: { embedded_terminal: true },
+      panel_active: 'weaver',
+      board_panel_height: 420,
+      standalone_panel_layout: {
+        version: 1,
+        bottom: { open: true, size: 280, tabs: ['board', 'weaver'], active: 'weaver' },
+        right: { open: true, size: 320, tabs: ['actions', 'events'], active: 'events' },
+        floats: {},
+        last_active: 'events',
+      },
+    };
+    _restorePanelState();
+  `);
+
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 340);
+  assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), null);
+  assert.equal(jsonValue(context, `sendCalls.length`), 0);
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout()`), {
+    version: 1,
+    bottom: { open: true, size: 280, tabs: ['board', 'weaver'], active: 'weaver' },
+    right: { open: true, size: 320, tabs: ['actions', 'events'], active: 'events' },
+    floats: {},
+    last_active: 'events',
+  });
+});
+
+test('standalone startup preserves a saved sidebar width', () => {
+  const { context, document } = createPanelHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.localStorage.setItem('loom.ide.sidebar_width', '612');
+
+  runInContext(context, `
+    state = {
+      runtime: { embedded_terminal: true },
+      standalone_panel_layout: {
+        version: 1,
+        bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+        right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+        floats: {},
+        last_active: 'context',
+      },
+    };
+    _restorePanelState();
+  `);
+
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 612);
+  assert.equal(document.body.style['--standalone-sidebar-width'], '612px');
+  assert.equal(jsonValue(context, `sendCalls.length`), 0);
+});
+
+test('restoreStandaloneLayoutDefaults resets width and ignores legacy state', () => {
+  const { context, document } = createPanelHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+  context.window.innerWidth = 1400;
+  context.window.innerHeight = 900;
+  context.localStorage.setItem('loom.ide.sidebar_width', '612');
+
+  runInContext(context, `
+    state = {
+      runtime: { embedded_terminal: true },
+      panel_active: 'weaver',
+      board_panel_height: 420,
+      standalone_panel_layout: {
+        version: 1,
+        bottom: { open: true, size: 280, tabs: ['board', 'weaver'], active: 'weaver' },
+        right: { open: true, size: 320, tabs: ['actions', 'events'], active: 'events' },
+        floats: {
+          context: { x: 50, y: 60, width: 400, height: 300, z: 2 },
+        },
+        last_active: 'weaver',
+      },
+    };
+    _restorePanelState();
+    sendCalls = [];
+    restoreStandaloneLayoutDefaults();
+  `);
+
+  assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), '784');
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 784);
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout()`), {
+    version: 1,
+    bottom: { open: true, size: 306, tabs: ['board'], active: 'board' },
+    right: {
+      open: true,
+      size: 298,
+      tabs: ['actions', 'templates', 'context', 'events'],
+      active: 'context',
+    },
+    floats: {},
+    last_active: 'board',
+  });
+  assert.deepEqual(jsonValue(context, `sendCalls`), [{
+    cmd: 'standalone_set_panel_layout',
+    layout: {
+      version: 1,
+      bottom: { open: true, size: 306, tabs: ['board'], active: 'board' },
+      right: {
+        open: true,
+        size: 298,
+        tabs: ['actions', 'templates', 'context', 'events'],
+        active: 'context',
+      },
+      floats: {},
+      last_active: 'board',
+    },
+  }]);
 });
 
 test('standalone startup restore keeps panel roots attached across the first double render', () => {
