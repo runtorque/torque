@@ -1482,6 +1482,94 @@ test('renderBoard uses a wide multi-lane layout only for embedded wide panels', 
   assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
 });
 
+test('renderBoard hides per-lane tabs and scroll arrows in wide embedded layout', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    backlog: { id: 'backlog', group: 'alpha', task: 'Backlog task', lane: 'Backlog', position: 4 },
+    todo: { id: 'todo', group: 'alpha', task: 'To Do task', lane: 'To Do', position: 3 },
+    progress: { id: 'progress', group: 'alpha', task: 'Active task', lane: 'In Progress', position: 2 },
+    done: { id: 'done', group: 'alpha', task: 'Done task', lane: 'Done', position: 1 },
+  };
+  runInContext(context, `_boardSelectedLane = 'Backlog';`);
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-wide-grid/);
+  assert.match(panel.innerHTML, /board-lane-bar-wide/);
+  assert.doesNotMatch(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
+  assert.doesNotMatch(panel.innerHTML, /id="board-scroll-left"/);
+  assert.doesNotMatch(panel.innerHTML, /id="board-scroll-right"/);
+  assert.match(panel.innerHTML, /board-lane-tab-schedules/);
+
+  panel.clientWidth = 820;
+  context.renderBoard();
+  assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
+  assert.doesNotMatch(panel.innerHTML, /board-lane-bar-wide/);
+  assert.match(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
+  assert.match(panel.innerHTML, /id="board-scroll-left"/);
+  assert.match(panel.innerHTML, /id="board-scroll-right"/);
+});
+
+test('renderBoard restores per-lane body scrollTop across re-renders in wide layout', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    backlog: { id: 'backlog', group: 'alpha', task: 'Backlog task', lane: 'Backlog', position: 2 },
+    done: { id: 'done', group: 'alpha', task: 'Done task', lane: 'Done', position: 1 },
+  };
+  runInContext(context, `_boardSelectedLane = 'Backlog';`);
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+
+  // Mock per-lane body elements that the production render would create.
+  const backlogBody = new FakeElement();
+  backlogBody.dataset = { lane: 'Backlog' };
+  backlogBody.scrollHeight = 800;
+  backlogBody.clientHeight = 200;
+  const doneBody = new FakeElement();
+  doneBody.dataset = { lane: 'Done' };
+  doneBody.scrollHeight = 800;
+  doneBody.clientHeight = 200;
+  panel.setQuerySelectorAll('.board-wide-lane-body[data-lane]', [backlogBody, doneBody]);
+
+  context.renderBoard();
+
+  // Operator scrolls the Backlog column 130px down.
+  backlogBody.scrollTop = 130;
+  backlogBody.listeners.scroll();
+  assert.equal(
+    runInContext(context, `_boardWideLaneScrollTops['Backlog']`),
+    130,
+  );
+
+  // Re-render: a fresh body element appears (innerHTML rebuild). Per-lane
+  // scrollTop must be restored on the new node.
+  const backlogBody2 = new FakeElement();
+  backlogBody2.dataset = { lane: 'Backlog' };
+  backlogBody2.scrollHeight = 800;
+  backlogBody2.clientHeight = 200;
+  const doneBody2 = new FakeElement();
+  doneBody2.dataset = { lane: 'Done' };
+  doneBody2.scrollHeight = 800;
+  doneBody2.clientHeight = 200;
+  panel.setQuerySelectorAll('.board-wide-lane-body[data-lane]', [backlogBody2, doneBody2]);
+
+  context.renderBoard();
+
+  assert.equal(backlogBody2.scrollTop, 130);
+  assert.equal(doneBody2.scrollTop, 0);
+});
+
 test('board keeps scroll state when changing the selected lane in wide embedded mode', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');
