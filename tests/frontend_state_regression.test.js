@@ -1516,6 +1516,60 @@ test('renderBoard hides per-lane tabs and scroll arrows in wide embedded layout'
   assert.match(panel.innerHTML, /id="board-scroll-right"/);
 });
 
+test('renderBoard restores per-lane body scrollTop across re-renders in wide layout', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  context.state.board_tasks = {
+    backlog: { id: 'backlog', group: 'alpha', task: 'Backlog task', lane: 'Backlog', position: 2 },
+    done: { id: 'done', group: 'alpha', task: 'Done task', lane: 'Done', position: 1 },
+  };
+  runInContext(context, `_boardSelectedLane = 'Backlog';`);
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+
+  // Mock per-lane body elements that the production render would create.
+  const backlogBody = new FakeElement();
+  backlogBody.dataset = { lane: 'Backlog' };
+  backlogBody.scrollHeight = 800;
+  backlogBody.clientHeight = 200;
+  const doneBody = new FakeElement();
+  doneBody.dataset = { lane: 'Done' };
+  doneBody.scrollHeight = 800;
+  doneBody.clientHeight = 200;
+  panel.setQuerySelectorAll('.board-wide-lane-body[data-lane]', [backlogBody, doneBody]);
+
+  context.renderBoard();
+
+  // Operator scrolls the Backlog column 130px down.
+  backlogBody.scrollTop = 130;
+  backlogBody.listeners.scroll();
+  assert.equal(
+    runInContext(context, `_boardWideLaneScrollTops['Backlog']`),
+    130,
+  );
+
+  // Re-render: a fresh body element appears (innerHTML rebuild). Per-lane
+  // scrollTop must be restored on the new node.
+  const backlogBody2 = new FakeElement();
+  backlogBody2.dataset = { lane: 'Backlog' };
+  backlogBody2.scrollHeight = 800;
+  backlogBody2.clientHeight = 200;
+  const doneBody2 = new FakeElement();
+  doneBody2.dataset = { lane: 'Done' };
+  doneBody2.scrollHeight = 800;
+  doneBody2.clientHeight = 200;
+  panel.setQuerySelectorAll('.board-wide-lane-body[data-lane]', [backlogBody2, doneBody2]);
+
+  context.renderBoard();
+
+  assert.equal(backlogBody2.scrollTop, 130);
+  assert.equal(doneBody2.scrollTop, 0);
+});
+
 test('board keeps scroll state when changing the selected lane in wide embedded mode', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');

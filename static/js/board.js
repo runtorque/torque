@@ -17,6 +17,7 @@ var _boardActDropdownWaiting = false;  // waiting for action list for dropdown
 var _boardActList = null;              // fetched actions shown inline (null = hidden)
 var _boardScrollLeft = 0;      // preserve scroll across re-renders
 var _boardCardsScrollTop = 0;  // preserve cards scroll across re-renders
+var _boardWideLaneScrollTops = {}; // preserve per-lane body scroll in wide layout
 var _boardViewStates = {};     // keyed lane/filter/schedules scroll + render state
 var _boardActiveViewKey = '';
 var _boardNextViewDefault = null;
@@ -681,6 +682,30 @@ function _boardRestoreRenderedState() {
       }
     });
   }
+
+  // Wide-layout: each lane column scrolls independently; restore per-lane
+  // scrollTop so re-renders don't jump operators back to the top.
+  var panelEl = document.getElementById('panel-board');
+  if (panelEl && typeof panelEl.querySelectorAll === 'function') {
+    var laneBodies = panelEl.querySelectorAll('.board-wide-lane-body[data-lane]');
+    for (var li = 0; li < laneBodies.length; li++) {
+      _boardBindWideLaneBodyScroll(laneBodies[li]);
+    }
+  }
+}
+
+function _boardBindWideLaneBodyScroll(body) {
+  if (!body || !body.dataset) return;
+  var lane = body.dataset.lane;
+  if (!lane) return;
+  var saved = _boardWideLaneScrollTops[lane];
+  if (typeof saved === 'number') body.scrollTop = saved;
+  body.addEventListener('scroll', function() {
+    _boardWideLaneScrollTops[lane] = body.scrollTop;
+    if (body.scrollTop + body.clientHeight >= body.scrollHeight - 100) {
+      boardLoadMore();
+    }
+  });
 }
 
 function _boardAfterRenderLayout() {
