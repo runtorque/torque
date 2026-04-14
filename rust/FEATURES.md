@@ -200,11 +200,11 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 - [x] `delete_action`
 - [x] `preview_prompt`
 - [x] `discover_pipelines`
-- [ ] `list_templates`
-- [ ] `get_template`
-- [ ] `save_template`
-- [ ] `delete_template`
-- [ ] `render_template`
+- [x] `list_templates`
+- [x] `get_template`
+- [x] `save_template` (project or user scope; accepts `config` object or `raw` YAML)
+- [x] `delete_template`
+- [x] `render_template` (deep-merges overrides onto the template)
 
 ### Worktree
 - [x] `worktree_create`
@@ -322,16 +322,16 @@ Server exposes these over `/mcp` (JSON-RPC). Agent-scoped (called by dispatched 
 - [x] `loom_ask`
 - [x] `loom_context`
 - [x] `loom_derive`
-- [ ] `loom_verify`
-- [ ] `loom_name`
-- [ ] `loom_reply`
+- [x] `loom_verify`
+- [x] `loom_name`
+- [x] `loom_reply`
+- [x] `loom_memory_publish` (auto-stamps source_kind/source_id/source_name)
+- [x] `loom_memory_list`
+- [x] `loom_memory_read`
+- [x] `loom_memory_pin`
+- [x] `loom_memory_unpin`
+- [x] `loom_memory_link`
 - [ ] `loom_task_upload_artifact` (multipart)
-- [ ] `loom_memory_publish`
-- [ ] `loom_memory_list`
-- [ ] `loom_memory_read`
-- [ ] `loom_memory_pin`
-- [ ] `loom_memory_unpin`
-- [ ] `loom_memory_link`
 
 ### Weaver-scoped (`loom/mcp_weaver_tools/tool_specs.py`)
 All not-started. Full list:

@@ -30,6 +30,7 @@ pub mod groups;
 pub mod memory;
 pub mod schedule;
 pub mod settings;
+pub mod templates;
 pub mod worktree;
 
 pub fn routes() -> Router<AppState> {
@@ -150,6 +151,13 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "delete_action" => actions::delete_action(ctx, req).await,
         "preview_prompt" => actions::preview_prompt(ctx, req).await,
         "discover_pipelines" => actions::discover_pipelines(ctx, req).await,
+
+        // templates (agent config bundles)
+        "list_templates" => templates::list_templates(ctx, req).await,
+        "get_template" => templates::get_template(ctx, req).await,
+        "save_template" => templates::save_template(ctx, req).await,
+        "delete_template" => templates::delete_template(ctx, req).await,
+        "render_template" => templates::render_template(ctx, req).await,
 
         // board
         "board_add_task" => board::add_task(ctx, req).await,

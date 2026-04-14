@@ -65,6 +65,15 @@ fn tool_specs() -> Vec<Value> {
         json!({"name": "loom_ask", "description": "Ask the human a clarifying question.", "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}}),
         json!({"name": "loom_context", "description": "Read back the current agent/task context.", "inputSchema": {"type": "object"}}),
         json!({"name": "loom_derive", "description": "Derive a follow-up task and dispatch it.", "inputSchema": {"type": "object", "properties": {"description": {"type": "string"}, "action": {"type": "string"}}, "required": ["description"]}}),
+        json!({"name": "loom_verify", "description": "Record verification status on the current task (verified/failed/on_review).", "inputSchema": {"type": "object", "properties": {"state": {"type": "string"}, "notes": {"type": "string"}, "mode": {"type": "string"}}, "required": ["state"]}}),
+        json!({"name": "loom_name", "description": "Update the current agent's display name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}),
+        json!({"name": "loom_reply", "description": "Reply to a `loom_ask` task (human responding to a pending ask).", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}, "reply": {"type": "string"}}, "required": ["task_id", "reply"]}}),
+        json!({"name": "loom_memory_publish", "description": "Publish a shared memory entry (finding/decision/warning/handoff/note).", "inputSchema": {"type": "object", "properties": {"entry_type": {"type": "string"}, "title": {"type": "string"}, "content": {"type": "string"}, "group": {"type": "string"}, "scope_kind": {"type": "string"}, "scope_ref": {"type": "string"}, "task_id": {"type": "string"}, "pinned": {"type": "boolean"}}, "required": ["entry_type", "title"]}}),
+        json!({"name": "loom_memory_list", "description": "List memory entries with optional filters.", "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "entry_type": {"type": "string"}, "task_id": {"type": "string"}, "pinned_only": {"type": "boolean"}, "search": {"type": "string"}}}}),
+        json!({"name": "loom_memory_read", "description": "Read a single memory entry by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}),
+        json!({"name": "loom_memory_pin", "description": "Pin a memory entry.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}),
+        json!({"name": "loom_memory_unpin", "description": "Unpin a memory entry.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}),
+        json!({"name": "loom_memory_link", "description": "Link a memory entry to a task/agent/pipeline (or detach).", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "target_kind": {"type": "string"}, "target_ref": {"type": "string"}, "detach": {"type": "boolean"}}, "required": ["id", "target_kind", "target_ref"]}}),
     ]
 }
 
@@ -98,6 +107,23 @@ async fn handle_tool_call(ctx: &CmdContext, req: &Value) -> Result<Value, String
         }
         "loom_context" => {
             return agent_context(ctx, &agent_id).await;
+        }
+        "loom_verify" => {
+            return verify_current_task(ctx, &agent_id, &args).await;
+        }
+        "loom_name" => {
+            return rename_agent(ctx, &agent_id, &args).await;
+        }
+        "loom_reply" => {
+            return resolve_ask_tool(ctx, &args).await;
+        }
+        "loom_memory_publish"
+        | "loom_memory_list"
+        | "loom_memory_read"
+        | "loom_memory_pin"
+        | "loom_memory_unpin"
+        | "loom_memory_link" => {
+            return memory_proxy(ctx, name, &agent_id, &args).await;
         }
         other => return Err(format!("unknown tool: {other}")),
     };
@@ -213,5 +239,133 @@ async fn derive_task(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<V
     Ok(json!({
         "content": [{"type": "text", "text": format!("derived task {new_id}")}],
         "loom": {"task_id": new_id, "description": description, "action": action_name},
+    }))
+}
+
+async fn verify_current_task(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<Value, String> {
+    let state = args
+        .get("state")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'state'".to_string())?
+        .to_string();
+    let task_id = {
+        let st = ctx.state.lock().await;
+        let agent = st
+            .agents
+            .get(agent_id)
+            .ok_or_else(|| format!("agent '{agent_id}' not found"))?;
+        agent.current_task_id.clone()
+    };
+    if task_id.is_empty() {
+        return Err("agent has no current task to verify".into());
+    }
+    let req = json!({
+        "id": task_id,
+        "state": state,
+        "mode": args.get("mode").cloned().unwrap_or(Value::Null),
+        "notes": args.get("notes").cloned().unwrap_or(Value::Null),
+        "updated_by": format!("agent:{agent_id}"),
+    });
+    let v = crate::commands::board::verify_task(ctx, &req)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(json!({
+        "content": [{"type": "text", "text": format!("verification: {state}")}],
+        "loom": v,
+    }))
+}
+
+async fn rename_agent(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<Value, String> {
+    let new_name = args
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'name'".to_string())?
+        .to_string();
+    if new_name.is_empty() {
+        return Err("empty name".into());
+    }
+    let agent = {
+        let mut st = ctx.state.lock().await;
+        if !st.agents.contains_key(agent_id) {
+            return Err(format!("agent '{agent_id}' not found"));
+        }
+        st.rename_agent(agent_id, &new_name)
+            .map_err(|e| format!("{e:?}"))?;
+        let agent = st.agents.get(agent_id).cloned().unwrap();
+        if let Some((seq, ops)) = st.drain_deltas() {
+            ctx.bus.send(loom_core::events::OutMessage::Delta { seq, ops });
+        }
+        agent
+    };
+    ctx.db
+        .save_agent(&agent)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(json!({
+        "content": [{"type": "text", "text": format!("renamed to {new_name}")}],
+        "loom": {"agent_id": agent_id, "name": new_name, "slug": agent.slug},
+    }))
+}
+
+async fn resolve_ask_tool(ctx: &CmdContext, args: &Value) -> Result<Value, String> {
+    let task_id = args
+        .get("task_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'task_id'".to_string())?
+        .to_string();
+    let reply = args
+        .get("reply")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'reply'".to_string())?
+        .to_string();
+    let req = json!({"task_id": task_id, "reply": reply});
+    let v = crate::commands::dispatch::resolve_ask(ctx, &req)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(json!({
+        "content": [{"type": "text", "text": "ask resolved"}],
+        "loom": v,
+    }))
+}
+
+/// Forward memory_* tool calls to the corresponding command handler.
+/// Auto-populates `source_kind: agent` + `source_id: <agent_id>` for
+/// `memory_publish` so audit data lands correctly.
+async fn memory_proxy(
+    ctx: &CmdContext,
+    tool: &str,
+    agent_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let mut req = args.clone();
+    if tool == "loom_memory_publish" {
+        if let Some(obj) = req.as_object_mut() {
+            if !obj.contains_key("source_kind") {
+                obj.insert("source_kind".into(), Value::String("agent".into()));
+            }
+            obj.insert("source_id".into(), Value::String(agent_id.to_string()));
+            // Source name: the agent's display name, if resolvable.
+            let name = {
+                let st = ctx.state.lock().await;
+                st.agents.get(agent_id).map(|a| a.name.clone())
+            };
+            if let Some(n) = name {
+                obj.insert("source_name".into(), Value::String(n));
+            }
+        }
+    }
+    let result = match tool {
+        "loom_memory_publish" => crate::commands::memory::publish(ctx, &req).await,
+        "loom_memory_list" => crate::commands::memory::list(ctx, &req).await,
+        "loom_memory_read" => crate::commands::memory::read(ctx, &req).await,
+        "loom_memory_pin" => crate::commands::memory::pin(ctx, &req).await,
+        "loom_memory_unpin" => crate::commands::memory::unpin(ctx, &req).await,
+        "loom_memory_link" => crate::commands::memory::link(ctx, &req).await,
+        other => return Err(format!("unknown memory tool: {other}")),
+    };
+    let v = result.map_err(|e| format!("{e:?}"))?;
+    Ok(json!({
+        "content": [{"type": "text", "text": format!("ok: {tool}")}],
+        "loom": v,
     }))
 }
