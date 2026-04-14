@@ -259,14 +259,17 @@ function _scheduleStandaloneBoardLayoutRender() {
   });
 }
 
-function _workspaceSidebarWidthBounds() {
+function _workspaceSidebarWidthBounds(opts) {
+  opts = opts || {};
   var minWidth = 240;
   var embedded = !!(typeof document !== 'undefined'
     && document
     && document.body
     && document.body.classList
     && document.body.classList.contains('runtime-embedded'));
-  if (embedded && typeof _standaloneMinimumShellWidthForLayout === 'function') {
+  if (!opts.allowStandaloneRailShrink
+      && embedded
+      && typeof _standaloneMinimumShellWidthForLayout === 'function') {
     var layout = (typeof _standalonePanelLayout !== 'undefined' && _standalonePanelLayout)
       ? _standalonePanelLayout
       : (state && state.standalone_panel_layout);
@@ -306,11 +309,17 @@ function _persistWorkspaceSidebarWidth(width) {
   } catch (_) {}
 }
 
-function _applyWorkspaceSidebarWidth(width) {
-  var bounds = _workspaceSidebarWidthBounds();
+function _applyWorkspaceSidebarWidth(width, opts) {
+  opts = opts || {};
+  var bounds = _workspaceSidebarWidthBounds(opts);
   var next = parseInt(width, 10);
   if (!Number.isFinite(next)) next = _workspaceSidebarDefaultWidth;
   next = Math.max(bounds.min, Math.min(bounds.max, next));
+  var embedded = !!(typeof document !== 'undefined'
+    && document
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('runtime-embedded'));
   _workspaceSidebarWidth = next;
   var root = document.documentElement || document.body;
   if (root && root.style) {
@@ -319,6 +328,16 @@ function _applyWorkspaceSidebarWidth(width) {
     } else {
       root.style['--standalone-sidebar-width'] = next + 'px';
     }
+  }
+  if (opts.allowStandaloneRailShrink
+      && embedded
+      && typeof _standaloneConstrainLayoutToShellWidth === 'function'
+      && typeof _standalonePanelSetLayoutFromState === 'function') {
+    var layout = (typeof _standalonePanelLayout !== 'undefined' && _standalonePanelLayout)
+      ? _standalonePanelLayout
+      : (state && state.standalone_panel_layout);
+    var constrained = _standaloneConstrainLayoutToShellWidth(layout, next);
+    if (constrained.changed) _standalonePanelSetLayoutFromState(constrained.layout, { fromServer: true });
   }
   _scheduleStandaloneBoardLayoutRender();
 }
@@ -396,7 +415,7 @@ function restoreStandaloneLayoutDefaults() {
   document.addEventListener('mousemove', function(e) {
     if (!dragging) return;
     var rect = shell.getBoundingClientRect();
-    _applyWorkspaceSidebarWidth(e.clientX - rect.left);
+    _applyWorkspaceSidebarWidth(e.clientX - rect.left, { allowStandaloneRailShrink: true });
   });
 
   document.addEventListener('mouseup', function() {
@@ -405,6 +424,7 @@ function restoreStandaloneLayoutDefaults() {
     document.body.style.cursor = '';
     document.body.classList.remove('workspace-resizing');
     _persistWorkspaceSidebarWidth(_workspaceSidebarWidth);
+    if (typeof _standalonePanelSaveLayout === 'function') _standalonePanelSaveLayout();
   });
 
   handle.addEventListener('dblclick', function() {

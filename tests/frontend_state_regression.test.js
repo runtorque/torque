@@ -857,6 +857,47 @@ function createPanelHarness() {
   return { context, document, sandbox };
 }
 
+function createWorkspaceResizeHarness() {
+  const { sandbox, document } = createSandbox({
+    window: {
+      innerHeight: 900,
+      addEventListener() {},
+      open() {},
+    },
+    connect() {},
+    setupDrag() {},
+  });
+  [
+    'workspace-shell',
+    'workspace-resize-handle',
+    'standalone-sidebar-shell',
+    'standalone-main-stack',
+    'standalone-bottom-dock',
+    'standalone-right-rail',
+    'standalone-float-layer',
+    'standalone-bottom-resize-handle',
+    'standalone-rail-resize-handle',
+    'add-name-input',
+    'add-cmd-input',
+    'add-dir-input',
+    'add-args-input',
+    'add-init-input',
+    'gs-directory',
+    'gs-agent-directory',
+    'gs-terminal-prefix',
+    'gs-terminal-boot-cmd',
+    'gs-terminal-cmd-args',
+    'gs-terminal-init-script',
+    'gs-terminal-directory',
+    'gs-weaver-boot-cmd',
+    'gs-weaver-custom-instructions',
+  ].forEach((id) => document.register(id));
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/panel_manager.js');
+  loadScript(context, 'static/js/main.js');
+  return { context, document, sandbox };
+}
+
 function createPanelManagerHarness() {
   const { sandbox, document } = createSandbox({
     window: {
@@ -7609,6 +7650,43 @@ test('standalone right resize preserves the main stack minimum width', () => {
 
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 320);
   assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '320px');
+});
+
+test('standalone outer resize shrinks the right rail when the main stack is already at its minimum', () => {
+  const { context, document } = createWorkspaceResizeHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+
+  const workspaceShell = document.getElementById('workspace-shell');
+  workspaceShell.getBoundingClientRect = () => ({ top: 0, bottom: 720, left: 0, right: 1400, width: 1400, height: 720 });
+
+  runInContext(context, `
+    _workspaceSidebarWidth = 568;
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  document.getElementById('workspace-resize-handle').listeners.mousedown({
+    preventDefault() {},
+    clientX: 572,
+    clientY: 100,
+  });
+  document.listeners.mousemove({
+    clientX: 520,
+    clientY: 100,
+  });
+
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 520);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 272);
+  assert.equal(document.body.style['--standalone-sidebar-width'], '520px');
+  assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '272px');
 });
 
 test('standalone rail drag shrinks immediately from the grabbed edge at the min boundary', () => {

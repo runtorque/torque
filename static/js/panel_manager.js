@@ -182,6 +182,26 @@ function _standaloneMinimumShellWidthForLayout(raw) {
   return _standaloneMainStackMinWidth() + 8 + rightSize;
 }
 
+function _standaloneConstrainLayoutToShellWidth(raw, shellWidth) {
+  var layout = raw && typeof raw === 'object'
+    ? _standaloneClone(raw)
+    : _standaloneDefaultLayout();
+  var right = layout.right && typeof layout.right === 'object' ? layout.right : null;
+  if (!right) return { layout: layout, changed: false };
+  var tabs = _standaloneEnsureUniqueTabs(right.tabs);
+  var active = String(right.active || '');
+  if (!_standaloneLayoutBool(right.open, true) || !active || tabs.indexOf(active) < 0) {
+    return { layout: layout, changed: false };
+  }
+  var bounds = _standaloneRightSizeBounds(shellWidth);
+  var current = parseInt(right.size, 10);
+  if (!Number.isFinite(current)) current = bounds.max;
+  var next = Math.max(0, Math.min(bounds.max, current));
+  if (next === current) return { layout: layout, changed: false };
+  layout.right.size = next;
+  return { layout: layout, changed: true };
+}
+
 function _standaloneHasPersistedLayout(layout) {
   return !!(layout && typeof layout === 'object' && Object.keys(layout).length);
 }
