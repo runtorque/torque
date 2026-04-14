@@ -38,6 +38,34 @@ function _standalonePanelTitle(app) {
   return _standalonePanelTitles[app] || app;
 }
 
+function _standaloneEmptyZoneSize(zoneName) {
+  return zoneName === 'bottom' ? 72 : 140;
+}
+
+function _standaloneZonePlaceholderVisible(zoneName, zone) {
+  return !!(
+    _standalonePanelDragApp
+    && zone
+    && zone.open
+    && !zone.active
+    && (!zone.tabs || !zone.tabs.length)
+    && (zoneName === 'bottom' || zoneName === 'right')
+  );
+}
+
+function _standaloneZoneRenderedSize(zoneName, zone) {
+  if (!zone || !zone.open) return 0;
+  if (zone.active) return zone.size;
+  if (_standaloneZonePlaceholderVisible(zoneName, zone)) return _standaloneEmptyZoneSize(zoneName);
+  return 0;
+}
+
+function _standaloneHasEmptyZonePreview(layout) {
+  var next = layout || _standalonePanelCurrentLayout();
+  return _standaloneZonePlaceholderVisible('bottom', next.bottom)
+    || _standaloneZonePlaceholderVisible('right', next.right);
+}
+
 function _standalonePanelParkingHost() {
   return document.getElementById('bottom-panel');
 }
@@ -534,8 +562,9 @@ function _standaloneBuildZone(zoneName, rootEl, roots, placed) {
   if (!rootEl) return;
   var layout = _standalonePanelCurrentLayout();
   var zone = layout[zoneName];
+  var placeholderVisible = _standaloneZonePlaceholderVisible(zoneName, zone);
   _clearElement(rootEl);
-  rootEl.classList.toggle('collapsed', !zone.open || !zone.active);
+  rootEl.classList.toggle('collapsed', !zone.open || (!zone.active && !placeholderVisible));
   rootEl.classList.toggle('empty', !zone.tabs.length);
   rootEl.dataset.zone = zoneName;
   rootEl.ondragover = function(event) { standalonePanelZoneDragOver(event, zoneName); };
@@ -546,28 +575,33 @@ function _standaloneBuildZone(zoneName, rootEl, roots, placed) {
     }
   };
 
-  var header = _makeStandaloneNode('div', 'standalone-panel-zone-header');
-  var tabs = _makeStandaloneNode('div', 'standalone-panel-zone-tabs');
-  for (var i = 0; i < zone.tabs.length; i++) {
-    tabs.appendChild(_standaloneZoneTab(zone.tabs[i], zone.tabs[i] === zone.active));
-  }
-  header.appendChild(tabs);
+  if (zone.tabs.length || zone.active) {
+    var header = _makeStandaloneNode('div', 'standalone-panel-zone-header');
+    var tabs = _makeStandaloneNode('div', 'standalone-panel-zone-tabs');
+    for (var i = 0; i < zone.tabs.length; i++) {
+      tabs.appendChild(_standaloneZoneTab(zone.tabs[i], zone.tabs[i] === zone.active));
+    }
+    header.appendChild(tabs);
 
-  var actions = _makeStandaloneNode('div', 'standalone-panel-zone-actions');
-  if (zone.active) {
-    var floatBtn = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Float');
-    floatBtn.onclick = function(activeApp) {
-      return function() { _standaloneMovePanelToZone(activeApp, 'float'); };
-    }(zone.active);
-    actions.appendChild(floatBtn);
+    var actions = _makeStandaloneNode('div', 'standalone-panel-zone-actions');
+    if (zone.active) {
+      var floatBtn = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Float');
+      floatBtn.onclick = function(activeApp) {
+        return function() { _standaloneMovePanelToZone(activeApp, 'float'); };
+      }(zone.active);
+      actions.appendChild(floatBtn);
+    }
+    var closeBtn = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Hide');
+    closeBtn.onclick = function() { _standaloneToggleZone(zoneName); };
+    actions.appendChild(closeBtn);
+    header.appendChild(actions);
+    rootEl.appendChild(header);
   }
-  var closeBtn = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Hide');
-  closeBtn.onclick = function() { _standaloneToggleZone(zoneName); };
-  actions.appendChild(closeBtn);
-  header.appendChild(actions);
-  rootEl.appendChild(header);
 
   var body = _makeStandaloneNode('div', 'standalone-panel-zone-body');
+  if (placeholderVisible) {
+    body.appendChild(_makeStandaloneNode('div', 'standalone-panel-empty-drop', 'Drop panel here'));
+  }
   rootEl.appendChild(body);
 
   for (var j = 0; j < zone.tabs.length; j++) {
@@ -641,8 +675,8 @@ function _standaloneRenderPanelWorkspace() {
   var panelRoots = _standaloneCapturePanelRoots();
   var placedRoots = {};
   var layout = _standalonePanelCurrentLayout();
-  _setStyleVar(shell, '--standalone-bottom-height', (layout.bottom.open && layout.bottom.active ? layout.bottom.size : 0) + 'px');
-  _setStyleVar(shell, '--standalone-right-rail-width', (layout.right.open && layout.right.active ? layout.right.size : 0) + 'px');
+  _setStyleVar(shell, '--standalone-bottom-height', _standaloneZoneRenderedSize('bottom', layout.bottom) + 'px');
+  _setStyleVar(shell, '--standalone-right-rail-width', _standaloneZoneRenderedSize('right', layout.right) + 'px');
   if (bottomHandle && bottomHandle.classList) bottomHandle.classList.toggle('collapsed', !(layout.bottom.open && layout.bottom.active));
   if (railHandle && railHandle.classList) railHandle.classList.toggle('collapsed', !(layout.right.open && layout.right.active));
   _standaloneBuildZone('bottom', bottomRoot, panelRoots, placedRoots);
@@ -674,12 +708,15 @@ function standalonePanelDragStart(event, app) {
     event.dataTransfer.effectAllowed = 'move';
   }
   document.body.classList.add('standalone-panel-dragging');
+  if (_standaloneHasEmptyZonePreview()) _standaloneRenderPanelWorkspace();
 }
 
 function standalonePanelDragEnd() {
+  var shouldRender = _standaloneHasEmptyZonePreview();
   _standalonePanelDragApp = '';
   document.body.classList.remove('standalone-panel-dragging');
   _standaloneSetDragTarget('');
+  if (shouldRender) _standaloneRenderPanelWorkspace();
 }
 
 function _standaloneDraggedApp(event) {

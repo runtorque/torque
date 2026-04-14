@@ -8033,6 +8033,50 @@ test('standalone bottom-dock drop moves a panel to the shell-owned dock and pres
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions']);
 });
 
+test('standalone drag temporarily reveals an empty bottom dock and allows redocking', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+  const shell = document.getElementById('standalone-sidebar-shell');
+  const bottomDock = document.getElementById('standalone-bottom-dock');
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: [], active: '' },
+      right: { open: true, size: 320, tabs: ['board', 'context'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  assert.equal(shell.style['--standalone-bottom-height'], '0px');
+  assert.equal(bottomDock.classList.contains('collapsed'), true);
+
+  context.standalonePanelDragStart(null, 'context');
+
+  assert.equal(shell.style['--standalone-bottom-height'], '72px');
+  assert.equal(bottomDock.classList.contains('collapsed'), false);
+  assert.equal(
+    !!findChildByClassName(findChildByClassName(bottomDock, 'standalone-panel-zone-body'), 'standalone-panel-empty-drop'),
+    true,
+  );
+
+  context.standalonePanelZoneDrop({
+    preventDefault() {},
+    currentTarget: bottomDock,
+    dataTransfer: {
+      getData() { return 'context'; },
+    },
+  }, 'bottom');
+
+  assert.equal(shell.style['--standalone-bottom-height'], '280px');
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['context']);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'context');
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs`), ['board']);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-context']);
+});
+
 test('standalone pointer drag moves a panel without native drag events', () => {
   const { context, document } = createAttachedStandaloneWsSyncHarness();
   const bottomDock = document.getElementById('standalone-bottom-dock');
