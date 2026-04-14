@@ -71,6 +71,7 @@ class FakeElement {
     this._querySelectorMap = new Map();
     this._querySelectorAllMap = new Map();
     this.parentNode = null;
+    this._detachChildrenOnInnerHTMLClear = false;
   }
 
   get innerHTML() {
@@ -79,10 +80,18 @@ class FakeElement {
 
   set innerHTML(value) {
     this._innerHTML = value;
+    if (this._detachChildrenOnInnerHTMLClear) {
+      this.children.forEach((child) => {
+        child.parentNode = null;
+      });
+    }
     this.children = [];
   }
 
   appendChild(child) {
+    if (child.parentNode && Array.isArray(child.parentNode.children)) {
+      child.parentNode.children = child.parentNode.children.filter((item) => item !== child);
+    }
     child.parentNode = this;
     this.children.push(child);
     if (child.selected) this.value = child.value;
@@ -169,6 +178,7 @@ class FakeDocument {
     this.body = new FakeElement('body');
     this.activeElement = null;
     this.listeners = {};
+    this._restrictToAttachedIds = false;
   }
 
   register(id, element = new FakeElement(id)) {
@@ -177,7 +187,10 @@ class FakeDocument {
   }
 
   getElementById(id) {
-    return this.elements.get(id) || null;
+    const element = this.elements.get(id) || null;
+    if (!element) return null;
+    if (this._restrictToAttachedIds && !this.isAttached(element)) return null;
+    return element;
   }
 
   createElement(tagName) {
@@ -213,7 +226,23 @@ class FakeDocument {
   setSelectorAll(selector, elements) {
     this.selectorAllMap.set(selector, elements);
   }
+
+  isAttached(element) {
+    for (let node = element; node; node = node.parentNode) {
+      if (node === this.body) return true;
+    }
+    return false;
+  }
 }
+
+const PANEL_ROOT_IDS = [
+  'panel-board',
+  'panel-actions',
+  'panel-templates',
+  'panel-context',
+  'panel-events',
+  'panel-weaver',
+];
 
 function createSandbox(overrides = {}) {
   const document = new FakeDocument();
@@ -390,6 +419,76 @@ function runInContext(context, code) {
 
 function jsonValue(context, expression) {
   return JSON.parse(runInContext(context, `JSON.stringify(${expression})`));
+}
+
+function attachStandalonePanelDom(document) {
+  const get = (id) => document.elements.get(id) || null;
+  const shell = get('standalone-sidebar-shell');
+  const stack = get('standalone-main-stack');
+  const bottomDock = get('standalone-bottom-dock');
+  const rightRail = get('standalone-right-rail');
+  const floatLayer = get('standalone-float-layer');
+  const bottomHandle = get('standalone-bottom-resize-handle');
+  const railHandle = get('standalone-rail-resize-handle');
+  const bottomPanel = get('bottom-panel');
+  const panelResizeHandle = get('panel-resize-handle');
+
+  if (shell) document.body.appendChild(shell);
+  if (stack && shell) shell.appendChild(stack);
+  if (bottomHandle && stack) stack.appendChild(bottomHandle);
+  if (bottomDock && stack) stack.appendChild(bottomDock);
+  if (railHandle && shell) shell.appendChild(railHandle);
+  if (rightRail && shell) shell.appendChild(rightRail);
+  if (floatLayer) document.body.appendChild(floatLayer);
+  if (bottomPanel) document.body.appendChild(bottomPanel);
+  if (panelResizeHandle && bottomPanel) bottomPanel.appendChild(panelResizeHandle);
+  PANEL_ROOT_IDS.forEach((id) => {
+    const panelRoot = get(id);
+    if (panelRoot && bottomPanel) bottomPanel.appendChild(panelRoot);
+  });
+
+  [bottomDock, rightRail, floatLayer].forEach((element) => {
+    if (element) element._detachChildrenOnInnerHTMLClear = true;
+  });
+  document._restrictToAttachedIds = true;
+}
+
+function findChildByClassName(element, className) {
+  if (!element || !Array.isArray(element.children)) return null;
+  return element.children.find((child) => child.classList && child.classList.contains(className)) || null;
+}
+
+function attachedStandalonePanelIds(document) {
+  return PANEL_ROOT_IDS.filter((id) => !!document.getElementById(id));
+}
+
+function standaloneZoneBodyPanelIds(document, zoneId) {
+  const zone = document.getElementById(zoneId);
+  const body = findChildByClassName(zone, 'standalone-panel-zone-body');
+  if (!body || !Array.isArray(body.children)) return [];
+  return body.children.map((child) => child.id).filter(Boolean);
+}
+
+function standaloneFloatPanelIds(document) {
+  const layer = document.getElementById('standalone-float-layer');
+  if (!layer || !Array.isArray(layer.children)) return [];
+  const ids = [];
+  layer.children.forEach((shell) => {
+    const body = findChildByClassName(shell, 'standalone-float-body');
+    if (!body || !Array.isArray(body.children)) return;
+    body.children.forEach((child) => {
+      if (child && child.id) ids.push(child.id);
+    });
+  });
+  return ids;
+}
+
+function parkedStandalonePanelIds(document) {
+  const bottomPanel = document.getElementById('bottom-panel');
+  if (!bottomPanel || !Array.isArray(bottomPanel.children)) return [];
+  return bottomPanel.children
+    .map((child) => child.id)
+    .filter((id) => PANEL_ROOT_IDS.includes(id));
 }
 
 function createBoardHarness(options = {}) {
@@ -665,6 +764,12 @@ function createStandaloneWsSyncHarness() {
   document.body.classList.add('runtime-embedded');
   context.isEmbeddedTerminalMode = function() { return true; };
   return { context, document, sandbox };
+}
+
+function createAttachedStandaloneWsSyncHarness() {
+  const harness = createStandaloneWsSyncHarness();
+  attachStandalonePanelDom(harness.document);
+  return harness;
 }
 
 function createStandaloneRenderHarness() {
@@ -7349,6 +7454,36 @@ test('standalone layout restore migrates legacy panel state into bottom and righ
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.open`), true);
 });
 
+test('standalone startup restore keeps panel roots attached across the first double render', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+  runInContext(context, `_panelStateRestored = false;`);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true },
+    agents: {},
+    groups: {},
+    children: {},
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: null,
+    standalone_panel_layout: {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board', 'weaver'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['actions', 'templates', 'context', 'events'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    },
+  });
+
+  assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-board', 'panel-weaver']);
+  assert.deepEqual(
+    standaloneZoneBodyPanelIds(document, 'standalone-right-rail'),
+    ['panel-actions', 'panel-templates', 'panel-context', 'panel-events']
+  );
+});
+
 test('standalone task deltas rerender every visible docked surface', () => {
   const { context, sandbox } = createWsRenderHarness();
 
@@ -7461,6 +7596,44 @@ test('standalone full-state resync loads and rerenders newly visible Actions', (
   });
 });
 
+test('standalone full-state rerender keeps panel roots attached', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true },
+    agents: {},
+    groups: {},
+    children: {},
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: null,
+    standalone_panel_layout: {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['actions', 'context'], active: 'actions' },
+      floats: {},
+      last_active: 'actions',
+    },
+  });
+
+  assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions', 'panel-context']);
+  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-events', 'panel-weaver']);
+});
+
 test('standalone layout ui_update loads and rerenders newly visible Actions', () => {
   const { context, sandbox } = createStandaloneWsSyncHarness();
 
@@ -7506,6 +7679,73 @@ test('standalone layout ui_update loads and rerenders newly visible Actions', ()
     weaver: 0,
     templates: 0,
   });
+});
+
+test('standalone layout ui_update keeps panel roots attached across rerenders', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['actions', 'context'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'ui_update',
+        key: 'standalone_panel_layout',
+        value: {
+          version: 1,
+          bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+          right: { open: true, size: 320, tabs: ['actions', 'context'], active: 'actions' },
+          floats: {},
+          last_active: 'actions',
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions', 'panel-context']);
+  assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-events', 'panel-weaver']);
+});
+
+test('standalone persisted float restore keeps floated panel roots attached', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+  runInContext(context, `_panelStateRestored = false;`);
+
+  context._handleFullState({
+    seq: 1,
+    runtime: { embedded_terminal: true },
+    agents: {},
+    groups: {},
+    children: {},
+    board_tasks: {},
+    panel_events: [],
+    active_session_id: null,
+    standalone_panel_layout: {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {
+        actions: { x: 48, y: 72, width: 420, height: 320, z: 2 },
+      },
+      last_active: 'actions',
+    },
+  });
+
+  assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
+  assert.deepEqual(standaloneFloatPanelIds(document), ['panel-actions']);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-board']);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-context']);
 });
 
 test('opening Actions in standalone loads the actions editor', () => {
