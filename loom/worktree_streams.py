@@ -7,12 +7,13 @@ introduced here.
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from datetime import datetime, timezone
 import os
 import subprocess
 import time
-from typing import Any
+from typing import Any, Iterable
 
 from .state import board_task_is_closed
 from .task_ids import parse_task_id
@@ -47,13 +48,25 @@ _NON_PRODUCT_ACTION_HINTS = (
     "research",
 )
 
-# `_branch_exists_locally` shells out to `git show-ref`. It's invoked per
-# stream on every broadcast, and broadcasts fire on every state mutation —
-# so without caching we fork() dozens of times per second on the asyncio
-# event loop. Cache the result for a short window; branch existence
-# changes infrequently and a minute of staleness is acceptable here.
+# `_branch_exists_locally` used to shell out to `git show-ref` per branch per
+# stream on every broadcast, forking dozens of times per second on the asyncio
+# event loop. We now batch the lookup: a single `git for-each-ref` per repo
+# populates a per-repo set of branches, and stream computation reads from the
+# set. Callers should `await prefill_branch_exists_async(...)` before entering
+# the sync compute path so the cache is warm and no subprocess runs inline.
+# The per-branch cache is retained as a fallback for the rare sync-context
+# entry (CLI, tests) where no prefill has happened.
 _BRANCH_EXISTS_TTL_SECONDS = 60.0
 _branch_exists_ttl_cache: dict[tuple[str, str], tuple[float, bool]] = {}
+_repo_branches_cache: dict[str, tuple[float, frozenset[str]]] = {}
+_repo_branches_inflight: dict[str, asyncio.Future] = {}
+
+
+def _normalize_repo_root(repo_root: str) -> str:
+    value = str(repo_root or "").strip()
+    if not value:
+        return ""
+    return os.path.realpath(os.path.expanduser(value))
 
 
 def invalidate_branch_exists_cache(repo_root: str = "", branch: str = "") -> None:
@@ -64,17 +77,129 @@ def invalidate_branch_exists_cache(repo_root: str = "", branch: str = "") -> Non
     when Loom itself creates or deletes a branch so the next lookup is
     fresh instead of waiting out the TTL.
     """
-    repo_root = os.path.realpath(os.path.expanduser(str(repo_root or "").strip())) \
-        if repo_root else ""
+    repo_root = _normalize_repo_root(repo_root) if repo_root else ""
     branch = str(branch or "").strip()
     if not repo_root:
         _branch_exists_ttl_cache.clear()
+        _repo_branches_cache.clear()
         return
     if branch:
         _branch_exists_ttl_cache.pop((repo_root, branch), None)
+    else:
+        for key in [k for k in _branch_exists_ttl_cache if k[0] == repo_root]:
+            _branch_exists_ttl_cache.pop(key, None)
+    _repo_branches_cache.pop(repo_root, None)
+
+
+async def _list_repo_branches_async(repo_root: str) -> frozenset[str]:
+    """Run one `git for-each-ref` and return the set of local branch names."""
+    if not repo_root or not os.path.isdir(repo_root):
+        return frozenset()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", "-C", repo_root,
+            "for-each-ref", "--format=%(refname:short)", "refs/heads/",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return frozenset()
+        return frozenset(
+            line.strip()
+            for line in stdout.decode("utf-8", errors="replace").splitlines()
+            if line.strip()
+        )
+    except (OSError, asyncio.CancelledError):
+        return frozenset()
+
+
+async def _refresh_repo_branches(repo_root: str) -> frozenset[str]:
+    """Refresh the repo-branches cache, deduplicating concurrent callers."""
+    inflight = _repo_branches_inflight.get(repo_root)
+    if inflight is not None:
+        try:
+            return await inflight
+        except Exception:
+            pass  # fall through and try again below
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+    _repo_branches_inflight[repo_root] = fut
+    try:
+        branches = await _list_repo_branches_async(repo_root)
+        _repo_branches_cache[repo_root] = (
+            time.monotonic() + _BRANCH_EXISTS_TTL_SECONDS, branches)
+        if not fut.done():
+            fut.set_result(branches)
+        return branches
+    except Exception as exc:
+        if not fut.done():
+            fut.set_exception(exc)
+        raise
+    finally:
+        _repo_branches_inflight.pop(repo_root, None)
+
+
+async def prefill_branch_exists_async(repo_roots: Iterable[str]) -> None:
+    """Warm the per-repo branch cache for each distinct ``repo_root``.
+
+    Uses one async `git for-each-ref` per repo, concurrently. Skips repos
+    whose cache entry is still fresh. Safe to call from any async context.
+    """
+    now = time.monotonic()
+    seen: set[str] = set()
+    targets: list[str] = []
+    for raw in repo_roots:
+        repo_root = _normalize_repo_root(raw or "")
+        if not repo_root or repo_root in seen:
+            continue
+        seen.add(repo_root)
+        cached = _repo_branches_cache.get(repo_root)
+        if cached is not None and cached[0] > now:
+            continue
+        targets.append(repo_root)
+    if not targets:
         return
-    for key in [k for k in _branch_exists_ttl_cache if k[0] == repo_root]:
-        _branch_exists_ttl_cache.pop(key, None)
+    await asyncio.gather(
+        *(_refresh_repo_branches(repo_root) for repo_root in targets),
+        return_exceptions=True,
+    )
+
+
+def _collect_state_repo_roots(state, *, group: str = "") -> set[str]:
+    """Return distinct normalized repo_roots referenced by agents + tasks."""
+    repo_roots: set[str] = set()
+    for cell in state.agents.values():
+        if getattr(cell, "cell_type", "") != "agent":
+            continue
+        if group and getattr(cell, "group", "") != group:
+            continue
+        repo_root = str(
+            getattr(cell, "worktree_repo_root", "")
+            or getattr(cell, "git_root", "")
+            or ""
+        ).strip()
+        if repo_root:
+            repo_roots.add(_normalize_repo_root(repo_root))
+    if group and hasattr(state, "tasks_in_group"):
+        tasks = state.tasks_in_group(group)
+    else:
+        tasks = state.board_tasks.values()
+    for task in tasks:
+        for attr in ("worktree_repo_root", "repo_root"):
+            repo_root = str(getattr(task, attr, "") or "").strip()
+            if repo_root:
+                repo_roots.add(_normalize_repo_root(repo_root))
+    repo_roots.discard("")
+    return repo_roots
+
+
+async def prefill_branch_exists_for_state(state, *, group: str = "") -> None:
+    """Prefill branch-exists cache for every repo referenced by ``state``."""
+    repo_roots = _collect_state_repo_roots(state, group=group)
+    if not repo_roots:
+        return
+    await prefill_branch_exists_async(repo_roots)
 
 
 def stream_id(repo_root: str, branch: str) -> str:
@@ -696,7 +821,16 @@ def compute_worktree_stream(state, *, repo_root: str, branch: str,
 def _branch_exists_locally(repo_root: str, branch: str, *,
                            cache: dict[tuple[str, str], bool] | None = None
                            ) -> bool:
-    repo_root = os.path.realpath(os.path.expanduser(str(repo_root or "").strip()))
+    """Return True if ``branch`` exists as a local ref in ``repo_root``.
+
+    Fast path: consult the batched per-repo branch set populated by
+    ``prefill_branch_exists_async``. No subprocess is spawned when the
+    cache is warm. Falls back to the legacy per-branch TTL cache and, as
+    a last resort, a synchronous `git show-ref` — this only happens when
+    a caller reaches this path without having run the async prefill
+    first (primarily CLI / test contexts).
+    """
+    repo_root = _normalize_repo_root(repo_root)
     branch = str(branch or "").strip()
     if not repo_root or not branch:
         return False
@@ -705,6 +839,13 @@ def _branch_exists_locally(repo_root: str, branch: str, *,
         return cache[key]
 
     now = time.monotonic()
+    repo_entry = _repo_branches_cache.get(repo_root)
+    if repo_entry is not None and repo_entry[0] > now:
+        exists = branch in repo_entry[1]
+        if cache is not None:
+            cache[key] = exists
+        return exists
+
     cached = _branch_exists_ttl_cache.get(key)
     if cached is not None and cached[0] > now:
         exists = cached[1]

@@ -675,6 +675,11 @@ class MatrixState:
         # Delta broadcast accumulator
         self._delta_ops: list[dict] = []
         self._seq: int = 0
+        # Per-agent fingerprint of weaver-relevant fields. Lets
+        # `_append_weaver_stream_delta_ops` skip recomputing a group's
+        # weaver streams when an agent_upsert only changes ephemeral
+        # fields (activity, path, last_event_at, etc.).
+        self._agent_weaver_fingerprints: dict[str, tuple] = {}
 
     # -- Delta emission -----------------------------------------------------
 
@@ -804,6 +809,27 @@ class MatrixState:
             for group in self._weaver_stream_groups()
         }
 
+    def _agent_weaver_fingerprint(self, op: dict) -> tuple:
+        """Fingerprint the weaver-relevant fields of an agent_upsert op.
+
+        Weaver stream identity/gating only depends on group, worktree
+        identity, current task assignment, and whether the agent is
+        busy. Everything else in the agent dict (activity, path, timers,
+        summary text, tokens) is ephemeral and must not force a
+        recompute — otherwise the per-second activity ticker would drive
+        a git-forking stream recompute on every broadcast.
+        """
+        return (
+            str(op.get("group", "") or ""),
+            str(op.get("worktree_repo_root", "") or ""),
+            str(op.get("git_root", "") or ""),
+            str(op.get("worktree_branch", "") or ""),
+            str(op.get("worktree_path", "") or ""),
+            str(op.get("current_task_id", "") or ""),
+            str(op.get("status", "") or ""),
+            str(op.get("cell_type", "") or ""),
+        )
+
     def _append_weaver_stream_delta_ops(self, ops: list[dict]) -> list[dict]:
         affected_groups: set[str] = set()
         for op in ops:
@@ -823,6 +849,15 @@ class MatrixState:
                 cell_type = str(op.get("cell_type", "agent") or "agent").strip()
                 if cell_type and cell_type != "agent":
                     continue
+                agent_id = str(op.get("id", "") or "")
+                if op_name == "agent_upsert" and agent_id:
+                    fingerprint = self._agent_weaver_fingerprint(op)
+                    if self._agent_weaver_fingerprints.get(
+                            agent_id) == fingerprint:
+                        continue
+                    self._agent_weaver_fingerprints[agent_id] = fingerprint
+                elif op_name == "agent_remove" and agent_id:
+                    self._agent_weaver_fingerprints.pop(agent_id, None)
             affected_groups.add(str(op.get("group", "") or "").strip())
         affected_groups.discard("")
         if not affected_groups:
@@ -3069,6 +3104,24 @@ class MatrixState:
         where the _emit was called), this is a no-op — the delta was
         already queued by _emit().
         """
+        # Cheap pre-lock bail-out: if nothing has been emitted, skip. This
+        # also spares us the prefill cost on the focus-only hot path.
+        if not self._delta_ops:
+            return
+        # Warm the per-repo branch-exists cache asynchronously before the
+        # weaver-stream recompute runs under the WS lock. Without this, the
+        # sync _branch_exists_locally fallback forks subprocess on the event
+        # loop, stalling focus/select clicks while git runs.
+        if any(
+            str((op or {}).get("op", "") or "")
+            in _WEAVER_STREAM_DELTA_TRIGGER_OPS
+            for op in self._delta_ops
+        ):
+            try:
+                from .worktree_streams import prefill_branch_exists_for_state
+                await prefill_branch_exists_for_state(self)
+            except Exception:
+                log.exception("Branch-exists prefill failed")
         async with self._ws_clients_lock:
             if not self._delta_ops:
                 return
