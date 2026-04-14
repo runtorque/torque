@@ -7499,6 +7499,15 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
 });
 
+test('standalone keeps the legacy bottom panel parking host fully collapsed', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(
+    css,
+    /body\.runtime-embedded #bottom-panel\.collapsed\s*\{[^}]*height:\s*0;[^}]*border-top:\s*none;[^}]*box-shadow:\s*none;/s,
+  );
+});
+
 test('standalone layout restore migrates legacy panel state into bottom and right docks', () => {
   const { context, document } = createPanelHarness();
   document.body.classList.add('runtime-embedded');

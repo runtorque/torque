@@ -2152,6 +2152,11 @@ body.runtime-embedded #bottom-panel {
   border-top-color: rgba(255,255,255,.06);
   box-shadow: 0 -18px 40px rgba(0,0,0,.2);
 }
+body.runtime-embedded #bottom-panel.collapsed {
+  height: 0;
+  border-top: none;
+  box-shadow: none;
+}
 #bottom-panel.collapsed {
   height: 0;
   border-top: none;
