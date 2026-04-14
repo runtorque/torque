@@ -259,12 +259,34 @@ function _scheduleStandaloneBoardLayoutRender() {
   });
 }
 
-function _workspaceSidebarWidthBounds() {
+function _workspaceSidebarWidthBounds(opts) {
+  opts = opts || {};
+  var minWidth = 240;
+  var embedded = !!(typeof document !== 'undefined'
+    && document
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('runtime-embedded'));
+  if (!opts.allowStandaloneRailShrink
+      && embedded
+      && typeof _standaloneMinimumShellWidthForLayout === 'function') {
+    var layout = (typeof _standalonePanelLayout !== 'undefined' && _standalonePanelLayout)
+      ? _standalonePanelLayout
+      : (state && state.standalone_panel_layout);
+    if (layout) minWidth = Math.max(minWidth, _standaloneMinimumShellWidthForLayout(layout));
+  } else if (opts.allowStandaloneRailShrink
+      && embedded
+      && typeof _standaloneMinimumShellWidthForDrag === 'function') {
+    var dragLayout = (typeof _standalonePanelLayout !== 'undefined' && _standalonePanelLayout)
+      ? _standalonePanelLayout
+      : (state && state.standalone_panel_layout);
+    if (dragLayout) minWidth = Math.max(minWidth, _standaloneMinimumShellWidthForDrag(dragLayout));
+  }
   var viewportWidth = (typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth > 0)
     ? window.innerWidth
     : 1280;
   var maxWidth = Math.max(320, Math.floor(viewportWidth * 0.62));
-  return { min: 240, max: maxWidth };
+  return { min: minWidth, max: Math.max(minWidth, maxWidth) };
 }
 
 function _readWorkspaceSidebarWidth() {
@@ -294,11 +316,17 @@ function _persistWorkspaceSidebarWidth(width) {
   } catch (_) {}
 }
 
-function _applyWorkspaceSidebarWidth(width) {
-  var bounds = _workspaceSidebarWidthBounds();
+function _applyWorkspaceSidebarWidth(width, opts) {
+  opts = opts || {};
+  var bounds = _workspaceSidebarWidthBounds(opts);
   var next = parseInt(width, 10);
   if (!Number.isFinite(next)) next = _workspaceSidebarDefaultWidth;
   next = Math.max(bounds.min, Math.min(bounds.max, next));
+  var embedded = !!(typeof document !== 'undefined'
+    && document
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('runtime-embedded'));
   _workspaceSidebarWidth = next;
   var root = document.documentElement || document.body;
   if (root && root.style) {
@@ -308,6 +336,16 @@ function _applyWorkspaceSidebarWidth(width) {
       root.style['--standalone-sidebar-width'] = next + 'px';
     }
   }
+  if (opts.allowStandaloneRailShrink
+      && embedded
+      && typeof _standaloneConstrainLayoutToShellWidth === 'function'
+      && typeof _standalonePanelSetLayoutFromState === 'function') {
+    var layout = (typeof _standalonePanelLayout !== 'undefined' && _standalonePanelLayout)
+      ? _standalonePanelLayout
+      : (state && state.standalone_panel_layout);
+    var constrained = _standaloneConstrainLayoutToShellWidth(layout, next);
+    if (constrained.changed) _standalonePanelSetLayoutFromState(constrained.layout, { fromServer: true });
+  }
   _scheduleStandaloneBoardLayoutRender();
 }
 
@@ -316,13 +354,25 @@ function _restoreStandaloneWorkspaceSidebarWidth(opts) {
   var saved = _readWorkspaceSidebarWidth();
   if (!opts.forceDefault && saved > 0) {
     _applyWorkspaceSidebarWidth(saved);
-    return { width: _workspaceSidebarWidth, source: 'persisted', shouldPersist: false };
+    var adjusted = _workspaceSidebarWidth;
+    var savedAdjusted = adjusted !== saved;
+    if (savedAdjusted) _persistWorkspaceSidebarWidth(adjusted);
+    return {
+      width: adjusted,
+      source: savedAdjusted ? 'persisted-adjusted' : 'persisted',
+      shouldPersist: savedAdjusted,
+    };
   }
   var hasPersistedLayout = typeof _standaloneHasPersistedLayout === 'function'
     && _standaloneHasPersistedLayout(state && state.standalone_panel_layout);
   var next = (opts.forceDefault || !hasPersistedLayout)
     ? _standalonePreferredSidebarWidth()
     : _workspaceSidebarDefaultWidth;
+  if (!opts.forceDefault
+      && hasPersistedLayout
+      && typeof _standaloneMinimumShellWidthForLayout === 'function') {
+    next = Math.max(next, _standaloneMinimumShellWidthForLayout(state && state.standalone_panel_layout));
+  }
   _applyWorkspaceSidebarWidth(next);
   var shouldPersist = !!opts.persistResolved && (opts.forceDefault || !hasPersistedLayout);
   if (shouldPersist) _persistWorkspaceSidebarWidth(_workspaceSidebarWidth);
@@ -372,7 +422,7 @@ function restoreStandaloneLayoutDefaults() {
   document.addEventListener('mousemove', function(e) {
     if (!dragging) return;
     var rect = shell.getBoundingClientRect();
-    _applyWorkspaceSidebarWidth(e.clientX - rect.left);
+    _applyWorkspaceSidebarWidth(e.clientX - rect.left, { allowStandaloneRailShrink: true });
   });
 
   document.addEventListener('mouseup', function() {
@@ -381,6 +431,7 @@ function restoreStandaloneLayoutDefaults() {
     document.body.style.cursor = '';
     document.body.classList.remove('workspace-resizing');
     _persistWorkspaceSidebarWidth(_workspaceSidebarWidth);
+    if (typeof _standalonePanelSaveLayout === 'function') _standalonePanelSaveLayout();
   });
 
   handle.addEventListener('dblclick', function() {
