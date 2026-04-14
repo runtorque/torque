@@ -385,6 +385,92 @@ pub async fn set_layout(ctx: &CmdContext, req: &Value) -> CmdResult {
     Ok(json!({ "ok": true }))
 }
 
+/// Place (or clear) the panel tree in an edge dock zone. Payload:
+/// `{ "zone": "top" | "left" | "right" | "bottom" | "center", "layout": <LayoutNode> | null }`.
+/// Passing `zone: "center"` routes to `set_layout` — the center's source of
+/// truth is `content_layout`. Edge zones are persisted to
+/// `ui_state[dock_edges]` as a single JSON blob.
+pub async fn dock_panel(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let zone_str = req
+        .get("zone")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CmdError::BadRequest("zone required".into()))?
+        .to_string();
+    let zone: loom_core::state::DockZone = match zone_str.as_str() {
+        "top" => loom_core::state::DockZone::Top,
+        "left" => loom_core::state::DockZone::Left,
+        "right" => loom_core::state::DockZone::Right,
+        "bottom" => loom_core::state::DockZone::Bottom,
+        "center" => loom_core::state::DockZone::Center,
+        other => {
+            return Err(CmdError::BadRequest(format!(
+                "unknown dock zone '{other}' (expected top/left/right/bottom/center)"
+            )));
+        }
+    };
+
+    let node_value = req.get("layout").cloned().unwrap_or(Value::Null);
+    let layout: Option<loom_core::state::LayoutNode> = if node_value.is_null() {
+        None
+    } else {
+        let parsed = serde_json::from_value(node_value)
+            .map_err(|e| CmdError::BadRequest(format!("invalid layout: {e}")))?;
+        Some(parsed)
+    };
+
+    let (persisted_edges, persisted_center) = {
+        let mut st = ctx.state.lock().await;
+        st.set_dock_edge(zone, layout.clone());
+        let edges_json = serde_json::to_string(&st.dock_edges)
+            .map_err(|e| CmdError::BadRequest(format!("encode edges: {e}")))?;
+        let center_json = match (&zone, &st.content_layout) {
+            (loom_core::state::DockZone::Center, Some(l)) => Some(
+                serde_json::to_string(l)
+                    .map_err(|e| CmdError::BadRequest(format!("encode center: {e}")))?,
+            ),
+            (loom_core::state::DockZone::Center, None) => Some(String::new()),
+            _ => None,
+        };
+        (edges_json, center_json)
+    };
+
+    if let Some(center_json) = persisted_center {
+        ctx.db.set_ui_state("content_layout", &center_json).await?;
+    } else {
+        ctx.db.set_ui_state("dock_edges", &persisted_edges).await?;
+    }
+    flush(ctx).await;
+    Ok(json!({ "ok": true }))
+}
+
+/// Update dock edge-zone size ratios. Payload:
+/// `{ "top": 0.0, "left": 0.22, "right": 0.0, "bottom": 0.32 }`. Missing
+/// fields keep their current values. Persisted via `dock_edges`.
+pub async fn set_dock_ratios(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let persisted_edges = {
+        let mut st = ctx.state.lock().await;
+        let mut ratios = st.dock_edges.ratios;
+        if let Some(v) = req.get("top").and_then(|v| v.as_f64()) {
+            ratios.top = v;
+        }
+        if let Some(v) = req.get("left").and_then(|v| v.as_f64()) {
+            ratios.left = v;
+        }
+        if let Some(v) = req.get("right").and_then(|v| v.as_f64()) {
+            ratios.right = v;
+        }
+        if let Some(v) = req.get("bottom").and_then(|v| v.as_f64()) {
+            ratios.bottom = v;
+        }
+        st.set_dock_ratios(ratios);
+        serde_json::to_string(&st.dock_edges)
+            .map_err(|e| CmdError::BadRequest(format!("encode edges: {e}")))?
+    };
+    ctx.db.set_ui_state("dock_edges", &persisted_edges).await?;
+    flush(ctx).await;
+    Ok(json!({ "ok": true }))
+}
+
 /// Set the active panel in the UI (one of `board`, `actions`, `templates`,
 /// `context`, `events`, `weaver`, `memory`, etc). Persisted to `ui_state` and
 /// broadcast via a `ui_update` delta so other WS clients (e.g. the Python

@@ -596,6 +596,26 @@ impl LoomDb {
                 }
             }
 
+            // Dock edges (Top/Left/Right/Bottom + ratios). If not persisted
+            // yet (legacy install pre-dock-system), the default from
+            // `MatrixState::new()` already sets Left=Sidebar + Bottom=Board.
+            let edges: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM ui_state WHERE key = 'dock_edges'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(s) = edges {
+                if !s.is_empty() {
+                    if let Ok(e) =
+                        serde_json::from_str::<crate::state::DockEdges>(&s)
+                    {
+                        state.dock_edges = e;
+                    }
+                }
+            }
+
             // Per-group board view state — each is a JSON-encoded map.
             for (key, target) in [
                 ("board_filters_by_group", "filters"),

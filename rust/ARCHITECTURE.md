@@ -18,14 +18,21 @@ Linux is a future consumer: a `loom-ui-linux` crate will consume the same `Engin
 │                                                                   │
 │  NSApplication.run() (main thread)                                │
 │  │                                                                │
-│  ├── NSWindow                                                     │
-│  │   └── NSSplitView                                              │
-│  │       ├── Sidebar (NSTextView, auto-refreshed every 500ms)     │
-│  │       └── Content container                                    │
-│  │           └── LayoutNode tree → nested NSSplitViews            │
-│  │               ├── Leaf(Terminal) → GhosttyView ── ghostty_surface_t │
-│  │               ├── Leaf(Board/Actions/...) → placeholder NSScrollView │
-│  │               └── Split { axis, ratio, first, second } recurses │
+│  ├── NSWindow → outer NSView (dock-layout container)              │
+│  │   └── outer NSSplitView  (vertical layout, horizontal dividers) │
+│  │       ├── Top zone        (optional Leaf/Split of panels)      │
+│  │       ├── middle NSSplitView (horizontal layout, vertical dividers) │
+│  │       │   ├── Left zone   (Sidebar panel by default)           │
+│  │       │   ├── Center zone (LayoutNode tree, always visible)    │
+│  │       │   │     ├── Leaf(Terminal) → GhosttyView ── ghostty_surface_t │
+│  │       │   │     ├── Leaf(Sidebar)  → SidebarView (cached)      │
+│  │       │   │     ├── Leaf(Board)    → BoardView (cached)        │
+│  │       │   │     ├── Leaf(Actions/Memory/...) → placeholder     │
+│  │       │   │     └── Split { axis, ratio, first, second } recurses │
+│  │       │   └── Right zone  (optional)                           │
+│  │       └── Bottom zone     (Board panel by default)             │
+│  │                                                                │
+│  │   Each edge zone wears a 22pt panel header (Move-to / Hide).   │
 │  │                                                                │
 │  └── Menubar → Quit (Cmd-Q)                                       │
 │                                                                   │
@@ -38,6 +45,8 @@ Linux is a future consumer: a `loom-ui-linux` crate will consume the same `Engin
 │  │     └─ /mcp             JSON-RPC tools (17 wired today)        │
 │  │                                                                │
 │  ├── MatrixState (in-memory, lives behind Arc<Mutex>)             │
+│  │     ├─ content_layout  (center LayoutNode)                     │
+│  │     └─ dock_edges      (top/left/right/bottom + ratios)        │
 │  ├── LoomDb (rusqlite, WAL mode)                                  │
 │  ├── EventBus (broadcast::Sender<OutMessage>)                     │
 │  ├── UiAgentRegistry (agent_id → mpsc::Sender<String>)            │
@@ -71,7 +80,15 @@ rust/
     ├── loom-weaver/                 # Weaver, MCP tool specs, task health (stubs)
     ├── loom-server/                 # axum HTTP/WS + command dispatcher + MCP + scheduler
     ├── loom-ghostty/                # libghostty FFI + GhosttyApp + Surface
-    ├── loom-ui-native/              # AppKit window + GhosttyView (feature=appkit)
+    ├── loom-ui-native/              # AppKit shell (appkit feature-gated):
+    │   ├── render.rs                #   pure-Rust: sidebar tree + board trees
+    │   ├── bridge.rs                #   EngineBridge snapshot/dispatch/subscribe
+    │   ├── appkit.rs                #   window + dock reconcile + refresh tick
+    │   ├── sidebar.rs               #   NSOutlineView + context menu
+    │   ├── board.rs                 #   kanban columns + drag-drop
+    │   ├── panel_header.rs          #   Move-to / Hide popup per edge zone
+    │   ├── modal.rs                 #   NSAlert-based prompt_form / confirm
+    │   └── ghostty_view.rs          #   NSView subclass over ghostty_surface_t
     └── loom-app/                    # main binary — wires engine + UI
 ```
 
@@ -93,10 +110,16 @@ AppKit event
 
 ```
 NSTimer tick (500ms)
-  → refresh_views()
+  → tick(mtm, bridge, views, state)
   → EngineBridge::snapshot() → clone state into MatrixStateSnapshot
-  → render::render_sidebar(snapshot) / render::render_content(snapshot)
-  → NSTextView::setString(...)
+  → reconcile_dock(mtm, ...) — rebuild NSSplitView tree only when the
+      dock-layout + selection signature changed (cheap JSON hash compare).
+      Cached SidebarView / BoardView / per-agent GhosttyView instances
+      survive rebuilds via ContentState; only the outer splits get redone.
+  → drain_pending_text(state) — pump queued UiAgentRegistry text into
+      the matching GhosttyView via ghostty_surface_text.
+  → sidebar.reload_if_changed(snapshot), board.reload_if_changed(snapshot)
+      — each panel short-circuits on its own signature.
 ```
 
 For libghostty panes, rendering bypasses this entirely — Ghostty owns the NSView region and draws via Metal directly.
@@ -186,9 +209,12 @@ Everything in `loom-core::state` mirrors Python Loom's dataclasses (JSON field n
 - **`GlobalSettings`** — app-wide (default_command, filter_by_window, keybindings, max_pipeline_depth).
 - **`Schedule`** — cron / one-shot task scheduling.
 - **`MemoryEntry`** + **`MemoryLink`** — shared findings/decisions/warnings/handoffs/notes, lightly scoped (project/group/pipeline/task) with denormalized links to other Loom objects.
-- **`PanelKind`** — what kind of panel a content-area leaf hosts (`Terminal { id }`, `Board`, `Actions`, `Memory`, `Events`, `Templates`, `Context`, `Weaver`, `Placeholder`).
-- **`LayoutNode`** — content-area layout tree: `Leaf { panel }` or `Split { axis, ratio, first, second }`. Persisted in `ui_state[content_layout]`. `MatrixState::effective_layout()` resolves `None` to a default `Terminal { id: None }` leaf bound to `selected_agent_id`.
-- **`MatrixState`** — the container; indexes by group, builds slugs, cascades deletes, enforces reserved lanes, emits deltas on every mutation. Owns `selected_agent_id`, `content_layout`, `panel_active`, the per-group board view-state maps, plus the memory entry map.
+- **`PanelKind`** — what kind of panel a leaf hosts (`Terminal { id }`, **`Sidebar`**, `Board`, `Actions`, `Memory`, `Events`, `Templates`, `Context`, `Weaver`, `Placeholder`). Sidebar is a first-class dockable panel, not a hardcoded rail.
+- **`LayoutNode`** — layout tree: `Leaf { panel }` or `Split { axis, ratio, first, second }`. Used both inside the Center zone and for optional per-zone splits.
+- **`DockZone`** — `Top / Left / Right / Bottom / Center`. Edges are dockable; Center is always visible and holds the existing tileable-grid `LayoutNode`.
+- **`DockEdges`** — `Option<LayoutNode>` per edge + `DockRatios { top, left, right, bottom }`. Persisted in `ui_state[dock_edges]`.
+- **`DockLayout`** — UI-facing combined view (edges + center + ratios). Built via `MatrixState::effective_dock_layout()` for snapshotting.
+- **`MatrixState`** — the container; indexes by group, builds slugs, cascades deletes, enforces reserved lanes, emits deltas on every mutation. Owns `selected_agent_id`, `content_layout` (center), `dock_edges` (edge zones), `panel_active`, the per-group board view-state maps, plus the memory entry map.
 
 ## Delta op catalog
 
@@ -208,7 +234,7 @@ events_update
 memory_upsert        memory_remove
 ```
 
-`ui_update` is the catch-all for UI-state changes — it carries one or more of `{ selected_agent_id, panel_active, content_layout, board_filters_by_group, board_saved_views_by_group, board_lane_sorts_by_group, board_card_density_by_group }` per emit.
+`ui_update` is the catch-all for UI-state changes — it carries one or more of `{ selected_agent_id, panel_active, content_layout, dock_edges, board_filters_by_group, board_saved_views_by_group, board_lane_sorts_by_group, board_card_density_by_group }` per emit.
 
 Each mutation on `MatrixState` emits one or more of these; `drain_deltas()` hands them to the bus as `{type: "delta", seq: N, ops: [...]}`.
 
@@ -220,7 +246,7 @@ Each mutation on `MatrixState` emits one or more of these; `drain_deltas()` hand
 - **PTY integration** — `loom-pty/tests/spawn.rs` spawns real `/bin/sh`.
 - **FFI smoke** — `loom-ghostty::ffi::ffi_smoke::symbols_linked` proves the linker resolved `ghostty_app_new` / `surface_new` etc.
 
-120 tests total, all green. (See [`STATUS.md`](STATUS.md) for the per-crate breakdown.)
+137 tests total, all green. (See [`STATUS.md`](STATUS.md) for the per-crate breakdown.)
 
 ### Race-prone tests
 
@@ -270,10 +296,12 @@ Full details: [`third_party/README.md`](third_party/README.md).
 1. This file.
 2. [`DECISIONS.md`](DECISIONS.md) — why things are the way they are.
 3. [`STATUS.md`](STATUS.md) — what works today.
-4. `crates/loom-core/src/state.rs` — the domain model.
+4. `crates/loom-core/src/state.rs` — the domain model (including DockEdges / DockZone / PanelKind::Sidebar).
 5. `crates/loom-core/src/delta.rs` — the wire contract.
 6. `crates/loom-server/src/commands/mod.rs` — the dispatch fanout.
-7. `crates/loom-ghostty/src/{app,surface,ffi}.rs` — the libghostty layer.
-8. `crates/loom-ui-native/src/{appkit,ghostty_view,bridge}.rs` — the UI.
+7. `crates/loom-server/src/commands/board.rs` — `dock_panel`, `set_dock_ratios`, `set_layout`, task CRUD, reorder/move.
+8. `crates/loom-ghostty/src/{app,surface,ffi}.rs` — the libghostty layer.
+9. `crates/loom-ui-native/src/{appkit,bridge,render}.rs` — the UI core.
+10. `crates/loom-ui-native/src/{sidebar,board,panel_header,modal,ghostty_view}.rs` — per-panel renderers + chrome.
 
 Everything else is straightforwardly derived from those.

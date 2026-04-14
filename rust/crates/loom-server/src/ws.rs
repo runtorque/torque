@@ -127,6 +127,7 @@ async fn build_snapshot_locked(
         "global_settings": st.global_settings,
         "selected_agent_id": st.selected_agent_id,
         "content_layout": st.content_layout,
+        "dock_edges": st.dock_edges,
         "panel_active": st.panel_active,
     })
 }

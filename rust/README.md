@@ -6,7 +6,7 @@ Native macOS port of the Loom daemon. Standalone spin-off product — not a drop
 
 ## Status
 
-Phases 0–9 shipped. Engine + native AppKit shell + libghostty terminal + multi-pane content layout + memory / schedule / template / board view-state CRUD + 17 MCP tools + dispatch routing through the UI registry. Window opens, dispatched prompts land in the embedded terminal, layout persists across restarts, and the engine speaks 60+ commands. 120 tests green.
+Phases 0–11 shipped. Engine + native AppKit shell + libghostty terminal + dock system (Top / Left / Center / Right / Bottom zones) + native **Sidebar** (NSOutlineView with context menu + modals) + native **Board** (all-lanes-visible kanban with nested derived tasks, inline add, drag-drop) + memory / schedule / template CRUD + 17 MCP tools. Window opens with Sidebar on the left and Board along the bottom by default; dispatched prompts land in the embedded terminal; layout persists across restarts; panels redock via each header's `…` menu. 137 tests green.
 
 The full per-feature inventory of what's done vs. pending is in [`FEATURES.md`](FEATURES.md).
 
@@ -72,8 +72,9 @@ curl -sX POST http://127.0.0.1:18932/api/cmd \
   -d "{\"cmd\":\"select_agent\",\"id\":\"$AGENT_ID\"}"
 ```
 
-The sidebar marks the selection with `▶` and the right pane mounts a fresh
-libghostty terminal within 500 ms. Try a multi-pane layout:
+The sidebar's clicked row highlights and the center pane mounts a fresh
+libghostty terminal within 500 ms. Try a nested Center layout (terminal on
+top, placeholder below):
 
 ```sh
 curl -sX POST http://127.0.0.1:18932/api/cmd \
@@ -82,13 +83,37 @@ curl -sX POST http://127.0.0.1:18932/api/cmd \
     "cmd": "set_layout",
     "layout": {
       "type": "split",
-      "axis": "horizontal",
+      "axis": "vertical",
       "ratio": 0.6,
       "first":  {"type": "leaf", "panel": {"kind": "terminal", "id": null}},
-      "second": {"type": "leaf", "panel": {"kind": "board"}}
+      "second": {"type": "leaf", "panel": {"kind": "placeholder"}}
     }
   }'
 ```
+
+Move the Board from its default Bottom dock to the Right edge:
+
+```sh
+# 1. Clear Bottom.
+curl -sX POST http://127.0.0.1:18932/api/cmd \
+  -H 'content-type: application/json' \
+  -d '{"cmd":"dock_panel","zone":"bottom","layout":null}'
+# 2. Mount Board on the Right.
+curl -sX POST http://127.0.0.1:18932/api/cmd \
+  -H 'content-type: application/json' \
+  -d '{
+    "cmd": "dock_panel",
+    "zone": "right",
+    "layout": {"type": "leaf", "panel": {"kind": "board"}}
+  }'
+# 3. Make the Right zone a bit wider.
+curl -sX POST http://127.0.0.1:18932/api/cmd \
+  -H 'content-type: application/json' \
+  -d '{"cmd":"set_dock_ratios","right":0.4}'
+```
+
+You can do the same interactively — click the `…` menu on the Board's
+header bar and pick "Move to → Right".
 
 ## Workspace layout
 

@@ -911,6 +911,9 @@ pub enum PanelKind {
     /// Selected-agent terminal — falls back to `selected_agent_id` if `id` is
     /// `None`. Use `id: Some(...)` to pin a specific agent's terminal to a pane.
     Terminal { id: Option<String> },
+    /// The agent + terminal tree. Defaults to the Left dock zone. Movable
+    /// like any other panel, per the dock system.
+    Sidebar,
     Board,
     Actions,
     Memory,
@@ -982,6 +985,174 @@ impl LayoutNode {
 }
 
 // ---------------------------------------------------------------------------
+// Dock layout (edge-zones around the center tileable grid)
+// ---------------------------------------------------------------------------
+
+/// Named regions panels can dock to.
+///
+/// - `Top`/`Left`/`Right`/`Bottom` are edge bars around the center. A panel
+///   docked there gets that bar; only one panel per zone for v1 (tabbed
+///   docks are a v2 extension).
+/// - `Center` is the always-visible tileable-grid area (the existing
+///   `LayoutNode` tree with terminals + any panels the user nested there).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum DockZone {
+    Top,
+    Left,
+    Right,
+    Bottom,
+    Center,
+}
+
+/// Edge-zone sizes as fractions of the window in the relevant dimension.
+/// `top`/`bottom` are fractions of window height; `left`/`right` of width.
+/// Sum must leave room for the center (we clamp each to [0.0, 0.7]).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct DockRatios {
+    #[serde(default = "default_ratio_top")]
+    pub top: f64,
+    #[serde(default = "default_ratio_left")]
+    pub left: f64,
+    #[serde(default = "default_ratio_right")]
+    pub right: f64,
+    #[serde(default = "default_ratio_bottom")]
+    pub bottom: f64,
+}
+
+fn default_ratio_top() -> f64 {
+    0.0
+}
+fn default_ratio_left() -> f64 {
+    0.22
+}
+fn default_ratio_right() -> f64 {
+    0.0
+}
+fn default_ratio_bottom() -> f64 {
+    0.32
+}
+
+impl Default for DockRatios {
+    fn default() -> Self {
+        Self {
+            top: default_ratio_top(),
+            left: default_ratio_left(),
+            right: default_ratio_right(),
+            bottom: default_ratio_bottom(),
+        }
+    }
+}
+
+impl DockRatios {
+    pub fn clamp(self) -> Self {
+        Self {
+            top: self.top.clamp(0.0, 0.7),
+            left: self.left.clamp(0.0, 0.7),
+            right: self.right.clamp(0.0, 0.7),
+            bottom: self.bottom.clamp(0.0, 0.7),
+        }
+    }
+}
+
+/// Edge-zone configuration for the dock system. The `Center` zone lives
+/// in `MatrixState::content_layout` (unchanged); this struct tracks only
+/// the four optional edge bars around it.
+///
+/// A single-panel zone is a `Leaf(Panel)` layout. Nested splits work the
+/// same as in the center (so a zone can itself host a split of panels).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DockEdges {
+    #[serde(default)]
+    pub top: Option<LayoutNode>,
+    #[serde(default)]
+    pub left: Option<LayoutNode>,
+    #[serde(default)]
+    pub right: Option<LayoutNode>,
+    #[serde(default)]
+    pub bottom: Option<LayoutNode>,
+    #[serde(default)]
+    pub ratios: DockRatios,
+}
+
+impl Default for DockEdges {
+    fn default() -> Self {
+        Self::default_for_fresh_install()
+    }
+}
+
+impl DockEdges {
+    /// Fresh-install defaults: sidebar on the left, Board at the bottom,
+    /// top + right hidden.
+    pub fn default_for_fresh_install() -> Self {
+        Self {
+            top: None,
+            left: Some(LayoutNode::Leaf {
+                panel: PanelKind::Sidebar,
+            }),
+            right: None,
+            bottom: Some(LayoutNode::Leaf {
+                panel: PanelKind::Board,
+            }),
+            ratios: DockRatios::default(),
+        }
+    }
+
+    pub fn layout_for(&self, zone: DockZone) -> Option<&LayoutNode> {
+        match zone {
+            DockZone::Top => self.top.as_ref(),
+            DockZone::Left => self.left.as_ref(),
+            DockZone::Right => self.right.as_ref(),
+            DockZone::Bottom => self.bottom.as_ref(),
+            DockZone::Center => None,
+        }
+    }
+
+    /// Set (or clear) an edge zone. Returns `true` if the value changed.
+    pub fn set_edge(&mut self, zone: DockZone, layout: Option<LayoutNode>) -> bool {
+        let slot = match zone {
+            DockZone::Top => &mut self.top,
+            DockZone::Left => &mut self.left,
+            DockZone::Right => &mut self.right,
+            DockZone::Bottom => &mut self.bottom,
+            DockZone::Center => return false,
+        };
+        let new_json = serde_json::to_string(&layout).unwrap_or_default();
+        let old_json = serde_json::to_string(&*slot).unwrap_or_default();
+        if new_json == old_json {
+            return false;
+        }
+        *slot = layout;
+        true
+    }
+}
+
+/// Full dock view (edges + center) — used for snapshotting out to the UI.
+#[derive(Debug, Clone, Serialize)]
+pub struct DockLayout {
+    pub top: Option<LayoutNode>,
+    pub left: Option<LayoutNode>,
+    pub right: Option<LayoutNode>,
+    pub bottom: Option<LayoutNode>,
+    pub center: LayoutNode,
+    pub ratios: DockRatios,
+}
+
+impl Default for DockLayout {
+    fn default() -> Self {
+        let edges = DockEdges::default_for_fresh_install();
+        Self {
+            top: edges.top,
+            left: edges.left,
+            right: edges.right,
+            bottom: edges.bottom,
+            center: LayoutNode::default(),
+            ratios: edges.ratios,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // MatrixState
 // ---------------------------------------------------------------------------
 
@@ -1026,10 +1197,14 @@ pub struct MatrixState {
 
     // UI state (persisted)
     pub selected_agent_id: Option<String>,
-    /// Content-area layout tree. `None` means "fall back to a single Terminal
+    /// Center-zone layout tree. `None` means "fall back to a single Terminal
     /// leaf bound to `selected_agent_id` (or Placeholder if unset)" — the
     /// default behavior for users who haven't customized the layout.
     pub content_layout: Option<LayoutNode>,
+    /// Edge zones (top / left / right / bottom) + ratios. The center lives
+    /// in `content_layout`. Together they form the full [`DockLayout`]
+    /// surfaced to the UI via [`MatrixState::effective_dock_layout`].
+    pub dock_edges: DockEdges,
 
     // Delta accumulator
     delta_ops: Vec<DeltaOp>,
@@ -1074,6 +1249,7 @@ impl MatrixState {
             memory_entries: HashMap::new(),
             selected_agent_id: None,
             content_layout: None,
+            dock_edges: DockEdges::default_for_fresh_install(),
             delta_ops: Vec::new(),
             seq: 0,
         }
@@ -1351,6 +1527,53 @@ impl MatrixState {
         self.content_layout
             .clone()
             .unwrap_or_default()
+    }
+
+    /// Full dock layout — edges + center, with defaults filled in. Used by
+    /// the UI for rendering the outer window shell.
+    pub fn effective_dock_layout(&self) -> DockLayout {
+        DockLayout {
+            top: self.dock_edges.top.clone(),
+            left: self.dock_edges.left.clone(),
+            right: self.dock_edges.right.clone(),
+            bottom: self.dock_edges.bottom.clone(),
+            center: self.effective_layout(),
+            ratios: self.dock_edges.ratios,
+        }
+    }
+
+    /// Replace a single edge zone. Pass `layout: None` to hide that edge.
+    /// Passing `DockZone::Center` routes to `set_layout` (the center zone's
+    /// source of truth).
+    pub fn set_dock_edge(&mut self, zone: DockZone, layout: Option<LayoutNode>) {
+        if matches!(zone, DockZone::Center) {
+            // Center lives in content_layout — route through set_layout so
+            // snapshot + CLI paths keep working.
+            self.set_layout(layout);
+            return;
+        }
+        if !self.dock_edges.set_edge(zone, layout) {
+            return;
+        }
+        let payload = serde_json::to_value(&self.dock_edges)
+            .unwrap_or(serde_json::Value::Null);
+        self.emit(DeltaOp::UiUpdate(serde_json::json!({
+            "dock_edges": payload,
+        })));
+    }
+
+    /// Update edge-zone size ratios (called e.g. from a splitter drag).
+    pub fn set_dock_ratios(&mut self, ratios: DockRatios) {
+        let clamped = ratios.clamp();
+        if clamped == self.dock_edges.ratios {
+            return;
+        }
+        self.dock_edges.ratios = clamped;
+        let payload = serde_json::to_value(&self.dock_edges)
+            .unwrap_or(serde_json::Value::Null);
+        self.emit(DeltaOp::UiUpdate(serde_json::json!({
+            "dock_edges": payload,
+        })));
     }
 
     /// Set (or clear) the UI's selected agent. `None` deselects.
@@ -1825,5 +2048,105 @@ mod tests {
         assert_eq!(chain.len(), 3);
         assert_eq!(chain[0].id, "eng-1a1");
         assert_eq!(chain[2].id, "eng-1");
+    }
+
+    // ---------- DockEdges / DockLayout ----------
+
+    #[test]
+    fn dock_edges_default_has_sidebar_left_board_bottom() {
+        let edges = DockEdges::default();
+        assert!(edges.top.is_none());
+        assert!(edges.right.is_none());
+        let left = edges.left.as_ref().expect("left default = sidebar");
+        assert!(matches!(left, LayoutNode::Leaf { panel: PanelKind::Sidebar }));
+        let bottom = edges.bottom.as_ref().expect("bottom default = board");
+        assert!(matches!(bottom, LayoutNode::Leaf { panel: PanelKind::Board }));
+    }
+
+    #[test]
+    fn effective_dock_layout_combines_center_and_edges() {
+        let s = MatrixState::new();
+        let dock = s.effective_dock_layout();
+        // Center defaults to a Terminal(None) leaf when content_layout is None.
+        match &dock.center {
+            LayoutNode::Leaf {
+                panel: PanelKind::Terminal { id },
+            } => assert!(id.is_none()),
+            other => panic!("expected Terminal leaf, got {other:?}"),
+        }
+        // Edges default: sidebar left, board bottom.
+        assert!(dock.left.is_some());
+        assert!(dock.bottom.is_some());
+    }
+
+    #[test]
+    fn set_dock_edge_emits_delta_and_mutates_slot() {
+        let mut s = MatrixState::new();
+        s.drain_deltas();
+        s.set_dock_edge(
+            DockZone::Right,
+            Some(LayoutNode::Leaf {
+                panel: PanelKind::Memory,
+            }),
+        );
+        assert!(s.dock_edges.right.is_some());
+        let (_, ops) = s.drain_deltas().expect("delta emitted");
+        let v = serde_json::to_value(&ops[0]).unwrap();
+        assert_eq!(v["op"], "ui_update");
+        assert_eq!(v["dock_edges"]["right"]["panel"]["kind"], "memory");
+    }
+
+    #[test]
+    fn set_dock_edge_idempotent_on_unchanged_value() {
+        let mut s = MatrixState::new();
+        // Left default is Some(Sidebar). Setting it to the same value is a
+        // no-op (no delta emitted).
+        s.drain_deltas();
+        s.set_dock_edge(
+            DockZone::Left,
+            Some(LayoutNode::Leaf {
+                panel: PanelKind::Sidebar,
+            }),
+        );
+        assert!(s.drain_deltas().is_none());
+    }
+
+    #[test]
+    fn set_dock_edge_center_routes_to_set_layout() {
+        let mut s = MatrixState::new();
+        s.drain_deltas();
+        let new_layout = LayoutNode::Leaf {
+            panel: PanelKind::Actions,
+        };
+        s.set_dock_edge(DockZone::Center, Some(new_layout.clone()));
+        assert!(matches!(
+            s.content_layout.as_ref().unwrap(),
+            LayoutNode::Leaf {
+                panel: PanelKind::Actions
+            }
+        ));
+        // Delta carries `content_layout`, not `dock_edges`.
+        let (_, ops) = s.drain_deltas().expect("delta emitted");
+        let v = serde_json::to_value(&ops[0]).unwrap();
+        assert!(v["content_layout"].is_object());
+    }
+
+    #[test]
+    fn set_dock_ratios_clamps_and_emits_delta() {
+        let mut s = MatrixState::new();
+        s.drain_deltas();
+        // Exceed the 0.7 clamp — values must be squashed.
+        s.set_dock_ratios(DockRatios {
+            top: 0.95,
+            left: 0.10,
+            right: 0.40,
+            bottom: 0.60,
+        });
+        assert!((s.dock_edges.ratios.top - 0.7).abs() < 1e-9);
+        assert!((s.dock_edges.ratios.left - 0.10).abs() < 1e-9);
+        let (_, ops) = s.drain_deltas().expect("delta emitted");
+        let v = serde_json::to_value(&ops[0]).unwrap();
+        assert_eq!(v["op"], "ui_update");
+        assert_eq!(v["dock_edges"]["ratios"]["top"], 0.7);
     }
 }

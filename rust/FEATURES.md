@@ -7,7 +7,7 @@ Legend:
 - `[~]` partial / stub
 - `[ ]` not started
 
-Last updated: 2026-04-13.
+Last updated: 2026-04-14 (after Phase 10 sidebar + Phase 11 dock + board).
 
 ## 0. Vision for the Rust UI
 
@@ -30,9 +30,9 @@ Panel values in Python: `board`, `actions`, `templates`, `context`, `events`, `w
 ### Window chrome
 
 - [x] NSWindow + menubar (Quit Cmd-Q) — `loom-ui-native/src/appkit.rs`
-- [x] NSSplitView with sidebar + content container
+- [x] NSSplitView with dock-layout container (cross of Top / Left / Center / Right / Bottom)
 - [x] Multi-pane tileable grid scaffold:
-  - [x] `PanelKind` enum (Terminal, Board, Actions, Memory, Events, Templates, Context, Weaver, Placeholder)
+  - [x] `PanelKind` enum (Terminal, Sidebar, Board, Actions, Memory, Events, Templates, Context, Weaver, Placeholder)
   - [x] `LayoutNode` tree (Leaf | Split { axis, ratio, first, second })
   - [x] `set_layout` / `standalone_set_panel_layout` command, persisted in `ui_state`
   - [x] Recursive NSSplitView builder in AppKit; rebuilds only when layout signature changes (preserves PTY identity via `agent_id → GhosttyView` cache)
@@ -41,39 +41,60 @@ Panel values in Python: `board`, `actions`, `templates`, `context`, `events`, `w
   - [ ] Window-level keyboard shortcuts (`Cmd+1…9` to focus pane N, `Cmd+W` close pane, `Cmd+D` split right, `Cmd+Shift+D` split down)
   - [ ] Drag-from-sidebar to mount a cell into a chosen pane
 
+### Dock zones
+
+- [x] `DockZone { Top, Left, Right, Bottom, Center }` + `DockRatios` + `DockEdges` state (`loom-core::state`)
+- [x] `MatrixState.dock_edges` field + `effective_dock_layout()` + `set_dock_edge()` + `set_dock_ratios()`
+- [x] `dock_panel { zone, layout }` / `set_dock_ratios` commands
+- [x] SQLite load/save for `ui_state[dock_edges]`, legacy installs fall through to defaults
+- [x] Snapshot includes `dock_layout` (full edges + center)
+- [x] Default layout: Left=Sidebar (0.22), Bottom=Board (0.32), Top/Right hidden
+- [x] Per-zone panel header with `…` popup (Move to / Hide) — `panel_header.rs`
+- [ ] Drag-to-redock (VSCode-style zone drop indicators)
+- [ ] Tabbed docks (multiple panels in one zone, switchable via tabs)
+- [ ] Splitter-drag to set ratios (currently only programmatic via `set_dock_ratios`)
+
 ### Sidebar (groups + agents tree)
 
-- [x] Group list rendering (read-only text)
-- [x] Agents under each group with status dot
+- [x] Group list rendering (source-list NSOutlineView, group rows uppercase)
+- [x] Agents under each group with status dot + type label ("Claude Code" / "Codex" / etc)
 - [x] Child terminals nested under parent agent
-- [x] Selection marker (▶) on selected agent
-- [ ] Clickable rows (swap NSTextView for NSOutlineView with data source)
-- [ ] Context menu on a row: Rename / Edit / Remove / Relaunch / Duplicate
+- [x] Selection highlight (source-list style)
+- [x] Clickable rows → dispatches `select_agent` (dispatch-first)
+- [x] Context menu per row: Rename / Edit / Relaunch / Remove (+ Add Agent / Add Terminal on group rows; Add child Terminal on agent rows)
+- [x] Modal forms (NSAlert + accessory) for Add/Edit/Rename/Add Group — `modal.rs`
+- [x] "+ Add Group" button above the outline
+- [x] Branch + directory subtitle on agent rows
+- [x] Panel header "…" menu for redocking the sidebar between edge zones
 - [ ] Drag-drop to reorder groups or move an agent across groups
 - [ ] Weaver strip (the "Weaver Code · Branch · Directory · Last event" card under a group)
-- [ ] "+ New" cell placeholder tile
 - [ ] Tab-color / icon / avatar swatches per cell
-- [ ] Worktree branch badge with diff stats
+- [ ] Worktree diff-stats badge (only plain branch name today)
 - [ ] Activity-detail subtext (e.g. `Session ended (4h ago)`)
 - [ ] Per-group filter by window (`global_settings.filter_by_window`)
 
 ### Board panel
 
 - [x] Read lanes + tasks from engine (command surface)
-- [ ] Native rendering: lane tabs, card grid, swimlane filter
-- [ ] Task card with title, labels, action badge, assignee, agent link
-- [ ] Derived-task nesting (indented child cards, collapsible)
+- [x] Native rendering: all-lanes-visible kanban columns (no tab switching)
+- [x] Horizontal NSScrollView → column host → per-lane columns (300pt wide)
+- [x] Task card with title, labels, action badge, group, status
+- [x] Derived-task nesting (`↳` prefix, indented by depth, dimmed when Done)
+- [x] Inline `+ Add task` row per column (Enter submits, clears, triggers reload)
+- [x] Card context menu: Dispatch / Edit / Move to lane / Remove
+- [x] Drag-drop within-lane (→ `board_reorder_task`) and cross-lane (→ `board_move_task`)
+- [x] Archived lane excluded from columns; `board_archive_task`/`unarchive_task` still available via API
 - [ ] Pipeline status badges (`On Review`, `Awaiting Input`)
-- [ ] Inline `+ Add task` row with autogrowing textarea + draft preservation across rerenders
 - [ ] `From action` overlay dropdown (grouped by Project/User)
 - [ ] Search / filter bar (matches `board_set_filters`)
 - [ ] Saved views (`board_set_saved_views`)
 - [ ] Lane sort configs (`board_set_lane_sorts`)
 - [ ] Card density toggle (`board_set_card_density`)
-- [ ] Card context menu: Dispatch / Edit / Move / Archive / View pipeline / Verify
+- [ ] Archived-lane reveal toggle
 - [ ] Pipeline thread overlay (chain of derived tasks with click-to-focus)
 - [ ] Dispatch flow with missing-action warning dialog
 - [ ] Scheduled tasks view (`schedule_*` CRUD)
+- [ ] Autogrowing textarea for inline add (currently single-line NSTextField)
 
 ### Actions panel
 
@@ -126,15 +147,17 @@ Panel values in Python: `board`, `actions`, `templates`, `context`, `events`, `w
 
 ### Modals
 
-- [ ] Task create / edit modal (autogrowing textarea, action picker, variable fieldset, assignee, labels, preview prompt)
-- [ ] Agent create / edit modal (group settings tab, worktree config, session resume, idle timeout, notifications)
+- [x] Reusable `modal::prompt_form` (NSAlert + accessory NSStackView of labeled NSTextFields) — covers all current Add/Edit/Rename flows
+- [x] Reusable `modal::confirm` (NSAlert) — destructive action gate
+- [x] Custom `showConfirm()` replacement — `NSAlert` directly on native
+- [ ] Task create / edit modal (autogrowing textarea, action picker, variable fieldset, assignee, labels, preview prompt) — today single-field "Edit" via `prompt_form`
+- [ ] Agent create / edit modal (group settings tab, worktree config, session resume, idle timeout, notifications) — today basic Name/Command/Directory via `prompt_form`
 - [ ] Group settings modal (tabbed: Group / Agents / Terminals)
 - [ ] Global settings modal (General / Keybindings, with interactive key capture)
 - [ ] Action-to-task flow (pre-selects action)
 - [ ] Prompt preview modal (scrollable, max-height)
 - [ ] Color picker
 - [ ] Hint tooltip popovers
-- [ ] Custom `showConfirm()` replacement — use `NSAlert` directly on native
 - [ ] Artifact upload / gallery UI
 
 ### Global affordances
@@ -197,6 +220,8 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 - [x] `board_set_lane_sorts`
 - [x] `board_set_card_density`
 - [x] `set_layout` / `standalone_set_panel_layout` (multi-pane grid layout descriptor)
+- [x] `dock_panel { zone, layout }` (set/clear top/left/right/bottom/center)
+- [x] `set_dock_ratios { top/left/right/bottom }`
 
 ### Actions + templates
 - [x] `list_actions`
@@ -447,12 +472,16 @@ All not-started. Full list:
 - [ ] Surface focus tracking across window focus changes
 
 ### UI native (`loom-ui-native`)
-- [x] `render.rs` sidebar + content (pure Rust)
-- [x] `appkit.rs` NSApplication, NSWindow, NSSplitView, menubar, 500ms refresh timer
+- [x] `render.rs` — pure Rust. `build_sidebar_tree`, `build_board_tree`, `build_board_columns`, plus legacy sidebar/content text renderers (still used by tests)
+- [x] `appkit.rs` — NSApplication, NSWindow, menubar, dock-layout reconcile, 500ms refresh timer, panel cache
+- [x] `sidebar.rs` — NSOutlineView + pooled SidebarItem + context menu + modal integration
+- [x] `board.rs` — kanban columns, drag-drop, inline add, card context menu
+- [x] `panel_header.rs` — 22pt header bar with Move-to/Hide popup
+- [x] `modal.rs` — reusable prompt_form + confirm (NSAlert-based)
+- [x] `bridge.rs` — `EngineBridge::snapshot/dispatch/subscribe`; `MatrixStateSnapshot` with `dock_layout`
 - [x] Content container that swaps GhosttyView by `selected_agent_id`
-- [x] `EngineBridge` with snapshot / dispatch / subscribe
 - [x] Per-cell command resolution (`claude` / `/bin/zsh`)
-- [ ] All panels from §1
+- [ ] Remaining panels from §1: Actions / Memory / Weaver / Context / Events / Templates
 
 ### Scheduler (`loom-server::scheduler`)
 - [x] 15s tick loop firing `scheduled_at` tasks

@@ -26,6 +26,14 @@ pub mod render;
 pub mod appkit;
 #[cfg(all(target_os = "macos", feature = "appkit"))]
 pub mod ghostty_view;
+#[cfg(all(target_os = "macos", feature = "appkit"))]
+pub mod board;
+#[cfg(all(target_os = "macos", feature = "appkit"))]
+pub mod modal;
+#[cfg(all(target_os = "macos", feature = "appkit"))]
+pub mod panel_header;
+#[cfg(all(target_os = "macos", feature = "appkit"))]
+pub mod sidebar;
 
 use loom_server::app::AppState;
 

@@ -14,6 +14,7 @@ loom-ghostty = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 # AppKit bindings — gated behind the `appkit` feature so the workspace builds
@@ -60,6 +61,24 @@ features = [
     "NSFontManager",
     "NSFontDescriptor",
     "NSEvent",
+    "NSOutlineView",
+    "NSTableView",
+    "NSTableColumn",
+    "NSTableHeaderView",
+    "NSTableCellView",
+    "NSCell",
+    "NSAlert",
+    "NSButton",
+    "NSButtonCell",
+    "NSStackView",
+    "NSLayoutConstraint",
+    "NSImage",
+    "NSImageView",
+    "NSSegmentedControl",
+    "NSSegmentedCell",
+    "NSPasteboard",
+    "NSPasteboardItem",
+    "NSDragging",
 ]
 
 [features]

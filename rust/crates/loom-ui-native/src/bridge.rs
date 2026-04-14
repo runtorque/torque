@@ -100,6 +100,7 @@ impl EngineBridge {
                 global_default_command: st.global_settings.default_command.clone(),
                 selected_agent_id: st.selected_agent_id.clone(),
                 content_layout: st.effective_layout(),
+                dock_layout: st.effective_dock_layout(),
             }
         })
     }
@@ -118,8 +119,11 @@ pub struct MatrixStateSnapshot {
     /// `GlobalSettings.default_command` — empty if unset.
     pub global_default_command: String,
     pub selected_agent_id: Option<String>,
-    /// Effective content-area layout (already resolved through default).
+    /// Effective center-zone layout (already resolved through default).
     pub content_layout: loom_core::state::LayoutNode,
+    /// Full dock layout — center + edges + ratios. The UI uses this to
+    /// build the outer window shell.
+    pub dock_layout: loom_core::state::DockLayout,
 }
 
 impl MatrixStateSnapshot {

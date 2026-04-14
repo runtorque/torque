@@ -6,7 +6,7 @@ Snapshot of what exists, what works, and what's left. Paired with [`PLAN.md`](PL
 
 ```sh
 cd rust/
-cargo test --workspace                                        # 120 tests passing
+cargo test --workspace                                        # 137 tests passing
 cargo build --bin loom-app                                    # engine + UI stub
 cargo run --bin loom-app --features loom-ui-native/appkit     # native window
 ```
@@ -23,10 +23,10 @@ cargo run --bin loom-app --features loom-ui-native/appkit     # native window
 ## What works end-to-end
 
 - **HTTP/WS engine** on axum (port via `LOOM_PORT`, default 18932).
-- **Snapshot on connect + delta broadcast** — same wire format consumers (CLI/MCP) expect. Snapshot now includes `selected_agent_id`, `panel_active`, `content_layout`.
+- **Snapshot on connect + delta broadcast** — same wire format consumers (CLI/MCP) expect. Snapshot now includes `selected_agent_id`, `panel_active`, `content_layout`, `dock_edges`.
 - **Lagged receivers trigger forced resync** — matches Python's seq-gap behavior.
-- **SQLite persistence** with WAL, targeted writes per mutation, full load on startup, ephemeral clearing. Schema includes `memory_entries`, `memory_links`, `schedules`, `weaver_settings`, `weaver_worklog`, `ui_state`.
-- **~63 commands** wired through the in-process dispatcher: groups, agents (incl. `select_agent`, `clear_agent_context`), tasks (incl. `board_verify_task`, the four `board_set_*` view-state setters, `set_layout` / `standalone_set_panel_layout`, `board_set_panel`), actions, templates, worktree, dispatch (incl. `resolve_ask`), MCP, schedule CRUD (7), memory CRUD (6). Exposed both via `/api/cmd` and `loom_server::commands::dispatch_command` for the native UI.
+- **SQLite persistence** with WAL, targeted writes per mutation, full load on startup, ephemeral clearing. Schema includes `memory_entries`, `memory_links`, `schedules`, `weaver_settings`, `weaver_worklog`, `ui_state`. New `ui_state[dock_edges]` row persists the edge-zone layout + ratios; legacy installs fall through to sensible defaults.
+- **~65 commands** wired through the in-process dispatcher: groups, agents (incl. `select_agent`, `clear_agent_context`), tasks (incl. `board_verify_task`, the four `board_set_*` view-state setters, `set_layout` / `standalone_set_panel_layout`, `board_set_panel`), actions, templates, worktree, dispatch (incl. `resolve_ask`), MCP, schedule CRUD (7), memory CRUD (6), **dock system (`dock_panel`, `set_dock_ratios`)**. Exposed both via `/api/cmd` and `loom_server::commands::dispatch_command` for the native UI.
 - **Action engine** (`loom-actions`) — YAML + subdir namespaces + minijinja + `loom.*` context, fixtures from `.loom/actions/` pass.
 - **Template engine** (`loom-server::commands::templates`) — YAML config bundles in `.loom/agents/` (project) or `~/.loom/agents/` (user). `render_template` deep-merges overrides onto the template.
 - **Memory engine** — `MemoryEntry` + `MemoryLink` model, scope-filtered list (group, scope_kind, scope_ref, entry_type, task_id, pinned_only, linked_target_kind/ref, search). Pinned entries sort first, then durable, then newest.
@@ -36,31 +36,33 @@ cargo run --bin loom-app --features loom-ui-native/appkit     # native window
 - **MCP handler** on `/mcp` — initialize, tools/list, tools/call. **17 tools wired**: `loom_progress|done|ready|blocked|error|ask|context|derive|verify|name|reply` plus `loom_memory_publish|list|read|pin|unpin|link`. Memory tools auto-stamp `source_kind/source_id/source_name` from the calling agent.
 - **Cron scheduler** — 15s tick, fires `scheduled_at` tasks. CRUD commands manage `Schedule` rows; `schedule_run` bypasses the tick.
 - **Native UI** (`loom-ui-native`):
-  - `render` module: pure-Rust display logic. Sidebar nests child terminals under their parent agent and marks the selected agent with `▶`.
-  - `appkit` module (feature-gated): full object graph — NSApplication, menubar (App menu → Quit/Cmd-Q), NSWindow (Titled/Closable/Resizable), outer NSSplitView with sidebar + content container.
-  - **Content area** is a recursive tree mount: `reconcile_content` walks `snapshot.content_layout`, builds nested NSSplitViews via `build_layout_into`, mounts a `GhosttyView` per `Terminal` leaf and a placeholder NSScrollView per non-terminal leaf. A signature short-circuit skips rebuilds when the layout JSON + selection haven't changed, so terminal PTYs and focus survive ticks.
+  - `render` module: pure-Rust display logic. Ships `build_sidebar_tree` (typed group/agent/terminal tree) and `build_board_columns` (one column per non-Archived lane, with nested derived tasks).
+  - `appkit` module (feature-gated): full object graph — NSApplication, menubar (App menu → Quit/Cmd-Q), NSWindow (Titled/Closable/Resizable), outer **dock-layout container** hosting top / left / center / right / bottom zones.
+  - **Dock system**: `reconcile_dock` walks `snapshot.dock_layout` and builds a cross-layout NSSplitView (vertical-divider outer split × horizontal-divider middle row). Edge zones (top/left/right/bottom) are optional `Option<LayoutNode>`; center is always present. Each edge zone is wrapped with a 22pt `panel_header.rs` bar with a "…" menu for Move-to / Hide. Signature short-circuit skips rebuilds when the dock layout + selection are unchanged.
+  - **Sidebar panel** (`sidebar.rs`): NSOutlineView with agent tree, context menu (Rename / Edit / Relaunch / Remove / Add child), inline "+ Add Group" button, modal-driven Add/Edit forms via `modal.rs`. Mounted as `PanelKind::Sidebar` in the Left dock zone by default.
+  - **Board panel** (`board.rs`): all-lanes-visible kanban. Horizontal NSScrollView → column host → one column per non-Archived lane. Each column has bold header ("Backlog · 3"), inline "+ Add task" NSTextField (tagged by column index), scrollable NSTableView with nested derived tasks (✓/↳ prefix, dimmed for Done). Card context menu (Dispatch / Edit / Move to / Remove). Drag-drop: within-lane reorder via `board_reorder_task`, cross-lane drop onto another column's NSTableView via `board_move_task`. Mounted as `PanelKind::Board` in the Bottom dock zone by default.
+  - **Content area (center zone)**: still a recursive tree mount of `LayoutNode::Leaf | Split`. Terminal leaves host `GhosttyView` (libghostty); other `PanelKind`s fall through to the native panel renderers or a placeholder.
   - **`UiAgentRegistry`** on `AppState`: when a `GhosttyView` is created, the UI registers an unbounded channel against the agent id. The 500 ms refresh tick drains pending text from each cached view's receiver and forwards it to `GhosttyView::send_text`. Cache eviction (agent removed) auto-unregisters.
-  - `bridge` module: `EngineBridge::snapshot/dispatch/subscribe`, plus `resolve_command` (cell override → global default → claude/zsh by cell type) and `resolve_cwd`.
-  - NSTimer-based 500ms refresh loop. Verified: binary launches, NSApplication run loop holds the process, engine stays responsive on HTTP during UI lifetime, dispatched prompts land inside the embedded terminal.
+  - **Panel cache**: `ContentState.sidebar_cache` + `board_cache` hold `Retained<SidebarView>` / `Retained<BoardView>` so they survive dock rebuilds — their internal state (outline expansion, board signature) is preserved.
+  - `bridge` module: `EngineBridge::snapshot/dispatch/subscribe`, plus `resolve_command` (cell override → global default → claude/zsh by cell type) and `resolve_cwd`. `MatrixStateSnapshot` now includes `dock_layout` (full edges + center + ratios).
+  - NSTimer-based 500ms refresh loop. Verified: binary launches, NSApplication run loop holds the process, engine stays responsive on HTTP during UI lifetime, dispatched prompts land inside the embedded terminal, sidebar context menu works, kanban board renders + accepts inline adds + drag-drop.
 
 ## Test summary
 
 ```
-loom-core:        44 unit tests
+loom-core:        50 unit tests  (+6 dock: DockEdges/DockRatios/effective_dock_layout/set_dock_edge/set_dock_ratios)
 loom-actions:     13 unit tests
 loom-adapters:     2 unit tests
-loom-ghostty:      3 unit tests (ffi.register + symbols_linked)
+loom-ghostty:      3 unit tests
 loom-pty:          1 integration (spawns /bin/sh)
 loom-server:      52 integration across 7 files
-                  (api_cmd 5, ws 7, actions 5, worktree 6,
-                   dispatch 10, mcp 4, batch_ports 8 [schedule/memory/board/layout])
 loom-worktree:     1 unit test
-loom-ui-native:   14 unit tests (render + bridge resolve_command logic)
+loom-ui-native:   25 unit tests  (render + bridge + sidebar tree + board tree + board columns)
 -------------------------------------
-total:           120 passing, 0 failing
+total:           137 passing, 0 failing
 ```
 
-Three pre-existing parallel-test races were fixed today: `LOOM_PROJECT_ROOT` (actions tests), `LOOM_DEFAULT_CMD` (config tests), ghostty `SURFACES` map (ffi tests). Each gated with a process-wide mutex so `cargo test --workspace` is now reliable.
+Three pre-existing parallel-test races were fixed earlier: `LOOM_PROJECT_ROOT` (actions tests), `LOOM_DEFAULT_CMD` (config tests), ghostty `SURFACES` map (ffi tests). Each gated with a process-wide mutex.
 
 ## Workspace layout
 
@@ -99,6 +101,33 @@ rust/
 - Board view state: `board_set_filters/saved_views/lane_sorts/card_density` per-group, persisted as JSON in `ui_state`.
 - 9 additional MCP tools: `loom_verify`, `loom_name`, `loom_reply`, plus the 6 memory tools.
 
+## Phase 10 — native sidebar (shipped 2026-04-14)
+
+- `sidebar.rs` module: custom `NSOutlineView` subclass with source-list selection highlight, floating group rows, pooled `SidebarItem` NSObject rows keyed by `(id, kind)` so expansion state survives reloads.
+- Pure-Rust `render::build_sidebar_tree(snapshot) -> SidebarTree` with typed group/agent/terminal nodes, status dot glyphs, and `branch · directory` subtitles.
+- Context menu per row: Rename / Edit / Relaunch / Remove (+ Add Agent / Add Terminal on group rows; Add child Terminal on agent rows). Destructive actions gated through a `modal::confirm` NSAlert.
+- `modal.rs`: reusable `prompt_form(title, message, fields, submit_label) -> Option<HashMap>` helper built on `NSAlert` + accessory view with stacked labeled `NSTextField`s. Used by all Add/Edit/Rename flows.
+- Click selects → dispatches `select_agent` (dispatch-first per [D7](DECISIONS.md)). "+ Add Group" button sits above the outline.
+
+## Phase 11 — dock system + native Board panel (shipped 2026-04-14)
+
+- **Engine dock model** (`loom-core::state`):
+  - `PanelKind::Sidebar` variant — sidebar is now a first-class dockable panel.
+  - `DockZone { Top, Left, Right, Bottom, Center }` + `DockRatios` + `DockEdges` structs + `DockLayout` (full view with edges + center + ratios).
+  - `MatrixState.dock_edges` field + `effective_dock_layout()` / `set_dock_edge()` / `set_dock_ratios()` methods. Defaults: Left=Sidebar (0.22), Bottom=Board (0.32), Top/Right hidden.
+  - SQLite load/save for `ui_state[dock_edges]`. Legacy installs with just `content_layout` fall through to the defaults.
+  - Commands: `dock_panel { zone, layout }` and `set_dock_ratios { top/left/right/bottom }`. Delta op: `UiUpdate { dock_edges }`.
+- **AppKit outer shell** (`appkit.rs`):
+  - Outer NSSplitView (vertical layout) × middle-row NSSplitView (horizontal layout). Zone hosts mounted only when `Some(layout)`. Cached `SidebarView` + `BoardView` + per-agent `GhosttyView` survive dock rebuilds.
+  - Each edge zone gets a 22pt `panel_header.rs` bar with a "…" popup menu for Move-to / Hide. Dispatches two `dock_panel` calls (clear source → set target) to perform the move.
+- **Native Board panel** (`board.rs`): all-lanes-visible kanban, **not** tab-switched.
+  - Horizontal NSScrollView → column host → one column per non-Archived lane.
+  - Per-column: bold header ("Backlog · 3"), inline "+ Add task" NSTextField (tag=column index), scrollable NSTableView with nested derived tasks (`↳` prefix, `✓` for Done, dimmed subordinates).
+  - Card context menu: Dispatch / Edit / Move to lane / Remove.
+  - Drag-drop: within-lane reorder via `board_reorder_task`, cross-lane drop on another column's NSTableView via `board_move_task`. Same data source handles both by comparing source lane ≠ destination lane.
+  - Reload strategy: rebuild column widgets only when the lane set changes; otherwise `reloadData` on each. `layout_columns()` runs every tick (cheap setFrame calls) so window resizes propagate — NSClipView otherwise anchors a shorter document view to its origin, floating the strip to the bottom of the panel.
+- **render.rs**: `build_board_columns(snapshot, group_filter)` returns one `BoardColumn { lane, rows }` per non-Archived lane. Reuses `build_board_tree` per lane so nesting + filter rules are consistent.
+
 ## What's deferred (follow-up work)
 
 Commands present in Python Loom but not yet in Rust (see [`FEATURES.md`](FEATURES.md) for the canonical checklist):
@@ -111,17 +140,19 @@ Commands present in Python Loom but not yet in Rust (see [`FEATURES.md`](FEATURE
 - **Events**: per-cell `EventLog` ring buffer, `get_events`, `events_dismiss`, throttled broadcast.
 - **Adapters**: full event parsing + activity inference (Python is ~1.4k LOC, Rust crates are stubs).
 - **Claude Code hook install** on dispatch.
-- **Native panel renderers**: Board, Actions (incl. Pipelines view), Memory, Weaver, Context, Events, Templates — placeholders today.
+- **Native panel renderers**: Actions (incl. Pipelines view), Memory, Weaver, Context, Events, Templates — placeholders today. Sidebar + Board shipped in phases 10 + 11.
+- **Archived-lane toggle** on the Board — `build_board_columns` already excludes Archived; need a reveal affordance (e.g. a toggle button above the columns).
+- **Drag-to-redock panels** — today re-docking is via each panel's `…` popup menu. No VSCode-style zone drop indicators yet.
 
 ## Next steps
 
 Roughly ordered for highest user-visible impact first:
 
-1. **Sidebar interactivity** — swap the read-only NSTextView for an NSOutlineView with an Outline data source so rows are clickable + draggable. Drives `select_agent` natively without HTTP.
-2. **First native panel** — pick Board (most-used) and render it as a leaf via `mount_panel_into`. NSCollectionView for cards, NSTableView for lanes.
-3. **Pane keyboard shortcuts + drag-to-split** — Cmd+D split right, Cmd+Shift+D split down, Cmd+W close pane. Drag a sidebar row onto a pane to mount its terminal there.
-4. **Claude Code hook install** on dispatch — `.claude/settings.local.json` merge so dispatched agents can `ai_report` back.
-5. **Adapter event parsing** — port `claude_code` HTTP hook handling; populate the Events log; surface activity badges in the sidebar.
+1. **Claude Code hook install** on dispatch — `.claude/settings.local.json` merge so dispatched agents can `ai_report` back end-to-end.
+2. **Adapter event parsing** — port `claude_code` HTTP hook handling; populate the per-cell Events log; surface activity badges in the sidebar.
+3. **Actions panel** — native form editor for `.loom/actions/*.yaml` (next most-used panel after Board). Mountable via `dock_panel { zone: right, ... }` or inside the center grid.
+4. **Archived-lane toggle** on the Board.
+5. **Pane keyboard shortcuts + drag-from-sidebar** — Cmd+D / Cmd+Shift+D / Cmd+W + dragging a sidebar row onto a pane to mount its terminal.
 6. **Weaver** — stand up `loom-weaver` (event buffer, digest, hints, session map) and the 34 MCP tools. Big chunk; do incrementally.
 7. **Mouse + clipboard in GhosttyView** — `mouseDown/Moved/scrollWheel:` → `ghostty_surface_mouse_*`; clipboard callbacks for Cmd-C/Cmd-V.
 8. **Linux UI** (deferred until Mac is steady) — `loom-ui-linux` crate consuming the same `EngineBridge`.

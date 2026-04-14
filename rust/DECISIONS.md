@@ -39,6 +39,16 @@ Load-bearing choices made during the port, with rationale + what broke along the
 **Why**: Frontend-compat — the existing JS frontend uses this contract. Even though the Rust UI doesn't use it, the CLI and future web clients might.
 **Consequence**: Every mutation must go through a method that calls `emit()`. Bypassing this path (mutating state directly from a raw handle) silently breaks broadcast.
 
+### D8. Edge-dock zones around a tileable center
+**Decision**: The native window's outer layout is a 5-zone cross: `Top`, `Left`, `Right`, `Bottom` edges + a `Center` region. The Center remains the existing tileable grid (the `LayoutNode` tree, unchanged). Only the edges are new; each edge zone holds an `Option<LayoutNode>` (None = hidden), each with a 22pt panel header for move/hide.
+**Why**: User directive ("proper system for attaching panels to different locations") plus the need to dock Board at the bottom and the Sidebar at the left. Classic IDE shape (Xcode / VSCode) — each zone is a clear home for a panel.
+**Consequence**: `MatrixState.dock_edges` is the new authoritative source for edge placement; `content_layout` is the Center. `effective_dock_layout()` combines them. Single-panel-per-zone for v1 — tabbed docks (multiple panels per zone) remain a future extension point. Re-docking uses two dispatches: clear source zone, set target zone. Drag-to-redock (VSCode zone indicators) is deferred.
+
+### D9. Sidebar is a `PanelKind`, not a hardcoded rail
+**Decision**: The agent/terminal outline is `PanelKind::Sidebar` — a normal dockable panel that defaults to the Left zone. Moving it to Right (or Top / Bottom) works the same way as moving any other panel.
+**Why**: Architectural uniformity with the dock system. Treating the sidebar as "special" would fork every dock-related code path.
+**Consequence**: `SidebarView::install` is called from `mount_panel_into` when a leaf's panel kind is `Sidebar`. The sidebar view is cached in `ContentState.sidebar_cache` so its expansion state + selection survive dock rebuilds. Same pattern as `BoardView`.
+
 ## Technical
 
 ### T1. `objc2` 0.5 — `MainThreadOnly` alloc path
@@ -117,6 +127,62 @@ Calling this before the split view has a non-zero frame is a no-op. We compute t
 ### T23. Process-wide test races — three known
 `#[test]` functions run in parallel by default. Three pre-existing tests raced because they mutate process-wide state: `LOOM_PROJECT_ROOT` (`loom-server/tests/actions.rs`), `LOOM_DEFAULT_CMD` (`loom-core/src/config.rs`), and the `SURFACES` map (`loom-ghostty/src/ffi.rs`). Each is now gated by a `static MUTEX`. New tests touching the same state must hold the same lock — see `ARCHITECTURE.md` § "Race-prone tests".
 
+### T24. `Retained<AnyObject>` has no `.downcast()` in objc2 0.5.2
+Bare `Retained<AnyObject>::downcast::<T>()` doesn't exist. Pattern is: check `isKindOfClass:` via `msg_send!` then call `Retained::cast::<T>(obj)` (unsafe). We ship two helpers in `sidebar.rs` and `board.rs`:
+
+```rust
+unsafe fn downcast_retained<T: ClassType>(obj: Retained<AnyObject>) -> Option<Retained<T>> {
+    let cls = T::class();
+    let is_kind: bool = msg_send![&*obj, isKindOfClass: cls];
+    if is_kind { Some(Retained::cast::<T>(obj)) } else { None }
+}
+```
+
+For cases where we put the object in the outline ourselves (so we know the class by construction), we skip the check and call `Retained::cast` directly.
+
+### T25. `declare_class!` method bodies can't early-return
+`#[method(...)]` and `#[method_id(...)]` wrap *only* the tail expression in the ObjC ABI return type (`Bool`, `IdReturnValue`). An early `return None` or `return false` inside the body fails the trait check.
+
+Fix: keep the whole method body a single expression. Use `match` or `if/else` instead of early `return`:
+
+```rust
+#[method_id(foo:)]
+fn foo(&self, ...) -> Option<Retained<NSMenu>> {
+    if bad { None } else { Some(...) }   // NOT: if bad { return None; } ...
+}
+```
+
+### T26. `NSArray::from_slice(&[&NSString])` fails; use `from_vec`
+`NSArray::from_slice` requires `T: MutabilityIsRetainable`. `NSString` is `ImmutableWithMutableSubclass<NSMutableString>`, which isn't `MutabilityIsRetainable`. Workaround: build `NSArray::from_vec(vec![retained_nsstring])` — takes owned `Retained<NSString>` values.
+
+Occurs when registering dragged types on `NSTableView` (see `board.rs` and `sidebar.rs`).
+
+### T27. NSClipView anchors smaller document views at its origin
+In a horizontally-scrolling `NSScrollView`, when the document view is shorter than the clip view's visible area, `NSClipView` positions the doc view at its origin — which in non-flipped coordinates is the *bottom*. Result: the whole content strip floats to the bottom of the panel with empty space above.
+
+Fix: set `NSViewHeightSizable` on the doc view *and* on any direct children, plus re-run our own `layout_columns`/frame-update on every refresh tick (even when data is unchanged) so window resizes propagate immediately. Saw this as the "board pinned to bottom of panel" bug.
+
+### T28. `NSTableColumn::initWithIdentifier` not exposed in objc2-app-kit 0.2
+The identifier-taking initializer isn't generated (its arg type `NSUserInterfaceItemIdentifier` is gated behind a feature we don't enable). Workaround: plain `msg_send_id![alloc, init]` to get a default column. Our code doesn't reference columns by identifier anywhere, so the default is fine. `setIdentifier:` also isn't available in the same way — skip setting it.
+
+### T29. `NSBezelStyle` + `NSSegmentStyle` variants missing; use raw NSInteger
+Several enum variants we'd reach for aren't exposed in objc2-app-kit 0.2:
+
+- `NSBezelStyle::NSBezelStyleRounded` — missing. We just omit `setBezelStyle:` on our buttons; the default (rounded push-button) is what we want anyway.
+- `NSSegmentStyle::NSSegmentStyleTexturedRounded` — missing. Send raw NSInteger 0 (NSSegmentStyleAutomatic) via `msg_send!` instead.
+- `NSTableViewSelectionHighlightStyle::NSTableViewSelectionHighlightStyleSourceList` — missing. Send raw NSInteger 1 via `msg_send!`.
+
+Pattern:
+```rust
+let _: () = msg_send![&outline, setSelectionHighlightStyle: 1isize];
+```
+
+### T30. `NSTextField.setTarget` target isn't retained — hold it yourself
+Cocoa's `NSControl.target` is a weak/unretained pointer. If the target object drops while the control references it, keystrokes / clicks produce EXC_BAD_ACCESS. Our `BoardMenuTarget` / `MenuActionTarget` / `HeaderTarget` are kept alive by Retained fields in `BoardView` / `SidebarView` / (for the panel header) a `std::mem::forget`-held reference — v1 accepts the leak; follow-up should use associated objects on the button to attach the target's lifetime to the NSButton.
+
+### T31. `NSScrollView::contentSize` is unsafe in objc2 0.5
+`contentSize()` on `NSScrollView` requires an `unsafe` block. Don't forget the wrapper when reading it for layout math.
+
 ## Cleanup landmines
 
 Things that look like dead code but aren't:
@@ -128,11 +194,15 @@ Things that look like dead code but aren't:
 
 ## Known regressions / rough edges
 
-- **No mouse support.** `mouseDown:`/`mouseMoved:`/`scrollWheel:` are not wired. Text selection in the terminal doesn't work.
-- **No clipboard.** Cmd+C / Cmd+V in the terminal pane isn't wired — the clipboard callbacks are stubs.
-- **Sidebar is read-only.** NSTextView dump. No click-to-select, no drag-drop, no context menu. Will become an NSOutlineView. `select_agent` is dispatchable via HTTP today; that's the workaround.
-- **Non-terminal panels render as placeholders.** Board, Actions, Memory, Weaver, Context, Events, Templates show a single-line hint until each one's native renderer lands. The layout machinery, persistence, and command surface are all in place — only the per-panel views are missing.
-- **No drag-to-split / close-pane / pane keyboard shortcuts.** Layout has to be set programmatically via `set_layout`.
+- **No mouse support in terminal.** `mouseDown:`/`mouseMoved:`/`scrollWheel:` are not wired on `GhosttyView`. Text selection in the terminal doesn't work.
+- **No clipboard in terminal.** Cmd+C / Cmd+V isn't wired — the clipboard callbacks are stubs.
+- **Sidebar drag-drop not wired.** Click-to-select, context menu, and keyboard nav work. Dragging a row to reorder groups or move an agent across groups isn't implemented yet.
+- **Board autogrowing textarea.** Inline add-task is a single-line `NSTextField`; the Python UI's autogrowing textarea is the follow-up.
+- **Non-Sidebar/Board panels render as placeholders.** Actions, Memory, Weaver, Context, Events, Templates show a single-line hint until each one's native renderer lands. The layout machinery, persistence, and command surface are all in place — only the per-panel views are missing.
+- **No drag-to-split / close-pane / pane keyboard shortcuts.** Layout has to be set programmatically via `set_layout` / `dock_panel`.
+- **No drag-to-redock.** Panels re-dock via the `…` popup menu on each header bar (Move to → {Top,Left,Right,Bottom}); no VSCode-style drop indicators yet.
 - **`cron_expr` is stored but not fired.** The scheduler tick only fires `scheduled_at` one-shots; recurring schedules need a cron parser + `next_run_at` advancement.
 - **Memory transient-entry expiry isn't swept.** `retention_kind: "transient"` + `expires_at` are honored on read filters but no background sweep purges expired rows.
 - **`/events` HTTP receiver is scaffolded but not routed into a per-cell EventLog.** Activity badges in the sidebar are based on `ai_report` / PTY events only.
+- **Archived-lane reveal toggle missing.** `build_board_columns` filters out Archived; CLI + API still archive/unarchive tasks. UI affordance to reveal them is a small follow-up.
+- **Panel-header target leak.** `HeaderTarget` in `panel_header.rs` is held alive via `std::mem::forget` because `NSMenuItem.target` isn't retained by Cocoa. Leaks one NSObject per edge-zone rebuild — acceptable for v1.

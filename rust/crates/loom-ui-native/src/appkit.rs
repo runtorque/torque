@@ -6,19 +6,26 @@
 //! NSApplication
 //! ├─ menubar → App menu → Quit (Cmd-Q)
 //! └─ NSWindow (Titled, Closable, Resizable, Miniaturizable)
-//!    └─ NSSplitView (vertical)
-//!       ├─ NSScrollView → NSTextView        (sidebar, read-only)
-//!       └─ Content container NSView
-//!          ├─ GhosttyView                   (when an agent is selected)
-//!          └─ placeholder NSScrollView+TV   (when nothing is selected)
+//!    └─ outer NSView (dock-layout container)
+//!       └─ NSSplitView (vertical layout, horizontal dividers)
+//!          ├─ Top zone        (optional)
+//!          ├─ Middle NSSplitView (horizontal layout, vertical dividers)
+//!          │  ├─ Left zone    (Sidebar by default)
+//!          │  ├─ Center zone  (LayoutNode tree: terminals + nested panels)
+//!          │  └─ Right zone   (optional)
+//!          └─ Bottom zone     (Board by default)
 //! ```
 //!
+//! Each zone's contents are a `LayoutNode` subtree mounted via
+//! `mount_panel_into`. Terminal leaves host libghostty surfaces; panel
+//! leaves (Sidebar / Board / ...) host their dedicated native renderers.
+//!
 //! Live updates: an `NSTimer` fires every 500 ms on the main run loop; the
-//! callback pulls a fresh snapshot from the engine and repaints the sidebar
-//! text + reconciles the content container with the engine's
-//! `selected_agent_id`. Each agent gets a GhosttyView cached by id — flipping
-//! selection just swaps which one is the content container's subview; the
-//! underlying libghostty surface + PTY stay alive so we preserve scrollback.
+//! callback pulls a fresh snapshot from the engine, reconciles the dock
+//! layout (rebuilds NSSplitView tree only when its JSON signature changed),
+//! and asks each cached panel renderer to self-refresh. Cached GhosttyView
+//! + SidebarView + BoardView instances survive layout rebuilds so their
+//! PTYs / expansion state / scroll position are preserved.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -27,7 +34,7 @@ use anyhow::Result;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{declare_class, msg_send_id, mutability, sel, ClassType, DeclaredClass};
-use loom_core::state::{LayoutNode, PanelKind, SplitAxis};
+use loom_core::state::{DockLayout, LayoutNode, PanelKind, SplitAxis};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSBackingStoreType,
     NSBorderType, NSColor, NSFont, NSMenu, NSMenuItem, NSScrollView, NSSplitView,
@@ -39,9 +46,14 @@ use objc2_foundation::{
 
 use loom_server::app::AppState;
 
+use crate::board::BoardView;
 use crate::bridge::{resolve_command, resolve_cwd, EngineBridge, MatrixStateSnapshot};
 use crate::ghostty_view::GhosttyView;
+use crate::panel_header::{install_header, PANEL_HEADER_HEIGHT};
 use crate::render;
+use crate::sidebar::SidebarView;
+
+use loom_core::state::DockZone;
 
 const REFRESH_INTERVAL_SECS: f64 = 0.5;
 
@@ -78,11 +90,11 @@ pub fn run(engine: AppState) -> Result<()> {
 #[derive(Clone)]
 struct Views {
     window: Retained<NSWindow>,
-    sidebar_tv: Retained<NSTextView>,
-    /// Container for the active content tree. Children are rebuilt by
-    /// `reconcile_content` whenever the layout signature changes; cached
-    /// GhosttyView instances survive across rebuilds via `ContentState.cache`.
-    content_container: Retained<NSView>,
+    /// Outer container hosting the full dock layout. Reconciliation rebuilds
+    /// its NSSplitView subtree when the dock signature changes; cached
+    /// panel views (sidebar / board / per-agent GhosttyView) in
+    /// `ContentState` survive across rebuilds.
+    outer: Retained<NSView>,
 }
 
 fn build_window(mtm: MainThreadMarker) -> Views {
@@ -104,46 +116,21 @@ fn build_window(mtm: MainThreadMarker) -> Views {
     };
     window.setTitle(&NSString::from_str("Loom"));
 
-    let split: Retained<NSSplitView> = unsafe {
-        let alloc = mtm.alloc::<NSSplitView>();
-        let split = NSSplitView::initWithFrame(
+    let outer: Retained<NSView> = unsafe {
+        let alloc = mtm.alloc::<NSView>();
+        let v = NSView::initWithFrame(
             alloc,
             NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1200.0, 760.0)),
         );
-        split.setVertical(true);
-        split.setDividerStyle(NSSplitViewDividerStyle::Thin);
-        split
-    };
-
-    let sidebar_frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(280.0, 760.0));
-    let sidebar_scroll = make_scroll_view(mtm, sidebar_frame);
-    let sidebar_tv = make_text_view(mtm, sidebar_frame);
-    unsafe { sidebar_scroll.setDocumentView(Some(&sidebar_tv)) };
-
-    // Content container — plain NSView that hosts either a GhosttyView or the
-    // placeholder. Flips based on selection on each refresh tick.
-    let content_frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(920.0, 760.0));
-    let content_container: Retained<NSView> = unsafe {
-        let alloc = mtm.alloc::<NSView>();
-        let v = NSView::initWithFrame(alloc, content_frame);
         v.setAutoresizingMask(
             NSAutoresizingMaskOptions::NSViewWidthSizable
                 | NSAutoresizingMaskOptions::NSViewHeightSizable,
         );
         v
     };
+    window.setContentView(Some(&outer));
 
-    unsafe {
-        split.addSubview(&sidebar_scroll);
-        split.addSubview(&content_container);
-        window.setContentView(Some(&split));
-    }
-
-    Views {
-        window,
-        sidebar_tv,
-        content_container,
-    }
+    Views { window, outer }
 }
 
 fn make_scroll_view(mtm: MainThreadMarker, frame: NSRect) -> Retained<NSScrollView> {
@@ -218,13 +205,21 @@ fn install_menubar(app: &NSApplication, mtm: MainThreadMarker) {
 
 /// Holds per-window UI state that mutates across refresh ticks:
 /// the cache of `agent_id → GhosttyView` (preserves PTYs across layout
-/// rebuilds), and a signature of the currently-mounted layout so we only
-/// rebuild when the tree actually changed.
+/// rebuilds), cached sidebar + board renderers, and a signature of the
+/// currently-mounted dock layout so we only rebuild the NSSplitView tree
+/// when it actually changed.
 struct ContentState {
-    /// Snapshot of the layout that's currently mounted. When the next tick's
-    /// computed signature differs, we wipe + rebuild.
+    /// JSON signature of the currently-mounted dock layout + selection.
+    /// Next tick's computed signature is compared; on mismatch we wipe +
+    /// rebuild.
     current_signature: Option<String>,
     cache: HashMap<String, CachedAgent>,
+    /// Reusable native panel renderers. Panels are created lazily when the
+    /// dock layout first mounts them, then reused across layout rebuilds
+    /// so their in-memory state (outline expansion, board scroll, etc.)
+    /// is preserved.
+    sidebar_cache: Option<SidebarView>,
+    board_cache: Option<BoardView>,
     /// True the first tick — forces an initial mount even if the layout
     /// signature happens to match `None`.
     first_tick: bool,
@@ -242,18 +237,20 @@ impl ContentState {
         Self {
             current_signature: None,
             cache: HashMap::new(),
+            sidebar_cache: None,
+            board_cache: None,
             first_tick: true,
         }
     }
 }
 
-/// Compact textual signature for a layout — used to skip rebuilds when the
-/// snapshot's tree hasn't actually changed. We include `selected_agent_id`
-/// because `Terminal { id: None }` panes bind to it, so a selection change
-/// affects which view a leaf renders.
-fn layout_signature(layout: &LayoutNode, selected: &Option<String>) -> String {
+/// Compact textual signature for the dock layout — used to skip rebuilds
+/// when the snapshot's tree hasn't actually changed. We include
+/// `selected_agent_id` because `Terminal { id: None }` panes bind to it,
+/// so a selection change affects which view a leaf renders.
+fn dock_signature(dock: &DockLayout, selected: &Option<String>) -> String {
     serde_json::to_string(&serde_json::json!({
-        "layout": layout,
+        "dock": dock,
         "selected": selected,
     }))
     .unwrap_or_default()
@@ -262,15 +259,25 @@ fn layout_signature(layout: &LayoutNode, selected: &Option<String>) -> String {
 fn tick(mtm: MainThreadMarker, bridge: &EngineBridge, views: &Views, state: &RefCell<ContentState>) {
     let snapshot = bridge.snapshot();
 
-    // 1. Sidebar text.
-    let sidebar_text = render::render_sidebar(&snapshot);
-    unsafe { views.sidebar_tv.setString(&NSString::from_str(&sidebar_text)) };
+    // 1. Reconcile the outer dock layout — rebuild NSSplitView tree only
+    //    when the dock signature changed. Cached panel instances survive.
+    reconcile_dock(mtm, bridge, views, &snapshot, state);
 
-    // 2. Reconcile content container against snapshot.selected_agent_id.
-    reconcile_content(mtm, bridge, views, &snapshot, state);
-
-    // 3. Drain any pending dispatch text into the corresponding GhosttyView.
+    // 2. Drain any pending dispatch text into the corresponding GhosttyView.
     drain_pending_text(state);
+
+    // 3. Tell each cached panel renderer to refresh itself. They short-
+    //    circuit if their own content hasn't changed.
+    let (sidebar_opt, board_opt) = {
+        let st = state.borrow();
+        (st.sidebar_cache.clone(), st.board_cache.clone())
+    };
+    if let Some(s) = sidebar_opt {
+        s.reload_if_changed(&snapshot);
+    }
+    if let Some(b) = board_opt {
+        b.reload_if_changed(&snapshot);
+    }
 }
 
 fn drain_pending_text(state: &RefCell<ContentState>) {
@@ -286,7 +293,7 @@ fn drain_pending_text(state: &RefCell<ContentState>) {
     }
 }
 
-fn reconcile_content(
+fn reconcile_dock(
     mtm: MainThreadMarker,
     bridge: &EngineBridge,
     views: &Views,
@@ -310,26 +317,18 @@ fn reconcile_content(
         st.cache.remove(id);
     }
 
-    // Skip rebuild when the layout (and dependent selection) hasn't changed.
-    let signature = layout_signature(&snapshot.content_layout, &snapshot.selected_agent_id);
-    if !st.first_tick && st.current_signature.as_deref() == Some(signature.as_str()) {
+    // Skip rebuild when the dock layout (+ dependent selection) hasn't changed.
+    let sig = dock_signature(&snapshot.dock_layout, &snapshot.selected_agent_id);
+    if !st.first_tick && st.current_signature.as_deref() == Some(sig.as_str()) {
         return;
     }
     st.first_tick = false;
-    st.current_signature = Some(signature);
+    st.current_signature = Some(sig);
 
-    // Wipe the container and rebuild from the layout tree. Cached GhosttyView
-    // instances are reused, so terminals keep their PTYs + scrollback; only
-    // the NSView hierarchy gets reassembled.
-    remove_container_children(&views.content_container);
-    build_layout_into(
-        mtm,
-        bridge,
-        snapshot,
-        &snapshot.content_layout,
-        &views.content_container,
-        &mut *st,
-    );
+    // Wipe the outer container and rebuild from the dock layout. Cached
+    // panel/terminal instances are reused.
+    remove_container_children(&views.outer);
+    build_dock_into(mtm, bridge, snapshot, &views.outer, &mut *st);
 
     // Focus the selected agent's terminal, if it ended up in the tree.
     if let Some(sel) = &snapshot.selected_agent_id {
@@ -337,6 +336,216 @@ fn reconcile_content(
             let gv: &NSView = &**cached.view;
             let _ = views.window.makeFirstResponder(Some(gv));
         }
+    }
+}
+
+/// Build the full dock layout (cross of top / left / center / right /
+/// bottom zones) into `parent`. Hidden edges (None) are omitted from the
+/// split views entirely; present edges get a subview in the relevant
+/// dimension.
+fn build_dock_into(
+    mtm: MainThreadMarker,
+    bridge: &EngineBridge,
+    snapshot: &MatrixStateSnapshot,
+    parent: &NSView,
+    state: &mut ContentState,
+) {
+    let dock = &snapshot.dock_layout;
+    let ratios = dock.ratios;
+
+    // Outer split: vertical layout (horizontal dividers) for top/middle/bottom.
+    let outer = make_split(mtm, parent, SplitAxis::Vertical);
+    unsafe { parent.addSubview(&outer) };
+
+    let parent_bounds = parent.bounds();
+    let total_h = parent_bounds.size.height.max(1.0);
+
+    // Top zone (if present).
+    let mut outer_order: Vec<(f64, Retained<NSView>)> = Vec::new();
+    if let Some(top_layout) = &dock.top {
+        let host = make_pane_host(mtm);
+        unsafe { outer.addSubview(&host) };
+        mount_edge_zone_into(mtm, bridge, snapshot, top_layout, DockZone::Top, &host, state);
+        outer_order.push((ratios.top * total_h, host));
+    }
+
+    // Middle row — left / center / right — always present.
+    let middle_host = make_pane_host(mtm);
+    unsafe { outer.addSubview(&middle_host) };
+    build_middle_row(mtm, bridge, snapshot, dock, &middle_host, state);
+    outer_order.push((f64::NAN, middle_host));
+
+    // Bottom zone (if present).
+    if let Some(bottom_layout) = &dock.bottom {
+        let host = make_pane_host(mtm);
+        unsafe { outer.addSubview(&host) };
+        mount_edge_zone_into(
+            mtm,
+            bridge,
+            snapshot,
+            bottom_layout,
+            DockZone::Bottom,
+            &host,
+            state,
+        );
+        outer_order.push((ratios.bottom * total_h, host));
+    }
+
+    apply_outer_ratios(&outer, total_h, &outer_order);
+}
+
+fn build_middle_row(
+    mtm: MainThreadMarker,
+    bridge: &EngineBridge,
+    snapshot: &MatrixStateSnapshot,
+    dock: &DockLayout,
+    parent: &NSView,
+    state: &mut ContentState,
+) {
+    let row = make_split(mtm, parent, SplitAxis::Horizontal);
+    unsafe { parent.addSubview(&row) };
+
+    let parent_bounds = parent.bounds();
+    let total_w = parent_bounds.size.width.max(1.0);
+    let ratios = dock.ratios;
+
+    let mut order: Vec<(f64, Retained<NSView>)> = Vec::new();
+
+    if let Some(left) = &dock.left {
+        let host = make_pane_host(mtm);
+        unsafe { row.addSubview(&host) };
+        mount_edge_zone_into(mtm, bridge, snapshot, left, DockZone::Left, &host, state);
+        order.push((ratios.left * total_w, host));
+    }
+
+    // Center is always present — no header bar (it's the main workspace).
+    let center_host = make_pane_host(mtm);
+    unsafe { row.addSubview(&center_host) };
+    build_layout_into(mtm, bridge, snapshot, &dock.center, &center_host, state);
+    order.push((f64::NAN, center_host));
+
+    if let Some(right) = &dock.right {
+        let host = make_pane_host(mtm);
+        unsafe { row.addSubview(&host) };
+        mount_edge_zone_into(mtm, bridge, snapshot, right, DockZone::Right, &host, state);
+        order.push((ratios.right * total_w, host));
+    }
+
+    apply_row_ratios(&row, total_w, &order);
+}
+
+/// Mount a panel tree inside an edge zone. Splits the zone vertically into
+/// a 22pt header bar on top + the panel content below; the header carries
+/// the Move-to / Hide menu.
+fn mount_edge_zone_into(
+    mtm: MainThreadMarker,
+    bridge: &EngineBridge,
+    snapshot: &MatrixStateSnapshot,
+    layout: &LayoutNode,
+    zone: DockZone,
+    parent: &NSView,
+    state: &mut ContentState,
+) {
+    let bounds = parent.bounds();
+    let parent_size = bounds.size;
+    install_header(mtm, bridge.clone(), parent, layout, zone, parent_size);
+
+    // Content area fills the parent minus the header strip at the top.
+    let content_h = (parent_size.height - PANEL_HEADER_HEIGHT).max(0.0);
+    let content_frame = NSRect::new(
+        NSPoint::new(0.0, 0.0),
+        NSSize::new(parent_size.width, content_h),
+    );
+    let content: Retained<NSView> = unsafe {
+        let alloc = mtm.alloc::<NSView>();
+        let v = NSView::initWithFrame(alloc, content_frame);
+        v.setAutoresizingMask(
+            NSAutoresizingMaskOptions::NSViewWidthSizable
+                | NSAutoresizingMaskOptions::NSViewHeightSizable,
+        );
+        v
+    };
+    unsafe { parent.addSubview(&content) };
+    build_layout_into(mtm, bridge, snapshot, layout, &content, state);
+}
+
+/// Apply dividers for the outer (vertical-layout) split. `order` lists the
+/// subviews top→bottom with their desired pixel sizes; NaN means "fill
+/// remaining". Only the non-NaN sizes are pinned via divider positions.
+fn apply_outer_ratios(
+    split: &NSSplitView,
+    _total: f64,
+    order: &[(f64, Retained<NSView>)],
+) {
+    if order.len() < 2 {
+        return;
+    }
+    // Divider 0 between subviews 0 and 1, etc. Set pinned sizes from the
+    // top for subviews that have an explicit size.
+    let mut accumulated = 0.0;
+    for (i, (size, _)) in order.iter().enumerate() {
+        if i == order.len() - 1 {
+            break;
+        }
+        if size.is_nan() {
+            // The filler subview — skip; the next pinned size (if any) will
+            // drive its boundary.
+            continue;
+        }
+        accumulated += size;
+        unsafe {
+            split.setPosition_ofDividerAtIndex(accumulated, i as isize);
+        }
+    }
+}
+
+/// Row (horizontal-layout) version. Left-pinned widths; right pane (if
+/// present) gets its divider positioned from the right edge via
+/// `total - size`.
+fn apply_row_ratios(
+    split: &NSSplitView,
+    total: f64,
+    order: &[(f64, Retained<NSView>)],
+) {
+    if order.len() < 2 {
+        return;
+    }
+    // Left-pinned: divider 0 sits `left_size` from the left.
+    // If there's a right zone, its divider is at `total - right_size`.
+    let (left_size, _) = &order[0];
+    if !left_size.is_nan() {
+        unsafe {
+            split.setPosition_ofDividerAtIndex(*left_size, 0);
+        }
+    }
+    if order.len() >= 3 {
+        let (right_size, _) = &order[order.len() - 1];
+        if !right_size.is_nan() {
+            let pos = (total - *right_size).max(0.0);
+            unsafe {
+                split.setPosition_ofDividerAtIndex(pos, (order.len() - 2) as isize);
+            }
+        }
+    }
+}
+
+fn make_split(
+    mtm: MainThreadMarker,
+    parent: &NSView,
+    axis: SplitAxis,
+) -> Retained<NSSplitView> {
+    unsafe {
+        let alloc = mtm.alloc::<NSSplitView>();
+        let split = NSSplitView::initWithFrame(alloc, container_frame(parent));
+        // NSSplitView::vertical = true → the divider is vertical → panes
+        // sit side by side (horizontal layout).
+        split.setVertical(matches!(axis, SplitAxis::Horizontal));
+        split.setDividerStyle(NSSplitViewDividerStyle::Thin);
+        split.setAutoresizingMask(
+            NSAutoresizingMaskOptions::NSViewWidthSizable
+                | NSAutoresizingMaskOptions::NSViewHeightSizable,
+        );
+        split
     }
 }
 
@@ -429,7 +638,35 @@ fn mount_panel_into(
             }
         }
         PanelKind::Placeholder => mount_placeholder_into(parent, "Empty pane"),
-        PanelKind::Board => mount_placeholder_into(parent, "[Board panel — pending native UI]"),
+        PanelKind::Sidebar => {
+            // Get-or-create the sidebar panel. Cached across dock rebuilds
+            // so expansion + scroll survive.
+            if state.sidebar_cache.is_none() {
+                state.sidebar_cache = Some(SidebarView::install(mtm, bridge.clone()));
+            }
+            let sb = state.sidebar_cache.as_ref().unwrap();
+            let frame = container_frame(parent);
+            let view: &NSView = &sb.container;
+            unsafe {
+                view.setFrame(frame);
+                parent.addSubview(view);
+            }
+            // First paint — blank tree until the next tick reloads.
+            sb.reload_if_changed(snapshot);
+        }
+        PanelKind::Board => {
+            if state.board_cache.is_none() {
+                state.board_cache = Some(BoardView::install(mtm, bridge.clone()));
+            }
+            let b = state.board_cache.as_ref().unwrap();
+            let frame = container_frame(parent);
+            let view: &NSView = &b.container;
+            unsafe {
+                view.setFrame(frame);
+                parent.addSubview(view);
+            }
+            b.reload_if_changed(snapshot);
+        }
         PanelKind::Actions => {
             mount_placeholder_into(parent, "[Actions panel — pending native UI]")
         }
