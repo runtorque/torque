@@ -22,6 +22,8 @@ var _standalonePanelLayout = null;
 var _standalonePanelSyncing = false;
 var _standalonePanelDragApp = '';
 var _standalonePanelFloatDrag = null;
+var _standalonePanelPointerDrag = null;
+var _standalonePanelSuppressClick = false;
 var _standalonePanelRoots = {};
 
 function _standalonePanelsEnabled() {
@@ -520,7 +522,11 @@ function _standaloneZoneTab(app, active) {
   var btn = _makeStandaloneNode('button', 'standalone-panel-tab' + (active ? ' active' : ''), _standalonePanelTitle(app));
   btn.dataset.app = app;
   btn.draggable = true;
-  btn.onclick = function() { _standaloneSelectPanel(app); };
+  btn.onclick = function(event) {
+    if (_standaloneConsumeSuppressedPanelClick(event)) return;
+    _standaloneSelectPanel(app);
+  };
+  btn.onmousedown = function(event) { standalonePanelPointerDragStart(event, app); };
   btn.ondragstart = function(event) { standalonePanelDragStart(event, app); };
   btn.ondragend = function() { standalonePanelDragEnd(); };
   return btn;
@@ -675,10 +681,7 @@ function standalonePanelDragStart(event, app) {
 function standalonePanelDragEnd() {
   _standalonePanelDragApp = '';
   document.body.classList.remove('standalone-panel-dragging');
-  ['standalone-bottom-dock', 'standalone-right-rail', 'standalone-float-layer'].forEach(function(id) {
-    var el = document.getElementById(id);
-    if (el && el.classList) el.classList.remove('drag-target');
-  });
+  _standaloneSetDragTarget('');
 }
 
 function _standaloneDraggedApp(event) {
@@ -689,18 +692,109 @@ function _standaloneDraggedApp(event) {
   return '';
 }
 
+function _standaloneConsumeSuppressedPanelClick(event) {
+  if (!_standalonePanelSuppressClick) return false;
+  _standalonePanelSuppressClick = false;
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  return true;
+}
+
+function _standaloneDropTargetElement(zoneName) {
+  if (zoneName === 'bottom') return document.getElementById('standalone-bottom-dock');
+  if (zoneName === 'right') return document.getElementById('standalone-right-rail');
+  if (zoneName === 'float') return document.getElementById('standalone-float-layer');
+  return null;
+}
+
+function _standaloneSetDragTarget(zoneName) {
+  ['bottom', 'right', 'float'].forEach(function(name) {
+    var el = _standaloneDropTargetElement(name);
+    if (el && el.classList) el.classList.toggle('drag-target', name === zoneName);
+  });
+}
+
+function _standaloneDropTargetZoneForElement(el) {
+  var node = el || null;
+  while (node) {
+    if (node.id === 'standalone-bottom-dock') return 'bottom';
+    if (node.id === 'standalone-right-rail') return 'right';
+    if (node.id === 'standalone-float-layer') return 'float';
+    node = node.parentNode || null;
+  }
+  return '';
+}
+
+function _standaloneDropTargetZoneAtPoint(clientX, clientY) {
+  if (!document || typeof document.elementFromPoint !== 'function') return '';
+  return _standaloneDropTargetZoneForElement(document.elementFromPoint(clientX, clientY));
+}
+
+function standalonePanelPointerDragStart(event, app) {
+  if (!event || event.button !== 0 || !app) return;
+  _standalonePanelPointerDrag = {
+    app: app,
+    startX: event.clientX,
+    startY: event.clientY,
+    active: false,
+  };
+  document.addEventListener('mousemove', _standalonePanelOnPointerDrag);
+  document.addEventListener('mouseup', _standalonePanelStopPointerDrag);
+}
+
+function _standalonePanelOnPointerDrag(event) {
+  var drag = _standalonePanelPointerDrag;
+  if (!drag) return;
+  var dx = Math.abs((event && Number.isFinite(event.clientX) ? event.clientX : drag.startX) - drag.startX);
+  var dy = Math.abs((event && Number.isFinite(event.clientY) ? event.clientY : drag.startY) - drag.startY);
+  if (!drag.active && dx < 4 && dy < 4) return;
+  if (!drag.active) {
+    drag.active = true;
+    standalonePanelDragStart(null, drag.app);
+  }
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  _standaloneSetDragTarget(_standaloneDropTargetZoneAtPoint(event.clientX, event.clientY));
+}
+
+function _standaloneClearPointerDrag() {
+  document.removeEventListener('mousemove', _standalonePanelOnPointerDrag);
+  document.removeEventListener('mouseup', _standalonePanelStopPointerDrag);
+  _standalonePanelPointerDrag = null;
+}
+
+function _standaloneResetSuppressedPanelClickSoon() {
+  if (typeof setTimeout !== 'function') return;
+  setTimeout(function() {
+    _standalonePanelSuppressClick = false;
+  }, 0);
+}
+
+function _standalonePanelStopPointerDrag(event) {
+  var drag = _standalonePanelPointerDrag;
+  if (!drag) return;
+  _standaloneClearPointerDrag();
+  if (!drag.active) return;
+  var clientX = event && Number.isFinite(event.clientX) ? event.clientX : drag.startX;
+  var clientY = event && Number.isFinite(event.clientY) ? event.clientY : drag.startY;
+  var zoneName = _standaloneDropTargetZoneAtPoint(clientX, clientY);
+  _standalonePanelSuppressClick = true;
+  _standaloneResetSuppressedPanelClickSoon();
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  standalonePanelDragEnd();
+  if (zoneName) _standaloneMovePanelToZone(drag.app, zoneName);
+}
+
 function standalonePanelZoneDragOver(event, zoneName) {
   var app = _standaloneDraggedApp(event);
   if (!app) return;
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  if (event && event.currentTarget && event.currentTarget.classList) event.currentTarget.classList.add('drag-target');
+  _standaloneSetDragTarget(zoneName);
 }
 
 function standalonePanelZoneDrop(event, zoneName) {
   var app = _standaloneDraggedApp(event);
   if (!app) return;
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  if (event && event.currentTarget && event.currentTarget.classList) event.currentTarget.classList.remove('drag-target');
   standalonePanelDragEnd();
   _standaloneMovePanelToZone(app, zoneName);
 }
@@ -709,8 +803,7 @@ function standalonePanelFloatDragOver(event) {
   var app = _standaloneDraggedApp(event);
   if (!app) return;
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  var layer = document.getElementById('standalone-float-layer');
-  if (layer && layer.classList) layer.classList.add('drag-target');
+  _standaloneSetDragTarget('float');
 }
 
 function standalonePanelFloatDrop(event) {

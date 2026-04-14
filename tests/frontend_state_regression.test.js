@@ -8033,6 +8033,49 @@ test('standalone bottom-dock drop moves a panel to the shell-owned dock and pres
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions']);
 });
 
+test('standalone pointer drag moves a panel without native drag events', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+  const bottomDock = document.getElementById('standalone-bottom-dock');
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context', 'actions'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  document.elementFromPoint = function() {
+    return bottomDock;
+  };
+
+  context.standalonePanelPointerDragStart({
+    button: 0,
+    clientX: 720,
+    clientY: 120,
+  }, 'context');
+  document.listeners.mousemove({
+    clientX: 220,
+    clientY: 520,
+    preventDefault() {},
+  });
+  document.listeners.mouseup({
+    clientX: 220,
+    clientY: 520,
+    preventDefault() {},
+  });
+
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board', 'context']);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'context');
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs`), ['actions']);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-board', 'panel-context']);
+  assert.equal(document.body.classList.contains('standalone-panel-dragging'), false);
+});
+
 test('standalone persisted float restore keeps floated panel roots attached', () => {
   const { context, document } = createAttachedStandaloneWsSyncHarness();
   runInContext(context, `_panelStateRestored = false;`);
