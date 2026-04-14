@@ -10,3 +10,4 @@ state.json
 .codex/config.toml
 .codex/hooks.json
 .claude/instructions.md
+.playwright-cli/
