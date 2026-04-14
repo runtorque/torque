@@ -857,6 +857,30 @@ function createPanelHarness() {
   return { context, document, sandbox };
 }
 
+function createPanelManagerHarness() {
+  const { sandbox, document } = createSandbox({
+    window: {
+      innerHeight: 900,
+      addEventListener() {},
+      open() {},
+    },
+    connect() {},
+    setupDrag() {},
+  });
+  [
+    'standalone-sidebar-shell',
+    'standalone-main-stack',
+    'standalone-bottom-dock',
+    'standalone-right-rail',
+    'standalone-float-layer',
+    'standalone-bottom-resize-handle',
+    'standalone-rail-resize-handle',
+  ].forEach((id) => document.register(id));
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/panel_manager.js');
+  return { context, document, sandbox };
+}
+
 function createModalHarness() {
   const { sandbox, document } = createSandbox();
   const context = vm.createContext(sandbox);
@@ -7585,6 +7609,43 @@ test('standalone right resize preserves the main stack minimum width', () => {
 
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 320);
   assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '320px');
+});
+
+test('standalone rail drag shrinks immediately from the grabbed edge at the min boundary', () => {
+  const { context, document } = createPanelManagerHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+
+  const shell = document.getElementById('standalone-sidebar-shell');
+  const handle = document.getElementById('standalone-rail-resize-handle');
+  shell.clientWidth = 568;
+  shell.getBoundingClientRect = () => ({ top: 20, bottom: 720, left: 0, right: 568, width: 568, height: 700 });
+  handle.getBoundingClientRect = () => ({ top: 20, bottom: 720, left: 240, right: 248, width: 8, height: 700 });
+
+  runInContext(context, `
+    _workspaceSidebarWidth = 568;
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  handle.listeners.mousedown({
+    preventDefault() {},
+    clientX: 240,
+    clientY: 60,
+  });
+  document.listeners.mousemove({
+    clientX: 245,
+    clientY: 60,
+  });
+
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 315);
 });
 
 test('standalone first full-state restore persists responsive defaults once', () => {

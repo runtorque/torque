@@ -979,23 +979,40 @@ function standalonePanelResizeRight(clientX) {
 }
 
 (function() {
-  function bindHandle(id, onMove, onStop) {
+  function bindHandle(id, onMove, onStop, adjustEvent) {
     var handle = document.getElementById(id);
     if (!handle) return;
     var dragging = false;
+    var dragOffsetX = 0;
+    var dragOffsetY = 0;
     handle.addEventListener('mousedown', function(event) {
       if (!_standalonePanelsEnabled()) return;
       event.preventDefault();
+      dragOffsetX = 0;
+      dragOffsetY = 0;
+      if (handle && typeof handle.getBoundingClientRect === 'function' && event) {
+        var rect = handle.getBoundingClientRect();
+        if (rect) {
+          if (Number.isFinite(rect.right) && Number.isFinite(event.clientX)) {
+            dragOffsetX = rect.right - event.clientX;
+          }
+          if (Number.isFinite(rect.bottom) && Number.isFinite(event.clientY)) {
+            dragOffsetY = rect.bottom - event.clientY;
+          }
+        }
+      }
       dragging = true;
       document.body.classList.add('workspace-resizing');
     });
     document.addEventListener('mousemove', function(event) {
       if (!dragging) return;
-      onMove(event);
+      onMove(typeof adjustEvent === 'function' ? adjustEvent(event, dragOffsetX, dragOffsetY) : event);
     });
     document.addEventListener('mouseup', function() {
       if (!dragging) return;
       dragging = false;
+      dragOffsetX = 0;
+      dragOffsetY = 0;
       document.body.classList.remove('workspace-resizing');
       if (typeof onStop === 'function') onStop();
     });
@@ -1004,11 +1021,21 @@ function standalonePanelResizeRight(clientX) {
     standalonePanelResizeBottom(event.clientY);
   }, function() {
     _standalonePanelSaveLayout();
+  }, function(event, _dragOffsetX, dragOffsetY) {
+    if (!event || !Number.isFinite(event.clientY)) return event;
+    return Object.assign({}, event, {
+      clientY: event.clientY + dragOffsetY,
+    });
   });
   bindHandle('standalone-rail-resize-handle', function(event) {
     standalonePanelResizeRight(event.clientX);
   }, function() {
     _standalonePanelSaveLayout();
+  }, function(event, dragOffsetX) {
+    if (!event || !Number.isFinite(event.clientX)) return event;
+    return Object.assign({}, event, {
+      clientX: event.clientX + dragOffsetX,
+    });
   });
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('resize', function() {
