@@ -21,7 +21,11 @@ Linux is a future consumer: a `loom-ui-linux` crate will consume the same `Engin
 │  ├── NSWindow                                                     │
 │  │   └── NSSplitView                                              │
 │  │       ├── Sidebar (NSTextView, auto-refreshed every 500ms)     │
-│  │       └── GhosttyView ─── ghostty_surface_t ─── PTY child      │
+│  │       └── Content container                                    │
+│  │           └── LayoutNode tree → nested NSSplitViews            │
+│  │               ├── Leaf(Terminal) → GhosttyView ── ghostty_surface_t │
+│  │               ├── Leaf(Board/Actions/...) → placeholder NSScrollView │
+│  │               └── Split { axis, ratio, first, second } recurses │
 │  │                                                                │
 │  └── Menubar → Quit (Cmd-Q)                                       │
 │                                                                   │
@@ -31,11 +35,12 @@ Linux is a future consumer: a `loom-ui-linux` crate will consume the same `Engin
 │  │     ├─ /ws              snapshot + deltas                      │
 │  │     ├─ /api/cmd         command dispatch                       │
 │  │     ├─ /events          Claude Code hook receiver              │
-│  │     └─ /mcp             JSON-RPC tools                         │
+│  │     └─ /mcp             JSON-RPC tools (17 wired today)        │
 │  │                                                                │
 │  ├── MatrixState (in-memory, lives behind Arc<Mutex>)             │
 │  ├── LoomDb (rusqlite, WAL mode)                                  │
 │  ├── EventBus (broadcast::Sender<OutMessage>)                     │
+│  ├── UiAgentRegistry (agent_id → mpsc::Sender<String>)            │
 │  ├── Scheduler (15s tick, fires scheduled_at tasks)               │
 │  └── Optional PTY backend (LocalPtyBackend) for non-ghostty cells │
 │                                                                   │
@@ -109,12 +114,26 @@ HTTP POST /api/cmd {"cmd": "...", ...}
 **Agent → engine feedback** (MCP):
 
 ```
-Agent process calls loom_progress / loom_done / loom_derive via MCP
+Agent process calls loom_progress / loom_done / loom_derive / loom_memory_* / ... via MCP
   → HTTP POST /mcp {"method": "tools/call", "params": {...}}
-  → loom-server::mcp dispatches to dispatch_cmd::ai_report
-  → updates agent ephemeral state + board task lane/labels
+  → loom-server::mcp dispatches to dispatch_cmd::ai_report (or memory::*, board::verify_task, etc)
+  → updates agent ephemeral state + board task lane/labels (or memory entries)
   → emits deltas
 ```
+
+**Engine → terminal output** (UI-attached agent dispatch):
+
+```
+dispatch_task / send_text / broadcast_to_group
+  → UiAgentRegistry::is_attached(agent_id)?
+       yes → UiAgentRegistry::send(agent_id, text)
+              → unbounded mpsc channel (one per cached GhosttyView)
+              → AppKit refresh tick drains receiver, calls GhosttyView::send_text
+              → ghostty_surface_text() writes the prompt; surface owns the PTY
+       no  → fallback: LocalPtyBackend.spawn() + .write()
+```
+
+This routing keeps libghostty as the sole owner of UI-visible PTYs (no double-spawn), while headless/test/CLI flows stay on `LocalPtyBackend`.
 
 ## Key design decisions
 
@@ -166,7 +185,10 @@ Everything in `loom-core::state` mirrors Python Loom's dataclasses (JSON field n
 - **`WeaverSettings`** — per-group weaver config (autonomy mode, push intervals, escalation style, enabled events).
 - **`GlobalSettings`** — app-wide (default_command, filter_by_window, keybindings, max_pipeline_depth).
 - **`Schedule`** — cron / one-shot task scheduling.
-- **`MatrixState`** — the container; indexes by group, builds slugs, cascades deletes, enforces reserved lanes, emits deltas on every mutation.
+- **`MemoryEntry`** + **`MemoryLink`** — shared findings/decisions/warnings/handoffs/notes, lightly scoped (project/group/pipeline/task) with denormalized links to other Loom objects.
+- **`PanelKind`** — what kind of panel a content-area leaf hosts (`Terminal { id }`, `Board`, `Actions`, `Memory`, `Events`, `Templates`, `Context`, `Weaver`, `Placeholder`).
+- **`LayoutNode`** — content-area layout tree: `Leaf { panel }` or `Split { axis, ratio, first, second }`. Persisted in `ui_state[content_layout]`. `MatrixState::effective_layout()` resolves `None` to a default `Terminal { id: None }` leaf bound to `selected_agent_id`.
+- **`MatrixState`** — the container; indexes by group, builds slugs, cascades deletes, enforces reserved lanes, emits deltas on every mutation. Owns `selected_agent_id`, `content_layout`, `panel_active`, the per-group board view-state maps, plus the memory entry map.
 
 ## Delta op catalog
 
@@ -183,7 +205,10 @@ ui_update            focus_update        panel_update
 schedule_upsert      schedule_remove
 weaver_settings_update   weaver_worklog_append
 events_update
+memory_upsert        memory_remove
 ```
+
+`ui_update` is the catch-all for UI-state changes — it carries one or more of `{ selected_agent_id, panel_active, content_layout, board_filters_by_group, board_saved_views_by_group, board_lane_sorts_by_group, board_card_density_by_group }` per emit.
 
 Each mutation on `MatrixState` emits one or more of these; `drain_deltas()` hands them to the bus as `{type: "delta", seq: N, ops: [...]}`.
 
@@ -195,7 +220,24 @@ Each mutation on `MatrixState` emits one or more of these; `drain_deltas()` hand
 - **PTY integration** — `loom-pty/tests/spawn.rs` spawns real `/bin/sh`.
 - **FFI smoke** — `loom-ghostty::ffi::ffi_smoke::symbols_linked` proves the linker resolved `ghostty_app_new` / `surface_new` etc.
 
-82 tests total, all green.
+120 tests total, all green. (See [`STATUS.md`](STATUS.md) for the per-crate breakdown.)
+
+### Race-prone tests
+
+Three test races are gated by process-wide mutexes. **Add to the lock if you mutate the same shared state in a new test:**
+
+- `loom-core::config::tests::ENV_LOCK` — gates anything that mutates `LOOM_DEFAULT_CMD` or `LOOM_INSTALL_DIR`.
+- `loom-server::tests::actions::ENV_LOCK` — gates anything that mutates `LOOM_PROJECT_ROOT`.
+- `loom-ghostty::ffi::tests::SURFACES_LOCK` — gates anything that touches the process-wide `SURFACES` map.
+
+Tests that need to set env vars or share global state should follow the pattern:
+```rust
+let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+std::env::set_var("FOO", "bar");
+// ...test body...
+```
+
+For `loom-server::tests::actions` (async), the lock is `tokio::sync::Mutex` — `let _g = env_lock().await;` at the top of each `#[tokio::test]`.
 
 ## Build procedure, condensed
 

@@ -93,19 +93,46 @@ For subclassing `NSView` you need `type Mutability = mutability::MainThreadOnly;
 ### T15. Release builds of libghostty are required
 `-Doptimize=ReleaseFast` is not optional. Debug builds produce a `libghostty.a` so large (~400 MB+) it chokes linker, and takes forever to build.
 
+### T16. Layout-rebuild signature short-circuit
+The content area's reconcile pass walks the layout tree and rebuilds nested NSSplitViews on each tick. Naively rebuilding every 500 ms breaks GhosttyView (re-parenting churns the surface, focus jumps, visible flicker). Fix: compute a JSON signature of `{ layout, selected_agent_id }` per tick and skip rebuild when unchanged. The `agent_id → CachedAgent` map keeps `Retained<GhosttyView>` alive across rebuilds, so terminals keep their PTYs + scrollback when the layout *does* change.
+
+### T17. Two terminal-spawn paths must not race
+A UI-attached agent has its PTY owned by libghostty's `Surface`. If `dispatch_task` falls through to `LocalPtyBackend::spawn` for the same agent, you get two child processes and the prompt lands in the headless one. Fix: `UiAgentRegistry::is_attached()` is the gate; check it before any PTY spawn or write. The UI registers each `GhosttyView` it creates and unregisters on cache eviction.
+
+### T18. `tokio::sync::mpsc::UnboundedReceiver::try_recv` for sync drains
+The dispatch path queues prompts via `mpsc::unbounded_channel`. The AppKit refresh tick (sync code on the main thread) drains via `try_recv` in a loop until `Empty`. Don't reach for `recv().await` — the tick isn't async, and blocking the main thread freezes the UI.
+
+### T19. `serde_json::Map::entry` needs explicit type annotation
+`obj.entry("source_kind".into()).or_insert_with(...)` fails to infer `S: Into<String>` because both `&str` and `String` satisfy it. Use `if !obj.contains_key("source_kind") { obj.insert("source_kind".into(), ...); }` instead.
+
+### T20. NSArray in objc2 0.5 has no `iter()` method
+Iterating subviews: use `subviews.count()` + `subviews.objectAtIndex(i)`, not `for v in subviews.iter()`.
+
+### T21. NSSplitView axis semantics are flipped from intuition
+`NSSplitView::setVertical(true)` makes the *divider* vertical, which means the panes sit **side by side** (horizontal layout). Our `SplitAxis::Horizontal` (panes side by side) maps to `setVertical(true)`. Pay attention.
+
+### T22. `NSSplitView::setPosition_ofDividerAtIndex` needs bounds
+Calling this before the split view has a non-zero frame is a no-op. We compute the position from the *parent's* current bounds when applying a ratio; the next resize tick re-applies if needed.
+
+### T23. Process-wide test races — three known
+`#[test]` functions run in parallel by default. Three pre-existing tests raced because they mutate process-wide state: `LOOM_PROJECT_ROOT` (`loom-server/tests/actions.rs`), `LOOM_DEFAULT_CMD` (`loom-core/src/config.rs`), and the `SURFACES` map (`loom-ghostty/src/ffi.rs`). Each is now gated by a `static MUTEX`. New tests touching the same state must hold the same lock — see `ARCHITECTURE.md` § "Race-prone tests".
+
 ## Cleanup landmines
 
 Things that look like dead code but aren't:
 
-- `_UiState` type alias in `loom-ui-native/src/window.rs` — future state for sidebar selection. Remove only after sidebar interactivity lands.
 - `sys_types` re-export from `loom-ghostty/src/lib.rs` — the key-forwarding code in `loom-ui-native` imports from here. Don't inline it.
 - `ghostty_config_t` in `GhosttyApp` — don't drop before `ghostty_app` because `ghostty_app_free` references the config internally.
+- `CachedAgent.rx` in `loom-ui-native::appkit` — read on every refresh tick via `try_recv`. Removing it breaks UI-attached dispatch silently.
+- `UiAgentRegistry` field on `AppState` — looks unused in tests that pass `Default::default()`, but the dispatch path checks `ctx.ui_agents.is_attached()` on every call. If you delete it, headless dispatch still works but real UI dispatch goes through the wrong path.
 
 ## Known regressions / rough edges
 
 - **No mouse support.** `mouseDown:`/`mouseMoved:`/`scrollWheel:` are not wired. Text selection in the terminal doesn't work.
 - **No clipboard.** Cmd+C / Cmd+V in the terminal pane isn't wired — the clipboard callbacks are stubs.
-- **Sidebar is read-only.** NSTextView dump. No click-to-select, no drag-drop, no context menu. Will become an NSOutlineView.
-- **Hardcoded `/bin/zsh`.** The content area unconditionally spawns a shell. Tying GhosttyView lifecycle to sidebar selection is the next real piece of UI work.
-- **No dispatch integration with GhosttyView.** The dispatch path spawns a separate `loom-pty` process (for non-UI flows) but doesn't feed the GhosttyView for UI flows yet.
-- **Engine's `tasks_dispatched` counter increments even without a real agent.** `dispatch_task` currently can't tell whether the target agent is UI-hosted or PTY-only.
+- **Sidebar is read-only.** NSTextView dump. No click-to-select, no drag-drop, no context menu. Will become an NSOutlineView. `select_agent` is dispatchable via HTTP today; that's the workaround.
+- **Non-terminal panels render as placeholders.** Board, Actions, Memory, Weaver, Context, Events, Templates show a single-line hint until each one's native renderer lands. The layout machinery, persistence, and command surface are all in place — only the per-panel views are missing.
+- **No drag-to-split / close-pane / pane keyboard shortcuts.** Layout has to be set programmatically via `set_layout`.
+- **`cron_expr` is stored but not fired.** The scheduler tick only fires `scheduled_at` one-shots; recurring schedules need a cron parser + `next_run_at` advancement.
+- **Memory transient-entry expiry isn't swept.** `retention_kind: "transient"` + `expires_at` are honored on read filters but no background sweep purges expired rows.
+- **`/events` HTTP receiver is scaffolded but not routed into a per-cell EventLog.** Activity badges in the sidebar are based on `ai_report` / PTY events only.

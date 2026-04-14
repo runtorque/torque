@@ -6,7 +6,9 @@ Native macOS port of the Loom daemon. Standalone spin-off product — not a drop
 
 ## Status
 
-v1 macOS scaffold is runnable. Engine (Phases 0–6), native AppKit shell (Phase 7), and libghostty embedded terminal (Phase 8) all shipped. Window opens, shell runs inside a libghostty-rendered pane, keystrokes reach the child process. 82 tests green.
+Phases 0–9 shipped. Engine + native AppKit shell + libghostty terminal + multi-pane content layout + memory / schedule / template / board view-state CRUD + 17 MCP tools + dispatch routing through the UI registry. Window opens, dispatched prompts land in the embedded terminal, layout persists across restarts, and the engine speaks 60+ commands. 120 tests green.
+
+The full per-feature inventory of what's done vs. pending is in [`FEATURES.md`](FEATURES.md).
 
 ## Requirements
 
@@ -56,12 +58,37 @@ cargo run --bin loom-app --features loom-ui-native/appkit
 Once the native UI is running, drive the engine from another terminal:
 
 ```sh
-curl -X POST http://127.0.0.1:18932/api/cmd \
+# Create a group + agent, then select it (mounts the agent's terminal in
+# the content area).
+curl -sX POST http://127.0.0.1:18932/api/cmd \
   -H 'content-type: application/json' \
   -d '{"cmd":"add_group","name":"Eng"}'
+AGENT_ID=$(curl -sX POST http://127.0.0.1:18932/api/cmd \
+  -H 'content-type: application/json' \
+  -d '{"cmd":"add_agent","name":"worker","group":"Eng","command":"/bin/zsh"}' \
+  | jq -r .agent_id)
+curl -sX POST http://127.0.0.1:18932/api/cmd \
+  -H 'content-type: application/json' \
+  -d "{\"cmd\":\"select_agent\",\"id\":\"$AGENT_ID\"}"
 ```
 
-The sidebar repaints within 500 ms.
+The sidebar marks the selection with `▶` and the right pane mounts a fresh
+libghostty terminal within 500 ms. Try a multi-pane layout:
+
+```sh
+curl -sX POST http://127.0.0.1:18932/api/cmd \
+  -H 'content-type: application/json' \
+  -d '{
+    "cmd": "set_layout",
+    "layout": {
+      "type": "split",
+      "axis": "horizontal",
+      "ratio": 0.6,
+      "first":  {"type": "leaf", "panel": {"kind": "terminal", "id": null}},
+      "second": {"type": "leaf", "panel": {"kind": "board"}}
+    }
+  }'
+```
 
 ## Workspace layout
 
