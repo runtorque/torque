@@ -271,6 +271,19 @@ function _connectEmbeddedTerminal(cell, surface) {
   _embeddedTerminal.loadAddon(_embeddedTerminalFit);
   _embeddedTerminal.open(surface);
   try { _embeddedTerminalFit.fit(); } catch (e) { /* container not measurable yet */ }
+  // Shift+Enter → send ESC+CR so TUIs like Claude Code treat it as a
+  // soft newline instead of submitting. xterm.js default maps Shift+Enter
+  // to plain `\r` (same as Enter), which submits prematurely.
+  _embeddedTerminal.attachCustomKeyEventHandler(function(e) {
+    if (e.type !== 'keydown') return true;
+    if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (_embeddedTerminalWs && _embeddedTerminalWs.readyState === WebSocket.OPEN) {
+        _embeddedTerminalWs.send(JSON.stringify({ type: 'input', data: '\x1b\r' }));
+      }
+      return false;
+    }
+    return true;
+  });
   _embeddedTerminalDataHandler = _embeddedTerminal.onData(function(data) {
     if (_embeddedTerminalWs && _embeddedTerminalWs.readyState === WebSocket.OPEN) {
       _embeddedTerminalWs.send(JSON.stringify({ type: 'input', data: data }));
