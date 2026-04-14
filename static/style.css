@@ -109,7 +109,7 @@ body.runtime-embedded #workspace-shell {
 }
 body.runtime-embedded #standalone-sidebar-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 8px var(--standalone-right-rail-width, 320px);
+  grid-template-columns: minmax(240px, 1fr) 8px var(--standalone-right-rail-width, 320px);
   grid-template-rows: minmax(0, 1fr) 8px var(--standalone-bottom-height, 280px);
   min-height: 0;
 }

@@ -7483,7 +7483,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
   assert.match(
     css,
-    /body\.runtime-embedded #standalone-sidebar-shell\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+8px\s+var\(--standalone-right-rail-width,\s*320px\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)\s+8px\s+var\(--standalone-bottom-height,\s*280px\);/s,
+    /body\.runtime-embedded #standalone-sidebar-shell\s*\{[^}]*grid-template-columns:\s*minmax\(240px,\s*1fr\)\s+8px\s+var\(--standalone-right-rail-width,\s*320px\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)\s+8px\s+var\(--standalone-bottom-height,\s*280px\);/s,
   );
   assert.match(
     css,
@@ -7556,6 +7556,32 @@ test('standalone bottom resize uses shell bounds and updates the shell height va
   assert.equal(document.getElementById('standalone-main-stack').style['--standalone-bottom-height'], undefined);
 });
 
+test('standalone right resize preserves the main stack minimum width', () => {
+  const { context, document } = createPanelHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+
+  const shell = document.getElementById('standalone-sidebar-shell');
+  shell.clientWidth = 700;
+  shell.getBoundingClientRect = () => ({ top: 20, bottom: 720, left: 0, right: 700, width: 700, height: 700 });
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+    standalonePanelResizeRight(0);
+  `);
+
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 452);
+  assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '452px');
+});
+
 test('standalone first full-state restore persists responsive defaults once', () => {
   const { context } = createStandaloneWsSyncHarness();
   context.window.innerWidth = 1400;
@@ -7598,7 +7624,7 @@ test('standalone first full-state restore persists responsive defaults once', ()
   });
 });
 
-test('standalone startup preserves persisted layouts without rewriting defaults', () => {
+test('standalone startup preserves persisted layouts by widening the sidebar when needed', () => {
   const { context, document } = createPanelHarness();
   document.body.classList.add('runtime-embedded');
   context.isEmbeddedTerminalMode = function() { return true; };
@@ -7620,7 +7646,7 @@ test('standalone startup preserves persisted layouts without rewriting defaults'
     _restorePanelState();
   `);
 
-  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 340);
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 568);
   assert.equal(context.localStorage.getItem('loom.ide.sidebar_width'), null);
   assert.equal(jsonValue(context, `sendCalls.length`), 0);
   assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout()`), {

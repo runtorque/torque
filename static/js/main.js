@@ -323,6 +323,11 @@ function _restoreStandaloneWorkspaceSidebarWidth(opts) {
   var next = (opts.forceDefault || !hasPersistedLayout)
     ? _standalonePreferredSidebarWidth()
     : _workspaceSidebarDefaultWidth;
+  if (!opts.forceDefault
+      && hasPersistedLayout
+      && typeof _standaloneMinimumShellWidthForLayout === 'function') {
+    next = Math.max(next, _standaloneMinimumShellWidthForLayout(state && state.standalone_panel_layout));
+  }
   _applyWorkspaceSidebarWidth(next);
   var shouldPersist = !!opts.persistResolved && (opts.forceDefault || !hasPersistedLayout);
   if (shouldPersist) _persistWorkspaceSidebarWidth(_workspaceSidebarWidth);
