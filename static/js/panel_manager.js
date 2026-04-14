@@ -4,7 +4,7 @@ var _standalonePanelApps = ['board', 'actions', 'templates', 'context', 'events'
 var _standalonePanelTitles = {
   board: 'Board',
   actions: 'Actions',
-  templates: 'Agents',
+  templates: 'Library',
   context: 'Context',
   events: 'Events',
   weaver: 'Weaver',

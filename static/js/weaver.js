@@ -63,16 +63,20 @@ function renderWeaverPanel() {
   var bstats = (state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null;
   var paused = !!(ws && ws.paused);
   var activeTab = _weaverActiveTab(group);
+  var emptyMessage = _weaverPanelEmptyMessage(group, ws, weaver, bstats);
 
   var html = '<div class="weaver-panel">';
 
   // Header
   html += '<div class="weaver-header">';
+  html += '<div class="weaver-header-copy">';
   html += '<span class="weaver-title">Weaver';
   if (group) html += ' — ' + _esc(group);
   html += '</span>';
+  html += '<div class="weaver-subtitle">Orchestration journal, digest queue, worklog, and session map.</div>';
+  html += '</div>';
   // Buffer stats + Pause/Resume toggle
-  if (group) {
+  if (!emptyMessage && group) {
     html += '<div class="weaver-header-right">';
     if (bstats && bstats.buffered_events > 0) {
       html += '<span class="weaver-buffer-stats">'
@@ -87,9 +91,11 @@ function renderWeaverPanel() {
   }
   html += '</div>';
 
-  html += _weaverRenderTabs(group, activeTab);
+  if (!emptyMessage) html += _weaverRenderTabs(group, activeTab);
   html += '<div class="weaver-content">';
-  if (activeTab === 'events') {
+  if (emptyMessage) {
+    html += '<div class="weaver-empty">' + _esc(emptyMessage) + '</div>';
+  } else if (activeTab === 'events') {
     html += _weaverRenderEvents(group, ws, weaver, bstats);
   } else if (activeTab === 'worklog') {
     html += _weaverRenderWorklog(group, ws);
@@ -1823,6 +1829,46 @@ function weaverToggleEvent(evt, enabled) {
 function _weaverGetSettings(group) {
   if (!group || !state.weaver_settings) return null;
   return state.weaver_settings[group] || null;
+}
+
+function _weaverPanelEmptyMessage(group, ws, weaver, bstats) {
+  if (!group) return 'Select a group to inspect Weaver orchestration state.';
+  if (_weaverHasPanelState(group, ws, weaver, bstats)) return '';
+  return 'No Weaver configured for ' + group + '. Create one from the group\'s + New menu or Group Settings -> Weaver.';
+}
+
+function _weaverHasPanelState(group, ws, weaver, bstats) {
+  if (!group) return false;
+  if (weaver) return true;
+  if (_weaverGroupHasConfiguredAgent(group)) return true;
+  if (_weaverGroupHasState(ws)) return true;
+  if (_weaverGroupHasState(bstats)) return true;
+  if (_weaverGroupStoreHasState(state.weaver_board_summary, group)) return true;
+  if (_weaverGroupStoreHasState(state.weaver_buffer_stats, group)) return true;
+  if (_weaverGroupStoreHasState(state.weaver_journal, group)) return true;
+  if (_weaverGroupStoreHasState(state.weaver_sent_events, group)) return true;
+  if (_weaverGroupStoreHasState(state.weaver_session_maps, group)) return true;
+  if (_weaverGroupStoreHasState(state.weaver_streams, group)) return true;
+  if (_weaverGroupStoreHasState(state.weaver_worklog, group)) return true;
+  return false;
+}
+
+function _weaverGroupHasConfiguredAgent(group) {
+  if (!group || !state || !state.group_settings) return false;
+  var settings = state.group_settings[group];
+  return !!(settings && settings.weaver_agent_id);
+}
+
+function _weaverGroupStoreHasState(store, group) {
+  if (!store || !group) return false;
+  return _weaverGroupHasState(store[group]);
+}
+
+function _weaverGroupHasState(value) {
+  if (value == null) return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return !!value;
 }
 
 function _weaverCurrentGroup() {

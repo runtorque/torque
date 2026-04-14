@@ -147,6 +147,14 @@ This template says:
 - do **not** create a worktree automatically
 - add one helper terminal for log tailing
 
+## Agent Library panel
+
+In the UI, templates and agent history live together in the **Agent Library** panel.
+
+- **Templates** are reusable launch presets.
+- **History** is for past agent runs and audit trails.
+- **Live agents stay in the main left column** — the library is for presets and history, not the current runtime roster.
+
 ## How templates are used
 
 Templates integrate in four places:

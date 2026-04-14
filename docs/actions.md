@@ -696,7 +696,7 @@ loom task create "Add dark mode" -a feature/implement
 
 ### From the UI
 
-The **Actions** panel (toggle with ++a++ or the panel button) provides a visual editor:
+The **Actions** panel (toggle with ++a++ or the panel button) provides a visual editor for prompt templates, pipelines, and dispatch workflows. In standalone mode it opens as a utility surface alongside the board instead of competing with the main runtime view.
 
 - **Action picker** --- dropdown with all available actions, grouped by Project and User scope
 - **Prompt editor** --- syntax-highlighted textarea with Jinja2 support

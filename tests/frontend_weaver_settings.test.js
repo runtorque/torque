@@ -49,8 +49,14 @@ function loadWeaver(context) {
   vm.runInContext(source, context, { filename });
 }
 
-test('renderWeaverPanel shows Journal and Events tabs without settings tabs', () => {
+test('renderWeaverPanel shows Journal and Events tabs without settings tabs when a Weaver is configured', () => {
   const sandbox = createSandbox();
+  sandbox.state.group_settings = {
+    alpha: { weaver_agent_id: 'weaver-alpha' },
+  };
+  sandbox.state.agents = {
+    'weaver-alpha': { id: 'weaver-alpha', group: 'alpha', name: 'Weaver' },
+  };
   const panel = {
     innerHTML: '',
     querySelector() { return null; },
@@ -535,5 +541,6 @@ test('renderWeaverPanel uses the focused group in multi-project workspaces', () 
   vm.runInContext('renderWeaverPanel()', context);
 
   assert.match(panel.innerHTML, /Weaver — beta/);
-  assert.match(panel.innerHTML, /No journal entries yet/);
+  assert.match(panel.innerHTML, /No Weaver configured for beta/);
+  assert.doesNotMatch(panel.innerHTML, /Weaver — alpha/);
 });

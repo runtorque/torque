@@ -2,6 +2,8 @@
 
 The task board is a Kanban-style interface for organizing work. Tasks move through lanes as agents work on them. The board integrates with [actions](actions.md) and [pipelines](actions.md#pipelines) so agents can report progress, derive follow-up tasks, and hand off work automatically.
 
+In standalone mode, the board remains the primary lower workspace while utility panels such as Events, Shared Context, Actions, Weaver, and the Agent Library open separately around it.
+
 For the day-to-day narrative from task creation through completion, start with the [Workflow Guide](workflow-guide.md).
 
 ## Lanes

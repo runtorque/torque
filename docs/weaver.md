@@ -42,6 +42,8 @@ The panel header also shows:
 - time until the next digest push
 - a pause/resume toggle for event delivery
 
+In standalone mode, the **Board** remains the default lower workspace. Open **Weaver** when you need orchestration detail, journal context, or the deterministic session map.
+
 When event delivery is paused, Loom keeps buffering matching events for that Weaver instead of dropping them. Resuming delivery flushes the buffered events in order, so pausing is safe even during busy boards.
 
 ### Group Settings → Weaver

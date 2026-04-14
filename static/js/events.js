@@ -321,14 +321,23 @@ function renderEvents() {
   var html = '';
 
   // Header
+  var grp = _eventsCurrentGroup();
+  var scopeLabel = grp
+    ? 'Attention inbox and recent activity for ' + grp
+    : 'Attention inbox and recent activity across Loom';
   html += '<div class="events-header">';
-  html += '<span class="events-header-title">Events</span>';
+  html += '<div class="events-header-copy">';
+  html += '<div class="events-header-title">Events</div>';
+  html += '<div class="events-header-subtitle">' + esc(scopeLabel) + '</div>';
+  html += '</div>';
+  html += '<div class="events-header-actions">';
   html += '<select class="events-kind-filter" onchange="eventsSetKindFilter(this.value)">';
   html += '<option value="all"' + (_eventsKindFilter === 'all' ? ' selected' : '') + '>All</option>';
   html += '<option value="errors"' + (_eventsKindFilter === 'errors' ? ' selected' : '') + '>Errors</option>';
   html += '<option value="tasks"' + (_eventsKindFilter === 'tasks' ? ' selected' : '') + '>Tasks</option>';
   html += '<option value="lifecycle"' + (_eventsKindFilter === 'lifecycle' ? ' selected' : '') + '>Lifecycle</option>';
   html += '</select>';
+  html += '</div>';
   html += '</div>';
   html += '<div class="events-search-row">';
   html += '<input class="events-search-input" type="text" placeholder="Search events\u2026"'
@@ -344,11 +353,11 @@ function renderEvents() {
   }
   var attCount = attention.length;
   html += '<div class="events-attention">';
-  html += '<div class="events-attention-heading">Attention'
+  html += '<div class="events-attention-heading">Attention inbox'
     + (attCount > 0 ? ' <span class="events-attention-count">' + attCount + '</span>' : '')
     + '</div>';
   if (attention.length === 0) {
-    html += '<div class="events-attention-empty">No items need attention</div>';
+    html += '<div class="events-attention-empty">No items need attention in this view.</div>';
   } else {
     for (var i = 0; i < attention.length; i++) {
       html += _renderAttentionCard(attention[i]);
@@ -359,7 +368,6 @@ function renderEvents() {
   // Log section
   html += '<div class="events-log">';
   var events = (state && state.panel_events) || [];
-  var grp = _eventsCurrentGroup();
   var count = 0;
   var lastDateLabel = '';
   for (var j = events.length - 1; j >= 0 && count < 200; j--) {
@@ -375,7 +383,7 @@ function renderEvents() {
     count++;
   }
   if (count === 0) {
-    html += '<div class="events-log-empty">No events yet</div>';
+    html += '<div class="events-log-empty">No recent events in this view yet.</div>';
   }
   if (_eventsLoading) {
     html += '<div class="events-loading">Loading\u2026</div>';
