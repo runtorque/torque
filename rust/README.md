@@ -1,73 +1,108 @@
 # Loom (Rust)
 
-Rust port of the Loom daemon. Standalone spin-off product — not a drop-in replacement for the Python daemon. See [`PLAN.md`](PLAN.md) for the full implementation plan.
+Native macOS port of the Loom daemon. Standalone spin-off product — not a drop-in replacement for Python Loom.
+
+**Read before diving in**: [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`DECISIONS.md`](DECISIONS.md) · [`STATUS.md`](STATUS.md) · [`PLAN.md`](PLAN.md)
 
 ## Status
 
-Under active development. Phases 0–6 (engine, actions, worktree, dispatch, MCP) aim for feature parity with Python Loom minus iTerm2 integration. Phases 7 (Tauri UI) and 8 (libghostty terminals) are the new-product layer.
+v1 macOS scaffold is runnable. Engine (Phases 0–6), native AppKit shell (Phase 7), and libghostty embedded terminal (Phase 8) all shipped. Window opens, shell runs inside a libghostty-rendered pane, keystrokes reach the child process. 82 tests green.
 
-## Toolchain
+## Requirements
 
-- Rust 1.78+ (stable channel — pinned in `rust-toolchain.toml`).
-- macOS 13+ (Apple Silicon or Intel).
-- `git` 2.35+ on `$PATH` (for shell-out paths in `loom-worktree`).
-- **Phase 8 only**: Zig 0.13+ for building vendored libghostty. Install via `brew install zig`.
+- macOS 13+
+- **Full Xcode** (not just Command Line Tools) — see [`DECISIONS.md` T6](DECISIONS.md#t6-xcode-full-install-is-required-not-just-command-line-tools)
+- **Metal Toolchain**: `sudo xcodebuild -downloadComponent MetalToolchain`
+- Rust stable (currently 1.94)
+- Zig 0.15.2: `brew install zig`
+- `git` 2.35+
 
-## Build
+## One-time setup
+
+```sh
+# Clone Ghostty source + build libghostty
+cd rust/third_party
+git clone --depth 20 https://github.com/ghostty-org/ghostty.git
+cd ghostty
+TOOLCHAINS=Metal zig build -Demit-xcframework=true \
+  -Dxcframework-target=native -Doptimize=ReleaseFast
+
+# Stage artifacts where loom-ghostty's build.rs looks for them
+cd ..
+mkdir -p ghostty-build/{lib,include}
+cp -R ghostty/include/. ghostty-build/include/
+cp "$(find ghostty/.zig-cache -name libghostty-fat.a | head -1)" \
+   ghostty-build/lib/libghostty.a
+```
+
+Details + troubleshooting: [`third_party/README.md`](third_party/README.md).
+
+## Running
 
 ```sh
 cd rust/
-cargo build                 # debug
-cargo build --release       # release
-cargo test --workspace      # all tests
-cargo clippy --workspace -- -D warnings
-cargo fmt --check
+
+# All tests
+cargo test --workspace
+
+# Headless engine only — HTTP on 127.0.0.1:18932
+# (Use LOOM_PORT=28932 to avoid clash with Python Loom daemon)
+cargo run --bin loom-app
+
+# Full native UI + embedded libghostty terminal
+cargo run --bin loom-app --features loom-ui-native/appkit
 ```
 
-## Run the engine (headless, no UI)
+Once the native UI is running, drive the engine from another terminal:
 
 ```sh
-cargo run --bin loom-app -- --headless
+curl -X POST http://127.0.0.1:18932/api/cmd \
+  -H 'content-type: application/json' \
+  -d '{"cmd":"add_group","name":"Eng"}'
 ```
 
-Listens on `http://127.0.0.1:18932` for the existing `bin/loom` CLI, Claude Code hooks, and MCP.
+The sidebar repaints within 500 ms.
 
 ## Workspace layout
 
 ```
-crates/
-├── loom-core/       State, delta ops, SQLite persistence, event bus
-├── loom-actions/    YAML action loading + minijinja rendering
-├── loom-worktree/   Git worktree + checkpoint + merge detection
-├── loom-pty/        PTY spawning and I/O via portable-pty
-├── loom-adapters/   Claude Code / Codex / Gemini / generic agent adapters
-├── loom-weaver/     MCP handler, weaver, task-health, hints
-├── loom-server/     Axum HTTP/WS server + command dispatcher
-├── loom-ghostty/    libghostty FFI bindings + terminal view bridge (Phase 8)
-└── loom-app/        Main binary — wires the engine and UI shell
+crates/loom-core/       State, delta ops, SQLite persistence, event bus
+crates/loom-actions/    YAML action loading + minijinja rendering
+crates/loom-worktree/   Git worktree + checkpoint + merge detection
+crates/loom-pty/        portable-pty backend (non-UI / headless)
+crates/loom-adapters/   Claude Code / Codex / Gemini / generic agent adapters
+crates/loom-weaver/     Weaver / MCP tool specs / task health (scaffolded)
+crates/loom-server/     axum HTTP/WS + command dispatcher + MCP + scheduler
+crates/loom-ghostty/    libghostty FFI + GhosttyApp + Surface wrappers
+crates/loom-ui-native/  AppKit window + GhosttyView (feature = "appkit")
+crates/loom-app/        Main binary — wires engine + UI
 ```
 
-Each crate has its own `src/` + unit tests. Integration tests live alongside the crate that owns the flow under test.
-
-## Testing philosophy
-
-- **Unit tests** per crate, colocated with the module they cover.
-- **Golden-file tests** for action rendering: every `.loom/actions/*.yaml` fixture renders to a stored expected output.
-- **Integration tests** for server command parity — run real axum handlers against an in-memory sqlite DB.
-- The existing Python test suite under `../tests/` is the source of truth for behavior; port a Rust equivalent per phase.
-
 ## Data locations
-
-New app uses its own paths (no collision with Python Loom):
 
 - SQLite DB: `~/Library/Application Support/Loom/loom.db`
 - Attachments: `~/Library/Application Support/Loom/attachments/`
 - Logs: `~/Library/Application Support/Loom/loom.log`
 
-The `bin/loom` CLI needs a minor patch to discover this new path. That change lives on the CLI side and is tracked separately.
+Override with `LOOM_INSTALL_DIR=/some/path`.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `DarwinSdkNotFound` on `zig build` | Command Line Tools only | Install full Xcode ([`DECISIONS.md` T6](DECISIONS.md#t6-xcode-full-install-is-required-not-just-command-line-tools)) |
+| `cannot execute tool 'metal'` | Missing Metal Toolchain | `sudo xcodebuild -downloadComponent MetalToolchain` |
+| `metal --version` fails after install | Toolchain is in cryptex mount | Prefix builds with `TOOLCHAINS=Metal` ([T8](DECISIONS.md#t8-toolchainsmetal-for-the-zig-build)) |
+| `Undefined symbols: _TISCopyCurrentKeyboardLayoutInputSource` | Carbon framework missing | See `loom-ghostty/build.rs` — should be listed |
+| `Address already in use (os error 48)` on port 18932 | Python Loom daemon running | `LOOM_PORT=28932 cargo run ...` |
+| `libghostty not staged` panic during `cargo build` | Did not stage the `.a` | Re-run one-time setup above |
+| Terminal renders but keystrokes don't reach shell | Using `ghostty_surface_text` instead of `ghostty_surface_key` | See [`DECISIONS.md` T5](DECISIONS.md#t5-ghostty_surface_text-vs-ghostty_surface_key--dont-confuse) |
 
 ## What does NOT port
 
-- `loom/bridge.py` — iTerm2 SDK adapter. Replaced by `loom-ghostty` + `loom-pty`.
-- `loom/keybindings.py` — iTerm2 global key bindings. Replaced by Tauri global-shortcut plugin in Phase 7.
-- `loom/desktop.py` — the Python desktop launcher. Replaced by the `loom-app` binary.
+From Python Loom:
+
+- `loom/bridge.py` (iTerm2 SDK) — replaced by `loom-ghostty` + embedded terminal.
+- `loom/keybindings.py` (iTerm2 global bindings) — replaced by `NSMenuItem` key equivalents.
+- `webview.html` + `static/js/*` — the JS frontend. Not ported. Native UI is rebuilt in AppKit.
+- `loom/desktop.py` (Python desktop launcher) — replaced by `loom-app` binary.
