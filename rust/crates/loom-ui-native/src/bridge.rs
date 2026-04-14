@@ -99,6 +99,7 @@ impl EngineBridge {
                 board_tasks: st.board_tasks.values().cloned().collect(),
                 global_default_command: st.global_settings.default_command.clone(),
                 selected_agent_id: st.selected_agent_id.clone(),
+                content_layout: st.effective_layout(),
             }
         })
     }
@@ -117,6 +118,8 @@ pub struct MatrixStateSnapshot {
     /// `GlobalSettings.default_command` — empty if unset.
     pub global_default_command: String,
     pub selected_agent_id: Option<String>,
+    /// Effective content-area layout (already resolved through default).
+    pub content_layout: loom_core::state::LayoutNode,
 }
 
 impl MatrixStateSnapshot {

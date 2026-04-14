@@ -31,9 +31,15 @@ Panel values in Python: `board`, `actions`, `templates`, `context`, `events`, `w
 
 - [x] NSWindow + menubar (Quit Cmd-Q) — `loom-ui-native/src/appkit.rs`
 - [x] NSSplitView with sidebar + content container
-- [ ] Multi-pane tileable grid (nested NSSplitViews, persistable layout, panel-kind enum)
-- [ ] Drag-to-split panes / close-pane affordance
-- [ ] Window-level keyboard shortcuts (`Cmd+1…9` to focus pane N, `Cmd+W` close pane, `Cmd+D` split right, `Cmd+Shift+D` split down)
+- [x] Multi-pane tileable grid scaffold:
+  - [x] `PanelKind` enum (Terminal, Board, Actions, Memory, Events, Templates, Context, Weaver, Placeholder)
+  - [x] `LayoutNode` tree (Leaf | Split { axis, ratio, first, second })
+  - [x] `set_layout` / `standalone_set_panel_layout` command, persisted in `ui_state`
+  - [x] Recursive NSSplitView builder in AppKit; rebuilds only when layout signature changes (preserves PTY identity via `agent_id → GhosttyView` cache)
+  - [x] Per-leaf default text for non-terminal panels (until each native panel lands)
+  - [ ] Drag-to-split / drag-to-resize panes, close-pane affordance
+  - [ ] Window-level keyboard shortcuts (`Cmd+1…9` to focus pane N, `Cmd+W` close pane, `Cmd+D` split right, `Cmd+Shift+D` split down)
+  - [ ] Drag-from-sidebar to mount a cell into a chosen pane
 
 ### Sidebar (groups + agents tree)
 
@@ -190,7 +196,7 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 - [x] `board_set_saved_views`
 - [x] `board_set_lane_sorts`
 - [x] `board_set_card_density`
-- [ ] `standalone_set_panel_layout` (multi-pane grid layout descriptor — ties into UI §0)
+- [x] `set_layout` / `standalone_set_panel_layout` (multi-pane grid layout descriptor)
 
 ### Actions + templates
 - [x] `list_actions`

@@ -173,6 +173,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "board_reorder_lanes" => board::reorder_lanes(ctx, req).await,
         "board_verify_task" => board::verify_task(ctx, req).await,
         "board_set_panel" => board::set_panel(ctx, req).await,
+        "set_layout" | "standalone_set_panel_layout" => board::set_layout(ctx, req).await,
         "board_set_filters" => board::set_filters(ctx, req).await,
         "board_set_saved_views" => board::set_saved_views(ctx, req).await,
         "board_set_lane_sorts" => board::set_lane_sorts(ctx, req).await,

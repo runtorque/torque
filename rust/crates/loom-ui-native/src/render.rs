@@ -149,6 +149,7 @@ mod tests {
             board_tasks: vec![],
             global_default_command: String::new(),
             selected_agent_id: None,
+            content_layout: Default::default(),
         }
     }
 
@@ -174,6 +175,7 @@ mod tests {
             board_tasks: vec![],
             global_default_command: String::new(),
             selected_agent_id: None,
+            content_layout: Default::default(),
         };
         let text = render_sidebar(&snap);
         assert!(text.contains("▸ Eng"));
@@ -207,6 +209,7 @@ mod tests {
             board_tasks: tasks,
             global_default_command: String::new(),
             selected_agent_id: None,
+            content_layout: Default::default(),
         };
         let text = render_content(&snap);
         assert!(text.contains("Open tasks (25)"));
@@ -231,6 +234,7 @@ mod tests {
             board_tasks: vec![],
             global_default_command: String::new(),
             selected_agent_id: Some("a1".into()),
+            content_layout: Default::default(),
         };
         let text = render_sidebar(&snap);
         assert!(text.contains("▶"), "expected selected marker, got: {text}");
@@ -261,6 +265,7 @@ mod tests {
             board_tasks: vec![],
             global_default_command: String::new(),
             selected_agent_id: None,
+            content_layout: Default::default(),
         };
         let text = render_sidebar(&snap);
         let parent_line = text.lines().find(|l| l.contains("Parent")).unwrap();
@@ -291,6 +296,7 @@ mod tests {
             board_tasks: vec![done, archived, open],
             global_default_command: String::new(),
             selected_agent_id: None,
+            content_layout: Default::default(),
         };
         let text = render_content(&snap);
         assert!(text.contains("open task"));

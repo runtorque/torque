@@ -898,6 +898,90 @@ pub struct MemoryLink {
 }
 
 // ---------------------------------------------------------------------------
+// Multi-pane content layout
+// ---------------------------------------------------------------------------
+
+/// Identifies which kind of panel a leaf in the content layout hosts. The UI
+/// renders one view per kind. `Terminal` is the only kind currently rendered
+/// as a real surface; other kinds (board / actions / weaver / etc) show a
+/// placeholder until those panels are ported.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PanelKind {
+    /// Selected-agent terminal — falls back to `selected_agent_id` if `id` is
+    /// `None`. Use `id: Some(...)` to pin a specific agent's terminal to a pane.
+    Terminal { id: Option<String> },
+    Board,
+    Actions,
+    Memory,
+    Events,
+    Templates,
+    Context { agent_id: Option<String> },
+    Weaver { group: Option<String> },
+    /// Empty pane — shown as the placeholder hint text.
+    Placeholder,
+}
+
+impl Default for PanelKind {
+    fn default() -> Self {
+        // Default content area: the currently selected agent's terminal (or
+        // placeholder if none selected).
+        PanelKind::Terminal { id: None }
+    }
+}
+
+/// Tree of nested splits that defines the content area layout. Leaves are
+/// `PanelKind`s; inner nodes split horizontally or vertically.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LayoutNode {
+    Leaf {
+        panel: PanelKind,
+    },
+    Split {
+        axis: SplitAxis,
+        /// Position of the divider as a fraction in [0, 1]. The UI clamps.
+        ratio: f64,
+        first: Box<LayoutNode>,
+        second: Box<LayoutNode>,
+    },
+}
+
+impl Default for LayoutNode {
+    fn default() -> Self {
+        LayoutNode::Leaf { panel: PanelKind::default() }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SplitAxis {
+    /// Children laid out left-to-right (a vertical divider).
+    Horizontal,
+    /// Children laid out top-to-bottom (a horizontal divider).
+    Vertical,
+}
+
+impl LayoutNode {
+    /// Walk the leaves left-to-right / top-to-bottom.
+    pub fn leaves(&self) -> Vec<&PanelKind> {
+        let mut out = Vec::new();
+        self.collect(&mut out);
+        out
+    }
+
+    fn collect<'a>(&'a self, out: &mut Vec<&'a PanelKind>) {
+        match self {
+            LayoutNode::Leaf { panel } => out.push(panel),
+            LayoutNode::Split { first, second, .. } => {
+                first.collect(out);
+                second.collect(out);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // MatrixState
 // ---------------------------------------------------------------------------
 
@@ -942,6 +1026,10 @@ pub struct MatrixState {
 
     // UI state (persisted)
     pub selected_agent_id: Option<String>,
+    /// Content-area layout tree. `None` means "fall back to a single Terminal
+    /// leaf bound to `selected_agent_id` (or Placeholder if unset)" — the
+    /// default behavior for users who haven't customized the layout.
+    pub content_layout: Option<LayoutNode>,
 
     // Delta accumulator
     delta_ops: Vec<DeltaOp>,
@@ -985,6 +1073,7 @@ impl MatrixState {
             weaver_worklog: HashMap::new(),
             memory_entries: HashMap::new(),
             selected_agent_id: None,
+            content_layout: None,
             delta_ops: Vec::new(),
             seq: 0,
         }
@@ -1240,6 +1329,28 @@ impl MatrixState {
         self.emit_group(&group);
         self.clear_selection_if_removed(&removed);
         Ok(removed)
+    }
+
+    /// Replace the content-area layout tree. Pass `None` to clear and fall
+    /// back to the default single-Terminal layout.
+    pub fn set_layout(&mut self, layout: Option<LayoutNode>) {
+        self.content_layout = layout.clone();
+        let payload = match &layout {
+            Some(l) => serde_json::to_value(l).unwrap_or(serde_json::Value::Null),
+            None => serde_json::Value::Null,
+        };
+        self.emit(DeltaOp::UiUpdate(serde_json::json!({
+            "content_layout": payload,
+        })));
+    }
+
+    /// Resolve the effective layout: returns the customized layout if set,
+    /// otherwise a default Leaf(Terminal { id: None }) which the UI binds
+    /// to `selected_agent_id`.
+    pub fn effective_layout(&self) -> LayoutNode {
+        self.content_layout
+            .clone()
+            .unwrap_or_default()
     }
 
     /// Set (or clear) the UI's selected agent. `None` deselects.
@@ -1613,6 +1724,86 @@ mod tests {
 
         s.remove_group("Eng").unwrap();
         assert!(s.selected_agent_id.is_none());
+    }
+
+    #[test]
+    fn layout_default_is_single_terminal_leaf() {
+        let l = LayoutNode::default();
+        assert!(matches!(
+            l,
+            LayoutNode::Leaf {
+                panel: PanelKind::Terminal { id: None }
+            }
+        ));
+        assert_eq!(l.leaves().len(), 1);
+    }
+
+    #[test]
+    fn layout_split_serializes_with_axis_and_ratio() {
+        let split = LayoutNode::Split {
+            axis: SplitAxis::Horizontal,
+            ratio: 0.5,
+            first: Box::new(LayoutNode::Leaf { panel: PanelKind::Board }),
+            second: Box::new(LayoutNode::Leaf {
+                panel: PanelKind::Terminal { id: Some("a1".into()) },
+            }),
+        };
+        let v = serde_json::to_value(&split).unwrap();
+        assert_eq!(v["type"], "split");
+        assert_eq!(v["axis"], "horizontal");
+        assert_eq!(v["first"]["type"], "leaf");
+        assert_eq!(v["first"]["panel"]["kind"], "board");
+        assert_eq!(v["second"]["panel"]["kind"], "terminal");
+        assert_eq!(v["second"]["panel"]["id"], "a1");
+    }
+
+    #[test]
+    fn layout_leaves_walk_in_order() {
+        let l = LayoutNode::Split {
+            axis: SplitAxis::Vertical,
+            ratio: 0.6,
+            first: Box::new(LayoutNode::Leaf { panel: PanelKind::Board }),
+            second: Box::new(LayoutNode::Split {
+                axis: SplitAxis::Horizontal,
+                ratio: 0.5,
+                first: Box::new(LayoutNode::Leaf { panel: PanelKind::Memory }),
+                second: Box::new(LayoutNode::Leaf {
+                    panel: PanelKind::Terminal { id: Some("a1".into()) },
+                }),
+            }),
+        };
+        let leaves = l.leaves();
+        assert_eq!(leaves.len(), 3);
+        assert!(matches!(leaves[0], PanelKind::Board));
+        assert!(matches!(leaves[1], PanelKind::Memory));
+        assert!(matches!(
+            leaves[2],
+            PanelKind::Terminal { id: Some(s) } if s == "a1"
+        ));
+    }
+
+    #[test]
+    fn set_layout_emits_ui_update_delta() {
+        let mut s = MatrixState::new();
+        s.set_layout(Some(LayoutNode::Leaf { panel: PanelKind::Board }));
+        let (_, ops) = s.drain_deltas().unwrap();
+        let v = serde_json::to_value(&ops[0]).unwrap();
+        assert_eq!(v["op"], "ui_update");
+        assert_eq!(v["content_layout"]["type"], "leaf");
+        assert_eq!(v["content_layout"]["panel"]["kind"], "board");
+    }
+
+    #[test]
+    fn set_layout_none_emits_null() {
+        let mut s = MatrixState::new();
+        s.set_layout(Some(LayoutNode::Leaf { panel: PanelKind::Memory }));
+        s.drain_deltas();
+
+        s.set_layout(None);
+        let (_, ops) = s.drain_deltas().unwrap();
+        let v = serde_json::to_value(&ops[0]).unwrap();
+        assert_eq!(v["op"], "ui_update");
+        assert!(v["content_layout"].is_null());
     }
 
     #[test]

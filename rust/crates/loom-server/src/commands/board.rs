@@ -356,6 +356,35 @@ pub async fn verify_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     Ok(json!({ "ok": true, "task_id": task.id }))
 }
 
+/// Replace the content-area layout tree. Payload `{ "layout": <node> }`
+/// (or `{ "layout": null }` to clear and fall back to the single-Terminal
+/// default). Persisted to `ui_state[content_layout]`.
+pub async fn set_layout(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let node_value = req.get("layout").cloned().unwrap_or(Value::Null);
+
+    let layout: Option<loom_core::state::LayoutNode> = if node_value.is_null() {
+        None
+    } else {
+        let parsed = serde_json::from_value(node_value)
+            .map_err(|e| CmdError::BadRequest(format!("invalid layout: {e}")))?;
+        Some(parsed)
+    };
+
+    {
+        let mut st = ctx.state.lock().await;
+        st.set_layout(layout.clone());
+    }
+
+    let stored = match &layout {
+        Some(l) => serde_json::to_string(l)
+            .map_err(|e| CmdError::BadRequest(format!("encode: {e}")))?,
+        None => String::new(),
+    };
+    ctx.db.set_ui_state("content_layout", &stored).await?;
+    flush(ctx).await;
+    Ok(json!({ "ok": true }))
+}
+
 /// Set the active panel in the UI (one of `board`, `actions`, `templates`,
 /// `context`, `events`, `weaver`, `memory`, etc). Persisted to `ui_state` and
 /// broadcast via a `ui_update` delta so other WS clients (e.g. the Python

@@ -581,6 +581,21 @@ impl LoomDb {
                 state.panel_active = v;
             }
 
+            let layout: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM ui_state WHERE key = 'content_layout'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(s) = layout {
+                if !s.is_empty() {
+                    if let Ok(node) = serde_json::from_str::<crate::state::LayoutNode>(&s) {
+                        state.content_layout = Some(node);
+                    }
+                }
+            }
+
             // Per-group board view state — each is a JSON-encoded map.
             for (key, target) in [
                 ("board_filters_by_group", "filters"),

@@ -298,6 +298,63 @@ async fn memory_publish_rejects_oversize_content() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+async fn set_layout_persists_and_is_idempotent() {
+    let (addr, state, db) = spawn().await;
+
+    let layout = json!({
+        "type": "split",
+        "axis": "horizontal",
+        "ratio": 0.6,
+        "first": {"type": "leaf", "panel": {"kind": "board"}},
+        "second": {
+            "type": "split",
+            "axis": "vertical",
+            "ratio": 0.5,
+            "first": {"type": "leaf", "panel": {"kind": "memory"}},
+            "second": {"type": "leaf", "panel": {"kind": "terminal", "id": null}}
+        }
+    });
+    let v = post(addr, json!({"cmd": "set_layout", "layout": layout.clone()})).await;
+    assert_eq!(v["ok"], true, "response: {v:?}");
+
+    {
+        let st = state.lock().await;
+        let stored = st.content_layout.as_ref().expect("layout should be set");
+        // 3 leaves: board, memory, terminal.
+        assert_eq!(stored.leaves().len(), 3);
+    }
+
+    // Persisted: a fresh load sees the same layout.
+    let reloaded = db.load_all().await.unwrap();
+    assert!(reloaded.content_layout.is_some());
+    assert_eq!(reloaded.content_layout.unwrap().leaves().len(), 3);
+
+    // Clear via null payload.
+    let v = post(addr, json!({"cmd": "set_layout", "layout": null})).await;
+    assert_eq!(v["ok"], true);
+    {
+        let st = state.lock().await;
+        assert!(st.content_layout.is_none());
+    }
+    let reloaded = db.load_all().await.unwrap();
+    assert!(reloaded.content_layout.is_none());
+}
+
+#[tokio::test]
+async fn set_layout_rejects_invalid_payload() {
+    let (addr, _, _) = spawn().await;
+    let v = post(
+        addr,
+        json!({
+            "cmd": "set_layout",
+            "layout": {"type": "leaf", "panel": "not-an-object"}
+        }),
+    )
+    .await;
+    assert!(v["error"].as_str().is_some(), "expected validation error, got: {v:?}");
+}
+
+#[tokio::test]
 async fn board_view_state_persists_per_group() {
     let (addr, state, db) = spawn().await;
     post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;

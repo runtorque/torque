@@ -126,5 +126,7 @@ async fn build_snapshot_locked(
         "tasks": tasks,
         "global_settings": st.global_settings,
         "selected_agent_id": st.selected_agent_id,
+        "content_layout": st.content_layout,
+        "panel_active": st.panel_active,
     })
 }

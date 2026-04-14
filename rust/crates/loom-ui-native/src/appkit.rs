@@ -27,6 +27,7 @@ use anyhow::Result;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{declare_class, msg_send_id, mutability, sel, ClassType, DeclaredClass};
+use loom_core::state::{LayoutNode, PanelKind, SplitAxis};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSBackingStoreType,
     NSBorderType, NSColor, NSFont, NSMenu, NSMenuItem, NSScrollView, NSSplitView,
@@ -78,13 +79,10 @@ pub fn run(engine: AppState) -> Result<()> {
 struct Views {
     window: Retained<NSWindow>,
     sidebar_tv: Retained<NSTextView>,
-    /// Container for the active content. Exactly one child at a time: either a
-    /// `GhosttyView` (agent selected) or `placeholder_scroll` (nothing
-    /// selected).
+    /// Container for the active content tree. Children are rebuilt by
+    /// `reconcile_content` whenever the layout signature changes; cached
+    /// GhosttyView instances survive across rebuilds via `ContentState.cache`.
     content_container: Retained<NSView>,
-    /// Shown when no agent is selected.
-    placeholder_scroll: Retained<NSScrollView>,
-    placeholder_tv: Retained<NSTextView>,
 }
 
 fn build_window(mtm: MainThreadMarker) -> Views {
@@ -135,14 +133,6 @@ fn build_window(mtm: MainThreadMarker) -> Views {
         v
     };
 
-    // Placeholder (shown when nothing is selected).
-    let placeholder_scroll = make_scroll_view(mtm, content_frame);
-    let placeholder_tv = make_text_view(mtm, content_frame);
-    unsafe {
-        placeholder_tv.setString(&NSString::from_str(render::initial_content_placeholder()));
-        placeholder_scroll.setDocumentView(Some(&placeholder_tv));
-    }
-
     unsafe {
         split.addSubview(&sidebar_scroll);
         split.addSubview(&content_container);
@@ -153,8 +143,6 @@ fn build_window(mtm: MainThreadMarker) -> Views {
         window,
         sidebar_tv,
         content_container,
-        placeholder_scroll,
-        placeholder_tv,
     }
 }
 
@@ -229,15 +217,16 @@ fn install_menubar(app: &NSApplication, mtm: MainThreadMarker) {
 // ---------------------------------------------------------------------------
 
 /// Holds per-window UI state that mutates across refresh ticks:
-/// which agent's GhosttyView is currently mounted, the cache of
-/// `agent_id → GhosttyView`, and the pending-text receivers that the engine
-/// pushes dispatch prompts into.
+/// the cache of `agent_id → GhosttyView` (preserves PTYs across layout
+/// rebuilds), and a signature of the currently-mounted layout so we only
+/// rebuild when the tree actually changed.
 struct ContentState {
-    current_mounted: Option<String>,
+    /// Snapshot of the layout that's currently mounted. When the next tick's
+    /// computed signature differs, we wipe + rebuild.
+    current_signature: Option<String>,
     cache: HashMap<String, CachedAgent>,
-    /// True the first tick — forces us to mount whatever matches selection
-    /// (including placeholder) even if `current_mounted == selection` (both
-    /// None at init).
+    /// True the first tick — forces an initial mount even if the layout
+    /// signature happens to match `None`.
     first_tick: bool,
 }
 
@@ -251,11 +240,23 @@ struct CachedAgent {
 impl ContentState {
     fn new() -> Self {
         Self {
-            current_mounted: None,
+            current_signature: None,
             cache: HashMap::new(),
             first_tick: true,
         }
     }
+}
+
+/// Compact textual signature for a layout — used to skip rebuilds when the
+/// snapshot's tree hasn't actually changed. We include `selected_agent_id`
+/// because `Terminal { id: None }` panes bind to it, so a selection change
+/// affects which view a leaf renders.
+fn layout_signature(layout: &LayoutNode, selected: &Option<String>) -> String {
+    serde_json::to_string(&serde_json::json!({
+        "layout": layout,
+        "selected": selected,
+    }))
+    .unwrap_or_default()
 }
 
 fn tick(mtm: MainThreadMarker, bridge: &EngineBridge, views: &Views, state: &RefCell<ContentState>) {
@@ -309,34 +310,105 @@ fn reconcile_content(
         st.cache.remove(id);
     }
 
-    let desired: Option<String> = snapshot
-        .selected_agent_id
-        .as_ref()
-        .filter(|id| snapshot.agents.iter().any(|a| &a.id == *id))
-        .cloned();
-
-    if !st.first_tick && st.current_mounted == desired {
+    // Skip rebuild when the layout (and dependent selection) hasn't changed.
+    let signature = layout_signature(&snapshot.content_layout, &snapshot.selected_agent_id);
+    if !st.first_tick && st.current_signature.as_deref() == Some(signature.as_str()) {
         return;
     }
     st.first_tick = false;
+    st.current_signature = Some(signature);
 
-    // Remove whatever's currently mounted in the container.
+    // Wipe the container and rebuild from the layout tree. Cached GhosttyView
+    // instances are reused, so terminals keep their PTYs + scrollback; only
+    // the NSView hierarchy gets reassembled.
     remove_container_children(&views.content_container);
+    build_layout_into(
+        mtm,
+        bridge,
+        snapshot,
+        &snapshot.content_layout,
+        &views.content_container,
+        &mut *st,
+    );
 
-    match &desired {
-        Some(agent_id) => {
-            // Get-or-create GhosttyView for this agent.
-            if !st.cache.contains_key(agent_id) {
-                let Some(agent) = snapshot.find_agent(agent_id) else {
-                    // race: snapshot changed between the lookup above and
-                    // here. Show placeholder and bail.
-                    mount_placeholder(views);
-                    st.current_mounted = None;
-                    return;
-                };
+    // Focus the selected agent's terminal, if it ended up in the tree.
+    if let Some(sel) = &snapshot.selected_agent_id {
+        if let Some(cached) = st.cache.get(sel) {
+            let gv: &NSView = &**cached.view;
+            let _ = views.window.makeFirstResponder(Some(gv));
+        }
+    }
+}
+
+/// Recursively assemble the layout tree as nested NSSplitViews under
+/// `parent`. Each leaf becomes either a GhosttyView (for terminals) or a
+/// placeholder NSScrollView (for panels not yet ported).
+fn build_layout_into(
+    mtm: MainThreadMarker,
+    bridge: &EngineBridge,
+    snapshot: &MatrixStateSnapshot,
+    node: &LayoutNode,
+    parent: &NSView,
+    state: &mut ContentState,
+) {
+    match node {
+        LayoutNode::Leaf { panel } => {
+            mount_panel_into(mtm, bridge, snapshot, panel, parent, state);
+        }
+        LayoutNode::Split { axis, ratio, first, second } => {
+            let split = make_split_for_axis(mtm, parent, *axis);
+            unsafe {
+                parent.addSubview(&split);
+            }
+            // Build the two subviews into intermediate containers — keeps the
+            // recursion type-uniform (always an NSView host).
+            let first_host = make_pane_host(mtm);
+            let second_host = make_pane_host(mtm);
+            unsafe {
+                split.addSubview(&first_host);
+                split.addSubview(&second_host);
+            }
+            build_layout_into(mtm, bridge, snapshot, first, &first_host, state);
+            build_layout_into(mtm, bridge, snapshot, second, &second_host, state);
+
+            // Apply the ratio after both panes are attached. NSSplitView
+            // measures off the parent's frame; setPosition is a no-op until
+            // it has bounds, so we also schedule a follow-up layout pass.
+            apply_split_ratio(&split, *axis, *ratio, parent);
+        }
+    }
+}
+
+fn mount_panel_into(
+    mtm: MainThreadMarker,
+    bridge: &EngineBridge,
+    snapshot: &MatrixStateSnapshot,
+    panel: &PanelKind,
+    parent: &NSView,
+    state: &mut ContentState,
+) {
+    match panel {
+        PanelKind::Terminal { id } => {
+            // Resolve which agent this terminal renders. `None` binds to
+            // `selected_agent_id`.
+            let agent_id = id
+                .clone()
+                .or_else(|| snapshot.selected_agent_id.clone());
+            let Some(agent_id) = agent_id else {
+                mount_placeholder_into(parent, render::initial_content_placeholder());
+                return;
+            };
+            let Some(agent) = snapshot.find_agent(&agent_id) else {
+                mount_placeholder_into(parent, &format!("agent {agent_id} not found"));
+                return;
+            };
+
+            // Get-or-create the GhosttyView for this agent + register the
+            // dispatch channel with the engine.
+            if !state.cache.contains_key(&agent_id) {
                 let command = resolve_command(agent, &snapshot.global_default_command);
                 let cwd = resolve_cwd(agent);
-                let frame = container_frame(&views.content_container);
+                let frame = container_frame(parent);
                 let gv = GhosttyView::new(mtm, frame, command, cwd);
                 unsafe {
                     gv.setAutoresizingMask(
@@ -344,37 +416,121 @@ fn reconcile_content(
                             | NSAutoresizingMaskOptions::NSViewHeightSizable,
                     );
                 }
-                // Register with the engine so dispatch routes prompts here.
                 let rx = bridge.ui_agents().register(agent_id.clone());
-                st.cache
+                state
+                    .cache
                     .insert(agent_id.clone(), CachedAgent { view: gv, rx });
             }
-            let cached = st.cache.get(agent_id).unwrap();
-            let gv_as_view: &NSView = &**cached.view;
+            let cached = state.cache.get(&agent_id).unwrap();
+            let gv: &NSView = &**cached.view;
             unsafe {
-                gv_as_view.setFrame(container_frame(&views.content_container));
-                views.content_container.addSubview(gv_as_view);
-                // Make the surface key — typing into the terminal just works.
-                let _ = views.window.makeFirstResponder(Some(gv_as_view));
+                gv.setFrame(container_frame(parent));
+                parent.addSubview(gv);
             }
         }
-        None => mount_placeholder(views),
+        PanelKind::Placeholder => mount_placeholder_into(parent, "Empty pane"),
+        PanelKind::Board => mount_placeholder_into(parent, "[Board panel — pending native UI]"),
+        PanelKind::Actions => {
+            mount_placeholder_into(parent, "[Actions panel — pending native UI]")
+        }
+        PanelKind::Memory => {
+            mount_placeholder_into(parent, "[Memory panel — pending native UI]")
+        }
+        PanelKind::Events => {
+            mount_placeholder_into(parent, "[Events panel — pending native UI]")
+        }
+        PanelKind::Templates => {
+            mount_placeholder_into(parent, "[Templates panel — pending native UI]")
+        }
+        PanelKind::Context { agent_id } => {
+            let label = match agent_id {
+                Some(id) => format!("[Context: agent {id} — pending native UI]"),
+                None => "[Context — pending native UI]".to_string(),
+            };
+            mount_placeholder_into(parent, &label);
+        }
+        PanelKind::Weaver { group } => {
+            let label = match group {
+                Some(g) => format!("[Weaver: {g} — pending native UI]"),
+                None => "[Weaver — pending native UI]".to_string(),
+            };
+            mount_placeholder_into(parent, &label);
+        }
     }
-
-    st.current_mounted = desired;
 }
 
-fn mount_placeholder(views: &Views) {
+fn make_pane_host(mtm: MainThreadMarker) -> Retained<NSView> {
     unsafe {
-        views.placeholder_scroll.setFrame(container_frame(&views.content_container));
-        views
-            .content_container
-            .addSubview(&views.placeholder_scroll);
-        // Refresh the placeholder text on every remount — cheap + keeps it
-        // accurate if the hint text ever changes.
-        views
-            .placeholder_tv
-            .setString(&NSString::from_str(render::initial_content_placeholder()));
+        let alloc = mtm.alloc::<NSView>();
+        let v = NSView::initWithFrame(
+            alloc,
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(100.0, 100.0)),
+        );
+        v.setAutoresizingMask(
+            NSAutoresizingMaskOptions::NSViewWidthSizable
+                | NSAutoresizingMaskOptions::NSViewHeightSizable,
+        );
+        v
+    }
+}
+
+fn make_split_for_axis(
+    mtm: MainThreadMarker,
+    parent: &NSView,
+    axis: SplitAxis,
+) -> Retained<NSSplitView> {
+    unsafe {
+        let alloc = mtm.alloc::<NSSplitView>();
+        let split = NSSplitView::initWithFrame(alloc, container_frame(parent));
+        // NSSplitView::vertical = true means the *divider* is vertical (panes
+        // sit side by side, i.e. horizontal layout).
+        split.setVertical(matches!(axis, SplitAxis::Horizontal));
+        split.setDividerStyle(NSSplitViewDividerStyle::Thin);
+        split.setAutoresizingMask(
+            NSAutoresizingMaskOptions::NSViewWidthSizable
+                | NSAutoresizingMaskOptions::NSViewHeightSizable,
+        );
+        split
+    }
+}
+
+fn apply_split_ratio(
+    split: &NSSplitView,
+    axis: SplitAxis,
+    ratio: f64,
+    parent: &NSView,
+) {
+    let bounds = parent.bounds();
+    let total = match axis {
+        SplitAxis::Horizontal => bounds.size.width,
+        SplitAxis::Vertical => bounds.size.height,
+    };
+    if total <= 0.0 {
+        // No bounds yet — let NSSplitView default to even split until the
+        // next resize tick.
+        return;
+    }
+    let r = ratio.clamp(0.05, 0.95);
+    let pos = total * r;
+    unsafe {
+        split.setPosition_ofDividerAtIndex(pos, 0);
+    }
+}
+
+/// Mount a placeholder NSScrollView+NSTextView with the given hint into
+/// `parent`. Used both for the no-selection state and for panel kinds whose
+/// native UI hasn't been built yet.
+fn mount_placeholder_into(parent: &NSView, hint: &str) {
+    let mtm = MainThreadMarker::new()
+        .expect("placeholder mounting must be called on main thread");
+    let frame = container_frame(parent);
+    let scroll = make_scroll_view(mtm, frame);
+    let tv = make_text_view(mtm, frame);
+    unsafe {
+        tv.setString(&NSString::from_str(hint));
+        scroll.setDocumentView(Some(&tv));
+        scroll.setFrame(frame);
+        parent.addSubview(&scroll);
     }
 }
 
