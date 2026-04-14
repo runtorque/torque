@@ -7495,7 +7495,7 @@ test('standalone shell owns the full-width bottom dock rows and drag selector', 
   );
   assert.match(
     css,
-    /body\.runtime-embedded\.standalone-panel-dragging #standalone-bottom-dock,\s*body\.runtime-embedded\.standalone-panel-dragging #standalone-right-rail,\s*body\.runtime-embedded\.standalone-panel-dragging #standalone-float-layer\s*\{/s,
+    /body\.runtime-embedded\.standalone-panel-dragging #standalone-bottom-dock,\s*body\.runtime-embedded\.standalone-panel-dragging #standalone-right-rail\s*\{/s,
   );
 });
 
@@ -8073,6 +8073,47 @@ test('standalone pointer drag moves a panel without native drag events', () => {
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'context');
   assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs`), ['actions']);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-board', 'panel-context']);
+  assert.equal(document.body.classList.contains('standalone-panel-dragging'), false);
+});
+
+test('standalone pointer drag ignores releases outside dock targets', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context', 'actions'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  document.elementFromPoint = function() {
+    return document.getElementById('standalone-main-stack');
+  };
+
+  context.standalonePanelPointerDragStart({
+    button: 0,
+    clientX: 720,
+    clientY: 120,
+  }, 'context');
+  document.listeners.mousemove({
+    clientX: 420,
+    clientY: 240,
+    preventDefault() {},
+  });
+  document.listeners.mouseup({
+    clientX: 420,
+    clientY: 240,
+    preventDefault() {},
+  });
+
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board']);
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs`), ['context', 'actions']);
+  assert.equal(jsonValue(context, `Object.keys(_standalonePanelCurrentLayout().floats).length`), 0);
   assert.equal(document.body.classList.contains('standalone-panel-dragging'), false);
 });
 

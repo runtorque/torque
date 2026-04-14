@@ -521,14 +521,12 @@ function _makeStandaloneNode(tag, classNames, text) {
 function _standaloneZoneTab(app, active) {
   var btn = _makeStandaloneNode('button', 'standalone-panel-tab' + (active ? ' active' : ''), _standalonePanelTitle(app));
   btn.dataset.app = app;
-  btn.draggable = true;
+  btn.draggable = false;
   btn.onclick = function(event) {
     if (_standaloneConsumeSuppressedPanelClick(event)) return;
     _standaloneSelectPanel(app);
   };
   btn.onmousedown = function(event) { standalonePanelPointerDragStart(event, app); };
-  btn.ondragstart = function(event) { standalonePanelDragStart(event, app); };
-  btn.ondragend = function() { standalonePanelDragEnd(); };
   return btn;
 }
 
@@ -703,12 +701,11 @@ function _standaloneConsumeSuppressedPanelClick(event) {
 function _standaloneDropTargetElement(zoneName) {
   if (zoneName === 'bottom') return document.getElementById('standalone-bottom-dock');
   if (zoneName === 'right') return document.getElementById('standalone-right-rail');
-  if (zoneName === 'float') return document.getElementById('standalone-float-layer');
   return null;
 }
 
 function _standaloneSetDragTarget(zoneName) {
-  ['bottom', 'right', 'float'].forEach(function(name) {
+  ['bottom', 'right'].forEach(function(name) {
     var el = _standaloneDropTargetElement(name);
     if (el && el.classList) el.classList.toggle('drag-target', name === zoneName);
   });
@@ -719,14 +716,22 @@ function _standaloneDropTargetZoneForElement(el) {
   while (node) {
     if (node.id === 'standalone-bottom-dock') return 'bottom';
     if (node.id === 'standalone-right-rail') return 'right';
-    if (node.id === 'standalone-float-layer') return 'float';
     node = node.parentNode || null;
   }
   return '';
 }
 
 function _standaloneDropTargetZoneAtPoint(clientX, clientY) {
-  if (!document || typeof document.elementFromPoint !== 'function') return '';
+  if (!document) return '';
+  if (typeof document.elementsFromPoint === 'function') {
+    var stack = document.elementsFromPoint(clientX, clientY) || [];
+    for (var i = 0; i < stack.length; i++) {
+      var zoneName = _standaloneDropTargetZoneForElement(stack[i]);
+      if (zoneName) return zoneName;
+    }
+    return '';
+  }
+  if (typeof document.elementFromPoint !== 'function') return '';
   return _standaloneDropTargetZoneForElement(document.elementFromPoint(clientX, clientY));
 }
 
