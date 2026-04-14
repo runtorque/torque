@@ -1,5 +1,6 @@
 //! Dispatch, send_text, broadcast, and ai_report.
 
+use std::path::Path;
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -7,6 +8,27 @@ use serde_json::{json, Value};
 use loom_actions::context::LoomContextBuilder;
 
 use super::{flush, ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
+
+/// Install provider-specific hooks, MCP config, and slash-command skills into
+/// `working_dir` for the adapter that matches `boot_command`. Best-effort —
+/// failures are logged and don't block dispatch, matching Python parity.
+async fn install_provider_integration(working_dir: &Path, boot_command: &str) {
+    let Some(provider) = loom_adapters::detect_by_command(boot_command) else {
+        return;
+    };
+    let Some(adapter) = loom_adapters::get_adapter(provider) else {
+        return;
+    };
+    if let Err(err) = adapter.install_hooks(working_dir).await {
+        tracing::warn!(?err, ?working_dir, provider, "install_hooks failed");
+    }
+    if let Err(err) = adapter.install_mcp_config(working_dir).await {
+        tracing::warn!(?err, ?working_dir, provider, "install_mcp_config failed");
+    }
+    if let Err(err) = adapter.install_skills(working_dir).await {
+        tracing::warn!(?err, ?working_dir, provider, "install_skills failed");
+    }
+}
 
 // ---------------------------------------------------------------------------
 // dispatch_task
@@ -101,6 +123,28 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
             Err(other) => return Err(CmdError::BadRequest(other.to_string())),
         }
     };
+
+    // Provider-specific hook install. Runs before the prompt is sent so the
+    // hooks are in place the moment the agent boots (or, for a re-dispatch,
+    // so any port change is reflected). Idempotent + best-effort.
+    {
+        let (cmd, cwd) = {
+            let st = ctx.state.lock().await;
+            st.agents
+                .get(&target_agent_id)
+                .map(|a| (a.command.clone(), a.directory.clone()))
+                .unwrap_or_default()
+        };
+        if !cwd.is_empty() {
+            let resolved_cmd = if cmd.is_empty() {
+                loom_core::config::default_command()
+            } else {
+                cmd
+            };
+            let dir = std::path::PathBuf::from(&cwd);
+            install_provider_integration(&dir, &resolved_cmd).await;
+        }
+    }
 
     // Route: if the agent is UI-attached (a GhosttyView is mounted for it),
     // send through the UI registry — Ghostty owns that agent's PTY. Otherwise

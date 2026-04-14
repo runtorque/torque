@@ -63,13 +63,35 @@ pub trait AgentAdapter: Send + Sync {
         Vec::new()
     }
 
-    /// Install any hooks this provider needs into `settings_dir`.
-    async fn install_hooks(&self, _settings_dir: &std::path::Path) -> anyhow::Result<()> {
+    /// Install any hooks this provider needs. `working_dir` is the agent's
+    /// working directory — config files land under `<working_dir>/.claude/`
+    /// and `<working_dir>/.mcp.json`.
+    async fn install_hooks(&self, _working_dir: &std::path::Path) -> anyhow::Result<()> {
         Ok(())
     }
 
     /// Remove previously-installed hooks.
-    async fn uninstall_hooks(&self, _settings_dir: &std::path::Path) -> anyhow::Result<()> {
+    async fn uninstall_hooks(&self, _working_dir: &std::path::Path) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// Register the Loom MCP server with the provider so the agent can call
+    /// `loom_*` tools (progress, done, memory, etc).
+    async fn install_mcp_config(&self, _working_dir: &std::path::Path) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn uninstall_mcp_config(&self, _working_dir: &std::path::Path) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    /// Install provider-specific slash-command shortcuts (Claude Code skills,
+    /// Codex commands, ...).
+    async fn install_skills(&self, _working_dir: &std::path::Path) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn uninstall_skills(&self, _working_dir: &std::path::Path) -> anyhow::Result<()> {
         Ok(())
     }
 }

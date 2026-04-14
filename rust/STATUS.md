@@ -32,7 +32,7 @@ cargo run --bin loom-app --features loom-ui-native/appkit     # native window
 - **Memory engine** — `MemoryEntry` + `MemoryLink` model, scope-filtered list (group, scope_kind, scope_ref, entry_type, task_id, pinned_only, linked_target_kind/ref, search). Pinned entries sort first, then durable, then newest.
 - **Worktree engine** (`loom-worktree`) — git2 diff + git worktree/checkpoint/rollback shell-out, merge detection.
 - **PTY engine** (`loom-pty`) — `portable-pty` via `/bin/sh -c`. Spawn/write/resize/close tested.
-- **Dispatch + ai_report** — create/reuse agents, render action prompts with full `loom.*` context, spawn PTY, update task + agent state. Now routes through `UiAgentRegistry` first: if an agent is UI-attached (a `GhosttyView` is mounted for it), text goes through the registry channel into the existing Ghostty PTY — no duplicate spawn.
+- **Dispatch + ai_report** — create/reuse agents, render action prompts with full `loom.*` context, spawn PTY, update task + agent state. Now routes through `UiAgentRegistry` first: if an agent is UI-attached (a `GhosttyView` is mounted for it), text goes through the registry channel into the existing Ghostty PTY — no duplicate spawn. Before text is sent, `dispatch_task` runs provider-specific integration install (hooks + MCP + skills) against the agent's working directory — idempotent, merges with any existing user config, deduped by `/events` URL marker across port changes. Claude Code is the only adapter with a non-trivial implementation today.
 - **MCP handler** on `/mcp` — initialize, tools/list, tools/call. **17 tools wired**: `loom_progress|done|ready|blocked|error|ask|context|derive|verify|name|reply` plus `loom_memory_publish|list|read|pin|unpin|link`. Memory tools auto-stamp `source_kind/source_id/source_name` from the calling agent.
 - **Cron scheduler** — 15s tick, fires `scheduled_at` tasks. CRUD commands manage `Schedule` rows; `schedule_run` bypasses the tick.
 - **Native UI** (`loom-ui-native`):
@@ -52,14 +52,14 @@ cargo run --bin loom-app --features loom-ui-native/appkit     # native window
 ```
 loom-core:        50 unit tests  (+6 dock: DockEdges/DockRatios/effective_dock_layout/set_dock_edge/set_dock_ratios)
 loom-actions:     13 unit tests
-loom-adapters:     2 unit tests
+loom-adapters:    13 unit tests  (+11 claude_code: hooks/MCP/skills install + dedupe + uninstall)
 loom-ghostty:      3 unit tests
 loom-pty:          1 integration (spawns /bin/sh)
 loom-server:      52 integration across 7 files
 loom-worktree:     1 unit test
 loom-ui-native:   25 unit tests  (render + bridge + sidebar tree + board tree + board columns)
 -------------------------------------
-total:           137 passing, 0 failing
+total:           147 passing, 0 failing
 ```
 
 Three pre-existing parallel-test races were fixed earlier: `LOOM_PROJECT_ROOT` (actions tests), `LOOM_DEFAULT_CMD` (config tests), ghostty `SURFACES` map (ffi tests). Each gated with a process-wide mutex.
@@ -139,7 +139,6 @@ Commands present in Python Loom but not yet in Rust (see [`FEATURES.md`](FEATURE
 - **Artifacts/uploads**: `task_upload_artifact`, `remove_attachment`, the multipart handler.
 - **Events**: per-cell `EventLog` ring buffer, `get_events`, `events_dismiss`, throttled broadcast.
 - **Adapters**: full event parsing + activity inference (Python is ~1.4k LOC, Rust crates are stubs).
-- **Claude Code hook install** on dispatch.
 - **Native panel renderers**: Actions (incl. Pipelines view), Memory, Weaver, Context, Events, Templates — placeholders today. Sidebar + Board shipped in phases 10 + 11.
 - **Archived-lane toggle** on the Board — `build_board_columns` already excludes Archived; need a reveal affordance (e.g. a toggle button above the columns).
 - **Drag-to-redock panels** — today re-docking is via each panel's `…` popup menu. No VSCode-style zone drop indicators yet.
@@ -148,11 +147,10 @@ Commands present in Python Loom but not yet in Rust (see [`FEATURES.md`](FEATURE
 
 Roughly ordered for highest user-visible impact first:
 
-1. **Claude Code hook install** on dispatch — `.claude/settings.local.json` merge so dispatched agents can `ai_report` back end-to-end.
-2. **Adapter event parsing** — port `claude_code` HTTP hook handling; populate the per-cell Events log; surface activity badges in the sidebar.
-3. **Actions panel** — native form editor for `.loom/actions/*.yaml` (next most-used panel after Board). Mountable via `dock_panel { zone: right, ... }` or inside the center grid.
-4. **Archived-lane toggle** on the Board.
-5. **Pane keyboard shortcuts + drag-from-sidebar** — Cmd+D / Cmd+Shift+D / Cmd+W + dragging a sidebar row onto a pane to mount its terminal.
-6. **Weaver** — stand up `loom-weaver` (event buffer, digest, hints, session map) and the 34 MCP tools. Big chunk; do incrementally.
-7. **Mouse + clipboard in GhosttyView** — `mouseDown/Moved/scrollWheel:` → `ghostty_surface_mouse_*`; clipboard callbacks for Cmd-C/Cmd-V.
-8. **Linux UI** (deferred until Mac is steady) — `loom-ui-linux` crate consuming the same `EngineBridge`.
+1. **Adapter event parsing** — port `claude_code` HTTP hook handling; populate the per-cell Events log; surface activity badges in the sidebar. (Hooks now install — `/events` receives real payloads but still routes to the scaffolded `parse_hook` stub, not the full Python event taxonomy.)
+2. **Actions panel** — native form editor for `.loom/actions/*.yaml` (next most-used panel after Board). Mountable via `dock_panel { zone: right, ... }` or inside the center grid.
+3. **Archived-lane toggle** on the Board.
+4. **Pane keyboard shortcuts + drag-from-sidebar** — Cmd+D / Cmd+Shift+D / Cmd+W + dragging a sidebar row onto a pane to mount its terminal.
+5. **Weaver** — stand up `loom-weaver` (event buffer, digest, hints, session map) and the 34 MCP tools. Big chunk; do incrementally.
+6. **Mouse + clipboard in GhosttyView** — `mouseDown/Moved/scrollWheel:` → `ghostty_surface_mouse_*`; clipboard callbacks for Cmd-C/Cmd-V.
+7. **Linux UI** (deferred until Mac is steady) — `loom-ui-linux` crate consuming the same `EngineBridge`.

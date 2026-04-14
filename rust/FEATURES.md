@@ -439,12 +439,14 @@ All not-started. Full list:
 - [ ] Conflict analysis (`check_conflicts`)
 
 ### Adapters (`loom-adapters`)
-- [~] `claude_code.rs` — 57 lines (stub)
+- [~] `claude_code.rs` — hooks/MCP/skills install + uninstall shipped; event parsing still minimal
 - [~] `codex.rs` — 22 lines (stub)
 - [~] `gemini.rs` — 15 lines (stub)
 - [~] `generic.rs` — 15 lines (stub)
 - [ ] Full event parsing + activity inference (Python: ~1.4k LOC combined)
-- [ ] Hook install / uninstall (.claude/settings.local.json merge)
+- [x] Hook install / uninstall (.claude/settings.local.json merge, URL-marker dedupe across port changes)
+- [x] MCP config install (`.mcp.json` merge with `${LOOM_PORT:-18932}` interpolation)
+- [x] Slash-command skills install (`.claude/skills/loom-status|loom-board|loom-done`)
 - [ ] Session resume (`claude --resume`)
 - [ ] MCP config install (Codex path)
 
@@ -503,7 +505,9 @@ All not-started. Full list:
 - [ ] Add Rust daemon's install dir to `get_state_local()` fallback paths
 
 ### Claude Code integration
-- [ ] `.claude/settings.local.json` hook install on dispatch
+- [x] `.claude/settings.local.json` hook install on dispatch (9 events, SessionStart command + HTTP for the rest)
+- [x] `.mcp.json` auto-registers Loom MCP server on dispatch
+- [x] `.claude/skills/` auto-installs `loom-status` / `loom-board` / `loom-done` slash commands
 - [ ] Session ID persistence for `claude --resume`
 - [ ] `/events` hook receiver — currently scaffolded but not routed into `EventLog`
 
