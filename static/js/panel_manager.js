@@ -22,6 +22,7 @@ var _standalonePanelLayout = null;
 var _standalonePanelSyncing = false;
 var _standalonePanelDragApp = '';
 var _standalonePanelFloatDrag = null;
+var _standalonePanelRoots = {};
 
 function _standalonePanelsEnabled() {
   return typeof isEmbeddedTerminalMode === 'function' && isEmbeddedTerminalMode();
@@ -33,6 +34,42 @@ function _standalonePanelRootId(app) {
 
 function _standalonePanelTitle(app) {
   return _standalonePanelTitles[app] || app;
+}
+
+function _standalonePanelParkingHost() {
+  return document.getElementById('bottom-panel');
+}
+
+function _standaloneRememberPanelRoot(app, root) {
+  if (!app || !root) return null;
+  _standalonePanelRoots[app] = root;
+  return root;
+}
+
+function _standalonePanelRoot(app) {
+  if (_standalonePanelRoots[app]) return _standalonePanelRoots[app];
+  return _standaloneRememberPanelRoot(app, document.getElementById(_standalonePanelRootId(app)));
+}
+
+function _standaloneCapturePanelRoots() {
+  var roots = {};
+  for (var i = 0; i < _standalonePanelApps.length; i++) {
+    var app = _standalonePanelApps[i];
+    roots[app] = _standalonePanelRoot(app);
+  }
+  return roots;
+}
+
+function _standaloneParkPanelRoots(roots, placed) {
+  var parkingHost = _standalonePanelParkingHost();
+  if (!parkingHost) return;
+  for (var i = 0; i < _standalonePanelApps.length; i++) {
+    var app = _standalonePanelApps[i];
+    var panelRoot = roots && roots[app];
+    if (!panelRoot || (placed && placed[app])) continue;
+    _appendPanelRoot(parkingHost, panelRoot);
+    _setPanelHidden(panelRoot, true);
+  }
 }
 
 function _standaloneLayoutBool(value, fallback) {
@@ -435,7 +472,7 @@ function _standaloneZoneTab(app, active) {
   return btn;
 }
 
-function _standaloneBuildZone(zoneName, rootEl) {
+function _standaloneBuildZone(zoneName, rootEl, roots, placed) {
   if (!rootEl) return;
   var layout = _standalonePanelCurrentLayout();
   var zone = layout[zoneName];
@@ -477,9 +514,10 @@ function _standaloneBuildZone(zoneName, rootEl) {
 
   for (var j = 0; j < zone.tabs.length; j++) {
     var app = zone.tabs[j];
-    var panelRoot = document.getElementById(_standalonePanelRootId(app));
+    var panelRoot = (roots && roots[app]) || _standalonePanelRoot(app);
     if (!panelRoot) continue;
     _appendPanelRoot(body, panelRoot);
+    if (placed) placed[app] = true;
     _setPanelHidden(panelRoot, !(zone.open && app === zone.active));
   }
 }
@@ -500,7 +538,7 @@ function _standaloneFloatHeader(app) {
   return header;
 }
 
-function _standaloneBuildFloats(layer) {
+function _standaloneBuildFloats(layer, roots, placed) {
   if (!layer) return;
   _clearElement(layer);
   layer.ondragover = standalonePanelFloatDragOver;
@@ -522,9 +560,10 @@ function _standaloneBuildFloats(layer) {
     shell.appendChild(_standaloneFloatHeader(app));
     var body = _makeStandaloneNode('div', 'standalone-float-body');
     shell.appendChild(body);
-    var panelRoot = document.getElementById(_standalonePanelRootId(app));
+    var panelRoot = (roots && roots[app]) || _standalonePanelRoot(app);
     if (panelRoot) {
       _appendPanelRoot(body, panelRoot);
+      if (placed) placed[app] = true;
       _setPanelHidden(panelRoot, false);
     }
     layer.appendChild(shell);
@@ -541,14 +580,17 @@ function _standaloneRenderPanelWorkspace() {
   var railHandle = document.getElementById('standalone-rail-resize-handle');
   if (!bottomRoot || !rightRoot || !shell || !stack || !layer) return;
 
+  var panelRoots = _standaloneCapturePanelRoots();
+  var placedRoots = {};
   var layout = _standalonePanelCurrentLayout();
   _setStyleVar(stack, '--standalone-bottom-height', (layout.bottom.open && layout.bottom.active ? layout.bottom.size : 0) + 'px');
   _setStyleVar(shell, '--standalone-right-rail-width', (layout.right.open && layout.right.active ? layout.right.size : 0) + 'px');
   if (bottomHandle && bottomHandle.classList) bottomHandle.classList.toggle('collapsed', !(layout.bottom.open && layout.bottom.active));
   if (railHandle && railHandle.classList) railHandle.classList.toggle('collapsed', !(layout.right.open && layout.right.active));
-  _standaloneBuildZone('bottom', bottomRoot);
-  _standaloneBuildZone('right', rightRoot);
-  _standaloneBuildFloats(layer);
+  _standaloneBuildZone('bottom', bottomRoot, panelRoots, placedRoots);
+  _standaloneBuildZone('right', rightRoot, panelRoots, placedRoots);
+  _standaloneBuildFloats(layer, panelRoots, placedRoots);
+  _standaloneParkPanelRoots(panelRoots, placedRoots);
   _standaloneUpdateTaskbarButtons();
 }
 
