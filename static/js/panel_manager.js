@@ -637,7 +637,7 @@ function _standaloneRenderPanelWorkspace() {
   var panelRoots = _standaloneCapturePanelRoots();
   var placedRoots = {};
   var layout = _standalonePanelCurrentLayout();
-  _setStyleVar(stack, '--standalone-bottom-height', (layout.bottom.open && layout.bottom.active ? layout.bottom.size : 0) + 'px');
+  _setStyleVar(shell, '--standalone-bottom-height', (layout.bottom.open && layout.bottom.active ? layout.bottom.size : 0) + 'px');
   _setStyleVar(shell, '--standalone-right-rail-width', (layout.right.open && layout.right.active ? layout.right.size : 0) + 'px');
   if (bottomHandle && bottomHandle.classList) bottomHandle.classList.toggle('collapsed', !(layout.bottom.open && layout.bottom.active));
   if (railHandle && railHandle.classList) railHandle.classList.toggle('collapsed', !(layout.right.open && layout.right.active));
@@ -769,7 +769,7 @@ function _standalonePanelStopFloatDrag() {
 }
 
 function standalonePanelResizeBottom(clientY) {
-  var shell = document.getElementById('standalone-main-stack');
+  var shell = document.getElementById('standalone-sidebar-shell');
   if (!shell || !shell.getBoundingClientRect) return;
   var rect = shell.getBoundingClientRect();
   var next = rect.bottom - clientY;

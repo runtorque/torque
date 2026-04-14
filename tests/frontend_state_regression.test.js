@@ -450,10 +450,10 @@ function attachStandalonePanelDom(document) {
 
   if (shell) document.body.appendChild(shell);
   if (stack && shell) shell.appendChild(stack);
-  if (bottomHandle && stack) stack.appendChild(bottomHandle);
-  if (bottomDock && stack) stack.appendChild(bottomDock);
   if (railHandle && shell) shell.appendChild(railHandle);
   if (rightRail && shell) shell.appendChild(rightRail);
+  if (bottomHandle && shell) shell.appendChild(bottomHandle);
+  if (bottomDock && shell) shell.appendChild(bottomDock);
   if (floatLayer) document.body.appendChild(floatLayer);
   if (bottomPanel) document.body.appendChild(bottomPanel);
   if (panelResizeHandle && bottomPanel) bottomPanel.appendChild(panelResizeHandle);
@@ -7473,6 +7473,32 @@ test('panel resize bounds stay narrow by default and expand in embedded runtime'
   assert.equal(jsonValue(context, `_normalizePanelHeight(1200)`), 740);
 });
 
+test('standalone shell owns the full-width bottom dock rows and drag selector', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(
+    html,
+    /<div id="standalone-sidebar-shell">\s*<div id="standalone-main-stack">\s*<main id="main"><\/main>\s*<\/div>\s*<div id="standalone-rail-resize-handle"[^>]*><\/div>\s*<aside id="standalone-right-rail"><\/aside>\s*<div id="standalone-bottom-resize-handle"[^>]*><\/div>\s*<section id="standalone-bottom-dock"><\/section>\s*<\/div>/s,
+  );
+  assert.match(
+    css,
+    /body\.runtime-embedded #standalone-sidebar-shell\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+8px\s+var\(--standalone-right-rail-width,\s*320px\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)\s+8px\s+var\(--standalone-bottom-height,\s*280px\);/s,
+  );
+  assert.match(
+    css,
+    /body\.runtime-embedded #standalone-bottom-resize-handle\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*grid-row:\s*2;/s,
+  );
+  assert.match(
+    css,
+    /body\.runtime-embedded #standalone-bottom-dock\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*grid-row:\s*3;/s,
+  );
+  assert.match(
+    css,
+    /body\.runtime-embedded\.standalone-panel-dragging #standalone-bottom-dock,\s*body\.runtime-embedded\.standalone-panel-dragging #standalone-right-rail,\s*body\.runtime-embedded\.standalone-panel-dragging #standalone-float-layer\s*\{/s,
+  );
+});
+
 test('standalone layout restore migrates legacy panel state into bottom and right docks', () => {
   const { context, document } = createPanelHarness();
   document.body.classList.add('runtime-embedded');
@@ -7491,6 +7517,34 @@ test('standalone layout restore migrates legacy panel state into bottom and righ
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'board');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.active`), 'events');
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.open`), true);
+});
+
+test('standalone bottom resize uses shell bounds and updates the shell height var', () => {
+  const { context, document } = createPanelHarness();
+  document.body.classList.add('runtime-embedded');
+  context.isEmbeddedTerminalMode = function() { return true; };
+
+  const shell = document.getElementById('standalone-sidebar-shell');
+  const stack = document.getElementById('standalone-main-stack');
+  shell.getBoundingClientRect = () => ({ top: 20, bottom: 720, left: 0, right: 900, width: 900, height: 700 });
+  stack.getBoundingClientRect = () => ({ top: 20, bottom: 360, left: 0, right: 540, width: 540, height: 340 });
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+    standalonePanelResizeBottom(320);
+  `);
+
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.size`), 400);
+  assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-bottom-height'], '400px');
+  assert.equal(document.getElementById('standalone-main-stack').style['--standalone-bottom-height'], undefined);
 });
 
 test('standalone first full-state restore persists responsive defaults once', () => {
@@ -7915,6 +7969,59 @@ test('standalone layout ui_update keeps panel roots attached across rerenders', 
   assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
   assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions', 'panel-context']);
   assert.deepEqual(parkedStandalonePanelIds(document), ['panel-templates', 'panel-events', 'panel-weaver']);
+});
+
+test('standalone bottom-dock drop moves a panel to the shell-owned dock and preserves roots across rerenders', () => {
+  const { context, document } = createAttachedStandaloneWsSyncHarness();
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    state.standalone_panel_layout = {
+      version: 1,
+      bottom: { open: true, size: 280, tabs: ['board'], active: 'board' },
+      right: { open: true, size: 320, tabs: ['context', 'actions'], active: 'context' },
+      floats: {},
+      last_active: 'context',
+    };
+    _standalonePanelSetLayoutFromState(state.standalone_panel_layout, { fromServer: true });
+  `);
+
+  context.standalonePanelDragStart({
+    dataTransfer: {
+      setData() {},
+      effectAllowed: '',
+    },
+  }, 'context');
+  context.standalonePanelZoneDrop({
+    preventDefault() {},
+    currentTarget: document.getElementById('standalone-bottom-dock'),
+    dataTransfer: {
+      getData() { return 'context'; },
+    },
+  }, 'bottom');
+
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().bottom.tabs`), ['board', 'context']);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().bottom.active`), 'context');
+  assert.deepEqual(jsonValue(context, `_standalonePanelCurrentLayout().right.tabs`), ['actions']);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-board', 'panel-context']);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions']);
+  assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
+
+  const droppedLayout = jsonValue(context, `_standalonePanelCurrentLayout()`);
+  context._handleDelta({
+    seq: 1,
+    ops: [
+      {
+        op: 'ui_update',
+        key: 'standalone_panel_layout',
+        value: droppedLayout,
+      },
+    ],
+  });
+
+  assert.deepEqual(attachedStandalonePanelIds(document), PANEL_ROOT_IDS);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-bottom-dock'), ['panel-board', 'panel-context']);
+  assert.deepEqual(standaloneZoneBodyPanelIds(document, 'standalone-right-rail'), ['panel-actions']);
 });
 
 test('standalone persisted float restore keeps floated panel roots attached', () => {

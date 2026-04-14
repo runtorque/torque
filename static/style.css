@@ -110,12 +110,30 @@ body.runtime-embedded #workspace-shell {
 body.runtime-embedded #standalone-sidebar-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 8px var(--standalone-right-rail-width, 320px);
+  grid-template-rows: minmax(0, 1fr) 8px var(--standalone-bottom-height, 280px);
   min-height: 0;
 }
 body.runtime-embedded #standalone-main-stack {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) 8px var(--standalone-bottom-height, 280px);
+  display: flex;
   min-height: 0;
+  grid-column: 1;
+  grid-row: 1;
+}
+body.runtime-embedded #standalone-rail-resize-handle {
+  grid-column: 2;
+  grid-row: 1;
+}
+body.runtime-embedded #standalone-right-rail {
+  grid-column: 3;
+  grid-row: 1;
+}
+body.runtime-embedded #standalone-bottom-resize-handle {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+body.runtime-embedded #standalone-bottom-dock {
+  grid-column: 1 / -1;
+  grid-row: 3;
 }
 body.runtime-embedded main {
   padding: 12px 12px 10px;
@@ -2066,9 +2084,9 @@ body.runtime-embedded .standalone-float-body > #panel-weaver {
   width: 100%;
   min-height: 0;
 }
-body.runtime-embedded .standalone-panel-dragging #standalone-bottom-dock,
-body.runtime-embedded .standalone-panel-dragging #standalone-right-rail,
-body.runtime-embedded .standalone-panel-dragging #standalone-float-layer {
+body.runtime-embedded.standalone-panel-dragging #standalone-bottom-dock,
+body.runtime-embedded.standalone-panel-dragging #standalone-right-rail,
+body.runtime-embedded.standalone-panel-dragging #standalone-float-layer {
   pointer-events: auto;
 }
 #standalone-bottom-dock.drag-target,
