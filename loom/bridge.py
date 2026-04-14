@@ -43,6 +43,15 @@ class ITerm2Adapter:
         self.on_session_terminated = None  # async callback(cell)
         self.on_terminal_disconnected = None  # async callback(cell) — auto-remove
         self.on_terminal_output = None  # async callback(cell_id, session_id, text)
+        # Short-lived app cache. Rapid focus clicks each used to pay the
+        # full iterm2.async_get_app round-trip + window/tab/session scan.
+        # 150ms is well below human click cadence but long enough to
+        # coalesce bursts (e.g. focus_session + update_session in the
+        # same handler).
+        self._app_cache: Optional[iterm2.App] = None
+        self._app_cache_expiry: float = 0.0
+        self._app_cache_ttl: float = 0.15
+        self._app_cache_lock = asyncio.Lock()
 
     async def start(self):
         self._term_task = asyncio.create_task(self._watch_terminations())
@@ -217,7 +226,7 @@ class ITerm2Adapter:
     async def get_launch_context(self) -> TerminalLaunchContext:
         """Return the current session metadata used for launching new sessions."""
         try:
-            app = await iterm2.async_get_app(self.conn)
+            app = await self._get_app()
             win = getattr(app, "current_terminal_window", None) \
                 or getattr(app, "current_window", None)
             if not win:
@@ -308,6 +317,10 @@ class ITerm2Adapter:
                              restore_focus_to_prev_tab: bool = False):
         log.info("Creating session for %s '%s' [%s]",
                  cell.cell_type, cell.name, cell.group)
+        # Bypass the short-lived App cache here — we're about to mutate
+        # the window/tab structure and downstream callers need to see the
+        # new session.
+        self._invalidate_app_cache()
         app = await iterm2.async_get_app(self.conn)
         launch_dir = ""
         if cell.directory:
@@ -494,6 +507,8 @@ class ITerm2Adapter:
         self.state._emit_agent(cell)
         self.state._db_save_agent(cell)
         self._start_prompt_monitor(cell)
+        # New session created — let subsequent callers see it.
+        self._invalidate_app_cache()
         await self.reorder_tabs()
 
         # Restore focus when dispatch explicitly asked to preserve the user's
@@ -512,7 +527,7 @@ class ITerm2Adapter:
     async def reorder_tabs(self):
         """Keep managed tabs last in each window, ordered by group then position."""
         try:
-            app = await iterm2.async_get_app(self.conn)
+            app = await self._get_app()
 
             # Sort key: (group_idx, parent_pos, is_child, child_pos)
             # This clusters child terminals right after their parent agent.
@@ -571,9 +586,11 @@ class ITerm2Adapter:
                 await session.async_close(force=True)
             except Exception:
                 log.exception("Failed to close session %s", session_id)
+            finally:
+                self._invalidate_app_cache()
 
     async def focus_session(self, session_id: str) -> bool:
-        app = await iterm2.async_get_app(self.conn)
+        app = await self._get_app()
         for window in app.windows:
             for tab in window.tabs:
                 for session in tab.sessions:
@@ -590,7 +607,7 @@ class ITerm2Adapter:
             return
         try:
             # Update tab title
-            app = await iterm2.async_get_app(self.conn)
+            app = await self._get_app()
             for window in app.windows:
                 for tab in window.tabs:
                     if tab.current_session and \
@@ -680,6 +697,33 @@ class ITerm2Adapter:
 
     # -- Helpers ------------------------------------------------------------
 
+    async def _get_app(self):
+        """Return a short-lived cached iterm2.App handle.
+
+        ``iterm2.async_get_app`` performs an RPC round-trip and returns a
+        fresh snapshot of all windows/tabs/sessions. With a sub-second
+        cache, back-to-back calls (focus → update → broadcast) reuse the
+        same snapshot instead of re-issuing RPCs — which is the main cost
+        paid on every UI click today.
+        """
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        if self._app_cache is not None and now < self._app_cache_expiry:
+            return self._app_cache
+        async with self._app_cache_lock:
+            now = loop.time()
+            if self._app_cache is not None and now < self._app_cache_expiry:
+                return self._app_cache
+            app = await iterm2.async_get_app(self.conn)
+            self._app_cache = app
+            self._app_cache_expiry = now + self._app_cache_ttl
+            return app
+
+    def _invalidate_app_cache(self) -> None:
+        """Drop the cached App handle; next caller re-fetches."""
+        self._app_cache = None
+        self._app_cache_expiry = 0.0
+
     def _find_cell_by_session(self, session_id: str) -> AgentCell | None:
         for cell in self.state.agents.values():
             if cell.session_id == session_id:
@@ -689,7 +733,7 @@ class ITerm2Adapter:
     async def _find_session(self, session_id: str):
         if not session_id:
             return None
-        app = await iterm2.async_get_app(self.conn)
+        app = await self._get_app()
         for window in app.windows:
             for tab in window.tabs:
                 for session in tab.sessions:

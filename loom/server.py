@@ -870,6 +870,8 @@ async def _register_ready_ui_ws_client(state: MatrixState, ws,
         state._ws_clients.discard(ws)
     while True:
         payload = payload_factory()
+        if asyncio.iscoroutine(payload):
+            payload = await payload
         if not await _send_ui_ws_json(ws, payload):
             return False
         async with state._ws_clients_lock:
@@ -1482,7 +1484,15 @@ async def main(connection=None):
             "default_command": state.get_default_command(),
         }
 
-    def _state_payload() -> dict:
+    async def _state_payload() -> dict:
+        # Prefill the per-repo branch cache before state.to_dict() runs —
+        # otherwise the sync weaver-stream snapshot inside it would fork
+        # `git show-ref` per branch on the event loop, stalling the WS.
+        try:
+            from .worktree_streams import prefill_branch_exists_for_state
+            await prefill_branch_exists_for_state(state)
+        except Exception:
+            log.exception("Branch-exists prefill failed for state payload")
         return {
             "type": "state",
             "seq": state._seq,
@@ -2619,7 +2629,7 @@ async def main(connection=None):
 
             elif cmd == "resync":
                 # Client detected a sequence gap — send full snapshot
-                return _state_payload()
+                return await _state_payload()
 
             elif cmd == "add_group":
                 state.add_group(data["group"])
@@ -3986,7 +3996,11 @@ async def main(connection=None):
                 lane = data.get("lane", "") or "Backlog"
                 labels = data.get("labels", [])
                 try:
-                    imported = import_external_ticket(
+                    # `import_external_ticket` may shell out to the `gh`
+                    # CLI for GitHub tickets (sync subprocess.run). Offload
+                    # it to a thread so the event loop keeps serving the UI.
+                    imported = await asyncio.to_thread(
+                        import_external_ticket,
                         data.get("ref", ""),
                         provider=data.get("provider", ""),
                         title=data.get("title", ""),
@@ -6892,7 +6906,7 @@ async def main(connection=None):
             return web.json_response(
                 {"ok": False, "error": result.get("message", "")})
 
-        payload = result if result else _state_payload()
+        payload = result if result else await _state_payload()
         return web.json_response({"ok": True, "data": payload})
 
     # -- Attachment upload/serve endpoints -----------------------------------
