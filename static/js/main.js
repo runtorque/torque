@@ -274,6 +274,13 @@ function _workspaceSidebarWidthBounds(opts) {
       ? _standalonePanelLayout
       : (state && state.standalone_panel_layout);
     if (layout) minWidth = Math.max(minWidth, _standaloneMinimumShellWidthForLayout(layout));
+  } else if (opts.allowStandaloneRailShrink
+      && embedded
+      && typeof _standaloneMinimumShellWidthForDrag === 'function') {
+    var dragLayout = (typeof _standalonePanelLayout !== 'undefined' && _standalonePanelLayout)
+      ? _standalonePanelLayout
+      : (state && state.standalone_panel_layout);
+    if (dragLayout) minWidth = Math.max(minWidth, _standaloneMinimumShellWidthForDrag(dragLayout));
   }
   var viewportWidth = (typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth > 0)
     ? window.innerWidth

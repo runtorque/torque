@@ -182,6 +182,17 @@ function _standaloneMinimumShellWidthForLayout(raw) {
   return _standaloneMainStackMinWidth() + 8 + rightSize;
 }
 
+function _standaloneMinimumShellWidthForDrag(raw) {
+  var layout = raw && typeof raw === 'object' ? raw : {};
+  var right = layout.right && typeof layout.right === 'object' ? layout.right : {};
+  var tabs = _standaloneEnsureUniqueTabs(right.tabs);
+  var active = String(right.active || '');
+  if (!_standaloneLayoutBool(right.open, true) || !active || tabs.indexOf(active) < 0) {
+    return _standaloneMainStackMinWidth();
+  }
+  return _standaloneMainStackMinWidth() + 8 + _standaloneRightSizeBounds(_standalonePreferredShellWidth()).min;
+}
+
 function _standaloneConstrainLayoutToShellWidth(raw, shellWidth) {
   var layout = raw && typeof raw === 'object'
     ? _standaloneClone(raw)
@@ -196,7 +207,7 @@ function _standaloneConstrainLayoutToShellWidth(raw, shellWidth) {
   var bounds = _standaloneRightSizeBounds(shellWidth);
   var current = parseInt(right.size, 10);
   if (!Number.isFinite(current)) current = bounds.max;
-  var next = Math.max(0, Math.min(bounds.max, current));
+  var next = _standaloneClamp(current, bounds.min, bounds.max, bounds.max);
   if (next === current) return { layout: layout, changed: false };
   layout.right.size = next;
   return { layout: layout, changed: true };

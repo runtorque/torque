@@ -7687,6 +7687,16 @@ test('standalone outer resize shrinks the right rail when the main stack is alre
   assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 272);
   assert.equal(document.body.style['--standalone-sidebar-width'], '520px');
   assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '272px');
+
+  document.listeners.mousemove({
+    clientX: 440,
+    clientY: 100,
+  });
+
+  assert.equal(jsonValue(context, `_workspaceSidebarWidth`), 488);
+  assert.equal(jsonValue(context, `_standalonePanelCurrentLayout().right.size`), 240);
+  assert.equal(document.body.style['--standalone-sidebar-width'], '488px');
+  assert.equal(document.getElementById('standalone-sidebar-shell').style['--standalone-right-rail-width'], '240px');
 });
 
 test('standalone rail drag shrinks immediately from the grabbed edge at the min boundary', () => {
