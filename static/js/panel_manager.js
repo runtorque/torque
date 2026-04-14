@@ -90,10 +90,11 @@ function _standaloneBottomSizeBounds() {
   return { min: min, max: max };
 }
 
-function _standaloneRightSizeBounds() {
+function _standaloneRightSizeBounds(shellWidth) {
   var shell = document.getElementById('standalone-sidebar-shell');
   var width = 0;
-  if (shell && typeof shell.clientWidth === 'number') width = shell.clientWidth;
+  if (Number.isFinite(shellWidth) && shellWidth > 0) width = shellWidth;
+  if (!width && shell && typeof shell.clientWidth === 'number') width = shell.clientWidth;
   if (!width && typeof window !== 'undefined' && typeof window.innerWidth === 'number') {
     width = Math.max(0, window.innerWidth - 420);
   }
@@ -103,18 +104,54 @@ function _standaloneRightSizeBounds() {
   };
 }
 
+function _standaloneHasPersistedLayout(layout) {
+  return !!(layout && typeof layout === 'object' && Object.keys(layout).length);
+}
+
+function _standalonePreferredShellWidth() {
+  if (typeof _workspaceSidebarWidth !== 'undefined'
+      && Number.isFinite(_workspaceSidebarWidth)
+      && _workspaceSidebarWidth > 0) {
+    return _workspaceSidebarWidth;
+  }
+  var shell = document.getElementById('standalone-sidebar-shell');
+  if (shell && typeof shell.clientWidth === 'number' && shell.clientWidth > 0) {
+    return shell.clientWidth;
+  }
+  if (typeof window !== 'undefined' && typeof window.innerWidth === 'number') {
+    return Math.max(0, Math.floor(window.innerWidth * 0.56));
+  }
+  return 0;
+}
+
+function _standaloneDefaultBottomSize() {
+  var bounds = _standaloneBottomSizeBounds();
+  var viewportHeight = (typeof window !== 'undefined' && typeof window.innerHeight === 'number')
+    ? window.innerHeight
+    : 900;
+  var preferred = Math.round(viewportHeight * 0.34);
+  return _standaloneClamp(preferred, bounds.min, bounds.max, 300);
+}
+
+function _standaloneDefaultRightSize() {
+  var shellWidth = _standalonePreferredShellWidth();
+  var bounds = _standaloneRightSizeBounds(shellWidth);
+  var preferred = Math.round(shellWidth * 0.38);
+  return _standaloneClamp(preferred, bounds.min, bounds.max, 280);
+}
+
 function _standaloneDefaultLayout() {
   return {
     version: _standalonePanelLayoutVersion,
     bottom: {
       open: true,
-      size: 280,
+      size: _standaloneDefaultBottomSize(),
       tabs: ['board'],
       active: 'board',
     },
     right: {
       open: true,
-      size: 320,
+      size: _standaloneDefaultRightSize(),
       tabs: ['actions', 'templates', 'context', 'events'],
       active: 'context',
     },
@@ -144,7 +181,7 @@ function _normalizeStandalonePanelLayout(raw) {
   var base = _standaloneDefaultLayout();
   var layout = raw && typeof raw === 'object' ? _standaloneClone(raw) : {};
   var bottomBounds = _standaloneBottomSizeBounds();
-  var rightBounds = _standaloneRightSizeBounds();
+  var rightBounds = _standaloneRightSizeBounds(_standalonePreferredShellWidth());
   var normalized = {
     version: _standalonePanelLayoutVersion,
     bottom: {
@@ -234,11 +271,30 @@ function _migrateStandalonePanelLayoutFromLegacyState() {
   return layout;
 }
 
+function _standaloneResolveRestoredLayout(opts) {
+  opts = opts || {};
+  var stored = (state && state.standalone_panel_layout) || {};
+  var hasStored = _standaloneHasPersistedLayout(stored);
+  if (!opts.forceDefault && hasStored) {
+    return {
+      layout: stored,
+      shouldPersist: false,
+      source: 'persisted',
+    };
+  }
+  return {
+    layout: opts.forceDefault
+      ? _standaloneDefaultLayout()
+      : _migrateStandalonePanelLayoutFromLegacyState(),
+    shouldPersist: !!opts.persistResolved,
+    source: opts.forceDefault ? 'default' : 'legacy',
+  };
+}
+
 function _standalonePanelCurrentLayout() {
   if (!_standalonePanelLayout) {
-    var source = (state && state.standalone_panel_layout) || {};
     _standalonePanelLayout = _normalizeStandalonePanelLayout(
-      Object.keys(source).length ? source : _migrateStandalonePanelLayoutFromLegacyState()
+      _standaloneResolveRestoredLayout({ persistResolved: false }).layout
     );
   }
   return _standalonePanelLayout;
@@ -274,13 +330,11 @@ function _standalonePanelSetLayoutFromState(layout, opts) {
   }
 }
 
-function _restoreStandalonePanelState() {
-  _standalonePanelSetLayoutFromState(
-    (state && state.standalone_panel_layout && Object.keys(state.standalone_panel_layout).length)
-      ? state.standalone_panel_layout
-      : _migrateStandalonePanelLayoutFromLegacyState(),
-    { fromServer: true }
-  );
+function _restoreStandalonePanelState(opts) {
+  var resolved = _standaloneResolveRestoredLayout(opts || {});
+  _standalonePanelSetLayoutFromState(resolved.layout, { fromServer: true });
+  if (resolved.shouldPersist) _standalonePanelSaveLayout();
+  return resolved;
 }
 
 function _standaloneVisiblePanelApps() {
