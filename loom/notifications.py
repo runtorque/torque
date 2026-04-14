@@ -72,6 +72,15 @@ class NotificationManager:
         })
         self._schedule_flush()
 
+    def on_system_alert(self, title: str, body: str):
+        """Send a system-level notification immediately, bypassing the
+        5-second batch window. Used for infrastructure events that the
+        user should see right away (e.g. PTY supervisor restart).
+        """
+        if not self._loop:
+            return
+        asyncio.create_task(_send_notification(title, body))
+
     def on_task_health_alert(self, task_id: str, health_state: str):
         """Queue a task-health notification when a task becomes risky."""
         task = self._state.board_tasks.get(task_id)

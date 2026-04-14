@@ -1333,6 +1333,185 @@ class ServerAutoDispatchQueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.board_tasks["task-2"].lane, "To Do")
         self.assertNotIn("g", state.auto_dispatch_queues)
 
+    async def test_pump_keeps_entry_when_task_agent_id_matches_target(self):
+        """A task pre-bound to its target agent must survive the pump.
+
+        Regression: direct-dispatch to a busy agent sets ``task.agent_id``
+        up front and enqueues the follow-up. The pump must not treat the
+        pre-bound agent as evidence of stale queue state.
+        """
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            session_id="sess-1",
+            current_task_id="task-active",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+
+        active = state.board_add_task(
+            "Active",
+            "g",
+            lane="In Progress",
+            id="task-active",
+            agent_id=worker.id,
+        )
+        queued = state.board_add_task(
+            "Queued for same agent",
+            "g",
+            lane="To Do",
+            id="task-queued",
+            agent_id=worker.id,
+        )
+        self.assertIsNotNone(active)
+        self.assertIsNotNone(queued)
+        state.auto_dispatch_queue_add(
+            "g",
+            queued.id,
+            target_agent_id=worker.id,
+            max_concurrent=2,
+        )
+
+        # Pre-existing pump check would remove this entry because
+        # task.agent_id is set. Verify the loosened check keeps it when
+        # the agent matches the entry's target.
+        calls = []
+
+        async def handle_command(payload):
+            calls.append(payload)
+            return {"type": "queued", "task_id": payload["id"],
+                    "agent_id": payload.get("agent_id", "")}
+
+        await self.server_mod._pump_auto_dispatch_queue(
+            state,
+            handle_command,
+            lambda *args, **kwargs: None,
+            group="g",
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["cmd"], "dispatch_task")
+        self.assertEqual(calls[0]["id"], "task-queued")
+        self.assertEqual(calls[0]["agent_id"], worker.id)
+
+    async def test_pump_removes_entry_when_task_agent_id_differs_from_target(self):
+        """Stale entries (task reassigned to another agent) must be purged."""
+        state = self._make_state()
+        first = self.state_mod.AgentCell(
+            id="agent-1", name="A", group="g", cell_type="agent",
+        )
+        second = self.state_mod.AgentCell(
+            id="agent-2", name="B", group="g", cell_type="agent",
+        )
+        state.agents[first.id] = first
+        state.agents[second.id] = second
+        state.groups["g"].extend([first.id, second.id])
+
+        task = state.board_add_task(
+            "Reassigned",
+            "g",
+            lane="To Do",
+            id="task-1",
+            agent_id=second.id,  # actually assigned to agent-2
+        )
+        self.assertIsNotNone(task)
+        state.auto_dispatch_queue_add(
+            "g",
+            task.id,
+            target_agent_id=first.id,  # queue says target is agent-1
+            max_concurrent=1,
+        )
+
+        async def handle_command(payload):
+            raise AssertionError("handle_command should not be called")
+
+        await self.server_mod._pump_auto_dispatch_queue(
+            state,
+            handle_command,
+            lambda *args, **kwargs: None,
+            group="g",
+        )
+
+        self.assertNotIn("g", state.auto_dispatch_queues)
+
+    def test_cleanup_preserves_entries_matching_target_agent(self):
+        """cleanup_stale must keep entries where task.agent_id == target."""
+        state = self._make_state()
+        worker = self.state_mod.AgentCell(
+            id="agent-1", name="Worker", group="g", cell_type="agent",
+        )
+        state.agents[worker.id] = worker
+        state.groups["g"].append(worker.id)
+
+        kept = state.board_add_task(
+            "Queued for target",
+            "g",
+            lane="To Do",
+            id="task-kept",
+            agent_id=worker.id,
+        )
+        stale = state.board_add_task(
+            "Stale",
+            "g",
+            lane="To Do",
+            id="task-stale",
+            agent_id="agent-other",  # assigned elsewhere
+        )
+        self.assertIsNotNone(kept)
+        self.assertIsNotNone(stale)
+        state.auto_dispatch_queue_add(
+            "g", kept.id, target_agent_id=worker.id, max_concurrent=1,
+        )
+        state.auto_dispatch_queue_add(
+            "g", stale.id, target_agent_id=worker.id, max_concurrent=1,
+        )
+
+        removed = state.cleanup_stale_auto_dispatch_queue()
+
+        self.assertEqual(removed, 1)
+        remaining = state.auto_dispatch_queues.get("g", [])
+        self.assertEqual([entry.task_id for entry in remaining], ["task-kept"])
+
+    async def test_pump_forever_survives_cycle_exceptions(self):
+        """The persistent pump must not die on a per-cycle failure."""
+        state = self._make_state()
+        cycles = []
+
+        async def boom(*args, **kwargs):
+            cycles.append("cycle")
+            if len(cycles) == 1:
+                raise RuntimeError("boom")
+            return []
+
+        slept = []
+
+        async def fake_sleep(delay):
+            slept.append(delay)
+            if len(slept) >= 2:
+                raise asyncio.CancelledError()
+
+        server_dispatch = importlib.import_module("loom.server_dispatch")
+        orig_pump = server_dispatch._pump_auto_dispatch_queue
+        orig_sleep = server_dispatch.asyncio.sleep
+        server_dispatch._pump_auto_dispatch_queue = boom
+        server_dispatch.asyncio.sleep = fake_sleep
+        try:
+            with self.assertRaises(asyncio.CancelledError):
+                await server_dispatch._pump_auto_dispatch_queue_forever(
+                    state, lambda *a, **kw: None, lambda *a, **kw: None,
+                    interval=0.01,
+                )
+        finally:
+            server_dispatch._pump_auto_dispatch_queue = orig_pump
+            server_dispatch.asyncio.sleep = orig_sleep
+
+        # First cycle raised; second cycle ran cleanly; both slept.
+        self.assertEqual(len(cycles), 2)
+        self.assertEqual(len(slept), 2)
+
     async def test_new_agent_prompt_sequence_preserves_old_codex_order(self):
         prompts = self.server_mod._new_agent_prompt_sequence(
             {

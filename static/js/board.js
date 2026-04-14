@@ -1414,7 +1414,19 @@ function boardCancelAddTask() {
   if (el) _boardAddingTaskDraft = el.value;
   // Keep open if there's a draft or attachments — user may be dragging files
   if (_boardAddingTaskDraft || _boardInlineAttachments.length) return;
-  setTimeout(function() { _boardAddingTask = false; _boardTplList = null; renderBoard(); }, 150);
+  setTimeout(function() {
+    // A re-render (mouse-move over cards that invalidates surfaces, a WS
+    // delta, etc.) replaces the textarea via innerHTML, which fires blur
+    // on the old node. The surface-state restore in renderBoard then
+    // re-focuses the new textarea synchronously. If focus is on the
+    // inline input at this point, the blur was render-driven — keep the
+    // form open.
+    var active = document.activeElement;
+    if (active && active.id === 'board-add-task-input') return;
+    _boardAddingTask = false;
+    _boardTplList = null;
+    renderBoard();
+  }, 150);
 }
 
 function boardClearAddTask() {
@@ -1460,7 +1472,11 @@ function boardSubmitAddTask() {
   var parsed = _boardParseInlineLabels(val);
   if (!parsed.title) return;
   var targetLane = _boardAddingTaskLane || _boardDefaultAddTaskLane();
-  _boardAddingTask = false;
+  // Clear the live textarea immediately so any blur fired during the
+  // upcoming innerHTML replacement (WebKit dispatches blur on focused
+  // elements about to be detached) cannot reseed the draft from the
+  // pre-submit text.
+  if (el) el.value = '';
   _boardAddingTaskDraft = '';
   var msg = { cmd: 'board_add_task', task: parsed.title, group: _currentGroup(), lane: targetLane };
   if (_boardInlineDraftId) msg.id = _boardInlineDraftId;
@@ -1474,6 +1490,10 @@ function boardSubmitAddTask() {
   _boardInlineDraftId = '';
   _boardInlineAttachments = [];
   _boardTplList = null;
+  // Keep the form open with a cleared textarea so the operator can
+  // rapid-fire consecutive tasks. Re-focus the new textarea after the
+  // upcoming render recreates it.
+  _boardAddTaskFocus = true;
   send(msg);
   renderBoard();
 }

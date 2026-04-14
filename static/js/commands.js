@@ -13,6 +13,20 @@ function _showToast(message, level) {
   }, 4000);
 }
 
+function _applySystemBanner(banner) {
+  const el = document.getElementById('system-banner');
+  if (!el) return;
+  if (!banner || !banner.message) {
+    el.hidden = true;
+    el.textContent = '';
+    el.removeAttribute('data-kind');
+    return;
+  }
+  el.hidden = false;
+  el.setAttribute('data-kind', banner.kind || 'info');
+  el.textContent = banner.message;
+}
+
 function _worktreeSharedWith(cell) {
   if (!cell.worktree_path || !state.agents) return '';
   var names = [];

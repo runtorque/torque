@@ -1161,8 +1161,15 @@ class MatrixState:
             changed = False
             for entry in queue:
                 task = self.board_tasks.get(entry.task_id)
-                if not task or task.group != group \
-                        or board_task_is_closed(task) or task.agent_id:
+                if (
+                    not task
+                    or task.group != group
+                    or board_task_is_closed(task)
+                    or (
+                        task.agent_id
+                        and task.agent_id != entry.target_agent_id
+                    )
+                ):
                     removed += 1
                     changed = True
                     continue

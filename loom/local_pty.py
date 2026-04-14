@@ -6,17 +6,13 @@ import asyncio
 import codecs
 import contextlib
 import errno
-import fcntl
 import json
 import os
 import pty
-import re
 import shlex
 import shutil
 import signal
-import struct
 import tempfile
-import termios
 import urllib.parse
 import uuid
 from dataclasses import dataclass, field
@@ -25,45 +21,28 @@ from typing import Optional
 
 from .adapters import detect_by_command, get_adapter
 from .config import log
+from .pty_core import (
+    ANSI_ESCAPE_RE as _ANSI_ESCAPE_RE,
+    BUFFER_LIMIT as _BUFFER_LIMIT,
+    OSC7_RE as _OSC7_RE,
+    PROMPT_HOOK_LIMIT as _PROMPT_HOOK_LIMIT,
+    READINESS_BUFFER_LIMIT as _READINESS_BUFFER_LIMIT,
+    Utf8IncrementalDecoder as _Utf8IncrementalDecoder,
+    preexec_acquire_ctty as _preexec_acquire_ctty,
+    set_winsize as _pty_set_winsize,
+)
 from .state import AgentCell, MatrixState
 from .terminal_adapter import TerminalCapabilities, TerminalLaunchContext
 from .worktree import ensure_git_exclude
-
-_OSC7_RE = re.compile("\x1b]7;file://[^/\x07\x1b]*(/.*?)(?:\x07|\x1b\\\\)")
-_ANSI_ESCAPE_RE = re.compile(
-    r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1B\\))",
-    re.DOTALL,
-)
-_BUFFER_LIMIT = 200_000
-_PROMPT_HOOK_LIMIT = 512
-_READINESS_BUFFER_LIMIT = 20_000
-
-
-_Utf8IncrementalDecoder = codecs.getincrementaldecoder("utf-8")
-
-
-def _preexec_acquire_ctty() -> None:
-    """Make the PTY slave (stdin after dup2) the controlling terminal.
-
-    subprocess with ``start_new_session=True`` calls ``setsid()`` which
-    detaches from any inherited controlling tty. On macOS/BSD the first
-    ``open()`` of a tty by a session leader does NOT auto-acquire it as
-    ctty — we must explicitly ioctl TIOCSCTTY. Without this, the kernel
-    has no foreground process group to signal on ``TIOCSWINSZ``, so
-    ``SIGWINCH`` never reaches the child and TUIs (Claude Code, vim, etc.)
-    don't re-render on resize.
-    """
-    with contextlib.suppress(OSError):
-        fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
 
 @dataclass
 class _PtySession:
     session_id: str
     cell_id: str
-    process: asyncio.subprocess.Process
-    master_fd: int
-    shell_path: str
+    process: Optional[asyncio.subprocess.Process] = None
+    master_fd: int = -1
+    shell_path: str = ""
     buffer: str = ""
     parse_tail: str = ""
     cols: int = 120
@@ -72,6 +51,8 @@ class _PtySession:
     reader_task: Optional[asyncio.Task] = None
     bootstrap_dir: str = ""
     claude_config_dir: str = ""
+    # Supervisor mode only — informational for display.
+    supervisor_pid: int = 0
     decoder: codecs.IncrementalDecoder = field(
         default_factory=lambda: _Utf8IncrementalDecoder(errors="replace")
     )
@@ -145,6 +126,65 @@ class LocalPtyAdapter:
         restore_focus_to_prev_tab: bool = False,
     ) -> None:
         del target_session_id, target_window_id, restore_focus_to_prev_tab
+        prep = self._prepare_create(cell, env_vars=env_vars, shell=shell)
+        session_id = uuid.uuid4().hex
+
+        master_fd, slave_fd = pty.openpty()
+        _pty_set_winsize(master_fd, 120, 32)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *prep["shell_argv"],
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=prep["cwd"],
+                env=prep["env"],
+                start_new_session=True,
+                preexec_fn=_preexec_acquire_ctty,
+            )
+        except Exception:
+            if prep["bootstrap_dir"]:
+                shutil.rmtree(prep["bootstrap_dir"], ignore_errors=True)
+            if prep["claude_config_dir"]:
+                shutil.rmtree(prep["claude_config_dir"], ignore_errors=True)
+            raise
+        finally:
+            with contextlib.suppress(OSError):
+                os.close(slave_fd)
+
+        session = _PtySession(
+            session_id=session_id,
+            cell_id=cell.id,
+            process=process,
+            master_fd=master_fd,
+            shell_path=prep["shell_path"],
+            bootstrap_dir=prep["bootstrap_dir"],
+            claude_config_dir=prep["claude_config_dir"],
+        )
+        self._sessions[session_id] = session
+        session.reader_task = asyncio.create_task(self._read_loop(session))
+
+        await self._finalize_create(
+            cell,
+            session_id,
+            prep=prep,
+            env_file=env_file,
+            init_script=init_script,
+            system_prompt=system_prompt,
+        )
+
+    def _prepare_create(
+        self,
+        cell: AgentCell,
+        *,
+        env_vars: Optional[dict[str, str]] = None,
+        shell: str = "",
+    ) -> dict:
+        """Pre-spawn setup shared by in-memory and supervisor adapters.
+
+        Side effects: mutates ``cell.agent_type`` (auto-detect) and
+        ``cell.directory`` (default to cwd) to preserve legacy behavior.
+        """
         shell_path = self._resolve_shell(shell)
         shell_name = os.path.basename(shell_path)
         if cell.cell_type == "agent" and not cell.agent_type and cell.command:
@@ -171,7 +211,8 @@ class LocalPtyAdapter:
         elif self.state.active_session_id:
             active = self._sessions.get(self.state.active_session_id)
             if active:
-                cwd = self.state.agents.get(active.cell_id, AgentCell("", "", "")).current_path or ""
+                cwd = self.state.agents.get(
+                    active.cell_id, AgentCell("", "", "")).current_path or ""
         if not cwd:
             cwd = os.getcwd()
         if not cell.directory:
@@ -186,47 +227,38 @@ class LocalPtyAdapter:
         if boot_adapter and boot_adapter.name == "claude-code":
             claude_config_dir = self._prepare_claude_config_overlay(env)
 
-        master_fd, slave_fd = pty.openpty()
-        session_id = uuid.uuid4().hex
-        self._set_winsize(master_fd, 120, 32)
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *shell_argv,
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                cwd=cwd,
-                env=env,
-                start_new_session=True,
-                preexec_fn=_preexec_acquire_ctty,
-            )
-        except Exception:
-            if bootstrap_dir:
-                shutil.rmtree(bootstrap_dir, ignore_errors=True)
-            if claude_config_dir:
-                shutil.rmtree(claude_config_dir, ignore_errors=True)
-            raise
-        finally:
-            with contextlib.suppress(OSError):
-                os.close(slave_fd)
+        return {
+            "shell_path": shell_path,
+            "shell_name": shell_name,
+            "shell_argv": shell_argv,
+            "env": env,
+            "cwd": cwd,
+            "bootstrap_dir": bootstrap_dir,
+            "claude_config_dir": claude_config_dir,
+            "boot_adapter": boot_adapter,
+        }
 
-        session = _PtySession(
-            session_id=session_id,
-            cell_id=cell.id,
-            process=process,
-            master_fd=master_fd,
-            shell_path=shell_path,
-            bootstrap_dir=bootstrap_dir,
-            claude_config_dir=claude_config_dir,
-        )
-        self._sessions[session_id] = session
-        session.reader_task = asyncio.create_task(self._read_loop(session))
+    async def _finalize_create(
+        self,
+        cell: AgentCell,
+        session_id: str,
+        *,
+        prep: dict,
+        env_file: str,
+        init_script: str,
+        system_prompt: str,
+    ) -> None:
+        """Post-spawn cell state updates and startup commands.
 
+        Shared between the in-memory and supervisor code paths.
+        """
         cell.session_id = session_id
         cell.window_id = "standalone"
-        cell.current_path = cwd
-        cell.current_process = self._initial_process_name(cell, shell_path)
-        cell.status = "running" if (cell.command and not cell.agent_type) else "idle"
+        cell.current_path = prep["cwd"]
+        cell.current_process = self._initial_process_name(
+            cell, prep["shell_path"])
+        cell.status = (
+            "running" if (cell.command and not cell.agent_type) else "idle")
         self._input_ready_sessions.discard(session_id)
         self._input_ready_events.pop(cell.id, None)
 
@@ -236,15 +268,18 @@ class LocalPtyAdapter:
 
         setup_commands = self._startup_commands(
             cell,
-            shell_name=shell_name,
-            cwd=cwd,
+            shell_name=prep["shell_name"],
+            cwd=prep["cwd"],
             env_file=env_file,
             init_script=init_script,
             system_prompt=system_prompt,
         )
         if setup_commands:
             await asyncio.sleep(0.12)
-            await self.write_input(session_id, "".join(cmd + "\r" for cmd in setup_commands))
+            await self.write_input(
+                session_id,
+                "".join(cmd + "\r" for cmd in setup_commands),
+            )
 
         await self.focus_session(session_id)
 
@@ -849,6 +884,365 @@ class LocalPtyAdapter:
                  cell.name, cell.agent_type, cell.session_id)
 
     def _set_winsize(self, fd: int, cols: int, rows: int) -> None:
-        packed = struct.pack("HHHH", max(1, rows), max(1, cols), 0, 0)
-        with contextlib.suppress(OSError):
-            fcntl.ioctl(fd, termios.TIOCSWINSZ, packed)
+        _pty_set_winsize(fd, cols, rows)
+
+
+class SupervisedPtyAdapter(LocalPtyAdapter):
+    """Standalone-mode adapter that delegates PTY ownership to the
+    supervisor sidecar.
+
+    Inherits all daemon-side helpers (env/shell/bootstrap/startup
+    commands, input-ready policy, git resolve, OSC7 parsing). Overrides
+    only the methods that interact with PTY FDs or child processes —
+    those go through ``PtySupervisorClient`` instead.
+
+    If the supervisor becomes unreachable the daemon continues running;
+    writes are dropped and the user sees a banner (wired from the
+    server). See also: ``on_supervisor_event``.
+    """
+
+    def __init__(self, state: MatrixState, socket_path):
+        super().__init__(state)
+        # Deferred import so unit tests that don't need the supervisor
+        # don't pay its cost.
+        from .pty_supervisor_client import PtySupervisorClient
+        self._client = PtySupervisorClient(socket_path)
+        self._client.on_reconnect = self._on_client_reconnect
+        # Optional hook: ``(kind: str, detail: dict) -> None | awaitable``.
+        # ``kind`` is one of: "connect_failed", "disconnected",
+        # "reconnected", "fresh_instance".
+        self.on_supervisor_event = None
+
+    # -- lifecycle ---------------------------------------------------------
+
+    async def start(self) -> None:
+        await super().start()
+        try:
+            await self._client.connect()
+        except Exception:
+            log.exception("PTY supervisor client failed to connect")
+            await self._emit_supervisor_event("connect_failed", {})
+            raise
+
+    async def shutdown(self) -> None:
+        # Supervisor owns the sessions — do NOT terminate them.
+        # Just close the client connection; supervisor keeps running.
+        try:
+            await self._client.aclose()
+        except Exception:
+            log.exception("PTY supervisor client shutdown failed")
+        # Skip super().shutdown() which would try to kill local sessions.
+        self._sessions.clear()
+
+    async def reconnect_orphans(self) -> None:
+        """Reconcile persisted cells with the supervisor's live sessions.
+
+        Cells whose session_id matches a live supervisor session are
+        re-adopted (the output stream resumes via ``subscribe``).
+        Cells without a match are cleared the same way the legacy
+        adapter does today. Supervisor sessions no cell references are
+        closed.
+        """
+        try:
+            sessions = await self._client.list_sessions()
+        except Exception:
+            log.exception(
+                "Supervisor list failed during reconcile — "
+                "treating all cells as stopped")
+            # Fall back to legacy behavior: mark everything stopped.
+            return await super().reconnect_orphans()
+
+        by_id = {s["session_id"]: s for s in sessions}
+        claimed: set[str] = set()
+        adopted = 0
+        cleared = 0
+        for cell in list(self.state.agents.values()):
+            sid = cell.session_id or ""
+            if sid and sid in by_id and by_id[sid].get("alive"):
+                await self._adopt_supervisor_session(cell, by_id[sid])
+                claimed.add(sid)
+                adopted += 1
+                continue
+            # No surviving session — clear like today's reconnect_orphans.
+            if cell.session_id or cell.status != "stopped":
+                cleared += 1
+            self._input_ready_sessions.discard(cell.session_id or "")
+            self._input_ready_events.pop(cell.id, None)
+            cell.status = "stopped"
+            cell.session_id = None
+            cell.window_id = "standalone"
+            cell.current_process = ""
+            cell.current_path = ""
+            cell.current_branch = ""
+            cell.git_root = ""
+            cell.activity = ""
+            cell.activity_detail = ""
+            cell.error_message = ""
+            cell.needs_attention = False
+            self.state._emit_agent(cell)
+            self.state._db_save_agent(cell)
+
+        # Close orphan sessions — alive in the supervisor but unreferenced.
+        for sid, info in by_id.items():
+            if sid in claimed:
+                continue
+            if not info.get("alive"):
+                continue
+            try:
+                await self._client.close_session(sid)
+            except Exception:
+                log.exception(
+                    "Failed to close orphan supervisor session %s", sid)
+
+        self.state.active_session_id = None
+        log.info(
+            "Standalone reconcile: adopted %d, cleared %d, orphans=%d",
+            adopted, cleared,
+            sum(1 for sid in by_id if sid not in claimed))
+
+    async def _adopt_supervisor_session(
+        self,
+        cell: AgentCell,
+        info: dict,
+    ) -> None:
+        session = _PtySession(
+            session_id=info["session_id"],
+            cell_id=cell.id,
+            process=None,
+            master_fd=-1,
+            shell_path="",
+            cols=int(info.get("cols") or 120),
+            rows=int(info.get("rows") or 32),
+            bootstrap_dir=str(info.get("bootstrap_dir") or ""),
+            claude_config_dir=str(info.get("claude_config_dir") or ""),
+            supervisor_pid=int(info.get("pid") or 0),
+        )
+        self._sessions[session.session_id] = session
+        await self._client.subscribe(
+            session.session_id,
+            on_output=self._make_output_handler(session),
+            on_exit=self._make_exit_handler(session),
+        )
+        cell.window_id = "standalone"
+        if cell.agent_type:
+            cell.status = "idle"
+        else:
+            cell.status = "running" if cell.command else "idle"
+        self.state._emit_agent(cell)
+        self.state._db_save_agent(cell)
+
+    # -- session ops (delegated to supervisor) -----------------------------
+
+    async def create_session(
+        self,
+        cell: AgentCell,
+        *,
+        env_vars: Optional[dict[str, str]] = None,
+        env_file: str = "",
+        init_script: str = "",
+        shell: str = "",
+        system_prompt: str = "",
+        target_session_id: str = "",
+        target_window_id: str = "",
+        restore_focus_to_prev_tab: bool = False,
+    ) -> None:
+        del target_session_id, target_window_id, restore_focus_to_prev_tab
+        prep = self._prepare_create(cell, env_vars=env_vars, shell=shell)
+        session_id = uuid.uuid4().hex
+        session = _PtySession(
+            session_id=session_id,
+            cell_id=cell.id,
+            process=None,
+            master_fd=-1,
+            shell_path=prep["shell_path"],
+            bootstrap_dir=prep["bootstrap_dir"],
+            claude_config_dir=prep["claude_config_dir"],
+        )
+        self._sessions[session_id] = session
+        try:
+            result = await self._client.create(
+                session_id=session_id,
+                cell_id=cell.id,
+                shell_argv=prep["shell_argv"],
+                env=prep["env"],
+                cwd=prep["cwd"],
+                cols=session.cols,
+                rows=session.rows,
+                bootstrap_dir=prep["bootstrap_dir"],
+                claude_config_dir=prep["claude_config_dir"],
+            )
+        except Exception:
+            self._sessions.pop(session_id, None)
+            if prep["bootstrap_dir"]:
+                shutil.rmtree(prep["bootstrap_dir"], ignore_errors=True)
+            if prep["claude_config_dir"]:
+                shutil.rmtree(
+                    prep["claude_config_dir"], ignore_errors=True)
+            raise
+        if result.get("type") != "ok":
+            self._sessions.pop(session_id, None)
+            if prep["bootstrap_dir"]:
+                shutil.rmtree(prep["bootstrap_dir"], ignore_errors=True)
+            if prep["claude_config_dir"]:
+                shutil.rmtree(
+                    prep["claude_config_dir"], ignore_errors=True)
+            raise RuntimeError(
+                f"supervisor create failed: {result.get('message') or result}")
+        session.supervisor_pid = int(result.get("pid") or 0)
+
+        await self._client.subscribe(
+            session_id,
+            on_output=self._make_output_handler(session),
+            on_exit=self._make_exit_handler(session),
+        )
+
+        await self._finalize_create(
+            cell,
+            session_id,
+            prep=prep,
+            env_file=env_file,
+            init_script=init_script,
+            system_prompt=system_prompt,
+        )
+
+    async def close_session(self, session_id: str) -> None:
+        session = self._sessions.get(session_id)
+        if not session or session.closed:
+            return
+        session.closed = True
+        self._input_ready_sessions.discard(session_id)
+        self._input_ready_events.pop(session.cell_id, None)
+        try:
+            await self._client.close_session(session_id)
+        except Exception:
+            log.exception(
+                "Supervisor close failed for %s (best-effort)", session_id)
+        # The supervisor's `exit` frame will drive _finalize_supervised.
+        # If it doesn't arrive in a reasonable time (supervisor down),
+        # still finalize locally.
+        asyncio.create_task(
+            self._finalize_local_after_timeout(session_id, 3.0))
+
+    async def _finalize_local_after_timeout(
+        self, session_id: str, timeout: float,
+    ) -> None:
+        await asyncio.sleep(timeout)
+        session = self._sessions.get(session_id)
+        if session and session.closed:
+            # Exit never came back — unblock UI anyway.
+            await self._finalize_supervised(session, announce=False)
+
+    async def write_input(self, session_id: str, data: str) -> None:
+        session = self._sessions.get(session_id)
+        if not session or session.closed:
+            return
+        if not data:
+            return
+        payload = data.encode("utf-8", errors="ignore")
+        try:
+            await self._client.write_input(session_id, payload)
+        except Exception:
+            log.exception(
+                "Supervisor write failed for %s — dropping input",
+                session_id)
+
+    async def resize_session(
+        self, session_id: str, cols: int, rows: int,
+    ) -> None:
+        session = self._sessions.get(session_id)
+        if not session:
+            return
+        session.cols = max(20, int(cols or 0))
+        session.rows = max(4, int(rows or 0))
+        try:
+            await self._client.resize(
+                session_id, session.cols, session.rows)
+        except Exception:
+            log.exception(
+                "Supervisor resize failed for %s", session_id)
+
+    # -- stream handlers ---------------------------------------------------
+
+    def _make_output_handler(self, session: _PtySession):
+        async def handler(msg: dict) -> None:
+            await self._handle_output_frame(session, msg)
+        return handler
+
+    def _make_exit_handler(self, session: _PtySession):
+        async def handler(msg: dict) -> None:
+            await self._handle_exit_frame(session, msg)
+        return handler
+
+    async def _handle_output_frame(
+        self, session: _PtySession, msg: dict,
+    ) -> None:
+        import base64
+        data = msg.get("data") or ""
+        if not data:
+            return
+        try:
+            raw = base64.b64decode(data)
+        except Exception:
+            log.warning("Bad base64 from supervisor for %s",
+                        session.session_id)
+            return
+        text = session.decoder.decode(raw)
+        if not text:
+            return
+        # Reset buffer to the supervisor's view on snapshot to avoid
+        # doubling up if we adopted an existing session.
+        if msg.get("type") == "snapshot":
+            session.buffer = text[-_BUFFER_LIMIT:]
+        else:
+            session.buffer = (session.buffer + text)[-_BUFFER_LIMIT:]
+        self._process_shell_integration(session, text)
+        await self._emit_terminal_output(session, text)
+
+    async def _handle_exit_frame(
+        self, session: _PtySession, msg: dict,
+    ) -> None:
+        del msg
+        await self._finalize_supervised(session)
+
+    async def _finalize_supervised(
+        self, session: _PtySession, *, announce: bool = True,
+    ) -> None:
+        existing = self._sessions.pop(session.session_id, None)
+        if existing is None:
+            return
+        if session.bootstrap_dir:
+            shutil.rmtree(session.bootstrap_dir, ignore_errors=True)
+        if session.claude_config_dir:
+            shutil.rmtree(session.claude_config_dir, ignore_errors=True)
+        cell = self.state.agents.get(session.cell_id)
+        if cell:
+            exit_note = "\r\n[process exited]\r\n"
+            session.buffer = (session.buffer + exit_note)[-_BUFFER_LIMIT:]
+            await self._emit_terminal_output(session, exit_note)
+            await self._mark_session_stopped(
+                cell, session.session_id, announce=announce)
+
+    # -- supervisor event wiring ------------------------------------------
+
+    async def _on_client_reconnect(self, info: dict) -> None:
+        if info.get("fresh"):
+            log.warning(
+                "PTY supervisor reconnected with a fresh instance — "
+                "existing sessions are gone")
+            await self._emit_supervisor_event("fresh_instance", info)
+            # Every tracked session is now dead. Finalize them.
+            for session in list(self._sessions.values()):
+                await self._finalize_supervised(session, announce=True)
+        else:
+            await self._emit_supervisor_event("reconnected", info)
+
+    async def _emit_supervisor_event(self, kind: str, detail: dict) -> None:
+        cb = self.on_supervisor_event
+        if cb is None:
+            return
+        try:
+            result = cb(kind, detail)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:
+            log.exception("Supervisor-event callback failed")

@@ -1,6 +1,7 @@
 """aiohttp server, WebSocket command handler, and runtime entry point."""
 
 import asyncio
+import contextlib
 import json
 import mimetypes
 import os
@@ -32,6 +33,7 @@ from .state import (
     BoardTask,
     MatrixState,
     merge_cleanup_flags,
+    normalize_default_worker_concurrency,
     task_counts_as_done,
     task_is_closed,
 )
@@ -102,6 +104,7 @@ from .server_dispatch import (
     _find_active_worktree_owner,
     _maybe_auto_resume_targets,
     _pump_auto_dispatch_queue,
+    _pump_auto_dispatch_queue_forever,
     _scheduler_loop,
     _should_handoff_shared_worktree,
     _should_queue_existing_agent_dispatch,
@@ -1261,10 +1264,30 @@ async def main(connection=None):
     asyncio.create_task(health_check(state, event_log, event_bus, notifier))
     log.info("Event bus, health monitor, and notifications started")
 
+    supervisor_banner: dict | None = None
     if STANDALONE:
-        from .local_pty import LocalPtyAdapter
+        from .local_pty import LocalPtyAdapter, SupervisedPtyAdapter
+        from . import pty_supervisor
 
-        bridge = LocalPtyAdapter(state)
+        bridge = None
+        try:
+            sock_path = pty_supervisor.ensure_running(DATA_DIR)
+            bridge = SupervisedPtyAdapter(state, sock_path)
+            log.info(
+                "Standalone mode — using PTY supervisor at %s", sock_path)
+        except Exception as exc:
+            log.exception(
+                "PTY supervisor unavailable — falling back to in-memory "
+                "(terminals will not survive daemon restart)")
+            supervisor_banner = {
+                "kind": "supervisor_unavailable",
+                "message": (
+                    "PTY supervisor unavailable — terminals will not "
+                    "survive a Loom restart. See loom.log for details."
+                ),
+                "detail": str(exc),
+            }
+            bridge = LocalPtyAdapter(state)
     else:
         from .bridge import ITerm2Adapter
 
@@ -1462,6 +1485,55 @@ async def main(connection=None):
             except Exception:
                 dead.add(ws_client)
         state._ws_clients -= dead
+
+    # Persistent supervisor-health banner. Only populated in standalone
+    # mode when the supervisor is unavailable / restarted. Latest state
+    # is replayed to each newly connected WS client.
+    supervisor_banner_state: dict = {"banner": supervisor_banner}
+
+    async def _broadcast_system_banner(banner):
+        supervisor_banner_state["banner"] = banner
+        payload = json.dumps({"type": "system_banner", "banner": banner})
+        dead = set()
+        for ws_client in state._ws_clients:
+            try:
+                await ws_client.send_str(payload)
+            except Exception:
+                dead.add(ws_client)
+        state._ws_clients -= dead
+
+    async def _on_supervisor_event(kind, detail):
+        """Translate SupervisedPtyAdapter events into user-visible
+        banner + macOS notification.
+        """
+        if kind == "fresh_instance":
+            banner = {
+                "kind": "supervisor_restarted",
+                "message": (
+                    "PTY supervisor restarted — open terminals were "
+                    "lost. Relaunch affected sessions from the UI."
+                ),
+            }
+            await _broadcast_system_banner(banner)
+            notifier.on_system_alert(
+                "Loom — supervisor restarted",
+                "Open terminals were lost. Relaunch them from the UI.")
+        elif kind == "reconnected":
+            # Routine reconnect to the same instance — clear banner.
+            await _broadcast_system_banner(None)
+        elif kind == "connect_failed":
+            banner = {
+                "kind": "supervisor_unavailable",
+                "message": (
+                    "Lost connection to the PTY supervisor — "
+                    "terminal output may stall until it comes back."
+                ),
+            }
+            await _broadcast_system_banner(banner)
+
+    # Duck-type: only SupervisedPtyAdapter has this attribute.
+    if hasattr(bridge, "on_supervisor_event"):
+        bridge.on_supervisor_event = _on_supervisor_event
 
     # Signal bridge when agent TUI is ready (hook-based session_start)
     event_bus.on_session_start = lambda cell: bridge.signal_input_ready(cell.id)
@@ -4350,6 +4422,24 @@ async def main(connection=None):
                                     state.board_update_task(
                                         tid, agent_id=cell.id)
                                     state.board_move_task(tid, "To Do")
+                                    queue_cap = (
+                                        normalize_default_worker_concurrency(
+                                            state.get_weaver_settings(
+                                                task.group
+                                            ).default_worker_concurrency
+                                        )
+                                    )
+                                    state.auto_dispatch_queue_add(
+                                        task.group,
+                                        tid,
+                                        target_agent_id=cell.id,
+                                        max_concurrent=queue_cap,
+                                        weaver_owner_id=str(
+                                            data.get(
+                                                "_weaver_dispatch_id", ""
+                                            ) or ""
+                                        ),
+                                    )
                                     _panel_event(
                                         "task_queued", cell.id,
                                         cell.name, cell.group,
@@ -6782,7 +6872,9 @@ async def main(connection=None):
     # -- Scheduler ----------------------------------------------------------
 
     asyncio.create_task(
-        _pump_auto_dispatch_queue(state, handle_command, _panel_event)
+        _pump_auto_dispatch_queue_forever(
+            state, handle_command, _panel_event
+        )
     )
     asyncio.create_task(
         _scheduler_loop(state, handle_command, _panel_event))
@@ -6801,6 +6893,14 @@ async def main(connection=None):
         if not await _register_ready_ui_ws_client(
                 state, ws, _state_payload):
             return ws
+        # Replay the current supervisor banner (if any) to the new client.
+        banner = supervisor_banner_state.get("banner")
+        if banner is not None:
+            with contextlib.suppress(Exception):
+                await ws.send_str(json.dumps({
+                    "type": "system_banner",
+                    "banner": banner,
+                }))
         try:
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:

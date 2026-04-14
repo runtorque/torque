@@ -3004,10 +3004,13 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 }
 .board-add-toolbar {
   display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; row-gap: 4px; column-gap: 4px;
   padding: 2px 4px; border-top: 1px solid var(--border);
   background: var(--bg-card);
 }
-.board-add-toolbar-right { display: flex; gap: 4px; }
+.board-add-toolbar-right {
+  display: flex; gap: 4px; flex-wrap: wrap; row-gap: 4px;
+}
 .board-add-toolbar-btn {
   background: var(--bg-cell); border: 1px solid var(--border);
   border-radius: var(--radius); color: var(--text-dim);
@@ -6279,4 +6282,24 @@ body.diff-view-open #ctx-menu {
   border-top: 1px solid var(--border);
   background: var(--bg-hover);
   flex-shrink: 0;
+}
+
+/* -- System banner (infrastructure health, e.g. PTY supervisor) -- */
+#system-banner {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: center;
+  background: #5a1a1a;
+  color: #ffd9d9;
+  border-bottom: 1px solid #7a2020;
+}
+#system-banner[data-kind="supervisor_restarted"] {
+  background: #5a3a1a;
+  color: #ffe5c0;
+  border-bottom-color: #7a5020;
 }

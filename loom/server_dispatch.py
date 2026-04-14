@@ -306,7 +306,15 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
                 break
             entry = queue[0]
             task = state.board_tasks.get(entry.task_id)
-            if not task or task.group != group_name or task_is_closed(task) or task.agent_id:
+            if (
+                not task
+                or task.group != group_name
+                or task_is_closed(task)
+                or (
+                    task.agent_id
+                    and task.agent_id != entry.target_agent_id
+                )
+            ):
                 state.auto_dispatch_queue_remove_task(entry.task_id)
                 continue
             if not state.board_deps_met(task):
@@ -369,6 +377,27 @@ async def _pump_auto_dispatch_queue(state: MatrixState, handle_command,
                 "agent_id": resolved_agent_id,
             })
     return dispatched
+
+
+async def _pump_auto_dispatch_queue_forever(state: MatrixState,
+                                            handle_command,
+                                            panel_event,
+                                            *,
+                                            interval: float = 10.0) -> None:
+    """Run the auto-dispatch pump on a persistent interval.
+
+    Survives per-cycle exceptions so a single failing group cannot halt the
+    whole pump. Completion handlers still trigger an immediate drain via
+    ``_pump_auto_dispatch_queue`` for responsiveness.
+    """
+    while True:
+        try:
+            await _pump_auto_dispatch_queue(
+                state, handle_command, panel_event
+            )
+        except Exception:
+            log.exception("Auto-dispatch pump cycle failed")
+        await asyncio.sleep(interval)
 
 
 def _should_handoff_shared_worktree(owner, *,

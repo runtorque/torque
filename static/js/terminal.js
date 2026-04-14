@@ -238,6 +238,12 @@ function _scheduleEmbeddedTerminalFit() {
   });
 }
 
+// Max attempts to re-open the terminal WS after a drop (e.g. daemon
+// restart). Each attempt sleeps _EMBEDDED_TERMINAL_RETRY_MS between
+// tries, giving ~15s of cover for a standalone-mode restart.
+var _EMBEDDED_TERMINAL_RETRY_MS = 1000;
+var _EMBEDDED_TERMINAL_MAX_RETRIES = 15;
+
 function _connectEmbeddedTerminal(cell, surface) {
   _disposeEmbeddedTerminal();
   var expectedSessionId = cell.session_id || '';
@@ -274,8 +280,14 @@ function _connectEmbeddedTerminal(cell, surface) {
     _scheduleEmbeddedTerminalFit();
   });
   _embeddedTerminalResizeObserver.observe(surface);
-  _embeddedTerminalWs = new WebSocket(_embeddedTerminalUrl(cell));
-  var socket = _embeddedTerminalWs;
+  _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, 0);
+  _scheduleEmbeddedTerminalFit();
+}
+
+function _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attempt) {
+  if (_embeddedTerminalSessionKey !== sessionKey) return;
+  var socket = new WebSocket(_embeddedTerminalUrl(cell));
+  _embeddedTerminalWs = socket;
   function isCurrentSessionMessage(msg) {
     if (_embeddedTerminalSessionKey !== sessionKey) return false;
     if (_embeddedTerminalWs !== socket) return false;
@@ -284,13 +296,18 @@ function _connectEmbeddedTerminal(cell, surface) {
     }
     return true;
   }
-  _embeddedTerminalWs.onopen = function() {
+  socket.onopen = function() {
     if (!isCurrentSessionMessage()) return;
+    var status = document.querySelector('#terminal-workspace .terminal-statusbar');
+    if (status && typeof status.removeAttribute === 'function') {
+      status.removeAttribute('data-closed');
+    }
     _scheduleEmbeddedTerminalFit();
     focusEmbeddedTerminalWorkspace(false);
   };
-  _embeddedTerminalWs.onmessage = function(event) {
-    const msg = JSON.parse(event.data);
+  socket.onmessage = function(event) {
+    var msg;
+    try { msg = JSON.parse(event.data); } catch (e) { return; }
     if (!isCurrentSessionMessage(msg)) return;
     if (msg.type === 'snapshot') {
       _embeddedTerminal.reset();
@@ -301,13 +318,28 @@ function _connectEmbeddedTerminal(cell, surface) {
       _embeddedTerminal.write(msg.data);
     }
   };
-  _embeddedTerminalWs.onclose = function() {
-    if (isCurrentSessionMessage()) {
-      const status = document.querySelector('#terminal-workspace .terminal-statusbar');
-      if (status) status.setAttribute('data-closed', '1');
+  socket.onclose = function() {
+    if (_embeddedTerminalSessionKey !== sessionKey) return;
+    if (_embeddedTerminalWs !== socket) return;
+    var status = document.querySelector('#terminal-workspace .terminal-statusbar');
+    if (status) status.setAttribute('data-closed', '1');
+    // The main `/ws` socket delivers state updates out-of-band; check
+    // whether the session is still the one the current cell points to.
+    // If the cell's session_id changed (stopped, relaunched to a new id),
+    // bail out — renderTerminalWorkspace() will set up a fresh surface.
+    if (state && state.agents && state.agents[cell.id]) {
+      var currentSid = state.agents[cell.id].session_id || '';
+      if (currentSid !== expectedSessionId) return;
+    } else {
+      return;
     }
+    if (attempt >= _EMBEDDED_TERMINAL_MAX_RETRIES) return;
+    setTimeout(function() {
+      if (_embeddedTerminalSessionKey !== sessionKey) return;
+      _openEmbeddedTerminalSocket(cell, sessionKey, expectedSessionId, attempt + 1);
+    }, _EMBEDDED_TERMINAL_RETRY_MS);
   };
-  _scheduleEmbeddedTerminalFit();
+  socket.onerror = function() { /* close will fire after */ };
 }
 
 function renderTerminalWorkspace() {

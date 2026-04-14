@@ -4527,6 +4527,94 @@ test('boardSubmitAddTask sends the selected inline lane instead of the viewed la
   assert.equal(runInContext(context, '_boardAddingTaskLane'), '');
 });
 
+test('boardSubmitAddTask clears the inline textarea and keeps the form open for rapid-fire entry', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+  const input = document.register('board-add-task-input');
+  input.value = 'foo';
+  document.activeElement = input;
+
+  context.state.board_lanes = ['Backlog', 'In Progress', 'Done'];
+  runInContext(context, `
+    _boardAddingTask = true;
+    _boardAddingTaskDraft = 'foo';
+    _boardAddingTaskAction = 'oneshot/fix';
+    _boardAddingTaskAgent = 'agent-1';
+    _boardInlineDraftId = 'draft-1';
+    _boardInlineAttachments = [{ url: '/u/1', filename: 'a.png' }];
+    _boardSelectedLane = 'Backlog';
+    _boardAddingTaskLane = 'Backlog';
+  `);
+
+  context.boardSubmitAddTask();
+
+  // Live textarea value cleared synchronously (before the upcoming render),
+  // so a blur dispatched during innerHTML replacement cannot reseed the
+  // draft from the pre-submit text.
+  assert.equal(input.value, '', 'textarea value should be cleared in the DOM');
+  assert.equal(runInContext(context, '_boardAddingTaskDraft'), '');
+  assert.equal(runInContext(context, '_boardAddingTaskAction'), '');
+  assert.equal(runInContext(context, '_boardAddingTaskAgent'), '');
+  assert.equal(runInContext(context, '_boardInlineDraftId'), '');
+  assert.deepEqual(jsonValue(context, '_boardInlineAttachments'), []);
+
+  // Form stays open so the operator can rapid-fire submit consecutive tasks,
+  // and the textarea is re-focused by the render that runs inside submit.
+  assert.equal(runInContext(context, '_boardAddingTask'), true);
+  assert.equal(input.focused, true, 'textarea should be re-focused after submit');
+
+  // The rendered HTML should contain a fresh, empty textarea — not the
+  // just-submitted "foo" text.
+  assert.match(panel.innerHTML, /board-add-task-input/);
+  assert.doesNotMatch(panel.innerHTML, />foo</);
+});
+
+test('boardCancelAddTask keeps the form open when a re-render restored focus to the textarea', () => {
+  const { context, document } = createBoardHarness();
+  document.register('panel-board');
+  document.register('board-cards');
+  const input = document.register('board-add-task-input');
+  input.value = '';
+  // Simulate post-render state: the old textarea blurred and the surface-state
+  // restore re-focused the (new) textarea synchronously before this timer runs.
+  document.activeElement = input;
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  runInContext(context, `
+    _boardAddingTask = true;
+    _boardAddingTaskDraft = '';
+    _boardInlineAttachments = [];
+  `);
+
+  context.boardCancelAddTask();
+
+  assert.equal(runInContext(context, '_boardAddingTask'), true,
+    'form must stay open when focus was restored by a re-render');
+});
+
+test('boardCancelAddTask closes the form when focus moved outside the inline textarea', () => {
+  const { context, document } = createBoardHarness();
+  document.register('panel-board');
+  document.register('board-cards');
+  const input = document.register('board-add-task-input');
+  input.value = '';
+  // Simulate the user clicking elsewhere: focus is NOT on the textarea.
+  document.activeElement = new FakeElement('some-other-button');
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  runInContext(context, `
+    _boardAddingTask = true;
+    _boardAddingTaskDraft = '';
+    _boardInlineAttachments = [];
+  `);
+
+  context.boardCancelAddTask();
+
+  assert.equal(runInContext(context, '_boardAddingTask'), false,
+    'form must close when the user moved focus outside the inline textarea');
+});
+
 test('agent history task links open the board and focus the selected task', () => {
   const { context, document } = createAgentHistoryHarness();
   document.register('panel-board');
@@ -6767,6 +6855,18 @@ test('context menu constrains width and clamps wrapped task-title rows', () => {
 
   assert.match(css, /#ctx-menu\s*\{[^}]*max-width:\s*min\(320px,\s*calc\(100vw - 8px\)\);/);
   assert.match(css, /#ctx-menu button\.ctx-button-wrap\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;[^}]*-webkit-line-clamp:\s*2;/);
+});
+
+test('inline add-task toolbar wraps buttons instead of overflowing narrow card widths', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  // Parent toolbar row must allow wrapping so the right-side group can
+  // drop onto a second line when the card is narrow (prevents Submit from
+  // clipping off the card edge).
+  assert.match(css, /\.board-add-toolbar\s*\{[^}]*flex-wrap:\s*wrap;[^}]*row-gap:\s*4px;/);
+  // The right-side group (agent / action / lane / submit) must also wrap
+  // internally — the four pill buttons can themselves outgrow the row.
+  assert.match(css, /\.board-add-toolbar-right\s*\{[^}]*flex-wrap:\s*wrap;[^}]*row-gap:\s*4px;/);
 });
 
 test('submitTask includes structured artifacts alongside attachments when editing a task', () => {

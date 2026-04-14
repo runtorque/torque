@@ -55,6 +55,10 @@ function connect() {
       _showGroupSettings(msg.group, msg);
     } else if (msg.type === 'toast') {
       _showToast(msg.message, msg.level);
+    } else if (msg.type === 'system_banner') {
+      if (typeof _applySystemBanner === 'function') {
+        _applySystemBanner(msg.banner);
+      }
     } else if (msg.type === 'worktree_history') {
       _showWorktreeHistory(msg);
     } else if (msg.type === 'worktree_pr') {

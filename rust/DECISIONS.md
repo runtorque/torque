@@ -206,3 +206,11 @@ Things that look like dead code but aren't:
 - **`/events` HTTP receiver is scaffolded but not routed into a per-cell EventLog.** Activity badges in the sidebar are based on `ai_report` / PTY events only.
 - **Archived-lane reveal toggle missing.** `build_board_columns` filters out Archived; CLI + API still archive/unarchive tasks. UI affordance to reveal them is a small follow-up.
 - **Panel-header target leak.** `HeaderTarget` in `panel_header.rs` is held alive via `std::mem::forget` because `NSMenuItem.target` isn't retained by Cocoa. Leaks one NSObject per edge-zone rebuild — acceptable for v1.
+
+## Out of scope for the Rust port
+
+- **Python standalone's PTY supervisor sidecar** (`loom/pty_supervisor.py`,
+  added 2026-04-14). The Python standalone mode now delegates PTY ownership
+  to a separate supervisor process so sessions survive daemon restart.
+  The Rust port uses libghostty, which owns its own PTY lifecycle — the
+  supervisor is Python-standalone-only. No parity needed.
