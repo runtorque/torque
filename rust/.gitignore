@@ -1,0 +1,11 @@
+target/
+**/*.rs.bk
+Cargo.lock
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Ghostty submodule + built artifacts (regeneratable, huge)
+third_party/ghostty/
+third_party/ghostty-build/

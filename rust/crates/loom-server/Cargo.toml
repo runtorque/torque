@@ -1,0 +1,40 @@
+[package]
+name = "loom-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+loom-core = { workspace = true }
+loom-actions = { workspace = true }
+loom-worktree = { workspace = true }
+loom-pty = { workspace = true }
+loom-adapters = { workspace = true }
+loom-weaver = { workspace = true }
+
+dirs = { workspace = true }
+serde_yaml = { workspace = true }
+
+tokio = { workspace = true }
+futures = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+bytes = { workspace = true }
+percent-encoding = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+hyper = { version = "1", features = ["client", "http1"] }
+tokio-tungstenite = "0.24"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
+uuid = { workspace = true }

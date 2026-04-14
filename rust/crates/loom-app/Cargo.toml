@@ -1,0 +1,30 @@
+[package]
+name = "loom-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "loom-app"
+path = "src/main.rs"
+
+[dependencies]
+loom-core = { workspace = true }
+loom-server = { workspace = true }
+loom-actions = { workspace = true }
+loom-worktree = { workspace = true }
+loom-pty = { workspace = true }
+loom-adapters = { workspace = true }
+loom-weaver = { workspace = true }
+loom-ui-native = { workspace = true }
+
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[features]
+default = []
+# Run without the native window (engine + HTTP only). Useful for headless/CI.
+headless = []

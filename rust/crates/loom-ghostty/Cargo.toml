@@ -1,0 +1,27 @@
+[package]
+name = "loom-ghostty"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+loom-core = { workspace = true }
+loom-pty = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+bytes = { workspace = true }
+once_cell = { workspace = true }
+
+[features]
+default = []
+# Real libghostty linking + FFI. Requires a prior build of libghostty:
+#   cd third_party/ghostty && TOOLCHAINS=Metal zig build -Demit-xcframework=true \
+#     -Dxcframework-target=native -Doptimize=ReleaseFast
+# then: scripts/stage-ghostty-lib.sh (or copy the cached libghostty-fat.a + header
+# into rust/third_party/ghostty-build/).
+ffi = ["dep:bindgen"]
+
+[build-dependencies]
+bindgen = { version = "0.70", optional = true }
