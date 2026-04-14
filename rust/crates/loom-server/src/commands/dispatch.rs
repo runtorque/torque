@@ -102,8 +102,21 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         }
     };
 
-    // Spawn the PTY if this is a fresh agent.
-    if let Some(pty) = &ctx_pty(ctx).await {
+    // Route: if the agent is UI-attached (a GhosttyView is mounted for it),
+    // send through the UI registry — Ghostty owns that agent's PTY. Otherwise
+    // fall through to the engine's own LocalPtyBackend.
+    if ctx.ui_agents.is_attached(&target_agent_id) {
+        if is_new_agent {
+            tokio::time::sleep(Duration::from_millis(2000)).await;
+        }
+        // `send_text` writes to Ghostty's display buffer as IME-style text and
+        // is the path the UI currently uses. We send the prompt body, pause
+        // briefly so it's treated as a paste, then send the newline separately
+        // to land outside bracketed paste mode.
+        ctx.ui_agents.send(&target_agent_id, rendered.clone());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        ctx.ui_agents.send(&target_agent_id, "\r".to_string());
+    } else if let Some(pty) = &ctx_pty(ctx).await {
         let agent = {
             let st = ctx.state.lock().await;
             st.agents.get(&target_agent_id).cloned()
@@ -179,12 +192,19 @@ pub async fn send_text(ctx: &CmdContext, req: &Value) -> CmdResult {
     let cell_id = required_str(req, "cell_id")?.to_string();
     let text = required_str(req, "text")?.to_string();
 
-    if let Some(pty) = ctx_pty(ctx).await {
+    {
         let st = ctx.state.lock().await;
         if !st.agents.contains_key(&cell_id) {
             return Err(CmdError::BadRequest(format!("agent '{cell_id}' not found")));
         }
-        drop(st);
+    }
+
+    if ctx.ui_agents.is_attached(&cell_id) {
+        ctx.ui_agents.send(&cell_id, text);
+        return ok();
+    }
+
+    if let Some(pty) = ctx_pty(ctx).await {
         pty.write(&cell_id, text.as_bytes())
             .await
             .map_err(|e| CmdError::BadRequest(e.to_string()))?;
@@ -217,8 +237,13 @@ pub async fn broadcast_to_group(ctx: &CmdContext, req: &Value) -> CmdResult {
         ids
     };
 
-    if let Some(pty) = ctx_pty(ctx).await {
-        for id in &targets {
+    let pty = ctx_pty(ctx).await;
+    for id in &targets {
+        if ctx.ui_agents.is_attached(id) {
+            ctx.ui_agents.send(id, text.clone());
+            continue;
+        }
+        if let Some(pty) = &pty {
             let _ = pty.write(id, text.as_bytes()).await;
         }
     }

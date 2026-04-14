@@ -229,15 +229,23 @@ fn install_menubar(app: &NSApplication, mtm: MainThreadMarker) {
 // ---------------------------------------------------------------------------
 
 /// Holds per-window UI state that mutates across refresh ticks:
-/// which agent's GhosttyView is currently mounted, and the cache of
-/// `agent_id → GhosttyView`.
+/// which agent's GhosttyView is currently mounted, the cache of
+/// `agent_id → GhosttyView`, and the pending-text receivers that the engine
+/// pushes dispatch prompts into.
 struct ContentState {
     current_mounted: Option<String>,
-    cache: HashMap<String, Retained<GhosttyView>>,
+    cache: HashMap<String, CachedAgent>,
     /// True the first tick — forces us to mount whatever matches selection
     /// (including placeholder) even if `current_mounted == selection` (both
     /// None at init).
     first_tick: bool,
+}
+
+struct CachedAgent {
+    view: Retained<GhosttyView>,
+    /// Pending text from `dispatch_task` / `send_text` / `broadcast_to_group`.
+    /// Drained each tick and forwarded to the surface via `send_text`.
+    rx: tokio::sync::mpsc::UnboundedReceiver<String>,
 }
 
 impl ContentState {
@@ -258,21 +266,48 @@ fn tick(mtm: MainThreadMarker, bridge: &EngineBridge, views: &Views, state: &Ref
     unsafe { views.sidebar_tv.setString(&NSString::from_str(&sidebar_text)) };
 
     // 2. Reconcile content container against snapshot.selected_agent_id.
-    reconcile_content(mtm, views, &snapshot, state);
+    reconcile_content(mtm, bridge, views, &snapshot, state);
+
+    // 3. Drain any pending dispatch text into the corresponding GhosttyView.
+    drain_pending_text(state);
+}
+
+fn drain_pending_text(state: &RefCell<ContentState>) {
+    use tokio::sync::mpsc::error::TryRecvError;
+    let mut st = state.borrow_mut();
+    for cached in st.cache.values_mut() {
+        loop {
+            match cached.rx.try_recv() {
+                Ok(text) => cached.view.send_text(&text),
+                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+            }
+        }
+    }
 }
 
 fn reconcile_content(
     mtm: MainThreadMarker,
+    bridge: &EngineBridge,
     views: &Views,
     snapshot: &MatrixStateSnapshot,
     state: &RefCell<ContentState>,
 ) {
     let mut st = state.borrow_mut();
 
-    // Drop cached views for agents that no longer exist.
+    // Drop cached views for agents that no longer exist; unregister them so
+    // dispatch stops trying to route through a dead channel.
     let live_ids: std::collections::HashSet<&str> =
         snapshot.agents.iter().map(|a| a.id.as_str()).collect();
-    st.cache.retain(|id, _view| live_ids.contains(id.as_str()));
+    let dead: Vec<String> = st
+        .cache
+        .keys()
+        .filter(|id| !live_ids.contains(id.as_str()))
+        .cloned()
+        .collect();
+    for id in &dead {
+        bridge.ui_agents().unregister(id);
+        st.cache.remove(id);
+    }
 
     let desired: Option<String> = snapshot
         .selected_agent_id
@@ -309,10 +344,13 @@ fn reconcile_content(
                             | NSAutoresizingMaskOptions::NSViewHeightSizable,
                     );
                 }
-                st.cache.insert(agent_id.clone(), gv);
+                // Register with the engine so dispatch routes prompts here.
+                let rx = bridge.ui_agents().register(agent_id.clone());
+                st.cache
+                    .insert(agent_id.clone(), CachedAgent { view: gv, rx });
             }
-            let gv = st.cache.get(agent_id).unwrap();
-            let gv_as_view: &NSView = &**gv;
+            let cached = st.cache.get(agent_id).unwrap();
+            let gv_as_view: &NSView = &**cached.view;
             unsafe {
                 gv_as_view.setFrame(container_frame(&views.content_container));
                 views.content_container.addSubview(gv_as_view);

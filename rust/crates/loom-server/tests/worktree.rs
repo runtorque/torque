@@ -68,6 +68,7 @@ async fn spawn_server_with_agent(
         state: state.clone(),
         bus,
         pty: None,
+        ui_agents: Default::default(),
     };
 
     let router = Router::new()

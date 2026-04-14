@@ -27,6 +27,7 @@ async fn handle_mcp(State(app): State<AppState>, Json(req): Json<Value>) -> impl
         state: app.state.clone(),
         bus: app.bus.clone(),
         pty: app.pty.clone(),
+        ui_agents: app.ui_agents.clone(),
     };
 
     let result = match method {

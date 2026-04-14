@@ -1,16 +1,62 @@
 //! Axum app assembly + startup.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use anyhow::Result;
 use axum::Router;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
 use loom_pty::LocalPtyBackend;
+
+/// Registry of agents whose terminal is hosted by the native UI (a
+/// `GhosttyView`, not a `LocalPtyBackend` session). When an agent is in the
+/// registry, dispatch routes its prompt through the registered channel
+/// instead of spawning a PTY on the engine side.
+///
+/// The UI owns the receiver side — it drains pending text each refresh tick
+/// and calls `GhosttyView::send_text`. This keeps the engine free of AppKit
+/// concerns (no `dispatch2::Queue::main` inside the engine).
+#[derive(Clone, Default)]
+pub struct UiAgentRegistry {
+    inner: Arc<StdMutex<HashMap<String, mpsc::UnboundedSender<String>>>>,
+}
+
+impl UiAgentRegistry {
+    /// UI registers an agent. Returns the receiver to be drained from the
+    /// main thread.
+    pub fn register(&self, agent_id: String) -> mpsc::UnboundedReceiver<String> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        map.insert(agent_id, tx);
+        rx
+    }
+
+    pub fn unregister(&self, agent_id: &str) {
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        map.remove(agent_id);
+    }
+
+    pub fn is_attached(&self, agent_id: &str) -> bool {
+        let map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        // A closed channel counts as detached.
+        map.get(agent_id).map(|tx| !tx.is_closed()).unwrap_or(false)
+    }
+
+    /// Returns `true` iff the text was queued to a live UI-attached agent.
+    pub fn send(&self, agent_id: &str, text: String) -> bool {
+        let map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(tx) = map.get(agent_id) {
+            tx.send(text).is_ok()
+        } else {
+            false
+        }
+    }
+}
 
 pub struct ServerConfig {
     pub bind: SocketAddr,
@@ -38,6 +84,9 @@ pub struct AppState {
     /// PTY backend for dispatch & send_text. `None` in environments where the
     /// engine runs headless without a terminal layer (e.g. some unit tests).
     pub pty: Option<Arc<LocalPtyBackend>>,
+    /// Registry of UI-attached agents. Dispatch routes through this when the
+    /// target agent is mounted in the native window.
+    pub ui_agents: UiAgentRegistry,
 }
 
 pub struct ServerHandle {
@@ -73,6 +122,7 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
         state: state.clone(),
         bus: bus.clone(),
         pty: Some(pty),
+        ui_agents: UiAgentRegistry::default(),
     };
 
     // Spawn scheduler

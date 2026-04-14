@@ -15,20 +15,28 @@ use tokio::sync::Mutex;
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
+use loom_server::app::UiAgentRegistry;
 use loom_server::commands;
 use loom_server::events as evt;
 use loom_server::uploads;
 use loom_server::ws;
 
 async fn spawn_test_server() -> (SocketAddr, Arc<Mutex<MatrixState>>) {
+    let (addr, state, _reg) = spawn_test_server_full().await;
+    (addr, state)
+}
+
+async fn spawn_test_server_full() -> (SocketAddr, Arc<Mutex<MatrixState>>, UiAgentRegistry) {
     let db = LoomDb::in_memory().unwrap();
     let state = Arc::new(Mutex::new(MatrixState::new()));
     let bus = EventBus::new();
+    let ui_agents = UiAgentRegistry::default();
     let app_state = loom_server::app::AppState {
         db,
         state: state.clone(),
         bus,
         pty: None,
+        ui_agents: ui_agents.clone(),
     };
 
     let router = Router::new()
@@ -43,7 +51,7 @@ async fn spawn_test_server() -> (SocketAddr, Arc<Mutex<MatrixState>>) {
     tokio::spawn(async move {
         let _ = axum::serve(listener, router).await;
     });
-    (addr, state)
+    (addr, state, ui_agents)
 }
 
 async fn post(addr: SocketAddr, body: Value) -> Value {
@@ -163,6 +171,86 @@ async fn ai_report_blocked_labels_task() {
     assert!(task.labels.iter().any(|l| l == "blocked"));
     let agent = st.agents.get(&agent_id).unwrap();
     assert!(agent.needs_attention);
+}
+
+#[tokio::test]
+async fn dispatch_routes_through_ui_registry_when_attached() {
+    let (addr, state, ui_agents) = spawn_test_server_full().await;
+
+    post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    // Add an agent and register it in the UI.
+    let v = post(
+        addr,
+        json!({"cmd": "add_agent", "name": "W", "group": "Eng"}),
+    )
+    .await;
+    let agent_id = v["agent_id"].as_str().unwrap().to_string();
+    let mut rx = ui_agents.register(agent_id.clone());
+
+    // Create a task pinned to that agent and dispatch it.
+    let t = post(
+        addr,
+        json!({"cmd": "board_add_task", "task": "Hello", "group": "Eng", "agent_id": &agent_id}),
+    )
+    .await;
+    let task_id = t["task_id"].as_str().unwrap().to_string();
+
+    let v = post(
+        addr,
+        json!({"cmd": "dispatch_task", "task_id": &task_id, "force_no_action": true}),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "dispatch response: {v:?}");
+
+    // Expect at least two messages: the rendered prompt + a bare "\r".
+    let mut received: Vec<String> = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while received.len() < 2 && std::time::Instant::now() < deadline {
+        match tokio::time::timeout(std::time::Duration::from_millis(250), rx.recv()).await {
+            Ok(Some(s)) => received.push(s),
+            Ok(None) => break,
+            Err(_) => {}
+        }
+    }
+    assert!(
+        received.iter().any(|s| s.contains("Hello")),
+        "expected rendered prompt to include task text, got: {received:?}"
+    );
+    assert!(
+        received.iter().any(|s| s == "\r"),
+        "expected trailing \\r send, got: {received:?}"
+    );
+
+    // PTY backend was None; task state should still be updated.
+    let st = state.lock().await;
+    assert_eq!(st.board_tasks.get(&task_id).unwrap().lane, "In Progress");
+}
+
+#[tokio::test]
+async fn send_text_routes_through_ui_registry_when_attached() {
+    let (addr, _state, ui_agents) = spawn_test_server_full().await;
+
+    post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let v = post(
+        addr,
+        json!({"cmd": "add_agent", "name": "W", "group": "Eng"}),
+    )
+    .await;
+    let agent_id = v["agent_id"].as_str().unwrap().to_string();
+    let mut rx = ui_agents.register(agent_id.clone());
+
+    let v = post(
+        addr,
+        json!({"cmd": "send_text", "cell_id": &agent_id, "text": "hi there"}),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+
+    let got = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("send_text should route to UI registry")
+        .expect("sender must still be open");
+    assert_eq!(got, "hi there");
 }
 
 #[tokio::test]

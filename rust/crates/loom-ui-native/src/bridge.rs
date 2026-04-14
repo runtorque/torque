@@ -11,7 +11,7 @@ use tokio::sync::broadcast;
 
 use loom_core::events::OutMessage;
 use loom_core::state::MatrixState;
-use loom_server::app::AppState;
+use loom_server::app::{AppState, UiAgentRegistry};
 use loom_server::commands::{CmdContext, CmdError};
 
 #[derive(Clone)]
@@ -33,7 +33,15 @@ impl EngineBridge {
             db: self.state.db.clone(),
             bus: self.state.bus.clone(),
             pty: self.state.pty.clone(),
+            ui_agents: self.state.ui_agents.clone(),
         }
+    }
+
+    /// The shared UI-attached-agents registry. The AppKit layer registers
+    /// GhosttyView-backed agents here so dispatch routes prompts to them
+    /// instead of spawning a duplicate PTY.
+    pub fn ui_agents(&self) -> &UiAgentRegistry {
+        &self.state.ui_agents
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<OutMessage> {

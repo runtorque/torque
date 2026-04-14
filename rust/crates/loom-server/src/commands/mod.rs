@@ -20,7 +20,7 @@ use loom_core::events::{EventBus, OutMessage};
 use loom_core::state::MatrixState;
 use loom_pty::LocalPtyBackend;
 
-use crate::app::AppState;
+use crate::app::{AppState, UiAgentRegistry};
 
 pub mod actions;
 pub mod agents;
@@ -49,6 +49,7 @@ async fn handle_cmd(State(app): State<AppState>, Json(req): Json<Value>) -> impl
         db: app.db.clone(),
         bus: app.bus.clone(),
         pty: app.pty.clone(),
+        ui_agents: app.ui_agents.clone(),
     };
 
     let result = dispatch(&ctx, &cmd, &req).await;
@@ -79,6 +80,7 @@ pub struct CmdContext {
     pub db: LoomDb,
     pub bus: EventBus,
     pub pty: Option<Arc<LocalPtyBackend>>,
+    pub ui_agents: UiAgentRegistry,
 }
 
 #[derive(Debug)]
@@ -185,6 +187,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
                 state: ctx.state.clone(),
                 bus: ctx.bus.clone(),
                 pty: ctx.pty.clone(),
+                ui_agents: ctx.ui_agents.clone(),
             })
             .await;
             Ok(snap)

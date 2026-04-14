@@ -21,7 +21,13 @@ async fn spawn_test_server() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let db = LoomDb::in_memory().unwrap();
     let state = Arc::new(Mutex::new(MatrixState::new()));
     let bus = EventBus::new();
-    let app_state = loom_server::app::AppState { db, state, bus, pty: None };
+    let app_state = loom_server::app::AppState {
+        db,
+        state,
+        bus,
+        pty: None,
+        ui_agents: Default::default(),
+    };
 
     let router = Router::new()
         .merge(ws::routes())
