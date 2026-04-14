@@ -514,7 +514,7 @@ function renderContextPanel() {
 
   var html = '<div class="context-panel">';
   html += '<div class="context-header">';
-  html += '<div class="context-header-copy"><div class="context-title">Context</div><div class="context-subtitle">Shared memory for the current flow</div></div>';
+  html += '<div class="context-header-copy"><div class="context-title">Shared Context</div><div class="context-subtitle">Notes and shared memory for the current flow.</div></div>';
   html += '<div class="context-header-actions">';
   html += '<button class="btn-primary btn-sm" onclick="contextOpenCreate()">New Note</button>';
   html += '</div></div>';
@@ -539,7 +539,7 @@ function renderContextPanel() {
     + (_contextPinnedOnly ? ' checked' : '')
     + ' onchange="contextSetPinnedOnly(this.checked)"><span>Pinned only</span></label>';
   html += '</div>';
-  html += '<div class="context-summary">' + esc(summary.join(' · ') || 'No active group or task context') + '</div>';
+  html += '<div class="context-summary">' + esc(summary.join(' · ') || 'Select a group, task, or agent to scope shared memory.') + '</div>';
   html += '<div class="context-browser' + (compact ? ' compact' : ' split') + '" id="context-browser"'
     + (compact ? '' : ' style="--context-list-width:' + Math.round(_contextClampSplitRatio(_contextSplitRatio) * 100) + '%;"')
     + '>';

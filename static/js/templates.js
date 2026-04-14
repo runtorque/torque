@@ -3,6 +3,7 @@
 /* ------------------------------------------------------------------ */
 
 var _agentsPanelView = 'history';  // 'templates' | 'history'
+var _agentHistoryDefaultFilter = 'merged';
 
 var _agentTplList = [];
 var _agentTplSelected = '';
@@ -66,17 +67,27 @@ function agentsPanelSwitchView(view) {
 function renderAgentTemplatesPanel() {
   var panel = document.getElementById('panel-templates');
   if (!panel) return;
+  var scopeGroup = (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
 
   var html = '';
   html += '<div class="tpled-header">';
+  html += '<div class="tpled-header-copy">';
+  html += '<div class="tpled-header-title-row">';
+  html += '<span class="tpled-header-title">Agent Library</span>';
+  if (scopeGroup) html += '<span class="tpled-scope-pill">Group: ' + esc(scopeGroup) + '</span>';
+  html += '</div>';
+  html += '<div class="tpled-header-subtitle">Templates and historical runs. Live agents stay in the left column.</div>';
+  html += '</div>';
+  html += '<div class="tpled-header-controls">';
 
   // View toggle (Templates | History)
-  html += '<div class="tpled-view-toggle" style="margin-left:0;margin-right:auto">';
+  html += '<div class="tpled-view-toggle">';
   html += '<button class="tpled-view-btn' + (_agentsPanelView === 'templates' ? ' active' : '') + '" onclick="agentsPanelSwitchView(\'templates\')">Templates</button>';
   html += '<button class="tpled-view-btn' + (_agentsPanelView === 'history' ? ' active' : '') + '" onclick="agentsPanelSwitchView(\'history\')">History</button>';
   html += '</div>';
 
   if (_agentsPanelView === 'history') {
+    html += '</div>';
     html += '</div>';
     html += '<div class="agent-history-container" id="agent-history-container"></div>';
     panel.innerHTML = html;
@@ -111,6 +122,7 @@ function renderAgentTemplatesPanel() {
   html += '</select>';
   html += '<button class="tpled-new-btn" onclick="agentTemplateNew()" title="New template">+</button>';
   html += '<button class="tpled-new-btn" onclick="agentTemplateEditorLoad()" title="Refresh">&#x21BB;</button>';
+  html += '</div>';
   html += '</div>';
   html += '<div class="tpled-editor" id="agent-tpl-editor"></div>';
 
@@ -158,9 +170,9 @@ function renderAgentTemplatesEditor() {
   if (!el) return;
   if (!_agentTplData && !_agentTplNew) {
     if (_agentTplList.length === 0) {
-      el.innerHTML = '<div class="tpled-empty">No agent templates found.<br>Click <b>+</b> to create one,<br>or add <code>.yaml</code> files to <code>.loom/agents/</code>.</div>';
+      el.innerHTML = '<div class="tpled-empty">No agent templates found.<br>Click <b>+</b> to save a launch preset,<br>or add <code>.yaml</code> files to <code>.loom/agents/</code>.</div>';
     } else {
-      el.innerHTML = '<div class="tpled-empty">Pick a template from the dropdown above.</div>';
+      el.innerHTML = '<div class="tpled-empty">Pick a template from the library above.</div>';
     }
     return;
   }
@@ -359,7 +371,7 @@ function agentTemplateDuplicate() {
 /* ------------------------------------------------------------------ */
 
 var _agentHistoryRecords = [];
-var _agentHistoryFilter = 'active'; // '', 'active', 'removed', 'merged'
+var _agentHistoryFilter = _agentHistoryDefaultFilter; // '', 'active', 'removed', 'merged'
 var _agentHistorySearch = '';
 var _agentHistoryExpanded = '';     // agent ID currently expanded
 var _agentHistoryDetail = null;     // detail data for expanded agent
@@ -493,7 +505,11 @@ function renderAgentHistoryView() {
   }
 
   if (!records.length) {
-    html += '<div class="ah-empty">No agent history records found.</div>';
+    var empty = 'No historical agent runs match this filter.';
+    if (_agentHistoryFilter === 'merged') empty = 'No merged agent runs yet.';
+    else if (_agentHistoryFilter === 'removed') empty = 'No removed agent runs yet.';
+    else if (_agentHistoryFilter === 'active') empty = 'No active agent runs match this filter.';
+    html += '<div class="ah-empty">' + empty + '<br>Live agents stay in the left column.</div>';
     container.innerHTML = html;
     return;
   }

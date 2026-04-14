@@ -70,12 +70,20 @@ function tplEditorReceiveDetail(msg) {
 function renderTemplatesPanel() {
   var panel = document.getElementById('panel-actions');
   if (!panel) return;
+  var scopeGroup = (typeof _currentGroup === 'function' ? _currentGroup() : '') || '';
 
   var html = '';
 
   // Header bar
   html += '<div class="tpled-header">';
+  html += '<div class="tpled-header-copy">';
+  html += '<div class="tpled-header-title-row">';
   html += '<span class="tpled-header-title">Actions</span>';
+  if (scopeGroup) html += '<span class="tpled-scope-pill">Group: ' + esc(scopeGroup) + '</span>';
+  html += '</div>';
+  html += '<div class="tpled-header-subtitle">Prompt templates, pipelines, and dispatch workflows.</div>';
+  html += '</div>';
+  html += '<div class="tpled-header-controls">';
   html += '<select class="tpled-select" id="tpled-select" onchange="tplEditorOnSelect(this.value)">';
   html += '<option value="">Select\u2026</option>';
   var projectTpls = [];
@@ -111,6 +119,7 @@ function renderTemplatesPanel() {
   html += '<div class="tpled-view-toggle">';
   html += '<button class="tpled-view-btn' + (_tplPanelView === 'editor' ? ' active' : '') + '" onclick="tplSwitchView(\'editor\')">Editor</button>';
   html += '<button class="tpled-view-btn' + (_tplPanelView === 'pipelines' ? ' active' : '') + '" onclick="tplSwitchView(\'pipelines\')">Pipelines</button>';
+  html += '</div>';
   html += '</div>';
   html += '</div>';
 

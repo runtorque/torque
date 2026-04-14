@@ -6050,12 +6050,36 @@ test('agents panel defaults to history view', () => {
   const panel = document.getElementById('panel-templates');
 
   assert.equal(jsonValue(context, '_agentsPanelView'), 'history');
+  assert.equal(jsonValue(context, '_agentHistoryFilter'), 'merged');
 
   context.renderAgentTemplatesPanel();
 
+  assert.match(panel.innerHTML, /Agent Library/);
+  assert.match(panel.innerHTML, /Live agents stay in the left column/);
   assert.match(panel.innerHTML, /History<\/button>/);
   assert.match(panel.innerHTML, /tpled-view-btn active[^"]*" onclick="agentsPanelSwitchView\('history'\)"/);
   assert.match(panel.innerHTML, /agent-history-container/);
+});
+
+test('standalone panel title renames templates surface to library', () => {
+  const { context } = createPanelHarness();
+  assert.equal(jsonValue(context, `_standalonePanelTitle('templates')`), 'Library');
+});
+
+test('renderWeaverPanel shows a group-scoped empty state before a weaver exists', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-weaver');
+  panel.querySelector = function() { return null; };
+
+  runInContext(context, `
+    state.groups = { alpha: [] };
+    state.group_settings = {};
+  `);
+
+  context.renderWeaverPanel();
+
+  assert.match(panel.innerHTML, /No Weaver configured for alpha/);
+  assert.doesNotMatch(panel.innerHTML, /weaver-tab-journal/);
 });
 
 test('opening agents panel requests history when history is the active view', () => {
