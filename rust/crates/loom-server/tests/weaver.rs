@@ -28,6 +28,7 @@ async fn spawn() -> (SocketAddr, Arc<Mutex<MatrixState>>, LoomDb, UiAgentRegistr
         bus,
         pty: None,
         ui_agents: ui_agents.clone(),
+        terminals: Default::default(),
     };
 
     let router = Router::new()
@@ -48,7 +49,7 @@ async fn spawn() -> (SocketAddr, Arc<Mutex<MatrixState>>, LoomDb, UiAgentRegistr
 
 async fn post(addr: SocketAddr, body: Value) -> Value {
     let client = reqwest::Client::new();
-    client
+    let value = client
         .post(format!("http://{}/api/cmd", addr))
         .json(&body)
         .send()
@@ -56,7 +57,15 @@ async fn post(addr: SocketAddr, body: Value) -> Value {
         .unwrap()
         .json::<Value>()
         .await
-        .unwrap()
+        .unwrap();
+    if value.get("ok").and_then(Value::as_bool) == Some(true) {
+        if let Some(data) = value.get("data").and_then(Value::as_object) {
+            let mut flattened = data.clone();
+            flattened.insert("ok".into(), Value::Bool(true));
+            return Value::Object(flattened);
+        }
+    }
+    value
 }
 
 async fn mcp_call(addr: SocketAddr, method: &str, params: Value, cell_id: Option<&str>) -> Value {

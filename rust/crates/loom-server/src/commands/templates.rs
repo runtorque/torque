@@ -15,39 +15,53 @@ use serde_json::{json, Value};
 
 use super::{optional_str, required_str, CmdContext, CmdError, CmdResult};
 
-pub async fn list_templates(_ctx: &CmdContext, _req: &Value) -> CmdResult {
+pub async fn list_templates(_ctx: &CmdContext, req: &Value) -> CmdResult {
     let mut templates: Vec<Value> = Vec::new();
     let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // Project first, user second — project wins on name clash.
-    for (root, scope) in [
-        (project_templates_root(), "project"),
-        (Some(user_templates_root()), "user"),
+    for (root, scope, global) in [
+        (project_templates_root(), "project", false),
+        (Some(user_templates_root()), "user", true),
     ] {
         let Some(root) = root else { continue };
         if !root.exists() {
             continue;
         }
-        let names = list_yaml_names(&root);
-        for name in names {
-            if seen_names.insert(name.clone()) {
-                templates.push(json!({
-                    "name": name,
-                    "scope": scope,
-                }));
-            } else {
-                // A project template with the same name already claimed this
-                // slot — skip the user variant.
+        let items = list_yaml_templates(&root);
+        for item in items {
+            let name = item["name"].as_str().unwrap_or("").to_string();
+            let shadowed = global && seen_names.contains(&name);
+            if !global {
+                seen_names.insert(name.clone());
             }
+            templates.push(json!({
+                "name": name,
+                "display_name": item.get("display_name").and_then(|v| v.as_str()).unwrap_or(""),
+                "description": item.get("description").and_then(|v| v.as_str()).unwrap_or(""),
+                "provider": item.get("provider").and_then(|v| v.as_str()).unwrap_or(""),
+                "dir": root.to_string_lossy(),
+                "scope": scope,
+                "global": global,
+                "shadowed": shadowed,
+            }));
         }
     }
     templates.sort_by(|a, b| {
-        a["name"]
-            .as_str()
-            .unwrap_or("")
-            .cmp(b["name"].as_str().unwrap_or(""))
+        let ag = a.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
+        let bg = b.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
+        ag.cmp(&bg).then_with(|| {
+            a["name"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(b["name"].as_str().unwrap_or(""))
+        })
     });
-    Ok(json!({ "templates": templates }))
+    Ok(json!({
+        "type": "templates",
+        "group": optional_str(req, "group").unwrap_or(""),
+        "templates": templates,
+    }))
 }
 
 pub async fn get_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
@@ -59,10 +73,11 @@ pub async fn get_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
     let parsed: Value =
         serde_yaml::from_str(&raw).map_err(|e| CmdError::BadRequest(format!("yaml parse: {e}")))?;
     Ok(json!({
+        "type": "template_detail",
         "name": name,
         "scope": scope,
         "path": path.to_string_lossy(),
-        "config": parsed,
+        "template": parsed,
         "raw": raw,
     }))
 }
@@ -103,7 +118,15 @@ pub async fn save_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
     }
     std::fs::write(&path, yaml_text).map_err(|e| CmdError::BadRequest(format!("write: {e}")))?;
 
-    Ok(json!({ "ok": true, "name": name, "scope": scope, "path": path.to_string_lossy() }))
+    let group = optional_str(req, "group").unwrap_or("");
+    Ok(json!({
+        "type": "templates",
+        "group": group,
+        "templates": list_templates(_ctx, req).await?.get("templates").cloned().unwrap_or_else(|| json!([])),
+        "saved": name,
+        "scope": scope,
+        "path": path.to_string_lossy(),
+    }))
 }
 
 pub async fn delete_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
@@ -126,7 +149,13 @@ pub async fn delete_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
     if !removed {
         return Err(CmdError::BadRequest(format!("template '{name}' not found")));
     }
-    Ok(json!({ "ok": true }))
+    let group = optional_str(req, "group").unwrap_or("");
+    Ok(json!({
+        "type": "templates",
+        "group": group,
+        "templates": list_templates(_ctx, req).await?.get("templates").cloned().unwrap_or_else(|| json!([])),
+        "deleted": name,
+    }))
 }
 
 /// Merge a template + overrides into a single config dict the UI + dispatch
@@ -162,8 +191,8 @@ pub async fn render_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
 // helpers
 // -----
 
-fn list_yaml_names(root: &Path) -> Vec<String> {
-    fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
+fn list_yaml_templates(root: &Path) -> Vec<Value> {
+    fn walk(dir: &Path, base: &Path, out: &mut Vec<Value>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
@@ -183,7 +212,14 @@ fn list_yaml_names(root: &Path) -> Vec<String> {
                     if let Some(stripped) = name.strip_prefix("./") {
                         name = stripped.to_string();
                     }
-                    out.push(name);
+                    let raw = std::fs::read_to_string(&path).unwrap_or_default();
+                    let meta: Value = serde_yaml::from_str(&raw).unwrap_or(Value::Null);
+                    out.push(json!({
+                        "name": name,
+                        "display_name": meta.get("display_name").and_then(|v| v.as_str()).unwrap_or(""),
+                        "description": meta.get("description").and_then(|v| v.as_str()).unwrap_or(""),
+                        "provider": meta.get("provider").and_then(|v| v.as_str()).unwrap_or(""),
+                    }));
                 }
             }
         }

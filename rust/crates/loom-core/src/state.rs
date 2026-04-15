@@ -1191,6 +1191,7 @@ pub struct MatrixState {
 
     pub panel_active: String,
     pub board_panel_height: i32,
+    pub standalone_panel_layout: serde_json::Value,
     pub events_dismissed_attention: HashMap<String, f64>,
     pub board_filters_by_group: HashMap<String, serde_json::Value>,
     pub board_saved_views_by_group: HashMap<String, serde_json::Value>,
@@ -1248,6 +1249,7 @@ impl MatrixState {
             auto_dispatch_queues: HashMap::new(),
             panel_active: String::new(),
             board_panel_height: 0,
+            standalone_panel_layout: serde_json::json!({}),
             events_dismissed_attention: HashMap::new(),
             board_filters_by_group: HashMap::new(),
             board_saved_views_by_group: HashMap::new(),
@@ -1364,11 +1366,15 @@ impl MatrixState {
         let next: WeaverSettings = serde_json::from_value(merged)
             .map_err(|e| crate::Error::validation(format!("invalid weaver settings: {e}")))?;
         self.weaver_settings.insert(group.to_string(), next.clone());
-        let mut value = serde_json::to_value(&next).unwrap_or(serde_json::Value::Null);
-        if let Some(obj) = value.as_object_mut() {
-            obj.insert("group".into(), serde_json::Value::String(group.to_string()));
-        }
-        self.emit(DeltaOp::WeaverSettingsUpdate(value));
+        let mut fields = serde_json::to_value(&next)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        fields.remove("group");
+        self.emit(DeltaOp::WeaverSettingsUpdate {
+            group: group.to_string(),
+            fields,
+        });
         Ok(next)
     }
 
@@ -1643,8 +1649,8 @@ impl MatrixState {
             }
         }
         self.emit(DeltaOp::GroupRename {
-            from: old.into(),
-            to: new.into(),
+            old_name: old.into(),
+            new_name: new.into(),
         });
         // reindex tasks
         if let Some(ids) = self.tasks_by_group.remove(old) {
@@ -1674,7 +1680,9 @@ impl MatrixState {
             }
         }
         self.groups_order = final_order.clone();
-        self.emit(DeltaOp::GroupsReorder { order: final_order });
+        self.emit(DeltaOp::GroupsReorder {
+            groups: final_order,
+        });
         Ok(())
     }
 
@@ -1771,9 +1779,10 @@ impl MatrixState {
             Some(l) => serde_json::to_value(l).unwrap_or(serde_json::Value::Null),
             None => serde_json::Value::Null,
         };
-        self.emit(DeltaOp::UiUpdate(serde_json::json!({
-            "content_layout": payload,
-        })));
+        self.emit(DeltaOp::UiUpdate {
+            key: "content_layout".into(),
+            value: payload,
+        });
     }
 
     /// Resolve the effective layout: returns the customized layout if set,
@@ -1810,9 +1819,10 @@ impl MatrixState {
             return;
         }
         let payload = serde_json::to_value(&self.dock_edges).unwrap_or(serde_json::Value::Null);
-        self.emit(DeltaOp::UiUpdate(serde_json::json!({
-            "dock_edges": payload,
-        })));
+        self.emit(DeltaOp::UiUpdate {
+            key: "dock_edges".into(),
+            value: payload,
+        });
     }
 
     /// Update edge-zone size ratios (called e.g. from a splitter drag).
@@ -1823,9 +1833,10 @@ impl MatrixState {
         }
         self.dock_edges.ratios = clamped;
         let payload = serde_json::to_value(&self.dock_edges).unwrap_or(serde_json::Value::Null);
-        self.emit(DeltaOp::UiUpdate(serde_json::json!({
-            "dock_edges": payload,
-        })));
+        self.emit(DeltaOp::UiUpdate {
+            key: "dock_edges".into(),
+            value: payload,
+        });
     }
 
     /// Set (or clear) the UI's selected agent. `None` deselects.
@@ -1840,9 +1851,10 @@ impl MatrixState {
             return Ok(());
         }
         self.selected_agent_id = new.clone();
-        self.emit(DeltaOp::UiUpdate(serde_json::json!({
-            "selected_agent_id": new,
-        })));
+        self.emit(DeltaOp::UiUpdate {
+            key: "selected_agent_id".into(),
+            value: serde_json::to_value(new).unwrap_or(serde_json::Value::Null),
+        });
         Ok(())
     }
 
@@ -1853,9 +1865,10 @@ impl MatrixState {
         };
         if removed.iter().any(|r| r == selected) {
             self.selected_agent_id = None;
-            self.emit(DeltaOp::UiUpdate(serde_json::json!({
-                "selected_agent_id": serde_json::Value::Null,
-            })));
+            self.emit(DeltaOp::UiUpdate {
+                key: "selected_agent_id".into(),
+                value: serde_json::Value::Null,
+            });
         }
     }
 
@@ -2148,7 +2161,8 @@ mod tests {
         let (_, ops) = s.drain_deltas().unwrap();
         let v = serde_json::to_value(&ops[0]).unwrap();
         assert_eq!(v["op"], "ui_update");
-        assert_eq!(v["selected_agent_id"], "a1");
+        assert_eq!(v["key"], "selected_agent_id");
+        assert_eq!(v["value"], "a1");
     }
 
     #[test]
@@ -2169,7 +2183,8 @@ mod tests {
         let (_, ops) = s.drain_deltas().unwrap();
         let v = serde_json::to_value(&ops[0]).unwrap();
         assert_eq!(v["op"], "ui_update");
-        assert!(v["selected_agent_id"].is_null());
+        assert_eq!(v["key"], "selected_agent_id");
+        assert!(v["value"].is_null());
     }
 
     #[test]
@@ -2197,7 +2212,7 @@ mod tests {
         let (_, ops) = s.drain_deltas().unwrap();
         let has_ui_clear = ops.iter().any(|op| {
             let v = serde_json::to_value(op).unwrap();
-            v["op"] == "ui_update" && v["selected_agent_id"].is_null()
+            v["op"] == "ui_update" && v["key"] == "selected_agent_id" && v["value"].is_null()
         });
         assert!(
             has_ui_clear,
@@ -2295,8 +2310,9 @@ mod tests {
         let (_, ops) = s.drain_deltas().unwrap();
         let v = serde_json::to_value(&ops[0]).unwrap();
         assert_eq!(v["op"], "ui_update");
-        assert_eq!(v["content_layout"]["type"], "leaf");
-        assert_eq!(v["content_layout"]["panel"]["kind"], "board");
+        assert_eq!(v["key"], "content_layout");
+        assert_eq!(v["value"]["type"], "leaf");
+        assert_eq!(v["value"]["panel"]["kind"], "board");
     }
 
     #[test]
@@ -2311,7 +2327,8 @@ mod tests {
         let (_, ops) = s.drain_deltas().unwrap();
         let v = serde_json::to_value(&ops[0]).unwrap();
         assert_eq!(v["op"], "ui_update");
-        assert!(v["content_layout"].is_null());
+        assert_eq!(v["key"], "content_layout");
+        assert!(v["value"].is_null());
     }
 
     #[test]
@@ -2388,7 +2405,8 @@ mod tests {
         let (_, ops) = s.drain_deltas().expect("delta emitted");
         let v = serde_json::to_value(&ops[0]).unwrap();
         assert_eq!(v["op"], "ui_update");
-        assert_eq!(v["dock_edges"]["right"]["panel"]["kind"], "memory");
+        assert_eq!(v["key"], "dock_edges");
+        assert_eq!(v["value"]["right"]["panel"]["kind"], "memory");
     }
 
     #[test]
@@ -2423,7 +2441,8 @@ mod tests {
         // Delta carries `content_layout`, not `dock_edges`.
         let (_, ops) = s.drain_deltas().expect("delta emitted");
         let v = serde_json::to_value(&ops[0]).unwrap();
-        assert!(v["content_layout"].is_object());
+        assert_eq!(v["key"], "content_layout");
+        assert!(v["value"].is_object());
     }
 
     #[test]
@@ -2442,6 +2461,7 @@ mod tests {
         let (_, ops) = s.drain_deltas().expect("delta emitted");
         let v = serde_json::to_value(&ops[0]).unwrap();
         assert_eq!(v["op"], "ui_update");
-        assert_eq!(v["dock_edges"]["ratios"]["top"], 0.7);
+        assert_eq!(v["key"], "dock_edges");
+        assert_eq!(v["value"]["ratios"]["top"], 0.7);
     }
 }

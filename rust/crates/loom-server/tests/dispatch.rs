@@ -8,7 +8,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::Router;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
@@ -16,10 +15,6 @@ use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
 use loom_server::app::UiAgentRegistry;
-use loom_server::commands;
-use loom_server::events as evt;
-use loom_server::uploads;
-use loom_server::ws;
 
 async fn spawn_test_server() -> (SocketAddr, Arc<Mutex<MatrixState>>) {
     let (addr, state, _reg) = spawn_test_server_full().await;
@@ -37,14 +32,10 @@ async fn spawn_test_server_full() -> (SocketAddr, Arc<Mutex<MatrixState>>, UiAge
         bus,
         pty: None,
         ui_agents: ui_agents.clone(),
+        terminals: Default::default(),
     };
 
-    let router = Router::new()
-        .merge(ws::routes())
-        .merge(commands::routes())
-        .merge(evt::routes())
-        .merge(uploads::routes())
-        .with_state(app_state);
+    let router = loom_server::app::build_router(app_state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -75,7 +66,7 @@ async fn dispatch_without_action_creates_agent_and_moves_task() {
         json!({"cmd": "board_add_task", "task": "Do the thing", "group": "Eng"}),
     )
     .await;
-    let task_id = t["task_id"].as_str().unwrap().to_string();
+    let task_id = t["data"]["task_id"].as_str().unwrap().to_string();
 
     let v = post(
         addr,
@@ -83,7 +74,7 @@ async fn dispatch_without_action_creates_agent_and_moves_task() {
     )
     .await;
     assert_eq!(v["ok"], true, "dispatch response: {v:?}");
-    let agent_id = v["agent_id"].as_str().unwrap().to_string();
+    let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
 
     let st = state.lock().await;
     let task = st.board_tasks.get(&task_id).unwrap();
@@ -105,14 +96,14 @@ async fn ai_report_done_moves_task_to_done_lane() {
         json!({"cmd": "board_add_task", "task": "Thing", "group": "Eng"}),
     )
     .await;
-    let task_id = t["task_id"].as_str().unwrap().to_string();
+    let task_id = t["data"]["task_id"].as_str().unwrap().to_string();
 
     let v = post(
         addr,
         json!({"cmd": "dispatch_task", "task_id": &task_id, "force_no_action": true}),
     )
     .await;
-    let agent_id = v["agent_id"].as_str().unwrap().to_string();
+    let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
 
     let v = post(
         addr,
@@ -150,13 +141,13 @@ async fn ai_report_blocked_labels_task() {
         json!({"cmd": "board_add_task", "task": "X", "group": "Eng"}),
     )
     .await;
-    let task_id = t["task_id"].as_str().unwrap().to_string();
+    let task_id = t["data"]["task_id"].as_str().unwrap().to_string();
     let v = post(
         addr,
         json!({"cmd": "dispatch_task", "task_id": &task_id, "force_no_action": true}),
     )
     .await;
-    let agent_id = v["agent_id"].as_str().unwrap().to_string();
+    let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
 
     post(
         addr,
@@ -187,7 +178,7 @@ async fn dispatch_routes_through_ui_registry_when_attached() {
         json!({"cmd": "add_agent", "name": "W", "group": "Eng"}),
     )
     .await;
-    let agent_id = v["agent_id"].as_str().unwrap().to_string();
+    let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
     let mut rx = ui_agents.register(agent_id.clone());
 
     // Create a task pinned to that agent and dispatch it.
@@ -196,7 +187,7 @@ async fn dispatch_routes_through_ui_registry_when_attached() {
         json!({"cmd": "board_add_task", "task": "Hello", "group": "Eng", "agent_id": &agent_id}),
     )
     .await;
-    let task_id = t["task_id"].as_str().unwrap().to_string();
+    let task_id = t["data"]["task_id"].as_str().unwrap().to_string();
 
     let v = post(
         addr,
@@ -239,7 +230,7 @@ async fn send_text_routes_through_ui_registry_when_attached() {
         json!({"cmd": "add_agent", "name": "W", "group": "Eng"}),
     )
     .await;
-    let agent_id = v["agent_id"].as_str().unwrap().to_string();
+    let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
     let mut rx = ui_agents.register(agent_id.clone());
 
     let v = post(
@@ -271,14 +262,17 @@ async fn dispatch_missing_action_returns_warning() {
         }),
     )
     .await;
-    let task_id = t["task_id"].as_str().unwrap().to_string();
+    let task_id = t["data"]["task_id"].as_str().unwrap().to_string();
 
     // Pin to a tempdir so the action manager doesn't find any fixtures.
     let tmp = tempfile::tempdir().unwrap();
     std::env::set_var("LOOM_PROJECT_ROOT", tmp.path());
 
     let v = post(addr, json!({"cmd": "dispatch_task", "task_id": &task_id})).await;
-    assert_eq!(v["warning"], "dispatch_action_missing", "got: {v:?}");
+    assert_eq!(
+        v["data"]["warning"], "dispatch_action_missing",
+        "got: {v:?}"
+    );
 }
 
 #[tokio::test]
@@ -290,13 +284,13 @@ async fn clear_agent_context_resets_counters_and_link() {
         json!({"cmd": "add_agent", "name": "W", "group": "Eng"}),
     )
     .await;
-    let agent_id = v["agent_id"].as_str().unwrap().to_string();
+    let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
     let t = post(
         addr,
         json!({"cmd": "board_add_task", "task": "X", "group": "Eng"}),
     )
     .await;
-    let task_id = t["task_id"].as_str().unwrap().to_string();
+    let task_id = t["data"]["task_id"].as_str().unwrap().to_string();
     post(
         addr,
         json!({"cmd": "dispatch_task", "task_id": &task_id, "force_no_action": true}),
@@ -322,7 +316,7 @@ async fn board_verify_task_updates_verification_state() {
         json!({"cmd": "board_add_task", "task": "X", "group": "Eng"}),
     )
     .await;
-    let task_id = t["task_id"].as_str().unwrap().to_string();
+    let task_id = t["data"]["task_id"].as_str().unwrap().to_string();
 
     let v = post(
         addr,
@@ -352,7 +346,7 @@ async fn board_set_panel_persists_and_idempotent_returns_early() {
     let (addr, state) = spawn_test_server().await;
     let v = post(addr, json!({"cmd": "board_set_panel", "panel": "weaver"})).await;
     assert_eq!(v["ok"], true);
-    assert_eq!(v["panel"], "weaver");
+    assert_eq!(v["data"]["panel"], "weaver");
 
     {
         let st = state.lock().await;
@@ -375,14 +369,14 @@ async fn resolve_ask_moves_ask_to_done_and_logs_reply() {
         json!({"cmd": "board_add_task", "task": "Parent", "group": "Eng"}),
     )
     .await;
-    let parent_id = parent["task_id"].as_str().unwrap().to_string();
+    let parent_id = parent["data"]["task_id"].as_str().unwrap().to_string();
 
     let ask = post(
         addr,
         json!({"cmd": "board_add_task", "task": "Need info", "group": "Eng"}),
     )
     .await;
-    let ask_id = ask["task_id"].as_str().unwrap().to_string();
+    let ask_id = ask["data"]["task_id"].as_str().unwrap().to_string();
 
     // Link ask to parent + flag it as human via update.
     post(
@@ -405,7 +399,7 @@ async fn resolve_ask_moves_ask_to_done_and_logs_reply() {
     )
     .await;
     assert_eq!(v["ok"], true, "response: {v:?}");
-    assert_eq!(v["parent_task_id"], parent_id);
+    assert_eq!(v["data"]["parent_task_id"], parent_id);
 
     let st = state.lock().await;
     assert_eq!(st.board_tasks.get(&ask_id).unwrap().lane, "Done");

@@ -8,17 +8,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use axum::Router;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::{AgentCell, MatrixState};
-use loom_server::commands;
-use loom_server::events as evt;
-use loom_server::uploads;
-use loom_server::ws;
 
 fn git_available() -> bool {
     Command::new("git")
@@ -73,14 +68,10 @@ async fn spawn_server_with_agent(
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminals: Default::default(),
     };
 
-    let router = Router::new()
-        .merge(ws::routes())
-        .merge(commands::routes())
-        .merge(evt::routes())
-        .merge(uploads::routes())
-        .with_state(app_state);
+    let router = loom_server::app::build_router(app_state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -126,7 +117,7 @@ async fn worktree_create_checkpoint_diff_remove() {
     )
     .await;
     assert_eq!(v["ok"], true, "create response: {v:?}");
-    let path = PathBuf::from(v["path"].as_str().unwrap());
+    let path = PathBuf::from(v["data"]["path"].as_str().unwrap());
     assert!(
         path.exists(),
         "worktree path {} does not exist",
@@ -158,7 +149,7 @@ async fn worktree_create_checkpoint_diff_remove() {
     std::fs::write(path.join("another.txt"), "more\n").unwrap();
     let v = post(addr, json!({"cmd": "worktree_diff", "agent_id": &agent_id})).await;
     assert!(
-        v["files"].as_u64().unwrap_or(0) >= 1,
+        v["data"]["files"].as_u64().unwrap_or(0) >= 1,
         "expected dirty, got {v:?}"
     );
 

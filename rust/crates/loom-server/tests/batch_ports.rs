@@ -5,17 +5,12 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::Router;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
-use loom_server::commands;
-use loom_server::events as evt;
-use loom_server::uploads;
-use loom_server::ws;
 
 async fn spawn() -> (SocketAddr, Arc<Mutex<MatrixState>>, LoomDb) {
     let db = LoomDb::in_memory().unwrap();
@@ -27,14 +22,10 @@ async fn spawn() -> (SocketAddr, Arc<Mutex<MatrixState>>, LoomDb) {
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminals: Default::default(),
     };
 
-    let router = Router::new()
-        .merge(ws::routes())
-        .merge(commands::routes())
-        .merge(evt::routes())
-        .merge(uploads::routes())
-        .with_state(app_state);
+    let router = loom_server::app::build_router(app_state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -77,7 +68,7 @@ async fn schedule_crud_round_trip() {
     )
     .await;
     assert_eq!(v["ok"], true, "create: {v:?}");
-    let id = v["schedule_id"].as_str().unwrap().to_string();
+    let id = v["data"]["schedule_id"].as_str().unwrap().to_string();
 
     let v = post(
         addr,
@@ -93,12 +84,12 @@ async fn schedule_crud_round_trip() {
     assert!(state.lock().await.schedules[&id].enabled);
 
     let v = post(addr, json!({"cmd": "schedule_list"})).await;
-    assert_eq!(v["schedules"].as_array().unwrap().len(), 1);
+    assert_eq!(v["data"]["schedules"].as_array().unwrap().len(), 1);
 
     // schedule_run should create a task.
     let v = post(addr, json!({"cmd": "schedule_run", "id": &id})).await;
     assert_eq!(v["ok"], true);
-    let task_id = v["task_id"].as_str().unwrap().to_string();
+    let task_id = v["data"]["task_id"].as_str().unwrap().to_string();
     {
         let st = state.lock().await;
         let task = st
@@ -179,7 +170,7 @@ async fn memory_publish_and_list_filters() {
 
     // All Eng entries (2).
     let v = post(addr, json!({"cmd": "memory_list", "group": "Eng"})).await;
-    let entries = v["entries"].as_array().unwrap();
+    let entries = v["data"]["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 2);
     // Pinned sorts first.
     assert_eq!(entries[0]["title"], "SQLite WAL mode");
@@ -190,16 +181,16 @@ async fn memory_publish_and_list_filters() {
         json!({"cmd": "memory_list", "entry_type": "decision"}),
     )
     .await;
-    assert_eq!(v["entries"].as_array().unwrap().len(), 1);
-    assert_eq!(v["entries"][0]["title"], "Use minijinja");
+    assert_eq!(v["data"]["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(v["data"]["entries"][0]["title"], "Use minijinja");
 
     // pinned_only.
     let v = post(addr, json!({"cmd": "memory_list", "pinned_only": true})).await;
-    assert_eq!(v["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(v["data"]["entries"].as_array().unwrap().len(), 1);
 
     // Substring search (case insensitive).
     let v = post(addr, json!({"cmd": "memory_list", "search": "JINJA"})).await;
-    assert_eq!(v["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(v["data"]["entries"].as_array().unwrap().len(), 1);
 
     // Persistence: reload from DB, count stays.
     let reloaded = db.load_all().await.unwrap();
@@ -220,7 +211,7 @@ async fn memory_pin_unpin_and_link_detach() {
         }),
     )
     .await;
-    let id = v["id"].as_str().unwrap().to_string();
+    let id = v["data"]["id"].as_str().unwrap().to_string();
 
     post(addr, json!({"cmd": "memory_pin", "id": &id})).await;
     assert!(state.lock().await.memory_entries[&id].pinned);

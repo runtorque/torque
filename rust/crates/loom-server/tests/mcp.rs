@@ -3,18 +3,12 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::Router;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
-use loom_server::commands;
-use loom_server::events as evt;
-use loom_server::mcp;
-use loom_server::uploads;
-use loom_server::ws;
 
 async fn spawn_test_server() -> SocketAddr {
     let db = LoomDb::in_memory().unwrap();
@@ -26,15 +20,10 @@ async fn spawn_test_server() -> SocketAddr {
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminals: Default::default(),
     };
 
-    let router = Router::new()
-        .merge(ws::routes())
-        .merge(commands::routes())
-        .merge(evt::routes())
-        .merge(uploads::routes())
-        .merge(mcp::routes())
-        .with_state(app_state);
+    let router = loom_server::app::base_router().with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -106,13 +95,13 @@ async fn mcp_progress_updates_agent_activity() {
         json!({"cmd": "board_add_task", "task": "T", "group": "Eng"}),
     )
     .await;
-    let task_id = task_resp["task_id"].as_str().unwrap().to_string();
+    let task_id = task_resp["data"]["task_id"].as_str().unwrap().to_string();
     let disp = cmd_call(
         addr,
         json!({"cmd": "dispatch_task", "task_id": &task_id, "force_no_action": true}),
     )
     .await;
-    let agent_id = disp["agent_id"].as_str().unwrap().to_string();
+    let agent_id = disp["data"]["agent_id"].as_str().unwrap().to_string();
 
     // Tool call: loom_progress
     let resp = mcp_call(
@@ -128,12 +117,7 @@ async fn mcp_progress_updates_agent_activity() {
 
     // Verify via resync
     let snap = cmd_call(addr, json!({"cmd": "resync"})).await;
-    let agent = snap["agents"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|a| a["id"] == agent_id)
-        .unwrap();
+    let agent = snap["data"]["agents"].get(&agent_id).unwrap();
     assert_eq!(agent["activity_detail"], "halfway there");
 }
 
@@ -146,13 +130,13 @@ async fn mcp_derive_creates_child_task_with_parent_linkage() {
         json!({"cmd": "board_add_task", "task": "Root task", "group": "Eng"}),
     )
     .await;
-    let parent_id = task_resp["task_id"].as_str().unwrap().to_string();
+    let parent_id = task_resp["data"]["task_id"].as_str().unwrap().to_string();
     let disp = cmd_call(
         addr,
         json!({"cmd": "dispatch_task", "task_id": &parent_id, "force_no_action": true}),
     )
     .await;
-    let agent_id = disp["agent_id"].as_str().unwrap().to_string();
+    let agent_id = disp["data"]["agent_id"].as_str().unwrap().to_string();
 
     let resp = mcp_call(
         addr,
@@ -172,6 +156,6 @@ async fn mcp_derive_creates_child_task_with_parent_linkage() {
 
     // chain command shows the parent
     let chain = cmd_call(addr, json!({"cmd": "task_chain", "id": &new_id})).await;
-    let chain_arr = chain["chain"].as_array().unwrap();
+    let chain_arr = chain["data"]["chain"].as_array().unwrap();
     assert!(chain_arr.iter().any(|t| t["id"] == parent_id));
 }

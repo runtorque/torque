@@ -12,19 +12,28 @@ use serde_yaml::Mapping as YamlMap;
 use loom_actions::manager::{ActionError, ActionInfo, ActionManager, ActionScope};
 use loom_actions::{context::stub_context, context::LoomContextBuilder};
 
-use super::{ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
+use super::{optional_str, required_str, CmdContext, CmdError, CmdResult};
 
-pub async fn list_actions(ctx: &CmdContext, _req: &Value) -> CmdResult {
+pub async fn list_actions(ctx: &CmdContext, req: &Value) -> CmdResult {
     let mgr = build_manager(ctx).await?;
     let actions = mgr.list_actions().map_err(|e| action_err(e))?;
-    Ok(json!({ "actions": actions }))
+    Ok(json!({
+        "type": "actions",
+        "group": optional_str(req, "group").unwrap_or(""),
+        "actions": actions,
+    }))
 }
 
 pub async fn get_action(ctx: &CmdContext, req: &Value) -> CmdResult {
     let name = required_str(req, "name")?;
     let mgr = build_manager(ctx).await?;
     let info = mgr.get_action(name).map_err(action_err)?;
-    Ok(serde_json::to_value(&info)?)
+    Ok(json!({
+        "type": "action_detail",
+        "name": name,
+        "action": info,
+        "vars": info.variables,
+    }))
 }
 
 pub async fn render_action(ctx: &CmdContext, req: &Value) -> CmdResult {
@@ -50,8 +59,11 @@ pub async fn render_action(ctx: &CmdContext, req: &Value) -> CmdResult {
         .map_err(|e| CmdError::BadRequest(format!("render: {e}")))?;
 
     Ok(json!({
-        "action": info,
-        "rendered": rendered,
+        "type": "action_rendered",
+        "name": info.name,
+        "prompt": rendered,
+        "group": info.group,
+        "labels": info.labels,
     }))
 }
 
@@ -95,9 +107,10 @@ pub async fn preview_prompt(ctx: &CmdContext, req: &Value) -> CmdResult {
         .map_err(|e| CmdError::BadRequest(format!("render: {e}")))?;
 
     Ok(json!({
+        "type": "prompt_preview",
         "task_id": task.id,
         "action": info.name,
-        "rendered": rendered,
+        "prompt": rendered,
     }))
 }
 
@@ -154,7 +167,15 @@ pub async fn save_action(_ctx: &CmdContext, req: &Value) -> CmdResult {
     }
     std::fs::write(&path, text).map_err(|e| CmdError::BadRequest(e.to_string()))?;
 
-    Ok(json!({ "ok": true, "path": path.to_string_lossy() }))
+    let mgr = build_manager(_ctx).await?;
+    let actions = mgr.list_actions().map_err(action_err)?;
+    Ok(json!({
+        "type": "actions",
+        "group": optional_str(req, "group").unwrap_or(""),
+        "actions": actions,
+        "saved": name,
+        "path": path.to_string_lossy(),
+    }))
 }
 
 pub async fn delete_action(_ctx: &CmdContext, req: &Value) -> CmdResult {
@@ -178,7 +199,14 @@ pub async fn delete_action(_ctx: &CmdContext, req: &Value) -> CmdResult {
     if !found {
         return Err(CmdError::BadRequest(format!("action '{name}' not found")));
     }
-    ok()
+    let mgr = build_manager(_ctx).await?;
+    let actions = mgr.list_actions().map_err(action_err)?;
+    Ok(json!({
+        "type": "actions",
+        "group": optional_str(req, "group").unwrap_or(""),
+        "actions": actions,
+        "deleted": name,
+    }))
 }
 
 /// Discover pipelines: connected components in the action transition graph.
@@ -247,6 +275,7 @@ pub async fn discover_pipelines(ctx: &CmdContext, _req: &Value) -> CmdResult {
         .collect();
 
     Ok(json!({
+        "type": "pipelines",
         "pipelines": pipelines,
         "edges": edges,
         "actions": actions.iter().map(|a| &a.name).collect::<Vec<_>>(),

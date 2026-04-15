@@ -9,3 +9,6 @@ Cargo.lock
 # Ghostty submodule + built artifacts (regeneratable, huge)
 third_party/ghostty/
 third_party/ghostty-build/
+
+# Local standalone-runtime scratch DBs
+.tmp-rust-standalone/

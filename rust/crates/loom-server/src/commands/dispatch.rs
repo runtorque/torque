@@ -6,6 +6,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use loom_actions::context::LoomContextBuilder;
+use loom_core::state::AgentCell;
 
 use super::{flush, ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
 
@@ -218,6 +219,66 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
 
     ctx.db.save_board_task(&task_final).await?;
     ctx.db.save_agent(&agent_final).await?;
+    if ctx
+        .db
+        .load_agent_history_detail(&agent_final.id)
+        .await?
+        .is_none()
+    {
+        ctx.db
+            .save_agent_history_record(
+                &agent_final.id,
+                &agent_final.name,
+                &agent_final.slug,
+                &agent_final.group,
+                &agent_final.agent_type,
+                &agent_final.template,
+                now_ts(),
+                None,
+                &agent_final.worktree_branch,
+                0,
+                0,
+                0,
+                "active",
+            )
+            .await?;
+    }
+    ctx.db
+        .save_agent_task_record(
+            &agent_final.id,
+            &task_final.id,
+            &task_final.task,
+            now_ts(),
+            None,
+            "",
+        )
+        .await?;
+    let total_tasks = ctx
+        .db
+        .load_agent_history_detail(&agent_final.id)
+        .await?
+        .and_then(|value| value.get("total_tasks").and_then(|v| v.as_i64()))
+        .unwrap_or(0)
+        + 1;
+    let mut history_fields = serde_json::Map::new();
+    history_fields.insert("total_tasks".into(), json!(total_tasks));
+    history_fields.insert("status".into(), json!("active"));
+    let _ = ctx
+        .db
+        .update_agent_history_fields(&agent_final.id, &history_fields)
+        .await;
+    let _ = crate::commands::compat::record_panel_event(
+        &ctx.state,
+        &ctx.db,
+        "task_dispatched",
+        &agent_final.id,
+        &agent_final.name,
+        &agent_final.group,
+        &task_final.task.chars().take(80).collect::<String>(),
+        &task_final.id,
+        false,
+    )
+    .await;
     flush(ctx).await;
     Ok(json!({
         "ok": true,
@@ -321,6 +382,9 @@ pub async fn relaunch_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     };
     if let Some(a) = agent {
         ctx.db.save_agent(&a).await?;
+        if a.cell_type == "terminal" || !a.command.is_empty() {
+            spawn_cell_session(ctx, &a, None).await?;
+        }
     }
     flush(ctx).await;
     ok()
@@ -430,6 +494,107 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
         ctx.db.save_board_task(t).await?;
     }
     ctx.db.save_agent(&agent).await?;
+    ctx.db
+        .save_agent_message_record(&agent.id, &task_id, now_ts(), &action, &message)
+        .await?;
+    match action.as_str() {
+        "done" | "ready" => {
+            if !task_id.is_empty() {
+                let outcome = if action == "ready" { "ready" } else { "done" };
+                let _ = ctx
+                    .db
+                    .update_agent_task(&agent.id, &task_id, Some(now_ts()), Some(outcome))
+                    .await;
+            }
+            let _ = crate::commands::compat::record_panel_event(
+                &ctx.state,
+                &ctx.db,
+                "task_completed",
+                &agent.id,
+                &agent.name,
+                &agent.group,
+                if message.is_empty() {
+                    "Task completed"
+                } else {
+                    &message
+                },
+                &task_id,
+                false,
+            )
+            .await;
+        }
+        "blocked" => {
+            let _ = crate::commands::compat::record_panel_event(
+                &ctx.state,
+                &ctx.db,
+                "agent_blocked",
+                &agent.id,
+                &agent.name,
+                &agent.group,
+                &message,
+                &task_id,
+                false,
+            )
+            .await;
+        }
+        "error" => {
+            let _ = crate::commands::compat::record_panel_event(
+                &ctx.state,
+                &ctx.db,
+                "agent_error",
+                &agent.id,
+                &agent.name,
+                &agent.group,
+                &message,
+                &task_id,
+                false,
+            )
+            .await;
+        }
+        "progress" => {
+            let _ = crate::commands::compat::record_panel_event(
+                &ctx.state,
+                &ctx.db,
+                "agent_progress",
+                &agent.id,
+                &agent.name,
+                &agent.group,
+                &message,
+                &task_id,
+                true,
+            )
+            .await;
+        }
+        "verify" => {
+            let _ = crate::commands::compat::record_panel_event(
+                &ctx.state,
+                &ctx.db,
+                "task_verification_updated",
+                &agent.id,
+                &agent.name,
+                &agent.group,
+                &message,
+                &task_id,
+                false,
+            )
+            .await;
+        }
+        "ask" => {
+            let _ = crate::commands::compat::record_panel_event(
+                &ctx.state,
+                &ctx.db,
+                "ask_created",
+                &agent.id,
+                &agent.name,
+                &agent.group,
+                &message,
+                &task_id,
+                false,
+            )
+            .await;
+        }
+        _ => {}
+    }
     flush(ctx).await;
     Ok(json!({ "ok": true, "action": action, "task_id": task_id }))
 }
@@ -488,6 +653,18 @@ pub async fn resolve_ask(ctx: &CmdContext, req: &Value) -> CmdResult {
     if let Some(p) = &parent {
         ctx.db.save_board_task(p).await?;
     }
+    let _ = crate::commands::compat::record_panel_event(
+        &ctx.state,
+        &ctx.db,
+        "ask_resolved",
+        "",
+        "",
+        &ask_task.group,
+        &reply,
+        &ask_task.id,
+        false,
+    )
+    .await;
     flush(ctx).await;
     Ok(json!({
         "ok": true,
@@ -502,4 +679,40 @@ pub async fn resolve_ask(ctx: &CmdContext, req: &Value) -> CmdResult {
 
 async fn ctx_pty(ctx: &CmdContext) -> Option<std::sync::Arc<loom_pty::LocalPtyBackend>> {
     ctx.pty.clone()
+}
+
+pub async fn spawn_cell_session(
+    ctx: &CmdContext,
+    cell: &AgentCell,
+    extra_env: Option<&std::collections::BTreeMap<String, String>>,
+) -> Result<(), CmdError> {
+    let Some(pty) = ctx_pty(ctx).await else {
+        return Ok(());
+    };
+    if cell.status == "running" && cell.session_id.is_some() {
+        return Ok(());
+    }
+    let command = if cell.command.is_empty() {
+        loom_core::config::default_command()
+    } else {
+        cell.command.clone()
+    };
+    let cwd = if cell.directory.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(&cell.directory))
+    };
+    let mut env = std::collections::HashMap::new();
+    env.insert(loom_core::config::ENV_CELL_ID.to_string(), cell.id.clone());
+    if let Some(extra) = extra_env {
+        env.extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+    pty.spawn(&cell.id, &command, cwd, env, 40, 120)
+        .await
+        .map_err(|e| CmdError::BadRequest(e.to_string()))?;
+    Ok(())
+}
+
+fn now_ts() -> f64 {
+    chrono::Utc::now().timestamp_millis() as f64 / 1000.0
 }

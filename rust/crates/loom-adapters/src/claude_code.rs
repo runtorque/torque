@@ -116,6 +116,64 @@ fn is_loom_hook_entry(entry: &Value) -> bool {
     })
 }
 
+fn truncate(value: &str, max_len: usize) -> String {
+    if value.chars().count() > max_len {
+        format!("{}...", value.chars().take(max_len).collect::<String>())
+    } else {
+        value.to_string()
+    }
+}
+
+fn basename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+fn tool_activity(tool: &str, input: &Value) -> String {
+    match tool {
+        "Bash" => format!(
+            "Running: {}",
+            truncate(
+                input.get("command").and_then(Value::as_str).unwrap_or(""),
+                40,
+            )
+        ),
+        "Edit" => format!(
+            "Editing {}",
+            basename(input.get("file_path").and_then(Value::as_str).unwrap_or(""))
+        ),
+        "Write" => format!(
+            "Writing {}",
+            basename(input.get("file_path").and_then(Value::as_str).unwrap_or(""))
+        ),
+        "Read" => format!(
+            "Reading {}",
+            basename(input.get("file_path").and_then(Value::as_str).unwrap_or(""))
+        ),
+        "Grep" => "Searching codebase".to_string(),
+        "Glob" => "Searching files".to_string(),
+        "Agent" => format!(
+            "Subagent: {}",
+            input
+                .get("description")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("working")
+        ),
+        "WebFetch" => "Fetching web page".to_string(),
+        "WebSearch" => "Searching web".to_string(),
+        "Skill" => format!(
+            "Running /{}",
+            input
+                .get("skill")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("?")
+        ),
+        _ if !tool.is_empty() => format!("Using {tool}"),
+        _ => "Working".to_string(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Hook config builder
 // ---------------------------------------------------------------------------
@@ -425,24 +483,91 @@ impl AgentAdapter for ClaudeCodeAdapter {
     }
 
     fn parse_hook(&self, payload: &serde_json::Value) -> Vec<AgentEvent> {
-        let kind = payload
+        let hook_event = payload
             .get("hook_event_name")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+            .unwrap_or("");
         let cell_id = payload
             .get("cell_id")
             .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if cell_id.is_empty() || kind.is_empty() {
+            .unwrap_or("");
+        if cell_id.is_empty() || hook_event.is_empty() {
             return Vec::new();
         }
-        let mut event = AgentEvent::new(cell_id, kind);
+        let mut event = match hook_event {
+            "SessionStart" => AgentEvent::new(cell_id, "session_start"),
+            "Stop" | "SessionEnd" => {
+                let mut event = AgentEvent::new(cell_id, "session_end");
+                event.summary = payload
+                    .get("last_assistant_message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                event
+            }
+            "PreToolUse" => {
+                let tool = payload
+                    .get("tool_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let input = payload
+                    .get("tool_input")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                let mut event = AgentEvent::new(cell_id, "tool_start");
+                event.detail = tool_activity(tool, &input);
+                event
+            }
+            "PostToolUse" | "PostToolUseFailure" => AgentEvent::new(cell_id, "tool_end"),
+            "Notification" => match payload
+                .get("notification_type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+            {
+                "permission_prompt" => {
+                    let mut event = AgentEvent::new(cell_id, "waiting");
+                    event.detail = "permission needed".to_string();
+                    event
+                }
+                "idle_prompt" => {
+                    let mut event = AgentEvent::new(cell_id, "session_end");
+                    event.summary = payload
+                        .get("last_assistant_message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    event
+                }
+                _ => return Vec::new(),
+            },
+            "StopFailure" => {
+                let mut event = AgentEvent::new(cell_id, "error");
+                event.error_message = payload
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string();
+                event.detail = payload
+                    .get("error_details")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(&event.error_message)
+                    .to_string();
+                event
+            }
+            "SubagentStart" => {
+                let agent_type = payload
+                    .get("agent_type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let mut event = AgentEvent::new(cell_id, "activity_change");
+                event.detail = format!("Subagent: {agent_type}");
+                event
+            }
+            "SubagentStop" => AgentEvent::new(cell_id, "activity_change"),
+            _ => return Vec::new(),
+        };
         event.raw = payload.clone();
-        if let Some(detail) = payload.get("detail").and_then(|v| v.as_str()) {
-            event.detail = detail.to_string();
-        }
         vec![event]
     }
 
@@ -784,5 +909,47 @@ mod tests {
             "hooks": [{ "type": "http", "url": "http://example.com/hook" }]
         });
         assert!(!is_loom_hook_entry(&entry));
+    }
+
+    #[test]
+    fn parse_hook_maps_permission_prompt_to_waiting() {
+        let adapter = ClaudeCodeAdapter;
+        let events = adapter.parse_hook(&json!({
+            "cell_id": "agent-1",
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+        }));
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "waiting");
+        assert_eq!(events[0].detail, "permission needed");
+    }
+
+    #[test]
+    fn parse_hook_maps_bash_tool_use_to_human_detail() {
+        let adapter = ClaudeCodeAdapter;
+        let events = adapter.parse_hook(&json!({
+            "cell_id": "agent-1",
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": { "command": "echo hello from loom" },
+        }));
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "tool_start");
+        assert_eq!(events[0].detail, "Running: echo hello from loom");
+    }
+
+    #[test]
+    fn parse_hook_maps_stop_failure_to_error() {
+        let adapter = ClaudeCodeAdapter;
+        let events = adapter.parse_hook(&json!({
+            "cell_id": "agent-1",
+            "hook_event_name": "StopFailure",
+            "error": "boom",
+            "error_details": "tool crashed",
+        }));
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, "error");
+        assert_eq!(events[0].error_message, "boom");
+        assert_eq!(events[0].detail, "tool crashed");
     }
 }
