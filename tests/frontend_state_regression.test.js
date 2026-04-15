@@ -1482,7 +1482,7 @@ test('renderBoard uses a wide multi-lane layout only for embedded wide panels', 
   assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
 });
 
-test('renderBoard hides per-lane tabs and scroll arrows in wide embedded layout', () => {
+test('renderBoard places recent, view, and schedules in the top toolbar for wide embedded layout', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');
   document.register('board-cards');
@@ -1501,19 +1501,38 @@ test('renderBoard hides per-lane tabs and scroll arrows in wide embedded layout'
   context.renderBoard();
 
   assert.match(panel.innerHTML, /board-wide-grid/);
-  assert.match(panel.innerHTML, /board-lane-bar-wide/);
+  assert.match(panel.innerHTML, /board-search-input-wrap/);
+  assert.match(panel.innerHTML, /board-view-menu-wrap/);
+  assert.match(panel.innerHTML, /board-schedules-toggle-wrap/);
+  assert.match(panel.innerHTML, /onclick="boardApplyQuickView\('recent'\)">Recent/);
+  assert.doesNotMatch(panel.innerHTML, /Recently Touched/);
+  assert.equal(
+    panel.innerHTML.indexOf('board-action-filter-wrap') < panel.innerHTML.indexOf("boardApplyQuickView('recent')"),
+    true,
+  );
+  assert.match(panel.innerHTML, /boardToggleSchedules\(\)">Schedules/);
+  assert.equal(
+    panel.innerHTML.indexOf('board-view-menu-wrap') < panel.innerHTML.indexOf('board-schedules-toggle-wrap'),
+    true,
+  );
+  assert.equal(
+    panel.innerHTML.indexOf("boardApplyQuickView('recent')") < panel.innerHTML.indexOf('board-view-menu-wrap'),
+    true,
+  );
+  assert.doesNotMatch(panel.innerHTML, /board-lane-bar/);
   assert.doesNotMatch(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
   assert.doesNotMatch(panel.innerHTML, /id="board-scroll-left"/);
   assert.doesNotMatch(panel.innerHTML, /id="board-scroll-right"/);
-  assert.match(panel.innerHTML, /board-lane-tab-schedules/);
+  assert.doesNotMatch(panel.innerHTML, /board-lane-tab-schedules/);
 
   panel.clientWidth = 820;
   context.renderBoard();
   assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
-  assert.doesNotMatch(panel.innerHTML, /board-lane-bar-wide/);
+  assert.match(panel.innerHTML, /board-schedules-toggle-wrap/);
   assert.match(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
   assert.match(panel.innerHTML, /id="board-scroll-left"/);
   assert.match(panel.innerHTML, /id="board-scroll-right"/);
+  assert.doesNotMatch(panel.innerHTML, /board-lane-tab-schedules/);
 });
 
 test('renderBoard restores per-lane body scrollTop across re-renders in wide layout', () => {
@@ -1568,6 +1587,54 @@ test('renderBoard restores per-lane body scrollTop across re-renders in wide lay
 
   assert.equal(backlogBody2.scrollTop, 130);
   assert.equal(doneBody2.scrollTop, 0);
+});
+
+test('wide standalone lane columns keep their direct children from shrinking', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(
+    css,
+    /\.runtime-embedded #panel-board \.board-wide-lane-body > \*\s*\{[^}]*flex-shrink:\s*0;/,
+  );
+});
+
+test('wide standalone board lanes keep card contrast with a lighter panel and visible borders', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(
+    css,
+    /\.runtime-embedded #panel-board \.board-wide-lane-body\s*\{[^}]*background:\s*linear-gradient\([^;]*var\(--bg-hover\)[^;]*var\(--bg-surface\)[^;]*;/s,
+  );
+  assert.match(
+    css,
+    /\.runtime-embedded #panel-board \.board-wide-lane-body \.board-card\s*\{[^}]*border-color:\s*color-mix\(/,
+  );
+});
+
+test('wide embedded schedules view keeps the display-row toggle and does not restore lane tabs', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'To Do', 'In Progress', 'Done'];
+  context.state.board_tasks = {
+    done: { id: 'done', group: 'alpha', task: 'Done task', lane: 'Done', position: 1 },
+  };
+  runInContext(context, `_boardSelectedLane = 'Done';`);
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.boardToggleSchedules();
+
+  assert.equal(runInContext(context, '_boardShowSchedules'), true);
+  assert.match(panel.innerHTML, /board-schedules-toggle-wrap/);
+  assert.match(panel.innerHTML, /board-filter-btn active" onclick="boardToggleSchedules\(\)">Schedules/);
+  assert.match(panel.innerHTML, /board-view-menu-wrap/);
+  assert.match(panel.innerHTML, /onclick="boardApplyQuickView\('recent'\)">Recent/);
+  assert.doesNotMatch(panel.innerHTML, /board-lane-bar/);
+  assert.doesNotMatch(panel.innerHTML, /class="board-lane-tab board-lane-drop-target/);
+  assert.doesNotMatch(panel.innerHTML, /board-lane-tab-schedules/);
+  assert.match(panel.innerHTML, /No schedules/);
 });
 
 test('board keeps scroll state when changing the selected lane in wide embedded mode', () => {
@@ -1881,7 +1948,7 @@ test('boardSaveCurrentView opens an inline naming control and boardSubmitSaveVie
   assert.match(panel.innerHTML, /Docs View/);
 });
 
-test('board quick views expose recent and recently touched tasks through the existing filter model', () => {
+test('board quick views keep recent visible while preserving touched-mode filtering', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');
   document.register('board-cards');
@@ -1924,7 +1991,7 @@ test('board quick views expose recent and recently touched tasks through the exi
 
   context.renderBoard();
   assert.match(panel.innerHTML, /Recent/);
-  assert.match(panel.innerHTML, /Recently Touched/);
+  assert.doesNotMatch(panel.innerHTML, /Recently Touched/);
 
   context.boardApplyQuickView('recent');
   assert.equal(runInContext(context, '_boardQuickView'), 'recent');
@@ -1956,7 +2023,7 @@ test('board quick views expose recent and recently touched tasks through the exi
     jsonValue(context, `_boardTasksInLane('Backlog').map(function(t) { return t.id; })`),
     ['docsRecent', 'recentNew'],
   );
-  assert.match(panel.innerHTML, /Recently Touched/);
+  assert.doesNotMatch(panel.innerHTML, /Recently Touched/);
 
   runInContext(context, `_boardSearchQuery = 'docs';`);
   assert.deepEqual(
