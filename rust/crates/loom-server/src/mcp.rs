@@ -216,7 +216,11 @@ async fn derive_task(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<V
     let v = crate::commands::board::add_task(ctx, &add_req)
         .await
         .map_err(|e| format!("{e:?}"))?;
-    let new_id = v.get("task_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let new_id = v
+        .get("task_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     // Patch parent linkage + depth.
     if let Some(parent) = parent_task {
@@ -232,7 +236,8 @@ async fn derive_task(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<V
         }
         st.emit_task(&new_id);
         if let Some((seq, ops)) = st.drain_deltas() {
-            ctx.bus.send(loom_core::events::OutMessage::Delta { seq, ops });
+            ctx.bus
+                .send(loom_core::events::OutMessage::Delta { seq, ops });
         }
     }
 
@@ -242,7 +247,11 @@ async fn derive_task(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<V
     }))
 }
 
-async fn verify_current_task(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<Value, String> {
+async fn verify_current_task(
+    ctx: &CmdContext,
+    agent_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
     let state = args
         .get("state")
         .and_then(|v| v.as_str())
@@ -293,7 +302,8 @@ async fn rename_agent(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<
             .map_err(|e| format!("{e:?}"))?;
         let agent = st.agents.get(agent_id).cloned().unwrap();
         if let Some((seq, ops)) = st.drain_deltas() {
-            ctx.bus.send(loom_core::events::OutMessage::Delta { seq, ops });
+            ctx.bus
+                .send(loom_core::events::OutMessage::Delta { seq, ops });
         }
         agent
     };

@@ -15,7 +15,10 @@ use loom_core::db::LoomDb;
 use super::{ok, optional_str, required_str, CmdContext, CmdResult};
 
 pub async fn get_events(ctx: &CmdContext, req: &Value) -> CmdResult {
-    let before_id = req.get("before_id").and_then(|v| v.as_i64()).filter(|id| *id > 0);
+    let before_id = req
+        .get("before_id")
+        .and_then(|v| v.as_i64())
+        .filter(|id| *id > 0);
     let limit = req
         .get("limit")
         .and_then(|v| v.as_u64())
@@ -64,7 +67,11 @@ pub async fn get_agent_history_detail(ctx: &CmdContext, req: &Value) -> CmdResul
     let mut tasks = ctx.db.load_agent_tasks(agent_id).await?;
     if tasks.is_empty() {
         let st = ctx.state.lock().await;
-        for task in st.board_tasks.values().filter(|task| task.agent_id == agent_id) {
+        for task in st
+            .board_tasks
+            .values()
+            .filter(|task| task.agent_id == agent_id)
+        {
             tasks.push(json!({
                 "id": 0,
                 "agent_id": agent_id,
@@ -101,18 +108,10 @@ pub async fn remove_attachment(ctx: &CmdContext, req: &Value) -> CmdResult {
         let Some(mut task) = st.board_tasks.get(&task_id).cloned() else {
             return ok();
         };
-        task.attachments.retain(|item| {
-            item.get("filename")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                != filename
-        });
-        task.artifacts.retain(|item| {
-            item.get("filename")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                != filename
-        });
+        task.attachments
+            .retain(|item| item.get("filename").and_then(|v| v.as_str()).unwrap_or("") != filename);
+        task.artifacts
+            .retain(|item| item.get("filename").and_then(|v| v.as_str()).unwrap_or("") != filename);
         st.upsert_task(task.clone())?;
         Some(task)
     };
@@ -134,8 +133,8 @@ pub async fn events_dismiss(ctx: &CmdContext, req: &Value) -> CmdResult {
     let value = {
         let mut st = ctx.state.lock().await;
         st.events_dismissed_attention.insert(item_id, timestamp);
-        let value = serde_json::to_value(&st.events_dismissed_attention)
-            .unwrap_or_else(|_| json!({}));
+        let value =
+            serde_json::to_value(&st.events_dismissed_attention).unwrap_or_else(|_| json!({}));
         st.emit(DeltaOp::UiUpdate {
             key: "events_dismissed_attention".into(),
             value: value.clone(),
@@ -150,12 +149,7 @@ pub async fn events_dismiss(ctx: &CmdContext, req: &Value) -> CmdResult {
 }
 
 fn sanitize_filename(value: &str) -> PathBuf {
-    PathBuf::from(
-        value
-            .replace('/', "_")
-            .replace('\\', "_")
-            .replace(' ', "_"),
-    )
+    PathBuf::from(value.replace('/', "_").replace('\\', "_").replace(' ', "_"))
 }
 
 pub async fn record_panel_event(
@@ -176,12 +170,16 @@ pub async fn record_panel_event(
             db.update_panel_event(id, agent_name, group, message, task_id, timestamp)
                 .await?
         } else {
-            db.save_panel_event(kind, cell_id, agent_name, group, message, task_id, timestamp)
-                .await?
+            db.save_panel_event(
+                kind, cell_id, agent_name, group, message, task_id, timestamp,
+            )
+            .await?
         }
     } else {
-        db.save_panel_event(kind, cell_id, agent_name, group, message, task_id, timestamp)
-            .await?
+        db.save_panel_event(
+            kind, cell_id, agent_name, group, message, task_id, timestamp,
+        )
+        .await?
     };
     db.trim_panel_events(500).await?;
     let mut st = state.lock().await;

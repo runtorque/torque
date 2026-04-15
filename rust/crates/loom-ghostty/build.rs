@@ -92,10 +92,7 @@ mod ffi_build {
         let out_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("ghostty_sys.rs");
         let bindings = bindgen::Builder::default()
             .header(header.to_string_lossy().to_string())
-            .clang_arg(format!(
-                "-I{}",
-                header.parent().unwrap().display()
-            ))
+            .clang_arg(format!("-I{}", header.parent().unwrap().display()))
             .clang_arg("-DGHOSTTY_STATIC")
             .allowlist_function("ghostty_.*")
             .allowlist_type("ghostty_.*")

@@ -39,7 +39,11 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn handle_cmd(State(app): State<AppState>, Json(req): Json<Value>) -> impl IntoResponse {
-    let cmd = req.get("cmd").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let cmd = req
+        .get("cmd")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if cmd.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -74,7 +78,9 @@ async fn handle_cmd(State(app): State<AppState>, Json(req): Json<Value>) -> impl
             "error": format!("command not implemented: {cmd}"),
         }))
         .into_response(),
-        Err(CmdError::BadRequest(msg)) => Json(json!({ "ok": false, "error": msg })).into_response(),
+        Err(CmdError::BadRequest(msg)) => {
+            Json(json!({ "ok": false, "error": msg })).into_response()
+        }
         Err(CmdError::Engine(err)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "ok": false, "error": err.to_string() })),

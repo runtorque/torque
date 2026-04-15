@@ -99,10 +99,8 @@ pub fn prompt_form(
                 NSPoint::new(0.0, y_base + row_height - 20.0),
                 NSSize::new(width, 16.0),
             );
-            let input_frame = NSRect::new(
-                NSPoint::new(0.0, y_base + 4.0),
-                NSSize::new(width, 24.0),
-            );
+            let input_frame =
+                NSRect::new(NSPoint::new(0.0, y_base + 4.0), NSSize::new(width, 24.0));
 
             let label: Retained<NSTextField> = {
                 let alloc = mtm.alloc::<NSTextField>();

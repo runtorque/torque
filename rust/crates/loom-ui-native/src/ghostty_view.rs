@@ -129,9 +129,8 @@ impl GhosttyView {
 
         let nsview_ptr: *mut c_void = self as *const Self as *const c_void as *mut c_void;
 
-        let surface = unsafe {
-            Surface::new_macos(nsview_ptr, scale, 13.0, Some(&cmd), cwd.as_deref())
-        };
+        let surface =
+            unsafe { Surface::new_macos(nsview_ptr, scale, 13.0, Some(&cmd), cwd.as_deref()) };
         match surface {
             Ok(s) => {
                 s.set_focus(true);

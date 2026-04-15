@@ -31,18 +31,16 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use anyhow::Result;
+use loom_core::state::{DockLayout, LayoutNode, PanelKind, SplitAxis};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{declare_class, msg_send_id, mutability, sel, ClassType, DeclaredClass};
-use loom_core::state::{DockLayout, LayoutNode, PanelKind, SplitAxis};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSBackingStoreType,
     NSBorderType, NSColor, NSFont, NSMenu, NSMenuItem, NSScrollView, NSSplitView,
     NSSplitViewDividerStyle, NSTextView, NSView, NSWindow, NSWindowStyleMask,
 };
-use objc2_foundation::{
-    MainThreadMarker, NSObject, NSPoint, NSRect, NSSize, NSString, NSTimer,
-};
+use objc2_foundation::{MainThreadMarker, NSObject, NSPoint, NSRect, NSSize, NSString, NSTimer};
 
 use loom_server::app::AppState;
 
@@ -158,10 +156,8 @@ fn make_text_view(mtm: MainThreadMarker, frame: NSRect) -> Retained<NSTextView> 
         tv.setDrawsBackground(true);
         tv.setBackgroundColor(&NSColor::controlBackgroundColor());
         tv.setTextColor(Some(&NSColor::labelColor()));
-        let font = NSFont::monospacedSystemFontOfSize_weight(
-            12.0,
-            objc2_app_kit::NSFontWeightRegular,
-        );
+        let font =
+            NSFont::monospacedSystemFontOfSize_weight(12.0, objc2_app_kit::NSFontWeightRegular);
         tv.setFont(Some(&font));
         tv.setAutoresizingMask(
             NSAutoresizingMaskOptions::NSViewWidthSizable
@@ -256,7 +252,12 @@ fn dock_signature(dock: &DockLayout, selected: &Option<String>) -> String {
     .unwrap_or_default()
 }
 
-fn tick(mtm: MainThreadMarker, bridge: &EngineBridge, views: &Views, state: &RefCell<ContentState>) {
+fn tick(
+    mtm: MainThreadMarker,
+    bridge: &EngineBridge,
+    views: &Views,
+    state: &RefCell<ContentState>,
+) {
     let snapshot = bridge.snapshot();
 
     // 1. Reconcile the outer dock layout — rebuild NSSplitView tree only
@@ -365,7 +366,15 @@ fn build_dock_into(
     if let Some(top_layout) = &dock.top {
         let host = make_pane_host(mtm);
         unsafe { outer.addSubview(&host) };
-        mount_edge_zone_into(mtm, bridge, snapshot, top_layout, DockZone::Top, &host, state);
+        mount_edge_zone_into(
+            mtm,
+            bridge,
+            snapshot,
+            top_layout,
+            DockZone::Top,
+            &host,
+            state,
+        );
         outer_order.push((ratios.top * total_h, host));
     }
 
@@ -472,11 +481,7 @@ fn mount_edge_zone_into(
 /// Apply dividers for the outer (vertical-layout) split. `order` lists the
 /// subviews top→bottom with their desired pixel sizes; NaN means "fill
 /// remaining". Only the non-NaN sizes are pinned via divider positions.
-fn apply_outer_ratios(
-    split: &NSSplitView,
-    _total: f64,
-    order: &[(f64, Retained<NSView>)],
-) {
+fn apply_outer_ratios(split: &NSSplitView, _total: f64, order: &[(f64, Retained<NSView>)]) {
     if order.len() < 2 {
         return;
     }
@@ -502,11 +507,7 @@ fn apply_outer_ratios(
 /// Row (horizontal-layout) version. Left-pinned widths; right pane (if
 /// present) gets its divider positioned from the right edge via
 /// `total - size`.
-fn apply_row_ratios(
-    split: &NSSplitView,
-    total: f64,
-    order: &[(f64, Retained<NSView>)],
-) {
+fn apply_row_ratios(split: &NSSplitView, total: f64, order: &[(f64, Retained<NSView>)]) {
     if order.len() < 2 {
         return;
     }
@@ -529,11 +530,7 @@ fn apply_row_ratios(
     }
 }
 
-fn make_split(
-    mtm: MainThreadMarker,
-    parent: &NSView,
-    axis: SplitAxis,
-) -> Retained<NSSplitView> {
+fn make_split(mtm: MainThreadMarker, parent: &NSView, axis: SplitAxis) -> Retained<NSSplitView> {
     unsafe {
         let alloc = mtm.alloc::<NSSplitView>();
         let split = NSSplitView::initWithFrame(alloc, container_frame(parent));
@@ -564,7 +561,12 @@ fn build_layout_into(
         LayoutNode::Leaf { panel } => {
             mount_panel_into(mtm, bridge, snapshot, panel, parent, state);
         }
-        LayoutNode::Split { axis, ratio, first, second } => {
+        LayoutNode::Split {
+            axis,
+            ratio,
+            first,
+            second,
+        } => {
             let split = make_split_for_axis(mtm, parent, *axis);
             unsafe {
                 parent.addSubview(&split);
@@ -600,9 +602,7 @@ fn mount_panel_into(
         PanelKind::Terminal { id } => {
             // Resolve which agent this terminal renders. `None` binds to
             // `selected_agent_id`.
-            let agent_id = id
-                .clone()
-                .or_else(|| snapshot.selected_agent_id.clone());
+            let agent_id = id.clone().or_else(|| snapshot.selected_agent_id.clone());
             let Some(agent_id) = agent_id else {
                 mount_placeholder_into(parent, render::initial_content_placeholder());
                 return;
@@ -667,15 +667,9 @@ fn mount_panel_into(
             }
             b.reload_if_changed(snapshot);
         }
-        PanelKind::Actions => {
-            mount_placeholder_into(parent, "[Actions panel — pending native UI]")
-        }
-        PanelKind::Memory => {
-            mount_placeholder_into(parent, "[Memory panel — pending native UI]")
-        }
-        PanelKind::Events => {
-            mount_placeholder_into(parent, "[Events panel — pending native UI]")
-        }
+        PanelKind::Actions => mount_placeholder_into(parent, "[Actions panel — pending native UI]"),
+        PanelKind::Memory => mount_placeholder_into(parent, "[Memory panel — pending native UI]"),
+        PanelKind::Events => mount_placeholder_into(parent, "[Events panel — pending native UI]"),
         PanelKind::Templates => {
             mount_placeholder_into(parent, "[Templates panel — pending native UI]")
         }
@@ -731,12 +725,7 @@ fn make_split_for_axis(
     }
 }
 
-fn apply_split_ratio(
-    split: &NSSplitView,
-    axis: SplitAxis,
-    ratio: f64,
-    parent: &NSView,
-) {
+fn apply_split_ratio(split: &NSSplitView, axis: SplitAxis, ratio: f64, parent: &NSView) {
     let bounds = parent.bounds();
     let total = match axis {
         SplitAxis::Horizontal => bounds.size.width,
@@ -758,8 +747,7 @@ fn apply_split_ratio(
 /// `parent`. Used both for the no-selection state and for panel kinds whose
 /// native UI hasn't been built yet.
 fn mount_placeholder_into(parent: &NSView, hint: &str) {
-    let mtm = MainThreadMarker::new()
-        .expect("placeholder mounting must be called on main thread");
+    let mtm = MainThreadMarker::new().expect("placeholder mounting must be called on main thread");
     let frame = container_frame(parent);
     let scroll = make_scroll_view(mtm, frame);
     let tv = make_text_view(mtm, frame);
@@ -801,8 +789,8 @@ fn install_refresh_timer(mtm: MainThreadMarker, bridge: EngineBridge, views: Vie
             );
     }
     let _ = mtm; // captured to prove main-thread provenance; unused directly
-    // Target is kept alive by the run loop's retain of the timer, which
-    // retains its target.
+                 // Target is kept alive by the run loop's retain of the timer, which
+                 // retains its target.
 }
 
 // Custom NSObject subclass that carries the engine bridge + views across
@@ -841,8 +829,8 @@ struct RefreshIvars {
 
 impl RefreshTarget {
     fn new(bridge: EngineBridge, views: Views) -> Retained<Self> {
-        let mtm = MainThreadMarker::new()
-            .expect("RefreshTarget::new must be called on the main thread");
+        let mtm =
+            MainThreadMarker::new().expect("RefreshTarget::new must be called on the main thread");
         let ivars = RefreshIvars {
             bridge,
             views,

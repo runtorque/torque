@@ -58,7 +58,11 @@ async fn add_group_then_add_agent_supports_python_field_aliases() {
     let v = post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
     assert_eq!(v["ok"], true);
 
-    let v = post(addr, json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"})).await;
+    let v = post(
+        addr,
+        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
+    )
+    .await;
     assert_eq!(v["ok"], true);
     let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
     let slug = v["data"]["slug"].as_str().unwrap();
@@ -90,7 +94,10 @@ async fn board_task_update_accepts_top_level_python_fields() {
     assert_eq!(v["ok"], true);
 
     let snap = post(addr, json!({"cmd": "refresh"})).await;
-    assert_eq!(snap["data"]["board_tasks"][&task_id]["description"], "Updated");
+    assert_eq!(
+        snap["data"]["board_tasks"][&task_id]["description"],
+        "Updated"
+    );
 }
 
 #[tokio::test]

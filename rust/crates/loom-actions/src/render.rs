@@ -61,9 +61,7 @@ pub fn render_prompt(
 // ---------------------------------------------------------------------------
 
 // Matches identifiers inside `{{ ... }}` or `{% ... %}` blocks.
-static VAR_EXPR: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"\{\{([^}]*)\}\}|\{%([^%]*)%\}").unwrap()
-});
+static VAR_EXPR: Lazy<Regex> = Lazy::new(|| Regex::new(r"\{\{([^}]*)\}\}|\{%([^%]*)%\}").unwrap());
 
 // Matches a bare identifier. Used for scanning inside the expressions above.
 static IDENT: Lazy<Regex> =
@@ -71,19 +69,72 @@ static IDENT: Lazy<Regex> =
 
 // Built-in names that are never "undeclared user variables".
 const BUILTINS: &[&str] = &[
-    "loom", "loop", "self", "super",
+    "loom",
+    "loop",
+    "self",
+    "super",
     // minijinja builtins & tests
-    "true", "false", "none", "True", "False", "None",
-    "not", "and", "or", "in", "is", "if", "else", "elif", "endif",
-    "for", "endfor", "set", "endset", "do", "with", "endwith",
-    "block", "endblock", "extends", "include", "import",
-    "from", "as", "macro", "endmacro",
+    "true",
+    "false",
+    "none",
+    "True",
+    "False",
+    "None",
+    "not",
+    "and",
+    "or",
+    "in",
+    "is",
+    "if",
+    "else",
+    "elif",
+    "endif",
+    "for",
+    "endfor",
+    "set",
+    "endset",
+    "do",
+    "with",
+    "endwith",
+    "block",
+    "endblock",
+    "extends",
+    "include",
+    "import",
+    "from",
+    "as",
+    "macro",
+    "endmacro",
     // common jinja filters
-    "default", "length", "upper", "lower", "join", "trim", "replace",
-    "capitalize", "title", "escape", "safe", "tojson",
-    "first", "last", "sort", "reverse", "map", "select", "reject",
-    "items", "keys", "values", "range", "list", "dict",
-    "int", "float", "string", "bool",
+    "default",
+    "length",
+    "upper",
+    "lower",
+    "join",
+    "trim",
+    "replace",
+    "capitalize",
+    "title",
+    "escape",
+    "safe",
+    "tojson",
+    "first",
+    "last",
+    "sort",
+    "reverse",
+    "map",
+    "select",
+    "reject",
+    "items",
+    "keys",
+    "values",
+    "range",
+    "list",
+    "dict",
+    "int",
+    "float",
+    "string",
+    "bool",
 ];
 
 /// Discover user-supplied variable names referenced in a template.
@@ -112,7 +163,11 @@ pub fn discover_variables(template: &str) -> Vec<super::manager::ActionVariable>
 
     // Second pass: scan all expressions.
     for cap in VAR_EXPR.captures_iter(template) {
-        let inner = cap.get(1).or_else(|| cap.get(2)).map(|m| m.as_str()).unwrap_or("");
+        let inner = cap
+            .get(1)
+            .or_else(|| cap.get(2))
+            .map(|m| m.as_str())
+            .unwrap_or("");
         for m in IDENT.captures_iter(inner) {
             let name = m[1].to_string();
             // Skip identifiers that appear after `|` or `.` — those are

@@ -10,15 +10,13 @@ use serde_json::{json, Value};
 use serde_yaml::Mapping as YamlMap;
 
 use loom_actions::manager::{ActionError, ActionInfo, ActionManager, ActionScope};
-use loom_actions::{context::LoomContextBuilder, context::stub_context};
+use loom_actions::{context::stub_context, context::LoomContextBuilder};
 
 use super::{optional_str, required_str, CmdContext, CmdError, CmdResult};
 
 pub async fn list_actions(ctx: &CmdContext, req: &Value) -> CmdResult {
     let mgr = build_manager(ctx).await?;
-    let actions = mgr
-        .list_actions()
-        .map_err(|e| action_err(e))?;
+    let actions = mgr.list_actions().map_err(|e| action_err(e))?;
     Ok(json!({
         "type": "actions",
         "group": optional_str(req, "group").unwrap_or(""),
@@ -133,15 +131,18 @@ pub async fn save_action(_ctx: &CmdContext, req: &Value) -> CmdResult {
         map.insert("group".into(), group.into());
     }
     if let Some(labels) = req.get("labels").and_then(|v| v.as_array()) {
-        let arr: Vec<serde_yaml::Value> =
-            labels.iter().filter_map(|v| v.as_str().map(|s| s.into())).collect();
+        let arr: Vec<serde_yaml::Value> = labels
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.into()))
+            .collect();
         map.insert("labels".into(), serde_yaml::Value::Sequence(arr));
     }
     if let Some(worktree) = req.get("worktree").and_then(|v| v.as_bool()) {
         map.insert("worktree".into(), serde_yaml::Value::Bool(worktree));
     }
     if let Some(transitions) = req.get("transitions") {
-        let yaml_v = serde_yaml::to_value(transitions).map_err(|e| CmdError::BadRequest(e.to_string()))?;
+        let yaml_v =
+            serde_yaml::to_value(transitions).map_err(|e| CmdError::BadRequest(e.to_string()))?;
         map.insert("transitions".into(), yaml_v);
     }
     if let Some(md) = req.get("max_depth").and_then(|v| v.as_i64()) {
@@ -156,8 +157,9 @@ pub async fn save_action(_ctx: &CmdContext, req: &Value) -> CmdResult {
 
     let root = match scope {
         "user" => user_actions_root(),
-        _ => project_actions_root()
-            .ok_or_else(|| CmdError::BadRequest("no project root".into()))?,
+        _ => {
+            project_actions_root().ok_or_else(|| CmdError::BadRequest("no project root".into()))?
+        }
     };
     let path = root.join(format!("{name}.yaml"));
     if let Some(parent) = path.parent() {
@@ -181,8 +183,9 @@ pub async fn delete_action(_ctx: &CmdContext, req: &Value) -> CmdResult {
     let scope = optional_str(req, "scope").unwrap_or("project");
     let root = match scope {
         "user" => user_actions_root(),
-        _ => project_actions_root()
-            .ok_or_else(|| CmdError::BadRequest("no project root".into()))?,
+        _ => {
+            project_actions_root().ok_or_else(|| CmdError::BadRequest("no project root".into()))?
+        }
     };
 
     let mut found = false;

@@ -57,7 +57,8 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
             .unwrap_or_else(|| "In Progress".to_string());
 
         // Resolve agent: existing (task.agent_id) or create new.
-        let target_agent_id = if !task.agent_id.is_empty() && st.agents.contains_key(&task.agent_id) {
+        let target_agent_id = if !task.agent_id.is_empty() && st.agents.contains_key(&task.agent_id)
+        {
             task.agent_id.clone()
         } else {
             // Create a new agent under the task's group.
@@ -150,7 +151,7 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     // Route: if the agent is UI-attached (a GhosttyView is mounted for it),
     // send through the UI registry — Ghostty owns that agent's PTY. Otherwise
     // fall through to the engine's own LocalPtyBackend.
-        if ctx.ui_agents.is_attached(&target_agent_id) {
+    if ctx.ui_agents.is_attached(&target_agent_id) {
         if is_new_agent {
             tokio::time::sleep(Duration::from_millis(2000)).await;
         }
@@ -180,10 +181,7 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
                     Some(std::path::PathBuf::from(&agent.directory))
                 };
                 let mut env = std::collections::HashMap::new();
-                env.insert(
-                    loom_core::config::ENV_CELL_ID.to_string(),
-                    agent.id.clone(),
-                );
+                env.insert(loom_core::config::ENV_CELL_ID.to_string(), agent.id.clone());
                 let _ = pty.spawn(&agent.id, &command, cwd, env, 40, 120).await;
                 // Boot delay — let the agent's prompt appear before we send text.
                 if is_new_agent {
@@ -221,7 +219,12 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
 
     ctx.db.save_board_task(&task_final).await?;
     ctx.db.save_agent(&agent_final).await?;
-    if ctx.db.load_agent_history_detail(&agent_final.id).await?.is_none() {
+    if ctx
+        .db
+        .load_agent_history_detail(&agent_final.id)
+        .await?
+        .is_none()
+    {
         ctx.db
             .save_agent_history_record(
                 &agent_final.id,
@@ -260,7 +263,10 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     let mut history_fields = serde_json::Map::new();
     history_fields.insert("total_tasks".into(), json!(total_tasks));
     history_fields.insert("status".into(), json!("active"));
-    let _ = ctx.db.update_agent_history_fields(&agent_final.id, &history_fields).await;
+    let _ = ctx
+        .db
+        .update_agent_history_fields(&agent_final.id, &history_fields)
+        .await;
     let _ = crate::commands::compat::record_panel_event(
         &ctx.state,
         &ctx.db,
@@ -396,7 +402,9 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
     let (task, agent) = {
         let mut st = ctx.state.lock().await;
         if !st.agents.contains_key(&agent_id) {
-            return Err(CmdError::BadRequest(format!("agent '{agent_id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "agent '{agent_id}' not found"
+            )));
         }
 
         // Update agent ephemeral state based on action.
@@ -494,7 +502,11 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
                 &agent.id,
                 &agent.name,
                 &agent.group,
-                if message.is_empty() { "Task completed" } else { &message },
+                if message.is_empty() {
+                    "Task completed"
+                } else {
+                    &message
+                },
                 &task_id,
                 false,
             )

@@ -17,8 +17,7 @@ use super::{optional_str, required_str, CmdContext, CmdError, CmdResult};
 
 pub async fn list_templates(_ctx: &CmdContext, req: &Value) -> CmdResult {
     let mut templates: Vec<Value> = Vec::new();
-    let mut seen_names: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // Project first, user second — project wins on name clash.
     for (root, scope, global) in [
@@ -69,10 +68,10 @@ pub async fn get_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
     let name = required_str(req, "name")?;
     let (path, scope) = resolve_path(name)
         .ok_or_else(|| CmdError::BadRequest(format!("template '{name}' not found")))?;
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|e| CmdError::BadRequest(format!("read: {e}")))?;
-    let parsed: Value = serde_yaml::from_str(&raw)
-        .map_err(|e| CmdError::BadRequest(format!("yaml parse: {e}")))?;
+    let raw =
+        std::fs::read_to_string(&path).map_err(|e| CmdError::BadRequest(format!("read: {e}")))?;
+    let parsed: Value =
+        serde_yaml::from_str(&raw).map_err(|e| CmdError::BadRequest(format!("yaml parse: {e}")))?;
     Ok(json!({
         "type": "template_detail",
         "name": name,
@@ -115,11 +114,9 @@ pub async fn save_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
 
     let path = root.join(format!("{name}.yaml"));
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| CmdError::BadRequest(format!("mkdir: {e}")))?;
+        std::fs::create_dir_all(parent).map_err(|e| CmdError::BadRequest(format!("mkdir: {e}")))?;
     }
-    std::fs::write(&path, yaml_text)
-        .map_err(|e| CmdError::BadRequest(format!("write: {e}")))?;
+    std::fs::write(&path, yaml_text).map_err(|e| CmdError::BadRequest(format!("write: {e}")))?;
 
     let group = optional_str(req, "group").unwrap_or("");
     Ok(json!({
@@ -172,8 +169,8 @@ pub async fn render_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
 
     let (path, _scope) = resolve_path(&name)
         .ok_or_else(|| CmdError::BadRequest(format!("template '{name}' not found")))?;
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|e| CmdError::BadRequest(format!("read: {e}")))?;
+    let raw =
+        std::fs::read_to_string(&path).map_err(|e| CmdError::BadRequest(format!("read: {e}")))?;
     let mut template: Value =
         serde_yaml::from_str(&raw).map_err(|e| CmdError::BadRequest(format!("yaml: {e}")))?;
 
@@ -278,10 +275,7 @@ fn is_safe_name(name: &str) -> bool {
 
 /// Deep-merge a JSON object into a JSON value. Object keys recurse; scalars +
 /// arrays get replaced wholesale.
-fn merge_object(
-    target: &mut Value,
-    patch: serde_json::Map<String, Value>,
-) {
+fn merge_object(target: &mut Value, patch: serde_json::Map<String, Value>) {
     if !target.is_object() {
         *target = Value::Object(Default::default());
     }
@@ -346,8 +340,7 @@ mod tests {
     #[test]
     fn merge_replaces_scalar_with_object_and_vice_versa() {
         let mut base = json!({"a": "scalar"});
-        let patch =
-            serde_json::from_value(json!({"a": {"nested": 1}})).unwrap();
+        let patch = serde_json::from_value(json!({"a": {"nested": 1}})).unwrap();
         merge_object(&mut base, patch);
         assert_eq!(base["a"]["nested"], 1);
     }

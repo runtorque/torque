@@ -125,7 +125,11 @@ pub async fn remove_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
             .filter(|(agent_id, cell)| {
                 **agent_id == id
                     || cell.parent_id == id
-                    || st.children.get(&id).map(|kids| kids.contains(agent_id)).unwrap_or(false)
+                    || st
+                        .children
+                        .get(&id)
+                        .map(|kids| kids.contains(agent_id))
+                        .unwrap_or(false)
             })
             .map(|(_, cell)| cell.clone())
             .collect::<Vec<_>>();
@@ -216,7 +220,10 @@ pub async fn update_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     history_fields.insert("group".into(), json!(agent.group));
     history_fields.insert("agent_type".into(), json!(agent.agent_type));
     history_fields.insert("template".into(), json!(agent.template));
-    let _ = ctx.db.update_agent_history_fields(&agent.id, &history_fields).await;
+    let _ = ctx
+        .db
+        .update_agent_history_fields(&agent.id, &history_fields)
+        .await;
     // child slugs may have changed — persist them too
     let children = {
         let st = ctx.state.lock().await;
@@ -272,7 +279,10 @@ pub async fn move_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     let mut history_fields = serde_json::Map::new();
     history_fields.insert("group".into(), json!(agent.group));
     history_fields.insert("slug".into(), json!(agent.slug));
-    let _ = ctx.db.update_agent_history_fields(&agent.id, &history_fields).await;
+    let _ = ctx
+        .db
+        .update_agent_history_fields(&agent.id, &history_fields)
+        .await;
     persist_group_members(ctx, &from_group).await?;
     persist_group_members(ctx, &to).await?;
     flush(ctx).await;
@@ -298,12 +308,19 @@ pub async fn reparent_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
             a.parent_id = new_parent.clone();
         }
         if !new_parent.is_empty() {
-            st.children.entry(new_parent.clone()).or_default().push(id.clone());
+            st.children
+                .entry(new_parent.clone())
+                .or_default()
+                .push(id.clone());
         }
         // regenerate slug
         let name = cell.name.clone();
         let group = cell.group.clone();
-        let parent_ref = if new_parent.is_empty() { None } else { Some(new_parent.as_str()) };
+        let parent_ref = if new_parent.is_empty() {
+            None
+        } else {
+            Some(new_parent.as_str())
+        };
         let new_slug = st.make_agent_slug(&name, parent_ref, &group);
         if let Some(a) = st.agents.get_mut(&id) {
             a.slug = new_slug;
@@ -315,7 +332,10 @@ pub async fn reparent_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
     ctx.db.save_agent(&agent).await?;
     let mut history_fields = serde_json::Map::new();
     history_fields.insert("slug".into(), json!(agent.slug));
-    let _ = ctx.db.update_agent_history_fields(&agent.id, &history_fields).await;
+    let _ = ctx
+        .db
+        .update_agent_history_fields(&agent.id, &history_fields)
+        .await;
     let _ = group;
     flush(ctx).await;
     ok()
@@ -411,16 +431,25 @@ pub async fn reorder_child(ctx: &CmdContext, req: &Value) -> CmdResult {
     let order: Vec<String> = req
         .get("order")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     let group = {
         let mut st = ctx.state.lock().await;
         if !st.children.contains_key(&parent_id) && !st.agents.contains_key(&parent_id) {
-            return Err(CmdError::BadRequest(format!("parent '{parent_id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "parent '{parent_id}' not found"
+            )));
         }
         st.children.insert(parent_id.clone(), order);
-        st.agents.get(&parent_id).map(|a| a.group.clone()).unwrap_or_default()
+        st.agents
+            .get(&parent_id)
+            .map(|a| a.group.clone())
+            .unwrap_or_default()
     };
     if !group.is_empty() {
         persist_group_members(ctx, &group).await?;
@@ -455,7 +484,11 @@ fn apply_common_fields(cell: &mut AgentCell, req: &Value) {
     }
 }
 
-fn apply_agent_defaults(cell: &mut AgentCell, settings: &loom_core::state::GroupSettings, req: &Value) {
+fn apply_agent_defaults(
+    cell: &mut AgentCell,
+    settings: &loom_core::state::GroupSettings,
+    req: &Value,
+) {
     if cell.directory.is_empty() {
         cell.directory = first_nonempty([
             settings.agent_directory.clone(),
@@ -471,10 +504,8 @@ fn apply_agent_defaults(cell: &mut AgentCell, settings: &loom_core::state::Group
         ]);
     }
     if cell.tab_color.is_empty() {
-        cell.tab_color = first_nonempty([
-            settings.agent_tab_color.clone(),
-            settings.tab_color.clone(),
-        ]);
+        cell.tab_color =
+            first_nonempty([settings.agent_tab_color.clone(), settings.tab_color.clone()]);
     }
     if cell.command.is_empty() {
         cell.command = first_nonempty([
@@ -535,10 +566,8 @@ fn apply_terminal_defaults(
         optional_str(req, "command_args").unwrap_or("").to_string(),
         settings.terminal_command_args.clone(),
     ]);
-    let mut command = first_nonempty([
-        cell.command.clone(),
-        settings.terminal_boot_command.clone(),
-    ]);
+    let mut command =
+        first_nonempty([cell.command.clone(), settings.terminal_boot_command.clone()]);
     if !command_args.is_empty() {
         command = if command.is_empty() {
             command_args
@@ -593,7 +622,11 @@ fn build_terminal_launch_command(
         if key.trim().is_empty() {
             continue;
         }
-        parts.push(format!("export {}={}", shell_escape(key), shell_escape(value)));
+        parts.push(format!(
+            "export {}={}",
+            shell_escape(key),
+            shell_escape(value)
+        ));
     }
     if !init_script.trim().is_empty() {
         parts.push(init_script.trim().to_string());

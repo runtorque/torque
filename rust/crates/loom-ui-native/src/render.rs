@@ -77,10 +77,7 @@ pub fn build_sidebar_tree(snapshot: &MatrixStateSnapshot) -> SidebarTree {
     }
 }
 
-fn build_node(
-    agent: &loom_core::state::AgentCell,
-    snapshot: &MatrixStateSnapshot,
-) -> SidebarNode {
+fn build_node(agent: &loom_core::state::AgentCell, snapshot: &MatrixStateSnapshot) -> SidebarNode {
     // Stable ordering for children: name asc.
     let mut children: Vec<&loom_core::state::AgentCell> = snapshot
         .agents
@@ -96,7 +93,10 @@ fn build_node(
         type_label: derive_type_label(agent),
         subtitle: derive_subtitle(agent),
         needs_attention: agent.needs_attention,
-        children: children.into_iter().map(|c| build_node(c, snapshot)).collect(),
+        children: children
+            .into_iter()
+            .map(|c| build_node(c, snapshot))
+            .collect(),
     }
 }
 
@@ -249,12 +249,11 @@ pub fn build_board_tree(
     // Roots for the active lane: top-level tasks in that lane, plus any
     // tasks whose parent is NOT in pool (orphans) so we don't drop them.
     let mut rows: Vec<BoardRow> = Vec::new();
-    let pool_ids: std::collections::HashSet<&str> =
-        pool.iter().map(|t| t.id.as_str()).collect();
+    let pool_ids: std::collections::HashSet<&str> = pool.iter().map(|t| t.id.as_str()).collect();
 
     for t in pool.iter().filter(|t| t.lane == active_lane) {
-        let parent_in_pool = !t.parent_task_id.is_empty()
-            && pool_ids.contains(t.parent_task_id.as_str());
+        let parent_in_pool =
+            !t.parent_task_id.is_empty() && pool_ids.contains(t.parent_task_id.as_str());
         if parent_in_pool {
             continue;
         }
@@ -402,8 +401,17 @@ fn write_agent_row(
     } else {
         " "
     };
-    let type_tag = if agent.cell_type == "terminal" { " ⎔" } else { "" };
-    writeln!(out, "{indent}{marker} {status_dot} {}{type_tag}", agent.name).ok();
+    let type_tag = if agent.cell_type == "terminal" {
+        " ⎔"
+    } else {
+        ""
+    };
+    writeln!(
+        out,
+        "{indent}{marker} {status_dot} {}{type_tag}",
+        agent.name
+    )
+    .ok();
 
     // Recurse into children (other agents whose parent_id == this one's id).
     let mut children: Vec<&loom_core::state::AgentCell> = snapshot
@@ -507,8 +515,12 @@ mod tests {
         let snap = MatrixStateSnapshot {
             agents: vec![st.agents["a1"].clone()],
             groups_order: vec!["Eng".into()],
-            group_slugs: [("Eng".to_string(), "eng".to_string())].into_iter().collect(),
-            groups: [("Eng".to_string(), vec!["a1".to_string()])].into_iter().collect(),
+            group_slugs: [("Eng".to_string(), "eng".to_string())]
+                .into_iter()
+                .collect(),
+            groups: [("Eng".to_string(), vec!["a1".to_string()])]
+                .into_iter()
+                .collect(),
             board_lanes: vec![],
             board_tasks: vec![],
             global_default_command: String::new(),
@@ -568,8 +580,12 @@ mod tests {
         let snap = MatrixStateSnapshot {
             agents,
             groups_order: vec!["Eng".into()],
-            group_slugs: [("Eng".to_string(), "eng".to_string())].into_iter().collect(),
-            groups: [("Eng".to_string(), vec!["a1".to_string()])].into_iter().collect(),
+            group_slugs: [("Eng".to_string(), "eng".to_string())]
+                .into_iter()
+                .collect(),
+            groups: [("Eng".to_string(), vec!["a1".to_string()])]
+                .into_iter()
+                .collect(),
             board_lanes: vec![],
             board_tasks: vec![],
             global_default_command: String::new(),
@@ -600,7 +616,9 @@ mod tests {
         let snap = MatrixStateSnapshot {
             agents,
             groups_order: vec!["Eng".into()],
-            group_slugs: [("Eng".to_string(), "eng".to_string())].into_iter().collect(),
+            group_slugs: [("Eng".to_string(), "eng".to_string())]
+                .into_iter()
+                .collect(),
             groups,
             board_lanes: vec![],
             board_tasks: vec![],
@@ -637,10 +655,7 @@ mod tests {
             "Eng".to_string(),
             vec!["a1".to_string(), "t1".to_string()],
         )]);
-        let group_slugs = std::collections::HashMap::from([(
-            "Eng".to_string(),
-            "eng".to_string(),
-        )]);
+        let group_slugs = std::collections::HashMap::from([("Eng".to_string(), "eng".to_string())]);
         let snap = MatrixStateSnapshot {
             agents,
             groups_order: vec!["Eng".into()],
@@ -687,8 +702,12 @@ mod tests {
         let snap = MatrixStateSnapshot {
             agents: vec![st.agents["a1"].clone()],
             groups_order: vec!["Eng".into()],
-            group_slugs: [("Eng".to_string(), "eng".to_string())].into_iter().collect(),
-            groups: [("Eng".to_string(), vec!["a1".to_string()])].into_iter().collect(),
+            group_slugs: [("Eng".to_string(), "eng".to_string())]
+                .into_iter()
+                .collect(),
+            groups: [("Eng".to_string(), vec!["a1".to_string()])]
+                .into_iter()
+                .collect(),
             board_lanes: vec![],
             board_tasks: vec![],
             global_default_command: String::new(),
@@ -714,8 +733,12 @@ mod tests {
         let snap = MatrixStateSnapshot {
             agents: vec![st.agents["a1"].clone()],
             groups_order: vec!["Eng".into()],
-            group_slugs: [("Eng".to_string(), "eng".to_string())].into_iter().collect(),
-            groups: [("Eng".to_string(), vec!["a1".to_string()])].into_iter().collect(),
+            group_slugs: [("Eng".to_string(), "eng".to_string())]
+                .into_iter()
+                .collect(),
+            groups: [("Eng".to_string(), vec!["a1".to_string()])]
+                .into_iter()
+                .collect(),
             board_lanes: vec![],
             board_tasks: vec![],
             global_default_command: String::new(),

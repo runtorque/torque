@@ -36,7 +36,12 @@ impl PtyHandle {
     pub async fn resize(&self, rows: u16, cols: u16) -> Result<()> {
         let master = self.master.lock().await;
         master
-            .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         Ok(())
     }
@@ -50,7 +55,10 @@ pub struct LocalPtyBackend {
 impl LocalPtyBackend {
     pub fn new() -> (Self, mpsc::Receiver<PtyEvent>) {
         let (tx, rx) = mpsc::channel(512);
-        let backend = Self { sessions: Arc::new(Mutex::new(HashMap::new())), tx };
+        let backend = Self {
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            tx,
+        };
         (backend, rx)
     }
 
@@ -69,7 +77,12 @@ impl LocalPtyBackend {
         }
         let pty_system = portable_pty::native_pty_system();
         let pair = pty_system
-            .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
             .context("openpty")?;
 
         // Route through /bin/sh -c so the shell handles quoting, pipes, and
@@ -113,7 +126,10 @@ impl LocalPtyBackend {
                     Ok(n) => {
                         let bytes = buf[..n].to_vec();
                         if tx
-                            .blocking_send(PtyEvent::Output { cell_id: cell.clone(), bytes })
+                            .blocking_send(PtyEvent::Output {
+                                cell_id: cell.clone(),
+                                bytes,
+                            })
                             .is_err()
                         {
                             break;
@@ -142,16 +158,27 @@ impl LocalPtyBackend {
             cell_id: cell_id.to_string(),
         };
 
-        self.sessions.lock().await.insert(cell_id.to_string(), handle);
+        self.sessions
+            .lock()
+            .await
+            .insert(cell_id.to_string(), handle);
 
         if let Some(pid) = pid {
             let _ = self
                 .tx
-                .send(PtyEvent::Spawned { cell_id: cell_id.to_string(), pid })
+                .send(PtyEvent::Spawned {
+                    cell_id: cell_id.to_string(),
+                    pid,
+                })
                 .await;
         }
 
-        Ok(PtySession { cell_id: cell_id.to_string(), pid, rows, cols })
+        Ok(PtySession {
+            cell_id: cell_id.to_string(),
+            pid,
+            rows,
+            cols,
+        })
     }
 
     pub async fn write(&self, cell_id: &str, data: &[u8]) -> Result<()> {
@@ -176,4 +203,3 @@ impl LocalPtyBackend {
         Ok(())
     }
 }
-

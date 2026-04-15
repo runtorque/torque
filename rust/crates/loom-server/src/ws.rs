@@ -107,7 +107,11 @@ async fn handle_ws(app: AppState, socket: WebSocket) {
                 {
                     payload = json!({ "cmd": "resync" });
                 }
-                let Some(cmd) = payload.get("cmd").and_then(|v| v.as_str()).map(str::to_string) else {
+                let Some(cmd) = payload
+                    .get("cmd")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                else {
                     continue;
                 };
                 let response = match crate::commands::dispatch_command(&ctx, &cmd, &payload).await {
@@ -231,7 +235,9 @@ async fn send_json(
     value: &Value,
 ) -> Result<(), ()> {
     sender
-        .send(Message::Text(serde_json::to_string(value).unwrap_or_default()))
+        .send(Message::Text(
+            serde_json::to_string(value).unwrap_or_default(),
+        ))
         .await
         .map_err(|_| ())
 }

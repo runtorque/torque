@@ -129,14 +129,19 @@ pub async fn update_group_settings(ctx: &CmdContext, req: &Value) -> CmdResult {
         let mut st = ctx.state.lock().await;
         st.group_settings.insert(group.clone(), merged.clone());
         let fields = struct_to_map(&merged)?;
-        st.emit(DeltaOp::GroupSettingsUpdate { name: group.clone(), fields });
+        st.emit(DeltaOp::GroupSettingsUpdate {
+            name: group.clone(),
+            fields,
+        });
     }
     ctx.db.save_group_settings(&group, &merged).await?;
     flush(ctx).await;
     ok()
 }
 
-fn struct_to_map<T: serde::Serialize>(value: &T) -> Result<serde_json::Map<String, Value>, CmdError> {
+fn struct_to_map<T: serde::Serialize>(
+    value: &T,
+) -> Result<serde_json::Map<String, Value>, CmdError> {
     serde_json::to_value(value)?
         .as_object()
         .cloned()
@@ -197,7 +202,9 @@ fn current_context_payload(
     let mut group_cells = Vec::new();
 
     for agent_id in st.groups.get(group).cloned().unwrap_or_default() {
-        let Some(cell) = st.agents.get(&agent_id) else { continue };
+        let Some(cell) = st.agents.get(&agent_id) else {
+            continue;
+        };
         let path = if !cell.current_path.is_empty() {
             cell.current_path.clone()
         } else {

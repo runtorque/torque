@@ -86,7 +86,9 @@ async fn ws_sends_python_state_snapshot_on_connect_then_deltas_on_mutation() {
         .expect("delta");
     assert_eq!(delta["type"], "delta");
     let ops = delta["ops"].as_array().unwrap();
-    assert!(ops.iter().any(|op| op["op"] == "group_update" && op["name"] == "Eng"));
+    assert!(ops
+        .iter()
+        .any(|op| op["op"] == "group_update" && op["name"] == "Eng"));
 }
 
 #[tokio::test]
@@ -97,9 +99,11 @@ async fn ws_accepts_browser_command_traffic_and_returns_direct_payloads() {
     let (mut ws, _) = connect_async(url).await.unwrap();
     let _ = next_json(&mut ws).await;
 
-    ws.send(Message::Text(json!({"cmd": "get_global_settings"}).to_string()))
-        .await
-        .unwrap();
+    ws.send(Message::Text(
+        json!({"cmd": "get_global_settings"}).to_string(),
+    ))
+    .await
+    .unwrap();
     let msg = tokio::time::timeout(Duration::from_secs(3), next_json(&mut ws))
         .await
         .unwrap();
@@ -129,7 +133,9 @@ async fn terminal_ws_replays_snapshot_and_live_output() {
     app.terminals
         .set_session("term-1", Some("sid-1".into()), true)
         .await;
-    app.terminals.append_output("term-1", "sid-1", "hello").await;
+    app.terminals
+        .append_output("term-1", "sid-1", "hello")
+        .await;
 
     let url = format!("ws://{}/ws/terminal/term-1", addr);
     let (mut ws, _) = connect_async(url).await.unwrap();
@@ -139,7 +145,9 @@ async fn terminal_ws_replays_snapshot_and_live_output() {
     assert_eq!(snap["session_id"], "sid-1");
     assert_eq!(snap["data"], "hello");
 
-    app.terminals.append_output("term-1", "sid-1", " world").await;
+    app.terminals
+        .append_output("term-1", "sid-1", " world")
+        .await;
     let msg = tokio::time::timeout(Duration::from_secs(3), next_json(&mut ws))
         .await
         .unwrap();
@@ -155,7 +163,9 @@ where
     loop {
         match ws.next().await {
             Some(Ok(Message::Text(text))) => return serde_json::from_str(&text).unwrap(),
-            Some(Ok(Message::Binary(_))) | Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
+            Some(Ok(Message::Binary(_)))
+            | Some(Ok(Message::Ping(_)))
+            | Some(Ok(Message::Pong(_))) => continue,
             Some(Ok(Message::Close(_))) | None => panic!("ws closed"),
             Some(Ok(Message::Frame(_))) => continue,
             Some(Err(e)) => panic!("ws err: {e}"),

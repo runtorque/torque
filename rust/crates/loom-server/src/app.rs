@@ -96,7 +96,11 @@ struct TerminalSessionState {
 impl Default for TerminalSessionState {
     fn default() -> Self {
         let (tx, _) = tokio::sync::broadcast::channel(256);
-        Self { session_id: String::new(), buffer: String::new(), tx }
+        Self {
+            session_id: String::new(),
+            buffer: String::new(),
+            tx,
+        }
     }
 }
 
@@ -106,7 +110,10 @@ impl TerminalHub {
         inner.entry(cell_id.to_string()).or_default().tx.clone()
     }
 
-    pub async fn subscribe(&self, cell_id: &str) -> tokio::sync::broadcast::Receiver<serde_json::Value> {
+    pub async fn subscribe(
+        &self,
+        cell_id: &str,
+    ) -> tokio::sync::broadcast::Receiver<serde_json::Value> {
         self.ensure(cell_id).await.subscribe()
     }
 
@@ -281,7 +288,9 @@ async fn handle_attachment(
     if invalid_attachment_path_segment(&task_id) || invalid_attachment_path_segment(&filename) {
         return Err((StatusCode::BAD_REQUEST, "invalid attachment path".into()));
     }
-    let path = loom_core::config::attachments_dir().join(&task_id).join(&filename);
+    let path = loom_core::config::attachments_dir()
+        .join(&task_id)
+        .join(&filename);
     let body = tokio::fs::read(&path)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "attachment not found".into()))?;
@@ -301,7 +310,13 @@ fn invalid_attachment_path_segment(value: &str) -> bool {
 }
 
 fn guess_content_type(filename: &str) -> &'static str {
-    match filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+    match filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
@@ -344,20 +359,33 @@ async fn handle_pty_event(
                 cell.status = "running".into();
                 cell.session_id = Some(pid.to_string());
                 clear_buffer = true;
-                panel_event = Some(("agent_started".into(), "Session started".into(), cell.current_task_id.clone()));
+                panel_event = Some((
+                    "agent_started".into(),
+                    "Session started".into(),
+                    cell.current_task_id.clone(),
+                ));
             }
             PtyEvent::Output { bytes, .. } => {
                 cell.last_event_at = chrono::Utc::now().timestamp() as f64;
                 if let Some(session_id) = cell.session_id.clone() {
-                    pending_output = Some((session_id, String::from_utf8_lossy(&bytes).to_string()));
+                    pending_output =
+                        Some((session_id, String::from_utf8_lossy(&bytes).to_string()));
                 }
             }
             PtyEvent::Exited { status, .. } => {
-                cell.status = if status == 0 { "stopped".into() } else { "error".into() };
+                cell.status = if status == 0 {
+                    "stopped".into()
+                } else {
+                    "error".into()
+                };
                 cell.session_id = None;
                 panel_event = Some((
                     "agent_finished".into(),
-                    if status == 0 { "Session ended".into() } else { format!("Session exited with status {status}") },
+                    if status == 0 {
+                        "Session ended".into()
+                    } else {
+                        format!("Session exited with status {status}")
+                    },
                     cell.current_task_id.clone(),
                 ));
             }
@@ -365,7 +393,11 @@ async fn handle_pty_event(
                 cell.error_message = message;
                 cell.status = "error".into();
                 cell.needs_attention = true;
-                panel_event = Some(("agent_error".into(), cell.error_message.clone(), cell.current_task_id.clone()));
+                panel_event = Some((
+                    "agent_error".into(),
+                    cell.error_message.clone(),
+                    cell.current_task_id.clone(),
+                ));
             }
         }
         let agent_snapshot = cell.clone();

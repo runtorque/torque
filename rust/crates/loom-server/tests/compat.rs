@@ -46,14 +46,36 @@ async fn post(addr: SocketAddr, body: Value) -> Value {
     resp.json::<Value>().await.unwrap()
 }
 
+async fn post_events_with_headers(
+    addr: SocketAddr,
+    body: Value,
+    headers: Vec<(&str, &str)>,
+) -> Value {
+    let client = reqwest::Client::new();
+    let mut req = client.post(format!("http://{}/events", addr)).json(&body);
+    for (name, value) in headers {
+        req = req.header(name, value);
+    }
+    let resp = req.send().await.unwrap();
+    resp.json::<Value>().await.unwrap()
+}
+
 #[tokio::test]
 async fn get_events_and_history_commands_return_python_compat_shapes() {
     let (addr, _h) = spawn_test_server().await;
 
     post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
-    let add_agent = post(addr, json!({"cmd": "add_agent", "group": "Eng", "name": "Worker"})).await;
+    let add_agent = post(
+        addr,
+        json!({"cmd": "add_agent", "group": "Eng", "name": "Worker"}),
+    )
+    .await;
     let agent_id = add_agent["data"]["agent_id"].as_str().unwrap().to_string();
-    let task = post(addr, json!({"cmd": "board_add_task", "group": "Eng", "task": "Ship it"})).await;
+    let task = post(
+        addr,
+        json!({"cmd": "board_add_task", "group": "Eng", "task": "Ship it"}),
+    )
+    .await;
     let task_id = task["data"]["task_id"].as_str().unwrap().to_string();
     post(
         addr,
@@ -97,7 +119,11 @@ async fn get_events_and_history_commands_return_python_compat_shapes() {
     assert!(history["data"]["records"].is_array());
     assert_eq!(history["data"]["records"][0]["total_tasks"], 1);
 
-    let detail = post(addr, json!({"cmd": "get_agent_history_detail", "agent_id": agent_id})).await;
+    let detail = post(
+        addr,
+        json!({"cmd": "get_agent_history_detail", "agent_id": agent_id}),
+    )
+    .await;
     assert_eq!(detail["ok"], true);
     assert_eq!(detail["data"]["type"], "agent_history_detail");
     assert_eq!(detail["data"]["record"]["id"], agent_id);
@@ -115,7 +141,11 @@ async fn get_events_and_history_commands_return_python_compat_shapes() {
     assert!(actions.iter().any(|action| action == "progress"));
     assert!(actions.iter().any(|action| action == "done"));
 
-    let missing = post(addr, json!({"cmd": "get_agent_history_detail", "agent_id": "missing"})).await;
+    let missing = post(
+        addr,
+        json!({"cmd": "get_agent_history_detail", "agent_id": "missing"}),
+    )
+    .await;
     assert_eq!(missing["ok"], false);
     assert_eq!(missing["error"], "Agent not found in history");
 }
@@ -128,7 +158,11 @@ async fn upload_endpoint_and_remove_attachment_command_roundtrip() {
 
     let (addr, _h) = spawn_test_server().await;
     post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
-    post(addr, json!({"cmd": "board_add_task", "group": "Eng", "task": "Ship it"})).await;
+    post(
+        addr,
+        json!({"cmd": "board_add_task", "group": "Eng", "task": "Ship it"}),
+    )
+    .await;
 
     let client = reqwest::Client::new();
     let boundary = "loom-test-boundary";
@@ -169,4 +203,67 @@ async fn upload_endpoint_and_remove_attachment_command_roundtrip() {
     assert!(!attachment_path.exists());
 
     std::env::remove_var("LOOM_INSTALL_DIR");
+}
+
+#[tokio::test]
+async fn provider_hook_events_populate_runtime_events_and_history() {
+    let (addr, _h) = spawn_test_server().await;
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let add_agent = post(
+        addr,
+        json!({"cmd": "add_agent", "group": "Eng", "name": "Claude", "provider": "claude-code"}),
+    )
+    .await;
+    let agent_id = add_agent["data"]["agent_id"].as_str().unwrap().to_string();
+
+    let session_start = post_events_with_headers(
+        addr,
+        json!({"hook_event_name": "SessionStart", "model": "sonnet"}),
+        vec![("X-Loom-Cell-Id", &agent_id)],
+    )
+    .await;
+    assert_eq!(session_start["ok"], true);
+
+    let waiting = post_events_with_headers(
+        addr,
+        json!({"hook_event_name": "Notification", "notification_type": "permission_prompt"}),
+        vec![("X-Loom-Cell-Id", &agent_id)],
+    )
+    .await;
+    assert_eq!(waiting["ok"], true);
+
+    let session_end = post_events_with_headers(
+        addr,
+        json!({"hook_event_name": "Stop", "last_assistant_message": "All done"}),
+        vec![("X-Loom-Cell-Id", &agent_id)],
+    )
+    .await;
+    assert_eq!(session_end["ok"], true);
+
+    let events = post(addr, json!({"cmd": "get_events", "limit": 10})).await;
+    let event_kinds: Vec<String> = events["data"]["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|value| value["kind"].as_str().map(|s| s.to_string()))
+        .collect();
+    assert!(event_kinds.iter().any(|kind| kind == "agent_started"));
+    assert!(event_kinds.iter().any(|kind| kind == "agent_waiting"));
+    assert!(event_kinds.iter().any(|kind| kind == "agent_finished"));
+
+    let detail = post(
+        addr,
+        json!({"cmd": "get_agent_history_detail", "agent_id": &agent_id}),
+    )
+    .await;
+    let actions: Vec<String> = detail["data"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|value| value["action"].as_str().map(|s| s.to_string()))
+        .collect();
+    assert!(actions.iter().any(|action| action == "session_start"));
+    assert!(actions.iter().any(|action| action == "waiting"));
+    assert!(actions.iter().any(|action| action == "session_end"));
 }

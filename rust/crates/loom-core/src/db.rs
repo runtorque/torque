@@ -8,8 +8,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use rusqlite::types::Value as SqlValue;
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use serde::de::DeserializeOwned;
 use tokio::sync::Mutex;
 
@@ -540,8 +540,7 @@ fn decode_board_task_row(row: &Row<'_>) -> BoardTask {
     task.verification_notes = row_string(row, "verification_notes");
     task.verification_updated_at = row_string(row, "verification_updated_at");
     task.verification_updated_by = row_string(row, "verification_updated_by");
-    task.verification_summary =
-        parse_json_or_default(&row_string(row, "verification_summary"));
+    task.verification_summary = parse_json_or_default(&row_string(row, "verification_summary"));
     task.worktree_boundary = parse_json_or_default(&row_string(row, "worktree_boundary"));
     task.resume_after_boundary_task_id = row_string(row, "resume_after_boundary_task_id");
     task.archived_at = row_string(row, "archived_at");
@@ -593,7 +592,11 @@ fn decode_group_settings_row(row: &Row<'_>) -> GroupSettings {
         default_directory: row_string(row, "default_directory"),
         default_terminal_backend: {
             let value = row_string(row, "default_terminal_backend");
-            if value.is_empty() { "iterm2".into() } else { value }
+            if value.is_empty() {
+                "iterm2".into()
+            } else {
+                value
+            }
         },
         profile: row_string(row, "profile"),
         shell: row_string(row, "shell"),
@@ -618,7 +621,11 @@ fn decode_group_settings_row(row: &Row<'_>) -> GroupSettings {
         git_worktree: row_bool(row, "git_worktree", false),
         worktree_base_dir: {
             let value = row_string(row, "worktree_base_dir");
-            if value.is_empty() { ".loom/worktrees".into() } else { value }
+            if value.is_empty() {
+                ".loom/worktrees".into()
+            } else {
+                value
+            }
         },
         worktree_base_branch: row_string(row, "worktree_base_branch"),
         worktree_auto_checkpoint: row_bool(row, "worktree_auto_checkpoint", false),
@@ -627,7 +634,11 @@ fn decode_group_settings_row(row: &Row<'_>) -> GroupSettings {
         worktree_merge_instructions: row_string(row, "worktree_merge_instructions"),
         worktree_merge_cleanup: {
             let value = row_string(row, "worktree_merge_cleanup");
-            if value.is_empty() { "keep".into() } else { value }
+            if value.is_empty() {
+                "keep".into()
+            } else {
+                value
+            }
         },
         worktree_merge_preserve_diff: row_bool(row, "worktree_merge_preserve_diff", false),
         worktree_symlinks: parse_json_or_default(&row_string(row, "worktree_symlinks")),
@@ -652,7 +663,11 @@ fn decode_group_settings_row(row: &Row<'_>) -> GroupSettings {
         terminal_close_on_disconnect: row_bool(row, "terminal_close_on_disconnect", false),
         dispatch_lane: {
             let value = row_string(row, "dispatch_lane");
-            if value.is_empty() { "In Progress".into() } else { value }
+            if value.is_empty() {
+                "In Progress".into()
+            } else {
+                value
+            }
         },
         dispatch_auto_terminals: row_bool(row, "dispatch_auto_terminals", false),
         board_default_labels: parse_json_or_default(&row_string(row, "board_default_labels")),
@@ -678,23 +693,43 @@ fn decode_weaver_settings_row(row: &Row<'_>) -> WeaverSettings {
         default_worker_concurrency: row_i32(row, "default_worker_concurrency", 2),
         autonomy_mode: {
             let value = row_string(row, "autonomy_mode");
-            if value.is_empty() { "dispatch_when_clear".into() } else { value }
+            if value.is_empty() {
+                "dispatch_when_clear".into()
+            } else {
+                value
+            }
         },
         wave_size_preference: {
             let value = row_string(row, "wave_size_preference");
-            if value.is_empty() { "small".into() } else { value }
+            if value.is_empty() {
+                "small".into()
+            } else {
+                value
+            }
         },
         same_agent_follow_up_preference: {
             let value = row_string(row, "same_agent_follow_up_preference");
-            if value.is_empty() { "balanced".into() } else { value }
+            if value.is_empty() {
+                "balanced".into()
+            } else {
+                value
+            }
         },
         digest_verbosity: {
             let value = row_string(row, "digest_verbosity");
-            if value.is_empty() { "balanced".into() } else { value }
+            if value.is_empty() {
+                "balanced".into()
+            } else {
+                value
+            }
         },
         escalation_style: {
             let value = row_string(row, "escalation_style");
-            if value.is_empty() { "note_then_ask".into() } else { value }
+            if value.is_empty() {
+                "note_then_ask".into()
+            } else {
+                value
+            }
         },
         paused: row_bool(row, "paused", false),
         custom_instructions: row_string(row, "custom_instructions"),
@@ -732,7 +767,10 @@ fn ensure_column(
     definition: &str,
 ) -> crate::Result<()> {
     if !column_exists(conn, table, column)? {
-        conn.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"), [])?;
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
     }
     Ok(())
 }
@@ -993,7 +1031,10 @@ impl LoomDb {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(SCHEMA_SQL)?;
         migrate_compat_schema(&conn)?;
-        Ok(Self { inner: Arc::new(Mutex::new(conn)), path: Arc::new(path) })
+        Ok(Self {
+            inner: Arc::new(Mutex::new(conn)),
+            path: Arc::new(path),
+        })
     }
 
     /// Open an in-memory db — used by tests.
@@ -1001,7 +1042,10 @@ impl LoomDb {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA_SQL)?;
         migrate_compat_schema(&conn)?;
-        Ok(Self { inner: Arc::new(Mutex::new(conn)), path: Arc::new(PathBuf::from(":memory:")) })
+        Ok(Self {
+            inner: Arc::new(Mutex::new(conn)),
+            path: Arc::new(PathBuf::from(":memory:")),
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -1085,22 +1129,39 @@ impl LoomDb {
     pub async fn delete_group(&self, name: &str) -> crate::Result<()> {
         let conn = self.inner.lock().await;
         conn.execute("DELETE FROM groups WHERE name = ?1", params![name])?;
-        conn.execute("DELETE FROM group_members WHERE group_name = ?1", params![name])?;
-        conn.execute("DELETE FROM group_settings WHERE group_name = ?1", params![name])?;
-        conn.execute("DELETE FROM auto_dispatch_queue WHERE group_name = ?1", params![name])?;
-        conn.execute("DELETE FROM weaver_settings WHERE group_name = ?1", params![name])?;
-        conn.execute("DELETE FROM weaver_worklog WHERE group_name = ?1", params![name])?;
-        conn.execute("DELETE FROM weaver_journal WHERE group_name = ?1", params![name])?;
+        conn.execute(
+            "DELETE FROM group_members WHERE group_name = ?1",
+            params![name],
+        )?;
+        conn.execute(
+            "DELETE FROM group_settings WHERE group_name = ?1",
+            params![name],
+        )?;
+        conn.execute(
+            "DELETE FROM auto_dispatch_queue WHERE group_name = ?1",
+            params![name],
+        )?;
+        conn.execute(
+            "DELETE FROM weaver_settings WHERE group_name = ?1",
+            params![name],
+        )?;
+        conn.execute(
+            "DELETE FROM weaver_worklog WHERE group_name = ?1",
+            params![name],
+        )?;
+        conn.execute(
+            "DELETE FROM weaver_journal WHERE group_name = ?1",
+            params![name],
+        )?;
         Ok(())
     }
 
-    pub async fn save_group_members(
-        &self,
-        group: &str,
-        members: &[String],
-    ) -> crate::Result<()> {
+    pub async fn save_group_members(&self, group: &str, members: &[String]) -> crate::Result<()> {
         let conn = self.inner.lock().await;
-        conn.execute("DELETE FROM group_members WHERE group_name = ?1", params![group])?;
+        conn.execute(
+            "DELETE FROM group_members WHERE group_name = ?1",
+            params![group],
+        )?;
         let mut stmt = conn.prepare(
             "INSERT INTO group_members(group_name, agent_id, position) VALUES (?1, ?2, ?3)",
         )?;
@@ -1230,14 +1291,35 @@ impl LoomDb {
         if column_exists(&conn, "global_settings", "key")? {
             conn.execute("DELETE FROM global_settings", [])?;
             for (key, value) in [
-                ("default_command", serde_json::to_string(&settings.default_command)?),
-                ("filter_by_window", serde_json::to_string(&settings.filter_by_window)?),
-                ("focus_new_tabs", serde_json::to_string(&settings.focus_new_tabs)?),
-                ("focus_on_click", serde_json::to_string(&settings.focus_on_click)?),
-                ("default_lanes", serde_json::to_string(&settings.default_lanes)?),
+                (
+                    "default_command",
+                    serde_json::to_string(&settings.default_command)?,
+                ),
+                (
+                    "filter_by_window",
+                    serde_json::to_string(&settings.filter_by_window)?,
+                ),
+                (
+                    "focus_new_tabs",
+                    serde_json::to_string(&settings.focus_new_tabs)?,
+                ),
+                (
+                    "focus_on_click",
+                    serde_json::to_string(&settings.focus_on_click)?,
+                ),
+                (
+                    "default_lanes",
+                    serde_json::to_string(&settings.default_lanes)?,
+                ),
                 ("keybindings", serde_json::to_string(&settings.keybindings)?),
-                ("max_pipeline_depth", serde_json::to_string(&settings.max_pipeline_depth)?),
-                ("max_event_log", serde_json::to_string(&settings.max_event_log)?),
+                (
+                    "max_pipeline_depth",
+                    serde_json::to_string(&settings.max_pipeline_depth)?,
+                ),
+                (
+                    "max_event_log",
+                    serde_json::to_string(&settings.max_event_log)?,
+                ),
             ] {
                 conn.execute(
                     "INSERT INTO global_settings(key, value) VALUES (?1, ?2)",
@@ -1690,13 +1772,14 @@ impl LoomDb {
             if !allowed.contains(&key.as_str()) {
                 continue;
             }
-            let col = if key == "group" { "\"group\"" } else { key.as_str() };
+            let col = if key == "group" {
+                "\"group\""
+            } else {
+                key.as_str()
+            };
             parts.push(format!("{col} = ?"));
             let sql_value = match key.as_str() {
-                "removed_at" => value
-                    .as_f64()
-                    .map(SqlValue::Real)
-                    .unwrap_or(SqlValue::Null),
+                "removed_at" => value.as_f64().map(SqlValue::Real).unwrap_or(SqlValue::Null),
                 "total_tokens_in" | "total_tokens_out" | "total_tasks" => {
                     SqlValue::Integer(value.as_i64().unwrap_or(0))
                 }
@@ -1823,7 +1906,12 @@ impl LoomDb {
         conn.execute(
             "INSERT OR IGNORE INTO memory_links(entry_id, target_kind, target_ref, created_at)
              VALUES (?1, ?2, ?3, ?4)",
-            params![link.entry_id, link.target_kind, link.target_ref, link.created_at],
+            params![
+                link.entry_id,
+                link.target_kind,
+                link.target_ref,
+                link.created_at
+            ],
         )?;
         Ok(())
     }
@@ -2016,10 +2104,7 @@ impl LoomDb {
         Ok(row)
     }
 
-    pub async fn load_agent_tasks(
-        &self,
-        agent_id: &str,
-    ) -> crate::Result<Vec<serde_json::Value>> {
+    pub async fn load_agent_tasks(&self, agent_id: &str) -> crate::Result<Vec<serde_json::Value>> {
         let conn = self.inner.lock().await;
         let mut stmt = conn.prepare(
             "SELECT id, agent_id, task_id, task_title, started_at, completed_at, outcome
@@ -2084,9 +2169,14 @@ impl LoomDb {
         // groups
         let mut groups: Vec<(String, String, i64)> = Vec::new();
         {
-            let mut stmt = conn.prepare("SELECT name, slug, position FROM groups ORDER BY position")?;
+            let mut stmt =
+                conn.prepare("SELECT name, slug, position FROM groups ORDER BY position")?;
             let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
             })?;
             for row in rows {
                 groups.push(row?);
@@ -2103,7 +2193,8 @@ impl LoomDb {
             let mut stmt = conn.prepare(
                 "SELECT group_name, agent_id FROM group_members ORDER BY group_name, position",
             )?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
             for row in rows {
                 let (group, aid) = row?;
                 state.groups.entry(group).or_default().push(aid);
@@ -2131,7 +2222,10 @@ impl LoomDb {
         {
             let mut stmt = conn.prepare("SELECT * FROM group_settings")?;
             let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, String>("group_name")?, decode_group_settings_row(r)))
+                Ok((
+                    r.get::<_, String>("group_name")?,
+                    decode_group_settings_row(r),
+                ))
             })?;
             for row in rows {
                 let (name, settings) = row?;
@@ -2144,15 +2238,12 @@ impl LoomDb {
             if column_exists(&conn, "global_settings", "key")? {
                 let mut payload = serde_json::Map::new();
                 let mut stmt = conn.prepare("SELECT key, value FROM global_settings")?;
-                let rows = stmt.query_map([], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                })?;
+                let rows =
+                    stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
                 for row in rows {
                     let (key, value) = row?;
-                    let parsed =
-                        serde_json::from_str::<serde_json::Value>(&value).unwrap_or_else(|_| {
-                            serde_json::Value::String(value)
-                        });
+                    let parsed = serde_json::from_str::<serde_json::Value>(&value)
+                        .unwrap_or_else(|_| serde_json::Value::String(value));
                     payload.insert(key, parsed);
                 }
                 if !payload.is_empty() {
@@ -2237,7 +2328,11 @@ impl LoomDb {
             })?;
             for row in rows {
                 let (group, entry) = row?;
-                state.auto_dispatch_queues.entry(group).or_default().push(entry);
+                state
+                    .auto_dispatch_queues
+                    .entry(group)
+                    .or_default()
+                    .push(entry);
             }
         }
 
@@ -2245,7 +2340,10 @@ impl LoomDb {
         {
             let mut stmt = conn.prepare("SELECT * FROM weaver_settings")?;
             let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, String>("group_name")?, decode_weaver_settings_row(r)))
+                Ok((
+                    r.get::<_, String>("group_name")?,
+                    decode_weaver_settings_row(r),
+                ))
             })?;
             for r in rows {
                 let (group, settings) = r?;
@@ -2256,7 +2354,8 @@ impl LoomDb {
         // task-id metadata
         {
             let mut stmt = conn.prepare("SELECT legacy_id, task_id FROM task_id_aliases")?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
             for row in rows {
                 let (legacy_id, task_id) = row?;
                 if !legacy_id.is_empty() && !task_id.is_empty() {
@@ -2276,13 +2375,15 @@ impl LoomDb {
             }
         }
         {
-            let mut stmt = conn
-                .prepare("SELECT root_task_id, next_child_number FROM pipeline_task_counters")?;
+            let mut stmt =
+                conn.prepare("SELECT root_task_id, next_child_number FROM pipeline_task_counters")?;
             let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u64>(1)?)))?;
             for row in rows {
                 let (root_task_id, next_child) = row?;
                 if !root_task_id.is_empty() {
-                    state.pipeline_task_counters.insert(root_task_id, next_child);
+                    state
+                        .pipeline_task_counters
+                        .insert(root_task_id, next_child);
                 }
             }
         }
@@ -2388,8 +2489,7 @@ impl LoomDb {
                 )
                 .optional()?;
             if let Some(v) = events_dismissed_attention {
-                if let Ok(map) =
-                    serde_json::from_str::<std::collections::HashMap<String, f64>>(&v)
+                if let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, f64>>(&v)
                 {
                     state.events_dismissed_attention = map;
                 }
@@ -2422,9 +2522,7 @@ impl LoomDb {
                 .optional()?;
             if let Some(s) = edges {
                 if !s.is_empty() {
-                    if let Ok(e) =
-                        serde_json::from_str::<crate::state::DockEdges>(&s)
-                    {
+                    if let Ok(e) = serde_json::from_str::<crate::state::DockEdges>(&s) {
                         state.dock_edges = e;
                     }
                 }
@@ -2444,8 +2542,9 @@ impl LoomDb {
                     )
                     .optional()?;
                 if let Some(s) = row {
-                    if let Ok(map) =
-                        serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(&s)
+                    if let Ok(map) = serde_json::from_str::<
+                        std::collections::HashMap<String, serde_json::Value>,
+                    >(&s)
                     {
                         match target {
                             "filters" => state.board_filters_by_group = map,
@@ -2706,14 +2805,20 @@ mod tests {
         assert_eq!(state.groups_order, vec!["Eng".to_string()]);
         assert_eq!(state.agents["a1"].status, "running");
         assert_eq!(
-            state.group_settings["Eng"].env_vars.get("RUST_LOG").map(String::as_str),
+            state.group_settings["Eng"]
+                .env_vars
+                .get("RUST_LOG")
+                .map(String::as_str),
             Some("debug")
         );
         assert_eq!(state.global_settings.default_command, "codex");
         assert!(!state.global_settings.filter_by_window);
         assert_eq!(state.board_tasks["eng-1"].task, "Ship it");
         assert_eq!(state.board_tasks["eng-1"].labels, vec!["rust".to_string()]);
-        assert_eq!(state.board_tasks["eng-1"].depends_on, vec!["eng-0".to_string()]);
+        assert_eq!(
+            state.board_tasks["eng-1"].depends_on,
+            vec!["eng-0".to_string()]
+        );
         assert!(!state.schedules["sched-1"].enabled);
         assert_eq!(state.task_id_aliases["1"], "eng-1");
         assert_eq!(state.task_id_counters["eng"], 7);

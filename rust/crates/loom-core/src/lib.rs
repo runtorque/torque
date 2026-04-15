@@ -1,13 +1,13 @@
 //! Core Loom engine: in-memory state, delta ops, SQLite persistence, event bus.
 
-pub mod config;
-pub mod task_ids;
 pub mod artifacts;
-pub mod slug;
-pub mod delta;
-pub mod state;
+pub mod config;
 pub mod db;
-pub mod events;
+pub mod delta;
 pub mod error;
+pub mod events;
+pub mod slug;
+pub mod state;
+pub mod task_ids;
 
 pub use error::{Error, Result};
