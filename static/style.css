@@ -145,7 +145,10 @@ body.runtime-embedded main {
     var(--bg-surface);
 }
 body.runtime-embedded #standalone-bottom-dock,
-body.runtime-embedded #standalone-right-rail,
+body.runtime-embedded #standalone-right-rail {
+  display: flex;
+  flex-direction: column;
+}
 body.runtime-embedded #standalone-bottom-resize-handle,
 body.runtime-embedded #standalone-rail-resize-handle,
 body.runtime-embedded #standalone-float-layer {
