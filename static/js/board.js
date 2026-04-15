@@ -175,9 +175,13 @@ function _boardPanelWidth(panel) {
   return 0;
 }
 
-function _boardWideLayoutActive(panel) {
-  if (_boardShowSchedules || !_boardIsEmbeddedRuntime()) return false;
+function _boardWideShellActive(panel) {
+  if (!_boardIsEmbeddedRuntime()) return false;
   return _boardPanelWidth(panel || document.getElementById('panel-board')) >= _boardWideModeMinWidth;
+}
+
+function _boardWideLayoutActive(panel) {
+  return !_boardShowSchedules && _boardWideShellActive(panel);
 }
 
 function _boardPanelVisible() {
@@ -984,6 +988,7 @@ function renderBoard() {
     _boardSelectedLane = _boardPreFilterLane;
     _boardPreFilterLane = '';
   }
+  var wideShell = _boardWideShellActive(panel);
   var wideLayout = _boardWideLayoutActive(panel);
 
   // Search & filter toolbar
@@ -1000,14 +1005,17 @@ function renderBoard() {
   var hasSavedViews = savedViews.length > 0;
   var hasQuickViews = _boardGroupTaskCount() > 0 || _boardQuickView !== '';
   var currentViewSavable = !_boardIsDefaultFilterState(_boardCurrentViewState());
+  var schedCount = _boardScheduleCount();
   var showToolbar = _boardGroupTaskCount() > 0
     || hasLabels || hasActions || hasAgents || hasHealth
     || _boardSearchQuery || _boardFilterLabels.length
     || _boardFilterActions.length || _boardFilterAgents.length
     || _boardFilterHealth.length
     || hasSavedViews || archivedCount || _boardShowArchived;
+  var showDisplayRow = hasQuickViews || hasSavedViews || currentViewSavable || _boardSavingView
+    || !_boardShowSchedules || wideShell;
 
-    if (showToolbar) {
+  if (showToolbar) {
     html += '<div class="board-search-bar">';
     html += '<input type="text" class="board-search-input" id="board-search-input"'
       + ' placeholder="Search tasks..." value="' + esc(_boardSearchQuery) + '"'
@@ -1052,55 +1060,69 @@ function renderBoard() {
       html += '<button class="board-filter-clear" onclick="boardClearFilters()">Clear</button>';
     }
     html += '</div>';
+  }
 
-    if (hasQuickViews || hasSavedViews || currentViewSavable || _boardSavingView || !_boardShowSchedules) {
-      html += '<div class="board-saved-views">';
-      if (hasQuickViews) {
-        html += '<button class="board-filter-btn'
-          + (_boardQuickView === 'recent' ? ' active' : '')
-          + '" onclick="boardApplyQuickView(\'recent\')">Recent</button>';
-        html += '<button class="board-filter-btn'
-          + (_boardQuickView === 'touched' ? ' active' : '')
-          + '" onclick="boardApplyQuickView(\'touched\')">Recently Touched</button>';
-      }
-      if (currentViewSavable || hasSavedViews || _boardSavingView) {
-        html += '<span class="board-saved-views-label">Saved</span>';
-        if (_boardSavingView) {
-          html += '<div class="board-save-view-form">';
-          html += '<input type="text" class="board-save-view-input" id="board-save-view-input"'
-            + ' placeholder="View name" value="' + esc(_boardSavingViewName) + '"'
-            + ' oninput="boardUpdateSaveViewName(this.value)"'
-            + ' onkeydown="boardSaveViewKeydown(event)">';
-          html += '<button class="board-filter-btn active" onclick="boardSubmitSaveView()">Save</button>';
-          html += '<button class="board-filter-btn" onclick="boardCancelSaveView()">Cancel</button>';
-          html += '</div>';
-        } else if (currentViewSavable) {
-          html += '<button class="board-filter-btn" onclick="boardStartSaveView()">Save View</button>';
-        }
-      }
-      for (var vi = 0; vi < savedViews.length; vi++) {
-        var view = savedViews[vi];
-        var viewName = esc(view.name).replace(/'/g, "\\'");
-        html += '<div class="board-saved-view">';
-        html += '<button class="board-filter-btn'
-          + (_boardViewMatchesCurrent(view) ? ' active' : '')
-          + '" onclick="boardApplySavedView(\'' + viewName + '\')">'
-          + esc(view.name) + '</button>';
-        html += '<button class="board-saved-view-delete"'
-          + ' onclick="event.stopPropagation();boardDeleteSavedView(\'' + viewName + '\')">&times;</button>';
+  if (showDisplayRow) {
+    var showViewMenuButton = !!(_boardSelectedLane && (!_boardShowSchedules || wideShell));
+    html += '<div class="board-saved-views">';
+    if (hasQuickViews) {
+      html += '<button class="board-filter-btn'
+        + (_boardQuickView === 'recent' ? ' active' : '')
+        + '" onclick="boardApplyQuickView(\'recent\')">Recent</button>';
+      html += '<button class="board-filter-btn'
+        + (_boardQuickView === 'touched' ? ' active' : '')
+        + '" onclick="boardApplyQuickView(\'touched\')">Recently Touched</button>';
+    }
+    if (currentViewSavable || hasSavedViews || _boardSavingView) {
+      html += '<span class="board-saved-views-label">Saved</span>';
+      if (_boardSavingView) {
+        html += '<div class="board-save-view-form">';
+        html += '<input type="text" class="board-save-view-input" id="board-save-view-input"'
+          + ' placeholder="View name" value="' + esc(_boardSavingViewName) + '"'
+          + ' oninput="boardUpdateSaveViewName(this.value)"'
+          + ' onkeydown="boardSaveViewKeydown(event)">';
+        html += '<button class="board-filter-btn active" onclick="boardSubmitSaveView()">Save</button>';
+        html += '<button class="board-filter-btn" onclick="boardCancelSaveView()">Cancel</button>';
         html += '</div>';
+      } else if (currentViewSavable) {
+        html += '<button class="board-filter-btn" onclick="boardStartSaveView()">Save View</button>';
       }
-      if (!_boardShowSchedules && _boardSelectedLane) {
-        html += '<div class="board-saved-views-spacer"></div>';
-        html += '<div class="board-filter-btn-wrap" id="board-view-menu-wrap">';
-        html += '<button class="board-filter-btn' + (_boardViewMenuOpen ? ' active' : '') + '"'
-          + ' onclick="boardToggleViewMenu()">View &#9662;</button>';
-        html += '</div>';
-      }
+    }
+    for (var vi = 0; vi < savedViews.length; vi++) {
+      var view = savedViews[vi];
+      var viewName = esc(view.name).replace(/'/g, "\\'");
+      html += '<div class="board-saved-view">';
+      html += '<button class="board-filter-btn'
+        + (_boardViewMatchesCurrent(view) ? ' active' : '')
+        + '" onclick="boardApplySavedView(\'' + viewName + '\')">'
+        + esc(view.name) + '</button>';
+      html += '<button class="board-saved-view-delete"'
+        + ' onclick="event.stopPropagation();boardDeleteSavedView(\'' + viewName + '\')">&times;</button>';
       html += '</div>';
     }
+    if (showViewMenuButton || wideShell) {
+      html += '<div class="board-saved-views-spacer"></div>';
+    }
+    if (showViewMenuButton) {
+      html += '<div class="board-filter-btn-wrap" id="board-view-menu-wrap">';
+      html += '<button class="board-filter-btn' + (_boardViewMenuOpen ? ' active' : '') + '"'
+        + ' onclick="boardToggleViewMenu()">View &#9662;</button>';
+      html += '</div>';
+    }
+    if (wideShell) {
+      html += '<div class="board-filter-btn-wrap" id="board-schedules-toggle-wrap">';
+      html += '<button class="board-filter-btn' + (_boardShowSchedules ? ' active' : '') + '"'
+        + ' onclick="boardToggleSchedules()">'
+        + 'Schedules'
+        + (schedCount ? ' <span class="board-filter-btn-count">' + schedCount + '</span>' : '')
+        + '</button>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
 
-    // Active filter chips
+  // Active filter chips
+  if (showToolbar) {
     if (_boardFilterLabels.length || _boardFilterActions.length || _boardFilterAgents.length || _boardFilterHealth.length) {
       html += '<div class="board-filter-active">';
       for (var fi = 0; fi < _boardFilterLabels.length; fi++) {
@@ -1147,15 +1169,13 @@ function renderBoard() {
 
   _boardActivateViewState(_boardCurrentViewKey());
 
-  // Lane tab bar. In wide layout, every lane is rendered as a column, so the
-  // per-lane tabs and their scroll arrows are redundant — only keep the
-  // Schedules toggle so that view stays reachable.
-  html += '<div class="board-lane-bar' + (wideLayout ? ' board-lane-bar-wide' : '') + '">';
-  if (!wideLayout) {
+  // Lane tab bar is only needed for narrow layouts. Wide standalone boards
+  // expose the schedules toggle beside the View menu and render lanes as
+  // headers inside each column instead.
+  if (!wideShell) {
+    html += '<div class="board-lane-bar">';
     html += '<button class="board-lane-scroll-btn" id="board-scroll-left" onclick="boardScrollLanes(-1)" title="Scroll left">&#9664;</button>';
-  }
-  html += '<div class="board-lane-tabs" id="board-lane-tabs">';
-  if (!wideLayout) {
+    html += '<div class="board-lane-tabs" id="board-lane-tabs">';
     for (var i = 0; i < lanes.length; i++) {
       var l = lanes[i];
       var cnt = _boardLaneCount(l);
@@ -1171,20 +1191,16 @@ function renderBoard() {
         + esc(l) + '<span class="lane-count">' + cnt + '</span>'
         + '</button>';
     }
-  }
-  // Schedules tab (after lane tabs)
-  var schedCount = _boardScheduleCount();
-  html += '<button class="board-lane-tab board-lane-tab-schedules'
-    + (_boardShowSchedules ? ' active' : '') + '"'
-    + ' onclick="boardToggleSchedules()">'
-    + 'Schedules' + (schedCount ? '<span class="lane-count">' + schedCount + '</span>' : '')
-    + '</button>';
-
-  html += '</div>';
-  if (!wideLayout) {
+    // Schedules tab (after lane tabs)
+    html += '<button class="board-lane-tab board-lane-tab-schedules'
+      + (_boardShowSchedules ? ' active' : '') + '"'
+      + ' onclick="boardToggleSchedules()">'
+      + 'Schedules' + (schedCount ? '<span class="lane-count">' + schedCount + '</span>' : '')
+      + '</button>';
+    html += '</div>';
     html += '<button class="board-lane-scroll-btn" id="board-scroll-right" onclick="boardScrollLanes(1)" title="Scroll right">&#9654;</button>';
+    html += '</div>';
   }
-  html += '</div>';
 
   // Schedules view (replaces cards when active)
   if (_boardShowSchedules) {
