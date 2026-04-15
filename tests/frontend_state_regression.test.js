@@ -1579,6 +1579,19 @@ test('wide standalone lane columns keep their direct children from shrinking', (
   );
 });
 
+test('wide standalone board lanes keep card contrast with a lighter panel and visible borders', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(
+    css,
+    /\.runtime-embedded #panel-board \.board-wide-lane-body\s*\{[^}]*background:\s*linear-gradient\([^;]*var\(--bg-hover\)[^;]*var\(--bg-surface\)[^;]*;/s,
+  );
+  assert.match(
+    css,
+    /\.runtime-embedded #panel-board \.board-wide-lane-body \.board-card\s*\{[^}]*border-color:\s*color-mix\(/,
+  );
+});
+
 test('board keeps scroll state when changing the selected lane in wide embedded mode', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');

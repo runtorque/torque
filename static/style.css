@@ -2351,12 +2351,21 @@ body.runtime-embedded #panel-board .board-wide-lane {
   min-height: 0;
   overflow-y: auto;
   padding: 8px;
-  background: color-mix(in srgb, var(--bg-cell) 88%, var(--bg) 12%);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.022), transparent 140px),
+    color-mix(in srgb, var(--bg-hover) 72%, var(--bg-surface) 28%);
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) + 2px);
 }
 .runtime-embedded #panel-board .board-wide-lane-body > * {
   flex-shrink: 0;
+}
+.runtime-embedded #panel-board .board-wide-lane-body .board-card {
+  border-color: color-mix(in srgb, var(--border) 92%, rgba(255,255,255,.08));
+}
+.runtime-embedded #panel-board .board-wide-lane-body .board-card:hover,
+.runtime-embedded #panel-board .board-wide-lane-body .board-card.board-card-hovered {
+  border-color: color-mix(in srgb, var(--text-dim) 28%, var(--border) 72%);
 }
 body.runtime-embedded #panel-board .board-wide-lane-body {
   gap: 6px;
@@ -2364,7 +2373,9 @@ body.runtime-embedded #panel-board .board-wide-lane-body {
 }
 .runtime-embedded #panel-board .board-wide-lane.active .board-wide-lane-body {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border) 60%);
-  background: color-mix(in srgb, var(--bg-cell) 90%, var(--accent) 10%);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.025), transparent 140px),
+    color-mix(in srgb, var(--bg-hover) 78%, var(--accent) 22%);
 }
 .runtime-embedded #panel-board .board-cards.board-wide-grid .board-load-more {
   margin-top: auto;
