@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 
 use super::{optional_str, required_str, CmdContext, CmdError, CmdResult};
 
-pub async fn list_templates(_ctx: &CmdContext, _req: &Value) -> CmdResult {
+pub async fn list_templates(_ctx: &CmdContext, req: &Value) -> CmdResult {
     let mut templates: Vec<Value> = Vec::new();
     let mut seen_names: std::collections::HashSet<String> =
         std::collections::HashSet::new();
@@ -48,7 +48,11 @@ pub async fn list_templates(_ctx: &CmdContext, _req: &Value) -> CmdResult {
             .unwrap_or("")
             .cmp(b["name"].as_str().unwrap_or(""))
     });
-    Ok(json!({ "templates": templates }))
+    Ok(json!({
+        "type": "templates",
+        "group": optional_str(req, "group").unwrap_or(""),
+        "templates": templates,
+    }))
 }
 
 pub async fn get_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
@@ -60,10 +64,11 @@ pub async fn get_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
     let parsed: Value = serde_yaml::from_str(&raw)
         .map_err(|e| CmdError::BadRequest(format!("yaml parse: {e}")))?;
     Ok(json!({
+        "type": "template_detail",
         "name": name,
         "scope": scope,
         "path": path.to_string_lossy(),
-        "config": parsed,
+        "template": parsed,
         "raw": raw,
     }))
 }
@@ -106,7 +111,15 @@ pub async fn save_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
     std::fs::write(&path, yaml_text)
         .map_err(|e| CmdError::BadRequest(format!("write: {e}")))?;
 
-    Ok(json!({ "ok": true, "name": name, "scope": scope, "path": path.to_string_lossy() }))
+    let group = optional_str(req, "group").unwrap_or("");
+    Ok(json!({
+        "type": "templates",
+        "group": group,
+        "templates": list_templates(_ctx, req).await?.get("templates").cloned().unwrap_or_else(|| json!([])),
+        "saved": name,
+        "scope": scope,
+        "path": path.to_string_lossy(),
+    }))
 }
 
 pub async fn delete_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
@@ -129,7 +142,13 @@ pub async fn delete_template(_ctx: &CmdContext, req: &Value) -> CmdResult {
     if !removed {
         return Err(CmdError::BadRequest(format!("template '{name}' not found")));
     }
-    Ok(json!({ "ok": true }))
+    let group = optional_str(req, "group").unwrap_or("");
+    Ok(json!({
+        "type": "templates",
+        "group": group,
+        "templates": list_templates(_ctx, req).await?.get("templates").cloned().unwrap_or_else(|| json!([])),
+        "deleted": name,
+    }))
 }
 
 /// Merge a template + overrides into a single config dict the UI + dispatch

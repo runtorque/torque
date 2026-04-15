@@ -580,6 +580,32 @@ impl LoomDb {
             if let Some(v) = panel {
                 state.panel_active = v;
             }
+            let board_panel_height: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM ui_state WHERE key = 'board_panel_height'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(v) = board_panel_height {
+                if let Ok(parsed) = v.parse::<i32>() {
+                    state.board_panel_height = parsed;
+                }
+            }
+            let standalone_panel_layout: Option<String> = conn
+                .query_row(
+                    "SELECT value FROM ui_state WHERE key = 'standalone_panel_layout'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?;
+            if let Some(v) = standalone_panel_layout {
+                if !v.is_empty() {
+                    if let Ok(layout) = serde_json::from_str::<serde_json::Value>(&v) {
+                        state.standalone_panel_layout = layout;
+                    }
+                }
+            }
 
             let layout: Option<String> = conn
                 .query_row(

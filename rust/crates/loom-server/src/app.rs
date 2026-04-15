@@ -2,11 +2,17 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use anyhow::Result;
+use axum::extract::Path;
+use axum::http::{header, StatusCode};
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::get;
 use axum::Router;
 use tokio::sync::{mpsc, Mutex};
+use tower_http::services::ServeDir;
 
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
@@ -95,6 +101,22 @@ pub struct ServerHandle {
     pub app_state: AppState,
 }
 
+pub fn base_router() -> Router<AppState> {
+    Router::new()
+        .route("/", get(handle_index))
+        .route("/attachments/{task_id}/{filename}", get(handle_attachment))
+        .nest_service("/static", ServeDir::new(frontend_static_dir()))
+        .merge(crate::ws::routes())
+        .merge(crate::commands::routes())
+        .merge(crate::events::routes())
+        .merge(crate::uploads::routes())
+        .merge(crate::mcp::routes())
+}
+
+pub fn build_router(app_state: AppState) -> Router {
+    base_router().with_state(app_state)
+}
+
 pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
     loom_core::config::ensure_data_dir()?;
 
@@ -128,13 +150,7 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
     // Spawn scheduler
     crate::scheduler::spawn(state.clone(), db.clone(), bus.clone());
 
-    let router = Router::new()
-        .merge(crate::ws::routes())
-        .merge(crate::commands::routes())
-        .merge(crate::events::routes())
-        .merge(crate::uploads::routes())
-        .merge(crate::mcp::routes())
-        .with_state(app_state.clone());
+    let router = build_router(app_state.clone());
 
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
     let addr = listener.local_addr()?;
@@ -154,6 +170,69 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
         shutdown_tx: tx,
         app_state,
     })
+}
+
+fn repo_root() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .ancestors()
+        .nth(3)
+        .map(PathBuf::from)
+        .unwrap_or(manifest_dir)
+}
+
+fn frontend_static_dir() -> PathBuf {
+    repo_root().join("static")
+}
+
+fn frontend_index_path() -> PathBuf {
+    repo_root().join("webview.html")
+}
+
+async fn handle_index() -> Result<Html<String>, (StatusCode, String)> {
+    let html = tokio::fs::read_to_string(frontend_index_path())
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Html(html))
+}
+
+async fn handle_attachment(
+    Path((task_id, filename)): Path<(String, String)>,
+) -> Result<Response, (StatusCode, String)> {
+    if invalid_attachment_path_segment(&task_id) || invalid_attachment_path_segment(&filename) {
+        return Err((StatusCode::BAD_REQUEST, "invalid attachment path".into()));
+    }
+    let path = loom_core::config::attachments_dir().join(&task_id).join(&filename);
+    let body = tokio::fs::read(&path)
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "attachment not found".into()))?;
+    let mime = guess_content_type(&filename);
+    Ok((
+        [
+            (header::CONTENT_TYPE, mime),
+            (header::CACHE_CONTROL, "max-age=3600"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+fn invalid_attachment_path_segment(value: &str) -> bool {
+    value.contains('/') || value.contains('\\') || value.contains("..")
+}
+
+fn guess_content_type(filename: &str) -> &'static str {
+    match filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "txt" | "log" | "md" => "text/plain; charset=utf-8",
+        "json" => "application/json",
+        "pdf" => "application/pdf",
+        _ => "application/octet-stream",
+    }
 }
 
 async fn handle_pty_event(

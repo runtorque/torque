@@ -479,21 +479,76 @@ pub async fn set_panel(ctx: &CmdContext, req: &Value) -> CmdResult {
     let panel = req
         .get("panel")
         .and_then(|v| v.as_str())
+        .or_else(|| req.get("active").and_then(|v| v.as_str()))
         .unwrap_or("")
         .to_string();
+    let height = req.get("height").and_then(|v| v.as_i64()).map(|v| v as i32);
+    let open = req.get("open").and_then(|v| v.as_bool());
+
+    let (changed, effective_panel, effective_height) = {
+        let mut changed = false;
+        let mut st = ctx.state.lock().await;
+        let mut effective_height = st.board_panel_height;
+        if let Some(next_height) = height {
+            if st.board_panel_height != next_height {
+                st.board_panel_height = next_height;
+                st.emit(loom_core::delta::DeltaOp::UiUpdate {
+                    key: "board_panel_height".into(),
+                    value: json!(next_height),
+                });
+                changed = true;
+            }
+            effective_height = st.board_panel_height;
+        }
+        let next_panel = if let Some(is_open) = open {
+            if is_open { "board".to_string() } else { String::new() }
+        } else {
+            panel.clone()
+        };
+        if st.panel_active != next_panel {
+            st.panel_active = next_panel.clone();
+            st.emit(loom_core::delta::DeltaOp::UiUpdate {
+                key: "panel_active".into(),
+                value: json!(next_panel),
+            });
+            changed = true;
+        }
+        let effective_panel = st.panel_active.clone();
+        (changed, effective_panel, effective_height)
+    };
+    if changed {
+        if height.is_some() {
+            ctx.db
+                .set_ui_state("board_panel_height", &effective_height.to_string())
+                .await?;
+        }
+        ctx.db.set_ui_state("panel_active", &effective_panel).await?;
+        flush(ctx).await;
+        Ok(json!({ "ok": true, "panel": effective_panel, "height": effective_height }))
+    } else {
+        ok()
+    }
+}
+
+/// Persist the legacy standalone panel layout object unchanged so the
+/// existing browser client can restore and sync its panel workspace.
+pub async fn set_standalone_panel_layout(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let layout = req.get("layout").cloned().unwrap_or_else(|| json!({}));
+    let encoded = serde_json::to_string(&layout)
+        .map_err(|e| CmdError::BadRequest(format!("encode: {e}")))?;
     {
         let mut st = ctx.state.lock().await;
-        if st.panel_active == panel {
-            return ok();
-        }
-        st.panel_active = panel.clone();
-        st.emit(loom_core::delta::DeltaOp::UiUpdate(json!({
-            "panel_active": panel,
-        })));
+        st.standalone_panel_layout = layout.clone();
+        st.emit(loom_core::delta::DeltaOp::UiUpdate {
+            key: "standalone_panel_layout".into(),
+            value: layout,
+        });
     }
-    ctx.db.set_ui_state("panel_active", &panel).await?;
+    ctx.db
+        .set_ui_state("standalone_panel_layout", &encoded)
+        .await?;
     flush(ctx).await;
-    Ok(json!({ "ok": true, "panel": panel }))
+    ok()
 }
 
 /// Set per-group board filter state. Payload: `{ "group": "Eng", "filters": {...} }`.
@@ -542,11 +597,11 @@ pub async fn set_card_density(ctx: &CmdContext, req: &Value) -> CmdResult {
         let mut st = ctx.state.lock().await;
         st.board_card_density_by_group
             .insert(group.clone(), density.clone());
-        // Broadcast the whole map (matches the Python wire shape: a ui_update
-        // with the by-group dict).
         let map = st.board_card_density_by_group.clone();
-        let payload = json!({ "board_card_density_by_group": map });
-        st.emit(loom_core::delta::DeltaOp::UiUpdate(payload));
+        st.emit(loom_core::delta::DeltaOp::UiUpdate {
+            key: "board_card_density_by_group".into(),
+            value: json!(map),
+        });
         map
     };
 
@@ -579,9 +634,10 @@ async fn set_per_group_ui(
         let map = select(&mut st);
         map.insert(group.clone(), value.clone());
         let clone = map.clone();
-        st.emit(loom_core::delta::DeltaOp::UiUpdate(json!({
-            ui_state_key: clone,
-        })));
+        st.emit(loom_core::delta::DeltaOp::UiUpdate {
+            key: ui_state_key.to_string(),
+            value: json!(clone),
+        });
         st_map_clone(&st, ui_state_key)
     };
 

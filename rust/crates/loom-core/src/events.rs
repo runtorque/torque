@@ -74,7 +74,13 @@ pub async fn flush_deltas(state: Arc<Mutex<MatrixState>>, bus: &EventBus) -> Opt
 
 /// Build a full snapshot message for a new subscriber or a resync.
 pub fn snapshot_message(_state: &MatrixState, seq: u64, value: serde_json::Value) -> DeltaMessage {
-    DeltaMessage::new(seq, vec![DeltaOp::UiUpdate(value)])
+    DeltaMessage::new(
+        seq,
+        vec![DeltaOp::UiUpdate {
+            key: "snapshot".into(),
+            value,
+        }],
+    )
 }
 
 #[cfg(test)]
