@@ -89,6 +89,81 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cell.last_summary, "All done")
         self.assertEqual(saved, [("agent-1", "idle")])
 
+    async def test_session_end_ignores_trailing_passive_activity_change(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="claude-code",
+            status="running",
+            activity="tool_call",
+            activity_detail="Using subagent",
+        )
+        state.agents[cell.id] = cell
+
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=time.time(),
+                event_type="session_end",
+                data={"summary": "Done"},
+            )
+        )
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=time.time(),
+                event_type="activity_change",
+                data={"activity": "thinking", "detail": ""},
+            )
+        )
+
+        self.assertEqual(cell.status, "idle")
+        self.assertEqual(cell.activity, "")
+        self.assertEqual(cell.activity_detail, "")
+        self.assertEqual(cell.last_event_text, "Session ended")
+
+    async def test_session_end_ignores_trailing_tool_end(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="claude-code",
+            status="running",
+            activity="tool_call",
+            activity_detail="Running tests",
+        )
+        state.agents[cell.id] = cell
+
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=time.time(),
+                event_type="session_end",
+                data={"summary": "Done"},
+            )
+        )
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=time.time(),
+                event_type="tool_end",
+                data={"tool": "Bash", "success": True},
+            )
+        )
+
+        self.assertEqual(cell.status, "idle")
+        self.assertEqual(cell.activity, "")
+        self.assertEqual(cell.activity_detail, "")
+
     async def test_activity_change_clears_blocked_label_on_current_task(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(

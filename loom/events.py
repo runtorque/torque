@@ -215,8 +215,20 @@ class EventBus:
                 cell.last_summary = summary
 
         elif et == "activity_change":
-            cell.activity = d.get("activity", "")
-            cell.activity_detail = d.get("detail", "")
+            next_activity = d.get("activity", "")
+            next_detail = d.get("detail", "")
+            # Claude Code can emit trailing "thinking" activity changes
+            # (for example from SubagentStop) after a turn has already
+            # ended. Do not revive an idle agent on that passive tail event.
+            if (
+                cell.status != "running"
+                and not cell.activity
+                and next_activity in ("", "thinking")
+                and not next_detail
+            ):
+                return
+            cell.activity = next_activity
+            cell.activity_detail = next_detail
             cell.error_message = ""
             cell.needs_attention = False
             if cell.activity_detail:
@@ -240,14 +252,15 @@ class EventBus:
         elif et == "tool_end":
             # Don't overwrite state if the tool itself set needs_attention
             # (e.g. loom ai blocked/error runs inside this tool call)
-            if not cell.needs_attention:
+            if not cell.needs_attention and cell.status == "running":
                 cell.activity = "thinking"
                 cell.activity_detail = ""
 
         elif et == "message":
-            cell.activity = "thinking"
-            cell.activity_detail = ""
-            cell.needs_attention = False
+            if cell.status == "running" or cell.activity:
+                cell.activity = "thinking"
+                cell.activity_detail = ""
+                cell.needs_attention = False
 
         elif et == "error":
             cell.error_message = d.get("error", "Unknown error")
