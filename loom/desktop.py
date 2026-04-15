@@ -144,6 +144,33 @@ def load_pywebview(import_module=importlib.import_module):
         ) from exc
 
 
+def _cocoa_accepts_first_mouse(_self, _event):
+    return True
+
+
+def _patch_pywebview_cocoa_first_mouse(
+    import_module=importlib.import_module,
+) -> bool:
+    try:
+        cocoa = import_module("webview.platforms.cocoa")
+        browser_view = getattr(cocoa, "BrowserView", None)
+        webkit_host = getattr(browser_view, "WebKitHost", None)
+        if webkit_host is None:
+            return False
+        if getattr(webkit_host, "_loom_accepts_first_mouse_patched", False):
+            return True
+        webkit_host.acceptsFirstMouse_ = _cocoa_accepts_first_mouse
+        webkit_host._loom_accepts_first_mouse_patched = True
+        log.info("Enabled pywebview Cocoa first-mouse delivery")
+        return True
+    except Exception:
+        log.debug(
+            "Unable to patch pywebview Cocoa first-mouse delivery",
+            exc_info=True,
+        )
+        return False
+
+
 def _probe_runtime_payload(port: int,
                            *,
                            timeout: float = PROBE_TIMEOUT_SECS,
@@ -400,6 +427,7 @@ class DesktopLauncher:
 
     def run(self, webview_module=None) -> None:
         webview = webview_module or load_pywebview()
+        _patch_pywebview_cocoa_first_mouse()
         self.ensure_server()
         try:
             self.create_window(webview)
