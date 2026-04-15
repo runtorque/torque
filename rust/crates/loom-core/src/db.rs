@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS agents (
     idle_timeout INTEGER NOT NULL DEFAULT 5,
     tasks_dispatched INTEGER NOT NULL DEFAULT 0,
     created_by_weaver_id TEXT NOT NULL DEFAULT '',
-    data TEXT NOT NULL
+    data TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS groups (
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     board_default_lane TEXT NOT NULL DEFAULT '',
     board_default_action TEXT NOT NULL DEFAULT '',
     weaver_agent_id TEXT NOT NULL DEFAULT '',
-    data TEXT NOT NULL
+    data TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS global_settings (
@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS board_tasks (
     resume_after_boundary_task_id TEXT NOT NULL DEFAULT '',
     archived_at TEXT NOT NULL DEFAULT '',
     archived_from_lane TEXT NOT NULL DEFAULT '',
-    data TEXT NOT NULL
+    data TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS board_lanes (
@@ -217,7 +217,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     last_task_id TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT '',
-    data TEXT NOT NULL
+    data TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS auto_dispatch_queue (
@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     weaver_profile TEXT NOT NULL DEFAULT '',
     weaver_shell TEXT NOT NULL DEFAULT '',
     weaver_tab_color TEXT NOT NULL DEFAULT '',
-    data TEXT NOT NULL
+    data TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS weaver_worklog (
@@ -1576,6 +1576,221 @@ impl LoomDb {
         Ok(val)
     }
 
+    pub async fn load_panel_events(
+        &self,
+        limit: usize,
+        before_id: Option<i64>,
+    ) -> crate::Result<Vec<serde_json::Value>> {
+        let conn = self.inner.lock().await;
+        let limit = limit.min(200) as i64;
+        let mut rows = Vec::new();
+        if let Some(before_id) = before_id.filter(|id| *id > 0) {
+            let mut stmt = conn.prepare(
+                "SELECT id, timestamp, kind, cell_id, agent_name, group_name, message, task_id
+                 FROM panel_events
+                 WHERE id < ?1
+                 ORDER BY id DESC
+                 LIMIT ?2",
+            )?;
+            let iter = stmt.query_map(params![before_id, limit], |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "timestamp": r.get::<_, f64>(1)?,
+                    "kind": r.get::<_, String>(2)?,
+                    "cell_id": r.get::<_, String>(3)?,
+                    "agent_name": r.get::<_, String>(4)?,
+                    "group_name": r.get::<_, String>(5)?,
+                    "message": r.get::<_, String>(6)?,
+                    "task_id": r.get::<_, String>(7)?,
+                }))
+            })?;
+            for row in iter {
+                rows.push(row?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, timestamp, kind, cell_id, agent_name, group_name, message, task_id
+                 FROM panel_events
+                 ORDER BY id DESC
+                 LIMIT ?1",
+            )?;
+            let iter = stmt.query_map(params![limit], |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "timestamp": r.get::<_, f64>(1)?,
+                    "kind": r.get::<_, String>(2)?,
+                    "cell_id": r.get::<_, String>(3)?,
+                    "agent_name": r.get::<_, String>(4)?,
+                    "group_name": r.get::<_, String>(5)?,
+                    "message": r.get::<_, String>(6)?,
+                    "task_id": r.get::<_, String>(7)?,
+                }))
+            })?;
+            for row in iter {
+                rows.push(row?);
+            }
+        }
+        rows.reverse();
+        Ok(rows)
+    }
+
+    pub async fn load_agent_history(
+        &self,
+        status_filter: &str,
+        limit: usize,
+        offset: usize,
+    ) -> crate::Result<Vec<serde_json::Value>> {
+        let conn = self.inner.lock().await;
+        let limit = limit.min(200) as i64;
+        let offset = offset as i64;
+        let sql_base = "SELECT id, name, slug, \"group\", agent_type, template, \
+                               created_at, removed_at, worktree_branch, total_tokens_in, \
+                               total_tokens_out, total_tasks, status \
+                        FROM agent_history";
+        let order = " ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, created_at DESC LIMIT ?1 OFFSET ?2";
+        let mut out = Vec::new();
+        if status_filter.is_empty() {
+            let mut stmt = conn.prepare(&(sql_base.to_string() + order))?;
+            let rows = stmt.query_map(params![limit, offset], |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, String>(0)?,
+                    "name": r.get::<_, String>(1)?,
+                    "slug": r.get::<_, String>(2)?,
+                    "group": r.get::<_, String>(3)?,
+                    "agent_type": r.get::<_, String>(4)?,
+                    "template": r.get::<_, String>(5)?,
+                    "created_at": r.get::<_, f64>(6)?,
+                    "removed_at": r.get::<_, Option<f64>>(7)?,
+                    "worktree_branch": r.get::<_, String>(8)?,
+                    "total_tokens_in": r.get::<_, i64>(9)?,
+                    "total_tokens_out": r.get::<_, i64>(10)?,
+                    "total_tasks": r.get::<_, i64>(11)?,
+                    "status": r.get::<_, String>(12)?,
+                }))
+            })?;
+            for row in rows {
+                out.push(row?);
+            }
+        } else {
+            let sql = format!("{sql_base} WHERE status=?1{order}");
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params![status_filter, limit, offset], |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, String>(0)?,
+                    "name": r.get::<_, String>(1)?,
+                    "slug": r.get::<_, String>(2)?,
+                    "group": r.get::<_, String>(3)?,
+                    "agent_type": r.get::<_, String>(4)?,
+                    "template": r.get::<_, String>(5)?,
+                    "created_at": r.get::<_, f64>(6)?,
+                    "removed_at": r.get::<_, Option<f64>>(7)?,
+                    "worktree_branch": r.get::<_, String>(8)?,
+                    "total_tokens_in": r.get::<_, i64>(9)?,
+                    "total_tokens_out": r.get::<_, i64>(10)?,
+                    "total_tasks": r.get::<_, i64>(11)?,
+                    "status": r.get::<_, String>(12)?,
+                }))
+            })?;
+            for row in rows {
+                out.push(row?);
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn load_agent_history_detail(
+        &self,
+        agent_id: &str,
+    ) -> crate::Result<Option<serde_json::Value>> {
+        let conn = self.inner.lock().await;
+        let row = conn
+            .query_row(
+                "SELECT id, name, slug, \"group\", agent_type, template, created_at, removed_at,
+                        worktree_branch, total_tokens_in, total_tokens_out, total_tasks, status
+                 FROM agent_history
+                 WHERE id = ?1",
+                params![agent_id],
+                |r| {
+                    Ok(serde_json::json!({
+                        "id": r.get::<_, String>(0)?,
+                        "name": r.get::<_, String>(1)?,
+                        "slug": r.get::<_, String>(2)?,
+                        "group": r.get::<_, String>(3)?,
+                        "agent_type": r.get::<_, String>(4)?,
+                        "template": r.get::<_, String>(5)?,
+                        "created_at": r.get::<_, f64>(6)?,
+                        "removed_at": r.get::<_, Option<f64>>(7)?,
+                        "worktree_branch": r.get::<_, String>(8)?,
+                        "total_tokens_in": r.get::<_, i64>(9)?,
+                        "total_tokens_out": r.get::<_, i64>(10)?,
+                        "total_tasks": r.get::<_, i64>(11)?,
+                        "status": r.get::<_, String>(12)?,
+                    }))
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    pub async fn load_agent_tasks(
+        &self,
+        agent_id: &str,
+    ) -> crate::Result<Vec<serde_json::Value>> {
+        let conn = self.inner.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_id, task_id, task_title, started_at, completed_at, outcome
+             FROM agent_tasks
+             WHERE agent_id = ?1
+             ORDER BY started_at DESC",
+        )?;
+        let rows = stmt.query_map(params![agent_id], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, i64>(0)?,
+                "agent_id": r.get::<_, String>(1)?,
+                "task_id": r.get::<_, String>(2)?,
+                "task_title": r.get::<_, String>(3)?,
+                "started_at": r.get::<_, f64>(4)?,
+                "completed_at": r.get::<_, Option<f64>>(5)?,
+                "outcome": r.get::<_, String>(6)?,
+            }))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub async fn load_agent_messages(
+        &self,
+        agent_id: &str,
+        limit: usize,
+    ) -> crate::Result<Vec<serde_json::Value>> {
+        let conn = self.inner.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_id, task_id, timestamp, action, message
+             FROM agent_messages
+             WHERE agent_id = ?1
+             ORDER BY timestamp DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![agent_id, limit.min(200) as i64], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, i64>(0)?,
+                "agent_id": r.get::<_, String>(1)?,
+                "task_id": r.get::<_, String>(2)?,
+                "timestamp": r.get::<_, f64>(3)?,
+                "action": r.get::<_, String>(4)?,
+                "message": r.get::<_, String>(5)?,
+            }))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     // --- load all ----------------------------------------------------------
 
     pub async fn load_all(&self) -> crate::Result<MatrixState> {
@@ -1981,7 +2196,7 @@ impl LoomDb {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::AgentCell;
+    use crate::state::{AgentCell, Schedule};
 
     #[tokio::test]
     async fn open_creates_schema() {
@@ -2028,5 +2243,198 @@ mod tests {
         db.delete_agent("a1").await.unwrap();
         let state = db.load_all().await.unwrap();
         assert!(!state.agents.contains_key("a1"));
+    }
+
+    #[tokio::test]
+    async fn save_methods_populate_python_compat_columns() {
+        let db = LoomDb::in_memory().unwrap();
+        db.save_group("Eng", "eng", 2).await.unwrap();
+
+        let mut agent = AgentCell::new("a1", "Worker", "Eng");
+        agent.status = "running".into();
+        agent.worktree_path = "/tmp/eng".into();
+        agent.tasks_dispatched = 4;
+        db.save_agent(&agent).await.unwrap();
+
+        let mut task = BoardTask::new_minimal("eng-1", "Ship it");
+        task.group = "Eng".into();
+        task.labels = vec!["rust".into()];
+        task.depends_on = vec!["eng-0".into()];
+        db.save_board_task(&task).await.unwrap();
+
+        let schedule = Schedule {
+            id: "sched-1".into(),
+            name: "Nightly".into(),
+            slug: String::new(),
+            task_template: "Nightly".into(),
+            description: String::new(),
+            group: "Eng".into(),
+            action_name: String::new(),
+            action_vars: serde_json::Map::new(),
+            agent_template: String::new(),
+            labels: vec!["nightly".into()],
+            cron_expr: "0 0 * * *".into(),
+            scheduled_at: String::new(),
+            timezone: "UTC".into(),
+            enabled: true,
+            last_run_at: String::new(),
+            next_run_at: String::new(),
+            run_count: 0,
+            last_task_id: String::new(),
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        db.save_schedule(&schedule).await.unwrap();
+
+        let mut gs = GlobalSettings::default();
+        gs.default_command = "codex".into();
+        db.save_global_settings(&gs).await.unwrap();
+
+        let conn = db.inner.lock().await;
+        let (position, ordinal): (i64, i64) = conn
+            .query_row(
+                "SELECT position, ordinal FROM groups WHERE name = 'Eng'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(position, 2);
+        assert_eq!(ordinal, 2);
+
+        let (status, worktree_path, tasks_dispatched): (String, String, i64) = conn
+            .query_row(
+                "SELECT status, worktree_path, tasks_dispatched FROM agents WHERE id = 'a1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "running");
+        assert_eq!(worktree_path, "/tmp/eng");
+        assert_eq!(tasks_dispatched, 4);
+
+        let (title, labels, depends_on): (String, String, String) = conn
+            .query_row(
+                "SELECT task, labels, depends_on FROM board_tasks WHERE id = 'eng-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "Ship it");
+        assert_eq!(labels, "[\"rust\"]");
+        assert_eq!(depends_on, "[\"eng-0\"]");
+
+        let (name, enabled): (String, i64) = conn
+            .query_row(
+                "SELECT name, enabled FROM schedules WHERE id = 'sched-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(name, "Nightly");
+        assert_eq!(enabled, 1);
+
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM global_settings", [], |r| r.get(0))
+            .unwrap();
+        assert!(rows >= 8);
+    }
+
+    #[tokio::test]
+    async fn load_all_accepts_python_style_rows_without_blob_data() {
+        let db = LoomDb::in_memory().unwrap();
+        {
+            let conn = db.inner.lock().await;
+            conn.execute(
+                "INSERT INTO groups(name, slug, position) VALUES ('Eng', 'eng', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO group_members(group_name, agent_id, position) VALUES ('Eng', 'a1', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO agents(
+                    id, name, slug, group_name, terminal_backend, status, session_resume
+                 ) VALUES ('a1', 'Worker', 'eng-worker', 'Eng', 'iterm2', 'running', 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO group_settings(
+                    group_name, env_vars, board_default_labels, dispatch_lane
+                 ) VALUES ('Eng', '{\"RUST_LOG\":\"debug\"}', '[\"backend\"]', 'In Progress')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO global_settings(key, value) VALUES
+                    ('default_command', '\"codex\"'),
+                    ('filter_by_window', 'false')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO board_tasks(
+                    id, task, group_name, lane, labels, action_vars, messages, depends_on,
+                    verification_summary, worktree_boundary
+                 ) VALUES (
+                    'eng-1', 'Ship it', 'Eng', 'Backlog', '[\"rust\"]', '{}', '[]', '[\"eng-0\"]', '{}', '{}'
+                 )",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO schedules(
+                    id, name, group_name, labels, action_vars, enabled
+                 ) VALUES ('sched-1', 'Nightly', 'Eng', '[\"nightly\"]', '{}', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO task_id_aliases(legacy_id, task_id) VALUES ('1', 'eng-1')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO task_id_counters(group_prefix, next_root_number) VALUES ('eng', 7)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO pipeline_task_counters(root_task_id, next_child_number)
+                 VALUES ('eng-1', 3)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO auto_dispatch_queue(
+                    group_name, position, task_id, agent_group, max_concurrent,
+                    target_agent_id, weaver_owner_id, enqueued_at
+                 ) VALUES ('Eng', 0, 'eng-1', 'Eng', 2, 'a1', 'weaver-1', '2026-04-15T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let state = db.load_all().await.unwrap();
+        assert_eq!(state.groups_order, vec!["Eng".to_string()]);
+        assert_eq!(state.agents["a1"].status, "running");
+        assert_eq!(
+            state.group_settings["Eng"].env_vars.get("RUST_LOG").map(String::as_str),
+            Some("debug")
+        );
+        assert_eq!(state.global_settings.default_command, "codex");
+        assert!(!state.global_settings.filter_by_window);
+        assert_eq!(state.board_tasks["eng-1"].task, "Ship it");
+        assert_eq!(state.board_tasks["eng-1"].labels, vec!["rust".to_string()]);
+        assert_eq!(state.board_tasks["eng-1"].depends_on, vec!["eng-0".to_string()]);
+        assert!(!state.schedules["sched-1"].enabled);
+        assert_eq!(state.task_id_aliases["1"], "eng-1");
+        assert_eq!(state.task_id_counters["eng"], 7);
+        assert_eq!(state.pipeline_task_counters["eng-1"], 3);
+        assert_eq!(state.auto_dispatch_queues["Eng"][0].task_id, "eng-1");
+        assert_eq!(state.auto_dispatch_queues["Eng"][0].max_concurrent, 2);
     }
 }

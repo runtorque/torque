@@ -25,6 +25,7 @@ use crate::app::{AppState, UiAgentRegistry};
 pub mod actions;
 pub mod agents;
 pub mod board;
+pub mod compat;
 pub mod dispatch;
 pub mod groups;
 pub mod memory;
@@ -128,6 +129,9 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "get_config" => settings::get_config(ctx, req).await,
         "get_global_settings" => settings::get_global_settings(ctx).await,
         "get_group_settings" => settings::get_group_settings(ctx, req).await,
+        "get_events" => compat::get_events(ctx, req).await,
+        "get_agent_history" => compat::get_agent_history(ctx, req).await,
+        "get_agent_history_detail" => compat::get_agent_history_detail(ctx, req).await,
 
         // groups
         "add_group" => groups::add_group(ctx, req).await,
@@ -174,6 +178,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "board_reorder_task" => board::reorder_task(ctx, req).await,
         "board_archive_task" => board::archive_task(ctx, req).await,
         "board_unarchive_task" => board::unarchive_task(ctx, req).await,
+        "remove_attachment" => compat::remove_attachment(ctx, req).await,
         "board_add_lane" => board::add_lane(ctx, req).await,
         "board_rename_lane" => board::rename_lane(ctx, req).await,
         "board_remove_lane" => board::remove_lane(ctx, req).await,
