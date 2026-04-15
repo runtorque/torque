@@ -20,8 +20,7 @@ const LOOM_SKILL_PREFIX: &str = "loom-";
 const HOOK_TIMEOUT_SECONDS: u32 = 3;
 
 static LOOM_EVENT_URL_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"http://(?:localhost|127\.0\.0\.1):\d+/events")
-        .expect("valid loom hook regex")
+    Regex::new(r"http://(?:localhost|127\.0\.0\.1):\d+/events").expect("valid loom hook regex")
 });
 
 // Three slash-command skills mirrored from the Python adapter. Kept as static
@@ -391,7 +390,9 @@ impl ClaudeCodeAdapter {
         };
         while let Some(entry) = rd.next_entry().await? {
             let name = entry.file_name();
-            let Some(name_str) = name.to_str() else { continue };
+            let Some(name_str) = name.to_str() else {
+                continue;
+            };
             if !name_str.starts_with(LOOM_SKILL_PREFIX) {
                 continue;
             }
@@ -538,10 +539,7 @@ mod tests {
             .and_then(Value::as_array)
             .and_then(|a| a.first())
             .unwrap();
-        assert_eq!(
-            pre_entry.get("matcher").and_then(Value::as_str),
-            Some(".*")
-        );
+        assert_eq!(pre_entry.get("matcher").and_then(Value::as_str), Some(".*"));
         let pre_hook = pre_entry
             .get("hooks")
             .and_then(Value::as_array)
@@ -720,7 +718,11 @@ mod tests {
         let adapter = ClaudeCodeAdapter;
         adapter.install_skills(tmp.path()).await.unwrap();
         for name in ["loom-status", "loom-board", "loom-done"] {
-            let p = tmp.path().join(".claude/skills").join(name).join("SKILL.md");
+            let p = tmp
+                .path()
+                .join(".claude/skills")
+                .join(name)
+                .join("SKILL.md");
             let text = fs::read_to_string(&p).await.expect(name);
             assert!(text.starts_with("---\nname: "));
             assert!(text.contains(&format!("name: {name}")));
@@ -736,12 +738,18 @@ mod tests {
         // Seed a user skill that should survive.
         let user = tmp.path().join(".claude/skills/my-skill");
         fs::create_dir_all(&user).await.unwrap();
-        fs::write(user.join("SKILL.md"), "user-content").await.unwrap();
+        fs::write(user.join("SKILL.md"), "user-content")
+            .await
+            .unwrap();
 
         adapter.uninstall_skills(tmp.path()).await.unwrap();
 
         for name in ["loom-status", "loom-board", "loom-done"] {
-            let p = tmp.path().join(".claude/skills").join(name).join("SKILL.md");
+            let p = tmp
+                .path()
+                .join(".claude/skills")
+                .join(name)
+                .join("SKILL.md");
             assert!(!p.exists(), "{name} should be gone");
         }
         assert!(user.join("SKILL.md").exists());

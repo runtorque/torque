@@ -7,8 +7,9 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-static CANONICAL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(?P<group>[a-z0-9\-]+)-(?P<trunk>\d+)(?P<derived>[a-z0-9]*)$").unwrap());
+static CANONICAL_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^(?P<group>[a-z0-9\-]+)-(?P<trunk>\d+)(?P<derived>[a-z0-9]*)$").unwrap()
+});
 
 static DRAFT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-z0-9\-]+-draft-[0-9a-f]+$").unwrap());
 
@@ -23,8 +24,15 @@ pub fn parse_task_id(id: &str) -> Option<ParsedTaskId> {
     let caps = CANONICAL_RE.captures(id)?;
     let group = caps.name("group")?.as_str().to_string();
     let trunk = caps.name("trunk")?.as_str().parse().ok()?;
-    let derived_suffix = caps.name("derived").map(|m| m.as_str().to_string()).unwrap_or_default();
-    Some(ParsedTaskId { group, trunk, derived_suffix })
+    let derived_suffix = caps
+        .name("derived")
+        .map(|m| m.as_str().to_string())
+        .unwrap_or_default();
+    Some(ParsedTaskId {
+        group,
+        trunk,
+        derived_suffix,
+    })
 }
 
 pub fn is_canonical_task_id(id: &str) -> bool {

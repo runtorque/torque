@@ -50,11 +50,7 @@ pub async fn update_global_settings(ctx: &CmdContext, req: &Value) -> CmdResult 
 pub async fn get_group_settings(ctx: &CmdContext, req: &Value) -> CmdResult {
     let group = required_str(req, "group")?;
     let st = ctx.state.lock().await;
-    let settings = st
-        .group_settings
-        .get(group)
-        .cloned()
-        .unwrap_or_default();
+    let settings = st.group_settings.get(group).cloned().unwrap_or_default();
     Ok(serde_json::to_value(&settings)?)
 }
 

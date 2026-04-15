@@ -142,14 +142,20 @@ impl LoomDb {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(SCHEMA_SQL)?;
-        Ok(Self { inner: Arc::new(Mutex::new(conn)), path: Arc::new(path) })
+        Ok(Self {
+            inner: Arc::new(Mutex::new(conn)),
+            path: Arc::new(path),
+        })
     }
 
     /// Open an in-memory db — used by tests.
     pub fn in_memory() -> crate::Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA_SQL)?;
-        Ok(Self { inner: Arc::new(Mutex::new(conn)), path: Arc::new(PathBuf::from(":memory:")) })
+        Ok(Self {
+            inner: Arc::new(Mutex::new(conn)),
+            path: Arc::new(PathBuf::from(":memory:")),
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -164,7 +170,14 @@ impl LoomDb {
         conn.execute(
             "INSERT OR REPLACE INTO agents(id, slug, name, group_name, parent_id, data)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![agent.id, agent.slug, agent.name, agent.group, agent.parent_id, data],
+            params![
+                agent.id,
+                agent.slug,
+                agent.name,
+                agent.group,
+                agent.parent_id,
+                data
+            ],
         )?;
         Ok(())
     }
@@ -187,18 +200,23 @@ impl LoomDb {
     pub async fn delete_group(&self, name: &str) -> crate::Result<()> {
         let conn = self.inner.lock().await;
         conn.execute("DELETE FROM groups WHERE name = ?1", params![name])?;
-        conn.execute("DELETE FROM group_members WHERE group_name = ?1", params![name])?;
-        conn.execute("DELETE FROM group_settings WHERE group_name = ?1", params![name])?;
+        conn.execute(
+            "DELETE FROM group_members WHERE group_name = ?1",
+            params![name],
+        )?;
+        conn.execute(
+            "DELETE FROM group_settings WHERE group_name = ?1",
+            params![name],
+        )?;
         Ok(())
     }
 
-    pub async fn save_group_members(
-        &self,
-        group: &str,
-        members: &[String],
-    ) -> crate::Result<()> {
+    pub async fn save_group_members(&self, group: &str, members: &[String]) -> crate::Result<()> {
         let conn = self.inner.lock().await;
-        conn.execute("DELETE FROM group_members WHERE group_name = ?1", params![group])?;
+        conn.execute(
+            "DELETE FROM group_members WHERE group_name = ?1",
+            params![group],
+        )?;
         let mut stmt = conn.prepare(
             "INSERT INTO group_members(group_name, agent_id, position) VALUES (?1, ?2, ?3)",
         )?;
@@ -350,7 +368,12 @@ impl LoomDb {
         conn.execute(
             "INSERT OR IGNORE INTO memory_links(entry_id, target_kind, target_ref, created_at)
              VALUES (?1, ?2, ?3, ?4)",
-            params![link.entry_id, link.target_kind, link.target_ref, link.created_at],
+            params![
+                link.entry_id,
+                link.target_kind,
+                link.target_ref,
+                link.created_at
+            ],
         )?;
         Ok(())
     }
@@ -394,9 +417,14 @@ impl LoomDb {
         // groups
         let mut groups: Vec<(String, String, i64)> = Vec::new();
         {
-            let mut stmt = conn.prepare("SELECT name, slug, ordinal FROM groups ORDER BY ordinal")?;
+            let mut stmt =
+                conn.prepare("SELECT name, slug, ordinal FROM groups ORDER BY ordinal")?;
             let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
             })?;
             for row in rows {
                 groups.push(row?);
@@ -413,7 +441,8 @@ impl LoomDb {
             let mut stmt = conn.prepare(
                 "SELECT group_name, agent_id FROM group_members ORDER BY group_name, position",
             )?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
             for row in rows {
                 let (group, aid) = row?;
                 state.groups.entry(group).or_default().push(aid);
@@ -466,7 +495,8 @@ impl LoomDb {
         // group settings
         {
             let mut stmt = conn.prepare("SELECT group_name, data FROM group_settings")?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
             for row in rows {
                 let (name, data) = row?;
                 if let Ok(s) = serde_json::from_str::<GroupSettings>(&data) {
@@ -537,7 +567,8 @@ impl LoomDb {
         // weaver settings
         {
             let mut stmt = conn.prepare("SELECT group_name, data FROM weaver_settings")?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
             for r in rows {
                 let (g, data) = r?;
                 if let Ok(s) = serde_json::from_str::<WeaverSettings>(&data) {
@@ -673,9 +704,7 @@ impl LoomDb {
                 .optional()?;
             if let Some(s) = edges {
                 if !s.is_empty() {
-                    if let Ok(e) =
-                        serde_json::from_str::<crate::state::DockEdges>(&s)
-                    {
+                    if let Ok(e) = serde_json::from_str::<crate::state::DockEdges>(&s) {
                         state.dock_edges = e;
                     }
                 }
@@ -695,8 +724,9 @@ impl LoomDb {
                     )
                     .optional()?;
                 if let Some(s) = row {
-                    if let Ok(map) =
-                        serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(&s)
+                    if let Ok(map) = serde_json::from_str::<
+                        std::collections::HashMap<String, serde_json::Value>,
+                    >(&s)
                     {
                         match target {
                             "filters" => state.board_filters_by_group = map,

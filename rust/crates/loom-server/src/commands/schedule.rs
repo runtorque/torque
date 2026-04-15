@@ -45,10 +45,7 @@ pub async fn create(ctx: &CmdContext, req: &Value) -> CmdResult {
         cron_expr: optstr(req, "cron_expr"),
         scheduled_at: optstr(req, "scheduled_at"),
         timezone: optstr(req, "timezone"),
-        enabled: req
-            .get("enabled")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true),
+        enabled: req.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
         last_run_at: String::new(),
         next_run_at: optstr(req, "next_run_at"),
         run_count: 0,

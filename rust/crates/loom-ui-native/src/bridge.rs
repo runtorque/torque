@@ -24,7 +24,10 @@ pub struct EngineBridge {
 
 impl EngineBridge {
     pub fn new(state: AppState) -> Self {
-        Self { state, runtime: tokio::runtime::Handle::current() }
+        Self {
+            state,
+            runtime: tokio::runtime::Handle::current(),
+        }
     }
 
     pub fn cmd_ctx(&self) -> CmdContext {
@@ -76,9 +79,9 @@ impl EngineBridge {
         if let Some(obj) = body.as_object_mut() {
             obj.insert("cmd".into(), Value::String(cmd.clone()));
         }
-        self.block_on(async move {
-            loom_server::commands::dispatch_command(&ctx, &cmd, &body).await
-        })
+        self.block_on(
+            async move { loom_server::commands::dispatch_command(&ctx, &cmd, &body).await },
+        )
     }
 
     /// Returns a clone of the full state (for the UI to snapshot).

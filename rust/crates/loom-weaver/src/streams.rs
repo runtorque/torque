@@ -4,7 +4,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
-use loom_core::state::{board_task_counts_as_done, AgentCell, BoardTask, MatrixState, ARCHIVED_LANE};
+use chrono::Utc;
+use loom_core::state::{
+    board_task_counts_as_done, AgentCell, BoardTask, MatrixState, ARCHIVED_LANE,
+};
 use serde_json::{json, Value};
 
 use crate::task_health::parse_iso;
@@ -161,7 +164,10 @@ pub fn compute_worktree_streams(
         tasks_by_id.insert(task.id.clone(), task.clone());
         if let Some((repo_root, branch)) = task_boundary_identity(task) {
             let key = branch_key(&repo_root, &branch);
-            seeds_by_stream.entry(key.clone()).or_default().insert(task.id.clone());
+            seeds_by_stream
+                .entry(key.clone())
+                .or_default()
+                .insert(task.id.clone());
             stream_key_by_task.insert(task.id.clone(), key);
         }
     }
@@ -170,7 +176,8 @@ pub fn compute_worktree_streams(
         if let Some((repo_root, branch)) = stream_identity_for_agent(agent) {
             let key = branch_key(&repo_root, &branch);
             let seeds = seeds_by_stream.entry(key.clone()).or_default();
-            if !agent.current_task_id.is_empty() && tasks_by_id.contains_key(&agent.current_task_id) {
+            if !agent.current_task_id.is_empty() && tasks_by_id.contains_key(&agent.current_task_id)
+            {
                 seeds.insert(agent.current_task_id.clone());
                 stream_key_by_task.insert(agent.current_task_id.clone(), key.clone());
             }
@@ -209,22 +216,38 @@ pub fn compute_worktree_streams(
         ) else {
             continue;
         };
-        if include_orphaned || stream.get("stream_presence").and_then(Value::as_str) != Some("orphaned") {
+        if include_orphaned
+            || stream.get("stream_presence").and_then(Value::as_str) != Some("orphaned")
+        {
             streams.push(stream);
         }
     }
 
     streams.sort_by(|a, b| {
-        let a_ts = a.get("last_activity_at").and_then(Value::as_str).and_then(parse_iso).unwrap_or(0.0);
-        let b_ts = b.get("last_activity_at").and_then(Value::as_str).and_then(parse_iso).unwrap_or(0.0);
+        let a_ts = a
+            .get("last_activity_at")
+            .and_then(Value::as_str)
+            .and_then(parse_iso)
+            .unwrap_or(0.0);
+        let b_ts = b
+            .get("last_activity_at")
+            .and_then(Value::as_str)
+            .and_then(parse_iso)
+            .unwrap_or(0.0);
         b_ts.partial_cmp(&a_ts)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.get("branch").and_then(Value::as_str).unwrap_or("").cmp(
-                b.get("branch").and_then(Value::as_str).unwrap_or(""),
-            ))
-            .then_with(|| a.get("stream_id").and_then(Value::as_str).unwrap_or("").cmp(
-                b.get("stream_id").and_then(Value::as_str).unwrap_or(""),
-            ))
+            .then_with(|| {
+                a.get("branch")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .cmp(b.get("branch").and_then(Value::as_str).unwrap_or(""))
+            })
+            .then_with(|| {
+                a.get("stream_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .cmp(b.get("stream_id").and_then(Value::as_str).unwrap_or(""))
+            })
     });
     streams
 }
@@ -250,7 +273,12 @@ fn compute_stream_for_identity(
     let boundary_tasks = sorted_tasks(
         stream_tasks
             .iter()
-            .filter(|task| task_boundary_identity(task).as_ref().map(|(r, b)| branch_key(r, b)) == Some(key.clone()))
+            .filter(|task| {
+                task_boundary_identity(task)
+                    .as_ref()
+                    .map(|(r, b)| branch_key(r, b))
+                    == Some(key.clone())
+            })
             .cloned()
             .collect(),
     );
@@ -318,7 +346,9 @@ fn compute_stream_for_identity(
             .collect(),
     );
 
-    let reference_boundary = latest_review_boundary.clone().or_else(|| latest_boundary.clone());
+    let reference_boundary = latest_review_boundary
+        .clone()
+        .or_else(|| latest_boundary.clone());
     let queued_followers = reference_boundary
         .as_ref()
         .map(|boundary| queued_successor_tasks(&stream_tasks, &boundary.id))
@@ -331,7 +361,9 @@ fn compute_stream_for_identity(
     let merged = is_merged_stream(&boundary_tasks, agents, repo_root, branch);
     let (validation_state, validation_record) = compute_validation_state(&stream_tasks);
     let pending_validation = validation_state == "pending_human_validation";
-    let merge_conflict = blocker_tasks.iter().any(|task| is_merge_conflict_task(task));
+    let merge_conflict = blocker_tasks
+        .iter()
+        .any(|task| is_merge_conflict_task(task));
     let partial_review_safe = latest_review_boundary.is_some() && started_followers.is_empty();
     let branch_advanced = latest_review_boundary.is_some() && !started_followers.is_empty();
 
@@ -361,7 +393,9 @@ fn compute_stream_for_identity(
         "reviewing"
     } else if pending_validation && code_state == "reviewed_clean" {
         "awaiting_human_validation"
-    } else if code_state == "reviewed_clean" && open_product_tasks.is_empty() && queued_tasks.is_empty()
+    } else if code_state == "reviewed_clean"
+        && open_product_tasks.is_empty()
+        && queued_tasks.is_empty()
     {
         "ready_to_merge"
     } else {
@@ -378,8 +412,23 @@ fn compute_stream_for_identity(
 
     let active_blocker_task = blocker_tasks.first().cloned();
     let active_review_task = review_tasks.first().cloned();
-    let foreground_task = select_foreground_task(state, repo_root, branch, &stream_tasks, &started_tasks, active_blocker_task.as_ref(), active_review_task.as_ref());
-    let owner_agent = select_owner_agent(state, agents, repo_root, branch, foreground_task.as_ref(), &stream_tasks);
+    let foreground_task = select_foreground_task(
+        state,
+        repo_root,
+        branch,
+        &stream_tasks,
+        &started_tasks,
+        active_blocker_task.as_ref(),
+        active_review_task.as_ref(),
+    );
+    let owner_agent = select_owner_agent(
+        state,
+        agents,
+        repo_root,
+        branch,
+        foreground_task.as_ref(),
+        &stream_tasks,
+    );
     let visibility_items = recent_visibility_items(&visibility_tasks, visibility_limit);
 
     let mut gate_reason = compute_gate_reason(
@@ -443,11 +492,20 @@ fn compute_stream_for_identity(
         &stream_tasks,
         &agents
             .iter()
-            .filter(|agent| stream_identity_for_agent(agent) == Some((repo_root.to_string(), branch.to_string())))
+            .filter(|agent| {
+                stream_identity_for_agent(agent)
+                    == Some((repo_root.to_string(), branch.to_string()))
+            })
             .cloned()
             .collect::<Vec<_>>(),
     );
-    let stream_presence = classify_stream_presence(repo_root, branch, &stream_tasks, &open_non_visibility, merged);
+    let stream_presence = classify_stream_presence(
+        repo_root,
+        branch,
+        &stream_tasks,
+        &open_non_visibility,
+        merged,
+    );
 
     Some(json!({
         "stream_id": stream_id(repo_root, branch),
@@ -597,7 +655,10 @@ fn classify_stream_presence(
     "orphaned"
 }
 
-fn classify_stream_task(task: &BoardTask, tasks_by_id: &HashMap<String, BoardTask>) -> &'static str {
+fn classify_stream_task(
+    task: &BoardTask,
+    tasks_by_id: &HashMap<String, BoardTask>,
+) -> &'static str {
     if is_visibility_task(task) {
         return "visibility";
     }
@@ -613,7 +674,12 @@ fn is_visibility_task(task: &BoardTask) -> bool {
         .iter()
         .map(|label| label.to_lowercase())
         .collect::<HashSet<_>>();
-    !labels.is_disjoint(&VISIBILITY_LABELS.iter().map(|label| (*label).to_string()).collect())
+    !labels.is_disjoint(
+        &VISIBILITY_LABELS
+            .iter()
+            .map(|label| (*label).to_string())
+            .collect(),
+    )
 }
 
 fn task_text(task: &BoardTask) -> String {
@@ -631,18 +697,31 @@ fn is_workflow_task(task: &BoardTask, tasks_by_id: &HashMap<String, BoardTask>) 
         .iter()
         .map(|label| label.to_lowercase())
         .collect::<HashSet<_>>();
-    if !labels.is_disjoint(&WORKFLOW_LABELS.iter().map(|label| (*label).to_string()).collect()) {
+    if !labels.is_disjoint(
+        &WORKFLOW_LABELS
+            .iter()
+            .map(|label| (*label).to_string())
+            .collect(),
+    ) {
         return true;
     }
     let action = task.action_name.to_lowercase();
     if PRODUCT_ACTIONS.contains(&action.as_str()) {
         return false;
     }
-    if NON_PRODUCT_ACTION_HINTS.iter().any(|hint| action.contains(hint)) {
+    if NON_PRODUCT_ACTION_HINTS
+        .iter()
+        .any(|hint| action.contains(hint))
+    {
         return true;
     }
     let text = task_text(task);
-    if REVIEW_HINTS.iter().chain(VALIDATION_HINTS).chain(MERGE_CONFLICT_HINTS).any(|hint| text.contains(hint)) {
+    if REVIEW_HINTS
+        .iter()
+        .chain(VALIDATION_HINTS)
+        .chain(MERGE_CONFLICT_HINTS)
+        .any(|hint| text.contains(hint))
+    {
         return true;
     }
     if !task.parent_task_id.is_empty() {
@@ -658,7 +737,10 @@ fn is_review_task(task: &BoardTask) -> bool {
         return false;
     }
     let action = task.action_name.to_lowercase();
-    action.contains("review") || REVIEW_HINTS.iter().any(|hint| task_text(task).contains(hint))
+    action.contains("review")
+        || REVIEW_HINTS
+            .iter()
+            .any(|hint| task_text(task).contains(hint))
 }
 
 fn is_validation_task(task: &BoardTask) -> bool {
@@ -668,7 +750,9 @@ fn is_validation_task(task: &BoardTask) -> bool {
     let action = task.action_name.to_lowercase();
     action.contains("validate")
         || action.contains("validation")
-        || VALIDATION_HINTS.iter().any(|hint| task_text(task).contains(hint))
+        || VALIDATION_HINTS
+            .iter()
+            .any(|hint| task_text(task).contains(hint))
 }
 
 fn is_merge_conflict_task(task: &BoardTask) -> bool {
@@ -732,7 +816,8 @@ fn select_foreground_task(
             continue;
         }
         if let Some(current) = state.agent_current_task(&agent.id) {
-            if stream_tasks.iter().any(|task| task.id == current.id) && !is_visibility_task(current) {
+            if stream_tasks.iter().any(|task| task.id == current.id) && !is_visibility_task(current)
+            {
                 return Some(current.clone());
             }
         }
@@ -750,20 +835,32 @@ fn select_owner_agent(
 ) -> Option<AgentCell> {
     if let Some(task) = foreground_task {
         if let Some(agent) = state.agents.get(&task.agent_id) {
-            if stream_identity_for_agent(agent) == Some((repo_root.to_string(), branch.to_string())) {
+            if stream_identity_for_agent(agent) == Some((repo_root.to_string(), branch.to_string()))
+            {
                 return Some(agent.clone());
             }
         }
     }
-    let stream_task_ids = stream_tasks.iter().map(|task| task.id.as_str()).collect::<HashSet<_>>();
+    let stream_task_ids = stream_tasks
+        .iter()
+        .map(|task| task.id.as_str())
+        .collect::<HashSet<_>>();
     let mut candidates = agents
         .iter()
-        .filter(|agent| stream_identity_for_agent(agent) == Some((repo_root.to_string(), branch.to_string())))
+        .filter(|agent| {
+            stream_identity_for_agent(agent) == Some((repo_root.to_string(), branch.to_string()))
+        })
         .cloned()
         .collect::<Vec<_>>();
     candidates.sort_by(|a, b| {
-        let a_current = state.agent_current_task(&a.id).map(|task| stream_task_ids.contains(task.id.as_str())).unwrap_or(false);
-        let b_current = state.agent_current_task(&b.id).map(|task| stream_task_ids.contains(task.id.as_str())).unwrap_or(false);
+        let a_current = state
+            .agent_current_task(&a.id)
+            .map(|task| stream_task_ids.contains(task.id.as_str()))
+            .unwrap_or(false);
+        let b_current = state
+            .agent_current_task(&b.id)
+            .map(|task| stream_task_ids.contains(task.id.as_str()))
+            .unwrap_or(false);
         b_current
             .cmp(&a_current)
             .then_with(|| (b.last_event_at as i64).cmp(&(a.last_event_at as i64)))
@@ -794,8 +891,12 @@ fn queue_state_counts(items: &[Value]) -> Value {
 
 fn queued_successor_tasks(tasks: &[BoardTask], boundary_task_id: &str) -> Vec<BoardTask> {
     sorted_tasks(
-        tasks.iter()
-            .filter(|task| task.resume_after_boundary_task_id == boundary_task_id && QUEUED_LANES.contains(&task.lane.as_str()))
+        tasks
+            .iter()
+            .filter(|task| {
+                task.resume_after_boundary_task_id == boundary_task_id
+                    && QUEUED_LANES.contains(&task.lane.as_str())
+            })
             .cloned()
             .collect(),
     )
@@ -803,8 +904,12 @@ fn queued_successor_tasks(tasks: &[BoardTask], boundary_task_id: &str) -> Vec<Bo
 
 fn started_successor_tasks(tasks: &[BoardTask], boundary_task_id: &str) -> Vec<BoardTask> {
     sorted_tasks(
-        tasks.iter()
-            .filter(|task| task.resume_after_boundary_task_id == boundary_task_id && !QUEUED_LANES.contains(&task.lane.as_str()))
+        tasks
+            .iter()
+            .filter(|task| {
+                task.resume_after_boundary_task_id == boundary_task_id
+                    && !QUEUED_LANES.contains(&task.lane.as_str())
+            })
             .cloned()
             .collect(),
     )
@@ -829,16 +934,29 @@ fn compute_validation_state(tasks: &[BoardTask]) -> (String, Option<Value>) {
             "verification_notes": task.verification_notes,
             "summary": summary,
         });
-        if latest.as_ref().map(|(latest_ts, _)| ts >= *latest_ts).unwrap_or(true) {
+        if latest
+            .as_ref()
+            .map(|(latest_ts, _)| ts >= *latest_ts)
+            .unwrap_or(true)
+        {
             latest = Some((ts, record));
         }
     }
     let Some((_ts, record)) = latest else {
         return ("none".into(), None);
     };
-    let state = record.get("verification_state").and_then(Value::as_str).unwrap_or("").trim();
+    let state = record
+        .get("verification_state")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
     let summary = record.get("summary").and_then(Value::as_object);
-    let notes = record.get("verification_notes").and_then(Value::as_str).unwrap_or("").trim().to_lowercase();
+    let notes = record
+        .get("verification_notes")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
     let pending_text = summary
         .and_then(|summary| summary.get("human_validation_pending"))
         .and_then(Value::as_str)
@@ -869,7 +987,9 @@ fn compute_validation_state(tasks: &[BoardTask]) -> (String, Option<Value>) {
     } else if state == "pending" || !pending_text.is_empty() {
         "pending_human_validation"
     } else if state == "attempted"
-        || summary.and_then(|summary| summary.get("tests_run")).is_some()
+        || summary
+            .and_then(|summary| summary.get("tests_run"))
+            .is_some()
         || summary
             .and_then(|summary| summary.get("deploy_attempted"))
             .and_then(Value::as_bool)
@@ -896,7 +1016,9 @@ fn compute_gate_reason(
         return String::new();
     }
     if merge_conflict {
-        return blocker_task.map(|task| task.task.clone()).unwrap_or_else(|| "Merge conflict must be resolved".into());
+        return blocker_task
+            .map(|task| task.task.clone())
+            .unwrap_or_else(|| "Merge conflict must be resolved".into());
     }
     if let Some(task) = blocker_task {
         return task.task.clone();
@@ -969,7 +1091,14 @@ fn compute_queue_gate(
         let blocking_task_id = validation_tasks
             .first()
             .map(|task| task.id.clone())
-            .or_else(|| validation_record.and_then(|record| record.get("task_id").and_then(Value::as_str).map(str::to_string)))
+            .or_else(|| {
+                validation_record.and_then(|record| {
+                    record
+                        .get("task_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+            })
             .unwrap_or_default();
         return json!({
             "gate_type": "human_validation",
@@ -1001,8 +1130,14 @@ fn compute_queue_items(
     review_task: Option<&BoardTask>,
     active_mutable_task: Option<&BoardTask>,
 ) -> Vec<Value> {
-    let gate_type = queue_gate.get("gate_type").and_then(Value::as_str).unwrap_or("");
-    let held_task_id = queue_gate.get("blocking_task_id").and_then(Value::as_str).unwrap_or("");
+    let gate_type = queue_gate
+        .get("gate_type")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let held_task_id = queue_gate
+        .get("blocking_task_id")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     queue_tasks
         .iter()
         .enumerate()
@@ -1036,7 +1171,10 @@ fn compute_queue_items(
         .collect()
 }
 
-fn nearest_review_ancestor_id(task: &BoardTask, tasks_by_id: &HashMap<String, BoardTask>) -> Option<String> {
+fn nearest_review_ancestor_id(
+    task: &BoardTask,
+    tasks_by_id: &HashMap<String, BoardTask>,
+) -> Option<String> {
     let mut current_id = task.id.clone();
     loop {
         let current = tasks_by_id.get(&current_id)?;
@@ -1094,7 +1232,12 @@ fn recent_visibility_items(tasks: &[BoardTask], limit: usize) -> Vec<Value> {
             let ts = message
                 .get("timestamp")
                 .and_then(Value::as_f64)
-                .or_else(|| message.get("timestamp").and_then(Value::as_str).and_then(parse_iso))
+                .or_else(|| {
+                    message
+                        .get("timestamp")
+                        .and_then(Value::as_str)
+                        .and_then(parse_iso)
+                })
                 .unwrap_or(0.0);
             let summary = summarize_visibility_message(
                 message.get("message").and_then(Value::as_str).unwrap_or(""),
@@ -1107,7 +1250,7 @@ fn recent_visibility_items(tasks: &[BoardTask], limit: usize) -> Vec<Value> {
                     "task_id": task.id,
                     "task_title": task.task,
                     "summary": summary,
-                    "timestamp": if ts > 0.0 { Value::String(Utc::now().timestamp_millis().to_string()) } else { Value::String(String::new()) },
+                    "timestamp": if ts > 0.0 { chrono::DateTime::<Utc>::from_timestamp(ts as i64, 0).map(|dt| Value::String(dt.to_rfc3339())).unwrap_or_else(|| Value::String(String::new())) } else { Value::String(String::new()) },
                 }),
             ));
         }
@@ -1127,7 +1270,11 @@ fn recent_visibility_items(tasks: &[BoardTask], limit: usize) -> Vec<Value> {
         items.extend(task_items);
     }
     items.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    items.into_iter().take(limit).map(|(_, item)| item).collect()
+    items
+        .into_iter()
+        .take(limit)
+        .map(|(_, item)| item)
+        .collect()
 }
 
 fn summarize_visibility_message(message: &str, limit: usize) -> String {
@@ -1144,7 +1291,12 @@ fn summarize_visibility_message(message: &str, limit: usize) -> String {
     }
 }
 
-fn is_merged_stream(boundary_tasks: &[BoardTask], agents: &[AgentCell], repo_root: &str, branch: &str) -> bool {
+fn is_merged_stream(
+    boundary_tasks: &[BoardTask],
+    agents: &[AgentCell],
+    repo_root: &str,
+    branch: &str,
+) -> bool {
     boundary_tasks
         .last()
         .and_then(boundary_status)
@@ -1181,7 +1333,11 @@ fn task_activity_ts(task: &BoardTask) -> Option<f64> {
     for msg in &task.messages {
         if let Some(ts) = msg.get("timestamp").and_then(Value::as_f64) {
             values.push(ts);
-        } else if let Some(ts) = msg.get("timestamp").and_then(Value::as_str).and_then(parse_iso) {
+        } else if let Some(ts) = msg
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(parse_iso)
+        {
             values.push(ts);
         }
     }
@@ -1189,8 +1345,15 @@ fn task_activity_ts(task: &BoardTask) -> Option<f64> {
 }
 
 fn latest_activity_iso(tasks: &[BoardTask], agents: &[AgentCell]) -> String {
-    let mut ts = tasks.iter().filter_map(task_activity_ts).collect::<Vec<_>>();
-    ts.extend(agents.iter().filter_map(|agent| (agent.last_event_at > 0.0).then_some(agent.last_event_at)));
+    let mut ts = tasks
+        .iter()
+        .filter_map(task_activity_ts)
+        .collect::<Vec<_>>();
+    ts.extend(
+        agents
+            .iter()
+            .filter_map(|agent| (agent.last_event_at > 0.0).then_some(agent.last_event_at)),
+    );
     ts.into_iter()
         .reduce(f64::max)
         .and_then(|ts| {
@@ -1228,7 +1391,11 @@ fn sorted_open_tasks(mut tasks: Vec<BoardTask>) -> Vec<BoardTask> {
 
 fn task_canonical_order(task: &BoardTask) -> (u64, u64, String) {
     if let Some(parsed) = loom_core::task_ids::parse_task_id(&task.id) {
-        (parsed.trunk, parsed.derived_suffix.len() as u64, task.id.clone())
+        (
+            parsed.trunk,
+            parsed.derived_suffix.len() as u64,
+            task.id.clone(),
+        )
     } else {
         (u64::MAX, u64::MAX, task.id.clone())
     }
@@ -1266,7 +1433,14 @@ fn branch_exists_locally(repo_root: &str, branch: &str) -> bool {
         return false;
     }
     Command::new("git")
-        .args(["-C", repo_root, "show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")])
+        .args([
+            "-C",
+            repo_root,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ])
         .status()
         .map(|status| status.success())
         .unwrap_or(false)

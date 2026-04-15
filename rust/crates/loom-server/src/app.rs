@@ -184,7 +184,11 @@ async fn handle_pty_event(
             cell.last_event_at = chrono::Utc::now().timestamp() as f64;
         }
         PtyEvent::Exited { status, .. } => {
-            cell.status = if status == 0 { "stopped".into() } else { "error".into() };
+            cell.status = if status == 0 {
+                "stopped".into()
+            } else {
+                "error".into()
+            };
             cell.session_id = None;
         }
         PtyEvent::Error { message, .. } => {

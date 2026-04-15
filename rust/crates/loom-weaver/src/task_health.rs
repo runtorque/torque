@@ -111,13 +111,19 @@ pub fn compute_task_health(
 
     let mut effective = HashMap::new();
     for task in active_tasks.values() {
-        compute_effective(task, &active_tasks, &children_by_id, &locals_by_id, &mut effective);
+        compute_effective(
+            task,
+            &active_tasks,
+            &children_by_id,
+            &locals_by_id,
+            &mut effective,
+        );
     }
     effective
 }
 
 fn roll_up_health(
-    task: &BoardTask,
+    _task: &BoardTask,
     local: TaskHealthSnapshot,
     child_snapshots: Vec<TaskHealthSnapshot>,
     tasks_by_id: &HashMap<String, &BoardTask>,
@@ -157,7 +163,11 @@ fn roll_up_health(
     details.insert("local_state".into(), Value::String(local.state.clone()));
     details.insert(
         "local_reasons".into(),
-        local.details.get("reasons").cloned().unwrap_or_else(|| Value::Array(Vec::new())),
+        local
+            .details
+            .get("reasons")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
     );
     TaskHealthSnapshot {
         state: worst.state,
@@ -176,7 +186,11 @@ fn compute_local_health(
         return healthy_snapshot(&task.id, task_last_activity_ts(task, agent));
     }
 
-    let labels = task.labels.iter().map(|label| label.as_str()).collect::<HashSet<_>>();
+    let labels = task
+        .labels
+        .iter()
+        .map(|label| label.as_str())
+        .collect::<HashSet<_>>();
     let mut reasons = Vec::new();
     if labels.contains("loom:human") || labels.contains("human") {
         reasons.push("awaiting_human");
@@ -201,7 +215,12 @@ fn compute_local_health(
     );
     details.insert(
         "reasons".into(),
-        Value::Array(reasons.iter().map(|reason| Value::String((*reason).to_string())).collect()),
+        Value::Array(
+            reasons
+                .iter()
+                .map(|reason| Value::String((*reason).to_string()))
+                .collect(),
+        ),
     );
     if let Some(cell) = agent {
         if cell.last_event_at > 0.0 {
@@ -222,7 +241,12 @@ fn compute_local_health(
     if !stale_reasons.is_empty() {
         details.insert(
             "reasons".into(),
-            Value::Array(stale_reasons.into_iter().map(|reason| Value::String(reason)).collect()),
+            Value::Array(
+                stale_reasons
+                    .into_iter()
+                    .map(|reason| Value::String(reason))
+                    .collect(),
+            ),
         );
         details.insert("agent_idle".into(), Value::Bool(true));
         return TaskHealthSnapshot {
@@ -324,7 +348,9 @@ fn stale_in_progress_reasons(
     if agent.cell_type != "agent" || agent.status != "running" || !agent.activity.is_empty() {
         return Vec::new();
     }
-    if task_has_open_child(task, tasks_by_id) || agent_has_other_open_work(&task.agent_id, &task.id, tasks_by_id) {
+    if task_has_open_child(task, tasks_by_id)
+        || agent_has_other_open_work(&task.agent_id, &task.id, tasks_by_id)
+    {
         return Vec::new();
     }
 
@@ -467,10 +493,7 @@ mod tests {
         dep.lane = "In Progress".into();
 
         let snapshots = compute_task_health(
-            &HashMap::from([
-                (parent.id.clone(), parent),
-                (dep.id.clone(), dep),
-            ]),
+            &HashMap::from([(parent.id.clone(), parent), (dep.id.clone(), dep)]),
             &HashMap::new(),
             Some(1_000_000.0),
         );

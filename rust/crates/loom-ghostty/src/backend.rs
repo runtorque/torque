@@ -23,7 +23,12 @@ impl GhosttyBackend {
     /// pump it into state + (in ffi mode) the libghostty renderer.
     pub fn new() -> (Self, mpsc::Receiver<PtyEvent>) {
         let (inner, rx) = LocalPtyBackend::new();
-        (Self { inner: Arc::new(inner) }, rx)
+        (
+            Self {
+                inner: Arc::new(inner),
+            },
+            rx,
+        )
     }
 
     pub async fn spawn(
@@ -42,7 +47,9 @@ impl GhosttyBackend {
             // path is used unconditionally.
             crate::ffi::register_cell_surface(cell_id)?;
         }
-        self.inner.spawn(cell_id, command, cwd, env, rows, cols).await
+        self.inner
+            .spawn(cell_id, command, cwd, env, rows, cols)
+            .await
     }
 
     pub async fn write(&self, cell_id: &str, data: &[u8]) -> Result<()> {

@@ -22,7 +22,10 @@ impl WorktreeManager {
     pub fn new(repo_root: impl Into<PathBuf>, base_dir: Option<PathBuf>) -> Self {
         let repo_root = repo_root.into();
         let base_dir = base_dir.unwrap_or_else(|| repo_root.join(".loom").join("worktrees"));
-        Self { repo_root, base_dir }
+        Self {
+            repo_root,
+            base_dir,
+        }
     }
 
     pub fn repo_root(&self) -> &Path {
@@ -54,7 +57,10 @@ impl WorktreeManager {
         }
         let out = cmd.output().await.context("git worktree add")?;
         if !out.status.success() {
-            bail!("git worktree add failed: {}", String::from_utf8_lossy(&out.stderr));
+            bail!(
+                "git worktree add failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         }
         Ok(WorktreeInfo {
             path,

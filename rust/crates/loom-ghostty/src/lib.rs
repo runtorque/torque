@@ -27,7 +27,5 @@ pub use surface::Surface;
 /// Re-export generated FFI enums used by callers building key events.
 #[cfg(feature = "ffi")]
 pub mod sys_types {
-    pub use super::ffi::sys::{
-        ghostty_input_action_e, ghostty_input_key_s, ghostty_input_mods_e,
-    };
+    pub use super::ffi::sys::{ghostty_input_action_e, ghostty_input_key_s, ghostty_input_mods_e};
 }

@@ -42,17 +42,15 @@ pub async fn is_merged(repo_path: &Path, branch: &str, base: &str) -> Result<boo
     if !base_tree.status.success() {
         return Ok(false);
     }
-    let base_tree_sha = String::from_utf8_lossy(&base_tree.stdout).trim().to_string();
+    let base_tree_sha = String::from_utf8_lossy(&base_tree.stdout)
+        .trim()
+        .to_string();
     Ok(first_line == base_tree_sha)
 }
 
 /// Fallback for squash merges: check whether the base branch advanced and
 /// the new commits touch every file the branch changed.
-pub async fn check_base_advanced(
-    _repo_path: &Path,
-    _branch: &str,
-    _base: &str,
-) -> Result<bool> {
+pub async fn check_base_advanced(_repo_path: &Path, _branch: &str, _base: &str) -> Result<bool> {
     // TODO: port full heuristic from `loom/worktree.py::check_base_advanced`.
     Ok(false)
 }

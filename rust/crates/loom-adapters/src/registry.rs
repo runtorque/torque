@@ -5,11 +5,17 @@ use std::sync::Arc;
 use once_cell::sync::Lazy;
 
 use super::base::AgentAdapter;
-use super::{claude_code::ClaudeCodeAdapter, codex::CodexAdapter, gemini::GeminiCliAdapter, generic::GenericAdapter};
+use super::{
+    claude_code::ClaudeCodeAdapter, codex::CodexAdapter, gemini::GeminiCliAdapter,
+    generic::GenericAdapter,
+};
 
 static PROVIDERS: Lazy<Vec<(&'static str, Arc<dyn AgentAdapter>)>> = Lazy::new(|| {
     vec![
-        ("claude-code", Arc::new(ClaudeCodeAdapter) as Arc<dyn AgentAdapter>),
+        (
+            "claude-code",
+            Arc::new(ClaudeCodeAdapter) as Arc<dyn AgentAdapter>,
+        ),
         ("codex", Arc::new(CodexAdapter)),
         ("gemini-cli", Arc::new(GeminiCliAdapter)),
         ("generic", Arc::new(GenericAdapter)),

@@ -910,7 +910,9 @@ pub struct MemoryLink {
 pub enum PanelKind {
     /// Selected-agent terminal — falls back to `selected_agent_id` if `id` is
     /// `None`. Use `id: Some(...)` to pin a specific agent's terminal to a pane.
-    Terminal { id: Option<String> },
+    Terminal {
+        id: Option<String>,
+    },
     /// The agent + terminal tree. Defaults to the Left dock zone. Movable
     /// like any other panel, per the dock system.
     Sidebar,
@@ -919,8 +921,12 @@ pub enum PanelKind {
     Memory,
     Events,
     Templates,
-    Context { agent_id: Option<String> },
-    Weaver { group: Option<String> },
+    Context {
+        agent_id: Option<String>,
+    },
+    Weaver {
+        group: Option<String>,
+    },
     /// Empty pane — shown as the placeholder hint text.
     Placeholder,
 }
@@ -952,7 +958,9 @@ pub enum LayoutNode {
 
 impl Default for LayoutNode {
     fn default() -> Self {
-        LayoutNode::Leaf { panel: PanelKind::default() }
+        LayoutNode::Leaf {
+            panel: PanelKind::default(),
+        }
     }
 }
 
@@ -1273,7 +1281,11 @@ impl MatrixState {
     pub fn emit_group(&mut self, name: &str) {
         let slug = self.group_slugs.get(name).cloned().unwrap_or_default();
         let agents = self.groups.get(name).cloned().unwrap_or_default();
-        self.delta_ops.push(DeltaOp::GroupUpdate { name: name.to_string(), slug, agents });
+        self.delta_ops.push(DeltaOp::GroupUpdate {
+            name: name.to_string(),
+            slug,
+            agents,
+        });
     }
 
     pub fn emit_task(&mut self, id: &str) {
@@ -1438,7 +1450,9 @@ impl MatrixState {
     }
 
     pub fn board_deps_met(&self, task: &BoardTask) -> bool {
-        task.depends_on.iter().all(|dep_id| board_task_counts_as_done(self.board_tasks.get(dep_id)))
+        task.depends_on
+            .iter()
+            .all(|dep_id| board_task_counts_as_done(self.board_tasks.get(dep_id)))
     }
 
     pub fn task_occupies_execution_slot(&self, task: Option<&BoardTask>, agent_id: &str) -> bool {
@@ -1486,7 +1500,11 @@ impl MatrixState {
             .values()
             .filter(|task| task.reply_agent_id == agent_id && !board_task_is_closed(Some(task)))
             .collect::<Vec<_>>();
-        tasks.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+        tasks.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
         tasks
     }
 
@@ -1500,14 +1518,26 @@ impl MatrixState {
     pub fn all_agent_slugs(&self) -> HashSet<String> {
         self.agents
             .values()
-            .filter_map(|a| if a.slug.is_empty() { None } else { Some(a.slug.clone()) })
+            .filter_map(|a| {
+                if a.slug.is_empty() {
+                    None
+                } else {
+                    Some(a.slug.clone())
+                }
+            })
             .collect()
     }
 
     pub fn all_task_slugs(&self) -> HashSet<String> {
         self.board_tasks
             .values()
-            .filter_map(|t| if t.slug.is_empty() { None } else { Some(t.slug.clone()) })
+            .filter_map(|t| {
+                if t.slug.is_empty() {
+                    None
+                } else {
+                    Some(t.slug.clone())
+                }
+            })
             .collect()
     }
 
@@ -1527,8 +1557,11 @@ impl MatrixState {
             }
             _ => {
                 // standalone terminal: prefix with group slug
-                let group_slug =
-                    self.group_slugs.get(group_name).cloned().unwrap_or_else(|| slugify(group_name));
+                let group_slug = self
+                    .group_slugs
+                    .get(group_name)
+                    .cloned()
+                    .unwrap_or_else(|| slugify(group_name));
                 unique_slug(&format!("{}:{}", group_slug, base), &existing)
             }
         }
@@ -1541,13 +1574,16 @@ impl MatrixState {
             return Err(crate::Error::validation("group name empty"));
         }
         if self.groups.contains_key(name) {
-            return Err(crate::Error::Conflict(format!("group '{name}' already exists")));
+            return Err(crate::Error::Conflict(format!(
+                "group '{name}' already exists"
+            )));
         }
         let slug = unique_slug(&slugify(name), &self.all_group_slugs());
         self.groups.insert(name.to_string(), Vec::new());
         self.groups_order.push(name.to_string());
         self.group_slugs.insert(name.to_string(), slug);
-        self.group_settings.insert(name.to_string(), GroupSettings::default());
+        self.group_settings
+            .insert(name.to_string(), GroupSettings::default());
         self.emit_group(name);
         Ok(())
     }
@@ -1566,7 +1602,9 @@ impl MatrixState {
             removed.extend(self.cascade_remove_agent(aid));
         }
 
-        self.emit(DeltaOp::GroupRemove { name: name.to_string() });
+        self.emit(DeltaOp::GroupRemove {
+            name: name.to_string(),
+        });
         for aid in &removed {
             self.emit(DeltaOp::AgentRemove { id: aid.clone() });
         }
@@ -1579,7 +1617,9 @@ impl MatrixState {
             return Ok(());
         }
         if self.groups.contains_key(new) {
-            return Err(crate::Error::Conflict(format!("group '{new}' already exists")));
+            return Err(crate::Error::Conflict(format!(
+                "group '{new}' already exists"
+            )));
         }
         let Some(members) = self.groups.remove(old) else {
             return Err(crate::Error::not_found(format!("group '{old}'")));
@@ -1602,7 +1642,10 @@ impl MatrixState {
                 agent.group = new.to_string();
             }
         }
-        self.emit(DeltaOp::GroupRename { from: old.into(), to: new.into() });
+        self.emit(DeltaOp::GroupRename {
+            from: old.into(),
+            to: new.into(),
+        });
         // reindex tasks
         if let Some(ids) = self.tasks_by_group.remove(old) {
             for tid in &ids {
@@ -1642,18 +1685,32 @@ impl MatrixState {
             return Err(crate::Error::not_found(format!("group '{}'", cell.group)));
         }
         if self.agents.contains_key(&cell.id) {
-            return Err(crate::Error::Conflict(format!("agent id '{}' already exists", cell.id)));
+            return Err(crate::Error::Conflict(format!(
+                "agent id '{}' already exists",
+                cell.id
+            )));
         }
         if cell.slug.is_empty() {
-            let pid = if cell.parent_id.is_empty() { None } else { Some(cell.parent_id.as_str()) };
+            let pid = if cell.parent_id.is_empty() {
+                None
+            } else {
+                Some(cell.parent_id.as_str())
+            };
             cell.slug = self.make_agent_slug(&cell.name, pid, &cell.group);
         }
         let group = cell.group.clone();
-        let parent = if cell.parent_id.is_empty() { None } else { Some(cell.parent_id.clone()) };
+        let parent = if cell.parent_id.is_empty() {
+            None
+        } else {
+            Some(cell.parent_id.clone())
+        };
 
         self.groups.get_mut(&group).unwrap().push(cell.id.clone());
         if let Some(pid) = &parent {
-            self.children.entry(pid.clone()).or_default().push(cell.id.clone());
+            self.children
+                .entry(pid.clone())
+                .or_default()
+                .push(cell.id.clone());
         }
         let id = cell.id.clone();
         self.agents.insert(id.clone(), cell);
@@ -1723,9 +1780,7 @@ impl MatrixState {
     /// otherwise a default Leaf(Terminal { id: None }) which the UI binds
     /// to `selected_agent_id`.
     pub fn effective_layout(&self) -> LayoutNode {
-        self.content_layout
-            .clone()
-            .unwrap_or_default()
+        self.content_layout.clone().unwrap_or_default()
     }
 
     /// Full dock layout — edges + center, with defaults filled in. Used by
@@ -1754,8 +1809,7 @@ impl MatrixState {
         if !self.dock_edges.set_edge(zone, layout) {
             return;
         }
-        let payload = serde_json::to_value(&self.dock_edges)
-            .unwrap_or(serde_json::Value::Null);
+        let payload = serde_json::to_value(&self.dock_edges).unwrap_or(serde_json::Value::Null);
         self.emit(DeltaOp::UiUpdate(serde_json::json!({
             "dock_edges": payload,
         })));
@@ -1768,8 +1822,7 @@ impl MatrixState {
             return;
         }
         self.dock_edges.ratios = clamped;
-        let payload = serde_json::to_value(&self.dock_edges)
-            .unwrap_or(serde_json::Value::Null);
+        let payload = serde_json::to_value(&self.dock_edges).unwrap_or(serde_json::Value::Null);
         self.emit(DeltaOp::UiUpdate(serde_json::json!({
             "dock_edges": payload,
         })));
@@ -1812,7 +1865,11 @@ impl MatrixState {
         let Some(agent) = self.agents.get(id) else {
             return Err(crate::Error::not_found(format!("agent '{id}'")));
         };
-        let parent_id = if agent.parent_id.is_empty() { None } else { Some(agent.parent_id.clone()) };
+        let parent_id = if agent.parent_id.is_empty() {
+            None
+        } else {
+            Some(agent.parent_id.clone())
+        };
         let group = agent.group.clone();
         let new_slug = self.make_agent_slug(new_name, parent_id.as_deref(), &group);
 
@@ -1923,7 +1980,9 @@ impl MatrixState {
         // reject rename of reserved lanes implicitly: reserved names must appear verbatim.
         for lane in RESERVED_LANES {
             if !final_lanes.iter().any(|l| l == *lane) && reserved.contains(lane) {
-                return Err(crate::Error::validation(format!("reserved lane '{lane}' must be present")));
+                return Err(crate::Error::validation(format!(
+                    "reserved lane '{lane}' must be present"
+                )));
             }
         }
         self.board_lanes = final_lanes.clone();
@@ -1957,7 +2016,10 @@ mod tests {
     fn add_group_emits_delta_and_generates_slug() {
         let mut s = MatrixState::new();
         s.add_group("Engineering").unwrap();
-        assert_eq!(s.group_slugs.get("Engineering").map(|s| s.as_str()), Some("engineering"));
+        assert_eq!(
+            s.group_slugs.get("Engineering").map(|s| s.as_str()),
+            Some("engineering")
+        );
         let (seq, ops) = s.drain_deltas().unwrap();
         assert_eq!(seq, 1);
         assert_eq!(ops.len(), 1);
@@ -1973,7 +2035,9 @@ mod tests {
     #[test]
     fn add_agent_requires_group() {
         let mut s = MatrixState::new();
-        let err = s.add_agent(AgentCell::new("a1", "Agent One", "missing")).unwrap_err();
+        let err = s
+            .add_agent(AgentCell::new("a1", "Agent One", "missing"))
+            .unwrap_err();
         matches!(err, crate::Error::NotFound(_));
     }
 
@@ -2032,7 +2096,8 @@ mod tests {
     #[test]
     fn reserved_lanes_cannot_be_removed() {
         let mut s = MatrixState::new();
-        s.set_lanes(vec!["Backlog".into(), "Custom".into()]).unwrap();
+        s.set_lanes(vec!["Backlog".into(), "Custom".into()])
+            .unwrap();
         assert!(s.board_lanes.contains(&"In Progress".into()));
         assert!(s.board_lanes.contains(&"Done".into()));
         assert!(s.board_lanes.contains(&"Archived".into()));
@@ -2114,7 +2179,10 @@ mod tests {
         s.select_agent(Some("a1")).unwrap();
         s.drain_deltas();
         s.select_agent(Some("a1")).unwrap();
-        assert!(s.drain_deltas().is_none(), "no delta for identical reselect");
+        assert!(
+            s.drain_deltas().is_none(),
+            "no delta for identical reselect"
+        );
     }
 
     #[test]
@@ -2131,7 +2199,11 @@ mod tests {
             let v = serde_json::to_value(op).unwrap();
             v["op"] == "ui_update" && v["selected_agent_id"].is_null()
         });
-        assert!(has_ui_clear, "expected ui_update clearing selection, got: {:?}", ops);
+        assert!(
+            has_ui_clear,
+            "expected ui_update clearing selection, got: {:?}",
+            ops
+        );
     }
 
     #[test]
@@ -2165,9 +2237,13 @@ mod tests {
         let split = LayoutNode::Split {
             axis: SplitAxis::Horizontal,
             ratio: 0.5,
-            first: Box::new(LayoutNode::Leaf { panel: PanelKind::Board }),
+            first: Box::new(LayoutNode::Leaf {
+                panel: PanelKind::Board,
+            }),
             second: Box::new(LayoutNode::Leaf {
-                panel: PanelKind::Terminal { id: Some("a1".into()) },
+                panel: PanelKind::Terminal {
+                    id: Some("a1".into()),
+                },
             }),
         };
         let v = serde_json::to_value(&split).unwrap();
@@ -2184,13 +2260,19 @@ mod tests {
         let l = LayoutNode::Split {
             axis: SplitAxis::Vertical,
             ratio: 0.6,
-            first: Box::new(LayoutNode::Leaf { panel: PanelKind::Board }),
+            first: Box::new(LayoutNode::Leaf {
+                panel: PanelKind::Board,
+            }),
             second: Box::new(LayoutNode::Split {
                 axis: SplitAxis::Horizontal,
                 ratio: 0.5,
-                first: Box::new(LayoutNode::Leaf { panel: PanelKind::Memory }),
+                first: Box::new(LayoutNode::Leaf {
+                    panel: PanelKind::Memory,
+                }),
                 second: Box::new(LayoutNode::Leaf {
-                    panel: PanelKind::Terminal { id: Some("a1".into()) },
+                    panel: PanelKind::Terminal {
+                        id: Some("a1".into()),
+                    },
                 }),
             }),
         };
@@ -2207,7 +2289,9 @@ mod tests {
     #[test]
     fn set_layout_emits_ui_update_delta() {
         let mut s = MatrixState::new();
-        s.set_layout(Some(LayoutNode::Leaf { panel: PanelKind::Board }));
+        s.set_layout(Some(LayoutNode::Leaf {
+            panel: PanelKind::Board,
+        }));
         let (_, ops) = s.drain_deltas().unwrap();
         let v = serde_json::to_value(&ops[0]).unwrap();
         assert_eq!(v["op"], "ui_update");
@@ -2218,7 +2302,9 @@ mod tests {
     #[test]
     fn set_layout_none_emits_null() {
         let mut s = MatrixState::new();
-        s.set_layout(Some(LayoutNode::Leaf { panel: PanelKind::Memory }));
+        s.set_layout(Some(LayoutNode::Leaf {
+            panel: PanelKind::Memory,
+        }));
         s.drain_deltas();
 
         s.set_layout(None);
@@ -2257,9 +2343,19 @@ mod tests {
         assert!(edges.top.is_none());
         assert!(edges.right.is_none());
         let left = edges.left.as_ref().expect("left default = sidebar");
-        assert!(matches!(left, LayoutNode::Leaf { panel: PanelKind::Sidebar }));
+        assert!(matches!(
+            left,
+            LayoutNode::Leaf {
+                panel: PanelKind::Sidebar
+            }
+        ));
         let bottom = edges.bottom.as_ref().expect("bottom default = board");
-        assert!(matches!(bottom, LayoutNode::Leaf { panel: PanelKind::Board }));
+        assert!(matches!(
+            bottom,
+            LayoutNode::Leaf {
+                panel: PanelKind::Board
+            }
+        ));
     }
 
     #[test]

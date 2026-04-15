@@ -190,7 +190,11 @@ async fn save_action_creates_file_then_delete_removes_it() {
     assert!(path.exists());
     assert!(path.to_string_lossy().ends_with("test/new-one.yaml"));
 
-    let v = post(addr, json!({"cmd": "delete_action", "name": "test/new-one"})).await;
+    let v = post(
+        addr,
+        json!({"cmd": "delete_action", "name": "test/new-one"}),
+    )
+    .await;
     assert_eq!(v["ok"], true);
     assert!(!path.exists());
 }
@@ -211,5 +215,8 @@ async fn save_action_rejects_missing_task() {
         }),
     )
     .await;
-    assert!(v["error"].is_string(), "expected validation error, got: {v:?}");
+    assert!(
+        v["error"].is_string(),
+        "expected validation error, got: {v:?}"
+    );
 }

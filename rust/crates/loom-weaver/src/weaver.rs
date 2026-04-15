@@ -13,7 +13,9 @@ pub struct Weaver {
 
 impl Weaver {
     pub fn new(group: impl Into<String>) -> Self {
-        Self { group: group.into() }
+        Self {
+            group: group.into(),
+        }
     }
 
     /// Compute a digest for the next push. Returns None if nothing new to say.
