@@ -1570,6 +1570,15 @@ test('renderBoard restores per-lane body scrollTop across re-renders in wide lay
   assert.equal(doneBody2.scrollTop, 0);
 });
 
+test('wide standalone lane columns keep their direct children from shrinking', () => {
+  const css = fs.readFileSync(path.join(repoRoot, 'static/style.css'), 'utf8');
+
+  assert.match(
+    css,
+    /\.runtime-embedded #panel-board \.board-wide-lane-body > \*\s*\{[^}]*flex-shrink:\s*0;/,
+  );
+});
+
 test('board keeps scroll state when changing the selected lane in wide embedded mode', () => {
   const { context, document } = createBoardHarness();
   const panel = document.register('panel-board');

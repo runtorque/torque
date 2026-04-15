@@ -2355,6 +2355,9 @@ body.runtime-embedded #panel-board .board-wide-lane {
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) + 2px);
 }
+.runtime-embedded #panel-board .board-wide-lane-body > * {
+  flex-shrink: 0;
+}
 body.runtime-embedded #panel-board .board-wide-lane-body {
   gap: 6px;
   padding: 10px;
