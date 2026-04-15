@@ -66,6 +66,45 @@ class DesktopLauncherTests(unittest.TestCase):
         self.desktop_mod = importlib.import_module("loom.desktop")
         self.desktop_mod = importlib.reload(self.desktop_mod)
 
+    def test_patch_pywebview_cocoa_first_mouse_overrides_host_once(self):
+        class FakeWebKitHost:
+            pass
+
+        class FakeBrowserView:
+            WebKitHost = FakeWebKitHost
+
+        class FakeCocoa:
+            BrowserView = FakeBrowserView
+
+        def fake_import(name):
+            if name == "webview.platforms.cocoa":
+                return FakeCocoa
+            raise ModuleNotFoundError(name)
+
+        patched = self.desktop_mod._patch_pywebview_cocoa_first_mouse(
+            import_module=fake_import
+        )
+        self.assertTrue(patched)
+        self.assertTrue(
+            FakeWebKitHost.acceptsFirstMouse_(object(), None)
+        )
+        self.assertTrue(
+            getattr(FakeWebKitHost, "_loom_accepts_first_mouse_patched")
+        )
+
+        patched_again = self.desktop_mod._patch_pywebview_cocoa_first_mouse(
+            import_module=fake_import
+        )
+        self.assertTrue(patched_again)
+
+    def test_patch_pywebview_cocoa_first_mouse_ignores_missing_backend(self):
+        patched = self.desktop_mod._patch_pywebview_cocoa_first_mouse(
+            import_module=lambda _name: (_ for _ in ()).throw(
+                ModuleNotFoundError("webview.platforms.cocoa")
+            )
+        )
+        self.assertFalse(patched)
+
     def test_resolve_settings_defaults_to_desktop_profile_and_port(self):
         with tempfile.TemporaryDirectory() as home_dir:
             settings = self.desktop_mod.resolve_desktop_settings(
@@ -154,7 +193,12 @@ class DesktopLauncherTests(unittest.TestCase):
             launcher.probe_runtime = lambda timeout=0.75: next(probes, None)
 
             with mock.patch.object(self.desktop_mod, "_is_port_open", return_value=False):
-                launcher.run(webview_module=fake_webview)
+                with mock.patch.object(
+                    self.desktop_mod,
+                    "_patch_pywebview_cocoa_first_mouse",
+                ) as patch_first_mouse:
+                    launcher.run(webview_module=fake_webview)
+                    patch_first_mouse.assert_called_once_with()
 
         self.assertEqual(
             popen_calls[0][0],
