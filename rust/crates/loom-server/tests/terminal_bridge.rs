@@ -271,6 +271,78 @@ async fn agent_sync_callback_updates_existing_agent() {
     assert_eq!(agent.agent_type, "codex");
 }
 
+#[tokio::test]
+async fn agent_sync_callback_preserves_rust_owned_state() {
+    let (addr, state) = spawn_loom_server(None).await;
+
+    post_cmd(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let response = post_cmd(
+        addr,
+        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
+    )
+    .await;
+    let agent_id = response["agent_id"].as_str().unwrap().to_string();
+
+    {
+        let mut st = state.lock().await;
+        let agent = st.agents.get_mut(&agent_id).unwrap();
+        agent.current_task_id = "eng-123".into();
+        agent.activity = "tool_call".into();
+        agent.activity_detail = "Dispatching task".into();
+        agent.last_summary = "authoritative summary".into();
+        agent.pending_weaver_message = true;
+        agent.session_tokens_in = 77;
+        agent.session_tokens_out = 88;
+        agent.worktree_dirty = true;
+    }
+
+    let response = post_json(
+        addr,
+        "/api/terminal-bridge/agent-sync",
+        json!({
+            "cell": {
+                "id": agent_id,
+                "session_id": "bridge-session-10",
+                "window_id": "bridge-window-10",
+                "status": "idle",
+                "current_process": "codex",
+                "current_path": "/tmp/repo",
+                "current_branch": "main",
+                "git_root": "/tmp/repo",
+                "agent_type": "codex",
+                "current_task_id": "",
+                "activity": "",
+                "activity_detail": "",
+                "last_summary": "",
+                "pending_weaver_message": false,
+                "session_tokens_in": 0,
+                "session_tokens_out": 0,
+                "worktree_dirty": false
+            }
+        }),
+    )
+    .await;
+    assert_eq!(response["ok"], true);
+
+    let st = state.lock().await;
+    let agent = st.agents.get(&agent_id).unwrap();
+    assert_eq!(agent.session_id.as_deref(), Some("bridge-session-10"));
+    assert_eq!(agent.window_id, "bridge-window-10");
+    assert_eq!(agent.current_process, "codex");
+    assert_eq!(agent.current_path, "/tmp/repo");
+    assert_eq!(agent.current_branch, "main");
+    assert_eq!(agent.git_root, "/tmp/repo");
+    assert_eq!(agent.agent_type, "codex");
+    assert_eq!(agent.current_task_id, "eng-123");
+    assert_eq!(agent.activity, "tool_call");
+    assert_eq!(agent.activity_detail, "Dispatching task");
+    assert_eq!(agent.last_summary, "authoritative summary");
+    assert!(agent.pending_weaver_message);
+    assert_eq!(agent.session_tokens_in, 77);
+    assert_eq!(agent.session_tokens_out, 88);
+    assert!(agent.worktree_dirty);
+}
+
 async fn next_json<S>(ws: &mut S) -> Value
 where
     S: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,

@@ -35,6 +35,31 @@ POLL_INTERVAL_SECS = 0.25
 
 
 _AGENT_CELL_FIELD_NAMES = {field.name for field in fields(AgentCell)}
+_TERMINAL_SYNC_FIELD_NAMES = (
+    "id",
+    "session_id",
+    "window_id",
+    "status",
+    "current_process",
+    "current_path",
+    "current_branch",
+    "git_root",
+    "agent_type",
+)
+
+
+def _terminal_sync_payload(cell_payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return only the terminal-owned fields Rust should accept from Python.
+
+    Rust remains the backend-of-record for task linkage, activity, token
+    counters, weaver flags, and other agent/worktree state. The Python bridge
+    only owns live terminal metadata observed from iTerm2.
+    """
+    payload: dict[str, Any] = {}
+    for name in _TERMINAL_SYNC_FIELD_NAMES:
+        if name in cell_payload:
+            payload[name] = cell_payload[name]
+    return payload
 
 
 class RustBridgeError(RuntimeError):
@@ -273,7 +298,7 @@ class RustBridgeCallbackState(MatrixState):
             elif kind == "agent_upsert":
                 cell_id = str(op.get("id") or "")
                 if cell_id:
-                    agent_payloads[cell_id] = dict(op)
+                    agent_payloads[cell_id] = _terminal_sync_payload(op)
 
         if focus_payload:
             try:

@@ -36,6 +36,58 @@ def _install_test_stubs():
         iterm2 = types.ModuleType("iterm2")
         iterm2.Connection = object
         sys.modules["iterm2"] = iterm2
+    if "aiohttp" not in sys.modules:
+        aiohttp = types.ModuleType("aiohttp")
+        web = types.ModuleType("aiohttp.web")
+
+        class ClientSession:
+            async def close(self):
+                return None
+
+        class Application:
+            def __init__(self):
+                self.routes = []
+
+            def add_routes(self, routes):
+                self.routes.extend(routes)
+
+        class AppRunner:
+            def __init__(self, app):
+                self.app = app
+
+            async def setup(self):
+                return None
+
+            async def cleanup(self):
+                return None
+
+        class TCPSite:
+            def __init__(self, runner, host, port):
+                self.runner = runner
+                self.host = host
+                self.port = port
+
+            async def start(self):
+                return None
+
+        def route(method, path, handler):
+            return (method, path, handler)
+
+        def json_response(payload):
+            return payload
+
+        aiohttp.ClientSession = ClientSession
+        web.Application = Application
+        web.AppRunner = AppRunner
+        web.TCPSite = TCPSite
+        web.Request = object
+        web.Response = object
+        web.get = lambda path, handler: route("GET", path, handler)
+        web.post = lambda path, handler: route("POST", path, handler)
+        web.json_response = json_response
+        aiohttp.web = web
+        sys.modules["aiohttp"] = aiohttp
+        sys.modules["aiohttp.web"] = web
 
 
 class RustBridgeRuntimeTests(unittest.TestCase):
@@ -184,3 +236,63 @@ class RustBridgeRuntimeTests(unittest.TestCase):
 
         self.assertFalse(process.terminated)
         self.assertFalse(process.killed)
+
+
+class FakeCallbackClient:
+    def __init__(self):
+        self.focus_updates = []
+        self.agent_sync_payloads = []
+
+    async def post_focus_update(self, **payload):
+        self.focus_updates.append(payload)
+
+    async def post_agent_sync(self, payload):
+        self.agent_sync_payloads.append(payload)
+
+
+class RustBridgeCallbackStateTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        _install_test_stubs()
+        self.mod = importlib.import_module("loom.rust_bridge_runtime")
+        self.mod = importlib.reload(self.mod)
+
+    async def test_broadcast_filters_agent_sync_to_terminal_owned_fields(self):
+        client = FakeCallbackClient()
+        state = self.mod.RustBridgeCallbackState(client)
+        state._delta_ops = [
+            {
+                "op": "agent_upsert",
+                "id": "agent-1",
+                "session_id": "session-1",
+                "window_id": "window-1",
+                "status": "idle",
+                "current_process": "codex",
+                "current_path": "/tmp/repo",
+                "current_branch": "main",
+                "git_root": "/tmp/repo",
+                "agent_type": "codex",
+                "current_task_id": "task-1",
+                "activity": "tool_call",
+                "activity_detail": "Dispatching",
+                "pending_weaver_message": True,
+                "session_tokens_in": 42,
+                "worktree_dirty": True,
+            }
+        ]
+
+        await state.broadcast()
+
+        self.assertEqual(
+            client.agent_sync_payloads,
+            [{
+                "id": "agent-1",
+                "session_id": "session-1",
+                "window_id": "window-1",
+                "status": "idle",
+                "current_process": "codex",
+                "current_path": "/tmp/repo",
+                "current_branch": "main",
+                "git_root": "/tmp/repo",
+                "agent_type": "codex",
+            }],
+        )

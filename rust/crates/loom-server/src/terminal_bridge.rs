@@ -8,6 +8,7 @@ use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
+use serde_json::Map;
 use serde_json::{json, Value};
 
 use loom_core::delta::DeltaOp;
@@ -217,7 +218,7 @@ struct FocusCallbackRequest {
 
 #[derive(Debug, Clone, Deserialize)]
 struct AgentSyncRequest {
-    cell: AgentCell,
+    cell: Map<String, Value>,
 }
 
 pub fn routes() -> Router<AppState> {
@@ -280,15 +281,24 @@ async fn push_agent_sync(
     State(app): State<AppState>,
     Json(req): Json<AgentSyncRequest>,
 ) -> Json<Value> {
+    let Some(cell_id) = req
+        .cell
+        .get("id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+    else {
+        return Json(json!({ "ok": false, "error": "missing cell.id" }));
+    };
+
     let synced = {
         let mut st = app.state.lock().await;
-        let Some(existing) = st.agents.get(&req.cell.id).cloned() else {
+        let Some(existing) = st.agents.get(cell_id).cloned() else {
             return Json(json!({ "ok": true, "ignored": true }));
         };
         let mut cell = existing;
         apply_synced_fields(&mut cell, &req.cell);
-        st.agents.insert(req.cell.id.clone(), cell.clone());
-        st.emit_agent(&req.cell.id);
+        st.agents.insert(cell_id.to_string(), cell.clone());
+        st.emit_agent(cell_id);
         cell
     };
     let _ = app.db.save_agent(&synced).await;
@@ -312,38 +322,31 @@ fn empty_to_none(value: String) -> Option<String> {
     }
 }
 
-fn apply_synced_fields(dst: &mut AgentCell, src: &AgentCell) {
-    dst.session_id = src.session_id.clone();
-    dst.window_id = src.window_id.clone();
-    dst.status = src.status.clone();
-    dst.current_process = src.current_process.clone();
-    dst.current_path = src.current_path.clone();
-    dst.current_branch = src.current_branch.clone();
-    dst.git_root = src.git_root.clone();
-    dst.agent_type = src.agent_type.clone();
-    dst.agent_session_id = src.agent_session_id.clone();
-    dst.activity = src.activity.clone();
-    dst.activity_detail = src.activity_detail.clone();
-    dst.last_event_at = src.last_event_at;
-    dst.last_event_text = src.last_event_text.clone();
-    dst.session_tokens_in = src.session_tokens_in;
-    dst.session_tokens_out = src.session_tokens_out;
-    dst.error_message = src.error_message.clone();
-    dst.needs_attention = src.needs_attention;
-    dst.last_summary = src.last_summary.clone();
-    dst.current_task_id = src.current_task_id.clone();
-    dst.session_resume = src.session_resume;
-    dst.idle_timeout = src.idle_timeout;
-    dst.worktree_dirty = src.worktree_dirty;
-    dst.worktree_diff = src.worktree_diff.clone();
-    dst.worktree_changed_files = src.worktree_changed_files.clone();
-    dst.worktree_checkpoints = src.worktree_checkpoints;
-    dst.worktree_behind = src.worktree_behind;
-    dst.worktree_ahead = src.worktree_ahead;
-    dst.worktree_merged = src.worktree_merged;
-    dst.mcp_messages = src.mcp_messages.clone();
-    dst.last_checkpoint_at = src.last_checkpoint_at;
-    dst.pending_weaver_message = src.pending_weaver_message;
+fn apply_synced_fields(dst: &mut AgentCell, src: &Map<String, Value>) {
+    if let Some(value) = src.get("session_id") {
+        dst.session_id = value.as_str().map(|value| value.to_string());
+    }
+    if let Some(value) = src.get("window_id").and_then(|value| value.as_str()) {
+        dst.window_id = value.to_string();
+    }
+    if let Some(value) = src.get("status").and_then(|value| value.as_str()) {
+        dst.status = value.to_string();
+    }
+    if let Some(value) = src.get("current_process").and_then(|value| value.as_str()) {
+        dst.current_process = value.to_string();
+    }
+    if let Some(value) = src.get("current_path").and_then(|value| value.as_str()) {
+        dst.current_path = value.to_string();
+    }
+    if let Some(value) = src.get("current_branch").and_then(|value| value.as_str()) {
+        dst.current_branch = value.to_string();
+    }
+    if let Some(value) = src.get("git_root").and_then(|value| value.as_str()) {
+        dst.git_root = value.to_string();
+    }
+    if let Some(value) = src.get("agent_type").and_then(|value| value.as_str()) {
+        dst.agent_type = value.to_string();
+    }
 }
 
 pub fn bridge_manages_cell(client: &TerminalBridgeClient, cell: &AgentCell) -> bool {
