@@ -1199,6 +1199,7 @@ pub struct MatrixState {
     pub board_card_density_by_group: HashMap<String, String>,
 
     pub weaver_settings: HashMap<String, WeaverSettings>,
+    pub weaver_journal: HashMap<String, Vec<serde_json::Value>>,
     pub weaver_worklog: HashMap<String, Vec<serde_json::Value>>,
 
     /// Memory entries, keyed by id. Links are denormalized onto each entry.
@@ -1255,6 +1256,7 @@ impl MatrixState {
             board_lane_sorts_by_group: HashMap::new(),
             board_card_density_by_group: HashMap::new(),
             weaver_settings: HashMap::new(),
+            weaver_journal: HashMap::new(),
             weaver_worklog: HashMap::new(),
             memory_entries: HashMap::new(),
             selected_agent_id: None,
@@ -1307,6 +1309,213 @@ impl MatrixState {
 
     pub fn current_seq(&self) -> u64 {
         self.seq
+    }
+
+    // ---- Weaver / board helpers -----------------------------------------
+
+    pub fn tasks_in_group(&self, group: &str) -> Vec<&BoardTask> {
+        let mut tasks = self
+            .tasks_by_group
+            .get(group)
+            .into_iter()
+            .flat_map(|ids| ids.iter())
+            .filter_map(|id| self.board_tasks.get(id))
+            .collect::<Vec<_>>();
+        tasks.sort_by(|a, b| {
+            a.position
+                .cmp(&b.position)
+                .then_with(|| a.created_at.cmp(&b.created_at))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        tasks
+    }
+
+    pub fn get_group_settings(&self, name: &str) -> GroupSettings {
+        self.group_settings.get(name).cloned().unwrap_or_default()
+    }
+
+    pub fn get_weaver_settings(&self, group: &str) -> WeaverSettings {
+        self.weaver_settings
+            .get(group)
+            .cloned()
+            .unwrap_or_else(|| WeaverSettings {
+                group: group.to_string(),
+                ..WeaverSettings::default()
+            })
+    }
+
+    pub fn update_weaver_settings(
+        &mut self,
+        group: &str,
+        patch: serde_json::Map<String, serde_json::Value>,
+    ) -> crate::Result<WeaverSettings> {
+        let current = self
+            .weaver_settings
+            .get(group)
+            .cloned()
+            .unwrap_or_else(|| WeaverSettings {
+                group: group.to_string(),
+                ..WeaverSettings::default()
+            });
+        let mut merged = serde_json::to_value(current)?;
+        if let Some(obj) = merged.as_object_mut() {
+            for (k, v) in patch {
+                obj.insert(k, v);
+            }
+        }
+        let next: WeaverSettings = serde_json::from_value(merged)
+            .map_err(|e| crate::Error::validation(format!("invalid weaver settings: {e}")))?;
+        self.weaver_settings.insert(group.to_string(), next.clone());
+        let mut fields = serde_json::to_value(&next)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        fields.remove("group");
+        self.emit(DeltaOp::WeaverSettingsUpdate {
+            group: group.to_string(),
+            fields,
+        });
+        Ok(next)
+    }
+
+    pub fn weaver_restricts_to_created_agents(&self, group: &str) -> bool {
+        self.get_weaver_settings(group).restrict_to_created_agents
+    }
+
+    pub fn agent_is_visible_to_weaver(&self, weaver_id: &str, agent_id: &str) -> bool {
+        let Some(weaver) = self.agents.get(weaver_id) else {
+            return false;
+        };
+        let Some(agent) = self.agents.get(agent_id) else {
+            return false;
+        };
+        if weaver.cell_type != "agent" || agent.cell_type != "agent" {
+            return false;
+        }
+        if weaver.group.is_empty() || agent.group != weaver.group {
+            return false;
+        }
+        if !self.weaver_restricts_to_created_agents(&weaver.group) {
+            return true;
+        }
+        agent.created_by_weaver_id == weaver.id
+    }
+
+    pub fn resolve_task_ident(&self, ident: &str) -> Option<String> {
+        let ident = ident.trim();
+        if ident.is_empty() {
+            return None;
+        }
+        if self.board_tasks.contains_key(ident) {
+            return Some(ident.to_string());
+        }
+        let mut prefix_matches = self
+            .board_tasks
+            .keys()
+            .filter(|id| id.starts_with(ident))
+            .cloned()
+            .collect::<Vec<_>>();
+        prefix_matches.sort();
+        if prefix_matches.len() == 1 {
+            return prefix_matches.into_iter().next();
+        }
+        None
+    }
+
+    pub fn resolve_agent_ident(&self, ident: &str) -> Option<String> {
+        let ident = ident.trim();
+        if ident.is_empty() {
+            return None;
+        }
+        if let Some(agent) = self.agents.get(ident) {
+            if agent.cell_type == "agent" {
+                return Some(agent.id.clone());
+            }
+        }
+        let ident_lower = ident.to_lowercase();
+        for agent in self.agents.values() {
+            if agent.cell_type != "agent" {
+                continue;
+            }
+            if agent.slug.to_lowercase() == ident_lower || agent.name.to_lowercase() == ident_lower
+            {
+                return Some(agent.id.clone());
+            }
+        }
+        let mut prefix_matches = self
+            .agents
+            .values()
+            .filter(|agent| agent.cell_type == "agent" && agent.id.starts_with(ident))
+            .map(|agent| agent.id.clone())
+            .collect::<Vec<_>>();
+        prefix_matches.sort();
+        if prefix_matches.len() == 1 {
+            return prefix_matches.into_iter().next();
+        }
+        None
+    }
+
+    pub fn board_deps_met(&self, task: &BoardTask) -> bool {
+        task.depends_on
+            .iter()
+            .all(|dep_id| board_task_counts_as_done(self.board_tasks.get(dep_id)))
+    }
+
+    pub fn task_occupies_execution_slot(&self, task: Option<&BoardTask>, agent_id: &str) -> bool {
+        let Some(task) = task else { return false };
+        if board_task_is_closed(Some(task)) {
+            return false;
+        }
+        if !agent_id.is_empty() && task.agent_id != agent_id {
+            return false;
+        }
+        !matches!(task.lane.as_str(), "Backlog" | "Done" | ARCHIVED_LANE)
+    }
+
+    pub fn agent_active_tasks(&self, agent_id: &str) -> Vec<&BoardTask> {
+        let mut tasks = self
+            .board_tasks
+            .values()
+            .filter(|task| self.task_occupies_execution_slot(Some(task), agent_id))
+            .collect::<Vec<_>>();
+        tasks.sort_by(|a, b| {
+            (a.lane != "In Progress")
+                .cmp(&(b.lane != "In Progress"))
+                .then_with(|| a.position.cmp(&b.position))
+                .then_with(|| a.created_at.cmp(&b.created_at))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        tasks
+    }
+
+    pub fn agent_current_task(&self, agent_id: &str) -> Option<&BoardTask> {
+        if let Some(agent) = self.agents.get(agent_id) {
+            if !agent.current_task_id.is_empty() {
+                let task = self.board_tasks.get(&agent.current_task_id);
+                if self.task_occupies_execution_slot(task, agent_id) {
+                    return task;
+                }
+            }
+        }
+        self.agent_active_tasks(agent_id).into_iter().next()
+    }
+
+    pub fn agent_pending_weaver_reply_tasks(&self, agent_id: &str) -> Vec<&BoardTask> {
+        let mut tasks = self
+            .board_tasks
+            .values()
+            .filter(|task| task.reply_agent_id == agent_id && !board_task_is_closed(Some(task)))
+            .collect::<Vec<_>>();
+        tasks.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        tasks
+    }
+
+    pub fn agent_is_busy(&self, agent_id: &str) -> bool {
+        self.agent_current_task(agent_id).is_some()
     }
 
     // ---- Slug helpers -----------------------------------------------------

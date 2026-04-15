@@ -247,7 +247,7 @@ pub async fn events(ctx: &CmdContext, req: &Value) -> CmdResult {
 
     let events = ctx
         .db
-        .load_panel_events(&group, since_id as i64, limit, &types)
+        .load_group_panel_events(&group, since_id as i64, limit, &types)
         .await?;
     let cursor = events
         .last()

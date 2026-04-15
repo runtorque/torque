@@ -1,5 +1,5 @@
 //! Integration test: spin up the real axum server against an in-memory DB
-//! and drive it through a few Python-compat command surfaces.
+//! and drive it through Python-compatible standalone command surfaces.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -98,6 +98,87 @@ async fn board_task_update_accepts_top_level_python_fields() {
         snap["data"]["board_tasks"][&task_id]["description"],
         "Updated"
     );
+}
+
+#[tokio::test]
+async fn remove_group_cascades() {
+    let (addr, _h) = spawn_test_server().await;
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    post(
+        addr,
+        json!({"cmd": "add_agent", "name": "A", "group": "Eng"}),
+    )
+    .await;
+    post(
+        addr,
+        json!({"cmd": "add_agent", "name": "B", "group": "Eng"}),
+    )
+    .await;
+
+    let v = post(addr, json!({"cmd": "remove_group", "group": "Eng"})).await;
+    assert_eq!(v["ok"], true);
+    let removed = v["data"]["removed_agents"].as_array().unwrap();
+    assert_eq!(removed.len(), 2);
+
+    let snap = post(addr, json!({"cmd": "refresh"})).await;
+    assert_eq!(snap["data"]["groups"].as_object().unwrap().len(), 0);
+    assert_eq!(snap["data"]["agents"].as_object().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn global_settings_roundtrip() {
+    let (addr, _h) = spawn_test_server().await;
+    let v = post(
+        addr,
+        json!({
+            "cmd": "update_global_settings",
+            "settings": {"default_command": "codex", "max_pipeline_depth": 5}
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+
+    let v = post(addr, json!({"cmd": "get_global_settings"})).await;
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["data"]["type"], "global_settings");
+    assert_eq!(v["data"]["settings"]["default_command"], "codex");
+    assert_eq!(v["data"]["settings"]["max_pipeline_depth"], 5);
+}
+
+#[tokio::test]
+async fn rename_lane_migrates_tasks() {
+    let (addr, _h) = spawn_test_server().await;
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    post(addr, json!({"cmd": "board_add_lane", "name": "Review"})).await;
+
+    let t = post(
+        addr,
+        json!({"cmd": "board_add_task", "task": "T", "group": "Eng", "lane": "Review"}),
+    )
+    .await;
+    let task_id = t["data"]["task_id"].as_str().unwrap().to_string();
+
+    let v = post(
+        addr,
+        json!({"cmd": "board_rename_lane", "from": "Review", "to": "QA"}),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+
+    let snap = post(addr, json!({"cmd": "refresh"})).await;
+    assert_eq!(snap["data"]["board_tasks"][&task_id]["lane"], "QA");
+}
+
+#[tokio::test]
+async fn reserved_lane_rename_rejected() {
+    let (addr, _h) = spawn_test_server().await;
+    let v = post(
+        addr,
+        json!({"cmd": "board_rename_lane", "from": "Backlog", "to": "Inbox"}),
+    )
+    .await;
+    assert_eq!(v["ok"], false);
+    assert!(v["error"].is_string());
 }
 
 #[tokio::test]

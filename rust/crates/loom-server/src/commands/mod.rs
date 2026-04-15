@@ -32,6 +32,7 @@ pub mod memory;
 pub mod schedule;
 pub mod settings;
 pub mod templates;
+pub mod weaver;
 pub mod worktree;
 
 pub fn routes() -> Router<AppState> {
@@ -202,6 +203,32 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "board_set_lane_sorts" => board::set_lane_sorts(ctx, req).await,
         "board_set_card_density" => board::set_card_density(ctx, req).await,
         "task_chain" => board::task_chain(ctx, req).await,
+
+        // weaver
+        "weaver_board_summary" => weaver::board_summary(ctx, req).await,
+        "weaver_streams_list" => weaver::streams_list(ctx, req).await,
+        "weaver_stream_show" => weaver::stream_show(ctx, req).await,
+        "weaver_board_list" => weaver::board_list(ctx, req).await,
+        "weaver_task_show" => weaver::task_show(ctx, req).await,
+        "weaver_agents_list" => weaver::agents_list(ctx, req).await,
+        "weaver_agent_show" => weaver::agent_show(ctx, req).await,
+        "weaver_actions_list" => weaver::actions_list(ctx, req).await,
+        "weaver_action_show" => weaver::action_show(ctx, req).await,
+        "weaver_events" => weaver::events(ctx, req).await,
+        "weaver_journal_append" => weaver::journal_append(ctx, req).await,
+        "weaver_journal_read" => weaver::journal_read(ctx, req).await,
+        "weaver_journal_delete" => weaver::journal_delete(ctx, req).await,
+        "weaver_session_map_read" => weaver::session_map_read(ctx, req).await,
+        "weaver_update_settings" => weaver::update_settings(ctx, req).await,
+        "weaver_ask" => weaver::ask(ctx, req).await,
+        "weaver_note" => weaver::note(ctx, req).await,
+        "weaver_dismiss_note" => weaver::dismiss_note(ctx, req).await,
+        "weaver_pause" => weaver::pause(ctx, req).await,
+        "weaver_resume" => weaver::resume(ctx, req).await,
+        "weaver_reply" => weaver::reply(ctx, req).await,
+        "weaver_notifications" => weaver::notifications(ctx, req).await,
+        "weaver_launch_settings" => weaver::launch_settings(ctx, req).await,
+        "weaver_flush_now" => weaver::flush_now(ctx, req).await,
 
         // worktree
         "worktree_create" => worktree::create(ctx, req).await,

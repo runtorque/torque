@@ -264,11 +264,27 @@ async fn build_snapshot_locked(
     let st = state.lock().await;
 
     let mut groups = serde_json::Map::new();
+    let mut weaver_streams = serde_json::Map::new();
+    let mut weaver_session_maps = serde_json::Map::new();
     for name in &st.groups_order {
         groups.insert(
             name.clone(),
             serde_json::to_value(st.groups.get(name).cloned().unwrap_or_default())
                 .unwrap_or_else(|_| json!([])),
+        );
+        weaver_streams.insert(name.clone(), weaver_stream_payload_for_group(&st, name));
+        let weaver_id = st.get_group_settings(name).weaver_agent_id;
+        weaver_session_maps.insert(
+            name.clone(),
+            loom_weaver::session_map::build_weaver_session_map(
+                &st,
+                name,
+                if weaver_id.trim().is_empty() {
+                    None
+                } else {
+                    Some(weaver_id.as_str())
+                },
+            ),
         );
     }
 
@@ -299,10 +315,10 @@ async fn build_snapshot_locked(
         "board_lane_sorts_by_group": &st.board_lane_sorts_by_group,
         "board_card_density_by_group": &st.board_card_density_by_group,
         "weaver_settings": &st.weaver_settings,
-        "weaver_journal": {},
+        "weaver_journal": &st.weaver_journal,
         "weaver_worklog": &st.weaver_worklog,
-        "weaver_streams": {},
-        "weaver_session_maps": {},
+        "weaver_streams": weaver_streams,
+        "weaver_session_maps": weaver_session_maps,
         "weaver_buffer_stats": {},
         "weaver_sent_events": {},
         "panel_events": panel_events,
@@ -311,6 +327,30 @@ async fn build_snapshot_locked(
         "dock_edges": &st.dock_edges,
         "providers": providers_payload(),
         "runtime": runtime_payload(embedded_terminal),
+    })
+}
+
+fn weaver_stream_payload_for_group(st: &loom_core::state::MatrixState, group: &str) -> Value {
+    const CARD_LIMIT: usize = 10;
+    let streams = loom_weaver::streams::compute_worktree_streams(st, group, CARD_LIMIT, false)
+        .into_iter()
+        .filter(|stream| stream.get("state").and_then(Value::as_str) != Some("merged"))
+        .collect::<Vec<_>>();
+    let mut by_state = serde_json::Map::new();
+    for stream in &streams {
+        let state = stream
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let next = by_state.get(&state).and_then(Value::as_u64).unwrap_or(0) + 1;
+        by_state.insert(state, Value::from(next));
+    }
+    json!({
+        "count": streams.len(),
+        "by_state": by_state,
+        "items": streams.iter().take(CARD_LIMIT).cloned().collect::<Vec<_>>(),
+        "truncated": streams.len() > CARD_LIMIT,
     })
 }
 

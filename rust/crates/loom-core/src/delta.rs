@@ -60,6 +60,11 @@ pub enum DeltaOp {
         id: String,
     },
     EventAppend(serde_json::Value),
+    JournalAppend(serde_json::Value),
+    JournalDelete {
+        group: String,
+        id: i64,
+    },
     WeaverSettingsUpdate {
         group: String,
         #[serde(flatten)]
@@ -69,6 +74,7 @@ pub enum DeltaOp {
         group: String,
         entry: serde_json::Value,
     },
+    WeaverStreams(serde_json::Value),
     EventsUpdate(serde_json::Value),
     PanelUpdate(serde_json::Value),
     MemoryUpsert(serde_json::Value),

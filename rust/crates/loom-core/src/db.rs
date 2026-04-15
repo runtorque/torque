@@ -270,7 +270,7 @@ CREATE TABLE IF NOT EXISTS weaver_worklog (
 );
 
 CREATE TABLE IF NOT EXISTS panel_events (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp REAL NOT NULL,
     kind TEXT NOT NULL,
     cell_id TEXT NOT NULL DEFAULT '',
@@ -367,6 +367,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_group ON agents(group_name);
 CREATE INDEX IF NOT EXISTS idx_board_tasks_group ON board_tasks(group_name);
 CREATE INDEX IF NOT EXISTS idx_auto_dispatch_queue_group ON auto_dispatch_queue(group_name, position);
 CREATE INDEX IF NOT EXISTS idx_worklog_group ON weaver_worklog(group_name);
+CREATE INDEX IF NOT EXISTS idx_panel_events_group_id ON panel_events(group_name, id);
 CREATE INDEX IF NOT EXISTS idx_panel_events_ts ON panel_events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_agent_tasks_agent ON agent_tasks(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_messages_agent ON agent_messages(agent_id);
@@ -1549,6 +1550,31 @@ impl LoomDb {
         Ok(())
     }
 
+    pub async fn append_weaver_journal(
+        &self,
+        group: &str,
+        entry_type: &str,
+        entry: &str,
+        timestamp: f64,
+    ) -> crate::Result<i64> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT INTO weaver_journal(group_name, timestamp, entry_type, entry)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![group, timestamp, entry_type, entry],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub async fn delete_weaver_journal_entry(&self, group: &str, id: i64) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "DELETE FROM weaver_journal WHERE id = ?1 AND group_name = ?2",
+            params![id, group],
+        )?;
+        Ok(())
+    }
+
     pub async fn save_task_id_counter(
         &self,
         group_prefix: &str,
@@ -1614,6 +1640,25 @@ impl LoomDb {
             "message": message,
             "task_id": task_id,
         }))
+    }
+
+    pub async fn append_panel_event(
+        &self,
+        kind: &str,
+        cell_id: &str,
+        agent_name: &str,
+        group: &str,
+        message: &str,
+        task_id: &str,
+        timestamp: f64,
+    ) -> crate::Result<i64> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT INTO panel_events(timestamp, kind, cell_id, agent_name, group_name, message, task_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![timestamp, kind, cell_id, agent_name, group, message, task_id],
+        )?;
+        Ok(conn.last_insert_rowid())
     }
 
     pub async fn find_latest_panel_event(
@@ -2006,6 +2051,56 @@ impl LoomDb {
         Ok(rows)
     }
 
+    pub async fn load_group_panel_events(
+        &self,
+        group: &str,
+        after_id: i64,
+        limit: usize,
+        kinds: &[String],
+    ) -> crate::Result<Vec<serde_json::Value>> {
+        let conn = self.inner.lock().await;
+        let mut sql = String::from(
+            "SELECT id, timestamp, kind, cell_id, agent_name, group_name, message, task_id
+             FROM panel_events
+             WHERE group_name = ?1 AND id > ?2",
+        );
+        let mut params = vec![
+            SqlValue::from(group.to_string()),
+            SqlValue::from(after_id.max(0)),
+        ];
+        if !kinds.is_empty() {
+            sql.push_str(" AND kind IN (");
+            for idx in 0..kinds.len() {
+                if idx > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str(&format!("?{}", idx + 3));
+                params.push(SqlValue::from(kinds[idx].clone()));
+            }
+            sql.push(')');
+        }
+        sql.push_str(&format!(" ORDER BY id ASC LIMIT ?{}", params.len() + 1));
+        params.push(SqlValue::from(limit.max(1).min(200) as i64));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = stmt.query(params_from_iter(params.iter()))?;
+        let mut events = Vec::new();
+        while let Some(row) = rows.next()? {
+            events.push(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "timestamp": row.get::<_, f64>(1)?,
+                "kind": row.get::<_, String>(2)?,
+                "cell_id": row.get::<_, String>(3)?,
+                "agent_name": row.get::<_, String>(4)?,
+                "group": row.get::<_, String>(5)?,
+                "group_name": row.get::<_, String>(5)?,
+                "message": row.get::<_, String>(6)?,
+                "task_id": row.get::<_, String>(7)?,
+            }));
+        }
+        Ok(events)
+    }
+
     pub async fn load_agent_history(
         &self,
         status_filter: &str,
@@ -2169,8 +2264,14 @@ impl LoomDb {
         // groups
         let mut groups: Vec<(String, String, i64)> = Vec::new();
         {
-            let mut stmt =
-                conn.prepare("SELECT name, slug, position FROM groups ORDER BY position")?;
+            let mut stmt = conn.prepare(
+                "SELECT name, slug, CASE
+                     WHEN position != 0 THEN position
+                     ELSE ordinal
+                 END AS sort_order
+                 FROM groups
+                 ORDER BY sort_order, name",
+            )?;
             let rows = stmt.query_map([], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
@@ -2348,6 +2449,48 @@ impl LoomDb {
             for r in rows {
                 let (group, settings) = r?;
                 state.weaver_settings.insert(group, settings);
+            }
+        }
+        {
+            let mut stmt = conn.prepare(
+                "SELECT group_name, entry
+                 FROM weaver_worklog
+                 ORDER BY group_name, id DESC",
+            )?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            for row in rows {
+                let (group, entry) = row?;
+                let parsed = serde_json::from_str::<serde_json::Value>(&entry)
+                    .unwrap_or_else(|_| serde_json::json!({}));
+                state.weaver_worklog.entry(group).or_default().push(parsed);
+            }
+        }
+        {
+            let mut stmt = conn.prepare(
+                "SELECT id, group_name, timestamp, entry_type, entry
+                 FROM weaver_journal
+                 ORDER BY group_name, id ASC",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "group": r.get::<_, String>(1)?,
+                    "timestamp": r.get::<_, f64>(2)?,
+                    "type": r.get::<_, String>(3)?,
+                    "entry": r.get::<_, String>(4)?,
+                }))
+            })?;
+            for row in rows {
+                let entry = row?;
+                let group = entry
+                    .get("group")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                if !group.is_empty() {
+                    state.weaver_journal.entry(group).or_default().push(entry);
+                }
             }
         }
 
