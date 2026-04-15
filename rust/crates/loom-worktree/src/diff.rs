@@ -29,7 +29,9 @@ pub fn diff_vs_base(worktree_path: &Path, base: &str) -> Result<DiffSummary> {
     };
 
     let mut diff_opts = git2::DiffOptions::new();
-    diff_opts.include_untracked(true).recurse_untracked_dirs(true);
+    diff_opts
+        .include_untracked(true)
+        .recurse_untracked_dirs(true);
 
     let diff = match base_tree {
         Some(tree) => repo.diff_tree_to_workdir_with_index(Some(&tree), Some(&mut diff_opts))?,

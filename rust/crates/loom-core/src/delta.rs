@@ -23,18 +23,20 @@ pub enum DeltaOp {
         name: String,
     },
     GroupRename {
-        from: String,
-        to: String,
+        old_name: String,
+        new_name: String,
     },
     GroupsReorder {
-        order: Vec<String>,
+        groups: Vec<String>,
     },
     GroupSettingsUpdate {
         name: String,
-        settings: serde_json::Value,
+        #[serde(flatten)]
+        fields: serde_json::Map<String, serde_json::Value>,
     },
     GlobalSettingsUpdate {
-        settings: serde_json::Value,
+        #[serde(flatten)]
+        fields: serde_json::Map<String, serde_json::Value>,
     },
     TaskUpsert(serde_json::Value),
     TaskRemove {
@@ -43,23 +45,36 @@ pub enum DeltaOp {
     LanesUpdate {
         lanes: Vec<String>,
     },
-    UiUpdate(serde_json::Value),
+    UiUpdate {
+        key: String,
+        value: serde_json::Value,
+    },
     FocusUpdate {
+        #[serde(skip_serializing_if = "Option::is_none")]
         active_session_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         current_window_id: Option<String>,
     },
     ScheduleUpsert(serde_json::Value),
     ScheduleRemove {
         id: String,
     },
+    EventAppend(serde_json::Value),
+    JournalAppend(serde_json::Value),
+    JournalDelete {
+        group: String,
+        id: i64,
+    },
     WeaverSettingsUpdate {
         group: String,
-        settings: serde_json::Value,
+        #[serde(flatten)]
+        fields: serde_json::Map<String, serde_json::Value>,
     },
     WeaverWorklogAppend {
         group: String,
         entry: serde_json::Value,
     },
+    WeaverStreams(serde_json::Value),
     EventsUpdate(serde_json::Value),
     PanelUpdate(serde_json::Value),
     MemoryUpsert(serde_json::Value),
@@ -114,5 +129,17 @@ mod tests {
         assert_eq!(v["type"], "delta");
         assert_eq!(v["seq"], 5);
         assert_eq!(v["ops"][0]["op"], "task_remove");
+    }
+
+    #[test]
+    fn ui_update_serializes_key_value_shape() {
+        let op = DeltaOp::UiUpdate {
+            key: "panel_active".into(),
+            value: serde_json::json!("board"),
+        };
+        let v = serde_json::to_value(&op).unwrap();
+        assert_eq!(v["op"], "ui_update");
+        assert_eq!(v["key"], "panel_active");
+        assert_eq!(v["value"], "board");
     }
 }

@@ -45,10 +45,7 @@ pub async fn create(ctx: &CmdContext, req: &Value) -> CmdResult {
         cron_expr: optstr(req, "cron_expr"),
         scheduled_at: optstr(req, "scheduled_at"),
         timezone: optstr(req, "timezone"),
-        enabled: req
-            .get("enabled")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true),
+        enabled: req.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
         last_run_at: String::new(),
         next_run_at: optstr(req, "next_run_at"),
         run_count: 0,
@@ -171,7 +168,7 @@ pub async fn run(ctx: &CmdContext, req: &Value) -> CmdResult {
     let id = required_str(req, "id")?.to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
-    let (sched, task_id) = {
+    let (sched, task_id, prefix, next_root_number) = {
         let mut st = ctx.state.lock().await;
         let Some(sched) = st.schedules.get(&id).cloned() else {
             return Err(CmdError::BadRequest(format!("schedule '{id}' not found")));
@@ -220,9 +217,17 @@ pub async fn run(ctx: &CmdContext, req: &Value) -> CmdResult {
                 serde_json::to_value(&clone).unwrap_or(Value::Null),
             ));
         }
-        (st.schedules.get(&id).cloned().unwrap(), task_id)
+        (
+            st.schedules.get(&id).cloned().unwrap(),
+            task_id,
+            prefix,
+            trunk,
+        )
     };
 
+    ctx.db
+        .save_task_id_counter(&prefix, next_root_number as u64)
+        .await?;
     ctx.db.save_schedule(&sched).await?;
     let task = {
         let st = ctx.state.lock().await;

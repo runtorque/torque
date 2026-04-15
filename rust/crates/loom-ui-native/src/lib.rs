@@ -25,9 +25,9 @@ pub mod render;
 #[cfg(all(target_os = "macos", feature = "appkit"))]
 pub mod appkit;
 #[cfg(all(target_os = "macos", feature = "appkit"))]
-pub mod ghostty_view;
-#[cfg(all(target_os = "macos", feature = "appkit"))]
 pub mod board;
+#[cfg(all(target_os = "macos", feature = "appkit"))]
+pub mod ghostty_view;
 #[cfg(all(target_os = "macos", feature = "appkit"))]
 pub mod modal;
 #[cfg(all(target_os = "macos", feature = "appkit"))]

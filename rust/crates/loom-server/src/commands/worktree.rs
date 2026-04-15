@@ -74,7 +74,9 @@ pub async fn create(ctx: &CmdContext, req: &Value) -> CmdResult {
     let agent = {
         let mut st = ctx.state.lock().await;
         let Some(cell) = st.agents.get_mut(&agent_id) else {
-            return Err(CmdError::BadRequest(format!("agent '{agent_id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "agent '{agent_id}' not found"
+            )));
         };
         cell.worktree_path = info.path.to_string_lossy().to_string();
         cell.worktree_branch = info.branch.clone();
@@ -98,12 +100,17 @@ pub async fn remove(ctx: &CmdContext, req: &Value) -> CmdResult {
     let (repo_root, path) = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
-            return Err(CmdError::BadRequest(format!("agent '{agent_id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "agent '{agent_id}' not found"
+            )));
         };
         if cell.worktree_path.is_empty() {
             return Err(CmdError::BadRequest("agent has no worktree".into()));
         }
-        (PathBuf::from(&cell.worktree_repo_root), PathBuf::from(&cell.worktree_path))
+        (
+            PathBuf::from(&cell.worktree_repo_root),
+            PathBuf::from(&cell.worktree_path),
+        )
     };
 
     let mgr = WorktreeManager::new(&repo_root, None);
@@ -150,12 +157,16 @@ pub async fn prune(_ctx: &CmdContext, req: &Value) -> CmdResult {
 
 pub async fn checkpoint_cmd(ctx: &CmdContext, req: &Value) -> CmdResult {
     let agent_id = required_str(req, "agent_id")?.to_string();
-    let message = optional_str(req, "message").unwrap_or("loom: checkpoint").to_string();
+    let message = optional_str(req, "message")
+        .unwrap_or("loom: checkpoint")
+        .to_string();
 
     let path = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
-            return Err(CmdError::BadRequest(format!("agent '{agent_id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "agent '{agent_id}' not found"
+            )));
         };
         if cell.worktree_path.is_empty() {
             return Err(CmdError::BadRequest("agent has no worktree".into()));
@@ -194,9 +205,14 @@ pub async fn history(ctx: &CmdContext, req: &Value) -> CmdResult {
     let (path, base) = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
-            return Err(CmdError::BadRequest(format!("agent '{agent_id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "agent '{agent_id}' not found"
+            )));
         };
-        (PathBuf::from(&cell.worktree_path), cell.worktree_base_branch.clone())
+        (
+            PathBuf::from(&cell.worktree_path),
+            cell.worktree_base_branch.clone(),
+        )
     };
     let checkpoints = list_checkpoints(&path, &base).await.map_err(worktree_err)?;
     Ok(json!({ "checkpoints": checkpoints }))
@@ -207,9 +223,14 @@ pub async fn diff(ctx: &CmdContext, req: &Value) -> CmdResult {
     let (path, base) = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
-            return Err(CmdError::BadRequest(format!("agent '{agent_id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "agent '{agent_id}' not found"
+            )));
         };
-        (PathBuf::from(&cell.worktree_path), cell.worktree_base_branch.clone())
+        (
+            PathBuf::from(&cell.worktree_path),
+            cell.worktree_base_branch.clone(),
+        )
     };
     let path_clone = path.clone();
     let base_clone = base.clone();
@@ -246,7 +267,9 @@ pub async fn rollback(ctx: &CmdContext, req: &Value) -> CmdResult {
     let path = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
-            return Err(CmdError::BadRequest(format!("agent '{agent_id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "agent '{agent_id}' not found"
+            )));
         };
         PathBuf::from(&cell.worktree_path)
     };
@@ -259,7 +282,9 @@ pub async fn check_merge(ctx: &CmdContext, req: &Value) -> CmdResult {
     let (path, branch, base) = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
-            return Err(CmdError::BadRequest(format!("agent '{agent_id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "agent '{agent_id}' not found"
+            )));
         };
         (
             PathBuf::from(&cell.worktree_path),
@@ -267,7 +292,9 @@ pub async fn check_merge(ctx: &CmdContext, req: &Value) -> CmdResult {
             cell.worktree_base_branch.clone(),
         )
     };
-    let merged = is_merged(&path, &branch, &base).await.map_err(worktree_err)?;
+    let merged = is_merged(&path, &branch, &base)
+        .await
+        .map_err(worktree_err)?;
 
     let agent = {
         let mut st = ctx.state.lock().await;

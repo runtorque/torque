@@ -11,7 +11,7 @@ pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     let title = required_str(req, "task")?.to_string();
     let group = required_str(req, "group")?.to_string();
 
-    let id = {
+    let (id, prefix, next_root_number) = {
         let mut st = ctx.state.lock().await;
         if !st.groups.contains_key(&group) {
             return Err(CmdError::BadRequest(format!("group '{group}' not found")));
@@ -20,7 +20,7 @@ pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         let counter = st.task_id_counters.entry(prefix.clone()).or_insert(0);
         *counter += 1;
         let trunk = *counter;
-        format_root_task_id(&group, trunk)
+        (format_root_task_id(&group, trunk), prefix, trunk)
     };
 
     let mut task = BoardTask::new_minimal(id.clone(), title.clone());
@@ -58,6 +58,9 @@ pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         let mut st = ctx.state.lock().await;
         st.upsert_task(task.clone())?;
     }
+    ctx.db
+        .save_task_id_counter(&prefix, next_root_number as u64)
+        .await?;
     ctx.db.save_board_task(&task).await?;
     flush(ctx).await;
     Ok(json!({ "ok": true, "task_id": task.id, "slug": task.slug }))
@@ -134,10 +137,7 @@ pub async fn move_task(ctx: &CmdContext, req: &Value) -> CmdResult {
 
 pub async fn reorder_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     let id = required_str(req, "id")?.to_string();
-    let position = req
-        .get("position")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
+    let position = req.get("position").and_then(|v| v.as_i64()).unwrap_or(0);
     let task = {
         let mut st = ctx.state.lock().await;
         let Some(mut task) = st.board_tasks.get(&id).cloned() else {
@@ -219,7 +219,9 @@ pub async fn rename_lane(ctx: &CmdContext, req: &Value) -> CmdResult {
     let from = required_str(req, "from")?.to_string();
     let to = required_str(req, "to")?.to_string();
     if loom_core::state::RESERVED_LANES.contains(&from.as_str()) {
-        return Err(CmdError::BadRequest(format!("cannot rename reserved lane '{from}'")));
+        return Err(CmdError::BadRequest(format!(
+            "cannot rename reserved lane '{from}'"
+        )));
     }
     let lanes = {
         let mut st = ctx.state.lock().await;
@@ -252,11 +254,18 @@ pub async fn rename_lane(ctx: &CmdContext, req: &Value) -> CmdResult {
 pub async fn remove_lane(ctx: &CmdContext, req: &Value) -> CmdResult {
     let name = required_str(req, "name")?.to_string();
     if loom_core::state::RESERVED_LANES.contains(&name.as_str()) {
-        return Err(CmdError::BadRequest(format!("cannot remove reserved lane '{name}'")));
+        return Err(CmdError::BadRequest(format!(
+            "cannot remove reserved lane '{name}'"
+        )));
     }
     let lanes = {
         let mut st = ctx.state.lock().await;
-        let new_lanes: Vec<String> = st.board_lanes.iter().filter(|l| *l != &name).cloned().collect();
+        let new_lanes: Vec<String> = st
+            .board_lanes
+            .iter()
+            .filter(|l| *l != &name)
+            .cloned()
+            .collect();
         st.set_lanes(new_lanes.clone())?;
         // tasks in the removed lane fall back to Backlog
         let affected: Vec<String> = st
@@ -282,7 +291,11 @@ pub async fn reorder_lanes(ctx: &CmdContext, req: &Value) -> CmdResult {
     let order: Vec<String> = req
         .get("order")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     if order.is_empty() {
         return Err(CmdError::BadRequest("missing 'order'".into()));
@@ -376,8 +389,9 @@ pub async fn set_layout(ctx: &CmdContext, req: &Value) -> CmdResult {
     }
 
     let stored = match &layout {
-        Some(l) => serde_json::to_string(l)
-            .map_err(|e| CmdError::BadRequest(format!("encode: {e}")))?,
+        Some(l) => {
+            serde_json::to_string(l).map_err(|e| CmdError::BadRequest(format!("encode: {e}")))?
+        }
         None => String::new(),
     };
     ctx.db.set_ui_state("content_layout", &stored).await?;
@@ -479,57 +493,106 @@ pub async fn set_panel(ctx: &CmdContext, req: &Value) -> CmdResult {
     let panel = req
         .get("panel")
         .and_then(|v| v.as_str())
+        .or_else(|| req.get("active").and_then(|v| v.as_str()))
         .unwrap_or("")
         .to_string();
+    let height = req.get("height").and_then(|v| v.as_i64()).map(|v| v as i32);
+    let open = req.get("open").and_then(|v| v.as_bool());
+
+    let (changed, effective_panel, effective_height) = {
+        let mut changed = false;
+        let mut st = ctx.state.lock().await;
+        let mut effective_height = st.board_panel_height;
+        if let Some(next_height) = height {
+            if st.board_panel_height != next_height {
+                st.board_panel_height = next_height;
+                st.emit(loom_core::delta::DeltaOp::UiUpdate {
+                    key: "board_panel_height".into(),
+                    value: json!(next_height),
+                });
+                changed = true;
+            }
+            effective_height = st.board_panel_height;
+        }
+        let next_panel = if let Some(is_open) = open {
+            if is_open {
+                "board".to_string()
+            } else {
+                String::new()
+            }
+        } else {
+            panel.clone()
+        };
+        if st.panel_active != next_panel {
+            st.panel_active = next_panel.clone();
+            st.emit(loom_core::delta::DeltaOp::UiUpdate {
+                key: "panel_active".into(),
+                value: json!(next_panel),
+            });
+            changed = true;
+        }
+        let effective_panel = st.panel_active.clone();
+        (changed, effective_panel, effective_height)
+    };
+    if changed {
+        if height.is_some() {
+            ctx.db
+                .set_ui_state("board_panel_height", &effective_height.to_string())
+                .await?;
+        }
+        ctx.db
+            .set_ui_state("panel_active", &effective_panel)
+            .await?;
+        flush(ctx).await;
+        Ok(json!({ "ok": true, "panel": effective_panel, "height": effective_height }))
+    } else {
+        ok()
+    }
+}
+
+/// Persist the legacy standalone panel layout object unchanged so the
+/// existing browser client can restore and sync its panel workspace.
+pub async fn set_standalone_panel_layout(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let layout = req.get("layout").cloned().unwrap_or_else(|| json!({}));
+    let encoded =
+        serde_json::to_string(&layout).map_err(|e| CmdError::BadRequest(format!("encode: {e}")))?;
     {
         let mut st = ctx.state.lock().await;
-        if st.panel_active == panel {
-            return ok();
-        }
-        st.panel_active = panel.clone();
-        st.emit(loom_core::delta::DeltaOp::UiUpdate(json!({
-            "panel_active": panel,
-        })));
+        st.standalone_panel_layout = layout.clone();
+        st.emit(loom_core::delta::DeltaOp::UiUpdate {
+            key: "standalone_panel_layout".into(),
+            value: layout,
+        });
     }
-    ctx.db.set_ui_state("panel_active", &panel).await?;
+    ctx.db
+        .set_ui_state("standalone_panel_layout", &encoded)
+        .await?;
     flush(ctx).await;
-    Ok(json!({ "ok": true, "panel": panel }))
+    ok()
 }
 
 /// Set per-group board filter state. Payload: `{ "group": "Eng", "filters": {...} }`.
 /// Persisted as JSON in `ui_state[board_filters_by_group]`.
 pub async fn set_filters(ctx: &CmdContext, req: &Value) -> CmdResult {
-    set_per_group_ui(
-        ctx,
-        req,
-        "filters",
-        "board_filters_by_group",
-        |st| &mut st.board_filters_by_group,
-    )
+    set_per_group_ui(ctx, req, "filters", "board_filters_by_group", |st| {
+        &mut st.board_filters_by_group
+    })
     .await
 }
 
 /// Set per-group saved views. Payload: `{ "group": "Eng", "views": [...] }`.
 pub async fn set_saved_views(ctx: &CmdContext, req: &Value) -> CmdResult {
-    set_per_group_ui(
-        ctx,
-        req,
-        "views",
-        "board_saved_views_by_group",
-        |st| &mut st.board_saved_views_by_group,
-    )
+    set_per_group_ui(ctx, req, "views", "board_saved_views_by_group", |st| {
+        &mut st.board_saved_views_by_group
+    })
     .await
 }
 
 /// Set per-group lane sort rules. Payload: `{ "group": "Eng", "sorts": {...} }`.
 pub async fn set_lane_sorts(ctx: &CmdContext, req: &Value) -> CmdResult {
-    set_per_group_ui(
-        ctx,
-        req,
-        "sorts",
-        "board_lane_sorts_by_group",
-        |st| &mut st.board_lane_sorts_by_group,
-    )
+    set_per_group_ui(ctx, req, "sorts", "board_lane_sorts_by_group", |st| {
+        &mut st.board_lane_sorts_by_group
+    })
     .await
 }
 
@@ -542,11 +605,11 @@ pub async fn set_card_density(ctx: &CmdContext, req: &Value) -> CmdResult {
         let mut st = ctx.state.lock().await;
         st.board_card_density_by_group
             .insert(group.clone(), density.clone());
-        // Broadcast the whole map (matches the Python wire shape: a ui_update
-        // with the by-group dict).
         let map = st.board_card_density_by_group.clone();
-        let payload = json!({ "board_card_density_by_group": map });
-        st.emit(loom_core::delta::DeltaOp::UiUpdate(payload));
+        st.emit(loom_core::delta::DeltaOp::UiUpdate {
+            key: "board_card_density_by_group".into(),
+            value: json!(map),
+        });
         map
     };
 
@@ -566,22 +629,23 @@ async fn set_per_group_ui(
     ui_state_key: &str,
     select: impl FnOnce(
         &mut loom_core::state::MatrixState,
-    )
-        -> &mut std::collections::HashMap<String, Value>,
+    ) -> &mut std::collections::HashMap<String, Value>,
 ) -> CmdResult {
     let group = required_str(req, "group")?.to_string();
-    let value = req.get(payload_key).cloned().ok_or_else(|| {
-        CmdError::BadRequest(format!("missing '{payload_key}'"))
-    })?;
+    let value = req
+        .get(payload_key)
+        .cloned()
+        .ok_or_else(|| CmdError::BadRequest(format!("missing '{payload_key}'")))?;
 
     let full_map = {
         let mut st = ctx.state.lock().await;
         let map = select(&mut st);
         map.insert(group.clone(), value.clone());
         let clone = map.clone();
-        st.emit(loom_core::delta::DeltaOp::UiUpdate(json!({
-            ui_state_key: clone,
-        })));
+        st.emit(loom_core::delta::DeltaOp::UiUpdate {
+            key: ui_state_key.to_string(),
+            value: json!(clone),
+        });
         st_map_clone(&st, ui_state_key)
     };
 

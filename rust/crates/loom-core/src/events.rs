@@ -21,14 +21,8 @@ const BROADCAST_CAPACITY: usize = 256;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutMessage {
-    Delta {
-        seq: u64,
-        ops: Vec<DeltaOp>,
-    },
-    Snapshot {
-        seq: u64,
-        state: serde_json::Value,
-    },
+    Delta { seq: u64, ops: Vec<DeltaOp> },
+    Snapshot { seq: u64, state: serde_json::Value },
     Event(serde_json::Value),
 }
 
@@ -74,7 +68,13 @@ pub async fn flush_deltas(state: Arc<Mutex<MatrixState>>, bus: &EventBus) -> Opt
 
 /// Build a full snapshot message for a new subscriber or a resync.
 pub fn snapshot_message(_state: &MatrixState, seq: u64, value: serde_json::Value) -> DeltaMessage {
-    DeltaMessage::new(seq, vec![DeltaOp::UiUpdate(value)])
+    DeltaMessage::new(
+        seq,
+        vec![DeltaOp::UiUpdate {
+            key: "snapshot".into(),
+            value,
+        }],
+    )
 }
 
 #[cfg(test)]
@@ -86,7 +86,10 @@ mod tests {
         let bus = EventBus::new();
         let mut rx1 = bus.subscribe();
         let mut rx2 = bus.subscribe();
-        bus.send(OutMessage::Delta { seq: 1, ops: vec![] });
+        bus.send(OutMessage::Delta {
+            seq: 1,
+            ops: vec![],
+        });
         let m1 = rx1.recv().await.unwrap();
         let m2 = rx2.recv().await.unwrap();
         match (m1, m2) {

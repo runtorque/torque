@@ -10,8 +10,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{declare_class, msg_send, msg_send_id, mutability, sel, ClassType, DeclaredClass};
 use objc2_app_kit::{
-    NSAutoresizingMaskOptions, NSButton, NSColor, NSFont, NSMenu, NSMenuItem, NSTextField,
-    NSView,
+    NSAutoresizingMaskOptions, NSButton, NSColor, NSFont, NSMenu, NSMenuItem, NSTextField, NSView,
 };
 use objc2_foundation::{MainThreadMarker, NSObject, NSPoint, NSRect, NSSize, NSString};
 

@@ -26,9 +26,7 @@ use std::rc::Rc;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
-use objc2::{
-    declare_class, msg_send, msg_send_id, mutability, sel, ClassType, DeclaredClass,
-};
+use objc2::{declare_class, msg_send, msg_send_id, mutability, sel, ClassType, DeclaredClass};
 use objc2_app_kit::{
     NSAutoresizingMaskOptions, NSBorderType, NSButton, NSColor, NSControlTextEditingDelegate,
     NSEvent, NSFont, NSMenu, NSMenuItem, NSOutlineView, NSOutlineViewDataSource,
@@ -538,26 +536,68 @@ fn build_context_menu(
     match item.kind() {
         ITEM_KIND_GROUP => {
             let name = key.trim_start_matches("g:");
-            add_item(&menu, mtm, "Rename Group…", &format!("rename_group|{name}"), target);
-            add_item(&menu, mtm, "Add Agent…", &format!("add_agent|{name}"), target);
-            add_item(&menu, mtm, "Add Terminal…", &format!("add_terminal|{name}"), target);
+            add_item(
+                &menu,
+                mtm,
+                "Rename Group…",
+                &format!("rename_group|{name}"),
+                target,
+            );
+            add_item(
+                &menu,
+                mtm,
+                "Add Agent…",
+                &format!("add_agent|{name}"),
+                target,
+            );
+            add_item(
+                &menu,
+                mtm,
+                "Add Terminal…",
+                &format!("add_terminal|{name}"),
+                target,
+            );
             menu.addItem(&NSMenuItem::separatorItem(mtm));
-            add_item(&menu, mtm, "Remove Group", &format!("remove_group|{name}"), target);
+            add_item(
+                &menu,
+                mtm,
+                "Remove Group",
+                &format!("remove_group|{name}"),
+                target,
+            );
         }
         ITEM_KIND_AGENT => {
             add_item(&menu, mtm, "Rename…", &format!("rename_cell|{key}"), target);
             add_item(&menu, mtm, "Edit…", &format!("edit_agent|{key}"), target);
             add_item(&menu, mtm, "Relaunch", &format!("relaunch|{key}"), target);
-            add_item(&menu, mtm, "Add Terminal…", &format!("add_child_terminal|{key}"), target);
+            add_item(
+                &menu,
+                mtm,
+                "Add Terminal…",
+                &format!("add_child_terminal|{key}"),
+                target,
+            );
             menu.addItem(&NSMenuItem::separatorItem(mtm));
-            add_item(&menu, mtm, "Remove Agent", &format!("remove_cell|{key}"), target);
+            add_item(
+                &menu,
+                mtm,
+                "Remove Agent",
+                &format!("remove_cell|{key}"),
+                target,
+            );
         }
         ITEM_KIND_TERMINAL => {
             add_item(&menu, mtm, "Rename…", &format!("rename_cell|{key}"), target);
             add_item(&menu, mtm, "Edit…", &format!("edit_terminal|{key}"), target);
             add_item(&menu, mtm, "Relaunch", &format!("relaunch|{key}"), target);
             menu.addItem(&NSMenuItem::separatorItem(mtm));
-            add_item(&menu, mtm, "Remove Terminal", &format!("remove_cell|{key}"), target);
+            add_item(
+                &menu,
+                mtm,
+                "Remove Terminal",
+                &format!("remove_cell|{key}"),
+                target,
+            );
         }
         _ => {}
     }
@@ -682,8 +722,7 @@ fn run_add_agent(bridge: &EngineBridge, mtm: MainThreadMarker, group: &str) {
         vec![
             FormField::new("Name", "name").with_placeholder("worker"),
             FormField::new("Command", "command").with_placeholder("claude"),
-            FormField::new("Directory", "directory")
-                .with_placeholder("leave blank for current"),
+            FormField::new("Directory", "directory").with_placeholder("leave blank for current"),
         ],
         "Create",
     ) else {
@@ -722,8 +761,7 @@ fn run_add_terminal(
         vec![
             FormField::new("Name", "name").with_placeholder("logs"),
             FormField::new("Command", "command").with_placeholder("/bin/zsh"),
-            FormField::new("Directory", "directory")
-                .with_placeholder("leave blank for current"),
+            FormField::new("Directory", "directory").with_placeholder("leave blank for current"),
         ],
         "Create",
     ) else {
@@ -1110,8 +1148,7 @@ impl SidebarView {
 
             // Protocol-typed setters: NSOutlineView wants ProtocolObject<dyn
             // NSOutlineViewDataSource> / NSOutlineViewDelegate.
-            let ds_proto =
-                ProtocolObject::from_ref::<SidebarDataSource>(&data_source);
+            let ds_proto = ProtocolObject::from_ref::<SidebarDataSource>(&data_source);
             outline.setDataSource(Some(ds_proto));
             let del_proto = ProtocolObject::from_ref::<SidebarDelegate>(&delegate);
             outline.setDelegate(Some(del_proto));
@@ -1155,8 +1192,7 @@ impl SidebarView {
 
     fn expand_all(&self) {
         let inner = self.inner.borrow();
-        let groups: Vec<String> =
-            inner.tree.groups.iter().map(|g| g.name.clone()).collect();
+        let groups: Vec<String> = inner.tree.groups.iter().map(|g| g.name.clone()).collect();
         drop(inner);
         for name in groups {
             let item = {

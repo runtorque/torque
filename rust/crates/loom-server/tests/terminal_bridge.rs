@@ -106,6 +106,7 @@ async fn spawn_loom_server(bridge_url: Option<String>) -> (SocketAddr, Arc<Mutex
         pty: None,
         ui_agents: Default::default(),
         terminal_bridge: terminal_bridge_client,
+        terminals: Default::default(),
     };
 
     let router = Router::new()
@@ -151,7 +152,7 @@ async fn add_agent_creates_session_via_terminal_bridge() {
     )
     .await;
     assert_eq!(response["ok"], true);
-    let agent_id = response["agent_id"].as_str().unwrap().to_string();
+    let agent_id = response["data"]["agent_id"].as_str().unwrap().to_string();
 
     let calls = calls.lock().await;
     let create = calls
@@ -177,7 +178,7 @@ async fn send_text_routes_through_terminal_bridge() {
         json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
     )
     .await;
-    let agent_id = response["agent_id"].as_str().unwrap().to_string();
+    let agent_id = response["data"]["agent_id"].as_str().unwrap().to_string();
 
     let response = post_cmd(
         addr,
@@ -238,7 +239,7 @@ async fn agent_sync_callback_updates_existing_agent() {
         json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
     )
     .await;
-    let agent_id = response["agent_id"].as_str().unwrap().to_string();
+    let agent_id = response["data"]["agent_id"].as_str().unwrap().to_string();
 
     let response = post_json(
         addr,
@@ -281,7 +282,7 @@ async fn agent_sync_callback_preserves_rust_owned_state() {
         json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
     )
     .await;
-    let agent_id = response["agent_id"].as_str().unwrap().to_string();
+    let agent_id = response["data"]["agent_id"].as_str().unwrap().to_string();
 
     {
         let mut st = state.lock().await;

@@ -1,10 +1,14 @@
 //! Agent + terminal CRUD commands.
 
+use std::collections::BTreeMap;
+
 use serde_json::{json, Value};
 use tracing::warn;
 use uuid::Uuid;
 
 use loom_core::state::AgentCell;
+
+use loom_core::delta::DeltaOp;
 
 use super::{flush, ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
 use crate::terminal_bridge::bridge_manages_cell;
@@ -12,10 +16,21 @@ use crate::terminal_bridge::bridge_manages_cell;
 pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     let name = required_str(req, "name")?.to_string();
     let group = required_str(req, "group")?.to_string();
+    let bridge_configured = ctx.terminal_bridge.is_configured();
 
     let mut cell = AgentCell::new(Uuid::new_v4().to_string(), &name, &group);
     cell.cell_type = "agent".into();
     apply_common_fields(&mut cell, req);
+    {
+        let st = ctx.state.lock().await;
+        let settings = st.group_settings.get(&group).cloned().unwrap_or_default();
+        apply_agent_defaults(&mut cell, &settings, req);
+    }
+    if let Some(bk) = req.get("terminal_backend").and_then(|v| v.as_str()) {
+        cell.terminal_backend = bk.to_string();
+    } else if bridge_configured {
+        cell.terminal_backend = "iterm2".into();
+    }
     let agent_id = cell.id.clone();
 
     let final_cell = {
@@ -25,6 +40,23 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     };
     let final_cell = maybe_create_bridge_session(ctx, final_cell).await?;
     ctx.db.save_agent(&final_cell).await?;
+    ctx.db
+        .save_agent_history_record(
+            &final_cell.id,
+            &final_cell.name,
+            &final_cell.slug,
+            &final_cell.group,
+            &final_cell.agent_type,
+            &final_cell.template,
+            now_ts(),
+            None,
+            &final_cell.worktree_branch,
+            0,
+            0,
+            0,
+            "active",
+        )
+        .await?;
     persist_group_members(ctx, &group).await?;
     flush(ctx).await;
     Ok(json!({ "ok": true, "agent_id": final_cell.id, "slug": final_cell.slug }))
@@ -33,6 +65,7 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
 pub async fn add_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
     let name = required_str(req, "name")?.to_string();
     let group = required_str(req, "group")?.to_string();
+    let bridge_configured = ctx.terminal_bridge.is_configured();
 
     let mut cell = AgentCell::new(Uuid::new_v4().to_string(), &name, &group);
     cell.cell_type = "terminal".into();
@@ -40,6 +73,27 @@ pub async fn add_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
         cell.parent_id = pid.to_string();
     }
     apply_common_fields(&mut cell, req);
+    let launch_env = {
+        let st = ctx.state.lock().await;
+        let settings = st.group_settings.get(&group).cloned().unwrap_or_default();
+        let parent_worktree = cell
+            .parent_id
+            .as_str()
+            .is_empty()
+            .then_some(String::new())
+            .unwrap_or_else(|| {
+                st.agents
+                    .get(&cell.parent_id)
+                    .map(|parent| parent.worktree_path.clone())
+                    .unwrap_or_default()
+            });
+        apply_terminal_defaults(&mut cell, &settings, req, &parent_worktree)
+    };
+    if let Some(bk) = req.get("terminal_backend").and_then(|v| v.as_str()) {
+        cell.terminal_backend = bk.to_string();
+    } else if bridge_configured {
+        cell.terminal_backend = "iterm2".into();
+    }
     let agent_id = cell.id.clone();
 
     let final_cell = {
@@ -49,7 +103,27 @@ pub async fn add_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
     };
     let final_cell = maybe_create_bridge_session(ctx, final_cell).await?;
     ctx.db.save_agent(&final_cell).await?;
+    ctx.db
+        .save_agent_history_record(
+            &final_cell.id,
+            &final_cell.name,
+            &final_cell.slug,
+            &final_cell.group,
+            &final_cell.agent_type,
+            &final_cell.template,
+            now_ts(),
+            None,
+            &final_cell.worktree_branch,
+            0,
+            0,
+            0,
+            "active",
+        )
+        .await?;
     persist_group_members(ctx, &group).await?;
+    if !bridge_manages_cell(&ctx.terminal_bridge, &final_cell) {
+        crate::commands::dispatch::spawn_cell_session(ctx, &final_cell, Some(&launch_env)).await?;
+    }
     flush(ctx).await;
     Ok(json!({ "ok": true, "agent_id": final_cell.id, "slug": final_cell.slug }))
 }
@@ -80,6 +154,20 @@ pub async fn remove_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     }
     for rid in &removed {
         ctx.db.delete_agent(rid).await?;
+    }
+    for cell in removed_cells {
+        let mut fields = serde_json::Map::new();
+        fields.insert("removed_at".into(), json!(now_ts()));
+        fields.insert("status".into(), json!("removed"));
+        fields.insert(
+            "total_tokens_in".into(),
+            json!(cell.session_tokens_in.max(0)),
+        );
+        fields.insert(
+            "total_tokens_out".into(),
+            json!(cell.session_tokens_out.max(0)),
+        );
+        let _ = ctx.db.update_agent_history_fields(&cell.id, &fields).await;
     }
     persist_group_members(ctx, &group).await?;
     persist_selection(ctx).await?;
@@ -143,6 +231,16 @@ pub async fn update_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
 
     let agent = maybe_update_bridge_session(ctx, agent, &old_name).await?;
     ctx.db.save_agent(&agent).await?;
+    let mut history_fields = serde_json::Map::new();
+    history_fields.insert("name".into(), json!(agent.name));
+    history_fields.insert("slug".into(), json!(agent.slug));
+    history_fields.insert("group".into(), json!(agent.group));
+    history_fields.insert("agent_type".into(), json!(agent.agent_type));
+    history_fields.insert("template".into(), json!(agent.template));
+    let _ = ctx
+        .db
+        .update_agent_history_fields(&agent.id, &history_fields)
+        .await;
     // child slugs may have changed — persist them too
     let children = {
         let st = ctx.state.lock().await;
@@ -195,6 +293,13 @@ pub async fn move_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     };
 
     ctx.db.save_agent(&agent).await?;
+    let mut history_fields = serde_json::Map::new();
+    history_fields.insert("group".into(), json!(agent.group));
+    history_fields.insert("slug".into(), json!(agent.slug));
+    let _ = ctx
+        .db
+        .update_agent_history_fields(&agent.id, &history_fields)
+        .await;
     persist_group_members(ctx, &from_group).await?;
     persist_group_members(ctx, &to).await?;
     flush(ctx).await;
@@ -242,6 +347,12 @@ pub async fn reparent_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
     };
 
     ctx.db.save_agent(&agent).await?;
+    let mut history_fields = serde_json::Map::new();
+    history_fields.insert("slug".into(), json!(agent.slug));
+    let _ = ctx
+        .db
+        .update_agent_history_fields(&agent.id, &history_fields)
+        .await;
     let _ = group;
     flush(ctx).await;
     ok()
@@ -272,6 +383,42 @@ pub async fn clear_agent_context(ctx: &CmdContext, req: &Value) -> CmdResult {
         st.agents.get(&id).cloned().unwrap()
     };
     ctx.db.save_agent(&agent).await?;
+    flush(ctx).await;
+    ok()
+}
+
+pub async fn focus_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let id = required_str(req, "id")?.to_string();
+    let selected_root = {
+        let mut st = ctx.state.lock().await;
+        let cell = st
+            .agents
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| CmdError::BadRequest(format!("agent '{id}' not found")))?;
+        let selected_root = if cell.cell_type == "terminal" && !cell.parent_id.is_empty() {
+            Some(cell.parent_id.clone())
+        } else {
+            Some(cell.id.clone())
+        };
+        st.select_agent(selected_root.as_deref())
+            .map_err(|e| CmdError::BadRequest(e.to_string()))?;
+        st.active_session_id = cell.session_id.clone();
+        st.current_window_id = if cell.window_id.is_empty() {
+            None
+        } else {
+            Some(cell.window_id.clone())
+        };
+        let active_session_id = st.active_session_id.clone();
+        let current_window_id = st.current_window_id.clone();
+        st.emit(DeltaOp::FocusUpdate {
+            active_session_id,
+            current_window_id,
+        });
+        selected_root
+    };
+    let stored = selected_root.unwrap_or_default();
+    ctx.db.set_ui_state("selected_agent_id", &stored).await?;
     flush(ctx).await;
     ok()
 }
@@ -352,6 +499,174 @@ fn apply_common_fields(cell: &mut AgentCell, req: &Value) {
     if let Some(bk) = req.get("terminal_backend").and_then(|v| v.as_str()) {
         cell.terminal_backend = bk.to_string();
     }
+}
+
+fn apply_agent_defaults(
+    cell: &mut AgentCell,
+    settings: &loom_core::state::GroupSettings,
+    req: &Value,
+) {
+    if cell.directory.is_empty() {
+        cell.directory = first_nonempty([
+            settings.agent_directory.clone(),
+            settings.default_directory.clone(),
+            std::env::var("LOOM_PROJECT_ROOT").unwrap_or_default(),
+        ]);
+    }
+    if cell.profile == "Default" {
+        cell.profile = first_nonempty([
+            settings.agent_profile.clone(),
+            settings.profile.clone(),
+            "Default".to_string(),
+        ]);
+    }
+    if cell.tab_color.is_empty() {
+        cell.tab_color =
+            first_nonempty([settings.agent_tab_color.clone(), settings.tab_color.clone()]);
+    }
+    if cell.command.is_empty() {
+        cell.command = first_nonempty([
+            settings.agent_boot_command.clone(),
+            loom_core::config::default_command(),
+        ]);
+    }
+    if cell.template.is_empty() && !settings.default_agent_template.is_empty() {
+        cell.template = settings.default_agent_template.clone();
+    }
+    if let Some(provider) = req.get("provider").and_then(|v| v.as_str()) {
+        cell.agent_type = provider.to_string();
+    } else if !settings.agent_provider.is_empty() {
+        cell.agent_type = settings.agent_provider.clone();
+    } else if let Some(provider) = loom_adapters::registry::detect_by_command(&cell.command) {
+        cell.agent_type = provider.to_string();
+    }
+    cell.terminal_backend = "pty".into();
+}
+
+fn apply_terminal_defaults(
+    cell: &mut AgentCell,
+    settings: &loom_core::state::GroupSettings,
+    req: &Value,
+    parent_worktree: &str,
+) -> BTreeMap<String, String> {
+    if cell.profile == "Default" {
+        cell.profile = first_nonempty([
+            optional_str(req, "profile").unwrap_or("").to_string(),
+            settings.terminal_profile.clone(),
+            settings.profile.clone(),
+            "Default".to_string(),
+        ]);
+    }
+    if cell.directory.is_empty() {
+        cell.directory = first_nonempty([
+            parent_worktree.to_string(),
+            settings.terminal_directory.clone(),
+            settings.default_directory.clone(),
+            std::env::var("LOOM_PROJECT_ROOT").unwrap_or_default(),
+        ]);
+    }
+    if cell.tab_color.is_empty() {
+        let terminal_color = settings.terminal_tab_color.clone();
+        cell.tab_color = if terminal_color == "none" {
+            String::new()
+        } else {
+            first_nonempty([terminal_color, settings.tab_color.clone()])
+        };
+    }
+    let shell = first_nonempty([
+        optional_str(req, "shell").unwrap_or("").to_string(),
+        settings.terminal_shell.clone(),
+        settings.shell.clone(),
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()),
+    ]);
+    let command_args = first_nonempty([
+        optional_str(req, "command_args").unwrap_or("").to_string(),
+        settings.terminal_command_args.clone(),
+    ]);
+    let mut command =
+        first_nonempty([cell.command.clone(), settings.terminal_boot_command.clone()]);
+    if !command_args.is_empty() {
+        command = if command.is_empty() {
+            command_args
+        } else {
+            format!("{command} {command_args}")
+        };
+    }
+    let init_script = first_nonempty([
+        optional_str(req, "init_script").unwrap_or("").to_string(),
+        settings.terminal_init_script.clone(),
+    ]);
+    let env_vars = merged_env(
+        &settings.env_vars,
+        &settings.terminal_env_vars,
+        req.get("env_vars").and_then(|v| v.as_object()),
+    );
+    cell.command = build_terminal_launch_command(&command, &shell, &init_script, &env_vars);
+    cell.terminal_backend = "pty".into();
+    env_vars
+}
+
+fn merged_env(
+    base: &BTreeMap<String, String>,
+    extra: &BTreeMap<String, String>,
+    req: Option<&serde_json::Map<String, Value>>,
+) -> BTreeMap<String, String> {
+    let mut env = base.clone();
+    env.extend(extra.clone());
+    if let Some(req) = req {
+        for (key, value) in req {
+            if let Some(value) = value.as_str() {
+                env.insert(key.clone(), value.to_string());
+            }
+        }
+    }
+    env
+}
+
+fn build_terminal_launch_command(
+    command: &str,
+    shell: &str,
+    init_script: &str,
+    env_vars: &BTreeMap<String, String>,
+) -> String {
+    let launch = if !command.trim().is_empty() {
+        command.trim().to_string()
+    } else {
+        shell.trim().to_string()
+    };
+    let mut parts = Vec::new();
+    for (key, value) in env_vars {
+        if key.trim().is_empty() {
+            continue;
+        }
+        parts.push(format!(
+            "export {}={}",
+            shell_escape(key),
+            shell_escape(value)
+        ));
+    }
+    if !init_script.trim().is_empty() {
+        parts.push(init_script.trim().to_string());
+    }
+    if !launch.is_empty() {
+        parts.push(format!("exec {launch}"));
+    }
+    parts.join("\n")
+}
+
+fn shell_escape(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn first_nonempty<const N: usize>(values: [String; N]) -> String {
+    values
+        .into_iter()
+        .find(|value| !value.is_empty())
+        .unwrap_or_default()
+}
+
+fn now_ts() -> f64 {
+    chrono::Utc::now().timestamp_millis() as f64 / 1000.0
 }
 
 async fn persist_group_members(ctx: &CmdContext, group: &str) -> Result<(), CmdError> {
