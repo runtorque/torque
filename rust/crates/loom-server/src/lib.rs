@@ -5,6 +5,7 @@ pub mod commands;
 pub mod events;
 pub mod mcp;
 pub mod scheduler;
+pub mod terminal_bridge;
 pub mod uploads;
 pub mod ws;
 

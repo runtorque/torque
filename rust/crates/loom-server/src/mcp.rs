@@ -35,6 +35,7 @@ async fn handle_mcp(
         bus: app.bus.clone(),
         pty: app.pty.clone(),
         ui_agents: app.ui_agents.clone(),
+        terminal_bridge: app.terminal_bridge.clone(),
     };
 
     let result = match method {

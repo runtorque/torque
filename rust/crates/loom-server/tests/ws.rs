@@ -25,6 +25,7 @@ async fn spawn_test_server() -> SocketAddr {
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
     };
 
@@ -47,6 +48,7 @@ async fn spawn_test_server_with_app() -> (SocketAddr, loom_server::app::AppState
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
     };
 

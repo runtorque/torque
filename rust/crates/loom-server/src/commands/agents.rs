@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
+use tracing::warn;
 use uuid::Uuid;
 
 use loom_core::state::AgentCell;
@@ -10,10 +11,12 @@ use loom_core::state::AgentCell;
 use loom_core::delta::DeltaOp;
 
 use super::{flush, ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
+use crate::terminal_bridge::bridge_manages_cell;
 
 pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     let name = required_str(req, "name")?.to_string();
     let group = required_str(req, "group")?.to_string();
+    let bridge_configured = ctx.terminal_bridge.is_configured();
 
     let mut cell = AgentCell::new(Uuid::new_v4().to_string(), &name, &group);
     cell.cell_type = "agent".into();
@@ -23,6 +26,11 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
         let settings = st.group_settings.get(&group).cloned().unwrap_or_default();
         apply_agent_defaults(&mut cell, &settings, req);
     }
+    if let Some(bk) = req.get("terminal_backend").and_then(|v| v.as_str()) {
+        cell.terminal_backend = bk.to_string();
+    } else if bridge_configured {
+        cell.terminal_backend = "iterm2".into();
+    }
     let agent_id = cell.id.clone();
 
     let final_cell = {
@@ -30,6 +38,7 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
         st.add_agent(cell)?;
         st.agents.get(&agent_id).cloned().unwrap()
     };
+    let final_cell = maybe_create_bridge_session(ctx, final_cell).await?;
     ctx.db.save_agent(&final_cell).await?;
     ctx.db
         .save_agent_history_record(
@@ -56,6 +65,7 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
 pub async fn add_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
     let name = required_str(req, "name")?.to_string();
     let group = required_str(req, "group")?.to_string();
+    let bridge_configured = ctx.terminal_bridge.is_configured();
 
     let mut cell = AgentCell::new(Uuid::new_v4().to_string(), &name, &group);
     cell.cell_type = "terminal".into();
@@ -79,6 +89,11 @@ pub async fn add_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
             });
         apply_terminal_defaults(&mut cell, &settings, req, &parent_worktree)
     };
+    if let Some(bk) = req.get("terminal_backend").and_then(|v| v.as_str()) {
+        cell.terminal_backend = bk.to_string();
+    } else if bridge_configured {
+        cell.terminal_backend = "iterm2".into();
+    }
     let agent_id = cell.id.clone();
 
     let final_cell = {
@@ -86,6 +101,7 @@ pub async fn add_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
         st.add_agent(cell)?;
         st.agents.get(&agent_id).cloned().unwrap()
     };
+    let final_cell = maybe_create_bridge_session(ctx, final_cell).await?;
     ctx.db.save_agent(&final_cell).await?;
     ctx.db
         .save_agent_history_record(
@@ -105,7 +121,9 @@ pub async fn add_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
         )
         .await?;
     persist_group_members(ctx, &group).await?;
-    crate::commands::dispatch::spawn_cell_session(ctx, &final_cell, Some(&launch_env)).await?;
+    if !bridge_manages_cell(&ctx.terminal_bridge, &final_cell) {
+        crate::commands::dispatch::spawn_cell_session(ctx, &final_cell, Some(&launch_env)).await?;
+    }
     flush(ctx).await;
     Ok(json!({ "ok": true, "agent_id": final_cell.id, "slug": final_cell.slug }))
 }
@@ -119,23 +137,21 @@ pub async fn remove_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
             .get(&id)
             .map(|a| a.group.clone())
             .ok_or_else(|| CmdError::BadRequest(format!("agent '{id}' not found")))?;
-        let removed_cells = st
-            .agents
-            .iter()
-            .filter(|(agent_id, cell)| {
-                **agent_id == id
-                    || cell.parent_id == id
-                    || st
-                        .children
-                        .get(&id)
-                        .map(|kids| kids.contains(agent_id))
-                        .unwrap_or(false)
-            })
-            .map(|(_, cell)| cell.clone())
-            .collect::<Vec<_>>();
+        let removed_cells = collect_removed_cells(&st, &id);
         let removed = st.remove_agent(&id)?;
         (group, removed, removed_cells)
     };
+    for cell in &removed_cells {
+        if bridge_manages_cell(&ctx.terminal_bridge, cell) && cell.session_id.is_some() {
+            if let Err(err) = ctx
+                .terminal_bridge
+                .close_session(&cell.id, cell.session_id.as_deref())
+                .await
+            {
+                warn!(?err, agent_id = %cell.id, "terminal bridge close_session failed");
+            }
+        }
+    }
     for rid in &removed {
         ctx.db.delete_agent(rid).await?;
     }
@@ -174,7 +190,7 @@ pub async fn update_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     let id = required_str(req, "id")?.to_string();
     let patch = req.get("fields").cloned().unwrap_or(Value::Null);
 
-    let (agent, group) = {
+    let (agent, group, old_name) = {
         let mut st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&id) else {
             return Err(CmdError::BadRequest(format!("agent '{id}' not found")));
@@ -210,9 +226,10 @@ pub async fn update_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
         }
         st.emit_agent(&id);
         let agent = st.agents.get(&id).cloned().unwrap();
-        (agent, group)
+        (agent, group, old_name)
     };
 
+    let agent = maybe_update_bridge_session(ctx, agent, &old_name).await?;
     ctx.db.save_agent(&agent).await?;
     let mut history_fields = serde_json::Map::new();
     history_fields.insert("name".into(), json!(agent.name));
@@ -659,4 +676,76 @@ async fn persist_group_members(ctx: &CmdContext, group: &str) -> Result<(), CmdE
     };
     ctx.db.save_group_members(group, &members).await?;
     Ok(())
+}
+
+async fn maybe_create_bridge_session(
+    ctx: &CmdContext,
+    cell: AgentCell,
+) -> Result<AgentCell, CmdError> {
+    if !bridge_manages_cell(&ctx.terminal_bridge, &cell) {
+        return Ok(cell);
+    }
+
+    let bridged = match ctx.terminal_bridge.create_session(&cell).await {
+        Ok(Some(updated)) => updated,
+        Ok(None) => cell,
+        Err(err) => {
+            warn!(?err, agent_id = %cell.id, "terminal bridge create_session failed");
+            let mut errored = cell;
+            errored.status = "error".into();
+            errored.error_message = err.to_string();
+            errored
+        }
+    };
+
+    let final_cell = {
+        let mut st = ctx.state.lock().await;
+        st.agents.insert(bridged.id.clone(), bridged.clone());
+        st.emit_agent(&bridged.id);
+        st.agents.get(&bridged.id).cloned().unwrap()
+    };
+    Ok(final_cell)
+}
+
+async fn maybe_update_bridge_session(
+    ctx: &CmdContext,
+    agent: AgentCell,
+    old_name: &str,
+) -> Result<AgentCell, CmdError> {
+    if !bridge_manages_cell(&ctx.terminal_bridge, &agent) || agent.session_id.is_none() {
+        return Ok(agent);
+    }
+
+    let bridged = match ctx.terminal_bridge.update_session(&agent, old_name).await {
+        Ok(Some(updated)) => updated,
+        Ok(None) => agent,
+        Err(err) => {
+            warn!(?err, agent_id = %agent.id, "terminal bridge update_session failed");
+            agent
+        }
+    };
+    let final_agent = {
+        let mut st = ctx.state.lock().await;
+        st.agents.insert(bridged.id.clone(), bridged.clone());
+        st.emit_agent(&bridged.id);
+        st.agents.get(&bridged.id).cloned().unwrap()
+    };
+    Ok(final_agent)
+}
+
+fn collect_removed_cells(st: &loom_core::state::MatrixState, id: &str) -> Vec<AgentCell> {
+    fn walk(st: &loom_core::state::MatrixState, id: &str, out: &mut Vec<AgentCell>) {
+        if let Some(cell) = st.agents.get(id).cloned() {
+            out.push(cell);
+        }
+        if let Some(children) = st.children.get(id) {
+            for child_id in children {
+                walk(st, child_id, out);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    walk(st, id, &mut out);
+    out
 }

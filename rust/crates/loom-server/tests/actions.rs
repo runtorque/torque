@@ -44,6 +44,7 @@ async fn spawn_with_actions() -> SocketAddr {
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
     };
 

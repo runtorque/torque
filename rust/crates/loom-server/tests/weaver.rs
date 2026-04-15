@@ -28,6 +28,7 @@ async fn spawn() -> (SocketAddr, Arc<Mutex<MatrixState>>, LoomDb, UiAgentRegistr
         bus,
         pty: None,
         ui_agents: ui_agents.clone(),
+        terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
     };
 

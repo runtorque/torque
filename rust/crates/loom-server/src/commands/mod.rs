@@ -21,6 +21,7 @@ use loom_core::state::MatrixState;
 use loom_pty::LocalPtyBackend;
 
 use crate::app::{AppState, UiAgentRegistry};
+use crate::terminal_bridge::TerminalBridgeClient;
 
 pub mod actions;
 pub mod agents;
@@ -59,6 +60,7 @@ async fn handle_cmd(State(app): State<AppState>, Json(req): Json<Value>) -> impl
         bus: app.bus.clone(),
         pty: app.pty.clone(),
         ui_agents: app.ui_agents.clone(),
+        terminal_bridge: app.terminal_bridge.clone(),
     };
 
     let result = dispatch_command(&ctx, &cmd, &req).await;
@@ -67,7 +69,10 @@ async fn handle_cmd(State(app): State<AppState>, Json(req): Json<Value>) -> impl
             if value.get("type").and_then(|v| v.as_str()) == Some("error") {
                 Json(json!({
                     "ok": false,
-                    "error": value.get("message").and_then(|v| v.as_str()).unwrap_or("Unknown error"),
+                    "error": value
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Unknown error"),
                 }))
                 .into_response()
             } else {
@@ -98,6 +103,7 @@ pub struct CmdContext {
     pub bus: EventBus,
     pub pty: Option<Arc<LocalPtyBackend>>,
     pub ui_agents: UiAgentRegistry,
+    pub terminal_bridge: TerminalBridgeClient,
 }
 
 #[derive(Debug)]
@@ -274,6 +280,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
                 bus: ctx.bus.clone(),
                 pty: ctx.pty.clone(),
                 ui_agents: ctx.ui_agents.clone(),
+                terminal_bridge: ctx.terminal_bridge.clone(),
                 terminals: Default::default(),
             })
             .await;

@@ -68,6 +68,7 @@ async fn spawn_server_with_agent(
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
     };
 

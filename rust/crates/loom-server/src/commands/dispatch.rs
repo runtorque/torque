@@ -4,11 +4,13 @@ use std::path::Path;
 use std::time::Duration;
 
 use serde_json::{json, Value};
+use tracing::warn;
 
 use loom_actions::context::LoomContextBuilder;
 use loom_core::state::AgentCell;
 
 use super::{flush, ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
+use crate::terminal_bridge::bridge_manages_cell;
 
 /// Install provider-specific hooks, MCP config, and slash-command skills into
 /// `working_dir` for the adapter that matches `boot_command`. Best-effort —
@@ -151,6 +153,11 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     // Route: if the agent is UI-attached (a GhosttyView is mounted for it),
     // send through the UI registry — Ghostty owns that agent's PTY. Otherwise
     // fall through to the engine's own LocalPtyBackend.
+    let bridge_agent = ensure_bridge_session(ctx, &target_agent_id).await?;
+    let bridge_managed = bridge_agent
+        .as_ref()
+        .map(|a| bridge_manages_cell(&ctx.terminal_bridge, a))
+        .unwrap_or(false);
     if ctx.ui_agents.is_attached(&target_agent_id) {
         if is_new_agent {
             tokio::time::sleep(Duration::from_millis(2000)).await;
@@ -162,6 +169,26 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         ctx.ui_agents.send(&target_agent_id, rendered.clone());
         tokio::time::sleep(Duration::from_millis(50)).await;
         ctx.ui_agents.send(&target_agent_id, "\r".to_string());
+    } else if let Some(agent) = bridge_agent
+        .as_ref()
+        .filter(|a| bridge_manages_cell(&ctx.terminal_bridge, a) && a.session_id.is_some())
+    {
+        if is_new_agent {
+            tokio::time::sleep(Duration::from_millis(2000)).await;
+        }
+        ctx.terminal_bridge
+            .send_text(
+                &target_agent_id,
+                agent.session_id.as_deref(),
+                &rendered,
+                false,
+            )
+            .await
+            .map_err(|e| CmdError::BadRequest(e.to_string()))?;
+    } else if bridge_managed {
+        return Err(CmdError::BadRequest(format!(
+            "agent '{target_agent_id}' has no live terminal bridge session"
+        )));
     } else if let Some(pty) = &ctx_pty(ctx).await {
         let agent = {
             let st = ctx.state.lock().await;
@@ -307,6 +334,26 @@ pub async fn send_text_to_cell(
         return Ok(());
     }
 
+    let bridge_agent = ensure_bridge_session(ctx, &cell_id).await?;
+    if let Some(agent) = bridge_agent.as_ref() {
+        if bridge_manages_cell(&ctx.terminal_bridge, &agent) && agent.session_id.is_some() {
+            ctx.terminal_bridge
+                .send_text(&cell_id, agent.session_id.as_deref(), &text, false)
+                .await
+                .map_err(|e| CmdError::BadRequest(e.to_string()))?;
+            return Ok(());
+        }
+    }
+    if bridge_agent
+        .as_ref()
+        .map(|a| bridge_manages_cell(&ctx.terminal_bridge, a))
+        .unwrap_or(false)
+    {
+        return Err(CmdError::BadRequest(format!(
+            "agent '{cell_id}' has no live terminal bridge session"
+        )));
+    }
+
     if let Some(pty) = ctx_pty(ctx).await {
         pty.write(cell_id, text.as_bytes())
             .await
@@ -357,6 +404,21 @@ pub async fn broadcast_to_group(ctx: &CmdContext, req: &Value) -> CmdResult {
             ctx.ui_agents.send(id, text.clone());
             continue;
         }
+        if let Some(agent) = ensure_bridge_session(ctx, id).await? {
+            if bridge_manages_cell(&ctx.terminal_bridge, &agent) && agent.session_id.is_some() {
+                if let Err(err) = ctx
+                    .terminal_bridge
+                    .send_text(id, agent.session_id.as_deref(), &text, false)
+                    .await
+                {
+                    warn!(?err, agent_id = %id, "terminal bridge broadcast send_text failed");
+                }
+                continue;
+            } else if bridge_manages_cell(&ctx.terminal_bridge, &agent) {
+                warn!(agent_id = %id, "skipping broadcast because the terminal bridge session is not ready");
+                continue;
+            }
+        }
         if let Some(pty) = &pty {
             let _ = pty.write(id, text.as_bytes()).await;
         }
@@ -366,6 +428,21 @@ pub async fn broadcast_to_group(ctx: &CmdContext, req: &Value) -> CmdResult {
 
 pub async fn relaunch_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     let id = required_str(req, "id")?.to_string();
+    let bridge_cell = {
+        let st = ctx.state.lock().await;
+        st.agents.get(&id).cloned()
+    };
+    if let Some(cell) = bridge_cell.as_ref() {
+        if bridge_manages_cell(&ctx.terminal_bridge, cell) && cell.session_id.is_some() {
+            if let Err(err) = ctx
+                .terminal_bridge
+                .close_session(&id, cell.session_id.as_deref())
+                .await
+            {
+                warn!(?err, agent_id = %id, "terminal bridge relaunch close_session failed");
+            }
+        }
+    }
     if let Some(pty) = ctx_pty(ctx).await {
         // Close existing session
         let _ = pty.close(&id).await;
@@ -382,7 +459,9 @@ pub async fn relaunch_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     };
     if let Some(a) = agent {
         ctx.db.save_agent(&a).await?;
-        if a.cell_type == "terminal" || !a.command.is_empty() {
+        if bridge_manages_cell(&ctx.terminal_bridge, &a) {
+            let _ = ensure_bridge_session(ctx, &a.id).await?;
+        } else if a.cell_type == "terminal" || !a.command.is_empty() {
             spawn_cell_session(ctx, &a, None).await?;
         }
     }
@@ -681,11 +760,54 @@ async fn ctx_pty(ctx: &CmdContext) -> Option<std::sync::Arc<loom_pty::LocalPtyBa
     ctx.pty.clone()
 }
 
+async fn ensure_bridge_session(
+    ctx: &CmdContext,
+    cell_id: &str,
+) -> Result<Option<loom_core::state::AgentCell>, CmdError> {
+    let agent = {
+        let st = ctx.state.lock().await;
+        st.agents.get(cell_id).cloned()
+    };
+    let Some(agent) = agent else {
+        return Ok(None);
+    };
+    if !bridge_manages_cell(&ctx.terminal_bridge, &agent) {
+        return Ok(Some(agent));
+    }
+    if agent.session_id.is_some() {
+        return Ok(Some(agent));
+    }
+
+    let bridged = match ctx.terminal_bridge.create_session(&agent).await {
+        Ok(Some(updated)) => updated,
+        Ok(None) => agent,
+        Err(err) => {
+            warn!(?err, agent_id = %cell_id, "terminal bridge create_session during dispatch failed");
+            let mut errored = agent;
+            errored.status = "error".into();
+            errored.error_message = err.to_string();
+            errored
+        }
+    };
+    let saved = {
+        let mut st = ctx.state.lock().await;
+        st.agents.insert(bridged.id.clone(), bridged.clone());
+        st.emit_agent(&bridged.id);
+        st.agents.get(&bridged.id).cloned().unwrap()
+    };
+    ctx.db.save_agent(&saved).await?;
+    flush(ctx).await;
+    Ok(Some(saved))
+}
+
 pub async fn spawn_cell_session(
     ctx: &CmdContext,
     cell: &AgentCell,
     extra_env: Option<&std::collections::BTreeMap<String, String>>,
 ) -> Result<(), CmdError> {
+    if bridge_manages_cell(&ctx.terminal_bridge, cell) {
+        return Ok(());
+    }
     let Some(pty) = ctx_pty(ctx).await else {
         return Ok(());
     };
