@@ -76,6 +76,14 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     data TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS weaver_journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_name TEXT NOT NULL,
+    entry_type TEXT NOT NULL,
+    entry TEXT NOT NULL,
+    ts REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS weaver_worklog (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_name TEXT NOT NULL,
@@ -108,6 +116,7 @@ CREATE TABLE IF NOT EXISTS memory_links (
 CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_name);
 CREATE INDEX IF NOT EXISTS idx_agents_group ON agents(group_name);
 CREATE INDEX IF NOT EXISTS idx_board_tasks_group ON board_tasks(group_name);
+CREATE INDEX IF NOT EXISTS idx_weaver_journal_group ON weaver_journal(group_name);
 CREATE INDEX IF NOT EXISTS idx_worklog_group ON weaver_worklog(group_name);
 CREATE INDEX IF NOT EXISTS idx_memory_group ON memory_entries(group_name);
 CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory_entries(scope_kind, scope_ref);
@@ -275,6 +284,30 @@ impl LoomDb {
         conn.execute(
             "INSERT OR REPLACE INTO weaver_settings(group_name, data) VALUES (?1, ?2)",
             params![group, data],
+        )?;
+        Ok(())
+    }
+
+    pub async fn append_weaver_journal(
+        &self,
+        group: &str,
+        entry_type: &str,
+        entry: &str,
+        ts: f64,
+    ) -> crate::Result<i64> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT INTO weaver_journal(group_name, entry_type, entry, ts) VALUES (?1, ?2, ?3, ?4)",
+            params![group, entry_type, entry, ts],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub async fn delete_weaver_journal_entry(&self, group: &str, id: i64) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "DELETE FROM weaver_journal WHERE id = ?1 AND group_name = ?2",
+            params![id, group],
         )?;
         Ok(())
     }
@@ -510,6 +543,38 @@ impl LoomDb {
                 if let Ok(s) = serde_json::from_str::<WeaverSettings>(&data) {
                     state.weaver_settings.insert(g, s);
                 }
+            }
+        }
+
+        // weaver journal
+        {
+            let mut stmt = conn.prepare(
+                "SELECT id, group_name, entry_type, entry, ts
+                 FROM weaver_journal
+                 ORDER BY group_name, id",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, f64>(4)?,
+                ))
+            })?;
+            for r in rows {
+                let (id, group, entry_type, entry, ts) = r?;
+                state
+                    .weaver_journal
+                    .entry(group.clone())
+                    .or_default()
+                    .push(serde_json::json!({
+                        "id": id,
+                        "group": group,
+                        "type": entry_type,
+                        "entry": entry,
+                        "timestamp": ts,
+                    }));
             }
         }
 

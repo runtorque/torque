@@ -3,6 +3,7 @@
 pub mod weaver;
 pub mod hints;
 pub mod session_map;
+pub mod streams;
 pub mod mcp;
 pub mod mcp_tools;
 pub mod task_health;
