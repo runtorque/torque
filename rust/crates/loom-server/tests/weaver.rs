@@ -363,7 +363,7 @@ async fn weaver_reply_delivers_text_and_notifications_persist() {
         .await
         .expect("reply delivery")
         .expect("channel open");
-    assert_eq!(sent, "Ship it\n");
+    assert_eq!(sent, "\n## Human Reply\nShip it\n---\n");
     {
         let st = state.lock().await;
         let settings = st.get_weaver_settings("Eng");
@@ -400,4 +400,150 @@ async fn weaver_reply_delivers_text_and_notifications_persist() {
         .enabled_events
         .iter()
         .any(|value| value == "agent_progress"));
+}
+
+#[tokio::test]
+async fn weaver_events_use_stable_panel_event_ids() {
+    let (addr, state, db, _ui_agents) = spawn().await;
+    let (_weaver_id, _worker_id) = seed_weaver_group(&state, &db).await;
+
+    let id1 = db
+        .append_panel_event(
+            "agent_started",
+            "weaver-1",
+            "Weaver",
+            "Eng",
+            "weaver booted",
+            "",
+            200.0,
+        )
+        .await
+        .unwrap();
+    let id2 = db
+        .append_panel_event(
+            "ask_created",
+            "weaver-1",
+            "Weaver",
+            "Eng",
+            "Need approval",
+            "eng-2",
+            100.0,
+        )
+        .await
+        .unwrap();
+
+    let first = post(
+        addr,
+        json!({
+            "cmd": "weaver_events",
+            "group": "Eng",
+            "since_id": 0,
+            "limit": 10,
+        }),
+    )
+    .await;
+    let events = first["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2, "first events: {first:?}");
+    assert_eq!(events[0]["id"].as_i64(), Some(id1));
+    assert_eq!(events[0]["kind"], "agent_started");
+    assert_eq!(events[1]["id"].as_i64(), Some(id2));
+    assert_eq!(events[1]["kind"], "ask_created");
+    assert_eq!(first["cursor"].as_i64(), Some(id2));
+
+    let filtered = post(
+        addr,
+        json!({
+            "cmd": "weaver_events",
+            "group": "Eng",
+            "since_id": 0,
+            "limit": 10,
+            "types": ["ask_created"],
+        }),
+    )
+    .await;
+    let filtered_events = filtered["events"].as_array().unwrap();
+    assert_eq!(filtered_events.len(), 1, "filtered: {filtered:?}");
+    assert_eq!(filtered_events[0]["id"].as_i64(), Some(id2));
+    assert_eq!(filtered_events[0]["task_id"], "eng-2");
+
+    let id3 = db
+        .append_panel_event(
+            "task_dispatched",
+            "worker-1",
+            "Worker",
+            "Eng",
+            "picked up work",
+            "eng-1",
+            50.0,
+        )
+        .await
+        .unwrap();
+    let second = post(
+        addr,
+        json!({
+            "cmd": "weaver_events",
+            "group": "Eng",
+            "since_id": id2,
+            "limit": 10,
+        }),
+    )
+    .await;
+    let second_events = second["events"].as_array().unwrap();
+    assert_eq!(second_events.len(), 1, "second events: {second:?}");
+    assert_eq!(second_events[0]["id"].as_i64(), Some(id3));
+    assert_eq!(second_events[0]["kind"], "task_dispatched");
+}
+
+#[tokio::test]
+async fn weaver_reply_keeps_pending_question_when_not_deliverable() {
+    let (addr, state, db, _ui_agents) = spawn().await;
+    let (weaver_id, _worker_id) = seed_weaver_group(&state, &db).await;
+
+    {
+        let mut st = state.lock().await;
+        if let Some(weaver) = st.agents.get_mut(&weaver_id) {
+            weaver.status = "stopped".into();
+            weaver.session_id = None;
+        }
+        st.weaver_settings.insert(
+            "Eng".into(),
+            WeaverSettings {
+                group: "Eng".into(),
+                pending_question: "Ship it?".into(),
+                paused: true,
+                ..WeaverSettings::default()
+            },
+        );
+    }
+    db.save_weaver_settings("Eng", &{
+        let st = state.lock().await;
+        st.get_weaver_settings("Eng")
+    })
+    .await
+    .unwrap();
+
+    let reply = post(
+        addr,
+        json!({
+            "cmd": "weaver_reply",
+            "group": "Eng",
+            "answer": "Ship it",
+        }),
+    )
+    .await;
+    assert_eq!(reply["error"], "Weaver is not running", "reply: {reply:?}");
+
+    {
+        let st = state.lock().await;
+        let settings = st.get_weaver_settings("Eng");
+        assert_eq!(settings.pending_question, "Ship it?");
+        assert!(settings.paused);
+        let journal = st.weaver_journal.get("Eng").cloned().unwrap_or_default();
+        assert!(
+            !journal
+                .iter()
+                .any(|entry| entry["entry"] == "Human replied: Ship it"),
+            "journal should not append on failed delivery: {journal:?}"
+        );
+    }
 }

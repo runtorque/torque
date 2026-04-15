@@ -91,6 +91,17 @@ CREATE TABLE IF NOT EXISTS weaver_worklog (
     ts REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS panel_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp REAL NOT NULL,
+    kind TEXT NOT NULL,
+    cell_id TEXT NOT NULL DEFAULT '',
+    agent_name TEXT NOT NULL DEFAULT '',
+    group_name TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL DEFAULT '',
+    task_id TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS memory_entries (
     id TEXT PRIMARY KEY,
     project_key TEXT NOT NULL DEFAULT '',
@@ -118,6 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_group ON agents(group_name);
 CREATE INDEX IF NOT EXISTS idx_board_tasks_group ON board_tasks(group_name);
 CREATE INDEX IF NOT EXISTS idx_weaver_journal_group ON weaver_journal(group_name);
 CREATE INDEX IF NOT EXISTS idx_worklog_group ON weaver_worklog(group_name);
+CREATE INDEX IF NOT EXISTS idx_panel_events_group_id ON panel_events(group_name, id);
 CREATE INDEX IF NOT EXISTS idx_memory_group ON memory_entries(group_name);
 CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory_entries(scope_kind, scope_ref);
 CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entries(entry_type);
@@ -328,6 +340,74 @@ impl LoomDb {
             params![id, group],
         )?;
         Ok(())
+    }
+
+    pub async fn append_panel_event(
+        &self,
+        kind: &str,
+        cell_id: &str,
+        agent_name: &str,
+        group: &str,
+        message: &str,
+        task_id: &str,
+        timestamp: f64,
+    ) -> crate::Result<i64> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT INTO panel_events(timestamp, kind, cell_id, agent_name, group_name, message, task_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![timestamp, kind, cell_id, agent_name, group, message, task_id],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub async fn load_panel_events(
+        &self,
+        group: &str,
+        after_id: i64,
+        limit: usize,
+        kinds: &[String],
+    ) -> crate::Result<Vec<serde_json::Value>> {
+        let conn = self.inner.lock().await;
+        let mut sql = String::from(
+            "SELECT id, timestamp, kind, cell_id, agent_name, group_name, message, task_id
+             FROM panel_events
+             WHERE group_name = ?1 AND id > ?2",
+        );
+        let mut params = vec![
+            rusqlite::types::Value::from(group.to_string()),
+            rusqlite::types::Value::from(after_id),
+        ];
+        if !kinds.is_empty() {
+            sql.push_str(" AND kind IN (");
+            for idx in 0..kinds.len() {
+                if idx > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str(&format!("?{}", idx + 3));
+                params.push(rusqlite::types::Value::from(kinds[idx].clone()));
+            }
+            sql.push(')');
+        }
+        sql.push_str(&format!(" ORDER BY id ASC LIMIT ?{}", params.len() + 1));
+        params.push(rusqlite::types::Value::from(limit.max(1) as i64));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = stmt.query(rusqlite::params_from_iter(params.iter()))?;
+        let mut events = Vec::new();
+        while let Some(row) = rows.next()? {
+            events.push(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "timestamp": row.get::<_, f64>(1)?,
+                "kind": row.get::<_, String>(2)?,
+                "cell_id": row.get::<_, String>(3)?,
+                "agent_name": row.get::<_, String>(4)?,
+                "group": row.get::<_, String>(5)?,
+                "message": row.get::<_, String>(6)?,
+                "task_id": row.get::<_, String>(7)?,
+            }));
+        }
+        Ok(events)
     }
 
     pub async fn save_memory_entry(&self, entry: &MemoryEntry) -> crate::Result<()> {

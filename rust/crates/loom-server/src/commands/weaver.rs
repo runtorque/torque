@@ -243,12 +243,12 @@ pub async fn events(ctx: &CmdContext, req: &Value) -> CmdResult {
         .unwrap_or_default()
         .into_iter()
         .filter_map(|value| value.as_str().map(str::to_string))
-        .collect::<HashSet<_>>();
+        .collect::<Vec<_>>();
 
-    let events = {
-        let st = ctx.state.lock().await;
-        synthesize_events(&st, &group, since_id, limit, &types)
-    };
+    let events = ctx
+        .db
+        .load_panel_events(&group, since_id as i64, limit, &types)
+        .await?;
     let cursor = events
         .last()
         .and_then(|event| event.get("id"))
@@ -367,6 +367,7 @@ pub async fn ask(ctx: &CmdContext, req: &Value) -> CmdResult {
         &format!("Asked human: {question}"),
     )
     .await?;
+    let _ = append_panel_event(ctx, "ask_created", &group, &question, "").await?;
     flush(ctx).await;
     Ok(json!({ "ok": true, "settings": settings }))
 }
@@ -458,17 +459,12 @@ pub async fn reply(ctx: &CmdContext, req: &Value) -> CmdResult {
         let st = ctx.state.lock().await;
         st.get_group_settings(&group).weaver_agent_id
     };
-    let delivered = if !weaver_id.trim().is_empty() {
-        let send_req = json!({
-            "cell_id": weaver_id,
-            "text": format!("{}\n", answer),
-        });
-        crate::commands::dispatch::send_text(ctx, &send_req)
-            .await
-            .is_ok()
-    } else {
-        false
-    };
+    if weaver_id.trim().is_empty() {
+        return Err(CmdError::BadRequest("Weaver is not running".into()));
+    }
+    crate::commands::dispatch::send_text_to_cell(ctx, &weaver_id, &format_human_reply(&answer))
+        .await
+        .map_err(|_| CmdError::BadRequest("Weaver is not running".into()))?;
     let settings = apply_settings_patch(
         ctx,
         &group,
@@ -488,7 +484,7 @@ pub async fn reply(ctx: &CmdContext, req: &Value) -> CmdResult {
     flush(ctx).await;
     Ok(json!({
         "ok": true,
-        "delivered": delivered,
+        "delivered": true,
         "settings": settings,
     }))
 }
@@ -1392,73 +1388,8 @@ fn resolve_visible_agent_id(
     Some(agent_id)
 }
 
-fn synthesize_events(
-    st: &MatrixState,
-    group: &str,
-    since_id: u64,
-    limit: usize,
-    types: &HashSet<String>,
-) -> Vec<Value> {
-    let mut events = Vec::<Value>::new();
-    for task in st.board_tasks.values().filter(|task| task.group == group) {
-        for message in &task.messages {
-            let kind = message
-                .get("action")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim();
-            if kind.is_empty() {
-                continue;
-            }
-            if !types.is_empty() && !types.contains(kind) {
-                continue;
-            }
-            events.push(json!({
-                "group": group,
-                "kind": kind,
-                "task_id": task.id,
-                "task_title": task.task,
-                "agent_id": task.agent_id,
-                "message": message.get("message").and_then(Value::as_str).unwrap_or(""),
-                "timestamp": message.get("timestamp").cloned().unwrap_or(Value::String(String::new())),
-            }));
-        }
-    }
-    events.sort_by(|a, b| event_sort_key(a).cmp(&event_sort_key(b)));
-    for (idx, event) in events.iter_mut().enumerate() {
-        if let Some(obj) = event.as_object_mut() {
-            obj.insert("id".into(), Value::Number(((idx + 1) as u64).into()));
-        }
-    }
-    events
-        .into_iter()
-        .filter(|event| event.get("id").and_then(Value::as_u64).unwrap_or(0) > since_id)
-        .rev()
-        .take(limit.max(1))
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect()
-}
-
-fn event_sort_key(event: &Value) -> (String, String, String) {
-    (
-        event
-            .get("timestamp")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        event
-            .get("task_id")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        event
-            .get("kind")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-    )
+fn format_human_reply(answer: &str) -> String {
+    format!("\n## Human Reply\n{answer}\n---\n")
 }
 
 async fn append_journal_entry(
@@ -1501,6 +1432,48 @@ async fn append_journal_entry(
         st.emit(DeltaOp::JournalAppend(item.clone()));
     }
     Ok(item)
+}
+
+async fn append_panel_event(
+    ctx: &CmdContext,
+    kind: &str,
+    group: &str,
+    message: &str,
+    task_id: &str,
+) -> Result<Value, CmdError> {
+    let (cell_id, agent_name) = {
+        let st = ctx.state.lock().await;
+        let weaver_id = st.get_group_settings(group).weaver_agent_id;
+        let agent_name = st
+            .agents
+            .get(&weaver_id)
+            .map(|agent| agent.name.clone())
+            .unwrap_or_default();
+        (weaver_id, agent_name)
+    };
+    let timestamp = Utc::now().timestamp_millis() as f64 / 1000.0;
+    let id = ctx
+        .db
+        .append_panel_event(
+            kind,
+            &cell_id,
+            &agent_name,
+            group,
+            message,
+            task_id,
+            timestamp,
+        )
+        .await?;
+    Ok(json!({
+        "id": id,
+        "timestamp": timestamp,
+        "kind": kind,
+        "cell_id": cell_id,
+        "agent_name": agent_name,
+        "group": group,
+        "message": message,
+        "task_id": task_id,
+    }))
 }
 
 fn read_journal_entries(

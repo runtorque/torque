@@ -230,27 +230,38 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
 // send_text / broadcast_to_group
 // ---------------------------------------------------------------------------
 
-pub async fn send_text(ctx: &CmdContext, req: &Value) -> CmdResult {
-    let cell_id = required_str(req, "cell_id")?.to_string();
-    let text = required_str(req, "text")?.to_string();
-
+pub async fn send_text_to_cell(
+    ctx: &CmdContext,
+    cell_id: &str,
+    text: &str,
+) -> Result<(), CmdError> {
     {
         let st = ctx.state.lock().await;
-        if !st.agents.contains_key(&cell_id) {
+        if !st.agents.contains_key(cell_id) {
             return Err(CmdError::BadRequest(format!("agent '{cell_id}' not found")));
         }
     }
 
-    if ctx.ui_agents.is_attached(&cell_id) {
-        ctx.ui_agents.send(&cell_id, text);
-        return ok();
+    if ctx.ui_agents.send(cell_id, text.to_string()) {
+        return Ok(());
     }
 
     if let Some(pty) = ctx_pty(ctx).await {
-        pty.write(&cell_id, text.as_bytes())
+        pty.write(cell_id, text.as_bytes())
             .await
             .map_err(|e| CmdError::BadRequest(e.to_string()))?;
+        return Ok(());
     }
+
+    Err(CmdError::BadRequest(format!(
+        "agent '{cell_id}' has no live delivery path"
+    )))
+}
+
+pub async fn send_text(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let cell_id = required_str(req, "cell_id")?.to_string();
+    let text = required_str(req, "text")?.to_string();
+    send_text_to_cell(ctx, &cell_id, &text).await?;
     ok()
 }
 
