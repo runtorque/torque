@@ -11,7 +11,7 @@ pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     let title = required_str(req, "task")?.to_string();
     let group = required_str(req, "group")?.to_string();
 
-    let id = {
+    let (id, prefix, next_root_number) = {
         let mut st = ctx.state.lock().await;
         if !st.groups.contains_key(&group) {
             return Err(CmdError::BadRequest(format!("group '{group}' not found")));
@@ -20,7 +20,7 @@ pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         let counter = st.task_id_counters.entry(prefix.clone()).or_insert(0);
         *counter += 1;
         let trunk = *counter;
-        format_root_task_id(&group, trunk)
+        (format_root_task_id(&group, trunk), prefix, trunk)
     };
 
     let mut task = BoardTask::new_minimal(id.clone(), title.clone());
@@ -58,6 +58,7 @@ pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         let mut st = ctx.state.lock().await;
         st.upsert_task(task.clone())?;
     }
+    ctx.db.save_task_id_counter(&prefix, next_root_number as u64).await?;
     ctx.db.save_board_task(&task).await?;
     flush(ctx).await;
     Ok(json!({ "ok": true, "task_id": task.id, "slug": task.slug }))
