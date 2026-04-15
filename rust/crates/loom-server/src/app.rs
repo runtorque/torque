@@ -8,6 +8,7 @@ use anyhow::Result;
 use axum::Router;
 use tokio::sync::{mpsc, Mutex};
 
+use crate::terminal_bridge::TerminalBridgeClient;
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
@@ -87,6 +88,8 @@ pub struct AppState {
     /// Registry of UI-attached agents. Dispatch routes through this when the
     /// target agent is mounted in the native window.
     pub ui_agents: UiAgentRegistry,
+    /// Optional HTTP client for the thin Python+iTerm2 bridge runtime.
+    pub terminal_bridge: TerminalBridgeClient,
 }
 
 pub struct ServerHandle {
@@ -123,6 +126,7 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
         bus: bus.clone(),
         pty: Some(pty),
         ui_agents: UiAgentRegistry::default(),
+        terminal_bridge: TerminalBridgeClient::from_env(),
     };
 
     // Spawn scheduler
@@ -131,6 +135,7 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
     let router = Router::new()
         .merge(crate::ws::routes())
         .merge(crate::commands::routes())
+        .merge(crate::terminal_bridge::routes())
         .merge(crate::events::routes())
         .merge(crate::uploads::routes())
         .merge(crate::mcp::routes())
@@ -184,7 +189,11 @@ async fn handle_pty_event(
             cell.last_event_at = chrono::Utc::now().timestamp() as f64;
         }
         PtyEvent::Exited { status, .. } => {
-            cell.status = if status == 0 { "stopped".into() } else { "error".into() };
+            cell.status = if status == 0 {
+                "stopped".into()
+            } else {
+                "error".into()
+            };
             cell.session_id = None;
         }
         PtyEvent::Error { message, .. } => {

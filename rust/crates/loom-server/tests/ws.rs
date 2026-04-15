@@ -29,6 +29,7 @@ async fn spawn_test_server() -> SocketAddr {
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
     };
 
     let router = Router::new()
@@ -74,12 +75,13 @@ async fn ws_sends_snapshot_on_connect_then_deltas_on_mutation() {
     // Second message should be a delta with group_update.
     let delta = tokio::time::timeout(Duration::from_secs(3), next_json(&mut ws))
         .await
-        .expect("delta")
-        ;
+        .expect("delta");
     assert_eq!(delta["type"], "delta");
     assert!(delta["seq"].as_u64().unwrap() >= 1);
     let ops = delta["ops"].as_array().unwrap();
-    assert!(ops.iter().any(|op| op["op"] == "group_update" && op["name"] == "Eng"));
+    assert!(ops
+        .iter()
+        .any(|op| op["op"] == "group_update" && op["name"] == "Eng"));
 }
 
 #[tokio::test]
@@ -111,7 +113,9 @@ where
     loop {
         match ws.next().await {
             Some(Ok(Message::Text(text))) => return serde_json::from_str(&text).unwrap(),
-            Some(Ok(Message::Binary(_))) | Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
+            Some(Ok(Message::Binary(_)))
+            | Some(Ok(Message::Ping(_)))
+            | Some(Ok(Message::Pong(_))) => continue,
             Some(Ok(Message::Close(_))) | None => panic!("ws closed"),
             Some(Ok(Message::Frame(_))) => continue,
             Some(Err(e)) => panic!("ws err: {e}"),

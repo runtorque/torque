@@ -21,6 +21,7 @@ use loom_core::state::MatrixState;
 use loom_pty::LocalPtyBackend;
 
 use crate::app::{AppState, UiAgentRegistry};
+use crate::terminal_bridge::TerminalBridgeClient;
 
 pub mod actions;
 pub mod agents;
@@ -38,7 +39,11 @@ pub fn routes() -> Router<AppState> {
 }
 
 async fn handle_cmd(State(app): State<AppState>, Json(req): Json<Value>) -> impl IntoResponse {
-    let cmd = req.get("cmd").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let cmd = req
+        .get("cmd")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if cmd.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
@@ -53,6 +58,7 @@ async fn handle_cmd(State(app): State<AppState>, Json(req): Json<Value>) -> impl
         bus: app.bus.clone(),
         pty: app.pty.clone(),
         ui_agents: app.ui_agents.clone(),
+        terminal_bridge: app.terminal_bridge.clone(),
     };
 
     let result = dispatch(&ctx, &cmd, &req).await;
@@ -63,11 +69,9 @@ async fn handle_cmd(State(app): State<AppState>, Json(req): Json<Value>) -> impl
             Json(json!({ "error": format!("command not implemented: {cmd}") })),
         )
             .into_response(),
-        Err(CmdError::BadRequest(msg)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": msg })),
-        )
-            .into_response(),
+        Err(CmdError::BadRequest(msg)) => {
+            (StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))).into_response()
+        }
         Err(CmdError::Engine(err)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": err.to_string() })),
@@ -84,6 +88,7 @@ pub struct CmdContext {
     pub bus: EventBus,
     pub pty: Option<Arc<LocalPtyBackend>>,
     pub ui_agents: UiAgentRegistry,
+    pub terminal_bridge: TerminalBridgeClient,
 }
 
 #[derive(Debug)]
@@ -226,6 +231,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
                 bus: ctx.bus.clone(),
                 pty: ctx.pty.clone(),
                 ui_agents: ctx.ui_agents.clone(),
+                terminal_bridge: ctx.terminal_bridge.clone(),
             })
             .await;
             Ok(snap)

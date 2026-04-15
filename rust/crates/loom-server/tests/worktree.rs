@@ -29,7 +29,11 @@ fn git_available() -> bool {
 }
 
 fn run_git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git").current_dir(dir).args(args).status().unwrap();
+    let status = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .status()
+        .unwrap();
     assert!(status.success(), "git {args:?} in {dir:?} failed");
 }
 
@@ -69,6 +73,7 @@ async fn spawn_server_with_agent(
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
     };
 
     let router = Router::new()
@@ -123,7 +128,11 @@ async fn worktree_create_checkpoint_diff_remove() {
     .await;
     assert_eq!(v["ok"], true, "create response: {v:?}");
     let path = PathBuf::from(v["path"].as_str().unwrap());
-    assert!(path.exists(), "worktree path {} does not exist", path.display());
+    assert!(
+        path.exists(),
+        "worktree path {} does not exist",
+        path.display()
+    );
 
     // Make a change + checkpoint.
     std::fs::write(path.join("new.txt"), "content\n").unwrap();
@@ -148,12 +157,11 @@ async fn worktree_create_checkpoint_diff_remove() {
 
     // Make another change without committing → diff reports dirty.
     std::fs::write(path.join("another.txt"), "more\n").unwrap();
-    let v = post(
-        addr,
-        json!({"cmd": "worktree_diff", "agent_id": &agent_id}),
-    )
-    .await;
-    assert!(v["files"].as_u64().unwrap_or(0) >= 1, "expected dirty, got {v:?}");
+    let v = post(addr, json!({"cmd": "worktree_diff", "agent_id": &agent_id})).await;
+    assert!(
+        v["files"].as_u64().unwrap_or(0) >= 1,
+        "expected dirty, got {v:?}"
+    );
 
     // Remove the worktree.
     let v = post(

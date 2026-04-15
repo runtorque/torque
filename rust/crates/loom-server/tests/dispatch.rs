@@ -37,6 +37,7 @@ async fn spawn_test_server_full() -> (SocketAddr, Arc<Mutex<MatrixState>>, UiAge
         bus,
         pty: None,
         ui_agents: ui_agents.clone(),
+        terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
     };
 
     let router = Router::new()
@@ -129,7 +130,10 @@ async fn ai_report_done_moves_task_to_done_lane() {
     let st = state.lock().await;
     let task = st.board_tasks.get(&task_id).unwrap();
     assert_eq!(task.lane, "Done");
-    assert!(task.messages.len() >= 1, "messages log should record the action");
+    assert!(
+        task.messages.len() >= 1,
+        "messages log should record the action"
+    );
     let last = task.messages.last().unwrap();
     assert_eq!(last["action"], "done");
 
@@ -282,7 +286,11 @@ async fn dispatch_missing_action_returns_warning() {
 async fn clear_agent_context_resets_counters_and_link() {
     let (addr, state) = spawn_test_server().await;
     post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
-    let v = post(addr, json!({"cmd": "add_agent", "name": "W", "group": "Eng"})).await;
+    let v = post(
+        addr,
+        json!({"cmd": "add_agent", "name": "W", "group": "Eng"}),
+    )
+    .await;
     let agent_id = v["agent_id"].as_str().unwrap().to_string();
     let t = post(
         addr,

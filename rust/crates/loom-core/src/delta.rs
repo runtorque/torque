@@ -45,7 +45,8 @@ pub enum DeltaOp {
     },
     UiUpdate(serde_json::Value),
     FocusUpdate {
-        id: Option<String>,
+        active_session_id: Option<String>,
+        current_window_id: Option<String>,
     },
     ScheduleUpsert(serde_json::Value),
     ScheduleRemove {
@@ -62,7 +63,9 @@ pub enum DeltaOp {
     EventsUpdate(serde_json::Value),
     PanelUpdate(serde_json::Value),
     MemoryUpsert(serde_json::Value),
-    MemoryRemove { id: String },
+    MemoryRemove {
+        id: String,
+    },
 }
 
 /// A full delta message sent to WS clients.
@@ -76,7 +79,11 @@ pub struct DeltaMessage {
 
 impl DeltaMessage {
     pub fn new(seq: u64, ops: Vec<DeltaOp>) -> Self {
-        Self { ty: "delta", seq, ops }
+        Self {
+            ty: "delta",
+            seq,
+            ops,
+        }
     }
 }
 

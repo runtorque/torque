@@ -27,6 +27,7 @@ async fn spawn() -> (SocketAddr, Arc<Mutex<MatrixState>>, LoomDb) {
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
     };
 
     let router = Router::new()
@@ -101,7 +102,10 @@ async fn schedule_crud_round_trip() {
     let task_id = v["task_id"].as_str().unwrap().to_string();
     {
         let st = state.lock().await;
-        let task = st.board_tasks.get(&task_id).expect("task from schedule_run");
+        let task = st
+            .board_tasks
+            .get(&task_id)
+            .expect("task from schedule_run");
         assert_eq!(task.lane, "To Do");
         assert_eq!(task.task, "updated");
         assert_eq!(st.schedules[&id].run_count, 1);
@@ -351,7 +355,10 @@ async fn set_layout_rejects_invalid_payload() {
         }),
     )
     .await;
-    assert!(v["error"].as_str().is_some(), "expected validation error, got: {v:?}");
+    assert!(
+        v["error"].as_str().is_some(),
+        "expected validation error, got: {v:?}"
+    );
 }
 
 #[tokio::test]
