@@ -3175,8 +3175,17 @@ body.runtime-embedded .board-search-bar {
   padding: 8px 10px;
   background: linear-gradient(180deg, rgba(255,255,255,.015), transparent 100%);
 }
+.board-search-input-wrap {
+  flex: 1 1 240px;
+  min-width: 140px;
+}
+body.runtime-embedded .board-search-input-wrap {
+  flex: 0 1 520px;
+  max-width: 520px;
+}
 .board-search-input {
-  flex: 1; min-width: 80px;
+  width: 100%;
+  min-width: 0;
   font: 10px/1.4 var(--font); color: var(--text);
   background: var(--bg); border: none;
   padding: 3px 6px; border-radius: 3px;
@@ -3188,6 +3197,10 @@ body.runtime-embedded .board-search-input {
   border: 1px solid rgba(255,255,255,.06);
   border-radius: 7px;
   background: color-mix(in srgb, var(--bg) 84%, var(--bg-cell) 16%);
+}
+.board-search-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .board-search-input::placeholder { color: var(--text-dim); }
 .board-search-input:focus { box-shadow: 0 0 0 1px var(--accent); }
