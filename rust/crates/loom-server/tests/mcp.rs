@@ -164,7 +164,10 @@ async fn mcp_derive_creates_child_task_with_parent_linkage() {
     )
     .await;
     assert!(resp["error"].is_null(), "got error: {resp:?}");
-    let new_id = resp["result"]["loom"]["task_id"].as_str().unwrap().to_string();
+    let new_id = resp["result"]["loom"]["task_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert!(!new_id.is_empty());
 
     // chain command shows the parent

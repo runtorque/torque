@@ -68,7 +68,11 @@ async fn add_group_then_add_agent() {
     let v = post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
     assert_eq!(v["ok"], true);
 
-    let v = post(addr, json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"})).await;
+    let v = post(
+        addr,
+        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
+    )
+    .await;
     assert_eq!(v["ok"], true);
     let agent_id = v["agent_id"].as_str().unwrap().to_string();
     let slug = v["slug"].as_str().unwrap();
@@ -131,8 +135,16 @@ async fn board_task_full_lifecycle() {
 async fn remove_group_cascades() {
     let (addr, _h) = spawn_test_server().await;
     post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
-    post(addr, json!({"cmd": "add_agent", "name": "A", "group": "Eng"})).await;
-    post(addr, json!({"cmd": "add_agent", "name": "B", "group": "Eng"})).await;
+    post(
+        addr,
+        json!({"cmd": "add_agent", "name": "A", "group": "Eng"}),
+    )
+    .await;
+    post(
+        addr,
+        json!({"cmd": "add_agent", "name": "B", "group": "Eng"}),
+    )
+    .await;
 
     let v = post(addr, json!({"cmd": "remove_group", "name": "Eng"})).await;
     assert_eq!(v["ok"], true);

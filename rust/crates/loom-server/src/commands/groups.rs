@@ -78,7 +78,11 @@ pub async fn move_group(ctx: &CmdContext, req: &Value) -> CmdResult {
     let order: Vec<String> = req
         .get("order")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     if order.is_empty() {
         return Err(CmdError::BadRequest("missing 'order'".into()));

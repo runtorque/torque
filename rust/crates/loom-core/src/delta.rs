@@ -51,18 +51,23 @@ pub enum DeltaOp {
     ScheduleRemove {
         id: String,
     },
-    WeaverSettingsUpdate {
+    WeaverSettingsUpdate(serde_json::Value),
+    JournalAppend(serde_json::Value),
+    JournalDelete {
         group: String,
-        settings: serde_json::Value,
+        id: i64,
     },
     WeaverWorklogAppend {
         group: String,
         entry: serde_json::Value,
     },
+    WeaverStreams(serde_json::Value),
     EventsUpdate(serde_json::Value),
     PanelUpdate(serde_json::Value),
     MemoryUpsert(serde_json::Value),
-    MemoryRemove { id: String },
+    MemoryRemove {
+        id: String,
+    },
 }
 
 /// A full delta message sent to WS clients.
@@ -76,7 +81,11 @@ pub struct DeltaMessage {
 
 impl DeltaMessage {
     pub fn new(seq: u64, ops: Vec<DeltaOp>) -> Self {
-        Self { ty: "delta", seq, ops }
+        Self {
+            ty: "delta",
+            seq,
+            ops,
+        }
     }
 }
 

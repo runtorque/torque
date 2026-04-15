@@ -27,10 +27,10 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
 use objc2::{declare_class, msg_send, msg_send_id, mutability, sel, ClassType, DeclaredClass};
 use objc2_app_kit::{
-    NSAutoresizingMaskOptions, NSBorderType, NSColor, NSControlTextEditingDelegate,
-    NSDraggingInfo, NSEvent, NSFont, NSMenu, NSMenuItem, NSPasteboard, NSPasteboardItem,
-    NSPasteboardWriting, NSScrollView, NSTableColumn, NSTableView, NSTableViewDataSource,
-    NSTableViewDelegate, NSTextField, NSView,
+    NSAutoresizingMaskOptions, NSBorderType, NSColor, NSControlTextEditingDelegate, NSDraggingInfo,
+    NSEvent, NSFont, NSMenu, NSMenuItem, NSPasteboard, NSPasteboardItem, NSPasteboardWriting,
+    NSScrollView, NSTableColumn, NSTableView, NSTableViewDataSource, NSTableViewDelegate,
+    NSTextField, NSView,
 };
 use objc2_foundation::{MainThreadMarker, NSObject, NSPoint, NSRect, NSSize, NSString};
 
@@ -473,7 +473,13 @@ fn build_card_menu(
 ) -> Retained<NSMenu> {
     let menu: Retained<NSMenu> = NSMenu::new(mtm);
     unsafe { menu.setAutoenablesItems(false) };
-    add_menu(&menu, mtm, "Dispatch", &format!("dispatch|{}", card.id), target);
+    add_menu(
+        &menu,
+        mtm,
+        "Dispatch",
+        &format!("dispatch|{}", card.id),
+        target,
+    );
     add_menu(&menu, mtm, "Edit…", &format!("edit|{}", card.id), target);
 
     // Move to lane submenu.
@@ -503,13 +509,7 @@ fn build_card_menu(
     menu.addItem(&move_item);
 
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    add_menu(
-        &menu,
-        mtm,
-        "Remove",
-        &format!("remove|{}", card.id),
-        target,
-    );
+    add_menu(&menu, mtm, "Remove", &format!("remove|{}", card.id), target);
     menu
 }
 
@@ -548,9 +548,7 @@ fn handle_card_action(
     let arg = parts.next().unwrap_or("");
     match verb {
         "dispatch" => {
-            if let Err(e) =
-                bridge.dispatch("dispatch_task", serde_json::json!({ "task_id": id }))
-            {
+            if let Err(e) = bridge.dispatch("dispatch_task", serde_json::json!({ "task_id": id })) {
                 tracing::warn!("dispatch_task failed: {e:?}");
             }
         }
@@ -600,9 +598,7 @@ fn handle_card_action(
             ) {
                 return;
             }
-            if let Err(e) =
-                bridge.dispatch("board_remove_task", serde_json::json!({ "id": id }))
-            {
+            if let Err(e) = bridge.dispatch("board_remove_task", serde_json::json!({ "id": id })) {
                 tracing::warn!("board_remove_task failed: {e:?}");
             }
         }
@@ -664,10 +660,7 @@ fn build_row_view(mtm: MainThreadMarker, row: &BoardRow) -> Retained<NSView> {
     if !subtitle.is_empty() {
         let sub_label = make_label(
             mtm,
-            NSRect::new(
-                NSPoint::new(indent, 4.0),
-                NSSize::new(width - indent, 14.0),
-            ),
+            NSRect::new(NSPoint::new(indent, 4.0), NSSize::new(width - indent, 14.0)),
             &subtitle,
             11.0,
             false,
@@ -884,8 +877,8 @@ impl BoardView {
         }
 
         if lanes_changed {
-            let mtm = MainThreadMarker::new()
-                .expect("reload_if_changed must run on the main thread");
+            let mtm =
+                MainThreadMarker::new().expect("reload_if_changed must run on the main thread");
             self.rebuild_column_widgets(mtm, &new_lanes);
         }
         // Resize the inner column_host and reload each table's data.
@@ -962,10 +955,7 @@ impl BoardView {
             let alloc = mtm.alloc::<NSView>();
             let v = NSView::initWithFrame(
                 alloc,
-                NSRect::new(
-                    NSPoint::new(0.0, 0.0),
-                    NSSize::new(COLUMN_WIDTH, 320.0),
-                ),
+                NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(COLUMN_WIDTH, 320.0)),
             );
             // Column stretches vertically with the host; horizontal position
             // + width are driven by `layout_columns`.
@@ -1005,10 +995,7 @@ impl BoardView {
             let t = NSTextField::initWithFrame(
                 alloc,
                 NSRect::new(
-                    NSPoint::new(
-                        0.0,
-                        320.0 - COLUMN_HEADER_HEIGHT - ADD_ROW_HEIGHT,
-                    ),
+                    NSPoint::new(0.0, 320.0 - COLUMN_HEADER_HEIGHT - ADD_ROW_HEIGHT),
                     NSSize::new(COLUMN_WIDTH, ADD_ROW_HEIGHT - 4.0),
                 ),
             );
@@ -1031,10 +1018,7 @@ impl BoardView {
         // Scrollable table below.
         let scroll_frame = NSRect::new(
             NSPoint::new(0.0, 0.0),
-            NSSize::new(
-                COLUMN_WIDTH,
-                320.0 - COLUMN_HEADER_HEIGHT - ADD_ROW_HEIGHT,
-            ),
+            NSSize::new(COLUMN_WIDTH, 320.0 - COLUMN_HEADER_HEIGHT - ADD_ROW_HEIGHT),
         );
         let scroll: Retained<NSScrollView> = unsafe {
             let alloc = mtm.alloc::<NSScrollView>();
@@ -1073,8 +1057,7 @@ impl BoardView {
                 lane: lane.to_string(),
             };
             let this = mtm.alloc::<BoardTableView>().set_ivars(ivars);
-            let this: Retained<BoardTableView> =
-                unsafe { msg_send_id![super(this), init] };
+            let this: Retained<BoardTableView> = unsafe { msg_send_id![super(this), init] };
             unsafe { this.setFrame(scroll_frame) };
             this
         };

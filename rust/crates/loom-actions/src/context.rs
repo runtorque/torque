@@ -51,7 +51,12 @@ pub struct LoomContextBuilder<'a> {
 
 impl<'a> LoomContextBuilder<'a> {
     pub fn new(state: &'a MatrixState) -> Self {
-        Self { state, agent: None, task: None, previous_tasks: Vec::new() }
+        Self {
+            state,
+            agent: None,
+            task: None,
+            previous_tasks: Vec::new(),
+        }
     }
 
     pub fn agent(mut self, agent: &'a AgentCell) -> Self {

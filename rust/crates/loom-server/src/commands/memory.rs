@@ -147,7 +147,9 @@ async fn set_pinned(ctx: &CmdContext, req: &Value, pinned: bool) -> CmdResult {
     let entry = {
         let mut st = ctx.state.lock().await;
         let Some(entry) = st.memory_entries.get_mut(&id) else {
-            return Err(CmdError::BadRequest(format!("memory entry '{id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "memory entry '{id}' not found"
+            )));
         };
         entry.pinned = pinned;
         entry.updated_at = chrono::Utc::now().to_rfc3339();
@@ -174,7 +176,9 @@ pub async fn link(ctx: &CmdContext, req: &Value) -> CmdResult {
     let entry = {
         let mut st = ctx.state.lock().await;
         let Some(entry) = st.memory_entries.get_mut(&id) else {
-            return Err(CmdError::BadRequest(format!("memory entry '{id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "memory entry '{id}' not found"
+            )));
         };
         if detach {
             entry

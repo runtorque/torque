@@ -31,18 +31,52 @@ pub fn normalize_artifacts(raw: &[serde_json::Value]) -> Vec<Artifact> {
 
 fn normalize_artifact(value: &serde_json::Value) -> Option<Artifact> {
     let obj = value.as_object()?;
-    let kind = obj.get("kind").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
+    let kind = obj
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
     if !VALID_KINDS.contains(&kind.as_str()) {
         return None;
     }
     let mut a = Artifact::default();
     a.kind = kind;
-    a.title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    a.body = obj.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    a.path = obj.get("path").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    a.url = obj.get("url").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    a.mime_type = obj.get("mime_type").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    a.created_at = obj.get("created_at").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    a.title = obj
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    a.body = obj
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    a.path = obj
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    a.url = obj
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    a.mime_type = obj
+        .get("mime_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    a.created_at = obj
+        .get("created_at")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     Some(a)
 }
 
@@ -80,8 +114,18 @@ pub fn normalize_attachments(raw: &[serde_json::Value]) -> Vec<Attachment> {
             }
             Some(Attachment {
                 path,
-                filename: o.get("filename").and_then(|v| v.as_str()).unwrap_or("").trim().to_string(),
-                mime_type: o.get("mime_type").and_then(|v| v.as_str()).unwrap_or("").trim().to_string(),
+                filename: o
+                    .get("filename")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
+                mime_type: o
+                    .get("mime_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
             })
         })
         .collect()

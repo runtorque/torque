@@ -203,12 +203,19 @@ pub async fn reparent_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
             a.parent_id = new_parent.clone();
         }
         if !new_parent.is_empty() {
-            st.children.entry(new_parent.clone()).or_default().push(id.clone());
+            st.children
+                .entry(new_parent.clone())
+                .or_default()
+                .push(id.clone());
         }
         // regenerate slug
         let name = cell.name.clone();
         let group = cell.group.clone();
-        let parent_ref = if new_parent.is_empty() { None } else { Some(new_parent.as_str()) };
+        let parent_ref = if new_parent.is_empty() {
+            None
+        } else {
+            Some(new_parent.as_str())
+        };
         let new_slug = st.make_agent_slug(&name, parent_ref, &group);
         if let Some(a) = st.agents.get_mut(&id) {
             a.slug = new_slug;
@@ -277,16 +284,25 @@ pub async fn reorder_child(ctx: &CmdContext, req: &Value) -> CmdResult {
     let order: Vec<String> = req
         .get("order")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     let group = {
         let mut st = ctx.state.lock().await;
         if !st.children.contains_key(&parent_id) && !st.agents.contains_key(&parent_id) {
-            return Err(CmdError::BadRequest(format!("parent '{parent_id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "parent '{parent_id}' not found"
+            )));
         }
         st.children.insert(parent_id.clone(), order);
-        st.agents.get(&parent_id).map(|a| a.group.clone()).unwrap_or_default()
+        st.agents
+            .get(&parent_id)
+            .map(|a| a.group.clone())
+            .unwrap_or_default()
     };
     if !group.is_empty() {
         persist_group_members(ctx, &group).await?;

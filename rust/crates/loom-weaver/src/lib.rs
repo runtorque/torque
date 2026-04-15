@@ -1,8 +1,9 @@
 //! Weaver, MCP handler, task health, hints.
 
-pub mod weaver;
 pub mod hints;
-pub mod session_map;
 pub mod mcp;
 pub mod mcp_tools;
+pub mod session_map;
+pub mod streams;
 pub mod task_health;
+pub mod weaver;

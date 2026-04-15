@@ -30,7 +30,9 @@ async fn handle_ws(app: AppState, socket: WebSocket) {
     // Send initial snapshot.
     let snapshot = build_snapshot(&app).await;
     if sender
-        .send(Message::Text(serde_json::to_string(&snapshot).unwrap_or_default()))
+        .send(Message::Text(
+            serde_json::to_string(&snapshot).unwrap_or_default(),
+        ))
         .await
         .is_err()
     {
@@ -51,7 +53,9 @@ async fn handle_ws(app: AppState, socket: WebSocket) {
                     // force resync
                     let snap = build_snapshot_locked(&state).await;
                     if sender
-                        .send(Message::Text(serde_json::to_string(&snap).unwrap_or_default()))
+                        .send(Message::Text(
+                            serde_json::to_string(&snap).unwrap_or_default(),
+                        ))
                         .await
                         .is_err()
                     {

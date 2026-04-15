@@ -96,7 +96,10 @@ pub struct ActionManager {
 
 impl ActionManager {
     pub fn new(project_root: Option<PathBuf>, user_root: Option<PathBuf>) -> Self {
-        Self { project_root, user_root }
+        Self {
+            project_root,
+            user_root,
+        }
     }
 
     pub fn with_project_root(root: PathBuf) -> Self {
@@ -246,7 +249,9 @@ fn parse_action_file(
 }
 
 fn coalesce_legacy_prompt(value: &mut serde_yaml::Value) {
-    let Some(map) = value.as_mapping_mut() else { return };
+    let Some(map) = value.as_mapping_mut() else {
+        return;
+    };
     let has_new = map.contains_key(serde_yaml::Value::String("prompt".into()));
     if has_new {
         return;

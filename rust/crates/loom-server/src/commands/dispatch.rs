@@ -56,7 +56,8 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
             .unwrap_or_else(|| "In Progress".to_string());
 
         // Resolve agent: existing (task.agent_id) or create new.
-        let target_agent_id = if !task.agent_id.is_empty() && st.agents.contains_key(&task.agent_id) {
+        let target_agent_id = if !task.agent_id.is_empty() && st.agents.contains_key(&task.agent_id)
+        {
             task.agent_id.clone()
         } else {
             // Create a new agent under the task's group.
@@ -179,10 +180,7 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
                     Some(std::path::PathBuf::from(&agent.directory))
                 };
                 let mut env = std::collections::HashMap::new();
-                env.insert(
-                    loom_core::config::ENV_CELL_ID.to_string(),
-                    agent.id.clone(),
-                );
+                env.insert(loom_core::config::ENV_CELL_ID.to_string(), agent.id.clone());
                 let _ = pty.spawn(&agent.id, &command, cwd, env, 40, 120).await;
                 // Boot delay — let the agent's prompt appear before we send text.
                 if is_new_agent {
@@ -232,27 +230,38 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
 // send_text / broadcast_to_group
 // ---------------------------------------------------------------------------
 
-pub async fn send_text(ctx: &CmdContext, req: &Value) -> CmdResult {
-    let cell_id = required_str(req, "cell_id")?.to_string();
-    let text = required_str(req, "text")?.to_string();
-
+pub async fn send_text_to_cell(
+    ctx: &CmdContext,
+    cell_id: &str,
+    text: &str,
+) -> Result<(), CmdError> {
     {
         let st = ctx.state.lock().await;
-        if !st.agents.contains_key(&cell_id) {
+        if !st.agents.contains_key(cell_id) {
             return Err(CmdError::BadRequest(format!("agent '{cell_id}' not found")));
         }
     }
 
-    if ctx.ui_agents.is_attached(&cell_id) {
-        ctx.ui_agents.send(&cell_id, text);
-        return ok();
+    if ctx.ui_agents.send(cell_id, text.to_string()) {
+        return Ok(());
     }
 
     if let Some(pty) = ctx_pty(ctx).await {
-        pty.write(&cell_id, text.as_bytes())
+        pty.write(cell_id, text.as_bytes())
             .await
             .map_err(|e| CmdError::BadRequest(e.to_string()))?;
+        return Ok(());
     }
+
+    Err(CmdError::BadRequest(format!(
+        "agent '{cell_id}' has no live delivery path"
+    )))
+}
+
+pub async fn send_text(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let cell_id = required_str(req, "cell_id")?.to_string();
+    let text = required_str(req, "text")?.to_string();
+    send_text_to_cell(ctx, &cell_id, &text).await?;
     ok()
 }
 
@@ -340,7 +349,9 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
     let (task, agent) = {
         let mut st = ctx.state.lock().await;
         if !st.agents.contains_key(&agent_id) {
-            return Err(CmdError::BadRequest(format!("agent '{agent_id}' not found")));
+            return Err(CmdError::BadRequest(format!(
+                "agent '{agent_id}' not found"
+            )));
         }
 
         // Update agent ephemeral state based on action.

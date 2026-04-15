@@ -76,11 +76,30 @@ CREATE TABLE IF NOT EXISTS weaver_settings (
     data TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS weaver_journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_name TEXT NOT NULL,
+    entry_type TEXT NOT NULL,
+    entry TEXT NOT NULL,
+    ts REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS weaver_worklog (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_name TEXT NOT NULL,
     entry TEXT NOT NULL,
     ts REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS panel_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp REAL NOT NULL,
+    kind TEXT NOT NULL,
+    cell_id TEXT NOT NULL DEFAULT '',
+    agent_name TEXT NOT NULL DEFAULT '',
+    group_name TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL DEFAULT '',
+    task_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS memory_entries (
@@ -108,7 +127,9 @@ CREATE TABLE IF NOT EXISTS memory_links (
 CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_name);
 CREATE INDEX IF NOT EXISTS idx_agents_group ON agents(group_name);
 CREATE INDEX IF NOT EXISTS idx_board_tasks_group ON board_tasks(group_name);
+CREATE INDEX IF NOT EXISTS idx_weaver_journal_group ON weaver_journal(group_name);
 CREATE INDEX IF NOT EXISTS idx_worklog_group ON weaver_worklog(group_name);
+CREATE INDEX IF NOT EXISTS idx_panel_events_group_id ON panel_events(group_name, id);
 CREATE INDEX IF NOT EXISTS idx_memory_group ON memory_entries(group_name);
 CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory_entries(scope_kind, scope_ref);
 CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entries(entry_type);
@@ -133,14 +154,20 @@ impl LoomDb {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(SCHEMA_SQL)?;
-        Ok(Self { inner: Arc::new(Mutex::new(conn)), path: Arc::new(path) })
+        Ok(Self {
+            inner: Arc::new(Mutex::new(conn)),
+            path: Arc::new(path),
+        })
     }
 
     /// Open an in-memory db — used by tests.
     pub fn in_memory() -> crate::Result<Self> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(SCHEMA_SQL)?;
-        Ok(Self { inner: Arc::new(Mutex::new(conn)), path: Arc::new(PathBuf::from(":memory:")) })
+        Ok(Self {
+            inner: Arc::new(Mutex::new(conn)),
+            path: Arc::new(PathBuf::from(":memory:")),
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -155,7 +182,14 @@ impl LoomDb {
         conn.execute(
             "INSERT OR REPLACE INTO agents(id, slug, name, group_name, parent_id, data)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![agent.id, agent.slug, agent.name, agent.group, agent.parent_id, data],
+            params![
+                agent.id,
+                agent.slug,
+                agent.name,
+                agent.group,
+                agent.parent_id,
+                data
+            ],
         )?;
         Ok(())
     }
@@ -178,18 +212,23 @@ impl LoomDb {
     pub async fn delete_group(&self, name: &str) -> crate::Result<()> {
         let conn = self.inner.lock().await;
         conn.execute("DELETE FROM groups WHERE name = ?1", params![name])?;
-        conn.execute("DELETE FROM group_members WHERE group_name = ?1", params![name])?;
-        conn.execute("DELETE FROM group_settings WHERE group_name = ?1", params![name])?;
+        conn.execute(
+            "DELETE FROM group_members WHERE group_name = ?1",
+            params![name],
+        )?;
+        conn.execute(
+            "DELETE FROM group_settings WHERE group_name = ?1",
+            params![name],
+        )?;
         Ok(())
     }
 
-    pub async fn save_group_members(
-        &self,
-        group: &str,
-        members: &[String],
-    ) -> crate::Result<()> {
+    pub async fn save_group_members(&self, group: &str, members: &[String]) -> crate::Result<()> {
         let conn = self.inner.lock().await;
-        conn.execute("DELETE FROM group_members WHERE group_name = ?1", params![group])?;
+        conn.execute(
+            "DELETE FROM group_members WHERE group_name = ?1",
+            params![group],
+        )?;
         let mut stmt = conn.prepare(
             "INSERT INTO group_members(group_name, agent_id, position) VALUES (?1, ?2, ?3)",
         )?;
@@ -279,6 +318,98 @@ impl LoomDb {
         Ok(())
     }
 
+    pub async fn append_weaver_journal(
+        &self,
+        group: &str,
+        entry_type: &str,
+        entry: &str,
+        ts: f64,
+    ) -> crate::Result<i64> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT INTO weaver_journal(group_name, entry_type, entry, ts) VALUES (?1, ?2, ?3, ?4)",
+            params![group, entry_type, entry, ts],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub async fn delete_weaver_journal_entry(&self, group: &str, id: i64) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "DELETE FROM weaver_journal WHERE id = ?1 AND group_name = ?2",
+            params![id, group],
+        )?;
+        Ok(())
+    }
+
+    pub async fn append_panel_event(
+        &self,
+        kind: &str,
+        cell_id: &str,
+        agent_name: &str,
+        group: &str,
+        message: &str,
+        task_id: &str,
+        timestamp: f64,
+    ) -> crate::Result<i64> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT INTO panel_events(timestamp, kind, cell_id, agent_name, group_name, message, task_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![timestamp, kind, cell_id, agent_name, group, message, task_id],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub async fn load_panel_events(
+        &self,
+        group: &str,
+        after_id: i64,
+        limit: usize,
+        kinds: &[String],
+    ) -> crate::Result<Vec<serde_json::Value>> {
+        let conn = self.inner.lock().await;
+        let mut sql = String::from(
+            "SELECT id, timestamp, kind, cell_id, agent_name, group_name, message, task_id
+             FROM panel_events
+             WHERE group_name = ?1 AND id > ?2",
+        );
+        let mut params = vec![
+            rusqlite::types::Value::from(group.to_string()),
+            rusqlite::types::Value::from(after_id),
+        ];
+        if !kinds.is_empty() {
+            sql.push_str(" AND kind IN (");
+            for idx in 0..kinds.len() {
+                if idx > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str(&format!("?{}", idx + 3));
+                params.push(rusqlite::types::Value::from(kinds[idx].clone()));
+            }
+            sql.push(')');
+        }
+        sql.push_str(&format!(" ORDER BY id ASC LIMIT ?{}", params.len() + 1));
+        params.push(rusqlite::types::Value::from(limit.max(1) as i64));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = stmt.query(rusqlite::params_from_iter(params.iter()))?;
+        let mut events = Vec::new();
+        while let Some(row) = rows.next()? {
+            events.push(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "timestamp": row.get::<_, f64>(1)?,
+                "kind": row.get::<_, String>(2)?,
+                "cell_id": row.get::<_, String>(3)?,
+                "agent_name": row.get::<_, String>(4)?,
+                "group": row.get::<_, String>(5)?,
+                "message": row.get::<_, String>(6)?,
+                "task_id": row.get::<_, String>(7)?,
+            }));
+        }
+        Ok(events)
+    }
+
     pub async fn save_memory_entry(&self, entry: &MemoryEntry) -> crate::Result<()> {
         let conn = self.inner.lock().await;
         let data = serde_json::to_string(entry)?;
@@ -317,7 +448,12 @@ impl LoomDb {
         conn.execute(
             "INSERT OR IGNORE INTO memory_links(entry_id, target_kind, target_ref, created_at)
              VALUES (?1, ?2, ?3, ?4)",
-            params![link.entry_id, link.target_kind, link.target_ref, link.created_at],
+            params![
+                link.entry_id,
+                link.target_kind,
+                link.target_ref,
+                link.created_at
+            ],
         )?;
         Ok(())
     }
@@ -361,9 +497,14 @@ impl LoomDb {
         // groups
         let mut groups: Vec<(String, String, i64)> = Vec::new();
         {
-            let mut stmt = conn.prepare("SELECT name, slug, ordinal FROM groups ORDER BY ordinal")?;
+            let mut stmt =
+                conn.prepare("SELECT name, slug, ordinal FROM groups ORDER BY ordinal")?;
             let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
             })?;
             for row in rows {
                 groups.push(row?);
@@ -380,7 +521,8 @@ impl LoomDb {
             let mut stmt = conn.prepare(
                 "SELECT group_name, agent_id FROM group_members ORDER BY group_name, position",
             )?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
             for row in rows {
                 let (group, aid) = row?;
                 state.groups.entry(group).or_default().push(aid);
@@ -433,7 +575,8 @@ impl LoomDb {
         // group settings
         {
             let mut stmt = conn.prepare("SELECT group_name, data FROM group_settings")?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
             for row in rows {
                 let (name, data) = row?;
                 if let Ok(s) = serde_json::from_str::<GroupSettings>(&data) {
@@ -504,12 +647,45 @@ impl LoomDb {
         // weaver settings
         {
             let mut stmt = conn.prepare("SELECT group_name, data FROM weaver_settings")?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
             for r in rows {
                 let (g, data) = r?;
                 if let Ok(s) = serde_json::from_str::<WeaverSettings>(&data) {
                     state.weaver_settings.insert(g, s);
                 }
+            }
+        }
+
+        // weaver journal
+        {
+            let mut stmt = conn.prepare(
+                "SELECT id, group_name, entry_type, entry, ts
+                 FROM weaver_journal
+                 ORDER BY group_name, id",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, f64>(4)?,
+                ))
+            })?;
+            for r in rows {
+                let (id, group, entry_type, entry, ts) = r?;
+                state
+                    .weaver_journal
+                    .entry(group.clone())
+                    .or_default()
+                    .push(serde_json::json!({
+                        "id": id,
+                        "group": group,
+                        "type": entry_type,
+                        "entry": entry,
+                        "timestamp": ts,
+                    }));
             }
         }
 
@@ -608,9 +784,7 @@ impl LoomDb {
                 .optional()?;
             if let Some(s) = edges {
                 if !s.is_empty() {
-                    if let Ok(e) =
-                        serde_json::from_str::<crate::state::DockEdges>(&s)
-                    {
+                    if let Ok(e) = serde_json::from_str::<crate::state::DockEdges>(&s) {
                         state.dock_edges = e;
                     }
                 }
@@ -630,8 +804,9 @@ impl LoomDb {
                     )
                     .optional()?;
                 if let Some(s) = row {
-                    if let Ok(map) =
-                        serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(&s)
+                    if let Ok(map) = serde_json::from_str::<
+                        std::collections::HashMap<String, serde_json::Value>,
+                    >(&s)
                     {
                         match target {
                             "filters" => state.board_filters_by_group = map,

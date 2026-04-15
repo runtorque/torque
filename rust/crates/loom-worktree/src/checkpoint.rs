@@ -75,11 +75,7 @@ pub async fn count_commits(worktree_path: &Path, base: &str) -> Result<i32> {
 pub async fn list_checkpoints(worktree_path: &Path, base: &str) -> Result<Vec<CheckpointEntry>> {
     let out = tokio::process::Command::new("git")
         .current_dir(worktree_path)
-        .args([
-            "log",
-            &format!("{base}..HEAD"),
-            "--pretty=%H\t%s\t%ct",
-        ])
+        .args(["log", &format!("{base}..HEAD"), "--pretty=%H\t%s\t%ct"])
         .output()
         .await?;
     let mut checkpoints = Vec::new();
@@ -91,7 +87,11 @@ pub async fn list_checkpoints(worktree_path: &Path, base: &str) -> Result<Vec<Ch
         if sha.is_empty() {
             continue;
         }
-        checkpoints.push(CheckpointEntry { sha, message, timestamp: ts });
+        checkpoints.push(CheckpointEntry {
+            sha,
+            message,
+            timestamp: ts,
+        });
     }
     Ok(checkpoints)
 }

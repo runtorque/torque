@@ -43,7 +43,12 @@ pub fn register_cell_surface(cell_id: &str) -> anyhow::Result<()> {
     if map.contains_key(cell_id) {
         anyhow::bail!("cell '{cell_id}' already has a surface");
     }
-    map.insert(cell_id.to_string(), SurfaceStub { cell_id: cell_id.to_string() });
+    map.insert(
+        cell_id.to_string(),
+        SurfaceStub {
+            cell_id: cell_id.to_string(),
+        },
+    );
     Ok(())
 }
 
@@ -83,7 +88,11 @@ mod tests {
     #[test]
     fn register_then_release_roundtrip() {
         let _g = SURFACES_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        assert_eq!(surface_count(), 0, "test isolation broken — unexpected entries");
+        assert_eq!(
+            surface_count(),
+            0,
+            "test isolation broken — unexpected entries"
+        );
         register_cell_surface("cell-x").unwrap();
         register_cell_surface("cell-y").unwrap();
         assert_eq!(surface_count(), 2);
