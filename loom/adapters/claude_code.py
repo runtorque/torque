@@ -303,6 +303,7 @@ class ClaudeCodeAdapter(AgentAdapter):
                 "PostToolUseFailure": _http_hook(".*"),
                 "Notification": _http_hook(".*"),
                 "Stop": _http_hook(),
+                "SessionEnd": _http_hook(),
                 "SubagentStart": _http_hook(".*"),
                 "SubagentStop": _http_hook(".*"),
                 "StopFailure": _http_hook(".*"),
@@ -507,12 +508,14 @@ class ClaudeCodeAdapter(AgentAdapter):
                 },
             )
 
-        if hook_event == "Stop":
+        if hook_event in ("Stop", "SessionEnd"):
             return AgentEvent(
                 cell_id=cell.id, timestamp=now,
                 event_type="session_end",
                 data={
-                    "reason": "completed",
+                    "reason": raw.get("reason", "")
+                    or ("completed" if hook_event == "Stop"
+                        else "session_ended"),
                     "summary": raw.get("last_assistant_message", ""),
                 },
             )

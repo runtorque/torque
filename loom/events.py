@@ -156,7 +156,10 @@ class EventBus:
             return
 
         prev_activity = cell.activity
+        prev_status = cell.status
         self._apply(event, cell)
+        if cell.status != prev_status:
+            self._state._db_save_agent(cell)
         self._log.append(event)
         log.info("Event: cell='%s' type=%s activity='%s' detail='%s'",
                  cell.name, event.event_type, cell.activity,
@@ -204,6 +207,8 @@ class EventBus:
             cell.activity_detail = ""
             cell.error_message = ""
             cell.needs_attention = False
+            if cell.status != "stopped":
+                cell.status = "idle"
             cell.last_event_text = "Session ended"
             summary = d.get("summary", "")
             if summary:

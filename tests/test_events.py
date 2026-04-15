@@ -54,6 +54,41 @@ class EventBusTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, ["agent-1"])
         self.assertEqual(event_log.get(cell.id)[0].event_type, "session_start")
 
+    async def test_session_end_marks_agent_idle_and_persists_status(self):
+        state = self._make_state()
+        cell = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Worker",
+            group="g",
+            cell_type="agent",
+            agent_type="claude-code",
+            status="running",
+            activity="thinking",
+            activity_detail="Running tests",
+        )
+        state.agents[cell.id] = cell
+
+        saved = []
+        state._db_save_agent = lambda agent: saved.append((agent.id, agent.status))
+
+        bus = self.events_mod.EventBus(state, self.events_mod.EventLog())
+
+        await bus.emit(
+            self.base_mod.AgentEvent(
+                cell_id=cell.id,
+                timestamp=time.time(),
+                event_type="session_end",
+                data={"summary": "All done"},
+            )
+        )
+
+        self.assertEqual(cell.status, "idle")
+        self.assertEqual(cell.activity, "")
+        self.assertEqual(cell.activity_detail, "")
+        self.assertEqual(cell.last_event_text, "Session ended")
+        self.assertEqual(cell.last_summary, "All done")
+        self.assertEqual(saved, [("agent-1", "idle")])
+
     async def test_activity_change_clears_blocked_label_on_current_task(self):
         state = self._make_state()
         cell = self.state_mod.AgentCell(
