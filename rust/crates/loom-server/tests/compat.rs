@@ -23,6 +23,7 @@ async fn spawn_test_server() -> (SocketAddr, tokio::task::JoinHandle<()>) {
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminals: Default::default(),
     };
 
     let router = loom_server::app::build_router(app_state);
@@ -49,19 +50,74 @@ async fn post(addr: SocketAddr, body: Value) -> Value {
 async fn get_events_and_history_commands_return_python_compat_shapes() {
     let (addr, _h) = spawn_test_server().await;
 
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let add_agent = post(addr, json!({"cmd": "add_agent", "group": "Eng", "name": "Worker"})).await;
+    let agent_id = add_agent["data"]["agent_id"].as_str().unwrap().to_string();
+    let task = post(addr, json!({"cmd": "board_add_task", "group": "Eng", "task": "Ship it"})).await;
+    let task_id = task["data"]["task_id"].as_str().unwrap().to_string();
+    post(
+        addr,
+        json!({"cmd": "board_update_task", "id": &task_id, "agent_id": &agent_id}),
+    )
+    .await;
+    post(
+        addr,
+        json!({"cmd": "dispatch_task", "task_id": &task_id, "force_no_action": true}),
+    )
+    .await;
+    post(
+        addr,
+        json!({"cmd": "ai_report", "agent_id": &agent_id, "action": "progress", "message": "Working"}),
+    )
+    .await;
+    post(
+        addr,
+        json!({"cmd": "ai_report", "agent_id": &agent_id, "action": "done", "message": "Finished"}),
+    )
+    .await;
+
     let events = post(addr, json!({"cmd": "get_events", "limit": 10})).await;
     assert_eq!(events["ok"], true);
     assert_eq!(events["data"]["type"], "events_page");
     assert!(events["data"]["events"].is_array());
+    let event_kinds: Vec<String> = events["data"]["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|value| value["kind"].as_str().map(|s| s.to_string()))
+        .collect();
+    assert!(event_kinds.iter().any(|kind| kind == "task_dispatched"));
+    assert!(event_kinds.iter().any(|kind| kind == "agent_progress"));
+    assert!(event_kinds.iter().any(|kind| kind == "task_completed"));
+    assert!(events["data"]["events"][0].get("group").is_some());
 
     let history = post(addr, json!({"cmd": "get_agent_history", "limit": 10})).await;
     assert_eq!(history["ok"], true);
     assert_eq!(history["data"]["type"], "agent_history_list");
     assert!(history["data"]["records"].is_array());
+    assert_eq!(history["data"]["records"][0]["total_tasks"], 1);
 
-    let detail = post(addr, json!({"cmd": "get_agent_history_detail", "agent_id": "missing"})).await;
-    assert_eq!(detail["ok"], false);
-    assert_eq!(detail["error"], "Agent not found in history");
+    let detail = post(addr, json!({"cmd": "get_agent_history_detail", "agent_id": agent_id})).await;
+    assert_eq!(detail["ok"], true);
+    assert_eq!(detail["data"]["type"], "agent_history_detail");
+    assert_eq!(detail["data"]["record"]["id"], agent_id);
+    assert!(detail["data"]["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value["task_id"] == task_id));
+    let actions: Vec<String> = detail["data"]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|value| value["action"].as_str().map(|s| s.to_string()))
+        .collect();
+    assert!(actions.iter().any(|action| action == "progress"));
+    assert!(actions.iter().any(|action| action == "done"));
+
+    let missing = post(addr, json!({"cmd": "get_agent_history_detail", "agent_id": "missing"})).await;
+    assert_eq!(missing["ok"], false);
+    assert_eq!(missing["error"], "Agent not found in history");
 }
 
 #[tokio::test]

@@ -132,6 +132,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "get_events" => compat::get_events(ctx, req).await,
         "get_agent_history" => compat::get_agent_history(ctx, req).await,
         "get_agent_history_detail" => compat::get_agent_history_detail(ctx, req).await,
+        "events_dismiss" => compat::events_dismiss(ctx, req).await,
 
         // groups
         "add_group" => groups::add_group(ctx, req).await,
@@ -149,6 +150,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "remove_agent" => agents::remove_agent(ctx, req).await,
         "update_agent" => agents::update_agent(ctx, req).await,
         "move_agent" => agents::move_agent(ctx, req).await,
+        "focus_agent" => agents::focus_agent(ctx, req).await,
         "reparent_terminal" => agents::reparent_terminal(ctx, req).await,
         "reorder_child" => agents::reorder_child(ctx, req).await,
         "select_agent" => agents::select_agent(ctx, req).await,
@@ -239,6 +241,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
                 bus: ctx.bus.clone(),
                 pty: ctx.pty.clone(),
                 ui_agents: ctx.ui_agents.clone(),
+                terminals: Default::default(),
             })
             .await;
             Ok(snap)
@@ -270,6 +273,10 @@ async fn normalize_request(ctx: &CmdContext, cmd: &str, req: &Value) -> Value {
         }
         "move_agent" => alias(&mut normalized, "target_group", "to_group"),
         "dispatch_task" | "preview_prompt" => alias(&mut normalized, "id", "task_id"),
+        "resolve_ask" => {
+            alias(&mut normalized, "id", "task_id");
+            alias(&mut normalized, "answer", "reply");
+        }
         "send_text" => alias(&mut normalized, "id", "cell_id"),
         "worktree_create"
         | "worktree_remove"

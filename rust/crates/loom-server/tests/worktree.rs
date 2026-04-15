@@ -64,6 +64,7 @@ async fn spawn_server_with_agent(
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminals: Default::default(),
     };
 
     let router = loom_server::app::build_router(app_state);

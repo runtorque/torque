@@ -2,8 +2,15 @@
 //! expects beyond the core CRUD flows.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde_json::{json, Value};
+use tokio::sync::Mutex;
+
+use loom_core::delta::DeltaOp;
+use loom_core::state::MatrixState;
+
+use loom_core::db::LoomDb;
 
 use super::{ok, optional_str, required_str, CmdContext, CmdResult};
 
@@ -117,6 +124,31 @@ pub async fn remove_attachment(ctx: &CmdContext, req: &Value) -> CmdResult {
     ok()
 }
 
+pub async fn events_dismiss(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let item_id = required_str(req, "id")?.to_string();
+    let timestamp = req
+        .get("timestamp")
+        .and_then(|v| v.as_f64())
+        .filter(|value| *value > 0.0)
+        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis() as f64 / 1000.0);
+    let value = {
+        let mut st = ctx.state.lock().await;
+        st.events_dismissed_attention.insert(item_id, timestamp);
+        let value = serde_json::to_value(&st.events_dismissed_attention)
+            .unwrap_or_else(|_| json!({}));
+        st.emit(DeltaOp::UiUpdate {
+            key: "events_dismissed_attention".into(),
+            value: value.clone(),
+        });
+        value
+    };
+    ctx.db
+        .set_ui_state("events_dismissed_attention", &value.to_string())
+        .await?;
+    super::flush(ctx).await;
+    ok()
+}
+
 fn sanitize_filename(value: &str) -> PathBuf {
     PathBuf::from(
         value
@@ -124,4 +156,35 @@ fn sanitize_filename(value: &str) -> PathBuf {
             .replace('\\', "_")
             .replace(' ', "_"),
     )
+}
+
+pub async fn record_panel_event(
+    state: &Arc<Mutex<MatrixState>>,
+    db: &LoomDb,
+    kind: &str,
+    cell_id: &str,
+    agent_name: &str,
+    group: &str,
+    message: &str,
+    task_id: &str,
+    replace_last: bool,
+) -> Result<serde_json::Value, loom_core::Error> {
+    let timestamp = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
+    let event = if replace_last {
+        if let Some(existing) = db.find_latest_panel_event(kind, cell_id).await? {
+            let id = existing.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+            db.update_panel_event(id, agent_name, group, message, task_id, timestamp)
+                .await?
+        } else {
+            db.save_panel_event(kind, cell_id, agent_name, group, message, task_id, timestamp)
+                .await?
+        }
+    } else {
+        db.save_panel_event(kind, cell_id, agent_name, group, message, task_id, timestamp)
+            .await?
+    };
+    db.trim_panel_events(500).await?;
+    let mut st = state.lock().await;
+    st.emit(DeltaOp::EventAppend(event.clone()));
+    Ok(event)
 }

@@ -20,6 +20,7 @@ async fn spawn_test_server() -> SocketAddr {
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminals: Default::default(),
     };
 
     let router = loom_server::app::base_router().with_state(app_state);

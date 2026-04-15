@@ -25,6 +25,7 @@ async fn spawn_test_server() -> SocketAddr {
         bus,
         pty: None,
         ui_agents: Default::default(),
+        terminals: Default::default(),
     };
 
     let router = loom_server::app::build_router(app_state);
@@ -34,6 +35,28 @@ async fn spawn_test_server() -> SocketAddr {
         let _ = axum::serve(listener, router).await;
     });
     addr
+}
+
+async fn spawn_test_server_with_app() -> (SocketAddr, loom_server::app::AppState) {
+    let db = LoomDb::in_memory().unwrap();
+    let state = Arc::new(Mutex::new(MatrixState::new()));
+    let bus = EventBus::new();
+    let app_state = loom_server::app::AppState {
+        db,
+        state,
+        bus,
+        pty: None,
+        ui_agents: Default::default(),
+        terminals: Default::default(),
+    };
+
+    let router = loom_server::app::build_router(app_state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    (addr, app_state)
 }
 
 #[tokio::test]
@@ -90,6 +113,39 @@ async fn ws_accepts_browser_command_traffic_and_returns_direct_payloads() {
         .await
         .unwrap();
     assert_eq!(msg["type"], "state");
+}
+
+#[tokio::test]
+async fn terminal_ws_replays_snapshot_and_live_output() {
+    let (addr, app) = spawn_test_server_with_app().await;
+    {
+        let mut st = app.state.lock().await;
+        st.add_group("Eng").unwrap();
+        let mut cell = loom_core::state::AgentCell::new("term-1", "Shell", "Eng");
+        cell.cell_type = "terminal".into();
+        cell.session_id = Some("sid-1".into());
+        st.add_agent(cell).unwrap();
+    }
+    app.terminals
+        .set_session("term-1", Some("sid-1".into()), true)
+        .await;
+    app.terminals.append_output("term-1", "sid-1", "hello").await;
+
+    let url = format!("ws://{}/ws/terminal/term-1", addr);
+    let (mut ws, _) = connect_async(url).await.unwrap();
+
+    let snap = next_json(&mut ws).await;
+    assert_eq!(snap["type"], "snapshot");
+    assert_eq!(snap["session_id"], "sid-1");
+    assert_eq!(snap["data"], "hello");
+
+    app.terminals.append_output("term-1", "sid-1", " world").await;
+    let msg = tokio::time::timeout(Duration::from_secs(3), next_json(&mut ws))
+        .await
+        .unwrap();
+    assert_eq!(msg["type"], "output");
+    assert_eq!(msg["session_id"], "sid-1");
+    assert_eq!(msg["data"], " world");
 }
 
 async fn next_json<S>(ws: &mut S) -> Value

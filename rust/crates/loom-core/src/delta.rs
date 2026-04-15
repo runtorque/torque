@@ -59,6 +59,7 @@ pub enum DeltaOp {
     ScheduleRemove {
         id: String,
     },
+    EventAppend(serde_json::Value),
     WeaverSettingsUpdate {
         group: String,
         #[serde(flatten)]

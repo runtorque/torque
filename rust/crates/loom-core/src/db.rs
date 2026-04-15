@@ -8,7 +8,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
+use rusqlite::types::Value as SqlValue;
 use serde::de::DeserializeOwned;
 use tokio::sync::Mutex;
 
@@ -1503,6 +1504,287 @@ impl LoomDb {
         Ok(())
     }
 
+    pub async fn save_panel_event(
+        &self,
+        kind: &str,
+        cell_id: &str,
+        agent_name: &str,
+        group: &str,
+        message: &str,
+        task_id: &str,
+        timestamp: f64,
+    ) -> crate::Result<serde_json::Value> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT INTO panel_events(timestamp, kind, cell_id, agent_name, group_name, message, task_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![timestamp, kind, cell_id, agent_name, group, message, task_id],
+        )?;
+        let id = conn.last_insert_rowid();
+        Ok(serde_json::json!({
+            "id": id,
+            "timestamp": timestamp,
+            "kind": kind,
+            "cell_id": cell_id,
+            "agent_name": agent_name,
+            "group": group,
+            "group_name": group,
+            "message": message,
+            "task_id": task_id,
+        }))
+    }
+
+    pub async fn find_latest_panel_event(
+        &self,
+        kind: &str,
+        cell_id: &str,
+    ) -> crate::Result<Option<serde_json::Value>> {
+        let conn = self.inner.lock().await;
+        let row = conn
+            .query_row(
+                "SELECT id, timestamp, kind, cell_id, agent_name, group_name, message, task_id
+                 FROM panel_events
+                 WHERE kind = ?1 AND cell_id = ?2
+                 ORDER BY id DESC
+                 LIMIT 1",
+                params![kind, cell_id],
+                |r| {
+                    Ok(serde_json::json!({
+                        "id": r.get::<_, i64>(0)?,
+                        "timestamp": r.get::<_, f64>(1)?,
+                        "kind": r.get::<_, String>(2)?,
+                        "cell_id": r.get::<_, String>(3)?,
+                        "agent_name": r.get::<_, String>(4)?,
+                        "group": r.get::<_, String>(5)?,
+                        "group_name": r.get::<_, String>(5)?,
+                        "message": r.get::<_, String>(6)?,
+                        "task_id": r.get::<_, String>(7)?,
+                    }))
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    pub async fn update_panel_event(
+        &self,
+        id: i64,
+        agent_name: &str,
+        group: &str,
+        message: &str,
+        task_id: &str,
+        timestamp: f64,
+    ) -> crate::Result<serde_json::Value> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "UPDATE panel_events
+             SET timestamp = ?2, agent_name = ?3, group_name = ?4, message = ?5, task_id = ?6
+             WHERE id = ?1",
+            params![id, timestamp, agent_name, group, message, task_id],
+        )?;
+        let row = conn
+            .query_row(
+                "SELECT id, timestamp, kind, cell_id, agent_name, group_name, message, task_id
+                 FROM panel_events
+                 WHERE id = ?1",
+                params![id],
+                |r| {
+                    Ok(serde_json::json!({
+                        "id": r.get::<_, i64>(0)?,
+                        "timestamp": r.get::<_, f64>(1)?,
+                        "kind": r.get::<_, String>(2)?,
+                        "cell_id": r.get::<_, String>(3)?,
+                        "agent_name": r.get::<_, String>(4)?,
+                        "group": r.get::<_, String>(5)?,
+                        "group_name": r.get::<_, String>(5)?,
+                        "message": r.get::<_, String>(6)?,
+                        "task_id": r.get::<_, String>(7)?,
+                    }))
+                },
+            )
+            .optional()?;
+        row.ok_or_else(|| crate::Error::not_found(format!("panel event '{id}'")))
+    }
+
+    pub async fn trim_panel_events(&self, max_size: usize) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "DELETE FROM panel_events
+             WHERE id NOT IN (
+                SELECT id FROM panel_events
+                ORDER BY id DESC
+                LIMIT ?1
+             )",
+            params![max_size.max(1) as i64],
+        )?;
+        Ok(())
+    }
+
+    pub async fn save_agent_history_record(
+        &self,
+        id: &str,
+        name: &str,
+        slug: &str,
+        group: &str,
+        agent_type: &str,
+        template: &str,
+        created_at: f64,
+        removed_at: Option<f64>,
+        worktree_branch: &str,
+        total_tokens_in: i64,
+        total_tokens_out: i64,
+        total_tasks: i64,
+        status: &str,
+    ) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT OR REPLACE INTO agent_history
+                (id, name, slug, \"group\", agent_type, template,
+                 created_at, removed_at, worktree_branch,
+                 total_tokens_in, total_tokens_out, total_tasks, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                id,
+                name,
+                slug,
+                group,
+                agent_type,
+                template,
+                created_at,
+                removed_at,
+                worktree_branch,
+                total_tokens_in,
+                total_tokens_out,
+                total_tasks,
+                status,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub async fn update_agent_history_fields(
+        &self,
+        agent_id: &str,
+        fields: &serde_json::Map<String, serde_json::Value>,
+    ) -> crate::Result<()> {
+        if fields.is_empty() {
+            return Ok(());
+        }
+        let allowed = [
+            "name",
+            "slug",
+            "group",
+            "agent_type",
+            "template",
+            "removed_at",
+            "worktree_branch",
+            "total_tokens_in",
+            "total_tokens_out",
+            "total_tasks",
+            "status",
+        ];
+
+        let mut parts = Vec::new();
+        let mut values: Vec<SqlValue> = Vec::new();
+        for (key, value) in fields {
+            if !allowed.contains(&key.as_str()) {
+                continue;
+            }
+            let col = if key == "group" { "\"group\"" } else { key.as_str() };
+            parts.push(format!("{col} = ?"));
+            let sql_value = match key.as_str() {
+                "removed_at" => value
+                    .as_f64()
+                    .map(SqlValue::Real)
+                    .unwrap_or(SqlValue::Null),
+                "total_tokens_in" | "total_tokens_out" | "total_tasks" => {
+                    SqlValue::Integer(value.as_i64().unwrap_or(0))
+                }
+                _ => SqlValue::Text(value.as_str().unwrap_or("").to_string()),
+            };
+            values.push(sql_value);
+        }
+        if parts.is_empty() {
+            return Ok(());
+        }
+
+        values.push(SqlValue::Text(agent_id.to_string()));
+        let conn = self.inner.lock().await;
+        conn.execute(
+            &format!("UPDATE agent_history SET {} WHERE id = ?", parts.join(", ")),
+            params_from_iter(values),
+        )?;
+        Ok(())
+    }
+
+    pub async fn save_agent_task_record(
+        &self,
+        agent_id: &str,
+        task_id: &str,
+        task_title: &str,
+        started_at: f64,
+        completed_at: Option<f64>,
+        outcome: &str,
+    ) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT INTO agent_tasks(agent_id, task_id, task_title, started_at, completed_at, outcome)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![agent_id, task_id, task_title, started_at, completed_at, outcome],
+        )?;
+        Ok(())
+    }
+
+    pub async fn update_agent_task(
+        &self,
+        agent_id: &str,
+        task_id: &str,
+        completed_at: Option<f64>,
+        outcome: Option<&str>,
+    ) -> crate::Result<()> {
+        let mut parts = Vec::new();
+        let mut values: Vec<SqlValue> = Vec::new();
+        if let Some(value) = completed_at {
+            parts.push("completed_at = ?".to_string());
+            values.push(SqlValue::Real(value));
+        }
+        if let Some(value) = outcome {
+            parts.push("outcome = ?".to_string());
+            values.push(SqlValue::Text(value.to_string()));
+        }
+        if parts.is_empty() {
+            return Ok(());
+        }
+        values.push(SqlValue::Text(agent_id.to_string()));
+        values.push(SqlValue::Text(task_id.to_string()));
+        let conn = self.inner.lock().await;
+        conn.execute(
+            &format!(
+                "UPDATE agent_tasks SET {} WHERE agent_id = ? AND task_id = ?",
+                parts.join(", ")
+            ),
+            params_from_iter(values),
+        )?;
+        Ok(())
+    }
+
+    pub async fn save_agent_message_record(
+        &self,
+        agent_id: &str,
+        task_id: &str,
+        timestamp: f64,
+        action: &str,
+        message: &str,
+    ) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT INTO agent_messages(agent_id, task_id, timestamp, action, message)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![agent_id, task_id, timestamp, action, message],
+        )?;
+        Ok(())
+    }
+
     pub async fn save_memory_entry(&self, entry: &MemoryEntry) -> crate::Result<()> {
         let conn = self.inner.lock().await;
         let data = serde_json::to_string(entry)?;
@@ -1599,6 +1881,7 @@ impl LoomDb {
                     "kind": r.get::<_, String>(2)?,
                     "cell_id": r.get::<_, String>(3)?,
                     "agent_name": r.get::<_, String>(4)?,
+                    "group": r.get::<_, String>(5)?,
                     "group_name": r.get::<_, String>(5)?,
                     "message": r.get::<_, String>(6)?,
                     "task_id": r.get::<_, String>(7)?,
@@ -1621,6 +1904,7 @@ impl LoomDb {
                     "kind": r.get::<_, String>(2)?,
                     "cell_id": r.get::<_, String>(3)?,
                     "agent_name": r.get::<_, String>(4)?,
+                    "group": r.get::<_, String>(5)?,
                     "group_name": r.get::<_, String>(5)?,
                     "message": r.get::<_, String>(6)?,
                     "task_id": r.get::<_, String>(7)?,

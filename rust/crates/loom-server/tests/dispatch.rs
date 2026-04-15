@@ -32,6 +32,7 @@ async fn spawn_test_server_full() -> (SocketAddr, Arc<Mutex<MatrixState>>, UiAge
         bus,
         pty: None,
         ui_agents: ui_agents.clone(),
+        terminals: Default::default(),
     };
 
     let router = loom_server::app::build_router(app_state);
