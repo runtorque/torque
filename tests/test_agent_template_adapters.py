@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from loom.adapters import detect_by_command, get_default_command_for_provider, get_providers
@@ -102,6 +103,7 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 installed["hooks"]["Stop"][0]["hooks"][0]["url"],
                 "https://user.example/hook",
             )
+            self.assertEqual(len(installed["hooks"]["SessionEnd"]), 1)
             self.assertEqual(len(installed["hooks"]["Notification"]), 1)
             session_start_hook = installed["hooks"]["SessionStart"][0]["hooks"][0]
             self.assertIn("http://localhost:18933/events", session_start_hook["command"])
@@ -118,6 +120,18 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                     }]
                 },
             })
+
+    def test_claude_parse_session_end_event(self):
+        adapter = ClaudeCodeAdapter()
+
+        event = adapter.parse_event(
+            {"hook_event_name": "SessionEnd", "reason": "clear"},
+            SimpleNamespace(id="agent-1"),
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event.event_type, "session_end")
+        self.assertEqual(event.data["reason"], "clear")
 
     def test_claude_mcp_config_install_and_cleanup_preserve_other_servers(self):
         with tempfile.TemporaryDirectory() as tmp:
