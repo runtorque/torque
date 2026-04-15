@@ -34,7 +34,7 @@ async fn spawn_bridge_stub_server() -> (SocketAddr, Arc<Mutex<Vec<(String, Value
     let router = Router::new()
         .route("/bridge/create_session", post(stub_create_session))
         .route("/bridge/update_session", post(stub_echo_ok))
-        .route("/bridge/close_session", post(stub_echo_ok))
+        .route("/bridge/close_session", post(stub_close_ok))
         .route("/bridge/focus_session", post(stub_focus_ok))
         .route("/bridge/send_text", post(stub_echo_ok))
         .route("/bridge/write_input", post(stub_echo_ok))
@@ -53,14 +53,19 @@ async fn stub_create_session(
     State(state): State<BridgeStubState>,
     Json(payload): Json<Value>,
 ) -> Json<Value> {
-    state
-        .calls
-        .lock()
-        .await
-        .push(("create_session".into(), payload.clone()));
+    let session_num = {
+        let mut calls = state.calls.lock().await;
+        let session_num = calls
+            .iter()
+            .filter(|(name, _)| name == "create_session")
+            .count()
+            + 1;
+        calls.push(("create_session".into(), payload.clone()));
+        session_num
+    };
     let mut cell = payload.get("cell").cloned().unwrap_or_else(|| json!({}));
-    cell["session_id"] = json!("bridge-session-1");
-    cell["window_id"] = json!("bridge-window-1");
+    cell["session_id"] = json!(format!("bridge-session-{session_num}"));
+    cell["window_id"] = json!(format!("bridge-window-{session_num}"));
     cell["status"] = json!("idle");
     Json(json!({ "ok": true, "cell": cell }))
 }
@@ -76,6 +81,18 @@ async fn stub_echo_ok(
         .or_else(|| payload.get("session_id").map(|_| "close_or_signal"))
         .unwrap_or("update_or_close");
     state.calls.lock().await.push((path.into(), payload));
+    Json(json!({ "ok": true }))
+}
+
+async fn stub_close_ok(
+    State(state): State<BridgeStubState>,
+    Json(payload): Json<Value>,
+) -> Json<Value> {
+    state
+        .calls
+        .lock()
+        .await
+        .push(("close_session".into(), payload));
     Json(json!({ "ok": true }))
 }
 
@@ -194,6 +211,54 @@ async fn send_text_routes_through_terminal_bridge() {
         .expect("send_text call recorded");
     assert_eq!(send.1["cell_id"], agent_id);
     assert_eq!(send.1["session_id"], "bridge-session-1");
+}
+
+#[tokio::test]
+async fn relaunch_agent_recreates_bridge_managed_session() {
+    let (bridge_addr, calls) = spawn_bridge_stub_server().await;
+    let (addr, state) = spawn_loom_server(Some(format!("http://{bridge_addr}"))).await;
+
+    post_cmd(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let response = post_cmd(
+        addr,
+        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
+    )
+    .await;
+    let agent_id = response["data"]["agent_id"].as_str().unwrap().to_string();
+
+    {
+        let st = state.lock().await;
+        let agent = st.agents.get(&agent_id).unwrap();
+        assert_eq!(agent.session_id.as_deref(), Some("bridge-session-1"));
+    }
+
+    let response = post_cmd(addr, json!({"cmd": "relaunch_agent", "id": &agent_id})).await;
+    assert_eq!(response["ok"], true);
+
+    let calls = calls.lock().await;
+    let create_calls = calls
+        .iter()
+        .filter(|(name, _)| name == "create_session")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        create_calls.len(),
+        2,
+        "expected add + relaunch create_session"
+    );
+    assert_eq!(create_calls[0].1["cell"]["id"], agent_id);
+    assert_eq!(create_calls[1].1["cell"]["id"], agent_id);
+    let close_call = calls
+        .iter()
+        .find(|(name, payload)| name == "close_session" && payload["cell_id"] == json!(agent_id))
+        .expect("close_session call recorded");
+    assert_eq!(close_call.1["session_id"], "bridge-session-1");
+    drop(calls);
+
+    let st = state.lock().await;
+    let agent = st.agents.get(&agent_id).unwrap();
+    assert_eq!(agent.session_id.as_deref(), Some("bridge-session-2"));
+    assert_eq!(agent.window_id, "bridge-window-2");
+    assert_eq!(agent.status, "idle");
 }
 
 #[tokio::test]

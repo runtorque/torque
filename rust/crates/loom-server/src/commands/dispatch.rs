@@ -459,7 +459,9 @@ pub async fn relaunch_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     };
     if let Some(a) = agent {
         ctx.db.save_agent(&a).await?;
-        if a.cell_type == "terminal" || !a.command.is_empty() {
+        if bridge_manages_cell(&ctx.terminal_bridge, &a) {
+            let _ = ensure_bridge_session(ctx, &a.id).await?;
+        } else if a.cell_type == "terminal" || !a.command.is_empty() {
             spawn_cell_session(ctx, &a, None).await?;
         }
     }
