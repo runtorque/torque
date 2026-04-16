@@ -5213,11 +5213,32 @@ test('agent clicks rescope the board to the clicked agent group immediately', ()
   assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-2');
   assert.equal(jsonValue(context, '_currentGroup()'), 'beta');
   assert.equal(jsonValue(context, 'renderCalls.board'), 1);
+  assert.deepEqual(jsonValue(context, 'sendCalls[0]'), {
+    cmd: 'select_agent',
+    id: 'agent-2',
+  });
 
   context.focusAgent('term-2');
   assert.equal(jsonValue(context, 'selectedAgentId'), 'agent-2');
   assert.equal(jsonValue(context, '_currentGroup()'), 'beta');
   assert.equal(jsonValue(context, 'renderCalls.board'), 1);
+});
+
+test('agent clicks still focus immediately when focus-on-click is enabled', () => {
+  const { context } = createSelectionHarness();
+
+  context.state.global_settings = { focus_on_click: true };
+  context.state.agents = {
+    'agent-1': { id: 'agent-1', name: 'Alpha', group: 'alpha', cell_type: 'agent' },
+    'agent-2': { id: 'agent-2', name: 'Beta', group: 'beta', cell_type: 'agent' },
+  };
+
+  context.onAgentClick('agent-2');
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.sendCalls)), [
+    { cmd: 'select_agent', id: 'agent-2' },
+    { cmd: 'focus_agent', id: 'agent-2' },
+  ]);
 });
 
 test('embedded terminal selection clears stale agent selection for standalone terminals', () => {

@@ -248,6 +248,11 @@ async fn send_text_routes_through_ui_registry_when_attached() {
         .expect("send_text should route to UI registry")
         .expect("sender must still be open");
     assert_eq!(got, UiAgentInput::Text("hi there".into()));
+    let submit = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("send_text should submit through UI registry")
+        .expect("sender must still be open");
+    assert_eq!(submit, UiAgentInput::Submit);
 }
 
 #[tokio::test]
@@ -406,13 +411,21 @@ async fn board_set_panel_persists_and_idempotent_returns_early() {
 
 #[tokio::test]
 async fn resolve_ask_moves_ask_to_done_and_logs_reply() {
-    let (addr, state) = spawn_test_server().await;
+    let (addr, state, ui_agents) = spawn_test_server_full().await;
     post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+
+    let agent = post(
+        addr,
+        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
+    )
+    .await;
+    let agent_id = agent["data"]["agent_id"].as_str().unwrap().to_string();
+    let mut rx = ui_agents.register(agent_id.clone());
 
     // Create a parent task + an ask child.
     let parent = post(
         addr,
-        json!({"cmd": "board_add_task", "task": "Parent", "group": "Eng"}),
+        json!({"cmd": "board_add_task", "task": "Parent", "group": "Eng", "agent_id": &agent_id}),
     )
     .await;
     let parent_id = parent["data"]["task_id"].as_str().unwrap().to_string();
@@ -430,7 +443,7 @@ async fn resolve_ask_moves_ask_to_done_and_logs_reply() {
         json!({
             "cmd": "board_update_task",
             "id": &ask_id,
-            "fields": {"parent_task_id": &parent_id, "labels": ["human"]}
+            "fields": {"parent_task_id": &parent_id, "labels": ["loom:human"]}
         }),
     )
     .await;
@@ -446,6 +459,12 @@ async fn resolve_ask_moves_ask_to_done_and_logs_reply() {
     .await;
     assert_eq!(v["ok"], true, "response: {v:?}");
     assert_eq!(v["data"]["parent_task_id"], parent_id);
+
+    let delivered = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("resolve_ask should deliver a reply to the parent agent")
+        .expect("sender must still be open");
+    assert!(matches!(delivered, UiAgentInput::Text(text) if text.contains("Go with option B")));
 
     let st = state.lock().await;
     assert_eq!(st.board_tasks.get(&ask_id).unwrap().lane, "Done");

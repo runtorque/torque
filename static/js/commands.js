@@ -102,6 +102,9 @@ function onAgentClick(id) {
   } else {
     // Select this agent → show its terminal drawer
     _updateSelectedAgentContext(id);
+    if (selectedAgentId) {
+      send({ cmd: 'select_agent', id: selectedAgentId });
+    }
     if (state.global_settings && state.global_settings.focus_on_click) {
       send({ cmd: 'focus_agent', id });
     }

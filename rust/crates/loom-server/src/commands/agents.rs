@@ -1,12 +1,14 @@
 //! Agent + terminal CRUD commands.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde::Serialize;
+use serde_json::{json, Map, Value};
 use tracing::warn;
 use uuid::Uuid;
 
-use loom_core::state::AgentCell;
+use loom_core::state::{AgentCell, GroupSettings, WeaverSettings};
 
 use loom_core::delta::DeltaOp;
 
@@ -17,17 +19,66 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     let name = required_str(req, "name")?.to_string();
     let group = required_str(req, "group")?.to_string();
     let bridge_configured = ctx.terminal_bridge.is_configured();
+    let is_weaver = req
+        .get("is_weaver")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let (group_settings, weaver_settings, default_command, existing_weaver_name) = {
+        let st = ctx.state.lock().await;
+        let group_settings = st.group_settings.get(&group).cloned().unwrap_or_default();
+        let weaver_settings = if is_weaver {
+            Some(st.get_weaver_settings(&group))
+        } else {
+            None
+        };
+        let existing_weaver_name = if is_weaver && !group_settings.weaver_agent_id.is_empty() {
+            st.agents
+                .get(&group_settings.weaver_agent_id)
+                .map(|agent| agent.name.clone())
+                .or_else(|| Some("unknown".to_string()))
+        } else {
+            None
+        };
+        (
+            group_settings,
+            weaver_settings,
+            default_command_from_global(&st.global_settings.default_command),
+            existing_weaver_name,
+        )
+    };
+    if let Some(existing_name) = existing_weaver_name {
+        return Err(CmdError::BadRequest(format!(
+            "Group '{group}' already has a weaver: {existing_name}"
+        )));
+    }
+    let effective_req = effective_agent_request(req, weaver_settings.as_ref());
+    let action_system_prompt = effective_req
+        .get("system_prompt")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
 
     let mut cell = AgentCell::new(Uuid::new_v4().to_string(), &name, &group);
     cell.cell_type = "agent".into();
-    apply_common_fields(&mut cell, req);
-    let bridge_options = {
-        let st = ctx.state.lock().await;
-        let settings = st.group_settings.get(&group).cloned().unwrap_or_default();
-        let default_command = default_command_from_global(&st.global_settings.default_command);
-        apply_agent_defaults(&mut cell, &settings, &default_command, req);
-        build_agent_create_session_options(&settings, req)
+    apply_common_fields(&mut cell, &effective_req);
+    apply_agent_defaults(&mut cell, &group_settings, &default_command, &effective_req);
+    let weaver_prompt = if is_weaver {
+        build_weaver_prompt(
+            &group,
+            &group_settings,
+            weaver_settings
+                .as_ref()
+                .expect("weaver settings should exist"),
+            &action_system_prompt,
+        )
+    } else {
+        String::new()
     };
+    let mut bridge_options = build_agent_create_session_options(&group_settings, &effective_req);
+    if !weaver_prompt.is_empty() {
+        bridge_options.system_prompt = weaver_prompt.clone();
+    }
     if let Some(bk) = req.get("terminal_backend").and_then(|v| v.as_str()) {
         cell.terminal_backend = bk.to_string();
     } else if bridge_configured {
@@ -35,10 +86,26 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     }
     let agent_id = cell.id.clone();
 
-    let final_cell = {
+    let (final_cell, designated_group_settings) = {
         let mut st = ctx.state.lock().await;
         st.add_agent(cell)?;
-        st.agents.get(&agent_id).cloned().unwrap()
+        let designated_group_settings = if is_weaver {
+            let mut settings = st.get_group_settings(&group);
+            settings.weaver_agent_id = agent_id.clone();
+            let fields = value_to_object_map(&settings)?;
+            st.group_settings.insert(group.clone(), settings.clone());
+            st.emit(DeltaOp::GroupSettingsUpdate {
+                name: group.clone(),
+                fields,
+            });
+            Some(settings)
+        } else {
+            None
+        };
+        (
+            st.agents.get(&agent_id).cloned().unwrap(),
+            designated_group_settings,
+        )
     };
     let final_cell = maybe_create_bridge_session(ctx, final_cell, &bridge_options).await?;
     ctx.db.save_agent(&final_cell).await?;
@@ -59,6 +126,9 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
             "active",
         )
         .await?;
+    if let Some(settings) = designated_group_settings.as_ref() {
+        ctx.db.save_group_settings(&group, settings).await?;
+    }
     persist_group_members(ctx, &group).await?;
     if !bridge_manages_cell(&ctx.terminal_bridge, &final_cell) {
         crate::commands::dispatch::spawn_cell_session(
@@ -71,6 +141,9 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     if bridge_bootstrap_failed(&final_cell) {
         flush(ctx).await;
         return Err(CmdError::BadRequest(final_cell.error_message.clone()));
+    }
+    if is_weaver && !weaver_prompt.is_empty() {
+        deliver_agent_prompt(ctx, &final_cell, &weaver_prompt).await?;
     }
     flush(ctx).await;
     Ok(json!({ "ok": true, "agent_id": final_cell.id, "slug": final_cell.slug }))
@@ -145,16 +218,22 @@ pub async fn add_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
 
 pub async fn remove_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     let id = required_str(req, "id")?.to_string();
-    let (group, removed, removed_cells) = {
+    let (group, removed, removed_cells, updated_group_settings) = {
         let mut st = ctx.state.lock().await;
         let group = st
             .agents
             .get(&id)
             .map(|a| a.group.clone())
             .ok_or_else(|| CmdError::BadRequest(format!("agent '{id}' not found")))?;
+        let clears_weaver = st.get_group_settings(&group).weaver_agent_id == id;
         let removed_cells = collect_removed_cells(&st, &id);
         let removed = st.remove_agent(&id)?;
-        (group, removed, removed_cells)
+        let updated_group_settings = if clears_weaver {
+            Some(st.get_group_settings(&group))
+        } else {
+            None
+        };
+        (group, removed, removed_cells, updated_group_settings)
     };
     for cell in &removed_cells {
         if bridge_manages_cell(&ctx.terminal_bridge, cell) && cell.session_id.is_some() {
@@ -169,6 +248,9 @@ pub async fn remove_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     }
     for rid in &removed {
         ctx.db.delete_agent(rid).await?;
+    }
+    if let Some(settings) = updated_group_settings.as_ref() {
+        ctx.db.save_group_settings(&group, settings).await?;
     }
     for cell in removed_cells {
         let mut fields = serde_json::Map::new();
@@ -516,6 +598,52 @@ fn apply_common_fields(cell: &mut AgentCell, req: &Value) {
     }
 }
 
+fn effective_agent_request(req: &Value, weaver_settings: Option<&WeaverSettings>) -> Value {
+    let mut merged = req.clone();
+    let Some(ws) = weaver_settings else {
+        return merged;
+    };
+    let Some(obj) = merged.as_object_mut() else {
+        return merged;
+    };
+    insert_string_override(obj, "provider", &ws.weaver_provider);
+    insert_string_override(obj, "command", &ws.weaver_boot_command);
+    insert_string_override(obj, "model", &ws.weaver_model);
+    insert_string_override(obj, "reasoning_effort", &ws.weaver_reasoning_effort);
+    insert_string_override(obj, "directory", &ws.weaver_directory);
+    insert_string_override(obj, "profile", &ws.weaver_profile);
+    insert_string_override(obj, "shell", &ws.weaver_shell);
+    insert_string_override(obj, "tab_color", &ws.weaver_tab_color);
+    merged
+}
+
+fn insert_string_override(map: &mut Map<String, Value>, key: &str, value: &str) {
+    if !value.trim().is_empty() {
+        map.insert(key.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn value_to_object_map<T: Serialize>(value: &T) -> Result<Map<String, Value>, CmdError> {
+    serde_json::to_value(value)?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| CmdError::BadRequest("expected object payload".into()))
+}
+
+pub(crate) fn build_weaver_prompt(
+    group: &str,
+    group_settings: &GroupSettings,
+    weaver_settings: &WeaverSettings,
+    action_system_prompt: &str,
+) -> String {
+    loom_weaver::weaver::build_weaver_system_prompt(
+        group,
+        Some(weaver_settings),
+        action_system_prompt,
+        Some(group_settings),
+    )
+}
+
 pub(crate) fn resolve_provider_command(
     provider: &str,
     boot_command: &str,
@@ -663,6 +791,49 @@ fn build_agent_create_session_options(
         ]),
         ..Default::default()
     }
+}
+
+pub(crate) async fn deliver_agent_prompt(
+    ctx: &CmdContext,
+    cell: &AgentCell,
+    prompt: &str,
+) -> Result<(), CmdError> {
+    if prompt.trim().is_empty() {
+        return Ok(());
+    }
+
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+
+    if ctx.ui_agents.is_attached(&cell.id) {
+        ctx.ui_agents.send_text(&cell.id, prompt.to_string());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        ctx.ui_agents.send_submit(&cell.id);
+        return Ok(());
+    }
+
+    if bridge_manages_cell(&ctx.terminal_bridge, cell) {
+        if cell.session_id.is_none() {
+            return Err(CmdError::BadRequest(format!(
+                "agent '{}' has no live terminal bridge session",
+                cell.id
+            )));
+        }
+        ctx.terminal_bridge
+            .send_text(&cell.id, cell.session_id.as_deref(), prompt, false)
+            .await
+            .map_err(|err| CmdError::BadRequest(err.to_string()))?;
+        return Ok(());
+    }
+
+    let Some(pty) = ctx.pty.as_ref() else {
+        return Err(CmdError::BadRequest(format!(
+            "agent '{}' has no live delivery path",
+            cell.id
+        )));
+    };
+    let _ = pty;
+    crate::commands::dispatch::send_prompt_to_local_pty(ctx, cell, prompt, true).await?;
+    Ok(())
 }
 
 fn apply_terminal_defaults(

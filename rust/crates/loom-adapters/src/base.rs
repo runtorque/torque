@@ -1,6 +1,7 @@
 //! Base types for agent adapters. Ports `loom/adapters/base.py`.
 
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -65,6 +66,34 @@ pub trait AgentAdapter: Send + Sync {
     }
     fn input_ready_policy(&self) -> InputReadyPolicy {
         InputReadyPolicy::OnPrompt
+    }
+    fn input_ready_timeout(&self) -> Duration {
+        Duration::from_secs(0)
+    }
+    fn input_ready_poll_interval(&self) -> Duration {
+        Duration::from_millis(250)
+    }
+    fn input_ready_stable_polls(&self) -> usize {
+        1
+    }
+    fn input_ready_post_ready_delay(&self) -> Duration {
+        Duration::from_secs(0)
+    }
+    fn is_input_ready_screen(&self, _screen_text: &str) -> bool {
+        true
+    }
+    fn submit_key(&self) -> &str {
+        "\r"
+    }
+    fn multiline_submit_delay(&self) -> Duration {
+        Duration::from_millis(300)
+    }
+    fn input_chunks(&self, body: &str) -> Vec<String> {
+        if body.is_empty() {
+            Vec::new()
+        } else {
+            vec![body.to_string()]
+        }
     }
 
     /// Parse a hook payload into structured events. Default = no events.

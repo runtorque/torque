@@ -76,6 +76,26 @@ async fn post(addr: SocketAddr, body: Value) -> Value {
     resp.json::<Value>().await.unwrap()
 }
 
+async fn mcp_tool_call(addr: SocketAddr, agent_id: &str, name: &str, arguments: Value) -> Value {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://{}/mcp", addr))
+        .header("X-Loom-Cell-Id", agent_id)
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": name,
+                "arguments": arguments,
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    resp.json::<Value>().await.unwrap()
+}
+
 #[tokio::test]
 async fn ping_roundtrips_in_python_api_envelope() {
     let (addr, _h) = spawn_test_server().await;
@@ -355,6 +375,515 @@ async fn add_agent_installs_codex_mcp_and_hook_config_before_spawn() {
     assert!(hooks.contains("SessionStart"));
     assert!(hooks.contains("PreToolUse"));
     assert!(hooks.contains("Stop"));
+}
+
+#[tokio::test]
+async fn add_weaver_designates_group_and_delivers_initial_prompt() {
+    let (addr, state, _pty_rx) = spawn_test_server_with_pty().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let prompt_capture = tmp.path().join("weaver-prompt.txt");
+    let working_dir = tmp.path().to_string_lossy().to_string();
+    let command = format!("cat > {}", prompt_capture.to_string_lossy());
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let v = post(
+        addr,
+        json!({
+            "cmd": "weaver_update_settings",
+            "group": "Eng",
+            "autonomy_mode": "aggressive_auto_continue",
+            "default_worker_concurrency": 3,
+            "custom_instructions": "Keep the board moving.",
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "weaver_update_settings response: {v:?}");
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "add_agent",
+            "name": "Weaver",
+            "group": "Eng",
+            "is_weaver": true,
+            "command": command,
+            "directory": working_dir,
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "add_agent response: {v:?}");
+    let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
+
+    let prompt_text = tokio::time::timeout(Duration::from_secs(6), async {
+        loop {
+            if let Ok(contents) = tokio::fs::read_to_string(&prompt_capture).await {
+                if contents.contains("You are the Weaver") {
+                    break contents;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for Weaver prompt capture");
+
+    assert!(prompt_text
+        .contains("You are the Weaver — the orchestrator agent for the \"Eng\" group in Loom."));
+    assert!(prompt_text.contains("## Operating Policy"));
+    assert!(prompt_text.contains("Autonomy mode: Aggressive auto-continue"));
+    assert!(prompt_text.contains("## Custom Instructions"));
+    assert!(prompt_text.contains("Keep the board moving."));
+
+    let st = state.lock().await;
+    assert_eq!(st.get_group_settings("Eng").weaver_agent_id, agent_id);
+}
+
+#[tokio::test]
+async fn relaunch_weaver_replays_weaver_prompt() {
+    let (addr, _state, _pty_rx) = spawn_test_server_with_pty().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let prompt_capture = tmp.path().join("weaver-prompt.txt");
+    let working_dir = tmp.path().to_string_lossy().to_string();
+    let command = format!("cat > {}", prompt_capture.to_string_lossy());
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let v = post(
+        addr,
+        json!({
+            "cmd": "weaver_update_settings",
+            "group": "Eng",
+            "custom_instructions": "Keep the board moving.",
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "weaver_update_settings response: {v:?}");
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "add_agent",
+            "name": "Weaver",
+            "group": "Eng",
+            "is_weaver": true,
+            "command": command,
+            "directory": working_dir,
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "add_agent response: {v:?}");
+    let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
+
+    tokio::time::timeout(Duration::from_secs(6), async {
+        loop {
+            if let Ok(contents) = tokio::fs::read_to_string(&prompt_capture).await {
+                if contents.contains("Keep the board moving.") {
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for initial Weaver prompt capture");
+
+    tokio::fs::remove_file(&prompt_capture)
+        .await
+        .expect("failed to clear prompt capture before relaunch");
+
+    let v = post(addr, json!({"cmd": "relaunch_agent", "id": agent_id})).await;
+    assert_eq!(v["ok"], true, "relaunch_agent response: {v:?}");
+
+    let prompt_text = tokio::time::timeout(Duration::from_secs(6), async {
+        loop {
+            if let Ok(contents) = tokio::fs::read_to_string(&prompt_capture).await {
+                if contents.contains("You are the Weaver") {
+                    break contents;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for relaunched Weaver prompt capture");
+
+    assert!(prompt_text
+        .contains("You are the Weaver — the orchestrator agent for the \"Eng\" group in Loom."));
+    assert!(prompt_text.contains("Keep the board moving."));
+}
+
+#[tokio::test]
+async fn removing_weaver_clears_group_designation_and_allows_recreate() {
+    let (addr, _state, _pty_rx) = spawn_test_server_with_pty().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let working_dir = tmp.path().to_string_lossy().to_string();
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+
+    let first = post(
+        addr,
+        json!({
+            "cmd": "add_agent",
+            "name": "Weaver",
+            "group": "Eng",
+            "is_weaver": true,
+            "command": "cat",
+            "directory": working_dir,
+        }),
+    )
+    .await;
+    assert_eq!(first["ok"], true, "first add_agent response: {first:?}");
+    let first_id = first["data"]["agent_id"].as_str().unwrap().to_string();
+
+    let removed = post(addr, json!({"cmd": "remove_agent", "id": first_id})).await;
+    assert_eq!(removed["ok"], true, "remove_agent response: {removed:?}");
+
+    let config = post(addr, json!({"cmd": "get_group_settings", "group": "Eng"})).await;
+    assert_eq!(
+        config["ok"], true,
+        "get_group_settings response: {config:?}"
+    );
+    assert_eq!(config["data"]["settings"]["weaver_agent_id"], "");
+
+    let second = post(
+        addr,
+        json!({
+            "cmd": "add_agent",
+            "name": "Weaver 2",
+            "group": "Eng",
+            "is_weaver": true,
+            "command": "cat",
+            "directory": tmp.path().to_string_lossy().to_string(),
+        }),
+    )
+    .await;
+    assert_eq!(second["ok"], true, "second add_agent response: {second:?}");
+    assert_ne!(
+        second["data"]["agent_id"].as_str().unwrap(),
+        "",
+        "recreated weaver should get a fresh agent id"
+    );
+}
+
+#[tokio::test]
+async fn preview_prompt_supports_project_feature_action_task_context_fields() {
+    let (addr, _state, _pty_rx) = spawn_test_server_with_pty().await;
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+
+    let task = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Implement standalone parity",
+            "description": "Carry the Python action context into Rust.",
+            "group": "Eng",
+            "action_name": "feature/implement",
+        }),
+    )
+    .await;
+    assert_eq!(task["ok"], true, "board_add_task response: {task:?}");
+    let task_id = task["data"]["task_id"].as_str().unwrap().to_string();
+
+    let preview = post(addr, json!({"cmd": "preview_prompt", "id": task_id})).await;
+    assert_eq!(preview["ok"], true, "preview_prompt response: {preview:?}");
+    let prompt = preview["data"]["prompt"].as_str().unwrap_or("");
+    assert!(prompt.contains("Implement standalone parity"));
+    assert!(prompt.contains("Carry the Python action context into Rust."));
+}
+
+#[tokio::test]
+async fn dispatch_task_renders_project_feature_action_and_sends_prompt() {
+    let (addr, _state, _pty_rx) = spawn_test_server_with_pty().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let prompt_capture = tmp.path().join("dispatch-prompt.txt");
+    let working_dir = tmp.path().to_string_lossy().to_string();
+    let command = format!("cat > {}", prompt_capture.to_string_lossy());
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let agent = post(
+        addr,
+        json!({
+            "cmd": "add_agent",
+            "name": "Worker",
+            "group": "Eng",
+            "command": command,
+            "directory": working_dir,
+        }),
+    )
+    .await;
+    assert_eq!(agent["ok"], true, "add_agent response: {agent:?}");
+    let agent_id = agent["data"]["agent_id"].as_str().unwrap().to_string();
+
+    let task = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Implement standalone parity",
+            "description": "Carry the Python action context into Rust.",
+            "group": "Eng",
+            "action_name": "feature/implement",
+            "agent_id": agent_id,
+        }),
+    )
+    .await;
+    assert_eq!(task["ok"], true, "board_add_task response: {task:?}");
+    let task_id = task["data"]["task_id"].as_str().unwrap().to_string();
+
+    let dispatched = post(addr, json!({"cmd": "dispatch_task", "id": task_id})).await;
+    assert_eq!(
+        dispatched["ok"], true,
+        "dispatch_task response: {dispatched:?}"
+    );
+
+    let prompt_text = tokio::time::timeout(Duration::from_secs(6), async {
+        loop {
+            if let Ok(contents) = tokio::fs::read_to_string(&prompt_capture).await {
+                if contents.contains("Implement standalone parity") {
+                    break contents;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for dispatched prompt capture");
+
+    assert!(prompt_text.contains("Implement standalone parity"));
+    assert!(prompt_text.contains("Carry the Python action context into Rust."));
+}
+
+#[tokio::test]
+async fn board_add_task_preserves_child_lineage_fields() {
+    let (addr, _h) = spawn_test_server().await;
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+
+    let root = post(
+        addr,
+        json!({"cmd": "board_add_task", "task": "Root", "group": "Eng"}),
+    )
+    .await;
+    let root_id = root["data"]["task_id"].as_str().unwrap().to_string();
+
+    let child = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Need review",
+            "group": "Eng",
+            "parent_task_id": &root_id,
+            "pipeline_root_id": &root_id,
+            "pipeline_depth": 1,
+            "status": "Awaiting Reply",
+            "reply_agent_id": "agent-1",
+            "labels": ["loom:human", "loom:derived"],
+        }),
+    )
+    .await;
+    assert_eq!(child["ok"], true, "board_add_task response: {child:?}");
+    let child_id = child["data"]["task_id"].as_str().unwrap().to_string();
+    assert_ne!(child_id, root_id);
+
+    let snap = post(addr, json!({"cmd": "refresh"})).await;
+    let task = &snap["data"]["board_tasks"][&child_id];
+    assert_eq!(task["parent_task_id"], root_id);
+    assert_eq!(task["pipeline_root_id"], root_id);
+    assert_eq!(task["pipeline_depth"], 1);
+    assert_eq!(task["status"], "Awaiting Reply");
+    assert_eq!(task["reply_agent_id"], "agent-1");
+}
+
+#[tokio::test]
+async fn loom_ask_creates_human_child_task_and_marks_parent_awaiting_input() {
+    let (addr, _state, _pty_rx) = spawn_test_server_with_pty().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let working_dir = tmp.path().to_string_lossy().to_string();
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let agent = post(
+        addr,
+        json!({
+            "cmd": "add_agent",
+            "name": "Worker",
+            "group": "Eng",
+            "command": "cat",
+            "directory": working_dir,
+        }),
+    )
+    .await;
+    let agent_id = agent["data"]["agent_id"].as_str().unwrap().to_string();
+    let root = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Implement feature",
+            "group": "Eng",
+            "agent_id": &agent_id,
+        }),
+    )
+    .await;
+    let root_id = root["data"]["task_id"].as_str().unwrap().to_string();
+    let dispatched = post(
+        addr,
+        json!({"cmd": "dispatch_task", "task_id": &root_id, "force_no_action": true}),
+    )
+    .await;
+    assert_eq!(dispatched["ok"], true, "dispatch response: {dispatched:?}");
+
+    let ask = mcp_tool_call(
+        addr,
+        &agent_id,
+        "loom_ask",
+        json!({
+            "question": "Need clarification",
+            "description": "Should I ship A or B?"
+        }),
+    )
+    .await;
+    assert!(ask["error"].is_null(), "loom_ask response: {ask:?}");
+    let ask_id = ask["result"]["loom"]["ask_task_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let snap = post(addr, json!({"cmd": "refresh"})).await;
+    let root_task = &snap["data"]["board_tasks"][&root_id];
+    assert_eq!(root_task["status"], "Awaiting Input");
+    let ask_task = &snap["data"]["board_tasks"][&ask_id];
+    assert_eq!(ask_task["task"], "Need clarification");
+    assert_eq!(ask_task["description"], "Should I ship A or B?");
+    assert_eq!(ask_task["lane"], "Backlog");
+    assert_eq!(ask_task["parent_task_id"], root_id);
+    assert_eq!(ask_task["pipeline_root_id"], root_id);
+    let labels = ask_task["labels"].as_array().cloned().unwrap_or_default();
+    assert!(labels.iter().any(|label| label == "loom:human"));
+}
+
+#[tokio::test]
+async fn resolve_ask_delivers_answer_and_clears_parent_status() {
+    let (addr, _state, _pty_rx) = spawn_test_server_with_pty().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let prompt_capture = tmp.path().join("worker.txt");
+    let working_dir = tmp.path().to_string_lossy().to_string();
+    let command = format!("cat > {}", prompt_capture.to_string_lossy());
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let agent = post(
+        addr,
+        json!({
+            "cmd": "add_agent",
+            "name": "Worker",
+            "group": "Eng",
+            "command": command,
+            "directory": working_dir,
+        }),
+    )
+    .await;
+    let agent_id = agent["data"]["agent_id"].as_str().unwrap().to_string();
+    let root = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Implement feature",
+            "group": "Eng",
+            "agent_id": &agent_id,
+        }),
+    )
+    .await;
+    let root_id = root["data"]["task_id"].as_str().unwrap().to_string();
+    let dispatched = post(
+        addr,
+        json!({"cmd": "dispatch_task", "task_id": &root_id, "force_no_action": true}),
+    )
+    .await;
+    assert_eq!(dispatched["ok"], true, "dispatch response: {dispatched:?}");
+
+    let ask = mcp_tool_call(
+        addr,
+        &agent_id,
+        "loom_ask",
+        json!({"question": "Need clarification"}),
+    )
+    .await;
+    assert!(ask["error"].is_null(), "loom_ask response: {ask:?}");
+    let ask_id = ask["result"]["loom"]["ask_task_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let resolved = post(
+        addr,
+        json!({
+            "cmd": "resolve_ask",
+            "task_id": &ask_id,
+            "reply": "Choose option B"
+        }),
+    )
+    .await;
+    assert_eq!(resolved["ok"], true, "resolve_ask response: {resolved:?}");
+
+    let delivered = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            if let Ok(contents) = tokio::fs::read_to_string(&prompt_capture).await {
+                if contents.contains("Answer to your question")
+                    && contents.contains("Choose option B")
+                {
+                    break contents;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for ask reply delivery");
+    assert!(delivered.contains("Answer to your question \"Need clarification\":"));
+    assert!(delivered.contains("Choose option B"));
+
+    let snap = post(addr, json!({"cmd": "refresh"})).await;
+    assert_eq!(snap["data"]["board_tasks"][&ask_id]["lane"], "Done");
+    assert_eq!(snap["data"]["board_tasks"][&root_id]["status"], "");
+}
+
+#[tokio::test]
+async fn send_text_submits_to_idle_local_pty_agent() {
+    let (addr, _state, _pty_rx) = spawn_test_server_with_pty().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let prompt_capture = tmp.path().join("send-text.txt");
+    let working_dir = tmp.path().to_string_lossy().to_string();
+    let command = format!("cat > {}", prompt_capture.to_string_lossy());
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let agent = post(
+        addr,
+        json!({
+            "cmd": "add_agent",
+            "name": "Worker",
+            "group": "Eng",
+            "command": command,
+            "directory": working_dir,
+        }),
+    )
+    .await;
+    let agent_id = agent["data"]["agent_id"].as_str().unwrap().to_string();
+
+    let sent = post(
+        addr,
+        json!({"cmd": "send_text", "cell_id": &agent_id, "text": "resume work"}),
+    )
+    .await;
+    assert_eq!(sent["ok"], true, "send_text response: {sent:?}");
+
+    let delivered = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            if let Ok(contents) = tokio::fs::read_to_string(&prompt_capture).await {
+                if contents.contains("resume work") {
+                    break contents;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for send_text delivery");
+    assert!(delivered.contains("resume work"));
 }
 
 #[tokio::test]

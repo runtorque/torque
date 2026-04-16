@@ -2,6 +2,7 @@
 //! slash-command skills. Port of `loom/adapters/claude_code.py`.
 
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -502,6 +503,47 @@ impl AgentAdapter for ClaudeCodeAdapter {
 
     fn input_ready_policy(&self) -> InputReadyPolicy {
         InputReadyPolicy::OnIdle
+    }
+
+    fn input_ready_timeout(&self) -> Duration {
+        Duration::from_secs(30)
+    }
+
+    fn input_ready_poll_interval(&self) -> Duration {
+        Duration::from_millis(500)
+    }
+
+    fn input_ready_stable_polls(&self) -> usize {
+        2
+    }
+
+    fn input_ready_post_ready_delay(&self) -> Duration {
+        Duration::from_millis(500)
+    }
+
+    fn is_input_ready_screen(&self, screen_text: &str) -> bool {
+        let lower = screen_text.to_lowercase();
+        lower.contains("claude code") || lower.contains("claude.ai/code")
+    }
+
+    fn input_chunks(&self, body: &str) -> Vec<String> {
+        if body.is_empty() {
+            return Vec::new();
+        }
+        if !body.contains('\n') {
+            return vec![body.to_string()];
+        }
+        let lines: Vec<&str> = body.split('\n').collect();
+        let mut chunks = Vec::new();
+        for (idx, line) in lines.iter().enumerate() {
+            if !line.is_empty() {
+                chunks.push((*line).to_string());
+            }
+            if idx + 1 < lines.len() {
+                chunks.push("\n".to_string());
+            }
+        }
+        chunks
     }
 
     fn parse_hook(&self, payload: &serde_json::Value) -> Vec<AgentEvent> {

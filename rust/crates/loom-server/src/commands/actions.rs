@@ -47,13 +47,21 @@ pub async fn render_action(ctx: &CmdContext, req: &Value) -> CmdResult {
     let mgr = build_manager(ctx).await?;
     let info = mgr.get_action(name).map_err(action_err)?;
 
-    // Build a stub `loom` ctx for preview. Full context is used during dispatch.
-    let loom_ctx = stub_context();
-
     // Add TASK placeholder if caller didn't provide one.
     let mut vars = vars;
     vars.entry("TASK".to_string())
         .or_insert_with(|| Value::String("<TASK>".into()));
+    let task_title = vars
+        .get("TASK")
+        .and_then(Value::as_str)
+        .unwrap_or("<TASK>")
+        .to_string();
+    // Build a stub `loom` ctx for preview. Mirror Python's preview behavior by
+    // exposing the provided TASK value through both {{ TASK }} and loom.task.title.
+    let mut loom_ctx = stub_context();
+    if let Some(task) = loom_ctx.get_mut("task").and_then(Value::as_object_mut) {
+        task.insert("title".into(), Value::String(task_title));
+    }
 
     let rendered = loom_actions::render::render_prompt(&info.prompt, &vars, &loom_ctx)
         .map_err(|e| CmdError::BadRequest(format!("render: {e}")))?;

@@ -20,7 +20,7 @@ use loom_core::events::{EventBus, OutMessage};
 use loom_core::state::MatrixState;
 use loom_pty::LocalPtyBackend;
 
-use crate::app::{AppState, UiAgentRegistry};
+use crate::app::{AppState, TerminalHub, UiAgentRegistry};
 use crate::terminal_bridge::TerminalBridgeClient;
 
 pub mod actions;
@@ -61,6 +61,7 @@ async fn handle_cmd(State(app): State<AppState>, Json(req): Json<Value>) -> impl
         pty: app.pty.clone(),
         ui_agents: app.ui_agents.clone(),
         terminal_bridge: app.terminal_bridge.clone(),
+        terminals: app.terminals.clone(),
     };
 
     let result = dispatch_command(&ctx, &cmd, &req).await;
@@ -104,6 +105,7 @@ pub struct CmdContext {
     pub pty: Option<Arc<LocalPtyBackend>>,
     pub ui_agents: UiAgentRegistry,
     pub terminal_bridge: TerminalBridgeClient,
+    pub terminals: TerminalHub,
 }
 
 #[derive(Debug)]
@@ -281,7 +283,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
                 pty: ctx.pty.clone(),
                 ui_agents: ctx.ui_agents.clone(),
                 terminal_bridge: ctx.terminal_bridge.clone(),
-                terminals: Default::default(),
+                terminals: ctx.terminals.clone(),
             })
             .await;
             Ok(snap)

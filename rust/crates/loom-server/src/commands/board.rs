@@ -5,27 +5,93 @@ use serde_json::{json, Value};
 use loom_core::state::{BoardTask, ARCHIVED_LANE};
 use loom_core::task_ids::{format_root_task_id, normalize_group_prefix};
 
-use super::{flush, ok, required_str, CmdContext, CmdError, CmdResult};
+use super::{flush, ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
+
+fn resolve_task_ref(st: &loom_core::state::MatrixState, ident: Option<&str>) -> String {
+    let value = ident.unwrap_or("").trim();
+    if value.is_empty() {
+        return String::new();
+    }
+    st.task_id_aliases
+        .get(value)
+        .cloned()
+        .or_else(|| st.resolve_task_ident(value))
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn allocate_derived_task_id(
+    st: &mut loom_core::state::MatrixState,
+    root_id: &str,
+) -> (String, u64) {
+    let counter = st
+        .pipeline_task_counters
+        .entry(root_id.to_string())
+        .or_insert(1);
+    let next_child = (*counter).max(1);
+    *counter = next_child + 1;
+    let task_id = if next_child == 1 {
+        format!("{root_id}a")
+    } else {
+        format!("{root_id}a{next_child}")
+    };
+    (task_id, *counter)
+}
 
 pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     let title = required_str(req, "task")?.to_string();
     let group = required_str(req, "group")?.to_string();
+    let explicit_id = optional_str(req, "id")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
 
-    let (id, prefix, next_root_number) = {
+    let (id, prefix, next_root_number, next_child_number, parent_task_id, pipeline_root_id) = {
         let mut st = ctx.state.lock().await;
         if !st.groups.contains_key(&group) {
             return Err(CmdError::BadRequest(format!("group '{group}' not found")));
         }
+        let parent_task_id = resolve_task_ref(&st, optional_str(req, "parent_task_id"));
+        let explicit_root = resolve_task_ref(&st, optional_str(req, "pipeline_root_id"));
+        let derived_root_id = if !explicit_root.is_empty() {
+            explicit_root.clone()
+        } else {
+            parent_task_id.clone()
+        };
         let prefix = normalize_group_prefix(&group);
-        let counter = st.task_id_counters.entry(prefix.clone()).or_insert(0);
-        *counter += 1;
-        let trunk = *counter;
-        (format_root_task_id(&group, trunk), prefix, trunk)
+        let (id, next_root_number, next_child_number) = if let Some(explicit_id) =
+            explicit_id.clone()
+        {
+            (explicit_id, 0, None)
+        } else if !derived_root_id.is_empty() {
+            let (task_id, next_child_number) = allocate_derived_task_id(&mut st, &derived_root_id);
+            (task_id, 0, Some(next_child_number))
+        } else {
+            let counter = st.task_id_counters.entry(prefix.clone()).or_insert(0);
+            *counter += 1;
+            let trunk = *counter;
+            (format_root_task_id(&group, trunk), trunk, None)
+        };
+        let pipeline_root_id = if !explicit_root.is_empty() {
+            explicit_root
+        } else if !derived_root_id.is_empty() {
+            derived_root_id
+        } else {
+            id.clone()
+        };
+        (
+            id,
+            prefix,
+            next_root_number,
+            next_child_number,
+            parent_task_id,
+            pipeline_root_id,
+        )
     };
 
     let mut task = BoardTask::new_minimal(id.clone(), title.clone());
     task.group = group.clone();
-    task.pipeline_root_id = id.clone();
+    task.parent_task_id = parent_task_id;
+    task.pipeline_root_id = pipeline_root_id.clone();
     task.lane = req
         .get("lane")
         .and_then(|v| v.as_str())
@@ -41,6 +107,11 @@ pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     if let Some(action) = req.get("action_name").and_then(|v| v.as_str()) {
         task.action_name = action.to_string();
     }
+    if let Some(depth) = req.get("pipeline_depth").and_then(|v| v.as_i64()) {
+        task.pipeline_depth = depth as i32;
+    } else if !task.parent_task_id.is_empty() {
+        task.pipeline_depth = 1;
+    }
     if let Some(vars) = req.get("action_vars").and_then(|v| v.as_object()) {
         task.action_vars = vars.clone();
     }
@@ -53,14 +124,28 @@ pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     if let Some(agent_id) = req.get("agent_id").and_then(|v| v.as_str()) {
         task.agent_id = agent_id.to_string();
     }
+    if let Some(reply_agent_id) = req.get("reply_agent_id").and_then(|v| v.as_str()) {
+        task.reply_agent_id = reply_agent_id.to_string();
+    }
+    if let Some(status) = req.get("status").and_then(|v| v.as_str()) {
+        task.status = status.to_string();
+    }
 
-    {
+    let task = {
         let mut st = ctx.state.lock().await;
         st.upsert_task(task.clone())?;
+        st.board_tasks.get(&id).cloned().unwrap_or(task)
+    };
+    if next_root_number > 0 {
+        ctx.db
+            .save_task_id_counter(&prefix, next_root_number as u64)
+            .await?;
     }
-    ctx.db
-        .save_task_id_counter(&prefix, next_root_number as u64)
-        .await?;
+    if let Some(next_child_number) = next_child_number {
+        ctx.db
+            .save_pipeline_task_counter(&pipeline_root_id, next_child_number)
+            .await?;
+    }
     ctx.db.save_board_task(&task).await?;
     flush(ctx).await;
     Ok(json!({ "ok": true, "task_id": task.id, "slug": task.slug }))

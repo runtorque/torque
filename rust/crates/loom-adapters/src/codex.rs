@@ -1,6 +1,7 @@
 //! Codex adapter — full integration via command hooks and MCP.
 
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -322,6 +323,26 @@ impl AgentAdapter for CodexAdapter {
 
     fn input_ready_policy(&self) -> InputReadyPolicy {
         InputReadyPolicy::OnPrompt
+    }
+
+    fn input_ready_timeout(&self) -> Duration {
+        Duration::from_secs(8)
+    }
+
+    fn input_ready_poll_interval(&self) -> Duration {
+        Duration::from_millis(250)
+    }
+
+    fn input_ready_stable_polls(&self) -> usize {
+        2
+    }
+
+    fn is_input_ready_screen(&self, screen_text: &str) -> bool {
+        let lower = screen_text.to_lowercase();
+        lower.contains("openai codex")
+            && lower.contains("model:")
+            && lower.contains("directory:")
+            && screen_text.contains('›')
     }
 
     fn parse_hook(&self, payload: &serde_json::Value) -> Vec<AgentEvent> {

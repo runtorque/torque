@@ -1759,12 +1759,30 @@ impl MatrixState {
             return Err(crate::Error::not_found(format!("agent '{id}'")));
         };
         let group = agent.group.clone();
+        let clears_weaver = self
+            .group_settings
+            .get(&group)
+            .map(|settings| settings.weaver_agent_id == id)
+            .unwrap_or(false);
         let removed = self.cascade_remove_agent(id);
         if removed.is_empty() {
             return Err(crate::Error::not_found(format!("agent '{id}'")));
         }
         for rid in &removed {
             self.emit(DeltaOp::AgentRemove { id: rid.clone() });
+        }
+        if clears_weaver {
+            let settings = self.group_settings.entry(group.clone()).or_default();
+            settings.weaver_agent_id.clear();
+            let fields = serde_json::to_value(&*settings)
+                .unwrap_or(serde_json::Value::Null)
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+            self.emit(DeltaOp::GroupSettingsUpdate {
+                name: group.clone(),
+                fields,
+            });
         }
         self.emit_group(&group);
         self.clear_selection_if_removed(&removed);

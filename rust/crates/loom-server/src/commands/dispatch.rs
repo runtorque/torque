@@ -1,12 +1,14 @@
 //! Dispatch, send_text, broadcast, and ai_report.
 
 use std::path::Path;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tracing::warn;
 
 use loom_actions::context::LoomContextBuilder;
+use loom_adapters::{AgentAdapter, InputReadyPolicy};
 use loom_core::state::AgentCell;
 
 use super::{flush, ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
@@ -31,6 +33,124 @@ async fn install_provider_integration(working_dir: &Path, boot_command: &str) {
     if let Err(err) = adapter.install_skills(working_dir).await {
         tracing::warn!(?err, ?working_dir, provider, "install_skills failed");
     }
+}
+
+fn resolve_ai_report_task_id(
+    st: &loom_core::state::MatrixState,
+    agent_id: &str,
+    explicit: &str,
+) -> String {
+    let explicit = explicit.trim();
+    if !explicit.is_empty() {
+        return st
+            .resolve_task_ident(explicit)
+            .or_else(|| st.task_id_aliases.get(explicit).cloned())
+            .unwrap_or_else(|| explicit.to_string());
+    }
+    let Some(agent) = st.agents.get(agent_id) else {
+        return String::new();
+    };
+    if !agent.current_task_id.is_empty() {
+        if let Some(current) = st.board_tasks.get(&agent.current_task_id) {
+            if st.task_occupies_execution_slot(Some(current), agent_id) {
+                return current.id.clone();
+            }
+        }
+    }
+    if let Some(current) = st.agent_current_task(agent_id) {
+        return current.id.clone();
+    }
+    let mut linked = st
+        .board_tasks
+        .values()
+        .filter(|task| {
+            task.agent_id == agent_id
+                && task.lane != "Done"
+                && task.lane != "Backlog"
+                && task.lane != loom_core::state::ARCHIVED_LANE
+        })
+        .collect::<Vec<_>>();
+    linked.sort_by(|a, b| a.id.cmp(&b.id));
+    if linked.len() == 1 {
+        linked[0].id.clone()
+    } else {
+        String::new()
+    }
+}
+
+fn parent_has_open_human_asks(
+    st: &loom_core::state::MatrixState,
+    parent_task_id: &str,
+    exclude_task_id: &str,
+) -> bool {
+    st.board_tasks.values().any(|task| {
+        task.id != exclude_task_id
+            && task.parent_task_id == parent_task_id
+            && !loom_core::state::board_task_is_closed(Some(task))
+            && task.labels.iter().any(|label| label == "loom:human")
+    })
+}
+
+fn clear_parent_awaiting_input(
+    st: &mut loom_core::state::MatrixState,
+    parent_task_id: &str,
+    exclude_task_id: &str,
+) -> Option<(
+    loom_core::state::BoardTask,
+    Option<loom_core::state::BoardTask>,
+)> {
+    if parent_task_id.trim().is_empty()
+        || parent_has_open_human_asks(st, parent_task_id, exclude_task_id)
+    {
+        return None;
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let Some(parent) = st.board_tasks.get(parent_task_id).cloned() else {
+        return None;
+    };
+
+    let mut updated_parent = parent.clone();
+    updated_parent.status.clear();
+    updated_parent.updated_at = now.clone();
+    st.upsert_task(updated_parent.clone()).ok()?;
+
+    let root_id = if updated_parent.pipeline_root_id.is_empty() {
+        updated_parent.id.clone()
+    } else {
+        updated_parent.pipeline_root_id.clone()
+    };
+    if root_id == updated_parent.id {
+        return Some((updated_parent, None));
+    }
+    let Some(root) = st.board_tasks.get(&root_id).cloned() else {
+        return Some((updated_parent, None));
+    };
+    let mut updated_root = root.clone();
+    updated_root.status.clear();
+    updated_root.updated_at = now;
+    st.upsert_task(updated_root.clone()).ok()?;
+    Some((updated_parent, Some(updated_root)))
+}
+
+async fn mark_agent_running(
+    ctx: &CmdContext,
+    agent_id: &str,
+) -> Result<Option<AgentCell>, CmdError> {
+    let agent = {
+        let mut st = ctx.state.lock().await;
+        let Some(agent) = st.agents.get_mut(agent_id) else {
+            return Ok(None);
+        };
+        agent.status = "running".into();
+        agent.error_message.clear();
+        agent.last_event_at = chrono::Utc::now().timestamp() as f64;
+        let cloned = agent.clone();
+        st.emit_agent(agent_id);
+        cloned
+    };
+    ctx.db.save_agent(&agent).await?;
+    flush(ctx).await;
+    Ok(Some(agent))
 }
 
 // ---------------------------------------------------------------------------
@@ -228,12 +348,13 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         return Err(CmdError::BadRequest(format!(
             "agent '{target_agent_id}' has no live terminal bridge session"
         )));
-    } else if let Some(pty) = &ctx_pty(ctx).await {
+    } else if let Some(_pty) = &ctx_pty(ctx).await {
         let agent = {
             let st = ctx.state.lock().await;
             st.agents.get(&target_agent_id).cloned()
         };
         if let Some(agent) = agent {
+            let mut spawned_now = false;
             if agent.status != "running" {
                 // Boot the agent's command.
                 let command = if agent.command.is_empty() {
@@ -248,18 +369,17 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
                 };
                 let mut env = std::collections::HashMap::new();
                 env.insert(loom_core::config::ENV_CELL_ID.to_string(), agent.id.clone());
-                let _ = pty.spawn(&agent.id, &command, cwd, env, 40, 120).await;
-                // Boot delay — let the agent's prompt appear before we send text.
-                if is_new_agent {
-                    tokio::time::sleep(Duration::from_millis(2000)).await;
-                }
+                let _ = _pty.spawn(&agent.id, &command, cwd, env, 40, 120).await;
+                spawned_now = true;
             }
+            send_prompt_to_local_pty(
+                ctx,
+                &agent,
+                &rendered,
+                spawned_now || is_new_agent || agent.tasks_dispatched == 0,
+            )
+            .await?;
         }
-
-        // Send the prompt + newline (separate write for the newline to escape bracketed paste).
-        let _ = pty.write(&target_agent_id, rendered.as_bytes()).await;
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let _ = pty.write(&target_agent_id, b"\r").await;
     }
 
     // Update task + agent state.
@@ -362,18 +482,22 @@ pub async fn send_text_to_cell(
     cell_id: &str,
     text: &str,
 ) -> Result<(), CmdError> {
-    {
+    let agent = {
         let st = ctx.state.lock().await;
-        if !st.agents.contains_key(cell_id) {
-            return Err(CmdError::BadRequest(format!("agent '{cell_id}' not found")));
-        }
+        st.agents.get(cell_id).cloned()
     }
+    .ok_or_else(|| CmdError::BadRequest(format!("agent '{cell_id}' not found")))?;
 
     if text == "\r" || text == "\n" || text == "\r\n" {
         if ctx.ui_agents.send_submit(cell_id) {
+            let _ = mark_agent_running(ctx, cell_id).await?;
             return Ok(());
         }
-    } else if ctx.ui_agents.send_text(cell_id, text.to_string()) {
+    } else if ctx.ui_agents.is_attached(cell_id) {
+        ctx.ui_agents.send_text(cell_id, text.to_string());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        ctx.ui_agents.send_submit(cell_id);
+        let _ = mark_agent_running(ctx, cell_id).await?;
         return Ok(());
     }
 
@@ -384,6 +508,7 @@ pub async fn send_text_to_cell(
                 .send_text(&cell_id, agent.session_id.as_deref(), &text, false)
                 .await
                 .map_err(|e| CmdError::BadRequest(e.to_string()))?;
+            let _ = mark_agent_running(ctx, cell_id).await?;
             return Ok(());
         }
     }
@@ -398,9 +523,14 @@ pub async fn send_text_to_cell(
     }
 
     if let Some(pty) = ctx_pty(ctx).await {
-        pty.write(cell_id, text.as_bytes())
-            .await
-            .map_err(|e| CmdError::BadRequest(e.to_string()))?;
+        if text == "\r" || text == "\n" || text == "\r\n" {
+            pty.write(cell_id, b"\r")
+                .await
+                .map_err(|e| CmdError::BadRequest(e.to_string()))?;
+        } else {
+            send_prompt_to_local_pty(ctx, &agent, text, true).await?;
+        }
+        let _ = mark_agent_running(ctx, cell_id).await?;
         return Ok(());
     }
 
@@ -506,6 +636,21 @@ pub async fn relaunch_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     };
     if let Some(a) = agent {
         ctx.db.save_agent(&a).await?;
+        let weaver_prompt = {
+            let st = ctx.state.lock().await;
+            let group_settings = st.get_group_settings(&a.group);
+            if group_settings.weaver_agent_id == a.id {
+                Some(crate::commands::agents::build_weaver_prompt(
+                    &a.group,
+                    &group_settings,
+                    &st.get_weaver_settings(&a.group),
+                    "",
+                ))
+            } else {
+                None
+            }
+        };
+        let mut delivery_cell = a.clone();
         if bridge_manages_cell(&ctx.terminal_bridge, &a) {
             let settings = {
                 let st = ctx.state.lock().await;
@@ -534,9 +679,13 @@ pub async fn relaunch_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
                     flush(ctx).await;
                     return Err(CmdError::BadRequest(agent.error_message));
                 }
+                delivery_cell = agent;
             }
         } else if a.cell_type == "terminal" || !a.command.is_empty() {
             spawn_cell_session(ctx, &a, None).await?;
+        }
+        if let Some(prompt) = weaver_prompt.as_ref() {
+            crate::commands::agents::deliver_agent_prompt(ctx, &delivery_cell, prompt).await?;
         }
     }
     flush(ctx).await;
@@ -547,21 +696,159 @@ pub async fn relaunch_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
 // ai_report — unified handler for all `loom ai` actions
 // ---------------------------------------------------------------------------
 
+async fn handle_agent_ask(
+    ctx: &CmdContext,
+    agent_id: &str,
+    task_id: &str,
+    question: &str,
+    description: &str,
+) -> CmdResult {
+    if question.trim().is_empty() {
+        return Err(CmdError::BadRequest("Ask requires a question".into()));
+    }
+
+    let (agent, parent_task, root_task, ask_task, next_child_number) = {
+        let mut st = ctx.state.lock().await;
+        if task_id.trim().is_empty() {
+            return Err(CmdError::BadRequest("No linked task to derive from".into()));
+        }
+        let Some(parent) = st.board_tasks.get(task_id).cloned() else {
+            return Err(CmdError::BadRequest(format!("task '{task_id}' not found")));
+        };
+        let Some(cell) = st.agents.get_mut(agent_id) else {
+            return Err(CmdError::BadRequest(format!(
+                "agent '{agent_id}' not found"
+            )));
+        };
+
+        let now = chrono::Utc::now().to_rfc3339();
+        cell.activity.clear();
+        cell.activity_detail.clear();
+        cell.needs_attention = true;
+        cell.error_message.clear();
+        cell.last_event_at = chrono::Utc::now().timestamp() as f64;
+        let agent = cell.clone();
+        st.emit_agent(agent_id);
+
+        let mut updated_parent = parent.clone();
+        updated_parent.status = "Awaiting Input".into();
+        updated_parent.updated_at = now.clone();
+        updated_parent.messages.push(json!({
+            "timestamp": now,
+            "action": "ask",
+            "message": question,
+            "agent_id": agent_id,
+            "agent_name": agent.name,
+        }));
+        st.upsert_task(updated_parent.clone())?;
+
+        let mut updated_root = None;
+        let root_id = if parent.pipeline_root_id.is_empty() {
+            parent.id.clone()
+        } else {
+            parent.pipeline_root_id.clone()
+        };
+        if root_id != parent.id {
+            if let Some(root) = st.board_tasks.get(&root_id).cloned() {
+                let mut root = root;
+                root.status = "Awaiting Input".into();
+                root.updated_at = chrono::Utc::now().to_rfc3339();
+                st.upsert_task(root.clone())?;
+                updated_root = Some(root);
+            }
+        }
+
+        let (ask_id, next_child_number) = {
+            let counter = st
+                .pipeline_task_counters
+                .entry(root_id.clone())
+                .or_insert(1);
+            let next_child = (*counter).max(1);
+            *counter = next_child + 1;
+            let ask_id = if next_child == 1 {
+                format!("{root_id}a")
+            } else {
+                format!("{root_id}a{next_child}")
+            };
+            (ask_id, *counter)
+        };
+        let mut ask_task = loom_core::state::BoardTask::new_minimal(ask_id, question.to_string());
+        ask_task.group = updated_parent.group.clone();
+        ask_task.description = description.to_string();
+        ask_task.lane = "Backlog".into();
+        ask_task.parent_task_id = updated_parent.id.clone();
+        ask_task.pipeline_depth = updated_parent.pipeline_depth + 1;
+        ask_task.pipeline_root_id = root_id.clone();
+        ask_task.labels = vec!["loom:human".into(), "loom:derived".into()];
+        ask_task.created_at = chrono::Utc::now().to_rfc3339();
+        ask_task.updated_at = ask_task.created_at.clone();
+        ask_task.lane_entered_at = ask_task.created_at.clone();
+        st.upsert_task(ask_task.clone())?;
+        let ask_task = st
+            .board_tasks
+            .get(&ask_task.id)
+            .cloned()
+            .unwrap_or(ask_task);
+
+        (
+            agent,
+            updated_parent,
+            updated_root,
+            ask_task,
+            next_child_number,
+        )
+    };
+
+    ctx.db.save_agent(&agent).await?;
+    ctx.db.save_board_task(&parent_task).await?;
+    if let Some(root_task) = &root_task {
+        ctx.db.save_board_task(root_task).await?;
+    }
+    ctx.db
+        .save_pipeline_task_counter(&ask_task.pipeline_root_id, next_child_number)
+        .await?;
+    ctx.db.save_board_task(&ask_task).await?;
+    ctx.db
+        .save_agent_message_record(&agent.id, &parent_task.id, now_ts(), "ask", question)
+        .await?;
+
+    let _ = crate::commands::compat::record_panel_event(
+        &ctx.state,
+        &ctx.db,
+        "ask_created",
+        &agent.id,
+        &agent.name,
+        &agent.group,
+        question,
+        &ask_task.id,
+        false,
+    )
+    .await;
+    flush(ctx).await;
+    Ok(json!({
+        "ok": true,
+        "action": "ask",
+        "task_id": parent_task.id,
+        "ask_task_id": ask_task.id,
+    }))
+}
+
 pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
     let action = required_str(req, "action")?.to_string();
     let agent_id = optional_str(req, "agent_id")
         .map(String::from)
         .ok_or_else(|| CmdError::BadRequest("missing agent_id".into()))?;
     let message = optional_str(req, "message").unwrap_or("").to_string();
-
-    // Resolve the linked task (agent.current_task_id).
+    let description = optional_str(req, "description").unwrap_or("").to_string();
+    let explicit_task_id = optional_str(req, "task_id").unwrap_or("").to_string();
     let task_id = {
         let st = ctx.state.lock().await;
-        st.agents
-            .get(&agent_id)
-            .map(|a| a.current_task_id.clone())
-            .unwrap_or_default()
+        resolve_ai_report_task_id(&st, &agent_id, &explicit_task_id)
     };
+
+    if action == "ask" {
+        return handle_agent_ask(ctx, &agent_id, &task_id, &message, &description).await;
+    }
 
     let (task, agent) = {
         let mut st = ctx.state.lock().await;
@@ -594,10 +881,6 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
                     if action == "ready" {
                         // unlink
                     }
-                }
-                "ask" => {
-                    cell.needs_attention = true;
-                    cell.activity_detail = format!("ask: {message}");
                 }
                 _ => {}
             }
@@ -732,20 +1015,6 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
             )
             .await;
         }
-        "ask" => {
-            let _ = crate::commands::compat::record_panel_event(
-                &ctx.state,
-                &ctx.db,
-                "ask_created",
-                &agent.id,
-                &agent.name,
-                &agent.group,
-                &message,
-                &task_id,
-                false,
-            )
-            .await;
-        }
         _ => {}
     }
     flush(ctx).await;
@@ -763,14 +1032,64 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
 pub async fn resolve_ask(ctx: &CmdContext, req: &Value) -> CmdResult {
     let task_id = required_str(req, "task_id")?.to_string();
     let reply = required_str(req, "reply")?.to_string();
+    if reply.trim().is_empty() {
+        return Err(CmdError::BadRequest("Answer is required".into()));
+    }
 
-    let (ask_task, parent) = {
+    let (question, parent_agent_id, agent_name, agent_group) = {
+        let st = ctx.state.lock().await;
+        let Some(ask_task) = st.board_tasks.get(&task_id) else {
+            return Err(CmdError::BadRequest(format!("task '{task_id}' not found")));
+        };
+        if !ask_task.labels.iter().any(|label| label == "loom:human") {
+            return Err(CmdError::BadRequest("Not an ask task".into()));
+        }
+        if ask_task.parent_task_id.is_empty() {
+            return Err(CmdError::BadRequest("Ask task has no parent".into()));
+        }
+        let Some(parent) = st.board_tasks.get(&ask_task.parent_task_id) else {
+            return Err(CmdError::BadRequest("Parent task not found".into()));
+        };
+        if parent.agent_id.trim().is_empty() {
+            return Err(CmdError::BadRequest(
+                "Parent task has no linked agent".into(),
+            ));
+        }
+        let Some(agent) = st.agents.get(&parent.agent_id) else {
+            return Err(CmdError::BadRequest("Parent agent not available".into()));
+        };
+        (
+            ask_task.task.clone(),
+            parent.agent_id.clone(),
+            agent.name.clone(),
+            agent.group.clone(),
+        )
+    };
+
+    let truncated_question = if question.chars().count() > 120 {
+        let mut truncated = question.chars().take(120).collect::<String>();
+        truncated.push('…');
+        truncated
+    } else {
+        question.clone()
+    };
+    send_text_to_cell(
+        ctx,
+        &parent_agent_id,
+        &format!("Answer to your question \"{truncated_question}\":\n{reply}"),
+    )
+    .await
+    .map_err(|_| CmdError::BadRequest("Parent agent not available".into()))?;
+
+    let (ask_task, parent, root) = {
         let mut st = ctx.state.lock().await;
         let Some(mut ask_task) = st.board_tasks.get(&task_id).cloned() else {
             return Err(CmdError::BadRequest(format!("task '{task_id}' not found")));
         };
-        // Mark the ask resolved: move to Done.
-        ask_task.lane = "Done".into();
+        if !loom_core::state::board_task_is_closed(Some(&ask_task)) {
+            ask_task.lane = "Done".into();
+        }
+        ask_task.status.clear();
         ask_task.lane_entered_at = chrono::Utc::now().to_rfc3339();
         ask_task.updated_at = ask_task.lane_entered_at.clone();
         ask_task.messages.push(json!({
@@ -780,40 +1099,46 @@ pub async fn resolve_ask(ctx: &CmdContext, req: &Value) -> CmdResult {
         }));
         st.upsert_task(ask_task.clone())?;
 
-        // Update the parent (if any): clear ask status, append reply to its
-        // message log.
-        let parent = if !ask_task.parent_task_id.is_empty() {
-            if let Some(mut parent) = st.board_tasks.get(&ask_task.parent_task_id).cloned() {
-                parent.messages.push(json!({
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
-                    "action": "ask_reply",
-                    "message": reply,
-                    "from_task_id": ask_task.id,
-                }));
-                parent.updated_at = chrono::Utc::now().to_rfc3339();
-                st.upsert_task(parent.clone())?;
-                Some(parent)
-            } else {
-                None
-            }
-        } else {
-            None
+        let Some(mut parent) = st.board_tasks.get(&ask_task.parent_task_id).cloned() else {
+            return Err(CmdError::BadRequest("Parent task not found".into()));
         };
-        (ask_task, parent)
+        parent.messages.push(json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "action": "ask_reply",
+            "message": reply,
+            "from_task_id": ask_task.id,
+        }));
+        parent.updated_at = chrono::Utc::now().to_rfc3339();
+        st.upsert_task(parent.clone())?;
+
+        let (parent, root) = match clear_parent_awaiting_input(&mut st, &parent.id, &ask_task.id) {
+            Some((updated_parent, updated_root)) => {
+                if updated_parent.updated_at > parent.updated_at {
+                    parent = updated_parent;
+                }
+                (parent, updated_root)
+            }
+            None => (parent, None),
+        };
+
+        (ask_task, Some(parent), root)
     };
 
     ctx.db.save_board_task(&ask_task).await?;
     if let Some(p) = &parent {
         ctx.db.save_board_task(p).await?;
     }
+    if let Some(root) = &root {
+        ctx.db.save_board_task(root).await?;
+    }
     let _ = crate::commands::compat::record_panel_event(
         &ctx.state,
         &ctx.db,
         "ask_resolved",
-        "",
-        "",
-        &ask_task.group,
-        &reply,
+        &parent_agent_id,
+        &agent_name,
+        &agent_group,
+        &format!("Resolved: {truncated_question}"),
         &ask_task.id,
         false,
     )
@@ -832,6 +1157,136 @@ pub async fn resolve_ask(ctx: &CmdContext, req: &Value) -> CmdResult {
 
 async fn ctx_pty(ctx: &CmdContext) -> Option<std::sync::Arc<loom_pty::LocalPtyBackend>> {
     ctx.pty.clone()
+}
+
+fn adapter_for_cell(cell: &AgentCell) -> Option<Arc<dyn AgentAdapter>> {
+    if !cell.agent_type.trim().is_empty() {
+        loom_adapters::get_adapter(cell.agent_type.trim())
+    } else if !cell.command.trim().is_empty() {
+        loom_adapters::detect_by_command(cell.command.trim()).and_then(loom_adapters::get_adapter)
+    } else {
+        None
+    }
+}
+
+async fn wait_for_local_pty_ready(ctx: &CmdContext, cell: &AgentCell, adapter: &dyn AgentAdapter) {
+    match adapter.input_ready_policy() {
+        InputReadyPolicy::Never | InputReadyPolicy::Always => return,
+        InputReadyPolicy::OnPrompt | InputReadyPolicy::OnIdle => {}
+    }
+    let timeout = adapter.input_ready_timeout();
+    if timeout.is_zero() {
+        return;
+    }
+    let deadline = Instant::now() + timeout;
+    let poll_interval = adapter.input_ready_poll_interval();
+    let stable_required = adapter.input_ready_stable_polls().max(1);
+    let mut stable_polls = 0usize;
+    while Instant::now() < deadline {
+        let (session_id, buffer) = ctx.terminals.snapshot(&cell.id).await;
+        if !session_id.is_empty() && adapter.is_input_ready_screen(&buffer) {
+            stable_polls += 1;
+            if stable_polls >= stable_required {
+                let post_ready_delay = adapter.input_ready_post_ready_delay();
+                if !post_ready_delay.is_zero() {
+                    tokio::time::sleep(post_ready_delay).await;
+                }
+                return;
+            }
+        } else {
+            stable_polls = 0;
+        }
+        tokio::time::sleep(poll_interval).await;
+    }
+}
+
+async fn wait_for_local_pty_echo(ctx: &CmdContext, cell: &AgentCell, body: &str) {
+    let needle = body
+        .lines()
+        .rev()
+        .find_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(
+                    trimmed
+                        .chars()
+                        .rev()
+                        .take(96)
+                        .collect::<String>()
+                        .chars()
+                        .rev()
+                        .collect::<String>(),
+                )
+            }
+        })
+        .unwrap_or_default();
+    if needle.is_empty() {
+        return;
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        let (_, buffer) = ctx.terminals.snapshot(&cell.id).await;
+        if buffer.contains(&needle) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+pub(crate) async fn send_prompt_to_local_pty(
+    ctx: &CmdContext,
+    cell: &AgentCell,
+    text: &str,
+    wait_for_ready: bool,
+) -> Result<(), CmdError> {
+    let Some(pty) = ctx_pty(ctx).await else {
+        return Err(CmdError::BadRequest(format!(
+            "agent '{}' has no live delivery path",
+            cell.id
+        )));
+    };
+    let body = text.trim_end_matches(['\r', '\n']);
+    if body.is_empty() {
+        return Ok(());
+    }
+    let adapter = adapter_for_cell(cell);
+    if wait_for_ready {
+        if let Some(adapter) = adapter.as_ref() {
+            wait_for_local_pty_ready(ctx, cell, adapter.as_ref()).await;
+        }
+    }
+    let chunks = adapter
+        .as_ref()
+        .map(|adapter| adapter.input_chunks(body))
+        .unwrap_or_else(|| vec![body.to_string()]);
+    for chunk in chunks {
+        if chunk.is_empty() {
+            continue;
+        }
+        pty.write(&cell.id, chunk.as_bytes())
+            .await
+            .map_err(|err| CmdError::BadRequest(err.to_string()))?;
+    }
+    wait_for_local_pty_echo(ctx, cell, body).await;
+    let delay = adapter
+        .as_ref()
+        .map(|adapter| adapter.multiline_submit_delay())
+        .unwrap_or_else(|| Duration::from_millis(300));
+    if !delay.is_zero() {
+        tokio::time::sleep(delay).await;
+    }
+    let submit_key = adapter
+        .as_ref()
+        .map(|adapter| adapter.submit_key().to_string())
+        .unwrap_or_else(|| "\r".to_string());
+    if !submit_key.is_empty() {
+        pty.write(&cell.id, submit_key.as_bytes())
+            .await
+            .map_err(|err| CmdError::BadRequest(err.to_string()))?;
+    }
+    Ok(())
 }
 
 async fn ensure_bridge_session(

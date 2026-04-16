@@ -40,6 +40,7 @@ async fn handle_mcp(
         pty: app.pty.clone(),
         ui_agents: app.ui_agents.clone(),
         terminal_bridge: app.terminal_bridge.clone(),
+        terminals: app.terminals.clone(),
     };
 
     if req.get("id").is_none() {
@@ -90,12 +91,12 @@ fn loom_tool_specs() -> Vec<Value> {
         json!({"name": "loom_ready", "description": "Complete the task and unlink this agent for reuse.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}}}}),
         json!({"name": "loom_blocked", "description": "Report the task is blocked.", "inputSchema": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]}}),
         json!({"name": "loom_error", "description": "Report an error encountered.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}}),
-        json!({"name": "loom_ask", "description": "Ask the human a clarifying question.", "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}}),
+        json!({"name": "loom_ask", "description": "Pause for human input only when the current task cannot proceed safely without a blocking human decision or approval.", "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}, "description": {"type": "string"}}, "required": ["question"]}}),
         json!({"name": "loom_context", "description": "Read back the current agent/task context.", "inputSchema": {"type": "object"}}),
         json!({"name": "loom_derive", "description": "Derive a follow-up task and dispatch it.", "inputSchema": {"type": "object", "properties": {"description": {"type": "string"}, "action": {"type": "string"}}, "required": ["description"]}}),
         json!({"name": "loom_verify", "description": "Record verification status on the current task.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string"}, "notes": {"type": "string"}, "mode": {"type": "string"}}, "required": ["state"]}}),
         json!({"name": "loom_name", "description": "Update the current agent's display name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}),
-        json!({"name": "loom_reply", "description": "Reply to a pending loom_ask task.", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}, "reply": {"type": "string"}}, "required": ["task_id", "reply"]}}),
+        json!({"name": "loom_reply", "description": "Reply to a pending loom_ask task.", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}, "task": {"type": "string"}, "reply": {"type": "string"}, "message": {"type": "string"}}, "required": ["task_id", "reply"]}}),
         json!({"name": "loom_memory_publish", "description": "Publish a shared memory entry.", "inputSchema": {"type": "object", "properties": {"entry_type": {"type": "string"}, "title": {"type": "string"}, "content": {"type": "string"}, "group": {"type": "string"}, "scope_kind": {"type": "string"}, "scope_ref": {"type": "string"}, "task_id": {"type": "string"}, "pinned": {"type": "boolean"}}, "required": ["entry_type", "title"]}}),
         json!({"name": "loom_memory_list", "description": "List memory entries with optional filters.", "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "entry_type": {"type": "string"}, "task_id": {"type": "string"}, "pinned_only": {"type": "boolean"}, "search": {"type": "string"}}}}),
         json!({"name": "loom_memory_read", "description": "Read a single memory entry by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}),
@@ -160,6 +161,7 @@ async fn handle_tool_call(ctx: &CmdContext, req: &Value, cell_id: &str) -> Resul
         "action": action,
         "agent_id": agent_id,
         "message": message,
+        "description": args.get("description").cloned().unwrap_or(Value::Null),
     });
     let value = dispatch_cmd::ai_report(ctx, &report_req)
         .await
@@ -445,11 +447,13 @@ async fn rename_agent(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<
 async fn resolve_ask_tool(ctx: &CmdContext, args: &Value) -> Result<Value, String> {
     let task_id = args
         .get("task_id")
+        .or_else(|| args.get("task"))
         .and_then(Value::as_str)
         .ok_or_else(|| "missing 'task_id'".to_string())?
         .to_string();
     let reply = args
         .get("reply")
+        .or_else(|| args.get("message"))
         .and_then(Value::as_str)
         .ok_or_else(|| "missing 'reply'".to_string())?
         .to_string();
