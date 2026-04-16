@@ -478,6 +478,28 @@ impl AgentAdapter for ClaudeCodeAdapter {
         "claude"
     }
 
+    fn resolve_model_flags(&self, model: &str) -> String {
+        let model = model.trim();
+        if model.is_empty() {
+            String::new()
+        } else {
+            format!(" --model {}", shell_words::quote(model))
+        }
+    }
+
+    fn resolve_reasoning_effort_flags(&self, reasoning_effort: &str) -> String {
+        let reasoning_effort = reasoning_effort.trim();
+        if reasoning_effort.is_empty() {
+            String::new()
+        } else {
+            format!(" --effort {}", shell_words::quote(reasoning_effort))
+        }
+    }
+
+    fn reasoning_effort_options(&self) -> Vec<&'static str> {
+        vec!["low", "medium", "high"]
+    }
+
     fn input_ready_policy(&self) -> InputReadyPolicy {
         InputReadyPolicy::OnIdle
     }

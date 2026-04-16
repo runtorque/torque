@@ -42,7 +42,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{MainThreadMarker, NSObject, NSPoint, NSRect, NSSize, NSString, NSTimer};
 
-use loom_server::app::AppState;
+use loom_server::app::{AppState, UiAgentInput};
 
 use crate::board::BoardView;
 use crate::bridge::{resolve_command, resolve_cwd, EngineBridge, MatrixStateSnapshot};
@@ -224,8 +224,8 @@ struct ContentState {
 struct CachedAgent {
     view: Retained<GhosttyView>,
     /// Pending text from `dispatch_task` / `send_text` / `broadcast_to_group`.
-    /// Drained each tick and forwarded to the surface via `send_text`.
-    rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+    /// Drained each tick and forwarded to the surface as text or submit.
+    rx: tokio::sync::mpsc::UnboundedReceiver<UiAgentInput>,
 }
 
 impl ContentState {
@@ -287,7 +287,8 @@ fn drain_pending_text(state: &RefCell<ContentState>) {
     for cached in st.cache.values_mut() {
         loop {
             match cached.rx.try_recv() {
-                Ok(text) => cached.view.send_text(&text),
+                Ok(UiAgentInput::Text(text)) => cached.view.send_text(&text),
+                Ok(UiAgentInput::Submit) => cached.view.submit(),
                 Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
             }
         }

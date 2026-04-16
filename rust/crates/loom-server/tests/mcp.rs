@@ -53,6 +53,22 @@ async fn mcp_call(addr: SocketAddr, method: &str, params: Value) -> Value {
         .unwrap()
 }
 
+async fn mcp_notify(addr: SocketAddr, method: &str, params: Value) -> reqwest::StatusCode {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+    });
+    let client = reqwest::Client::new();
+    client
+        .post(format!("http://{}/mcp", addr))
+        .json(&body)
+        .send()
+        .await
+        .unwrap()
+        .status()
+}
+
 async fn cmd_call(addr: SocketAddr, body: Value) -> Value {
     let client = reqwest::Client::new();
     client
@@ -72,7 +88,26 @@ async fn mcp_initialize_returns_server_info() {
     let resp = mcp_call(addr, "initialize", json!({})).await;
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["result"]["serverInfo"]["name"], "loom");
-    assert!(resp["result"]["protocolVersion"].is_string());
+    assert_eq!(resp["result"]["protocolVersion"], "2025-03-26");
+    assert!(resp["result"]["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("Loom manages AI agent sessions"));
+}
+
+#[tokio::test]
+async fn mcp_initialized_notification_is_accepted() {
+    let addr = spawn_test_server().await;
+    let status = mcp_notify(addr, "notifications/initialized", json!({})).await;
+    assert_eq!(status, reqwest::StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
+async fn mcp_ping_returns_empty_result() {
+    let addr = spawn_test_server().await;
+    let resp = mcp_call(addr, "ping", json!({})).await;
+    assert_eq!(resp["jsonrpc"], "2.0");
+    assert_eq!(resp["result"], json!({}));
 }
 
 #[tokio::test]

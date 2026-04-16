@@ -49,6 +49,25 @@ async fn spawn_bridge_stub_server() -> (SocketAddr, Arc<Mutex<Vec<(String, Value
     (addr, calls)
 }
 
+async fn spawn_bridge_failing_create_server() -> SocketAddr {
+    async fn failing_create_session(
+        Json(_payload): Json<Value>,
+    ) -> (axum::http::StatusCode, Json<Value>) {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "ok": false, "error": "bridge create failed" })),
+        )
+    }
+
+    let router = Router::new().route("/bridge/create_session", post(failing_create_session));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    addr
+}
+
 async fn stub_create_session(
     State(state): State<BridgeStubState>,
     Json(payload): Json<Value>,
@@ -185,6 +204,65 @@ async fn add_agent_creates_session_via_terminal_bridge() {
 }
 
 #[tokio::test]
+async fn add_agent_uses_provider_defaults_and_bridge_launch_payload() {
+    let (bridge_addr, calls) = spawn_bridge_stub_server().await;
+    let (addr, state) = spawn_loom_server(Some(format!("http://{bridge_addr}"))).await;
+
+    post_cmd(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let update = post_cmd(
+        addr,
+        json!({
+            "cmd": "update_group_settings",
+            "group": "Eng",
+            "settings": {
+                "agent_provider": "codex",
+                "agent_model": "gpt-5.4-mini",
+                "agent_reasoning_effort": "high",
+                "agent_shell": "/bin/bash",
+                "env_vars": {"BASE": "1"},
+                "agent_env_vars": {"AGENT_ONLY": "2"},
+                "agent_env_file": "/tmp/agent.env"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(update["ok"], true);
+
+    let response = post_cmd(
+        addr,
+        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
+    )
+    .await;
+    assert_eq!(response["ok"], true, "response: {response:?}");
+    let agent_id = response["data"]["agent_id"].as_str().unwrap().to_string();
+
+    let calls = calls.lock().await;
+    let create = calls
+        .iter()
+        .find(|(name, _)| name == "create_session")
+        .expect("create_session call recorded");
+    assert_eq!(create.1["cell"]["id"], agent_id);
+    assert_eq!(
+        create.1["cell"]["command"],
+        "codex --model gpt-5.4-mini -c model_reasoning_effort=high"
+    );
+    assert_eq!(create.1["cell"]["agent_type"], "codex");
+    assert_eq!(create.1["shell"], "/bin/bash");
+    assert_eq!(create.1["env_file"], "/tmp/agent.env");
+    assert_eq!(create.1["env_vars"]["BASE"], "1");
+    assert_eq!(create.1["env_vars"]["AGENT_ONLY"], "2");
+    drop(calls);
+
+    let st = state.lock().await;
+    let agent = st.agents.get(&agent_id).unwrap();
+    assert_eq!(
+        agent.command,
+        "codex --model gpt-5.4-mini -c model_reasoning_effort=high"
+    );
+    assert_eq!(agent.agent_type, "codex");
+}
+
+#[tokio::test]
 async fn send_text_routes_through_terminal_bridge() {
     let (bridge_addr, calls) = spawn_bridge_stub_server().await;
     let (addr, _state) = spawn_loom_server(Some(format!("http://{bridge_addr}"))).await;
@@ -219,6 +297,16 @@ async fn relaunch_agent_recreates_bridge_managed_session() {
     let (addr, state) = spawn_loom_server(Some(format!("http://{bridge_addr}"))).await;
 
     post_cmd(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let update = post_cmd(
+        addr,
+        json!({
+            "cmd": "update_group_settings",
+            "group": "Eng",
+            "settings": {"agent_provider": "codex"}
+        }),
+    )
+    .await;
+    assert_eq!(update["ok"], true);
     let response = post_cmd(
         addr,
         json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
@@ -247,6 +335,8 @@ async fn relaunch_agent_recreates_bridge_managed_session() {
     );
     assert_eq!(create_calls[0].1["cell"]["id"], agent_id);
     assert_eq!(create_calls[1].1["cell"]["id"], agent_id);
+    assert_eq!(create_calls[0].1["cell"]["command"], "codex");
+    assert_eq!(create_calls[1].1["cell"]["command"], "codex");
     let close_call = calls
         .iter()
         .find(|(name, payload)| name == "close_session" && payload["cell_id"] == json!(agent_id))
@@ -259,6 +349,127 @@ async fn relaunch_agent_recreates_bridge_managed_session() {
     assert_eq!(agent.session_id.as_deref(), Some("bridge-session-2"));
     assert_eq!(agent.window_id, "bridge-window-2");
     assert_eq!(agent.status, "idle");
+}
+
+#[tokio::test]
+async fn dispatch_to_existing_bridge_agent_recreates_session_and_sends_prompt() {
+    let (bridge_addr, calls) = spawn_bridge_stub_server().await;
+    let (addr, state) = spawn_loom_server(Some(format!("http://{bridge_addr}"))).await;
+
+    post_cmd(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let update = post_cmd(
+        addr,
+        json!({
+            "cmd": "update_group_settings",
+            "group": "Eng",
+            "settings": {
+                "agent_provider": "codex",
+                "agent_shell": "/bin/bash",
+                "env_vars": {"BASE": "1"},
+                "agent_env_vars": {"AGENT_ONLY": "2"},
+                "agent_env_file": "/tmp/agent.env"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(update["ok"], true);
+
+    let agent = post_cmd(
+        addr,
+        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
+    )
+    .await;
+    let agent_id = agent["data"]["agent_id"].as_str().unwrap().to_string();
+
+    {
+        let mut st = state.lock().await;
+        let worker = st.agents.get_mut(&agent_id).unwrap();
+        worker.session_id = None;
+        worker.status = "stopped".into();
+    }
+
+    let task = post_cmd(
+        addr,
+        json!({"cmd": "board_add_task", "task": "Resume and handle this task", "group": "Eng"}),
+    )
+    .await;
+    let task_id = task["data"]["task_id"].as_str().unwrap().to_string();
+
+    let response = post_cmd(
+        addr,
+        json!({
+            "cmd": "dispatch_task",
+            "task_id": &task_id,
+            "agent_id": &agent_id,
+            "force_no_action": true
+        }),
+    )
+    .await;
+    assert_eq!(response["ok"], true, "response: {response:?}");
+    assert_eq!(response["data"]["agent_id"], agent_id);
+
+    let calls = calls.lock().await;
+    let create_calls = calls
+        .iter()
+        .filter(|(name, _)| name == "create_session")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        create_calls.len(),
+        2,
+        "expected add + dispatch create_session"
+    );
+    assert_eq!(create_calls[1].1["cell"]["id"], agent_id);
+    assert_eq!(create_calls[1].1["shell"], "/bin/bash");
+    assert_eq!(create_calls[1].1["env_file"], "/tmp/agent.env");
+    assert_eq!(create_calls[1].1["env_vars"]["BASE"], "1");
+    assert_eq!(create_calls[1].1["env_vars"]["AGENT_ONLY"], "2");
+    assert_eq!(create_calls[1].1["target_window_id"], "bridge-window-1");
+
+    let send_call = calls
+        .iter()
+        .find(|(name, payload)| {
+            name == "send_text"
+                && payload["cell_id"] == json!(agent_id)
+                && payload["text"] == json!("Resume and handle this task")
+        })
+        .expect("dispatch send_text call recorded");
+    assert_eq!(send_call.1["session_id"], "bridge-session-2");
+    drop(calls);
+
+    let st = state.lock().await;
+    assert_eq!(
+        st.agents.len(),
+        1,
+        "dispatch should reuse the existing agent"
+    );
+    let agent = st.agents.get(&agent_id).unwrap();
+    assert_eq!(agent.session_id.as_deref(), Some("bridge-session-2"));
+    assert_eq!(agent.status, "idle");
+    assert_eq!(st.board_tasks.get(&task_id).unwrap().agent_id, agent_id);
+}
+
+#[tokio::test]
+async fn add_agent_returns_error_when_bridge_create_session_fails() {
+    let bridge_addr = spawn_bridge_failing_create_server().await;
+    let (addr, state) = spawn_loom_server(Some(format!("http://{bridge_addr}"))).await;
+
+    post_cmd(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let response = post_cmd(
+        addr,
+        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
+    )
+    .await;
+    assert_eq!(response["ok"], false, "response: {response:?}");
+    assert!(response["error"].as_str().unwrap_or("").contains("bridge"));
+
+    let st = state.lock().await;
+    let agent = st
+        .agents
+        .values()
+        .next()
+        .expect("agent should remain visible");
+    assert_eq!(agent.status, "error");
+    assert!(agent.error_message.contains("bridge create"));
 }
 
 #[tokio::test]

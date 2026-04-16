@@ -10,7 +10,7 @@ use loom_actions::context::LoomContextBuilder;
 use loom_core::state::AgentCell;
 
 use super::{flush, ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
-use crate::terminal_bridge::bridge_manages_cell;
+use crate::terminal_bridge::{bridge_manages_cell, CreateSessionOptions};
 
 /// Install provider-specific hooks, MCP config, and slash-command skills into
 /// `working_dir` for the adapter that matches `boot_command`. Best-effort —
@@ -39,6 +39,10 @@ async fn install_provider_integration(working_dir: &Path, boot_command: &str) {
 
 pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     let task_id = required_str(req, "task_id")?.to_string();
+    let requested_agent_id = optional_str(req, "agent_id")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
     let force_no_action = req
         .get("force_no_action")
         .and_then(|v| v.as_bool())
@@ -58,9 +62,17 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "In Progress".to_string());
 
-        // Resolve agent: existing (task.agent_id) or create new.
-        let target_agent_id = if !task.agent_id.is_empty() && st.agents.contains_key(&task.agent_id)
-        {
+        let mut created_new_agent = false;
+
+        // Resolve agent: request-body agent_id wins, then task.agent_id, else create new.
+        let target_agent_id = if let Some(agent_id) = requested_agent_id.as_ref() {
+            if !st.agents.contains_key(agent_id) {
+                return Err(CmdError::BadRequest(format!(
+                    "agent '{agent_id}' not found"
+                )));
+            }
+            agent_id.clone()
+        } else if !task.agent_id.is_empty() && st.agents.contains_key(&task.agent_id) {
             task.agent_id.clone()
         } else {
             // Create a new agent under the task's group.
@@ -77,17 +89,36 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
                 &task.group,
             );
             cell.cell_type = "agent".into();
-            cell.command = loom_core::config::default_command();
-            if let Some(dir) = std::env::var("LOOM_PROJECT_ROOT").ok() {
-                cell.directory = dir;
+            let settings = st
+                .group_settings
+                .get(&task.group)
+                .cloned()
+                .unwrap_or_default();
+            let default_command = crate::commands::agents::default_command_from_global(
+                &st.global_settings.default_command,
+            );
+            crate::commands::agents::apply_agent_defaults(
+                &mut cell,
+                &settings,
+                &default_command,
+                req,
+            );
+            if ctx.terminal_bridge.is_configured() {
+                cell.terminal_backend = "iterm2".into();
+            }
+            if cell.directory.is_empty() {
+                cell.directory = crate::commands::agents::first_nonempty([
+                    std::env::var("LOOM_PROJECT_ROOT").unwrap_or_default(),
+                    crate::app::repo_root().to_string_lossy().to_string(),
+                ]);
             }
             let id = cell.id.clone();
             st.add_agent(cell)?;
+            created_new_agent = true;
             id
         };
-        let is_new = !task.agent_id.eq(&target_agent_id) && task.agent_id.is_empty();
 
-        (task, target_agent_id, is_new, dispatch_lane)
+        (task, target_agent_id, created_new_agent, dispatch_lane)
     };
 
     // Render the prompt.
@@ -153,7 +184,15 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     // Route: if the agent is UI-attached (a GhosttyView is mounted for it),
     // send through the UI registry — Ghostty owns that agent's PTY. Otherwise
     // fall through to the engine's own LocalPtyBackend.
-    let bridge_agent = ensure_bridge_session(ctx, &target_agent_id).await?;
+    let bridge_options = bridge_create_session_options(ctx, &target_agent_id).await;
+    let bridge_agent =
+        ensure_bridge_session(ctx, &target_agent_id, bridge_options.as_ref()).await?;
+    if let Some(agent) = bridge_agent.as_ref() {
+        if crate::commands::agents::bridge_bootstrap_failed(agent) {
+            flush(ctx).await;
+            return Err(CmdError::BadRequest(agent.error_message.clone()));
+        }
+    }
     let bridge_managed = bridge_agent
         .as_ref()
         .map(|a| bridge_manages_cell(&ctx.terminal_bridge, a))
@@ -166,9 +205,9 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         // is the path the UI currently uses. We send the prompt body, pause
         // briefly so it's treated as a paste, then send the newline separately
         // to land outside bracketed paste mode.
-        ctx.ui_agents.send(&target_agent_id, rendered.clone());
+        ctx.ui_agents.send_text(&target_agent_id, rendered.clone());
         tokio::time::sleep(Duration::from_millis(50)).await;
-        ctx.ui_agents.send(&target_agent_id, "\r".to_string());
+        ctx.ui_agents.send_submit(&target_agent_id);
     } else if let Some(agent) = bridge_agent
         .as_ref()
         .filter(|a| bridge_manages_cell(&ctx.terminal_bridge, a) && a.session_id.is_some())
@@ -330,11 +369,15 @@ pub async fn send_text_to_cell(
         }
     }
 
-    if ctx.ui_agents.send(cell_id, text.to_string()) {
+    if text == "\r" || text == "\n" || text == "\r\n" {
+        if ctx.ui_agents.send_submit(cell_id) {
+            return Ok(());
+        }
+    } else if ctx.ui_agents.send_text(cell_id, text.to_string()) {
         return Ok(());
     }
 
-    let bridge_agent = ensure_bridge_session(ctx, &cell_id).await?;
+    let bridge_agent = ensure_bridge_session(ctx, &cell_id, None).await?;
     if let Some(agent) = bridge_agent.as_ref() {
         if bridge_manages_cell(&ctx.terminal_bridge, &agent) && agent.session_id.is_some() {
             ctx.terminal_bridge
@@ -401,10 +444,14 @@ pub async fn broadcast_to_group(ctx: &CmdContext, req: &Value) -> CmdResult {
     let pty = ctx_pty(ctx).await;
     for id in &targets {
         if ctx.ui_agents.is_attached(id) {
-            ctx.ui_agents.send(id, text.clone());
+            if text == "\r" || text == "\n" || text == "\r\n" {
+                ctx.ui_agents.send_submit(id);
+            } else {
+                ctx.ui_agents.send_text(id, text.clone());
+            }
             continue;
         }
-        if let Some(agent) = ensure_bridge_session(ctx, id).await? {
+        if let Some(agent) = ensure_bridge_session(ctx, id, None).await? {
             if bridge_manages_cell(&ctx.terminal_bridge, &agent) && agent.session_id.is_some() {
                 if let Err(err) = ctx
                     .terminal_bridge
@@ -460,7 +507,34 @@ pub async fn relaunch_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     if let Some(a) = agent {
         ctx.db.save_agent(&a).await?;
         if bridge_manages_cell(&ctx.terminal_bridge, &a) {
-            let _ = ensure_bridge_session(ctx, &a.id).await?;
+            let settings = {
+                let st = ctx.state.lock().await;
+                st.group_settings.get(&a.group).cloned().unwrap_or_default()
+            };
+            let options = CreateSessionOptions {
+                env_vars: crate::commands::agents::merged_env(
+                    &settings.env_vars,
+                    &settings.agent_env_vars,
+                    None,
+                ),
+                env_file: crate::commands::agents::first_nonempty([
+                    settings.agent_env_file.clone(),
+                    settings.env_file.clone(),
+                ]),
+                shell: crate::commands::agents::first_nonempty([
+                    settings.agent_shell.clone(),
+                    settings.shell.clone(),
+                    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()),
+                ]),
+                target_window_id: a.window_id.clone(),
+                ..Default::default()
+            };
+            if let Some(agent) = ensure_bridge_session(ctx, &a.id, Some(&options)).await? {
+                if crate::commands::agents::bridge_bootstrap_failed(&agent) {
+                    flush(ctx).await;
+                    return Err(CmdError::BadRequest(agent.error_message));
+                }
+            }
         } else if a.cell_type == "terminal" || !a.command.is_empty() {
             spawn_cell_session(ctx, &a, None).await?;
         }
@@ -763,6 +837,7 @@ async fn ctx_pty(ctx: &CmdContext) -> Option<std::sync::Arc<loom_pty::LocalPtyBa
 async fn ensure_bridge_session(
     ctx: &CmdContext,
     cell_id: &str,
+    options: Option<&CreateSessionOptions>,
 ) -> Result<Option<loom_core::state::AgentCell>, CmdError> {
     let agent = {
         let st = ctx.state.lock().await;
@@ -778,7 +853,12 @@ async fn ensure_bridge_session(
         return Ok(Some(agent));
     }
 
-    let bridged = match ctx.terminal_bridge.create_session(&agent).await {
+    let default_options = CreateSessionOptions::default();
+    let bridged = match ctx
+        .terminal_bridge
+        .create_session(&agent, options.unwrap_or(&default_options))
+        .await
+    {
         Ok(Some(updated)) => updated,
         Ok(None) => agent,
         Err(err) => {
@@ -798,6 +878,40 @@ async fn ensure_bridge_session(
     ctx.db.save_agent(&saved).await?;
     flush(ctx).await;
     Ok(Some(saved))
+}
+
+async fn bridge_create_session_options(
+    ctx: &CmdContext,
+    cell_id: &str,
+) -> Option<CreateSessionOptions> {
+    let (agent, settings) = {
+        let st = ctx.state.lock().await;
+        let agent = st.agents.get(cell_id)?.clone();
+        let settings = st
+            .group_settings
+            .get(&agent.group)
+            .cloned()
+            .unwrap_or_default();
+        (agent, settings)
+    };
+    Some(CreateSessionOptions {
+        env_vars: crate::commands::agents::merged_env(
+            &settings.env_vars,
+            &settings.agent_env_vars,
+            None,
+        ),
+        env_file: crate::commands::agents::first_nonempty([
+            settings.agent_env_file.clone(),
+            settings.env_file.clone(),
+        ]),
+        shell: crate::commands::agents::first_nonempty([
+            settings.agent_shell.clone(),
+            settings.shell.clone(),
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()),
+        ]),
+        target_window_id: agent.window_id,
+        ..Default::default()
+    })
 }
 
 pub async fn spawn_cell_session(
@@ -824,6 +938,9 @@ pub async fn spawn_cell_session(
     } else {
         Some(std::path::PathBuf::from(&cell.directory))
     };
+    if let Some(dir) = cwd.as_deref() {
+        install_provider_integration(dir, &command).await;
+    }
     let mut env = std::collections::HashMap::new();
     env.insert(loom_core::config::ENV_CELL_ID.to_string(), cell.id.clone());
     if let Some(extra) = extra_env {

@@ -1,5 +1,6 @@
 //! Thin bridge between the Rust backend and the Python+iTerm2 runtime.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -7,7 +8,7 @@ use anyhow::{bail, Context, Result};
 use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use serde_json::{json, Value};
 
@@ -16,6 +17,30 @@ use loom_core::events::OutMessage;
 use loom_core::state::AgentCell;
 
 use crate::app::AppState;
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CreateSessionOptions {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env_vars: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub env_file: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub init_script: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub shell: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub system_prompt: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub target_session_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub target_window_id: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub restore_focus_to_prev_tab: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct TerminalBridgeClient {
@@ -87,9 +112,26 @@ impl TerminalBridgeClient {
         Ok(value)
     }
 
-    pub async fn create_session(&self, cell: &AgentCell) -> Result<Option<AgentCell>> {
+    pub async fn create_session(
+        &self,
+        cell: &AgentCell,
+        options: &CreateSessionOptions,
+    ) -> Result<Option<AgentCell>> {
         let value = self
-            .post("/bridge/create_session", json!({ "cell": cell }))
+            .post(
+                "/bridge/create_session",
+                json!({
+                    "cell": cell,
+                    "env_vars": options.env_vars,
+                    "env_file": options.env_file,
+                    "init_script": options.init_script,
+                    "shell": options.shell,
+                    "system_prompt": options.system_prompt,
+                    "target_session_id": options.target_session_id,
+                    "target_window_id": options.target_window_id,
+                    "restore_focus_to_prev_tab": options.restore_focus_to_prev_tab,
+                }),
+            )
             .await?;
         parse_cell_response(value)
     }
@@ -235,6 +277,10 @@ async fn get_runtime(State(app): State<AppState>) -> Json<Value> {
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(loom_core::config::DEFAULT_PORT);
     let bridge_url = app.terminal_bridge.current_url();
+    let default_command = {
+        let st = app.state.lock().await;
+        crate::commands::agents::default_command_from_global(&st.global_settings.default_command)
+    };
     Json(json!({
         "runtime": {
             "profile": std::env::var("LOOM_PROFILE").unwrap_or_default(),
@@ -242,7 +288,7 @@ async fn get_runtime(State(app): State<AppState>) -> Json<Value> {
             "port": port,
             "bridge_url": bridge_url,
             "terminal_backend": std::env::var("LOOM_TERMINAL_BACKEND").unwrap_or_else(|_| "pty".into()),
-            "default_command": loom_core::config::default_command(),
+            "default_command": default_command,
         }
     }))
 }

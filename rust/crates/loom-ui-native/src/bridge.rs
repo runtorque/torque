@@ -37,6 +37,7 @@ impl EngineBridge {
             bus: self.state.bus.clone(),
             pty: self.state.pty.clone(),
             ui_agents: self.state.ui_agents.clone(),
+            terminal_bridge: self.state.terminal_bridge.clone(),
         }
     }
 

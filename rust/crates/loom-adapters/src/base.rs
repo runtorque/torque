@@ -54,6 +54,15 @@ impl AgentEvent {
 pub trait AgentAdapter: Send + Sync {
     fn provider_name(&self) -> &str;
     fn default_boot_command(&self) -> &str;
+    fn resolve_model_flags(&self, _model: &str) -> String {
+        String::new()
+    }
+    fn resolve_reasoning_effort_flags(&self, _reasoning_effort: &str) -> String {
+        String::new()
+    }
+    fn reasoning_effort_options(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
     fn input_ready_policy(&self) -> InputReadyPolicy {
         InputReadyPolicy::OnPrompt
     }

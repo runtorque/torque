@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
-use loom_server::app::UiAgentRegistry;
+use loom_server::app::{UiAgentInput, UiAgentRegistry};
 
 async fn spawn_test_server() -> (SocketAddr, Arc<Mutex<MatrixState>>) {
     let (addr, state, _reg) = spawn_test_server_full().await;
@@ -198,7 +198,7 @@ async fn dispatch_routes_through_ui_registry_when_attached() {
     assert_eq!(v["ok"], true, "dispatch response: {v:?}");
 
     // Expect at least two messages: the rendered prompt + a bare "\r".
-    let mut received: Vec<String> = Vec::new();
+    let mut received: Vec<UiAgentInput> = Vec::new();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while received.len() < 2 && std::time::Instant::now() < deadline {
         match tokio::time::timeout(std::time::Duration::from_millis(250), rx.recv()).await {
@@ -208,12 +208,14 @@ async fn dispatch_routes_through_ui_registry_when_attached() {
         }
     }
     assert!(
-        received.iter().any(|s| s.contains("Hello")),
+        received
+            .iter()
+            .any(|s| matches!(s, UiAgentInput::Text(text) if text.contains("Hello"))),
         "expected rendered prompt to include task text, got: {received:?}"
     );
     assert!(
-        received.iter().any(|s| s == "\r"),
-        "expected trailing \\r send, got: {received:?}"
+        received.iter().any(|s| matches!(s, UiAgentInput::Submit)),
+        "expected trailing submit event, got: {received:?}"
     );
 
     // PTY backend was None; task state should still be updated.
@@ -245,7 +247,50 @@ async fn send_text_routes_through_ui_registry_when_attached() {
         .await
         .expect("send_text should route to UI registry")
         .expect("sender must still be open");
-    assert_eq!(got, "hi there");
+    assert_eq!(got, UiAgentInput::Text("hi there".into()));
+}
+
+#[tokio::test]
+async fn dispatch_prefers_request_body_agent_id_over_creating_new_agent() {
+    let (addr, state) = spawn_test_server().await;
+
+    post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let agent = post(
+        addr,
+        json!({"cmd": "add_agent", "name": "Existing", "group": "Eng"}),
+    )
+    .await;
+    let agent_id = agent["data"]["agent_id"].as_str().unwrap().to_string();
+
+    let task = post(
+        addr,
+        json!({"cmd": "board_add_task", "task": "Reuse the existing agent", "group": "Eng"}),
+    )
+    .await;
+    let task_id = task["data"]["task_id"].as_str().unwrap().to_string();
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "dispatch_task",
+            "task_id": &task_id,
+            "agent_id": &agent_id,
+            "force_no_action": true
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "dispatch response: {v:?}");
+    assert_eq!(v["data"]["agent_id"], agent_id);
+
+    let st = state.lock().await;
+    assert_eq!(
+        st.agents.len(),
+        1,
+        "dispatch should reuse the existing agent"
+    );
+    let task = st.board_tasks.get(&task_id).unwrap();
+    assert_eq!(task.agent_id, agent_id);
+    assert_eq!(task.lane, "In Progress");
 }
 
 #[tokio::test]

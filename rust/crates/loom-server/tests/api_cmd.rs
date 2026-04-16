@@ -2,7 +2,9 @@
 //! and drive it through Python-compatible standalone command surfaces.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -10,6 +12,7 @@ use tokio::sync::Mutex;
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
+use loom_pty::{LocalPtyBackend, PtyEvent};
 
 async fn spawn_test_server() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let db = LoomDb::in_memory().unwrap();
@@ -32,6 +35,34 @@ async fn spawn_test_server() -> (SocketAddr, tokio::task::JoinHandle<()>) {
         let _ = axum::serve(listener, router).await;
     });
     (addr, handle)
+}
+
+async fn spawn_test_server_with_pty() -> (
+    SocketAddr,
+    Arc<Mutex<MatrixState>>,
+    tokio::sync::mpsc::Receiver<PtyEvent>,
+) {
+    let db = LoomDb::in_memory().unwrap();
+    let state = Arc::new(Mutex::new(MatrixState::new()));
+    let bus = EventBus::new();
+    let (pty, rx) = LocalPtyBackend::new();
+    let app_state = loom_server::app::AppState {
+        db,
+        state: state.clone(),
+        bus,
+        pty: Some(Arc::new(pty)),
+        ui_agents: Default::default(),
+        terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
+        terminals: Default::default(),
+    };
+
+    let router = loom_server::app::build_router(app_state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
+    (addr, state, rx)
 }
 
 async fn post(addr: SocketAddr, body: Value) -> Value {
@@ -144,6 +175,186 @@ async fn global_settings_roundtrip() {
     assert_eq!(v["data"]["type"], "global_settings");
     assert_eq!(v["data"]["settings"]["default_command"], "codex");
     assert_eq!(v["data"]["settings"]["max_pipeline_depth"], 5);
+}
+
+#[tokio::test]
+async fn get_config_uses_global_default_command_in_runtime_payload() {
+    let (addr, _h) = spawn_test_server().await;
+    let v = post(
+        addr,
+        json!({
+            "cmd": "update_global_settings",
+            "settings": {"default_command": "codex"}
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+
+    let v = post(addr, json!({"cmd": "get_config"})).await;
+    assert_eq!(v["ok"], true, "response: {v:?}");
+    assert_eq!(v["data"]["default_command"], "codex");
+    assert_eq!(v["data"]["runtime"]["default_command"], "codex");
+}
+
+#[tokio::test]
+async fn get_config_falls_back_to_repo_root_for_current_path() {
+    let (addr, _h) = spawn_test_server().await;
+    let expected = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .map(PathBuf::from)
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    let v = post(addr, json!({"cmd": "get_config"})).await;
+    assert_eq!(v["ok"], true, "response: {v:?}");
+    assert_eq!(v["data"]["current_path"], expected);
+    assert_eq!(v["data"]["resolved_agent_defaults"]["directory"], expected);
+}
+
+#[tokio::test]
+async fn get_config_resolves_provider_default_command_when_boot_command_is_blank() {
+    let (addr, _h) = spawn_test_server().await;
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let v = post(
+        addr,
+        json!({
+            "cmd": "update_group_settings",
+            "group": "Eng",
+            "settings": {
+                "agent_provider": "codex",
+                "agent_model": "gpt-5.4-mini",
+                "agent_reasoning_effort": "high",
+                "agent_boot_command": ""
+            }
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+
+    let v = post(addr, json!({"cmd": "get_config", "group": "Eng"})).await;
+    assert_eq!(v["ok"], true, "response: {v:?}");
+    assert_eq!(v["data"]["resolved_agent_defaults"]["provider"], "codex");
+    assert_eq!(
+        v["data"]["resolved_agent_defaults"]["command"],
+        "codex --model gpt-5.4-mini -c model_reasoning_effort=high"
+    );
+    let reasoning_efforts = v["data"]["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|provider| provider["name"] == "codex")
+        .and_then(|provider| provider["reasoning_efforts"].as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(reasoning_efforts.iter().any(|value| value == "high"));
+}
+
+#[tokio::test]
+async fn add_agent_starts_local_pty_session_and_uses_repo_root_defaults() {
+    let (addr, state, mut pty_rx) = spawn_test_server_with_pty().await;
+    let expected_repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(3)
+        .map(PathBuf::from)
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let v = post(
+        addr,
+        json!({
+            "cmd": "update_global_settings",
+            "settings": {"default_command": "codex"}
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+
+    let v = post(
+        addr,
+        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "add_agent response: {v:?}");
+    let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
+
+    let spawned = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match pty_rx.recv().await {
+                Some(PtyEvent::Spawned { cell_id, .. }) if cell_id == agent_id => break true,
+                Some(_) => continue,
+                None => break false,
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for PTY spawn event");
+    assert!(spawned, "PTY event stream closed before agent spawn");
+
+    let st = state.lock().await;
+    let agent = st.agents.get(&agent_id).expect("agent missing after add");
+    assert_eq!(agent.command, "codex");
+    assert_eq!(agent.agent_type, "codex");
+    assert_eq!(agent.directory, expected_repo_root);
+}
+
+#[tokio::test]
+async fn add_agent_installs_codex_mcp_and_hook_config_before_spawn() {
+    let (addr, _state, mut pty_rx) = spawn_test_server_with_pty().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let working_dir = tmp.path().to_string_lossy().to_string();
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let v = post(
+        addr,
+        json!({
+            "cmd": "update_global_settings",
+            "settings": {"default_command": "codex"}
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "add_agent",
+            "name": "Worker",
+            "group": "Eng",
+            "directory": working_dir,
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "add_agent response: {v:?}");
+    let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
+
+    let spawned = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match pty_rx.recv().await {
+                Some(PtyEvent::Spawned { cell_id, .. }) if cell_id == agent_id => break true,
+                Some(_) => continue,
+                None => break false,
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for PTY spawn event");
+    assert!(spawned, "PTY event stream closed before agent spawn");
+
+    let config = tokio::fs::read_to_string(tmp.path().join(".codex").join("config.toml"))
+        .await
+        .expect("codex config should be installed before spawn");
+    assert!(config.contains("[mcp_servers.loom]"));
+    assert!(config.contains("env_http_headers = { \"X-Loom-Cell-Id\" = \"LOOM_CELL_ID\" }"));
+    let hooks = tokio::fs::read_to_string(tmp.path().join(".codex").join("hooks.json"))
+        .await
+        .expect("codex hooks should be installed before spawn");
+    assert!(hooks.contains("SessionStart"));
+    assert!(hooks.contains("PreToolUse"));
+    assert!(hooks.contains("Stop"));
 }
 
 #[tokio::test]

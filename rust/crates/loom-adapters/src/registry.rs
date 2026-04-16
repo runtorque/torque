@@ -33,6 +33,12 @@ pub fn get_adapter(name: &str) -> Option<Arc<dyn AgentAdapter>> {
         .map(|(_, a)| a.clone())
 }
 
+pub fn get_default_command_for_provider(name: &str) -> String {
+    get_adapter(name)
+        .map(|adapter| adapter.default_boot_command().to_string())
+        .unwrap_or_default()
+}
+
 /// Detect by boot command (e.g. `claude` → claude-code).
 pub fn detect_by_command(cmd: &str) -> Option<&'static str> {
     let first = cmd.split_whitespace().next().unwrap_or("");

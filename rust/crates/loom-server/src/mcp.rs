@@ -2,6 +2,7 @@
 
 use axum::extract::State;
 use axum::http::HeaderMap;
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::Json;
@@ -10,6 +11,9 @@ use serde_json::{json, Value};
 
 use crate::app::AppState;
 use crate::commands::{dispatch as dispatch_cmd, weaver as weaver_cmd, CmdContext};
+
+const PROTOCOL_VERSION: &str = "2025-03-26";
+const INSTRUCTIONS: &str = "Loom manages AI agent sessions and tasks in iTerm2. Use these tools to report progress, complete tasks, derive subtasks, and coordinate with other agents in the pipeline.";
 
 pub fn routes() -> Router<AppState> {
     Router::new().route("/mcp", post(handle_mcp))
@@ -38,12 +42,18 @@ async fn handle_mcp(
         terminal_bridge: app.terminal_bridge.clone(),
     };
 
+    if req.get("id").is_none() {
+        return StatusCode::ACCEPTED.into_response();
+    }
+
     let result = match method {
         "initialize" => Ok(json!({
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": PROTOCOL_VERSION,
             "serverInfo": {"name": "loom", "version": env!("CARGO_PKG_VERSION")},
             "capabilities": {"tools": {}},
+            "instructions": INSTRUCTIONS,
         })),
+        "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tool_specs(&ctx, &cell_id).await })),
         "tools/call" => handle_tool_call(&ctx, &req, &cell_id).await,
         other => Err(format!("method not supported: {other}")),
@@ -54,12 +64,14 @@ async fn handle_mcp(
             "jsonrpc": "2.0",
             "id": id,
             "result": value,
-        })),
+        }))
+        .into_response(),
         Err(msg) => Json(json!({
             "jsonrpc": "2.0",
             "id": id,
             "error": {"code": -32603, "message": msg},
-        })),
+        }))
+        .into_response(),
     }
 }
 

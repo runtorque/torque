@@ -1,7 +1,5 @@
 //! Global + group settings commands.
 
-use std::path::PathBuf;
-
 use serde_json::{json, Value};
 
 use loom_core::delta::DeltaOp;
@@ -13,8 +11,9 @@ pub async fn get_config(ctx: &CmdContext, req: &Value) -> CmdResult {
     let group = optional_str(req, "group").unwrap_or("");
     let st = ctx.state.lock().await;
     let group_settings = st.group_settings.get(group).cloned().unwrap_or_default();
+    let global_default_command = st.global_settings.default_command.clone();
     let (current_path, current_profile, group_cells) = current_context_payload(&st, group);
-    let resolved_agent_defaults = resolved_agent_defaults(&group_settings);
+    let resolved_agent_defaults = resolved_agent_defaults(&group_settings, &global_default_command);
     drop(st);
     let templates = crate::commands::templates::list_templates(ctx, req)
         .await?
@@ -32,8 +31,8 @@ pub async fn get_config(ctx: &CmdContext, req: &Value) -> CmdResult {
         "providers": provider_payload(),
         "templates": templates,
         "playbooks": [],
-        "runtime": runtime_payload(ctx.pty.is_some()),
-        "default_command": loom_core::config::default_command(),
+        "runtime": runtime_payload(ctx.pty.is_some(), &global_default_command),
+        "default_command": crate::commands::agents::default_command_from_global(&global_default_command),
         "global_settings": ctx.state.lock().await.global_settings.clone(),
         "port": runtime_port(),
     }))
@@ -78,6 +77,7 @@ pub async fn get_group_settings(ctx: &CmdContext, req: &Value) -> CmdResult {
     let group = required_str(req, "group")?;
     let st = ctx.state.lock().await;
     let settings = st.group_settings.get(group).cloned().unwrap_or_default();
+    let global_default_command = st.global_settings.default_command.clone();
     drop(st);
     let templates = crate::commands::templates::list_templates(ctx, req)
         .await?
@@ -94,13 +94,13 @@ pub async fn get_group_settings(ctx: &CmdContext, req: &Value) -> CmdResult {
         "group": group,
         "settings": settings,
         "weaver_settings": ctx.state.lock().await.weaver_settings.get(group).cloned().unwrap_or_default(),
-        "resolved_agent_defaults": resolved_agent_defaults(&settings),
+        "resolved_agent_defaults": resolved_agent_defaults(&settings, &global_default_command),
         "profiles": ["Default"],
         "providers": provider_payload(),
         "templates": templates,
         "actions": actions,
         "playbooks": [],
-        "runtime": runtime_payload(ctx.pty.is_some()),
+        "runtime": runtime_payload(ctx.pty.is_some(), &global_default_command),
     }))
 }
 
@@ -157,17 +157,26 @@ fn provider_payload() -> Vec<Value> {
                 .as_ref()
                 .map(|adapter| adapter.default_boot_command().to_string())
                 .unwrap_or_default();
+            let reasoning_efforts = loom_adapters::registry::get_adapter(name)
+                .map(|adapter| {
+                    adapter
+                        .reasoning_effort_options()
+                        .into_iter()
+                        .map(Value::from)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             json!({
                 "name": name,
                 "display_name": name,
                 "command": command,
-                "reasoning_efforts": [],
+                "reasoning_efforts": reasoning_efforts,
             })
         })
         .collect()
 }
 
-fn runtime_payload_with_embedded(embedded_terminal: bool) -> Value {
+fn runtime_payload_with_embedded(embedded_terminal: bool, global_default_command: &str) -> Value {
     json!({
         "standalone": true,
         "embedded_terminal": embedded_terminal,
@@ -178,12 +187,12 @@ fn runtime_payload_with_embedded(embedded_terminal: bool) -> Value {
         "data_dir": loom_core::config::data_dir().to_string_lossy().to_string(),
         "desktop_shell": std::env::var("LOOM_DESKTOP_SHELL").unwrap_or_default(),
         "port": runtime_port(),
-        "default_command": loom_core::config::default_command(),
+        "default_command": crate::commands::agents::default_command_from_global(global_default_command),
     })
 }
 
-fn runtime_payload(embedded_terminal: bool) -> Value {
-    runtime_payload_with_embedded(embedded_terminal)
+fn runtime_payload(embedded_terminal: bool, global_default_command: &str) -> Value {
+    runtime_payload_with_embedded(embedded_terminal, global_default_command)
 }
 
 fn runtime_port() -> u16 {
@@ -229,30 +238,23 @@ fn current_context_payload(
         current_path = std::env::var("LOOM_PROJECT_ROOT")
             .ok()
             .filter(|value| !value.is_empty())
-            .or_else(|| {
-                std::env::current_dir()
-                    .ok()
-                    .map(|path| path.to_string_lossy().to_string())
-            })
+            .or_else(|| Some(crate::app::repo_root().to_string_lossy().to_string()))
             .unwrap_or_default();
     }
 
     (current_path, current_profile, group_cells)
 }
 
-fn resolved_agent_defaults(settings: &GroupSettings) -> Value {
-    let command = if !settings.agent_boot_command.is_empty() {
-        settings.agent_boot_command.clone()
-    } else {
-        loom_core::config::default_command()
-    };
-    let provider = if !settings.agent_provider.is_empty() {
-        settings.agent_provider.clone()
-    } else {
-        loom_adapters::registry::detect_by_command(&command)
-            .unwrap_or("")
-            .to_string()
-    };
+fn resolved_agent_defaults(settings: &GroupSettings, global_default_command: &str) -> Value {
+    let default_command =
+        crate::commands::agents::default_command_from_global(global_default_command);
+    let (command, provider) = crate::commands::agents::resolve_agent_launch_command(
+        &settings.agent_provider,
+        &settings.agent_boot_command,
+        &default_command,
+        &settings.agent_model,
+        &settings.agent_reasoning_effort,
+    );
     json!({
         "provider": provider,
         "command": command,
@@ -300,11 +302,6 @@ fn project_root_or_cwd() -> String {
     std::env::var("LOOM_PROJECT_ROOT")
         .ok()
         .filter(|value| !value.is_empty())
-        .or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .map(PathBuf::into_os_string)
-                .and_then(|value| value.into_string().ok())
-        })
+        .or_else(|| crate::app::repo_root().into_os_string().into_string().ok())
         .unwrap_or_default()
 }

@@ -11,7 +11,7 @@ use loom_core::state::AgentCell;
 use loom_core::delta::DeltaOp;
 
 use super::{flush, ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
-use crate::terminal_bridge::bridge_manages_cell;
+use crate::terminal_bridge::{bridge_manages_cell, CreateSessionOptions};
 
 pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     let name = required_str(req, "name")?.to_string();
@@ -21,11 +21,13 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     let mut cell = AgentCell::new(Uuid::new_v4().to_string(), &name, &group);
     cell.cell_type = "agent".into();
     apply_common_fields(&mut cell, req);
-    {
+    let bridge_options = {
         let st = ctx.state.lock().await;
         let settings = st.group_settings.get(&group).cloned().unwrap_or_default();
-        apply_agent_defaults(&mut cell, &settings, req);
-    }
+        let default_command = default_command_from_global(&st.global_settings.default_command);
+        apply_agent_defaults(&mut cell, &settings, &default_command, req);
+        build_agent_create_session_options(&settings, req)
+    };
     if let Some(bk) = req.get("terminal_backend").and_then(|v| v.as_str()) {
         cell.terminal_backend = bk.to_string();
     } else if bridge_configured {
@@ -38,7 +40,7 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
         st.add_agent(cell)?;
         st.agents.get(&agent_id).cloned().unwrap()
     };
-    let final_cell = maybe_create_bridge_session(ctx, final_cell).await?;
+    let final_cell = maybe_create_bridge_session(ctx, final_cell, &bridge_options).await?;
     ctx.db.save_agent(&final_cell).await?;
     ctx.db
         .save_agent_history_record(
@@ -58,6 +60,18 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
         )
         .await?;
     persist_group_members(ctx, &group).await?;
+    if !bridge_manages_cell(&ctx.terminal_bridge, &final_cell) {
+        crate::commands::dispatch::spawn_cell_session(
+            ctx,
+            &final_cell,
+            Some(&bridge_options.env_vars),
+        )
+        .await?;
+    }
+    if bridge_bootstrap_failed(&final_cell) {
+        flush(ctx).await;
+        return Err(CmdError::BadRequest(final_cell.error_message.clone()));
+    }
     flush(ctx).await;
     Ok(json!({ "ok": true, "agent_id": final_cell.id, "slug": final_cell.slug }))
 }
@@ -101,7 +115,8 @@ pub async fn add_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {
         st.add_agent(cell)?;
         st.agents.get(&agent_id).cloned().unwrap()
     };
-    let final_cell = maybe_create_bridge_session(ctx, final_cell).await?;
+    let final_cell =
+        maybe_create_bridge_session(ctx, final_cell, &CreateSessionOptions::default()).await?;
     ctx.db.save_agent(&final_cell).await?;
     ctx.db
         .save_agent_history_record(
@@ -501,16 +516,87 @@ fn apply_common_fields(cell: &mut AgentCell, req: &Value) {
     }
 }
 
-fn apply_agent_defaults(
+pub(crate) fn resolve_provider_command(
+    provider: &str,
+    boot_command: &str,
+    default_command: &str,
+) -> (String, String) {
+    if !provider.trim().is_empty() {
+        let adapter_cmd = loom_adapters::registry::get_default_command_for_provider(provider);
+        if !adapter_cmd.is_empty() {
+            return (
+                if boot_command.trim().is_empty() {
+                    adapter_cmd
+                } else {
+                    boot_command.to_string()
+                },
+                provider.to_string(),
+            );
+        }
+    }
+    (
+        if boot_command.trim().is_empty() {
+            default_command.to_string()
+        } else {
+            boot_command.to_string()
+        },
+        String::new(),
+    )
+}
+
+pub(crate) fn resolve_agent_launch_command(
+    provider: &str,
+    boot_command: &str,
+    default_command: &str,
+    model: &str,
+    reasoning_effort: &str,
+) -> (String, String) {
+    let (mut command, resolved_provider) =
+        resolve_provider_command(provider, boot_command, default_command);
+    let effective_provider = if !resolved_provider.is_empty() {
+        resolved_provider
+    } else if !provider.trim().is_empty() {
+        provider.to_string()
+    } else {
+        loom_adapters::registry::detect_by_command(&command)
+            .unwrap_or("")
+            .to_string()
+    };
+    if boot_command.trim().is_empty() && !effective_provider.is_empty() {
+        if let Some(adapter) = loom_adapters::registry::get_adapter(&effective_provider) {
+            command.push_str(&adapter.resolve_model_flags(model));
+            command.push_str(&adapter.resolve_reasoning_effort_flags(reasoning_effort));
+        }
+    }
+    let agent_type = if !effective_provider.is_empty() {
+        effective_provider
+    } else {
+        loom_adapters::registry::detect_by_command(&command)
+            .unwrap_or("")
+            .to_string()
+    };
+    (command, agent_type)
+}
+
+pub(crate) fn default_command_from_global(global_default_command: &str) -> String {
+    if global_default_command.trim().is_empty() {
+        loom_core::config::default_command()
+    } else {
+        global_default_command.to_string()
+    }
+}
+
+pub(crate) fn apply_agent_defaults(
     cell: &mut AgentCell,
     settings: &loom_core::state::GroupSettings,
+    default_command: &str,
     req: &Value,
 ) {
     if cell.directory.is_empty() {
         cell.directory = first_nonempty([
             settings.agent_directory.clone(),
             settings.default_directory.clone(),
-            std::env::var("LOOM_PROJECT_ROOT").unwrap_or_default(),
+            project_root_fallback(),
         ]);
     }
     if cell.profile == "Default" {
@@ -524,23 +610,59 @@ fn apply_agent_defaults(
         cell.tab_color =
             first_nonempty([settings.agent_tab_color.clone(), settings.tab_color.clone()]);
     }
-    if cell.command.is_empty() {
-        cell.command = first_nonempty([
-            settings.agent_boot_command.clone(),
-            loom_core::config::default_command(),
-        ]);
-    }
     if cell.template.is_empty() && !settings.default_agent_template.is_empty() {
         cell.template = settings.default_agent_template.clone();
     }
-    if let Some(provider) = req.get("provider").and_then(|v| v.as_str()) {
-        cell.agent_type = provider.to_string();
-    } else if !settings.agent_provider.is_empty() {
-        cell.agent_type = settings.agent_provider.clone();
-    } else if let Some(provider) = loom_adapters::registry::detect_by_command(&cell.command) {
-        cell.agent_type = provider.to_string();
+    let provider = req
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&settings.agent_provider);
+    let model = req
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&settings.agent_model);
+    let reasoning_effort = req
+        .get("reasoning_effort")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&settings.agent_reasoning_effort);
+    let raw_command = first_nonempty([cell.command.clone(), settings.agent_boot_command.clone()]);
+    let (command, agent_type) = resolve_agent_launch_command(
+        provider,
+        &raw_command,
+        default_command,
+        model,
+        reasoning_effort,
+    );
+    cell.command = command;
+    if !agent_type.is_empty() {
+        cell.agent_type = agent_type;
     }
     cell.terminal_backend = "pty".into();
+}
+
+fn build_agent_create_session_options(
+    settings: &loom_core::state::GroupSettings,
+    req: &Value,
+) -> CreateSessionOptions {
+    CreateSessionOptions {
+        env_vars: merged_env(
+            &settings.env_vars,
+            &settings.agent_env_vars,
+            req.get("env_vars").and_then(|v| v.as_object()),
+        ),
+        env_file: first_nonempty([
+            optional_str(req, "env_file").unwrap_or("").to_string(),
+            settings.agent_env_file.clone(),
+            settings.env_file.clone(),
+        ]),
+        shell: first_nonempty([
+            optional_str(req, "shell").unwrap_or("").to_string(),
+            settings.agent_shell.clone(),
+            settings.shell.clone(),
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()),
+        ]),
+        ..Default::default()
+    }
 }
 
 fn apply_terminal_defaults(
@@ -562,7 +684,7 @@ fn apply_terminal_defaults(
             parent_worktree.to_string(),
             settings.terminal_directory.clone(),
             settings.default_directory.clone(),
-            std::env::var("LOOM_PROJECT_ROOT").unwrap_or_default(),
+            project_root_fallback(),
         ]);
     }
     if cell.tab_color.is_empty() {
@@ -606,7 +728,7 @@ fn apply_terminal_defaults(
     env_vars
 }
 
-fn merged_env(
+pub(crate) fn merged_env(
     base: &BTreeMap<String, String>,
     extra: &BTreeMap<String, String>,
     req: Option<&serde_json::Map<String, Value>>,
@@ -658,11 +780,22 @@ fn shell_escape(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-fn first_nonempty<const N: usize>(values: [String; N]) -> String {
+fn project_root_fallback() -> String {
+    std::env::var("LOOM_PROJECT_ROOT")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| crate::app::repo_root().to_string_lossy().to_string())
+}
+
+pub(crate) fn first_nonempty<const N: usize>(values: [String; N]) -> String {
     values
         .into_iter()
         .find(|value| !value.is_empty())
         .unwrap_or_default()
+}
+
+pub(crate) fn bridge_bootstrap_failed(cell: &AgentCell) -> bool {
+    cell.status == "error" && !cell.error_message.trim().is_empty()
 }
 
 fn now_ts() -> f64 {
@@ -681,12 +814,13 @@ async fn persist_group_members(ctx: &CmdContext, group: &str) -> Result<(), CmdE
 async fn maybe_create_bridge_session(
     ctx: &CmdContext,
     cell: AgentCell,
+    options: &CreateSessionOptions,
 ) -> Result<AgentCell, CmdError> {
     if !bridge_manages_cell(&ctx.terminal_bridge, &cell) {
         return Ok(cell);
     }
 
-    let bridged = match ctx.terminal_bridge.create_session(&cell).await {
+    let bridged = match ctx.terminal_bridge.create_session(&cell, options).await {
         Ok(Some(updated)) => updated,
         Ok(None) => cell,
         Err(err) => {

@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::{AgentCell, BoardTask, MatrixState, WeaverSettings};
-use loom_server::app::UiAgentRegistry;
+use loom_server::app::{UiAgentInput, UiAgentRegistry};
 use loom_server::commands;
 use loom_server::events as evt;
 use loom_server::mcp;
@@ -373,7 +373,10 @@ async fn weaver_reply_delivers_text_and_notifications_persist() {
         .await
         .expect("reply delivery")
         .expect("channel open");
-    assert_eq!(sent, "\n## Human Reply\nShip it\n---\n");
+    assert_eq!(
+        sent,
+        UiAgentInput::Text("\n## Human Reply\nShip it\n---\n".into())
+    );
     {
         let st = state.lock().await;
         let settings = st.get_weaver_settings("Eng");

@@ -146,6 +146,28 @@ impl GhosttyView {
             surface.write_text(text);
         }
     }
+
+    /// Programmatically submit the current prompt buffer to the PTY child.
+    pub fn submit(&self) {
+        use loom_ghostty::sys_types::{ghostty_input_action_e, ghostty_input_mods_e};
+
+        const RETURN_KEYCODE: u32 = 36;
+
+        if let Some(surface) = self.ivars().surface.borrow().as_ref() {
+            surface.send_key(
+                ghostty_input_action_e::GHOSTTY_ACTION_PRESS,
+                ghostty_input_mods_e::GHOSTTY_MODS_NONE,
+                RETURN_KEYCODE,
+                None,
+            );
+            surface.send_key(
+                ghostty_input_action_e::GHOSTTY_ACTION_RELEASE,
+                ghostty_input_mods_e::GHOSTTY_MODS_NONE,
+                RETURN_KEYCODE,
+                None,
+            );
+        }
+    }
 }
 
 fn forward_key(view: &GhosttyView, event: &NSEvent, is_down: bool) {

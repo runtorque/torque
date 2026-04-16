@@ -264,6 +264,8 @@ async fn build_snapshot_locked(
     embedded_terminal: bool,
 ) -> Value {
     let st = state.lock().await;
+    let global_default_command =
+        crate::commands::agents::default_command_from_global(&st.global_settings.default_command);
 
     let mut groups = serde_json::Map::new();
     let mut weaver_streams = serde_json::Map::new();
@@ -328,7 +330,7 @@ async fn build_snapshot_locked(
         "content_layout": &st.content_layout,
         "dock_edges": &st.dock_edges,
         "providers": providers_payload(),
-        "runtime": runtime_payload(embedded_terminal),
+        "runtime": runtime_payload(embedded_terminal, &global_default_command),
     })
 }
 
@@ -365,17 +367,26 @@ fn providers_payload() -> Vec<Value> {
                 .as_ref()
                 .map(|adapter| adapter.default_boot_command().to_string())
                 .unwrap_or_default();
+            let reasoning_efforts = loom_adapters::registry::get_adapter(name)
+                .map(|adapter| {
+                    adapter
+                        .reasoning_effort_options()
+                        .into_iter()
+                        .map(Value::from)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             json!({
                 "name": name,
                 "display_name": name,
                 "command": command,
-                "reasoning_efforts": [],
+                "reasoning_efforts": reasoning_efforts,
             })
         })
         .collect()
 }
 
-fn runtime_payload(embedded_terminal: bool) -> Value {
+fn runtime_payload(embedded_terminal: bool, default_command: &str) -> Value {
     json!({
         "standalone": true,
         "embedded_terminal": embedded_terminal,
@@ -389,6 +400,6 @@ fn runtime_payload(embedded_terminal: bool) -> Value {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(loom_core::config::DEFAULT_PORT),
-        "default_command": loom_core::config::default_command(),
+        "default_command": default_command,
     })
 }

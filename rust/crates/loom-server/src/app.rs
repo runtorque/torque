@@ -20,6 +20,12 @@ use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
 use loom_pty::LocalPtyBackend;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UiAgentInput {
+    Text(String),
+    Submit,
+}
+
 /// Registry of agents whose terminal is hosted by the native UI (a
 /// `GhosttyView`, not a `LocalPtyBackend` session). When an agent is in the
 /// registry, dispatch routes its prompt through the registered channel
@@ -30,13 +36,13 @@ use loom_pty::LocalPtyBackend;
 /// concerns (no `dispatch2::Queue::main` inside the engine).
 #[derive(Clone, Default)]
 pub struct UiAgentRegistry {
-    inner: Arc<StdMutex<HashMap<String, mpsc::UnboundedSender<String>>>>,
+    inner: Arc<StdMutex<HashMap<String, mpsc::UnboundedSender<UiAgentInput>>>>,
 }
 
 impl UiAgentRegistry {
     /// UI registers an agent. Returns the receiver to be drained from the
     /// main thread.
-    pub fn register(&self, agent_id: String) -> mpsc::UnboundedReceiver<String> {
+    pub fn register(&self, agent_id: String) -> mpsc::UnboundedReceiver<UiAgentInput> {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         map.insert(agent_id, tx);
@@ -54,14 +60,24 @@ impl UiAgentRegistry {
         map.get(agent_id).map(|tx| !tx.is_closed()).unwrap_or(false)
     }
 
-    /// Returns `true` iff the text was queued to a live UI-attached agent.
-    pub fn send(&self, agent_id: &str, text: String) -> bool {
+    /// Returns `true` iff the input was queued to a live UI-attached agent.
+    fn send_input(&self, agent_id: &str, input: UiAgentInput) -> bool {
         let map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(tx) = map.get(agent_id) {
-            tx.send(text).is_ok()
+            tx.send(input).is_ok()
         } else {
             false
         }
+    }
+
+    /// Returns `true` iff text was queued to a live UI-attached agent.
+    pub fn send_text(&self, agent_id: &str, text: String) -> bool {
+        self.send_input(agent_id, UiAgentInput::Text(text))
+    }
+
+    /// Returns `true` iff a submit action was queued to a live UI-attached agent.
+    pub fn send_submit(&self, agent_id: &str) -> bool {
+        self.send_input(agent_id, UiAgentInput::Submit)
     }
 }
 
@@ -263,7 +279,7 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
     })
 }
 
-fn repo_root() -> PathBuf {
+pub(crate) fn repo_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest_dir
         .ancestors()

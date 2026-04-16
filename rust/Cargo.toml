@@ -63,6 +63,7 @@ bytes = "1"
 percent-encoding = "2"
 url = "2"
 dirs = "5"
+shell-words = "1.1"
 
 # Internal crates
 loom-core = { path = "crates/loom-core" }
