@@ -141,17 +141,26 @@ fn inherit_worktree_from_parent_chain(
     false
 }
 
+#[derive(Default)]
+struct CascadeResult {
+    tasks: Vec<loom_core::state::BoardTask>,
+    unlinked_agents: Vec<loom_core::state::AgentCell>,
+}
+
 /// Walk up the parent chain from `task_id`, completing ancestors whose
 /// descendant branches are all Done. Mirrors `_cascade_done` in
-/// `loom/server.py`. Returns every task that was moved to Done so the caller
-/// can persist them.
-fn cascade_done(
-    st: &mut loom_core::state::MatrixState,
-    task_id: &str,
-) -> Vec<loom_core::state::BoardTask> {
-    let mut updated = Vec::new();
+/// `loom/server.py`. Returns every task that was moved to Done (and every
+/// agent whose stale `current_task_id` got cleared) so the caller can
+/// persist them.
+///
+/// Also unlinks any agent whose `current_task_id` pointed at a promoted
+/// task — cascade-closing a task means its worker is idle, even if that
+/// worker never fired its own `loom_done` (e.g. a reviewer handed work
+/// off and we only see the terminal `done` from the fixer).
+fn cascade_done(st: &mut loom_core::state::MatrixState, task_id: &str) -> CascadeResult {
+    let mut out = CascadeResult::default();
     let Some(start) = st.board_tasks.get(task_id) else {
-        return updated;
+        return out;
     };
     let mut pid = start.parent_task_id.clone();
     while !pid.is_empty() {
@@ -175,10 +184,25 @@ fn cascade_done(
         if st.upsert_task(promoted.clone()).is_err() {
             break;
         }
-        updated.push(promoted.clone());
+        // Clear any agent whose current_task_id pointed at the promoted
+        // task — the agent has nothing linked anymore.
+        let stale_agents: Vec<String> = st
+            .agents
+            .values()
+            .filter(|a| a.current_task_id == promoted.id)
+            .map(|a| a.id.clone())
+            .collect();
+        for aid in stale_agents {
+            if let Some(agent) = st.agents.get_mut(&aid) {
+                agent.current_task_id.clear();
+                out.unlinked_agents.push(agent.clone());
+            }
+            st.emit_agent(&aid);
+        }
+        out.tasks.push(promoted.clone());
         pid = promoted.parent_task_id.clone();
     }
-    updated
+    out
 }
 
 fn clear_parent_awaiting_input(
@@ -1113,7 +1137,7 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
             .await;
     }
 
-    let (task, agent, cascaded) = {
+    let (task, agent, cascaded): (Option<loom_core::state::BoardTask>, loom_core::state::AgentCell, CascadeResult) = {
         let mut st = ctx.state.lock().await;
         if !st.agents.contains_key(&agent_id) {
             return Err(CmdError::BadRequest(format!(
@@ -1153,7 +1177,7 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
 
         // Update linked task.
         let mut task = None;
-        let mut cascaded: Vec<loom_core::state::BoardTask> = Vec::new();
+        let mut cascaded = CascadeResult::default();
         if !task_id.is_empty() {
             if let Some(t) = st.board_tasks.get_mut(&task_id) {
                 match action.as_str() {
@@ -1199,8 +1223,11 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
     if let Some(t) = &task {
         ctx.db.save_board_task(t).await?;
     }
-    for promoted in &cascaded {
+    for promoted in &cascaded.tasks {
         ctx.db.save_board_task(promoted).await?;
+    }
+    for agent in &cascaded.unlinked_agents {
+        ctx.db.save_agent(agent).await?;
     }
     ctx.db.save_agent(&agent).await?;
     ctx.db
@@ -1392,7 +1419,7 @@ pub async fn resolve_ask(ctx: &CmdContext, req: &Value) -> CmdResult {
     .await
     .map_err(|_| CmdError::BadRequest("Parent agent not available".into()))?;
 
-    let (ask_task, parent, root) = {
+    let (ask_task, parent, root, cascaded) = {
         let mut st = ctx.state.lock().await;
         let Some(mut ask_task) = st.board_tasks.get(&task_id).cloned() else {
             return Err(CmdError::BadRequest(format!("task '{task_id}' not found")));
@@ -1432,7 +1459,13 @@ pub async fn resolve_ask(ctx: &CmdContext, req: &Value) -> CmdResult {
             None => (parent, None),
         };
 
-        (ask_task, Some(parent), root)
+        // Marking the ask Done can unblock ancestor cascade: if a sibling
+        // `loom_done` already fired and stopped at an open ancestor because
+        // this ask was still pending, it's time to close that ancestor out.
+        // Mirrors Python server.py which cascades on every Done transition.
+        let cascaded = cascade_done(&mut st, &ask_task.id);
+
+        (ask_task, Some(parent), root, cascaded)
     };
 
     ctx.db.save_board_task(&ask_task).await?;
@@ -1441,6 +1474,12 @@ pub async fn resolve_ask(ctx: &CmdContext, req: &Value) -> CmdResult {
     }
     if let Some(root) = &root {
         ctx.db.save_board_task(root).await?;
+    }
+    for promoted in &cascaded.tasks {
+        ctx.db.save_board_task(promoted).await?;
+    }
+    for agent in &cascaded.unlinked_agents {
+        ctx.db.save_agent(agent).await?;
     }
     let _ = crate::commands::compat::record_panel_event(
         &ctx.state,

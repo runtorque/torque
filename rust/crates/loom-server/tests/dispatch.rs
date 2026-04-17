@@ -477,3 +477,257 @@ async fn resolve_ask_moves_ask_to_done_and_logs_reply() {
     assert_eq!(last["message"], "Go with option B");
     assert_eq!(last["from_task_id"], ask_id);
 }
+
+#[tokio::test]
+async fn ai_report_done_cascades_to_root_when_all_descendants_done() {
+    // Reproduces the live weaver report: root task stays In Progress even
+    // after ask + review + fix children are all Done. Cascade must walk up
+    // from the deepest Done descendant to promote the root.
+    let (addr, state) = spawn_test_server().await;
+
+    post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let t = post(
+        addr,
+        json!({"cmd": "board_add_task", "task": "Root work", "group": "Eng"}),
+    )
+    .await;
+    let root_id = t["data"]["task_id"].as_str().unwrap().to_string();
+
+    // Dispatch the root so it enters In Progress and has a linked agent.
+    let dispatch = post(
+        addr,
+        json!({"cmd": "dispatch_task", "task_id": &root_id, "force_no_action": true}),
+    )
+    .await;
+    assert_eq!(dispatch["ok"], true);
+    let worker_id = dispatch["data"]["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Manually build the two-level child hierarchy the derive path would
+    // produce: root → review (derived from root) → fix (derived from review).
+    let review = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Review it",
+            "group": "Eng",
+            "parent_task_id": &root_id,
+            "pipeline_root_id": &root_id,
+            "labels": ["loom:derived"]
+        }),
+    )
+    .await;
+    let review_id = review["data"]["task_id"].as_str().unwrap().to_string();
+
+    let fix = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Fix it",
+            "group": "Eng",
+            "parent_task_id": &review_id,
+            "pipeline_root_id": &root_id,
+            "labels": ["loom:derived"]
+        }),
+    )
+    .await;
+    let fix_id = fix["data"]["task_id"].as_str().unwrap().to_string();
+
+    // The live scenario: reviewer back-derives without closing its own
+    // task, so review stays In Progress (with a status badge like
+    // "Awaiting Fix") while the worker takes over on the fix. Put review
+    // into In Progress to mirror that.
+    post(
+        addr,
+        json!({"cmd": "board_move_task", "id": &review_id, "lane": "In Progress"}),
+    )
+    .await;
+    // Pipeline-aware status the derive path stamps. Leaving non-empty so
+    // the cascade has to tolerate it.
+    {
+        let mut st = state.lock().await;
+        if let Some(r) = st.board_tasks.get_mut(&review_id) {
+            r.status = "Awaiting Fix".into();
+        }
+    }
+
+    // Point worker at the deepest child, then fire loom_done on it.
+    {
+        let mut st = state.lock().await;
+        let worker = st.agents.get_mut(&worker_id).unwrap();
+        worker.current_task_id = fix_id.clone();
+    }
+    let done = post(
+        addr,
+        json!({
+            "cmd": "ai_report",
+            "action": "done",
+            "agent_id": &worker_id,
+            "task_id": &fix_id,
+            "message": "all set"
+        }),
+    )
+    .await;
+    assert_eq!(done["ok"], true, "ai_report response: {done:?}");
+
+    let st = state.lock().await;
+    let root = st.board_tasks.get(&root_id).unwrap();
+    assert_eq!(
+        root.lane, "Done",
+        "cascade should have promoted root after all descendants hit Done"
+    );
+    assert_eq!(st.board_tasks.get(&review_id).unwrap().lane, "Done");
+    assert_eq!(st.board_tasks.get(&fix_id).unwrap().lane, "Done");
+    let worker = st.agents.get(&worker_id).unwrap();
+    assert!(
+        worker.current_task_id.is_empty(),
+        "done should clear the worker's current_task_id (got {:?})",
+        worker.current_task_id
+    );
+}
+
+#[tokio::test]
+async fn resolve_ask_cascades_to_parent_after_sibling_done() {
+    // Exact live-weaver scenario: worker emits loom_done on loom-1a3
+    // (deepest fix task) BEFORE the human has answered the ask (loom-1a).
+    // That cascade stops at loom-1 because loom-1a is still open. The
+    // human then resolves the ask, which must continue the cascade and
+    // mark loom-1 Done.
+    let (addr, state, ui_agents) = spawn_test_server_full().await;
+
+    post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
+    let t = post(
+        addr,
+        json!({"cmd": "board_add_task", "task": "Root work", "group": "Eng"}),
+    )
+    .await;
+    let root_id = t["data"]["task_id"].as_str().unwrap().to_string();
+    let dispatch = post(
+        addr,
+        json!({"cmd": "dispatch_task", "task_id": &root_id, "force_no_action": true}),
+    )
+    .await;
+    let worker_id = dispatch["data"]["agent_id"].as_str().unwrap().to_string();
+
+    // Ask task opened while worker still on loom-1. Label `loom:human`
+    // replicates handle_agent_ask.
+    let ask = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Which option?",
+            "group": "Eng",
+            "parent_task_id": &root_id,
+            "pipeline_root_id": &root_id,
+            "lane": "Backlog",
+            "labels": ["loom:human", "loom:derived"]
+        }),
+    )
+    .await;
+    let ask_id = ask["data"]["task_id"].as_str().unwrap().to_string();
+
+    // Reviewer branch + fix branch.
+    let review = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Review it",
+            "group": "Eng",
+            "parent_task_id": &root_id,
+            "pipeline_root_id": &root_id,
+            "lane": "In Progress",
+            "labels": ["loom:derived"]
+        }),
+    )
+    .await;
+    let review_id = review["data"]["task_id"].as_str().unwrap().to_string();
+    let fix = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Fix it",
+            "group": "Eng",
+            "parent_task_id": &review_id,
+            "pipeline_root_id": &root_id,
+            "labels": ["loom:derived"]
+        }),
+    )
+    .await;
+    let fix_id = fix["data"]["task_id"].as_str().unwrap().to_string();
+
+    // Worker finishes the fix first.
+    {
+        let mut st = state.lock().await;
+        st.agents.get_mut(&worker_id).unwrap().current_task_id = fix_id.clone();
+    }
+    post(
+        addr,
+        json!({
+            "cmd": "ai_report",
+            "action": "done",
+            "agent_id": &worker_id,
+            "task_id": &fix_id,
+            "message": "fix shipped"
+        }),
+    )
+    .await;
+    // At this point review should have cascaded to Done, but root should
+    // still be In Progress because the ask is open.
+    {
+        let st = state.lock().await;
+        assert_eq!(st.board_tasks.get(&review_id).unwrap().lane, "Done");
+        assert_ne!(
+            st.board_tasks.get(&root_id).unwrap().lane,
+            "Done",
+            "root should NOT be Done yet — ask is still open"
+        );
+    }
+
+    // Human answers the ask. This must continue the cascade.
+    let ask_task = {
+        let st = state.lock().await;
+        st.board_tasks.get(&ask_id).cloned().unwrap()
+    };
+    // Give the ask a linked agent so resolve_ask can route the reply; use
+    // the worker as the parent agent (matches the real flow where the
+    // asking agent is still registered against loom-1).
+    let mut rx = ui_agents.register(worker_id.clone());
+    {
+        let mut st = state.lock().await;
+        let parent = st.board_tasks.get_mut(&root_id).unwrap();
+        parent.agent_id = worker_id.clone();
+        let _ = ask_task;
+    }
+
+    post(
+        addr,
+        json!({
+            "cmd": "resolve_ask",
+            "task_id": &ask_id,
+            "reply": "option B"
+        }),
+    )
+    .await;
+    // Drain any text that resolve_ask delivered to the worker so the
+    // channel doesn't fill up.
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
+
+    let st = state.lock().await;
+    assert_eq!(st.board_tasks.get(&ask_id).unwrap().lane, "Done");
+    assert_eq!(
+        st.board_tasks.get(&root_id).unwrap().lane,
+        "Done",
+        "resolve_ask cascade should have promoted root now that every child is Done"
+    );
+    // The worker was still linked to root (never fired its own loom_done
+    // because the done landed on the fixer). Cascade-promoting root to
+    // Done should have cleared the worker's stale current_task_id.
+    let worker = st.agents.get(&worker_id).unwrap();
+    assert!(
+        worker.current_task_id.is_empty(),
+        "cascade should have unlinked the worker from the promoted root (got {:?})",
+        worker.current_task_id
+    );
+}
