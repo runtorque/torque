@@ -305,17 +305,41 @@ fn project_actions_root() -> Option<PathBuf> {
 }
 
 /// Exposed for sibling modules (e.g. dispatch.rs) that need the same path.
+///
+/// Priority:
+/// 1. `LOOM_PROJECT_ROOT` env var — use `<root>/.loom/actions`.
+/// 2. Walk up from CWD looking for an existing `.loom/actions` directory.
+/// 3. Fall back to `<cwd>/.loom/actions` even if it doesn't exist (so the
+///    UI can still save new actions into a fresh project).
+///
+/// Returning `None` only if we truly cannot determine a CWD. Previously
+/// this returned `Some(<cwd>/.loom/actions)` unconditionally, which
+/// silently hid every action when the daemon launched from a directory
+/// that wasn't the repo root (e.g. `cargo run` from the `rust/` subdir).
 pub fn project_actions_root_pub() -> Option<PathBuf> {
     if let Ok(root) = std::env::var("LOOM_PROJECT_ROOT") {
-        return Some(
-            crate::paths::expand_user_path(&root)
-                .join(".loom")
-                .join("actions"),
-        );
+        if !root.trim().is_empty() {
+            return Some(
+                crate::paths::expand_user_path(&root)
+                    .join(".loom")
+                    .join("actions"),
+            );
+        }
     }
-    std::env::current_dir()
-        .ok()
-        .map(|d| d.join(".loom").join("actions"))
+    let cwd = std::env::current_dir().ok()?;
+    let mut cur = cwd.clone();
+    for _ in 0..32 {
+        let candidate = cur.join(".loom").join("actions");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        if !cur.pop() {
+            break;
+        }
+    }
+    // No existing `.loom/actions` in any ancestor — keep a CWD-anchored
+    // path so the editor can still save into a fresh project scaffold.
+    Some(cwd.join(".loom").join("actions"))
 }
 
 fn user_actions_root() -> PathBuf {

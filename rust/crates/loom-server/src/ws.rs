@@ -117,16 +117,26 @@ async fn handle_ws(app: AppState, socket: WebSocket) {
                 else {
                     continue;
                 };
-                let response = match crate::commands::dispatch_command(&ctx, &cmd, &payload).await {
-                    Ok(value) => value,
-                    Err(err) => json!({
-                        "type": "error",
-                        "message": cmd_error_message(&cmd, err),
-                    }),
-                };
-                if cmd_tx.send(response).is_err() {
-                    break;
-                }
+                // Spawn each command so slow ones don't block the receive
+                // loop (or other concurrent clicks). The Python server does
+                // the same thing via its event loop; serialising these
+                // caused the whole web UI to freeze whenever one dispatch
+                // (e.g. `dispatch_task` with its 2s boot delay) was in
+                // flight. Responses still arrive in flight order on the
+                // socket via the unbounded `cmd_tx` channel.
+                let ctx_spawn = ctx.clone();
+                let cmd_tx_spawn = cmd_tx.clone();
+                tokio::spawn(async move {
+                    let response =
+                        match crate::commands::dispatch_command(&ctx_spawn, &cmd, &payload).await {
+                            Ok(value) => value,
+                            Err(err) => json!({
+                                "type": "error",
+                                "message": cmd_error_message(&cmd, err),
+                            }),
+                        };
+                    let _ = cmd_tx_spawn.send(response);
+                });
             }
             Message::Close(_) => break,
             _ => {}

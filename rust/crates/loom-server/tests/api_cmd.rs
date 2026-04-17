@@ -295,9 +295,11 @@ async fn add_agent_starts_local_pty_session_and_uses_repo_root_defaults() {
     .await;
     assert_eq!(v["ok"], true);
 
+    // Opt out of worktree auto-creation so we can assert directory=repo_root
+    // exactly. Worktree behavior is covered separately by add_agent_autocreates_worktree.
     let v = post(
         addr,
-        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
+        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng", "worktree": false}),
     )
     .await;
     assert_eq!(v["ok"], true, "add_agent response: {v:?}");
@@ -473,10 +475,13 @@ async fn add_weaver_designates_group_and_delivers_initial_prompt() {
     assert_eq!(v["ok"], true, "add_agent response: {v:?}");
     let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
 
-    let prompt_text = tokio::time::timeout(Duration::from_secs(6), async {
+    // Wait for the final expected string, not just the start — the prompt
+    // now streams asynchronously (fire-and-forget spawn) so we can't break
+    // as soon as the header lands.
+    let prompt_text = tokio::time::timeout(Duration::from_secs(8), async {
         loop {
             if let Ok(contents) = tokio::fs::read_to_string(&prompt_capture).await {
-                if contents.contains("You are the Weaver") {
+                if contents.contains("Keep the board moving.") {
                     break contents;
                 }
             }

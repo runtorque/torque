@@ -13,7 +13,7 @@ pub struct PtySession {
 #[derive(Debug, Clone)]
 pub enum PtyEvent {
     Spawned { cell_id: String, pid: u32 },
-    Output { cell_id: String, bytes: Vec<u8> },
+    Output { cell_id: String, text: String },
     Exited { cell_id: String, status: i32 },
     Error { cell_id: String, message: String },
 }

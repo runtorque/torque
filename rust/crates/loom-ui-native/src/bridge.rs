@@ -1,8 +1,15 @@
 //! Glue between the AppKit UI and the engine.
 //!
-//! The UI calls `EngineBridge::dispatch(cmd, payload)` to mutate state. State
-//! changes flow back through an async watcher on `AppState.bus` which is
-//! marshalled onto the main thread by the window controller.
+//! The UI polls `EngineBridge::snapshot()` every tick to render. To keep the
+//! main (Cocoa) thread free of tokio lock contention, the bridge maintains a
+//! cached snapshot that is refreshed by a background tokio task subscribed to
+//! the engine's event bus. The main thread only takes a `std::sync::RwLock`
+//! read lock — never a tokio mutex — so rendering is never blocked by a
+//! long-running engine operation.
+//!
+//! Command dispatch is fire-and-forget: `bridge.dispatch()` spawns the future
+//! on the runtime and returns immediately. Errors are logged. If a caller
+//! needs the result synchronously, use `dispatch_blocking`.
 
 use std::sync::Arc;
 
@@ -20,13 +27,46 @@ pub struct EngineBridge {
     /// Tokio runtime handle — the UI sits on the main thread (Cocoa) so it
     /// needs to hand async work to tokio instead of calling .await directly.
     runtime: tokio::runtime::Handle,
+    /// Cached snapshot refreshed by a background task. Reads from the main
+    /// thread are cheap (std RwLock read) and never wait on a tokio mutex.
+    snapshot_cache: Arc<std::sync::RwLock<MatrixStateSnapshot>>,
 }
 
 impl EngineBridge {
     pub fn new(state: AppState) -> Self {
+        let runtime = tokio::runtime::Handle::current();
+
+        // Seed the cache with a blocking snapshot before returning. The UI's
+        // first tick will see real data rather than a stub.
+        let initial = runtime.block_on(build_snapshot(&state));
+        let snapshot_cache = Arc::new(std::sync::RwLock::new(initial));
+
+        // Spawn the refresher. It rebuilds the cache whenever the engine
+        // emits a delta / snapshot / event. A lagged receiver rebuilds from
+        // the current state.
+        {
+            let state_clone = state.clone();
+            let cache = snapshot_cache.clone();
+            runtime.spawn(async move {
+                let mut rx = state_clone.bus.subscribe();
+                loop {
+                    match rx.recv().await {
+                        Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                            let snap = build_snapshot(&state_clone).await;
+                            if let Ok(mut w) = cache.write() {
+                                *w = snap;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
+        }
+
         Self {
             state,
-            runtime: tokio::runtime::Handle::current(),
+            runtime,
+            snapshot_cache,
         }
     }
 
@@ -58,57 +98,54 @@ impl EngineBridge {
         self.state.state.clone()
     }
 
-    /// Block the current thread until the future finishes, using the tokio
-    /// runtime that owns the engine. Safe to call from the main (UI) thread
-    /// because we don't hold any Cocoa locks.
-    pub fn block_on<F, T>(&self, fut: F) -> T
-    where
-        F: std::future::Future<Output = T> + Send + 'static,
-        T: Send + 'static,
-    {
-        let handle = self.runtime.clone();
-        std::thread::scope(|s| {
-            let h = s.spawn(|| handle.block_on(fut));
-            h.join().unwrap()
-        })
-    }
-
-    /// Execute a command in the engine. Mirrors the HTTP `/api/cmd` handler
-    /// but stays in-process.
+    /// Fire-and-forget command dispatch. The future runs on the tokio
+    /// runtime; errors are logged. Returns immediately so the UI main thread
+    /// stays responsive. Use `dispatch_blocking` if the caller truly needs
+    /// the result synchronously.
     pub fn dispatch(&self, cmd: &str, body: Value) -> Result<Value, CmdError> {
         let ctx = self.cmd_ctx();
-        let cmd = cmd.to_string();
+        let cmd_str = cmd.to_string();
         let mut body = body;
         if let Some(obj) = body.as_object_mut() {
-            obj.insert("cmd".into(), Value::String(cmd.clone()));
+            obj.insert("cmd".into(), Value::String(cmd_str.clone()));
         }
-        self.block_on(
-            async move { loom_server::commands::dispatch_command(&ctx, &cmd, &body).await },
-        )
+        self.runtime.spawn(async move {
+            if let Err(err) = loom_server::commands::dispatch_command(&ctx, &cmd_str, &body).await {
+                tracing::warn!("dispatch({cmd_str}) failed: {err:?}");
+            }
+        });
+        Ok(serde_json::json!({ "ok": true }))
     }
 
-    /// Returns a clone of the full state (for the UI to snapshot).
+    /// Blocking dispatch — used when the caller needs the command's result
+    /// value. Spawns a task on the runtime and blocks the current thread
+    /// until it resolves. Avoid on the UI main thread unless necessary.
+    pub fn dispatch_blocking(&self, cmd: &str, body: Value) -> Result<Value, CmdError> {
+        let ctx = self.cmd_ctx();
+        let cmd_str = cmd.to_string();
+        let mut body = body;
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("cmd".into(), Value::String(cmd_str.clone()));
+        }
+        let handle = self.runtime.clone();
+        let fut = async move { loom_server::commands::dispatch_command(&ctx, &cmd_str, &body).await };
+        // Use a oneshot channel + spawn so we never call block_on on the
+        // current thread (which may be tokio-owned or hold AppKit locks).
+        let (tx, rx) = std::sync::mpsc::channel();
+        handle.spawn(async move {
+            let _ = tx.send(fut.await);
+        });
+        rx.recv().unwrap_or_else(|_| Err(CmdError::BadRequest(
+            "dispatch oneshot channel dropped".into(),
+        )))
+    }
+
+    /// Return the most recent cached snapshot. O(1); never blocks on tokio.
     pub fn snapshot(&self) -> MatrixStateSnapshot {
-        let state = self.state_arc();
-        self.block_on(async move {
-            let st = state.lock().await;
-            MatrixStateSnapshot {
-                agents: st.agents.values().cloned().collect(),
-                groups_order: st.groups_order.clone(),
-                group_slugs: st.group_slugs.clone(),
-                groups: st
-                    .groups
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
-                board_lanes: st.board_lanes.clone(),
-                board_tasks: st.board_tasks.values().cloned().collect(),
-                global_default_command: st.global_settings.default_command.clone(),
-                selected_agent_id: st.selected_agent_id.clone(),
-                content_layout: st.effective_layout(),
-                dock_layout: st.effective_dock_layout(),
-            }
-        })
+        self.snapshot_cache
+            .read()
+            .expect("snapshot cache poisoned")
+            .clone()
     }
 }
 
@@ -138,14 +175,36 @@ impl MatrixStateSnapshot {
     }
 }
 
+/// Collect a fresh snapshot by locking the engine state briefly.
+async fn build_snapshot(state: &AppState) -> MatrixStateSnapshot {
+    let st = state.state.lock().await;
+    MatrixStateSnapshot {
+        agents: st.agents.values().cloned().collect(),
+        groups_order: st.groups_order.clone(),
+        group_slugs: st.group_slugs.clone(),
+        groups: st
+            .groups
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        board_lanes: st.board_lanes.clone(),
+        board_tasks: st.board_tasks.values().cloned().collect(),
+        global_default_command: st.global_settings.default_command.clone(),
+        selected_agent_id: st.selected_agent_id.clone(),
+        content_layout: st.effective_layout(),
+        dock_layout: st.effective_dock_layout(),
+    }
+}
+
 /// Resolve the command + working directory for a given agent cell.
 ///
 /// Priority:
 ///   1. `cell.command` override if explicitly set.
 ///   2. `global_settings.default_command` if cell is an agent and override is
 ///      empty.
-///   3. Fallback per cell_type: `"claude"` for agents, `"/bin/zsh"` for
-///      terminals.
+///   3. Fallback per cell_type: `"claude"` for agents, empty for terminals.
+///      (Empty means: let Ghostty spawn its default login shell so `.zshrc`
+///      / `.zprofile` are sourced — see `GhosttyView::ensure_surface`.)
 pub fn resolve_command(cell: &loom_core::state::AgentCell, global_default: &str) -> String {
     if !cell.command.is_empty() {
         return cell.command.clone();
@@ -157,7 +216,9 @@ pub fn resolve_command(cell: &loom_core::state::AgentCell, global_default: &str)
     if is_agent {
         "claude".to_string()
     } else {
-        "/bin/zsh".to_string()
+        // Empty → Ghostty spawns its default login shell, which sources
+        // the user's shell init scripts (.zprofile, .zshrc, etc.).
+        String::new()
     }
 }
 
@@ -184,10 +245,12 @@ mod tests {
     }
 
     #[test]
-    fn resolve_command_terminal_uses_zsh_fallback() {
+    fn resolve_command_terminal_returns_empty_for_default_login_shell() {
+        // Empty string tells Ghostty to spawn its default login shell so the
+        // user's shell init scripts are sourced.
         let mut cell = AgentCell::new("a", "Logs", "g");
         cell.cell_type = "terminal".into();
-        assert_eq!(resolve_command(&cell, ""), "/bin/zsh");
+        assert_eq!(resolve_command(&cell, ""), "");
     }
 
     #[test]
@@ -203,7 +266,7 @@ mod tests {
         // inherit `claude` from it.
         let mut cell = AgentCell::new("a", "Logs", "g");
         cell.cell_type = "terminal".into();
-        assert_eq!(resolve_command(&cell, "codex"), "/bin/zsh");
+        assert_eq!(resolve_command(&cell, "codex"), "");
     }
 
     #[test]

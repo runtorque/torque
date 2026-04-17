@@ -254,8 +254,9 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
         });
     }
 
-    // Spawn scheduler
+    // Spawn scheduler + periodic weaver buffer drain.
     crate::scheduler::spawn(state.clone(), db.clone(), bus.clone());
+    crate::scheduler::spawn_weaver_flusher(app_state.clone());
 
     let router = build_router(app_state.clone());
 
@@ -361,7 +362,7 @@ async fn handle_pty_event(app: &AppState, evt: loom_pty::PtyEvent) {
         | PtyEvent::Error { cell_id, .. } => cell_id.clone(),
     };
 
-    let (agent_snapshot, panel_event, clear_buffer, pending_output) = {
+    let (agent_snapshot, panel_event, clear_buffer, pending_output, is_output_only) = {
         let mut st = app.state.lock().await;
         let Some(cell) = st.agents.get_mut(&cell_id) else {
             return;
@@ -369,6 +370,7 @@ async fn handle_pty_event(app: &AppState, evt: loom_pty::PtyEvent) {
         let mut panel_event = None::<(String, String, String)>;
         let mut clear_buffer = false;
         let mut pending_output = None::<(String, String)>;
+        let mut is_output_only = false;
         match evt {
             PtyEvent::Spawned { pid, .. } => {
                 cell.status = "running".into();
@@ -380,12 +382,22 @@ async fn handle_pty_event(app: &AppState, evt: loom_pty::PtyEvent) {
                     cell.current_task_id.clone(),
                 ));
             }
-            PtyEvent::Output { bytes, .. } => {
-                cell.last_event_at = chrono::Utc::now().timestamp() as f64;
+            PtyEvent::Output { text, .. } => {
+                // High-frequency path — every byte burst hits here. Do
+                // NOT update state fields that would trigger a delta
+                // broadcast (e.g. `last_event_at`). Serialising the whole
+                // AgentCell on every chunk overwhelmed the WS bus and
+                // starved command dispatch, which was the root cause of
+                // the "UI freezes while agent runs / buttons stop
+                // working" symptom. Terminal output still streams to WS
+                // subscribers through the `TerminalHub` below. `text` is
+                // already a valid UTF-8 String — the PTY reader thread
+                // runs an incremental decoder that buffers partial
+                // multibyte sequences across reads.
                 if let Some(session_id) = cell.session_id.clone() {
-                    pending_output =
-                        Some((session_id, String::from_utf8_lossy(&bytes).to_string()));
+                    pending_output = Some((session_id, text));
                 }
+                is_output_only = true;
             }
             PtyEvent::Exited { status, .. } => {
                 cell.status = if status == 0 {
@@ -416,8 +428,16 @@ async fn handle_pty_event(app: &AppState, evt: loom_pty::PtyEvent) {
             }
         }
         let agent_snapshot = cell.clone();
-        st.emit_agent(&cell_id);
-        (agent_snapshot, panel_event, clear_buffer, pending_output)
+        if !is_output_only {
+            st.emit_agent(&cell_id);
+        }
+        (
+            agent_snapshot,
+            panel_event,
+            clear_buffer,
+            pending_output,
+            is_output_only,
+        )
     };
     if clear_buffer {
         app.terminals
@@ -447,11 +467,32 @@ async fn handle_pty_event(app: &AppState, evt: loom_pty::PtyEvent) {
         )
         .await;
     }
+    // Skip the DB save + delta broadcast + weaver flush for high-frequency
+    // Output events — nothing meaningful changed on the cell, and both
+    // paths would otherwise drown the WS bus (see comment above).
+    if is_output_only {
+        return;
+    }
     let _ = app.db.save_agent(&agent_snapshot).await;
     let mut st = app.state.lock().await;
     if let Some((seq, ops)) = st.drain_deltas() {
         app.bus.send(OutMessage::Delta { seq, ops });
     }
     drop(st);
-    app.weaver_buffer.maybe_flush_due_for_app(app).await;
+    // CRITICAL: spawn the flush instead of awaiting it. `flush_group` can
+    // call `wait_for_local_pty_ready`, which polls the weaver's terminal
+    // buffer for up to 30 seconds. That buffer is only populated when
+    // *this* task drains the PTY `mpsc` channel — so awaiting here
+    // deadlocks the event pump: every subsequent `PtyEvent::Output` for
+    // 30s piles up unread behind a flush that's waiting for bytes that
+    // can't arrive. Symptom: agents freshly spawned appear to produce no
+    // output for ~30s. The scheduler's 5s periodic flusher picks up any
+    // events this task might miss by skipping the inline flush.
+    let app_for_flush = app.clone();
+    tokio::spawn(async move {
+        app_for_flush
+            .weaver_buffer
+            .maybe_flush_due_for_app(&app_for_flush)
+            .await;
+    });
 }

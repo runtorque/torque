@@ -112,6 +112,11 @@ async fn seed_weaver_group(state: &Arc<Mutex<MatrixState>>, db: &LoomDb) -> (Str
 
         let mut weaver_settings = WeaverSettings::default();
         weaver_settings.group = "Eng".into();
+        // Test fixture: push digests immediately so we don't wait on the
+        // operator-configured 60s interval. Tests that verify interval
+        // gating explicitly override this.
+        weaver_settings.push_interval = 0;
+        weaver_settings.max_interval = 0;
         st.weaver_settings
             .insert("Eng".into(), weaver_settings.clone());
 

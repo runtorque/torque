@@ -30,9 +30,16 @@ pub const DEFAULT_WEAVER_DIGEST_VERBOSITY: &str = "balanced";
 pub const DEFAULT_WEAVER_ESCALATION_STYLE: &str = "note_then_ask";
 pub const DEFAULT_WORKTREE_MERGE_CLEANUP: &str = "keep";
 
-// Mandatory weaver events — always pushed regardless of config.
+// Mandatory weaver events — always pushed regardless of config. These are the
+// events the weaver *must* see to keep its mental model accurate: any task
+// it dispatched starting, deriving, asking a question, or finishing. Without
+// these, the worklog and digest stay empty even when real work is happening.
 pub const WEAVER_MANDATORY_EVENTS: &[&str] = &[
+    "task_dispatched",
+    "task_derived",
     "task_completed",
+    "agent_started",
+    "agent_finished",
     "agent_reply",
     "agent_error",
     "agent_blocked",
@@ -510,7 +517,7 @@ pub const EPHEMERAL_FIELDS: &[&str] = &[
 // GroupSettings
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupSettings {
     #[serde(default)]
     pub default_directory: String,
@@ -558,7 +565,7 @@ pub struct GroupSettings {
     pub agent_model: String,
     #[serde(default)]
     pub agent_reasoning_effort: String,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub git_worktree: bool,
     #[serde(default = "default_loom_worktrees")]
     pub worktree_base_dir: String,
@@ -636,6 +643,74 @@ pub struct GroupSettings {
     // weaver
     #[serde(default)]
     pub weaver_agent_id: String,
+}
+
+impl Default for GroupSettings {
+    /// Go through serde so `#[serde(default = "…")]` field defaults are
+    /// honored (e.g. `git_worktree = true`, `worktree_merge_squash = true`).
+    /// Falls back to `unwrap_or_else` safety net, though the `{}` payload
+    /// should always deserialize cleanly.
+    fn default() -> Self {
+        serde_json::from_value::<Self>(serde_json::json!({})).unwrap_or_else(|_| Self {
+            default_directory: String::new(),
+            default_terminal_backend: default_iterm2_backend(),
+            profile: String::new(),
+            shell: String::new(),
+            tab_color: String::new(),
+            env_vars: BTreeMap::new(),
+            env_file: String::new(),
+            auto_terminals: 0,
+            max_agents: 0,
+            collapsed_default: false,
+            filter_by_window: false,
+            agent_directory: String::new(),
+            agent_profile: String::new(),
+            agent_shell: String::new(),
+            agent_tab_color: String::new(),
+            agent_env_vars: BTreeMap::new(),
+            agent_env_file: String::new(),
+            default_agent_template: String::new(),
+            agent_provider: String::new(),
+            agent_boot_command: String::new(),
+            agent_model: String::new(),
+            agent_reasoning_effort: String::new(),
+            git_worktree: true,
+            worktree_base_dir: default_loom_worktrees(),
+            worktree_base_branch: String::new(),
+            worktree_auto_checkpoint: false,
+            checkpoint_on_progress: false,
+            worktree_merge_squash: true,
+            worktree_merge_instructions: String::new(),
+            worktree_merge_cleanup: default_keep(),
+            worktree_merge_preserve_diff: false,
+            worktree_symlinks: Vec::new(),
+            agent_session_resume: true,
+            agent_idle_timeout: 5,
+            agent_always_custom_dialog: false,
+            notifications: false,
+            notify_on_finish: true,
+            notify_on_error: true,
+            notify_on_attention: true,
+            terminal_name_prefix: String::new(),
+            terminal_boot_command: String::new(),
+            terminal_command_args: String::new(),
+            terminal_init_script: String::new(),
+            terminal_directory: String::new(),
+            terminal_profile: String::new(),
+            terminal_shell: String::new(),
+            terminal_tab_color: String::new(),
+            terminal_env_vars: BTreeMap::new(),
+            terminal_env_file: String::new(),
+            terminal_always_custom_dialog: false,
+            terminal_close_on_disconnect: false,
+            dispatch_lane: default_in_progress(),
+            dispatch_auto_terminals: false,
+            board_default_labels: Vec::new(),
+            board_default_lane: String::new(),
+            board_default_action: String::new(),
+            weaver_agent_id: String::new(),
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1295,6 +1370,28 @@ impl MatrixState {
             let value = serde_json::to_value(task).unwrap_or(serde_json::Value::Null);
             self.delta_ops.push(DeltaOp::TaskUpsert(value));
         }
+    }
+
+    /// Prepend a weaver worklog entry to the in-memory list (newest first)
+    /// and emit a delta so live WS clients see it instantly. `entry` should
+    /// already include `id`, `group`, `task_id`, `task_title`, `agent_id`,
+    /// `agent_name`, `agent_slug`, `started_at`. Capped at 200 entries
+    /// per group to bound memory — older entries fall off the tail.
+    pub fn append_weaver_worklog_entry(
+        &mut self,
+        group: &str,
+        entry: serde_json::Value,
+    ) {
+        const WORKLOG_MEMORY_LIMIT: usize = 200;
+        let entries = self.weaver_worklog.entry(group.to_string()).or_default();
+        entries.insert(0, entry.clone());
+        if entries.len() > WORKLOG_MEMORY_LIMIT {
+            entries.truncate(WORKLOG_MEMORY_LIMIT);
+        }
+        self.delta_ops.push(DeltaOp::WeaverWorklogAppend {
+            group: group.to_string(),
+            entry,
+        });
     }
 
     /// Pop all accumulated deltas, bump the seq, return a message tuple.

@@ -1566,6 +1566,41 @@ impl LoomDb {
         Ok(conn.last_insert_rowid())
     }
 
+    /// Persist a Weaver worklog entry (task dispatched under this weaver's group)
+    /// and return the row id. Callers should store the id back onto the in-memory
+    /// entry so WS clients can correlate updates.
+    pub async fn append_weaver_worklog(
+        &self,
+        group: &str,
+        entry_json: &str,
+        timestamp: f64,
+    ) -> crate::Result<i64> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT INTO weaver_worklog(group_name, entry, ts) VALUES (?1, ?2, ?3)",
+            params![group, entry_json, timestamp],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// Cap the number of persisted worklog rows per group. Oldest rows are
+    /// deleted first so the most recent `limit` entries survive.
+    pub async fn trim_weaver_worklog(&self, group: &str, limit: usize) -> crate::Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "DELETE FROM weaver_worklog
+             WHERE group_name = ?1
+               AND id NOT IN (
+                 SELECT id FROM weaver_worklog
+                  WHERE group_name = ?1
+                  ORDER BY id DESC
+                  LIMIT ?2
+               )",
+            params![group, limit as i64],
+        )?;
+        Ok(())
+    }
+
     pub async fn delete_weaver_journal_entry(&self, group: &str, id: i64) -> crate::Result<()> {
         let conn = self.inner.lock().await;
         conn.execute(

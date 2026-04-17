@@ -108,6 +108,21 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
         )
     };
     let final_cell = maybe_create_bridge_session(ctx, final_cell, &bridge_options).await?;
+    // Auto-create a worktree if group settings enable it and the agent is
+    // not a weaver (weavers always operate on the repo root). Mirrors
+    // server_agent.py's behavior. Errors here are logged and skipped — the
+    // agent still boots in the original directory.
+    let final_cell = if !is_weaver
+        && group_settings.git_worktree
+        && effective_req
+            .get("worktree")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+    {
+        try_create_agent_worktree(ctx, final_cell, &group_settings).await
+    } else {
+        final_cell
+    };
     ctx.db.save_agent(&final_cell).await?;
     ctx.db
         .save_agent_history_record(
@@ -142,11 +157,115 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
         flush(ctx).await;
         return Err(CmdError::BadRequest(final_cell.error_message.clone()));
     }
+    // Fire the initial prompt delivery in the background — it waits up to
+    // 30s for Claude Code's "ready" screen before typing. Blocking
+    // `add_agent` on that would freeze the caller (and every queued WS
+    // command) for the full duration, manifesting as a seemingly-dead UI
+    // while the weaver boots.
     if is_weaver && !weaver_prompt.is_empty() {
-        deliver_agent_prompt(ctx, &final_cell, &weaver_prompt).await?;
+        let ctx_spawn = ctx.clone();
+        let cell_spawn = final_cell.clone();
+        let prompt_spawn = weaver_prompt.clone();
+        tokio::spawn(async move {
+            if let Err(err) = deliver_agent_prompt(&ctx_spawn, &cell_spawn, &prompt_spawn).await {
+                tracing::warn!(?err, agent_id = %cell_spawn.id, "weaver prompt delivery failed");
+            }
+        });
     }
     flush(ctx).await;
     Ok(json!({ "ok": true, "agent_id": final_cell.id, "slug": final_cell.slug }))
+}
+
+/// Best-effort worktree bootstrap. Called during `add_agent` when the group's
+/// `git_worktree` setting is true. Silently no-ops for agents whose directory
+/// isn't inside a git repo. On success, mutates the agent in-state + DB to
+/// point `directory` at the fresh worktree path and records the
+/// `worktree_path`, `worktree_branch`, `worktree_repo_root` fields.
+pub(crate) async fn try_create_agent_worktree(
+    ctx: &CmdContext,
+    cell: AgentCell,
+    group_settings: &GroupSettings,
+) -> AgentCell {
+    use std::path::{Path, PathBuf};
+
+    if cell.directory.trim().is_empty() {
+        return cell;
+    }
+    let start = PathBuf::from(crate::paths::expand_user_path_string(&cell.directory));
+    let repo_root = find_git_root(&start);
+    let Some(repo_root) = repo_root else {
+        tracing::debug!(agent = %cell.name, "skipping worktree: not inside a git repo");
+        return cell;
+    };
+
+    let base_dir = if !group_settings.worktree_base_dir.is_empty() {
+        let candidate = crate::paths::expand_user_path(&group_settings.worktree_base_dir);
+        if candidate.is_absolute() {
+            candidate
+        } else {
+            repo_root.join(candidate)
+        }
+    } else {
+        repo_root.join(".loom").join("worktrees")
+    };
+    let base_branch = group_settings.worktree_base_branch.clone();
+
+    // Branch name: `loom/<sanitized-name>-<short-id>` — stable and
+    // collision-resistant. Git branches reject `:` (used in our slug format)
+    // and many other characters, so we sanitize aggressively: keep
+    // [A-Za-z0-9._-] and replace everything else with `-`.
+    let short_id: String = cell.id.chars().take(8).collect();
+    let raw_name = if cell.name.is_empty() { &cell.slug } else { &cell.name };
+    let sanitized: String = raw_name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
+            c
+        } else {
+            '-'
+        })
+        .collect();
+    let branch = format!("loom/{}-{}", sanitized.trim_matches('-'), short_id);
+
+    let mgr = loom_worktree::manager::WorktreeManager::new(&repo_root, Some(base_dir));
+    let info = match mgr.create(&branch, &base_branch).await {
+        Ok(info) => info,
+        Err(err) => {
+            tracing::warn!(agent = %cell.name, error = %err, "worktree create failed; agent will run in original directory");
+            return cell;
+        }
+    };
+    let _ = loom_worktree::gitignore::ensure_git_exclude(&repo_root);
+
+    // Persist the worktree fields and swap `directory`.
+    let agent_id = cell.id.clone();
+    let mut st = ctx.state.lock().await;
+    if let Some(updated) = st.agents.get_mut(&agent_id) {
+        updated.worktree_path = info.path.to_string_lossy().to_string();
+        updated.worktree_branch = info.branch.clone();
+        updated.worktree_repo_root = info.repo_root.to_string_lossy().to_string();
+        updated.worktree_base_branch = info.base_branch.clone();
+        updated.directory = info.path.to_string_lossy().to_string();
+        st.emit_agent(&agent_id);
+        return st.agents.get(&agent_id).cloned().unwrap_or(cell);
+    }
+    drop(st);
+    let _ = Path::new("");
+    cell
+}
+
+/// Walk up from `start` looking for a `.git` directory or file. Returns the
+/// first ancestor that is a git repo root, or None.
+fn find_git_root(start: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut cur = start.to_path_buf();
+    for _ in 0..32 {
+        if cur.join(".git").exists() {
+            return Some(cur);
+        }
+        if !cur.pop() {
+            break;
+        }
+    }
+    None
 }
 
 pub async fn add_terminal(ctx: &CmdContext, req: &Value) -> CmdResult {

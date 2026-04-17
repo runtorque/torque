@@ -129,8 +129,15 @@ impl GhosttyView {
 
         let nsview_ptr: *mut c_void = self as *const Self as *const c_void as *mut c_void;
 
+        // Empty command → pass None so Ghostty spawns its default login
+        // shell (which sources .zprofile / .zshrc, so user aliases load).
+        let cmd_opt = if cmd.trim().is_empty() {
+            None
+        } else {
+            Some(cmd.as_str())
+        };
         let surface =
-            unsafe { Surface::new_macos(nsview_ptr, scale, 13.0, Some(&cmd), cwd.as_deref()) };
+            unsafe { Surface::new_macos(nsview_ptr, scale, 13.0, cmd_opt, cwd.as_deref()) };
         match surface {
             Ok(s) => {
                 s.set_focus(true);

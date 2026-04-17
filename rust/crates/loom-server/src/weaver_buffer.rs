@@ -19,6 +19,10 @@ struct WeaverEventBufferState {
     queued: HashMap<String, Vec<Value>>,
     sent: HashMap<String, Vec<Value>>,
     last_push: HashMap<String, f64>,
+    /// Wall-clock time when the currently-queued batch's first event arrived.
+    /// Cleared after a successful flush. Used together with `last_push` to
+    /// respect the operator-configured push/max intervals.
+    buffer_started_at: HashMap<String, f64>,
     pending_flush: HashSet<String>,
 }
 
@@ -37,12 +41,16 @@ impl WeaverEventBuffer {
         if group.is_empty() || kind.is_empty() || !should_buffer_event(st, group, kind) {
             return;
         }
+        let now = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
         let mut inner = self.inner.lock().await;
-        inner
-            .queued
-            .entry(group.to_string())
-            .or_default()
-            .push(event.clone());
+        let entry = inner.queued.entry(group.to_string()).or_default();
+        let was_empty = entry.is_empty();
+        entry.push(event.clone());
+        if was_empty {
+            inner
+                .buffer_started_at
+                .insert(group.to_string(), now);
+        }
     }
 
     pub async fn export_state(&self, st: &MatrixState) -> (Value, Value) {
@@ -104,7 +112,26 @@ impl WeaverEventBuffer {
     }
 
     pub async fn flush_group(&self, ctx: &CmdContext, group: &str) -> Result<(), String> {
-        let (weaver_id, board_summary) = {
+        self.flush_group_inner(ctx, group, false).await
+    }
+
+    /// Force an immediate flush, bypassing the interval gate. Used by operator
+    /// "flush now" actions.
+    pub async fn force_flush_group(
+        &self,
+        ctx: &CmdContext,
+        group: &str,
+    ) -> Result<(), String> {
+        self.flush_group_inner(ctx, group, true).await
+    }
+
+    async fn flush_group_inner(
+        &self,
+        ctx: &CmdContext,
+        group: &str,
+        force: bool,
+    ) -> Result<(), String> {
+        let (weaver_id, board_summary, push_interval, max_interval) = {
             let st = ctx.state.lock().await;
             let weaver_id = st.get_group_settings(group).weaver_agent_id.clone();
             if weaver_id.trim().is_empty() {
@@ -113,27 +140,57 @@ impl WeaverEventBuffer {
             let Some(weaver) = st.agents.get(&weaver_id) else {
                 return Ok(());
             };
-            if weaver.status != "running" {
+            // The weaver must be alive — but "idle" counts. Claude Code flips
+            // the cell to `"idle"` when it hits its Stop hook (i.e. it has
+            // just finished a turn and is waiting for new input). Digests
+            // should flow at exactly that moment; requiring `"running"` meant
+            // events piled up forever after the first turn.
+            let status = weaver.status.as_str();
+            if !matches!(status, "running" | "idle") {
                 return Ok(());
             }
-            if st.get_weaver_settings(group).paused {
+            let ws = st.get_weaver_settings(group);
+            if ws.paused {
                 return Ok(());
             }
             if !weaver.activity.trim().is_empty() && weaver.activity != "waiting" {
                 return Ok(());
             }
-            (weaver_id, board_summary(&st, group))
+            (
+                weaver_id,
+                board_summary(&st, group),
+                ws.push_interval.max(0) as f64,
+                ws.max_interval.max(0) as f64,
+            )
         };
 
+        let now = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
         let events = {
             let mut inner = self.inner.lock().await;
             if inner.pending_flush.contains(group) {
                 return Ok(());
             }
+            if !force {
+                let first_queued = match inner.buffer_started_at.get(group) {
+                    Some(t) => *t,
+                    None => return Ok(()),
+                };
+                let last_push = inner.last_push.get(group).copied().unwrap_or(0.0);
+                if !interval_gate_fires(
+                    now,
+                    first_queued,
+                    last_push,
+                    push_interval,
+                    max_interval,
+                ) {
+                    return Ok(());
+                }
+            }
             let Some(events) = inner.queued.remove(group) else {
                 return Ok(());
             };
             if events.is_empty() {
+                inner.buffer_started_at.remove(group);
                 return Ok(());
             }
             inner.pending_flush.insert(group.to_string());
@@ -149,6 +206,7 @@ impl WeaverEventBuffer {
         match send_result {
             Ok(()) => {
                 inner.last_push.insert(group.to_string(), delivered_at);
+                inner.buffer_started_at.remove(group);
                 let sent = inner.sent.entry(group.to_string()).or_default();
                 for event in events {
                     let mut snapshot = event_snapshot(&event);
@@ -270,6 +328,29 @@ fn format_event_line(event: &Value) -> String {
     }
 }
 
+/// Pure interval-gate predicate — `true` means "enough time has passed, flush
+/// now". Mirrors the Python weaver's semantics:
+///   * without a prior push, the push deadline is `first_queued + push_interval`
+///   * with one,               it's `last_push + push_interval`
+///   * the hard ceiling is always `first_queued + max_interval`
+///   * effective deadline is `min(push_deadline, max_deadline)`
+fn interval_gate_fires(
+    now: f64,
+    first_queued: f64,
+    last_push: f64,
+    push_interval: f64,
+    max_interval: f64,
+) -> bool {
+    let push_deadline = if last_push > 0.0 {
+        last_push + push_interval
+    } else {
+        first_queued + push_interval
+    };
+    let max_deadline = first_queued + max_interval;
+    let deadline = push_deadline.min(max_deadline);
+    now >= deadline
+}
+
 fn event_snapshot(event: &Value) -> Value {
     json!({
         "id": event.get("id").and_then(Value::as_i64).unwrap_or(0),
@@ -281,4 +362,55 @@ fn event_snapshot(event: &Value) -> Value {
         "message": event.get("message").and_then(Value::as_str).unwrap_or(""),
         "task_id": event.get("task_id").and_then(Value::as_str).unwrap_or(""),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::interval_gate_fires;
+
+    #[test]
+    fn gate_blocks_fresh_batch_before_push_interval() {
+        // First event arrived at t=100, no prior push. push=60s, max=300s.
+        // At t=110 (10s in) we should be blocked.
+        assert!(!interval_gate_fires(110.0, 100.0, 0.0, 60.0, 300.0));
+    }
+
+    #[test]
+    fn gate_fires_at_push_interval_on_fresh_batch() {
+        // First event at t=100, no prior push. push=60s.
+        // At t=160 exactly → should fire.
+        assert!(interval_gate_fires(160.0, 100.0, 0.0, 60.0, 300.0));
+    }
+
+    #[test]
+    fn gate_respects_last_push_when_present() {
+        // last_push at t=200. push=60s. fresh event queued later at t=250.
+        // Even though 50s elapsed since queuing, last_push+60 = 260 hasn't
+        // elapsed yet — should be blocked at t=255.
+        assert!(!interval_gate_fires(255.0, 250.0, 200.0, 60.0, 300.0));
+        // At t=260 the push deadline is reached → fire.
+        assert!(interval_gate_fires(260.0, 250.0, 200.0, 60.0, 300.0));
+    }
+
+    #[test]
+    fn gate_max_interval_caps_push_deadline() {
+        // Operator set push_interval absurdly high (10000s) but max=30s.
+        // Event queued at 100 → max deadline = 130. Should fire at 130.
+        assert!(!interval_gate_fires(120.0, 100.0, 0.0, 10_000.0, 30.0));
+        assert!(interval_gate_fires(130.0, 100.0, 0.0, 10_000.0, 30.0));
+    }
+
+    #[test]
+    fn gate_zero_intervals_always_fire() {
+        // push=0, max=0 → fire immediately on any `now >= first_queued`.
+        // Matches the existing test-fixture convention in weaver.rs.
+        assert!(interval_gate_fires(100.0, 100.0, 0.0, 0.0, 0.0));
+        assert!(interval_gate_fires(100.1, 100.0, 0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn gate_exact_boundary_fires() {
+        // `now >= deadline` — at the exact second, we should flush, not block.
+        assert!(interval_gate_fires(160.0, 100.0, 0.0, 60.0, 300.0));
+    }
 }

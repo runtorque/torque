@@ -221,7 +221,16 @@ async fn handle_event(
             app.bus.send(OutMessage::Delta { seq, ops });
         }
         drop(st);
-        app.weaver_buffer.maybe_flush_due_for_app(&app).await;
+        // Spawn the flush — see comment in `app.rs handle_pty_event`.
+        // Awaiting here can deadlock the hook HTTP handler on the weaver's
+        // own wait-for-ready when the weaver's startup hook fires.
+        let app_for_flush = app.clone();
+        tokio::spawn(async move {
+            app_for_flush
+                .weaver_buffer
+                .maybe_flush_due_for_app(&app_for_flush)
+                .await;
+        });
     }
     (StatusCode::OK, Json(json!({ "ok": true })))
 }

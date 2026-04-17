@@ -4,6 +4,9 @@
 //! Background task that wakes every 15s, scans schedules + tasks, fires what
 //! needs firing. Minimal v1 — no cron_expr support yet (only `scheduled_at`
 //! one-shots).
+//!
+//! Also runs a periodic weaver-buffer drain so queued events don't stall
+//! when no hook / PTY / command event is around to trigger a flush.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,7 +17,10 @@ use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
 
+use crate::app::AppState;
+
 const TICK: Duration = Duration::from_secs(15);
+const WEAVER_FLUSH_TICK: Duration = Duration::from_secs(5);
 
 pub fn spawn(state: Arc<Mutex<MatrixState>>, db: LoomDb, bus: EventBus) {
     tokio::spawn(async move {
@@ -23,6 +29,26 @@ pub fn spawn(state: Arc<Mutex<MatrixState>>, db: LoomDb, bus: EventBus) {
         loop {
             ticker.tick().await;
             tick(&state, &db, &bus).await;
+        }
+    });
+}
+
+/// Periodic weaver buffer drain. Runs every 5s; iterates groups with
+/// queued events and attempts a flush. `flush_group` gates internally on
+/// weaver status / pause / activity, so this is a no-op for groups whose
+/// weaver isn't ready to receive.
+///
+/// Why separate from `tick`: that one needs a `MatrixState` + `LoomDb` +
+/// `EventBus` only (schedule-firing is lightweight). Weaver flushing needs
+/// the full `AppState` so it can hand `send_text_to_cell_quiet` the PTY /
+/// terminal-bridge it might need.
+pub fn spawn_weaver_flusher(app: AppState) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(WEAVER_FLUSH_TICK);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            ticker.tick().await;
+            app.weaver_buffer.maybe_flush_due_for_app(&app).await;
         }
     });
 }

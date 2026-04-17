@@ -177,7 +177,7 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         .unwrap_or(false);
 
     // Load task + resolve target agent.
-    let (task, target_agent_id, is_new_agent, dispatch_lane) = {
+    let (task, target_agent_id, is_new_agent, dispatch_lane, new_agent_group_settings) = {
         let mut st = ctx.state.lock().await;
         let Some(task) = st.board_tasks.get(&task_id).cloned() else {
             return Err(CmdError::BadRequest(format!("task '{task_id}' not found")));
@@ -191,6 +191,7 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
             .unwrap_or_else(|| "In Progress".to_string());
 
         let mut created_new_agent = false;
+        let mut new_agent_group_settings: Option<loom_core::state::GroupSettings> = None;
 
         // Resolve agent: request-body agent_id wins, then task.agent_id, else create new.
         let target_agent_id = if let Some(agent_id) = requested_agent_id.as_ref() {
@@ -245,11 +246,44 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
             let id = cell.id.clone();
             st.add_agent(cell)?;
             created_new_agent = true;
+            new_agent_group_settings = Some(settings);
             id
         };
 
-        (task, target_agent_id, created_new_agent, dispatch_lane)
+        (
+            task,
+            target_agent_id,
+            created_new_agent,
+            dispatch_lane,
+            new_agent_group_settings,
+        )
     };
+
+    // Bootstrap a git worktree for the fresh worker if the group opted in
+    // and the task's directory is a git repo. Must happen *before* the PTY
+    // spawns so the shell starts inside the worktree. Mirrors the branch
+    // of `add_agent` that handles manual agent creation.
+    if is_new_agent {
+        if let Some(settings) = new_agent_group_settings.as_ref() {
+            let worktree_wanted = settings.git_worktree
+                && req
+                    .get("worktree")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+            if worktree_wanted {
+                let cell_snapshot = {
+                    let st = ctx.state.lock().await;
+                    st.agents.get(&target_agent_id).cloned()
+                };
+                if let Some(cell) = cell_snapshot {
+                    let updated =
+                        crate::commands::agents::try_create_agent_worktree(ctx, cell, settings)
+                            .await;
+                    let _ = ctx.db.save_agent(&updated).await;
+                }
+            }
+        }
+    }
 
     // Render the prompt.
     let rendered = if task.action_name.is_empty() || force_no_action {
@@ -476,6 +510,49 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         false,
     )
     .await;
+
+    // Weaver worklog: record this dispatch so the group's weaver sees it in
+    // the worklog panel + digest. Mirrors loom/state.py `_append_weaver_worklog_entry`
+    // called from the Python dispatch path. We persist first so the entry
+    // gets a stable id, then append to the in-memory list under that id so
+    // clients receive the same value via WS delta.
+    {
+        let ts = now_ts();
+        let weaver_agent_id = {
+            let st = ctx.state.lock().await;
+            st.group_settings
+                .get(&task_final.group)
+                .map(|g| g.weaver_agent_id.clone())
+                .unwrap_or_default()
+        };
+        if !weaver_agent_id.is_empty() {
+            let mut entry = serde_json::json!({
+                "group": task_final.group,
+                "task_id": task_final.id,
+                "task_title": task_final.task,
+                "agent_id": agent_final.id,
+                "agent_name": agent_final.name,
+                "agent_slug": agent_final.slug,
+                "agent_owned": agent_final.created_by_weaver_id == weaver_agent_id
+                    && !weaver_agent_id.is_empty(),
+                "started_at": ts,
+            });
+            let entry_json = serde_json::to_string(&entry).unwrap_or_else(|_| "{}".into());
+            if let Ok(row_id) = ctx
+                .db
+                .append_weaver_worklog(&task_final.group, &entry_json, ts)
+                .await
+            {
+                if let Some(obj) = entry.as_object_mut() {
+                    obj.insert("id".into(), serde_json::json!(row_id));
+                }
+                let _ = ctx.db.trim_weaver_worklog(&task_final.group, 200).await;
+            }
+            let mut st = ctx.state.lock().await;
+            st.append_weaver_worklog_entry(&task_final.group, entry);
+        }
+    }
+
     flush(ctx).await;
     Ok(json!({
         "ok": true,
@@ -1434,6 +1511,36 @@ pub async fn spawn_cell_session(
         install_provider_integration(dir, &command).await;
     }
     let mut env = std::collections::HashMap::new();
+    // Inherit the parent environment so the user's PATH, HOME, SSH agent,
+    // shell-specific XDG dirs, etc. are all present. Strip iTerm-injected
+    // vars so the child shell's TUI apps don't try to talk to a terminal
+    // emulator that isn't on the other end of this PTY. Then layer on our
+    // own vars last so they win.
+    for (k, v) in std::env::vars() {
+        if k.starts_with("ITERM_") {
+            continue;
+        }
+        if matches!(
+            k.as_str(),
+            "LC_TERMINAL"
+                | "LC_TERMINAL_VERSION"
+                | "TERM_SESSION_ID"
+                | "TERM_FEATURES"
+                | "TERMINFO_DIRS"
+                | "TERM_PROGRAM"
+                | "TERM_PROGRAM_VERSION"
+                | "STARSHIP_SESSION_KEY"
+                | "STARSHIP_SHELL"
+        ) {
+            continue;
+        }
+        env.insert(k, v);
+    }
+    env.insert("TERM".into(), "xterm-256color".into());
+    env.insert("COLORTERM".into(), "truecolor".into());
+    env.insert("CLAUDE_GATEWAY_NO_AUTO_UPDATE".into(), "true".into());
+    env.insert("DISABLE_AUTOUPDATER".into(), "1".into());
+    env.insert("LOOM_STANDALONE_PTY".into(), "1".into());
     env.insert(loom_core::config::ENV_CELL_ID.to_string(), cell.id.clone());
     if let Some(extra) = extra_env {
         env.extend(extra.iter().map(|(k, v)| (k.clone(), v.clone())));
