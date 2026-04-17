@@ -202,7 +202,7 @@ pub async fn checkpoint_cmd(ctx: &CmdContext, req: &Value) -> CmdResult {
 
 pub async fn history(ctx: &CmdContext, req: &Value) -> CmdResult {
     let agent_id = required_str(req, "agent_id")?.to_string();
-    let (path, base) = {
+    let (path, base, branch) = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
             return Err(CmdError::BadRequest(format!(
@@ -212,10 +212,21 @@ pub async fn history(ctx: &CmdContext, req: &Value) -> CmdResult {
         (
             PathBuf::from(&cell.worktree_path),
             cell.worktree_base_branch.clone(),
+            cell.worktree_branch.clone(),
         )
     };
-    let checkpoints = list_checkpoints(&path, &base).await.map_err(worktree_err)?;
-    Ok(json!({ "checkpoints": checkpoints }))
+    let commits = if path.as_os_str().is_empty() || base.is_empty() {
+        Vec::new()
+    } else {
+        list_checkpoints(&path, &base).await.map_err(worktree_err)?
+    };
+    Ok(json!({
+        "type": "worktree_history",
+        "id": agent_id,
+        "branch": branch,
+        "base_branch": base,
+        "commits": commits,
+    }))
 }
 
 pub async fn diff(ctx: &CmdContext, req: &Value) -> CmdResult {
@@ -447,7 +458,12 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
         )
     };
     if repo_root.is_empty() || branch.is_empty() {
-        return Err(CmdError::BadRequest("agent has no worktree branch".into()));
+        return Ok(json!({
+            "type": "worktree_merge",
+            "id": agent_id,
+            "ok": false,
+            "error": "agent has no worktree branch",
+        }));
     }
 
     let commit_message = if !message_override.is_empty() {
@@ -465,10 +481,15 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
         .await
         .map_err(|e| CmdError::BadRequest(format!("git checkout: {e}")))?;
     if !out.status.success() {
-        return Err(CmdError::BadRequest(format!(
-            "git checkout {base}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        )));
+        return Ok(json!({
+            "type": "worktree_merge",
+            "id": agent_id,
+            "ok": false,
+            "error": format!(
+                "git checkout {base}: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        }));
     }
 
     // Run the merge.
@@ -491,6 +512,8 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
             .output()
             .await;
         return Ok(json!({
+            "type": "worktree_merge",
+            "id": agent_id,
             "ok": false,
             "error": stderr.trim(),
         }));
@@ -505,6 +528,8 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
             .map_err(|e| CmdError::BadRequest(format!("git commit: {e}")))?;
         if !out.status.success() {
             return Ok(json!({
+                "type": "worktree_merge",
+                "id": agent_id,
                 "ok": false,
                 "error": String::from_utf8_lossy(&out.stderr).trim(),
             }));
@@ -512,14 +537,34 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
     }
 
     if cleanup && !worktree_path.is_empty() {
-        let _ = tokio::process::Command::new("git")
+        let remove = tokio::process::Command::new("git")
             .args(["-C", &repo_root, "worktree", "remove", "--force", &worktree_path])
             .output()
             .await;
-        let _ = tokio::process::Command::new("git")
+        if let Ok(out) = remove {
+            if !out.status.success() {
+                tracing::warn!(
+                    agent = %agent_id,
+                    path = %worktree_path,
+                    stderr = %String::from_utf8_lossy(&out.stderr).trim(),
+                    "worktree remove after merge failed"
+                );
+            }
+        }
+        let del = tokio::process::Command::new("git")
             .args(["-C", &repo_root, "branch", "-D", &branch])
             .output()
             .await;
+        if let Ok(out) = del {
+            if !out.status.success() {
+                tracing::warn!(
+                    agent = %agent_id,
+                    branch = %branch,
+                    stderr = %String::from_utf8_lossy(&out.stderr).trim(),
+                    "branch delete after merge failed"
+                );
+            }
+        }
     }
 
     // Clear worktree fields on the cell.
@@ -542,6 +587,8 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
     ctx.db.save_agent(&agent).await?;
     flush(ctx).await;
     Ok(json!({
+        "type": "worktree_merge",
+        "id": agent_id,
         "ok": true,
         "branch": branch,
         "base": base,
@@ -569,7 +616,12 @@ pub async fn rebase(ctx: &CmdContext, req: &Value) -> CmdResult {
         )
     };
     if path.is_empty() {
-        return Err(CmdError::BadRequest("agent has no worktree".into()));
+        return Ok(json!({
+            "type": "worktree_rebase",
+            "id": agent_id,
+            "ok": false,
+            "error": "agent has no worktree",
+        }));
     }
     let out = tokio::process::Command::new("git")
         .args(["-C", &path, "rebase", &base])
@@ -583,11 +635,18 @@ pub async fn rebase(ctx: &CmdContext, req: &Value) -> CmdResult {
             .output()
             .await;
         return Ok(json!({
+            "type": "worktree_rebase",
+            "id": agent_id,
             "ok": false,
             "error": stderr.trim(),
         }));
     }
-    Ok(json!({ "ok": true, "base": base }))
+    Ok(json!({
+        "type": "worktree_rebase",
+        "id": agent_id,
+        "ok": true,
+        "base": base,
+    }))
 }
 
 /// Open a pull request for this agent's branch via the `gh` CLI. Requires
@@ -797,7 +856,7 @@ fn parse_unified_diff(patch: &str) -> Vec<Value> {
 
 pub async fn check_merge(ctx: &CmdContext, req: &Value) -> CmdResult {
     let agent_id = required_str(req, "agent_id")?.to_string();
-    let (path, branch, base) = {
+    let (worktree_path, repo_root, branch, base, agent_name, squash) = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
             return Err(CmdError::BadRequest(format!(
@@ -805,24 +864,141 @@ pub async fn check_merge(ctx: &CmdContext, req: &Value) -> CmdResult {
             )));
         };
         (
-            PathBuf::from(&cell.worktree_path),
+            cell.worktree_path.clone(),
+            if !cell.worktree_repo_root.is_empty() {
+                cell.worktree_repo_root.clone()
+            } else {
+                cell.git_root.clone()
+            },
             cell.worktree_branch.clone(),
-            cell.worktree_base_branch.clone(),
+            if cell.worktree_base_branch.is_empty() {
+                "main".to_string()
+            } else {
+                cell.worktree_base_branch.clone()
+            },
+            cell.name.clone(),
+            cell.worktree_merge_squash,
         )
     };
-    let merged = is_merged(&path, &branch, &base)
-        .await
-        .map_err(worktree_err)?;
+    if worktree_path.is_empty() || branch.is_empty() {
+        return Ok(json!({
+            "type": "worktree_check_merge",
+            "id": agent_id,
+            "clean": false,
+            "dirty": false,
+            "conflicts": [],
+            "error": "No worktree",
+        }));
+    }
 
-    let agent = {
-        let mut st = ctx.state.lock().await;
-        if let Some(cell) = st.agents.get_mut(&agent_id) {
-            cell.worktree_merged = merged;
-        }
-        st.emit_agent(&agent_id);
-        st.agents.get(&agent_id).cloned().unwrap()
+    // 1. Dirty check — any uncommitted changes in the worktree block the merge.
+    let dirty = has_uncommitted_changes(&worktree_path).await;
+    if dirty {
+        return Ok(json!({
+            "type": "worktree_check_merge",
+            "id": agent_id,
+            "clean": false,
+            "dirty": true,
+            "conflicts": [],
+        }));
+    }
+
+    // 2. Run merge-tree --write-tree on the shared repo root. Success => clean
+    //    merge, tree_sha on stdout. Failure => parse conflicts.
+    let effective_repo = if !repo_root.is_empty() {
+        repo_root
+    } else {
+        worktree_path.clone()
     };
-    ctx.db.save_agent(&agent).await?;
-    flush(ctx).await;
-    Ok(json!({ "merged": merged }))
+    let out = tokio::process::Command::new("git")
+        .args(["-C", &effective_repo, "merge-tree", "--write-tree", &base, &branch])
+        .output()
+        .await
+        .map_err(|e| CmdError::BadRequest(format!("git merge-tree: {e}")))?;
+
+    if out.status.success() {
+        let tree_sha = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let default_message = if squash {
+            format!("Squash merge: {}", if branch.is_empty() { agent_name } else { branch.clone() })
+        } else {
+            format!("Merge branch '{}'", if branch.is_empty() { agent_name } else { branch.clone() })
+        };
+        return Ok(json!({
+            "type": "worktree_check_merge",
+            "id": agent_id,
+            "clean": true,
+            "dirty": false,
+            "conflicts": [],
+            "tree_sha": tree_sha,
+            "default_message": default_message,
+        }));
+    }
+
+    // Conflicts — parse merge-tree conflict output. Each conflicted file
+    // shows up in the `Conflict` section. Minimal port: extract any path
+    // after "CONFLICT" lines, deduped.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let mut conflicts: Vec<Value> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for line in stdout.lines().chain(stderr.lines()) {
+        let line = line.trim();
+        // merge-tree conflict reports look like:
+        //   "<sha> <stage>\t<path>"  (with stage 1/2/3 for conflicts)
+        // or a message line starting with "CONFLICT (...)".
+        if let Some(rest) = line.strip_prefix("CONFLICT") {
+            // CONFLICT (content): Merge conflict in <path>
+            let reason = rest.trim_start_matches(|c: char| c == ' ' || c == '(' || c == ')' || c == ':');
+            if let Some(path) = line.rsplit(" in ").next() {
+                let path = path.trim();
+                if !path.is_empty() && seen.insert(path.to_string()) {
+                    conflicts.push(json!({ "path": path, "reason": reason }));
+                }
+            }
+        } else if line.contains('\t') && line.split('\t').count() >= 2 {
+            // Stage-style line; take the tab-separated path.
+            let mut parts = line.splitn(2, '\t');
+            let header = parts.next().unwrap_or("");
+            let path = parts.next().unwrap_or("").trim();
+            // Only include lines with a stage suffix (1/2/3) indicating a
+            // conflict entry — plain info lines don't match.
+            let looks_conflict = header.split_whitespace().count() == 3
+                && matches!(header.split_whitespace().last(), Some("1" | "2" | "3"));
+            if looks_conflict && !path.is_empty() && seen.insert(path.to_string()) {
+                conflicts.push(json!({ "path": path, "reason": "merge conflict" }));
+            }
+        }
+    }
+
+    Ok(json!({
+        "type": "worktree_check_merge",
+        "id": agent_id,
+        "clean": false,
+        "dirty": false,
+        "conflicts": conflicts,
+    }))
+}
+
+/// True iff `git status --porcelain` shows any entries in the worktree.
+async fn has_uncommitted_changes(worktree_path: &str) -> bool {
+    let Ok(out) = tokio::process::Command::new("git")
+        .args(["-C", worktree_path, "status", "--porcelain"])
+        .output()
+        .await
+    else {
+        return false;
+    };
+    !out.stdout.is_empty()
+}
+
+/// Retained for the ambient merge-state on cell load. Not called from the
+/// WS path anymore (the frontend goes through `check_merge`).
+#[allow(dead_code)]
+async fn probe_merged(path: &PathBuf, branch: &str, base: &str) -> bool {
+    is_merged(path, branch, base).await.unwrap_or(false)
 }

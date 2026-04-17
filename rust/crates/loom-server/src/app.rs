@@ -254,9 +254,10 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
         });
     }
 
-    // Spawn scheduler + periodic weaver buffer drain.
+    // Spawn scheduler + periodic weaver buffer drain + worktree refresher.
     crate::scheduler::spawn(state.clone(), db.clone(), bus.clone());
     crate::scheduler::spawn_weaver_flusher(app_state.clone());
+    crate::scheduler::spawn_worktree_refresher(app_state.clone());
 
     let router = build_router(app_state.clone());
 

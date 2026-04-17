@@ -45,13 +45,15 @@ impl WeaverEventBuffer {
         }
         let now = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
         let push_interval = st.get_weaver_settings(&group).push_interval.max(0) as f64;
-        let (buffered, first_queued_at) = {
+        let (buffered, first_queued_at, queued_snapshot) = {
             let mut inner = self.inner.lock().await;
-            let entry = inner.queued.entry(group.clone()).or_default();
-            let was_empty = entry.is_empty();
-            entry.push(event.clone());
-            let buffered = entry.len();
-            if was_empty {
+            let (buffered, snapshot) = {
+                let entry = inner.queued.entry(group.clone()).or_default();
+                entry.push(event.clone());
+                let snapshot = entry.iter().map(event_snapshot).collect::<Vec<_>>();
+                (entry.len(), snapshot)
+            };
+            if buffered == 1 {
                 inner.buffer_started_at.insert(group.clone(), now);
             }
             let first_queued_at = inner
@@ -59,7 +61,7 @@ impl WeaverEventBuffer {
                 .get(&group)
                 .copied()
                 .unwrap_or(now);
-            (buffered, first_queued_at)
+            (buffered, first_queued_at, snapshot)
         };
         // Live update so weaver panels see the queue fill up without a
         // resync. Frontends render next_push_at + queued_events under
@@ -69,7 +71,7 @@ impl WeaverEventBuffer {
             buffered_events: buffered,
             next_push_in: (first_queued_at + push_interval - now).max(0.0),
             next_push_at: first_queued_at + push_interval,
-            queued_events: Vec::new(),
+            queued_events: queued_snapshot,
             manual_flush_requested: false,
         });
     }
@@ -85,19 +87,31 @@ impl WeaverEventBuffer {
         groups.extend(inner.queued.keys().cloned());
         groups.extend(inner.sent.keys().cloned());
 
+        let now = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
         let mut stats = Map::new();
         let mut sent = Map::new();
         for group in groups {
             let queued = inner.queued.get(&group).cloned().unwrap_or_default();
             let sent_events = inner.sent.get(&group).cloned().unwrap_or_default();
-            let push_interval = st.get_weaver_settings(&group).push_interval.max(0);
+            let ws = st.get_weaver_settings(&group);
+            let push_interval = ws.push_interval.max(0) as f64;
+            let first_queued_at = inner.buffer_started_at.get(&group).copied();
+            let (next_push_in, next_push_at) = if queued.is_empty() {
+                (push_interval, 0.0)
+            } else if let Some(first) = first_queued_at {
+                let deadline = first + push_interval;
+                ((deadline - now).max(0.0), deadline)
+            } else {
+                (0.0, 0.0)
+            };
+            let queued_snapshot = queued.iter().map(event_snapshot).collect::<Vec<_>>();
             stats.insert(
                 group.clone(),
                 json!({
                     "buffered_events": queued.len(),
-                    "next_push_in": if queued.is_empty() { push_interval } else { 0 },
-                    "next_push_at": 0,
-                    "queued_events": queued,
+                    "next_push_in": next_push_in,
+                    "next_push_at": next_push_at,
+                    "queued_events": queued_snapshot,
                     "manual_flush_requested": false,
                 }),
             );
@@ -159,6 +173,7 @@ impl WeaverEventBuffer {
                 return Ok(());
             }
             let Some(weaver) = st.agents.get(&weaver_id) else {
+                tracing::debug!(group, "flush skipped: weaver cell missing");
                 return Ok(());
             };
             // The weaver must be alive — but "idle" counts. Claude Code flips
@@ -168,13 +183,20 @@ impl WeaverEventBuffer {
             // events piled up forever after the first turn.
             let status = weaver.status.as_str();
             if !matches!(status, "running" | "idle") {
+                tracing::debug!(group, status, "flush skipped: weaver not running/idle");
                 return Ok(());
             }
             let ws = st.get_weaver_settings(group);
             if ws.paused {
+                tracing::debug!(group, "flush skipped: weaver paused");
                 return Ok(());
             }
             if !weaver.activity.trim().is_empty() && weaver.activity != "waiting" {
+                tracing::debug!(
+                    group,
+                    activity = %weaver.activity,
+                    "flush skipped: weaver busy"
+                );
                 return Ok(());
             }
             (
@@ -218,6 +240,7 @@ impl WeaverEventBuffer {
             events
         };
 
+        let event_count = events.len();
         let digest = format_digest(&events, &board_summary);
         let delivered_at = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
         let send_result = send_text_to_cell_quiet(ctx, &weaver_id, &digest).await;
@@ -226,21 +249,49 @@ impl WeaverEventBuffer {
         inner.pending_flush.remove(group);
         match send_result {
             Ok(()) => {
+                tracing::info!(
+                    group,
+                    weaver_id = %weaver_id,
+                    count = event_count,
+                    "weaver digest delivered"
+                );
                 inner.last_push.insert(group.to_string(), delivered_at);
-                inner.buffer_started_at.remove(group);
-                let sent = inner.sent.entry(group.to_string()).or_default();
-                for event in events {
-                    let mut snapshot = event_snapshot(&event);
-                    if let Some(obj) = snapshot.as_object_mut() {
-                        obj.insert("delivered_at".into(), json!(delivered_at));
+                // Only clear `buffer_started_at` when no new events arrived
+                // during the send. If `record_event` ran while we were
+                // awaiting `send_text_to_cell_quiet`, it will have re-queued
+                // events and reset `buffer_started_at` — we must NOT erase
+                // that, or the next flush will return early on the None
+                // guard above and the new events will pile up forever.
+                let queue_empty = inner
+                    .queued
+                    .get(group)
+                    .map(|v| v.is_empty())
+                    .unwrap_or(true);
+                if queue_empty {
+                    inner.buffer_started_at.remove(group);
+                }
+                let sent_snapshot = {
+                    let sent = inner.sent.entry(group.to_string()).or_default();
+                    for event in events {
+                        let mut snapshot = event_snapshot(&event);
+                        if let Some(obj) = snapshot.as_object_mut() {
+                            obj.insert("delivered_at".into(), json!(delivered_at));
+                        }
+                        sent.push(snapshot);
                     }
-                    sent.push(snapshot);
-                }
-                if sent.len() > 200 {
-                    let excess = sent.len() - 200;
-                    sent.drain(0..excess);
-                }
-                let sent_snapshot = sent.clone();
+                    if sent.len() > 200 {
+                        let excess = sent.len() - 200;
+                        sent.drain(0..excess);
+                    }
+                    sent.clone()
+                };
+                let remaining = inner.queued.get(group).map(|v| v.len()).unwrap_or(0);
+                let queued_snapshot = inner
+                    .queued
+                    .get(group)
+                    .map(|v| v.iter().map(event_snapshot).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                let next_first = inner.buffer_started_at.get(group).copied();
                 drop(inner);
                 let mut st = ctx.state.lock().await;
                 // Broadcast the updated sent-events buffer so live WS
@@ -250,23 +301,45 @@ impl WeaverEventBuffer {
                     group: group.to_string(),
                     events: sent_snapshot,
                 });
-                // And the buffer stats reset — queued drained, last_push
-                // bumped, next push_interval seconds out.
+                // And the buffer stats — reflecting whatever is still queued
+                // (could be non-empty if events arrived during the send).
+                let (next_in, next_at) = if remaining == 0 {
+                    (push_interval, delivered_at + push_interval)
+                } else if let Some(first) = next_first {
+                    let deadline = first + push_interval;
+                    ((deadline - delivered_at).max(0.0), deadline)
+                } else {
+                    (0.0, 0.0)
+                };
                 st.emit(loom_core::delta::DeltaOp::WeaverBufferStats {
                     group: group.to_string(),
-                    buffered_events: 0,
-                    next_push_in: push_interval,
-                    next_push_at: delivered_at + push_interval,
-                    queued_events: Vec::new(),
+                    buffered_events: remaining,
+                    next_push_in: next_in,
+                    next_push_at: next_at,
+                    queued_events: queued_snapshot,
                     manual_flush_requested: false,
                 });
                 if let Some((seq, ops)) = st.drain_deltas() {
                     ctx.bus
                         .send(loom_core::events::OutMessage::Delta { seq, ops });
                 }
+                drop(st);
+                // If events arrived during the send and the weaver is still
+                // idle, a fresh flush will be attempted at the next 5s
+                // scheduler tick (scheduler.rs::spawn_weaver_flusher). We
+                // already emitted the updated WeaverBufferStats above so
+                // the UI reflects the still-queued tail immediately.
+                let _ = remaining; // suppress unused warning when tracing is off
                 Ok(())
             }
             Err(err) => {
+                tracing::warn!(
+                    group,
+                    weaver_id = %weaver_id,
+                    count = event_count,
+                    error = ?err,
+                    "weaver digest delivery failed — events restored to queue"
+                );
                 let queued = inner.queued.entry(group.to_string()).or_default();
                 let mut restored = events;
                 restored.extend(queued.clone());
