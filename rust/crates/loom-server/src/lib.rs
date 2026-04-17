@@ -5,6 +5,7 @@ pub mod commands;
 pub mod events;
 pub mod mcp;
 pub mod paths;
+pub mod pty_backend;
 pub mod scheduler;
 pub mod terminal_bridge;
 pub mod uploads;

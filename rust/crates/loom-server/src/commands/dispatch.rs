@@ -1306,7 +1306,7 @@ pub async fn resolve_ask(ctx: &CmdContext, req: &Value) -> CmdResult {
 // helpers
 // ---------------------------------------------------------------------------
 
-async fn ctx_pty(ctx: &CmdContext) -> Option<std::sync::Arc<loom_pty::LocalPtyBackend>> {
+async fn ctx_pty(ctx: &CmdContext) -> Option<crate::pty_backend::PtyBackend> {
     ctx.pty.clone()
 }
 

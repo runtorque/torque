@@ -10,6 +10,7 @@ loom-core = { workspace = true }
 loom-actions = { workspace = true }
 loom-worktree = { workspace = true }
 loom-pty = { workspace = true }
+loom-pty-supervisor = { workspace = true }
 loom-adapters = { workspace = true }
 loom-weaver = { workspace = true }
 

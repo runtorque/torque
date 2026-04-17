@@ -18,9 +18,9 @@ use tokio::sync::Mutex;
 use loom_core::db::LoomDb;
 use loom_core::events::{EventBus, OutMessage};
 use loom_core::state::MatrixState;
-use loom_pty::LocalPtyBackend;
 
 use crate::app::{AppState, TerminalHub, UiAgentRegistry};
+use crate::pty_backend::PtyBackend;
 use crate::terminal_bridge::TerminalBridgeClient;
 use crate::weaver_buffer::WeaverEventBuffer;
 
@@ -105,7 +105,7 @@ pub struct CmdContext {
     pub state: Arc<Mutex<MatrixState>>,
     pub db: LoomDb,
     pub bus: EventBus,
-    pub pty: Option<Arc<LocalPtyBackend>>,
+    pub pty: Option<PtyBackend>,
     pub ui_agents: UiAgentRegistry,
     pub terminal_bridge: TerminalBridgeClient,
     pub terminals: TerminalHub,

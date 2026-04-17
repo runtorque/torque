@@ -14,12 +14,12 @@ use axum::Router;
 use tokio::sync::{mpsc, Mutex};
 use tower_http::services::ServeDir;
 
+use crate::pty_backend::PtyBackend;
 use crate::terminal_bridge::TerminalBridgeClient;
 use crate::weaver_buffer::WeaverEventBuffer;
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
-use loom_pty::LocalPtyBackend;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiAgentInput {
@@ -188,7 +188,10 @@ pub struct AppState {
     pub bus: EventBus,
     /// PTY backend for dispatch & send_text. `None` in environments where the
     /// engine runs headless without a terminal layer (e.g. some unit tests).
-    pub pty: Option<Arc<LocalPtyBackend>>,
+    /// In standalone mode this is the supervised variant, which delegates
+    /// PTY ownership to the detached `loom-pty-supervisor` sidecar so
+    /// sessions survive daemon restarts.
+    pub pty: Option<PtyBackend>,
     /// Registry of UI-attached agents. Dispatch routes through this when the
     /// target agent is mounted in the native window.
     pub ui_agents: UiAgentRegistry,
@@ -230,14 +233,13 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
     let bus = EventBus::new();
 
     let terminals = TerminalHub::default();
-    let (pty, mut pty_rx) = LocalPtyBackend::new();
-    let pty = Arc::new(pty);
+    let (pty, mut pty_rx) = build_pty_backend(&config).await;
 
     let app_state = AppState {
         db: db.clone(),
         state: state.clone(),
         bus: bus.clone(),
-        pty: Some(pty),
+        pty: Some(pty.clone()),
         ui_agents: UiAgentRegistry::default(),
         terminal_bridge: TerminalBridgeClient::from_env(),
         terminals: terminals.clone(),
@@ -252,6 +254,16 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
                 handle_pty_event(&app_clone, evt).await;
             }
         });
+    }
+
+    // When running on the supervised backend, reconcile the daemon's
+    // persisted agents against the supervisor's live session list:
+    //   * session alive in supervisor + cell persisted → re-adopt the
+    //     existing session so output flows and the UI shows it as live.
+    //   * cell persisted, session gone → mark the cell stopped so the
+    //     UI doesn't pretend a dead terminal is still typeable.
+    if let Some(supervised) = pty.supervised() {
+        reconcile_supervised_sessions(&app_state, supervised.clone()).await;
     }
 
     // Spawn scheduler + periodic weaver buffer drain + worktree refresher.
@@ -279,6 +291,126 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
         shutdown_tx: tx,
         app_state,
     })
+}
+
+/// Decide which PTY backend to run with. Honours `LOOM_PTY_BACKEND`:
+///   * `"supervised"` or unset + `LOOM_STANDALONE=1` → try supervised,
+///     fall back to local on failure with a warn log.
+///   * `"local"` → always local.
+async fn build_pty_backend(
+    config: &ServerConfig,
+) -> (PtyBackend, tokio::sync::mpsc::Receiver<loom_pty::PtyEvent>) {
+    let explicit = std::env::var("LOOM_PTY_BACKEND").ok();
+    let standalone = std::env::var("LOOM_STANDALONE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let want_supervised = match explicit.as_deref() {
+        Some("supervised") => true,
+        Some("local") => false,
+        _ => standalone,
+    };
+    if want_supervised {
+        match connect_supervised(&config.data_dir).await {
+            Ok((backend, rx)) => return (backend, rx),
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "supervised PTY backend unavailable, falling back to local"
+                );
+            }
+        }
+    }
+    PtyBackend::new_local()
+}
+
+async fn connect_supervised(
+    data_dir: &std::path::Path,
+) -> Result<(PtyBackend, tokio::sync::mpsc::Receiver<loom_pty::PtyEvent>)> {
+    use loom_pty_supervisor::{ensure_running, PtySupervisorClient, SupervisedPtyBackend, SupervisorPaths};
+    let paths = SupervisorPaths::from_data_dir(data_dir.to_path_buf());
+    let pong = ensure_running(&paths, std::time::Duration::from_secs(5)).await?;
+    tracing::info!(
+        socket = %paths.socket.display(),
+        supervisor_pid = pong.pid,
+        "PTY supervisor ready"
+    );
+    let client = PtySupervisorClient::connect(&paths.socket).await?;
+    let (backend, rx) = SupervisedPtyBackend::new(client);
+    let backend = PtyBackend::Supervised(Arc::new(backend));
+    Ok((backend, rx))
+}
+
+/// On daemon startup with the supervised backend, reconcile persisted
+/// agents against the supervisor's live sessions. Re-adopt survivors;
+/// mark dead ones stopped so the UI doesn't pretend they're live.
+async fn reconcile_supervised_sessions(
+    app: &AppState,
+    supervised: Arc<loom_pty_supervisor::SupervisedPtyBackend>,
+) {
+    // Pull live session ids from the supervisor — may have zero if the
+    // supervisor itself was just spawned fresh.
+    let live: std::collections::HashSet<String> = match supervised.client().list().await {
+        Ok(list) => list
+            .into_iter()
+            .filter_map(|v| {
+                v.get("session_id")
+                    .and_then(|x| x.as_str())
+                    .map(String::from)
+            })
+            .collect(),
+        Err(err) => {
+            tracing::warn!(?err, "supervisor list failed during startup reconcile");
+            return;
+        }
+    };
+
+    // Snapshot the cells we persisted as having a live session.
+    let cells: Vec<(String, String)> = {
+        let st = app.state.lock().await;
+        st.agents
+            .values()
+            .filter(|c| c.session_id.is_some() && c.status != "stopped")
+            .map(|c| (c.id.clone(), c.session_id.clone().unwrap_or_default()))
+            .collect()
+    };
+
+    for (cell_id, session_id) in cells {
+        if session_id.is_empty() {
+            continue;
+        }
+        if live.contains(&session_id) {
+            // Session survived; re-subscribe so output flows again.
+            if let Err(err) = supervised.adopt(&cell_id, &session_id).await {
+                tracing::warn!(?err, agent = %cell_id, "adopt session failed");
+                mark_stopped(app, &cell_id).await;
+            } else {
+                tracing::info!(agent = %cell_id, session = %session_id, "re-adopted supervised session");
+            }
+        } else {
+            mark_stopped(app, &cell_id).await;
+        }
+    }
+}
+
+async fn mark_stopped(app: &AppState, cell_id: &str) {
+    let agent = {
+        let mut st = app.state.lock().await;
+        if let Some(cell) = st.agents.get_mut(cell_id) {
+            cell.status = "stopped".into();
+            cell.activity.clear();
+            cell.activity_detail.clear();
+        }
+        st.emit_agent(cell_id);
+        st.agents.get(cell_id).cloned()
+    };
+    if let Some(agent) = agent {
+        let _ = app.db.save_agent(&agent).await;
+    }
+    let mut st = app.state.lock().await;
+    if let Some((seq, ops)) = st.drain_deltas() {
+        app.bus
+            .send(loom_core::events::OutMessage::Delta { seq, ops });
+    }
 }
 
 pub(crate) fn repo_root() -> PathBuf {

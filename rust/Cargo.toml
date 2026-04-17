@@ -5,6 +5,7 @@ members = [
     "crates/loom-actions",
     "crates/loom-worktree",
     "crates/loom-pty",
+    "crates/loom-pty-supervisor",
     "crates/loom-adapters",
     "crates/loom-weaver",
     "crates/loom-server",
@@ -64,12 +65,15 @@ percent-encoding = "2"
 url = "2"
 dirs = "5"
 shell-words = "1.1"
+base64 = "0.22"
+libc = "0.2"
 
 # Internal crates
 loom-core = { path = "crates/loom-core" }
 loom-actions = { path = "crates/loom-actions" }
 loom-worktree = { path = "crates/loom-worktree" }
 loom-pty = { path = "crates/loom-pty" }
+loom-pty-supervisor = { path = "crates/loom-pty-supervisor" }
 loom-adapters = { path = "crates/loom-adapters" }
 loom-weaver = { path = "crates/loom-weaver" }
 loom-server = { path = "crates/loom-server" }

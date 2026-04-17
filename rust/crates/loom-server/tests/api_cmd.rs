@@ -46,12 +46,12 @@ async fn spawn_test_server_with_pty() -> (
     let db = LoomDb::in_memory().unwrap();
     let state = Arc::new(Mutex::new(MatrixState::new()));
     let bus = EventBus::new();
-    let (pty, rx) = LocalPtyBackend::new();
+    let (pty, rx) = loom_server::pty_backend::PtyBackend::new_local();
     let app_state = loom_server::app::AppState {
         db,
         state: state.clone(),
         bus,
-        pty: Some(Arc::new(pty)),
+        pty: Some(pty),
         ui_agents: Default::default(),
         terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
