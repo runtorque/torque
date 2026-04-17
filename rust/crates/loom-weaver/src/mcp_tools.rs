@@ -333,5 +333,88 @@ pub fn weaver_tool_specs() -> Vec<Value> {
                 "required": ["agent"]
             }
         }),
+        json!({
+            "name": "weaver_merge",
+            "description": "Merge a worker agent's worktree branch back into its base branch.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string"},
+                    "squash": {"type": "boolean"},
+                    "message": {"type": "string"},
+                    "cleanup": {"type": "boolean"}
+                },
+                "required": ["agent"]
+            }
+        }),
+        json!({
+            "name": "weaver_rebase",
+            "description": "Rebase a worker agent's branch on top of its base branch.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"agent": {"type": "string"}},
+                "required": ["agent"]
+            }
+        }),
+        json!({
+            "name": "weaver_create_pr",
+            "description": "Open a pull request for a worker agent's branch via the `gh` CLI.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string"},
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "draft": {"type": "boolean"}
+                },
+                "required": ["agent"]
+            }
+        }),
+        json!({
+            "name": "weaver_diff",
+            "description": "Return the full unified worktree diff for a worker agent.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"agent": {"type": "string"}},
+                "required": ["agent"]
+            }
+        }),
+        json!({
+            "name": "weaver_worktree_checkpoint",
+            "description": "Create a checkpoint commit on a worker agent's worktree.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string"},
+                    "message": {"type": "string"}
+                },
+                "required": ["agent"]
+            }
+        }),
+        json!({
+            "name": "weaver_worktree_remove",
+            "description": "Remove a worker agent's worktree + branch.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string"},
+                    "force": {"type": "boolean"}
+                },
+                "required": ["agent"]
+            }
+        }),
+        json!({
+            "name": "weaver_task_upload_artifact",
+            "description": "Attach a text artifact to a board task (base64-free pass-through of `content`).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string"},
+                    "filename": {"type": "string"},
+                    "content": {"type": "string"}
+                },
+                "required": ["task", "filename", "content"]
+            }
+        }),
     ]
 }

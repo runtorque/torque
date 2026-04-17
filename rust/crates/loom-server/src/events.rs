@@ -98,6 +98,7 @@ async fn handle_event(
                         cell.activity_detail.clear();
                         cell.error_message.clear();
                         cell.needs_attention = false;
+                        cell.last_event_text = "Session started".into();
                     }
                     "session_end" => {
                         cell.activity.clear();
@@ -109,16 +110,34 @@ async fn handle_event(
                         if !event.summary.is_empty() {
                             cell.last_summary = event.summary.clone();
                         }
+                        cell.last_event_text = "Session ended".into();
                     }
                     "activity_change" | "progress" => {
-                        cell.activity = "running".into();
-                        cell.activity_detail = event.detail.clone();
-                        cell.needs_attention = false;
+                        // Claude Code can emit trailing `thinking` /
+                        // empty-detail progress events after a turn
+                        // has ended (e.g. SubagentStop tails). Do not
+                        // revive an idle/stopped agent on those
+                        // passive events — mirrors loom/events.py
+                        // `_apply` guard.
+                        let passive_tail = cell.status != "running"
+                            && cell.activity.is_empty()
+                            && event.detail.is_empty();
+                        if !passive_tail {
+                            cell.activity = "running".into();
+                            cell.activity_detail = event.detail.clone();
+                            cell.needs_attention = false;
+                            if !event.detail.is_empty() {
+                                cell.last_event_text = event.detail.clone();
+                            }
+                        }
                     }
                     "tool_start" => {
                         cell.activity = "tool_call".into();
                         cell.activity_detail = event.detail.clone();
                         cell.needs_attention = false;
+                        if !event.detail.is_empty() {
+                            cell.last_event_text = event.detail.clone();
+                        }
                     }
                     "tool_end" => {
                         cell.activity = "thinking".into();
@@ -128,6 +147,11 @@ async fn handle_event(
                         cell.activity = "waiting".into();
                         cell.activity_detail = event.detail.clone();
                         cell.needs_attention = true;
+                        if !event.detail.is_empty() {
+                            cell.last_event_text = event.detail.clone();
+                        } else {
+                            cell.last_event_text = "Waiting on input".into();
+                        }
                     }
                     "error" => {
                         cell.activity = "error".into();
@@ -137,6 +161,11 @@ async fn handle_event(
                             event.detail.clone()
                         };
                         cell.needs_attention = true;
+                        cell.last_event_text = if !cell.error_message.is_empty() {
+                            cell.error_message.clone()
+                        } else {
+                            "Error".into()
+                        };
                     }
                     "cost_update" => {
                         cell.session_tokens_in += event.tokens_in;
@@ -162,7 +191,22 @@ async fn handle_event(
                         false,
                     )),
                     "progress" | "activity_change" => {
-                        Some(("agent_progress".to_string(), event.detail.clone(), true))
+                        // Same passive-tail suppression as the
+                        // state-update block above — don't flood the
+                        // event log with meaningless `agent_progress`
+                        // rows that arrive after session_end.
+                        let passive_tail = agent.status != "running"
+                            && agent.activity.is_empty()
+                            && event.detail.is_empty();
+                        if passive_tail {
+                            None
+                        } else {
+                            Some((
+                                "agent_progress".to_string(),
+                                event.detail.clone(),
+                                true,
+                            ))
+                        }
                     }
                     "waiting" => Some(("agent_waiting".to_string(), event.detail.clone(), false)),
                     "error" => Some((

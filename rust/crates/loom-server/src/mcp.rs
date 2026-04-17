@@ -104,6 +104,7 @@ fn loom_tool_specs() -> Vec<Value> {
         json!({"name": "loom_memory_pin", "description": "Pin a memory entry.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}),
         json!({"name": "loom_memory_unpin", "description": "Unpin a memory entry.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}),
         json!({"name": "loom_memory_link", "description": "Link a memory entry to a task/agent/pipeline.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "target_kind": {"type": "string"}, "target_ref": {"type": "string"}, "detach": {"type": "boolean"}}, "required": ["id", "target_kind", "target_ref"]}}),
+        json!({"name": "loom_task_upload_artifact", "description": "Attach a text artifact to the current task.", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}, "filename": {"type": "string"}, "content": {"type": "string"}}, "required": ["filename", "content"]}}),
     ]
 }
 
@@ -147,6 +148,9 @@ async fn handle_tool_call(ctx: &CmdContext, req: &Value, cell_id: &str) -> Resul
         | "loom_memory_pin"
         | "loom_memory_unpin"
         | "loom_memory_link" => return memory_proxy(ctx, name, &agent_id, &args).await,
+        "loom_task_upload_artifact" => {
+            return upload_artifact_proxy(ctx, &agent_id, &args).await
+        }
         other => return Err(format!("unknown tool: {other}")),
     };
 
@@ -231,6 +235,13 @@ async fn handle_weaver_tool_call(
         "weaver_agent_message" => weaver_cmd::agent_message(ctx, &req).await,
         "weaver_agent_close" => weaver_cmd::agent_close(ctx, &req).await,
         "weaver_agent_relaunch" => weaver_cmd::agent_relaunch(ctx, &req).await,
+        "weaver_merge" | "weaver_rebase" | "weaver_create_pr" | "weaver_diff"
+        | "weaver_worktree_checkpoint" | "weaver_worktree_remove" => {
+            return weaver_worktree_proxy(ctx, name, &req).await
+        }
+        "weaver_task_upload_artifact" => {
+            return weaver_upload_artifact_proxy(ctx, &req).await
+        }
         other => return Err(format!("unknown weaver tool: {other}")),
     }
     .map_err(|e| format!("{e:?}"))?;
@@ -729,6 +740,108 @@ async fn memory_proxy(
     .map_err(|e| format!("{e:?}"))?;
     Ok(json!({
         "content": [{"type": "text", "text": format!("ok: {tool}")}],
+        "loom": value,
+    }))
+}
+
+/// Proxy for `loom_task_upload_artifact` — forwards to the command surface.
+async fn upload_artifact_proxy(
+    ctx: &CmdContext,
+    agent_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let mut req = args.clone();
+    if let Some(obj) = req.as_object_mut() {
+        if !obj.contains_key("task_id") {
+            let task_id = {
+                let st = ctx.state.lock().await;
+                st.agents
+                    .get(agent_id)
+                    .map(|agent| agent.current_task_id.clone())
+                    .unwrap_or_default()
+            };
+            if !task_id.is_empty() {
+                obj.insert("task_id".into(), Value::String(task_id));
+            }
+        }
+    }
+    let value = crate::commands::misc::task_upload_artifact(ctx, &req)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(json!({
+        "content": [{"type": "text", "text": "ok: loom_task_upload_artifact"}],
+        "loom": value,
+    }))
+}
+
+/// Proxy for the weaver's worktree/merge/rebase/PR tools. These map
+/// directly onto the agent-scoped `worktree_*` commands — the weaver
+/// tool just carries `agent` instead of `agent_id` and (for
+/// worktree-removal) `force` as a bool.
+async fn weaver_worktree_proxy(
+    ctx: &CmdContext,
+    tool: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let agent_ref = args
+        .get("agent")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if agent_ref.is_empty() {
+        return Err("missing 'agent'".into());
+    }
+    let agent_id = {
+        let st = ctx.state.lock().await;
+        st.agents
+            .values()
+            .find(|cell| {
+                cell.id == agent_ref || cell.slug == agent_ref || cell.name == agent_ref
+            })
+            .map(|cell| cell.id.clone())
+    }
+    .ok_or_else(|| format!("agent '{agent_ref}' not found"))?;
+
+    let mut req = args.clone();
+    if let Some(obj) = req.as_object_mut() {
+        obj.insert("agent_id".into(), Value::String(agent_id));
+    }
+    let value = match tool {
+        "weaver_merge" => crate::commands::worktree::merge(ctx, &req).await,
+        "weaver_rebase" => crate::commands::worktree::rebase(ctx, &req).await,
+        "weaver_create_pr" => crate::commands::worktree::create_pr(ctx, &req).await,
+        "weaver_diff" => crate::commands::worktree::diff_full(ctx, &req).await,
+        "weaver_worktree_checkpoint" => {
+            crate::commands::worktree::checkpoint_cmd(ctx, &req).await
+        }
+        "weaver_worktree_remove" => crate::commands::worktree::remove(ctx, &req).await,
+        other => return Err(format!("unknown weaver worktree tool: {other}")),
+    }
+    .map_err(|e| format!("{e:?}"))?;
+    Ok(json!({
+        "content": [{"type": "text", "text": format!("ok: {tool}")}],
+        "loom": value,
+    }))
+}
+
+/// Proxy for `weaver_task_upload_artifact`. Maps `task` → `task_id` and
+/// forwards to the shared upload handler.
+async fn weaver_upload_artifact_proxy(
+    ctx: &CmdContext,
+    args: &Value,
+) -> Result<Value, String> {
+    let mut req = args.clone();
+    if let Some(obj) = req.as_object_mut() {
+        if let Some(task) = obj.remove("task") {
+            obj.insert("task_id".into(), task);
+        }
+    }
+    let value = crate::commands::misc::task_upload_artifact(ctx, &req)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(json!({
+        "content": [{"type": "text", "text": "ok: weaver_task_upload_artifact"}],
         "loom": value,
     }))
 }

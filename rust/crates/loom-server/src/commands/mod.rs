@@ -28,6 +28,7 @@ pub mod actions;
 pub mod agents;
 pub mod board;
 pub mod compat;
+pub mod misc;
 pub mod dispatch;
 pub mod groups;
 pub mod memory;
@@ -249,8 +250,13 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "worktree_checkpoint" => worktree::checkpoint_cmd(ctx, req).await,
         "worktree_history" => worktree::history(ctx, req).await,
         "worktree_diff" => worktree::diff(ctx, req).await,
+        "worktree_diff_full" => worktree::diff_full(ctx, req).await,
         "worktree_rollback" => worktree::rollback(ctx, req).await,
         "worktree_check_merge" => worktree::check_merge(ctx, req).await,
+        "worktree_check_conflicts" => worktree::check_conflicts(ctx, req).await,
+        "worktree_merge" => worktree::merge(ctx, req).await,
+        "worktree_rebase" => worktree::rebase(ctx, req).await,
+        "worktree_create_pr" => worktree::create_pr(ctx, req).await,
 
         // dispatch + ai_report
         "dispatch_task" => dispatch::dispatch_task(ctx, req).await,
@@ -276,6 +282,30 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
         "memory_pin" => memory::pin(ctx, req).await,
         "memory_unpin" => memory::unpin(ctx, req).await,
         "memory_link" => memory::link(ctx, req).await,
+
+        // playbooks (stubbed empty)
+        "get_playbooks" => misc::get_playbooks(ctx, req).await,
+        "get_playbook" => misc::get_playbook(ctx, req).await,
+        "list_playbook_candidates" => misc::list_playbook_candidates(ctx, req).await,
+        "get_playbook_candidates" => misc::get_playbook_candidates(ctx, req).await,
+        "extract_playbook_candidates" => misc::extract_playbook_candidates(ctx, req).await,
+        "generate_playbook_draft" => misc::generate_playbook_draft(ctx, req).await,
+        "publish_playbook_draft" => misc::publish_playbook_draft(ctx, req).await,
+        "discard_playbook_draft" => misc::discard_playbook_draft(ctx, req).await,
+
+        // external ticket bridges
+        "external_import_task" => misc::external_import_task(ctx, req).await,
+        "external_link_task" => misc::external_link_task(ctx, req).await,
+        "external_open_task" => misc::external_open_task(ctx, req).await,
+        "external_push_task_status" => misc::external_push_task_status(ctx, req).await,
+        "external_post_task_comment" => misc::external_post_task_comment(ctx, req).await,
+
+        // artifacts + ops
+        "task_upload_artifact" => misc::task_upload_artifact(ctx, req).await,
+        "weaver_message" => misc::weaver_message(ctx, req).await,
+        "restart" => misc::restart(ctx, req).await,
+        "suspend_keybindings" => misc::suspend_keybindings(ctx, req).await,
+        "resume_keybindings" => misc::resume_keybindings(ctx, req).await,
 
         // resync / state
         "refresh" | "resync" => {
