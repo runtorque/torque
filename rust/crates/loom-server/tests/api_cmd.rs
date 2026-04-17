@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
-use loom_pty::{LocalPtyBackend, PtyEvent};
+use loom_pty::PtyEvent;
 
 async fn spawn_test_server() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let db = LoomDb::in_memory().unwrap();
@@ -475,9 +475,10 @@ async fn add_weaver_designates_group_and_delivers_initial_prompt() {
     assert_eq!(v["ok"], true, "add_agent response: {v:?}");
     let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
 
-    // Wait for the final expected string, not just the start — the prompt
-    // now streams asynchronously (fire-and-forget spawn) so we can't break
-    // as soon as the header lands.
+    // The typed first message is the weaver's custom instructions only —
+    // the role/policy system prompt is delivered via
+    // `--append-system-prompt-file` so the typed chat turn shouldn't
+    // repeat it. Anchor on the custom-instructions sentinel.
     let prompt_text = tokio::time::timeout(Duration::from_secs(8), async {
         loop {
             if let Ok(contents) = tokio::fs::read_to_string(&prompt_capture).await {
@@ -491,12 +492,18 @@ async fn add_weaver_designates_group_and_delivers_initial_prompt() {
     .await
     .expect("timed out waiting for Weaver prompt capture");
 
-    assert!(prompt_text
-        .contains("You are the Weaver — the orchestrator agent for the \"Eng\" group in Loom."));
-    assert!(prompt_text.contains("## Operating Policy"));
-    assert!(prompt_text.contains("Autonomy mode: Aggressive auto-continue"));
-    assert!(prompt_text.contains("## Custom Instructions"));
-    assert!(prompt_text.contains("Keep the board moving."));
+    assert!(
+        prompt_text.contains("Keep the board moving."),
+        "typed message should include custom instructions: {prompt_text:?}"
+    );
+    assert!(
+        !prompt_text.contains("You are the Weaver"),
+        "typed message should NOT include system-prompt header: {prompt_text:?}"
+    );
+    assert!(
+        !prompt_text.contains("## Operating Policy"),
+        "typed message should NOT include policy section: {prompt_text:?}"
+    );
 
     let st = state.lock().await;
     assert_eq!(st.get_group_settings("Eng").weaver_agent_id, agent_id);
@@ -560,7 +567,7 @@ async fn relaunch_weaver_replays_weaver_prompt() {
     let prompt_text = tokio::time::timeout(Duration::from_secs(6), async {
         loop {
             if let Ok(contents) = tokio::fs::read_to_string(&prompt_capture).await {
-                if contents.contains("You are the Weaver") {
+                if contents.contains("Keep the board moving.") {
                     break contents;
                 }
             }
@@ -570,9 +577,59 @@ async fn relaunch_weaver_replays_weaver_prompt() {
     .await
     .expect("timed out waiting for relaunched Weaver prompt capture");
 
-    assert!(prompt_text
-        .contains("You are the Weaver — the orchestrator agent for the \"Eng\" group in Loom."));
     assert!(prompt_text.contains("Keep the board moving."));
+    assert!(
+        !prompt_text.contains("You are the Weaver"),
+        "relaunch typed message should NOT include system-prompt header: {prompt_text:?}"
+    );
+}
+
+#[tokio::test]
+async fn weaver_without_custom_instructions_gets_kickoff_hint() {
+    let (addr, _state, _pty_rx) = spawn_test_server_with_pty().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let prompt_capture = tmp.path().join("weaver-prompt.txt");
+    let working_dir = tmp.path().to_string_lossy().to_string();
+    let command = format!("cat > {}", prompt_capture.to_string_lossy());
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    // Intentionally DO NOT set custom_instructions — we want the
+    // kickoff-hint fallback path.
+    let v = post(
+        addr,
+        json!({
+            "cmd": "add_agent",
+            "name": "Weaver",
+            "group": "Eng",
+            "is_weaver": true,
+            "command": command,
+            "directory": working_dir,
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "add_agent response: {v:?}");
+
+    let prompt_text = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            if let Ok(contents) = tokio::fs::read_to_string(&prompt_capture).await {
+                if !contents.trim().is_empty() {
+                    break contents;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for kickoff hint capture");
+
+    assert!(
+        prompt_text.contains("You're the weaver for this group."),
+        "expected kickoff hint: {prompt_text:?}"
+    );
+    assert!(
+        !prompt_text.contains("## Operating Policy"),
+        "kickoff hint should not contain system-prompt policy section: {prompt_text:?}"
+    );
 }
 
 #[tokio::test]

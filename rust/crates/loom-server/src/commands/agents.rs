@@ -75,10 +75,29 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     } else {
         String::new()
     };
+    // The first typed chat message for a fresh weaver: only the custom
+    // instructions (if any), otherwise a short "start working" hint.
+    // The full system prompt is delivered via
+    // `--append-system-prompt-file`, so repeating it here would just
+    // waste context.
+    let weaver_first_message = if is_weaver {
+        build_weaver_first_message(weaver_settings.as_ref())
+    } else {
+        String::new()
+    };
     let mut bridge_options = build_agent_create_session_options(&group_settings, &effective_req);
-    if !weaver_prompt.is_empty() {
-        bridge_options.system_prompt = weaver_prompt.clone();
-    }
+    // Populate `system_prompt` for the iTerm2 Python bridge. The bridge
+    // writes the value to `.loom/...` and appends
+    // `--append-system-prompt-file` on its side, matching the LocalPty
+    // path's behavior. Weavers get the weaver-role prompt; other agents
+    // get the worker-role prompt. Previously only weavers were handled,
+    // so bridge-managed workers shipped with no system prompt at all
+    // and had no Loom MCP reporting guidance.
+    bridge_options.system_prompt = if !weaver_prompt.is_empty() {
+        weaver_prompt.clone()
+    } else {
+        loom_core::prompts::build_dispatch_persistent_prompt(&action_system_prompt)
+    };
     if let Some(bk) = req.get("terminal_backend").and_then(|v| v.as_str()) {
         cell.terminal_backend = bk.to_string();
     } else if bridge_configured {
@@ -162,13 +181,13 @@ pub async fn add_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     // `add_agent` on that would freeze the caller (and every queued WS
     // command) for the full duration, manifesting as a seemingly-dead UI
     // while the weaver boots.
-    if is_weaver && !weaver_prompt.is_empty() {
+    if is_weaver && !weaver_first_message.is_empty() {
         let ctx_spawn = ctx.clone();
         let cell_spawn = final_cell.clone();
-        let prompt_spawn = weaver_prompt.clone();
+        let prompt_spawn = weaver_first_message.clone();
         tokio::spawn(async move {
             if let Err(err) = deliver_agent_prompt(&ctx_spawn, &cell_spawn, &prompt_spawn).await {
-                tracing::warn!(?err, agent_id = %cell_spawn.id, "weaver prompt delivery failed");
+                tracing::warn!(?err, agent_id = %cell_spawn.id, "weaver first-message delivery failed");
             }
         });
     }
@@ -764,6 +783,28 @@ pub(crate) fn build_weaver_prompt(
         action_system_prompt,
         Some(group_settings),
     )
+}
+
+/// First user-visible chat message for a freshly-booted weaver. The full
+/// role/policy system prompt is delivered via `--append-system-prompt-file`,
+/// so the first message shouldn't re-type it. When the operator set
+/// weaver-specific custom instructions, that's what the weaver sees; when
+/// they didn't, send a short kickoff hint so Claude Code starts its first
+/// turn instead of sitting idle.
+pub(crate) fn build_weaver_first_message(weaver_settings: Option<&WeaverSettings>) -> String {
+    let custom = weaver_settings
+        .map(|ws| ws.custom_instructions.trim().to_string())
+        .unwrap_or_default();
+    if !custom.is_empty() {
+        return custom;
+    }
+    // Mirrors the wording used by the Python weaver's boot hint; kept
+    // short so it doesn't look like an instructions dump to the operator
+    // reading the transcript.
+    "You're the weaver for this group. \
+     Wait for a digest of panel events, then coordinate based on what you see. \
+     Use `loom_context()` any time if you need to refresh your view of the board."
+        .to_string()
 }
 
 pub(crate) fn resolve_provider_command(

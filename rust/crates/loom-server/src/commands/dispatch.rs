@@ -743,18 +743,32 @@ pub async fn relaunch_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
     };
     if let Some(a) = agent {
         ctx.db.save_agent(&a).await?;
-        let weaver_prompt = {
+        // Build two separate strings for weaver relaunch:
+        //   * `system_prompt`: the full role/policy block, handed to the
+        //     adapter so `--append-system-prompt-file` is re-injected on
+        //     boot (bridge path passes this through CreateSessionOptions;
+        //     LocalPty path re-injects via apply_persistent_prompt_flag).
+        //   * `first_message`: custom instructions alone, or a short
+        //     kickoff hint. Never the full system prompt — that's already
+        //     in the file.
+        let (weaver_system_prompt, weaver_first_message) = {
             let st = ctx.state.lock().await;
             let group_settings = st.get_group_settings(&a.group);
             if group_settings.weaver_agent_id == a.id {
-                Some(crate::commands::agents::build_weaver_prompt(
-                    &a.group,
-                    &group_settings,
-                    &st.get_weaver_settings(&a.group),
-                    "",
-                ))
+                let ws = st.get_weaver_settings(&a.group);
+                (
+                    Some(crate::commands::agents::build_weaver_prompt(
+                        &a.group,
+                        &group_settings,
+                        &ws,
+                        "",
+                    )),
+                    Some(crate::commands::agents::build_weaver_first_message(Some(
+                        &ws,
+                    ))),
+                )
             } else {
-                None
+                (None, None)
             }
         };
         let mut delivery_cell = a.clone();
@@ -779,6 +793,7 @@ pub async fn relaunch_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
                     std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()),
                 ]),
                 target_window_id: a.window_id.clone(),
+                system_prompt: weaver_system_prompt.clone().unwrap_or_default(),
                 ..Default::default()
             };
             if let Some(agent) = ensure_bridge_session(ctx, &a.id, Some(&options)).await? {
@@ -791,8 +806,10 @@ pub async fn relaunch_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
         } else if a.cell_type == "terminal" || !a.command.is_empty() {
             spawn_cell_session(ctx, &a, None).await?;
         }
-        if let Some(prompt) = weaver_prompt.as_ref() {
-            crate::commands::agents::deliver_agent_prompt(ctx, &delivery_cell, prompt).await?;
+        if let Some(msg) = weaver_first_message.as_ref() {
+            if !msg.is_empty() {
+                crate::commands::agents::deliver_agent_prompt(ctx, &delivery_cell, msg).await?;
+            }
         }
     }
     flush(ctx).await;

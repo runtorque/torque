@@ -1,6 +1,11 @@
 __pycache__/
 *.pyc
 .loom/worktrees/
+.loom/loom-system-prompt-*.md
+.loom/weaver-system-prompt-*.md
+.loom/pty_supervisor.sock
+.loom/pty_supervisor.pid
+.loom/pty_supervisor.log
 *.log
 .DS_Store
 state.json
