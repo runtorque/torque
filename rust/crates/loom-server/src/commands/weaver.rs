@@ -1066,7 +1066,8 @@ pub async fn launch_settings(ctx: &CmdContext, req: &Value) -> CmdResult {
 
 pub async fn flush_now(ctx: &CmdContext, req: &Value) -> CmdResult {
     let group = required_str(req, "group")?.to_string();
-    let _ = ctx.weaver_buffer.flush_group(ctx, &group).await;
+    // Operator asked for "flush now" — bypass the interval gate.
+    let _ = ctx.weaver_buffer.force_flush_group(ctx, &group).await;
     Ok(json!({ "ok": true }))
 }
 

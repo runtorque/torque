@@ -7,7 +7,7 @@ Legend:
 - `[~]` partial / stub
 - `[ ]` not started
 
-Last updated: 2026-04-14 (after Phase 10 sidebar + Phase 11 dock + board).
+Last updated: 2026-04-17 (Python-parity pass — server commands, MCP tools, hook classifier, live weaver-panel deltas).
 
 ## 0. Vision for the Rust UI
 
@@ -247,28 +247,29 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 - [x] `worktree_diff`
 - [x] `worktree_rollback`
 - [x] `worktree_check_merge`
-- [ ] `worktree_diff_full`
-- [ ] `worktree_check_conflicts`
-- [ ] `worktree_rebase`
-- [ ] `worktree_merge`
-- [ ] `worktree_create_pr`
+- [x] `worktree_diff_full`
+- [x] `worktree_check_conflicts`
+- [x] `worktree_rebase`
+- [x] `worktree_merge`
+- [x] `worktree_create_pr`
 - [ ] `worktree_streams` — implementing/reviewing/fixed/merged stream synthesis
 - [ ] `worktree_boundaries` — task-scoped merge boundary detection
 
 ### Weaver
-- [ ] `weaver_message`
-- [ ] `weaver_journal_append`
-- [ ] `weaver_journal_read`
-- [ ] `weaver_journal_delete`
-- [ ] `weaver_session_map_read`
-- [ ] `weaver_update_settings`
-- [ ] `weaver_ask`
-- [ ] `weaver_note`
-- [ ] `weaver_dismiss_note`
-- [ ] `weaver_reply`
-- [ ] `weaver_pause`
-- [ ] `weaver_resume`
-- [ ] `weaver_flush_now`
+- [x] `weaver_message`
+- [x] `weaver_journal_append`
+- [x] `weaver_journal_read`
+- [x] `weaver_journal_delete`
+- [x] `weaver_session_map_read`
+- [x] `weaver_update_settings`
+- [x] `weaver_ask`
+- [x] `weaver_note`
+- [x] `weaver_dismiss_note`
+- [x] `weaver_reply`
+- [x] `weaver_pause`
+- [x] `weaver_resume`
+- [x] `weaver_flush_now`
+- [x] Live `weaver_sent_events` / `weaver_buffer_stats` delta broadcasts so the weaver panel updates without a resync
 
 ### Memory
 - [x] `memory_publish`
@@ -282,13 +283,13 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 - [ ] Expiry sweep for `retention_kind: "transient"` entries (not wired yet)
 
 ### Playbooks
-- [ ] `get_playbooks`
-- [ ] `get_playbook`
-- [ ] `list_playbook_candidates`
-- [ ] `extract_playbook_candidates`
-- [ ] `generate_playbook_draft`
-- [ ] `publish_playbook_draft`
-- [ ] `discard_playbook_draft`
+- [~] `get_playbooks` — empty-state stub (returns `[]`)
+- [~] `get_playbook` — empty-state stub
+- [~] `list_playbook_candidates` — empty-state stub
+- [~] `extract_playbook_candidates` — empty-state stub
+- [~] `generate_playbook_draft` — stub (returns "not available" error)
+- [~] `publish_playbook_draft` — stub
+- [~] `discard_playbook_draft` — stub (returns ok)
 
 ### Scheduling (cron)
 - [x] Scheduler tick loop (`scheduler::spawn`, 15s tick, fires `scheduled_at`)
@@ -302,25 +303,26 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 - [ ] Cron expression parsing / next-run computation — `cron_expr` stored but not yet fired on schedule
 
 ### External tickets (Jira / GitHub)
-- [ ] `external_import_task`
-- [ ] `external_link_task`
-- [ ] `external_open_task`
-- [ ] `external_push_task_status`
-- [ ] `external_post_task_comment`
-- [ ] `gh` CLI shell-out wrapper
+- [x] `external_import_task` — `gh issue view <url>` → new board task with provider+external_url
+- [x] `external_link_task` — stamp provider+external_url on an existing task
+- [x] `external_open_task` — OS `open <url>`
+- [~] `external_push_task_status` — accept+no-op (safe default; real push requires operator-authorized `gh`)
+- [x] `external_post_task_comment` — `gh issue comment <url> --body ...`
+- [x] `gh` CLI shell-out wrapper
 
 ### Artifacts / uploads
-- [ ] `task_upload_artifact`
-- [ ] `remove_attachment`
-- [ ] Multipart upload handler (`uploads.rs` currently stub)
-- [ ] Artifact filesystem layout (`attachments_dir`)
+- [x] `task_upload_artifact` (command-envelope variant — accepts `content` text or `bytes` array)
+- [x] `remove_attachment`
+- [~] Multipart upload handler (`uploads.rs`) — still thin; command envelope covers the common paths
+- [x] Artifact filesystem layout (`attachments_dir`)
 
 ### Events
-- [ ] `get_events`
-- [ ] `get_agent_history`
-- [ ] `get_agent_history_detail`
-- [ ] `events_dismiss`
-- [ ] `EventLog` ring buffer per agent (port from `events.py`)
+- [x] `get_events` (paginated via `before_id` + `limit`)
+- [x] `get_agent_history` (status filter, limit, offset)
+- [x] `get_agent_history_detail` (record + tasks + messages)
+- [x] `events_dismiss`
+- [x] `record_panel_event` ring buffer — SQLite `panel_events` table, 500-row trim, live delta (`EventAppend`)
+- [x] Session-end passive-tail guard (Claude Code SubagentStop `thinking` events no longer revive idle agents)
 - [ ] Event bus throttle window (200ms) — current Rust broadcast is unthrottled
 
 ### Prompts
@@ -332,9 +334,9 @@ Dispatched via `/api/cmd` and in-process `dispatch_command`. Full Python list fr
 - [x] `get_group_settings`
 - [x] `update_group_settings`
 - [x] `update_global_settings`
-- [ ] `suspend_keybindings` (may drop — iTerm2-specific)
-- [ ] `resume_keybindings` (may drop)
-- [ ] `restart` (process self-respawn)
+- [x] `suspend_keybindings` (no-op — accepted so Python UI doesn't banner an error)
+- [x] `resume_keybindings` (no-op)
+- [x] `restart` (unix-only process re-exec via `Command::exec`)
 
 ### Meta / admin
 - [x] `refresh` / `resync`
@@ -362,45 +364,44 @@ Server exposes these over `/mcp` (JSON-RPC). Agent-scoped (called by dispatched 
 - [x] `loom_memory_pin`
 - [x] `loom_memory_unpin`
 - [x] `loom_memory_link`
-- [ ] `loom_task_upload_artifact` (multipart)
+- [x] `loom_task_upload_artifact` (text-artifact pass-through)
 
 ### Weaver-scoped (`loom/mcp_weaver_tools/tool_specs.py`)
-All not-started. Full list:
-- [ ] `weaver_board_summary`
-- [ ] `weaver_session_map`
-- [ ] `weaver_streams_list`
-- [ ] `weaver_stream_show`
-- [ ] `weaver_board_list`
-- [ ] `weaver_task_show`
-- [ ] `weaver_agents_list`
-- [ ] `weaver_agent_show`
-- [ ] `weaver_actions_list`
-- [ ] `weaver_action_show`
-- [ ] `weaver_task_create`
-- [ ] `weaver_task_edit`
-- [ ] `weaver_task_upload_artifact`
-- [ ] `weaver_task_verify`
-- [ ] `weaver_task_move`
-- [ ] `weaver_task_dispatch`
-- [ ] `weaver_batch_dispatch`
-- [ ] `weaver_task_resolve`
-- [ ] `weaver_events`
-- [ ] `weaver_launch_settings`
-- [ ] `weaver_notifications`
-- [ ] `weaver_resume`
-- [ ] `weaver_journal`
-- [ ] `weaver_journal_read`
-- [ ] `weaver_agent_message`
-- [ ] `weaver_ask`
-- [ ] `weaver_note`
-- [ ] `weaver_agent_close`
-- [ ] `weaver_agent_relaunch`
-- [ ] `weaver_merge`
-- [ ] `weaver_rebase`
-- [ ] `weaver_create_pr`
-- [ ] `weaver_diff`
-- [ ] `weaver_worktree_remove`
-- [ ] `weaver_worktree_checkpoint`
+- [x] `weaver_board_summary`
+- [x] `weaver_session_map`
+- [x] `weaver_streams_list`
+- [x] `weaver_stream_show`
+- [x] `weaver_board_list`
+- [x] `weaver_task_show`
+- [x] `weaver_agents_list`
+- [x] `weaver_agent_show`
+- [x] `weaver_actions_list`
+- [x] `weaver_action_show`
+- [x] `weaver_task_create`
+- [x] `weaver_task_edit`
+- [x] `weaver_task_upload_artifact`
+- [x] `weaver_task_verify`
+- [x] `weaver_task_move`
+- [x] `weaver_task_dispatch`
+- [x] `weaver_batch_dispatch`
+- [x] `weaver_task_resolve`
+- [x] `weaver_events`
+- [x] `weaver_launch_settings`
+- [x] `weaver_notifications`
+- [x] `weaver_resume`
+- [x] `weaver_journal`
+- [x] `weaver_journal_read`
+- [x] `weaver_agent_message`
+- [x] `weaver_ask`
+- [x] `weaver_note`
+- [x] `weaver_agent_close`
+- [x] `weaver_agent_relaunch`
+- [x] `weaver_merge`
+- [x] `weaver_rebase`
+- [x] `weaver_create_pr`
+- [x] `weaver_diff`
+- [x] `weaver_worktree_remove`
+- [x] `weaver_worktree_checkpoint`
 
 ## 4. Subsystem modules
 
@@ -492,8 +493,8 @@ All not-started. Full list:
 
 ### MCP handler (`loom-server::mcp`)
 - [x] JSON-RPC shell, `initialize` / `tools/list` / `tools/call`
-- [x] 8 agent tools dispatched
-- [ ] Remaining agent tools + all 34 weaver tools
+- [x] All 17 agent tools dispatched
+- [x] All 34 weaver tools dispatched (direct + worktree-proxy + artifact-proxy)
 
 ### Notifications
 - [ ] `notify-rust` integration (macOS only for v1)

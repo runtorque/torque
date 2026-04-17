@@ -74,6 +74,28 @@ pub enum DeltaOp {
         group: String,
         entry: serde_json::Value,
     },
+    /// Published when a digest is successfully delivered to a weaver —
+    /// snapshot of the rolling `sent_events` buffer for that group so
+    /// live clients can render the event history panel without having
+    /// to resync. Matches the JS frontend's `case 'weaver_sent_events'`
+    /// delta handler.
+    WeaverSentEvents {
+        group: String,
+        events: Vec<serde_json::Value>,
+    },
+    /// Published when the weaver buffer's public stats change
+    /// (queued events, next_push deadline, manual flush request).
+    /// Matches the JS frontend's `case 'weaver_buffer_stats'` handler.
+    WeaverBufferStats {
+        group: String,
+        buffered_events: usize,
+        next_push_in: f64,
+        next_push_at: f64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        queued_events: Vec<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        manual_flush_requested: bool,
+    },
     WeaverStreams(serde_json::Value),
     EventsUpdate(serde_json::Value),
     PanelUpdate(serde_json::Value),

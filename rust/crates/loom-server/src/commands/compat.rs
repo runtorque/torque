@@ -185,7 +185,7 @@ pub async fn record_panel_event(
     };
     db.trim_panel_events(500).await?;
     let mut st = state.lock().await;
-    weaver_buffer.record_event(&st, &event).await;
+    weaver_buffer.record_event(&mut st, &event).await;
     st.emit(DeltaOp::EventAppend(event.clone()));
     Ok(event)
 }

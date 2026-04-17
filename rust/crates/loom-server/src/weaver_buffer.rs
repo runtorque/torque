@@ -27,30 +27,51 @@ struct WeaverEventBufferState {
 }
 
 impl WeaverEventBuffer {
-    pub async fn record_event(&self, st: &MatrixState, event: &Value) {
+    pub async fn record_event(&self, st: &mut MatrixState, event: &Value) {
         let group = event
             .get("group")
             .and_then(Value::as_str)
             .unwrap_or("")
-            .trim();
+            .trim()
+            .to_string();
         let kind = event
             .get("kind")
             .and_then(Value::as_str)
             .unwrap_or("")
-            .trim();
-        if group.is_empty() || kind.is_empty() || !should_buffer_event(st, group, kind) {
+            .trim()
+            .to_string();
+        if group.is_empty() || kind.is_empty() || !should_buffer_event(st, &group, &kind) {
             return;
         }
         let now = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
-        let mut inner = self.inner.lock().await;
-        let entry = inner.queued.entry(group.to_string()).or_default();
-        let was_empty = entry.is_empty();
-        entry.push(event.clone());
-        if was_empty {
-            inner
+        let push_interval = st.get_weaver_settings(&group).push_interval.max(0) as f64;
+        let (buffered, first_queued_at) = {
+            let mut inner = self.inner.lock().await;
+            let entry = inner.queued.entry(group.clone()).or_default();
+            let was_empty = entry.is_empty();
+            entry.push(event.clone());
+            let buffered = entry.len();
+            if was_empty {
+                inner.buffer_started_at.insert(group.clone(), now);
+            }
+            let first_queued_at = inner
                 .buffer_started_at
-                .insert(group.to_string(), now);
-        }
+                .get(&group)
+                .copied()
+                .unwrap_or(now);
+            (buffered, first_queued_at)
+        };
+        // Live update so weaver panels see the queue fill up without a
+        // resync. Frontends render next_push_at + queued_events under
+        // `state.weaver_buffer_stats[group]`.
+        st.emit(loom_core::delta::DeltaOp::WeaverBufferStats {
+            group,
+            buffered_events: buffered,
+            next_push_in: (first_queued_at + push_interval - now).max(0.0),
+            next_push_at: first_queued_at + push_interval,
+            queued_events: Vec::new(),
+            manual_flush_requested: false,
+        });
     }
 
     pub async fn export_state(&self, st: &MatrixState) -> (Value, Value) {
@@ -219,8 +240,26 @@ impl WeaverEventBuffer {
                     let excess = sent.len() - 200;
                     sent.drain(0..excess);
                 }
+                let sent_snapshot = sent.clone();
                 drop(inner);
                 let mut st = ctx.state.lock().await;
+                // Broadcast the updated sent-events buffer so live WS
+                // clients' weaver panels show the new history without
+                // needing a resync.
+                st.emit(loom_core::delta::DeltaOp::WeaverSentEvents {
+                    group: group.to_string(),
+                    events: sent_snapshot,
+                });
+                // And the buffer stats reset — queued drained, last_push
+                // bumped, next push_interval seconds out.
+                st.emit(loom_core::delta::DeltaOp::WeaverBufferStats {
+                    group: group.to_string(),
+                    buffered_events: 0,
+                    next_push_in: push_interval,
+                    next_push_at: delivered_at + push_interval,
+                    queued_events: Vec::new(),
+                    manual_flush_requested: false,
+                });
                 if let Some((seq, ops)) = st.drain_deltas() {
                     ctx.bus
                         .send(loom_core::events::OutMessage::Delta { seq, ops });
