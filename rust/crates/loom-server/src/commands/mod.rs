@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use loom_core::db::LoomDb;
-use loom_core::events::{EventBus, OutMessage};
+use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
 
 use crate::app::{AppState, TerminalHub, UiAgentRegistry};
@@ -65,6 +65,7 @@ async fn handle_cmd(State(app): State<AppState>, Json(req): Json<Value>) -> impl
         terminal_bridge: app.terminal_bridge.clone(),
         terminals: app.terminals.clone(),
         weaver_buffer: app.weaver_buffer.clone(),
+        notifier: app.notifier.clone(),
     };
 
     let result = dispatch_command(&ctx, &cmd, &req).await;
@@ -110,6 +111,7 @@ pub struct CmdContext {
     pub terminal_bridge: TerminalBridgeClient,
     pub terminals: TerminalHub,
     pub weaver_buffer: WeaverEventBuffer,
+    pub notifier: crate::notifications::NotificationManager,
 }
 
 #[derive(Debug)]
@@ -318,6 +320,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
                 terminal_bridge: ctx.terminal_bridge.clone(),
                 terminals: ctx.terminals.clone(),
                 weaver_buffer: ctx.weaver_buffer.clone(),
+                notifier: ctx.notifier.clone(),
             })
             .await;
             Ok(snap)
@@ -415,14 +418,13 @@ async fn normalize_request(ctx: &CmdContext, cmd: &str, req: &Value) -> Value {
     Value::Object(normalized)
 }
 
-/// Drain accumulated deltas from state and broadcast them.
+/// Schedule a throttled drain-and-broadcast of accumulated deltas.
+///
+/// Matches Python's 1s trailing-edge throttle: bursts of mutations inside
+/// a single command dispatch share a single WS frame. `EventBus` handles
+/// the timer + flag bookkeeping.
 pub async fn flush(ctx: &CmdContext) {
-    let mut st = ctx.state.lock().await;
-    let drained = st.drain_deltas();
-    drop(st);
-    if let Some((seq, ops)) = drained {
-        ctx.bus.send(OutMessage::Delta { seq, ops });
-    }
+    ctx.bus.request_delta_flush(ctx.state.clone());
     ctx.weaver_buffer.maybe_flush_due(ctx).await;
 }
 

@@ -22,6 +22,64 @@ static LOOM_EVENT_URL_RE: Lazy<Regex> = Lazy::new(|| {
 
 pub struct CodexAdapter;
 
+/// Codex flags that take a value argument, used by `codex_split_boot_args`
+/// to determine whether the next token belongs to the preceding option or
+/// starts the trailing prompt. Matches `_VALUE_OPTS` in `loom/adapters/codex.py`.
+const CODEX_VALUE_OPTS: &[&str] = &[
+    "-c",
+    "--config",
+    "--enable",
+    "--disable",
+    "--remote",
+    "--remote-auth-token-env",
+    "-i",
+    "--image",
+    "-m",
+    "--model",
+    "--local-provider",
+    "-p",
+    "--profile",
+    "-s",
+    "--sandbox",
+    "-a",
+    "--ask-for-approval",
+    "-C",
+    "--cd",
+    "--add-dir",
+];
+
+/// Split a Codex boot command's arg list (binary already stripped) into
+/// option args and a trailing prompt string. Mirrors `_split_boot_args`.
+fn codex_split_boot_args(args: &[String]) -> (Vec<String>, String) {
+    let mut opts: Vec<String> = Vec::new();
+    let mut prompt = String::new();
+    let mut i = 0;
+    while i < args.len() {
+        let part = &args[i];
+        if part == "--" {
+            if i + 1 < args.len() {
+                prompt = args[i + 1..].join(" ");
+            }
+            break;
+        }
+        if part.starts_with('-') {
+            opts.push(part.clone());
+            if !part.contains('=')
+                && CODEX_VALUE_OPTS.contains(&part.as_str())
+                && i + 1 < args.len()
+            {
+                i += 1;
+                opts.push(args[i].clone());
+            }
+            i += 1;
+            continue;
+        }
+        prompt = args[i..].join(" ");
+        break;
+    }
+    (opts, prompt)
+}
+
 fn truncate(value: &str, max_len: usize) -> String {
     if value.chars().count() > max_len {
         format!("{}...", value.chars().take(max_len).collect::<String>())
@@ -386,8 +444,44 @@ impl AgentAdapter for CodexAdapter {
             "PostToolUse" => AgentEvent::new(cell_id, "tool_end"),
             _ => return Vec::new(),
         };
+        // Codex SessionStart payloads carry a `session_id` — promote it so
+        // the next relaunch can use `codex resume`.
+        event.session_id = payload
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
         event.raw = payload.clone();
         vec![event]
+    }
+
+    fn resume_command(&self, boot_cmd: &str, session_id: &str) -> Option<String> {
+        let sid = session_id.trim();
+        if sid.is_empty() {
+            return None;
+        }
+        let parts = match shell_words::split(boot_cmd) {
+            Ok(p) if !p.is_empty() => p,
+            _ => return None,
+        };
+        // Split the rest of the boot cmd into option args vs trailing prompt,
+        // matching Python `_split_boot_args`. Then insert `resume <sid>`
+        // between the binary and the options.
+        let (opts, prompt) = codex_split_boot_args(&parts[1..]);
+        let mut out: Vec<String> = Vec::with_capacity(opts.len() + 3);
+        out.push(parts[0].clone());
+        out.push("resume".into());
+        out.extend(opts);
+        out.push(sid.to_string());
+        if !prompt.is_empty() {
+            out.push(prompt);
+        }
+        Some(
+            out.iter()
+                .map(|s| shell_words::quote(s).into_owned())
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
     }
 
     async fn install_hooks(&self, working_dir: &Path) -> Result<()> {
@@ -518,6 +612,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
+    use crate::ENV_LOCK;
 
     #[test]
     fn parse_hook_maps_session_start() {
@@ -568,6 +663,7 @@ mod tests {
         )
         .await
         .unwrap();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let expected_url = loom_mcp_url();
 
         CodexAdapter.install_mcp_config(tmp.path()).await.unwrap();
@@ -611,6 +707,7 @@ mod tests {
         )
         .await
         .unwrap();
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let expected_hook_url = loom_hook_url();
 
         CodexAdapter.install_hooks(tmp.path()).await.unwrap();

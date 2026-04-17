@@ -157,6 +157,7 @@ impl WeaverEventBuffer {
             terminal_bridge: app.terminal_bridge.clone(),
             terminals: app.terminals.clone(),
             weaver_buffer: app.weaver_buffer.clone(),
+            notifier: app.notifier.clone(),
         };
         self.maybe_flush_due(&ctx).await;
     }
@@ -181,7 +182,7 @@ impl WeaverEventBuffer {
         group: &str,
         force: bool,
     ) -> Result<(), String> {
-        let (weaver_id, board_summary, push_interval, max_interval) = {
+        let (weaver_id, digest_ctx, push_interval, max_interval) = {
             let st = ctx.state.lock().await;
             let weaver_id = st.get_group_settings(group).weaver_agent_id.clone();
             if weaver_id.trim().is_empty() {
@@ -216,7 +217,7 @@ impl WeaverEventBuffer {
             }
             (
                 weaver_id,
-                board_summary(&st, group),
+                digest_context(&st, group),
                 ws.push_interval.max(0) as f64,
                 ws.max_interval.max(0) as f64,
             )
@@ -256,7 +257,7 @@ impl WeaverEventBuffer {
         };
 
         let event_count = events.len();
-        let digest = format_digest(&events, &board_summary);
+        let digest = format_digest(&events, &digest_ctx);
         let delivered_at = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
         let send_result = send_text_to_cell_quiet(ctx, &weaver_id, &digest).await;
 
@@ -414,7 +415,168 @@ fn lane_order(lane: &str) -> i32 {
     }
 }
 
-fn format_digest(events: &[Value], board_summary: &str) -> String {
+/// Data carried from `MatrixState` into `format_digest`. Mirrors the fields
+/// Python's `_format_digest` pulls off the state during rendering.
+#[derive(Debug, Default, Clone)]
+struct DigestContext {
+    verbosity: String,
+    board_summary: String,
+    active_summary: String,
+    attention_summary: String,
+    context_warning: String,
+}
+
+fn digest_context(st: &MatrixState, group: &str) -> DigestContext {
+    let ws = st.get_weaver_settings(group);
+    let verbosity = normalize_verbosity(&ws.digest_verbosity);
+    let board_summary = board_summary(st, group);
+    let active_summary = active_agents_summary(st, group);
+    let attention_limit = if verbosity == "detailed" { 5 } else { 3 };
+    let attention_summary = attention_summary(st, group, attention_limit);
+
+    // Context warning for the weaver cell itself (~80% of 1M).
+    let weaver_id = st.get_group_settings(group).weaver_agent_id.clone();
+    let context_warning = if weaver_id.is_empty() {
+        String::new()
+    } else if let Some(weaver) = st.agents.get(&weaver_id) {
+        context_warning(weaver.session_tokens_in, weaver.session_tokens_out)
+    } else {
+        String::new()
+    };
+
+    DigestContext {
+        verbosity,
+        board_summary,
+        active_summary,
+        attention_summary,
+        context_warning,
+    }
+}
+
+fn normalize_verbosity(raw: &str) -> String {
+    match raw.trim().to_lowercase().as_str() {
+        "compact" => "compact".into(),
+        "detailed" => "detailed".into(),
+        _ => "balanced".into(),
+    }
+}
+
+fn active_agents_summary(st: &MatrixState, group: &str) -> String {
+    let mut parts = Vec::new();
+    for cell in st.agents.values() {
+        if cell.cell_type != "agent" || cell.group != group {
+            continue;
+        }
+        if cell.activity.trim().is_empty() {
+            continue;
+        }
+        let label = if !cell.slug.is_empty() {
+            &cell.slug
+        } else {
+            &cell.name
+        };
+        parts.push(format!("{} ({})", label, cell.activity));
+    }
+    parts.join(" · ")
+}
+
+/// Summarize agents/tasks that need operator attention. Python uses a
+/// `health_state` field on tasks; Rust doesn't have that yet (task_health
+/// port is task #14). Until then, approximate with agents flagged
+/// `needs_attention` / with an `error_message` and tasks with the `blocked`
+/// or `error` labels. Matches Python output style: `Attention: <tag>: <title>`.
+fn attention_summary(st: &MatrixState, group: &str, limit: usize) -> String {
+    let mut items: Vec<(&str, String)> = Vec::new();
+    for cell in st.agents.values() {
+        if cell.cell_type != "agent" || cell.group != group {
+            continue;
+        }
+        let title = if !cell.slug.is_empty() {
+            cell.slug.clone()
+        } else {
+            cell.name.clone()
+        };
+        if !cell.error_message.trim().is_empty() {
+            items.push(("error", truncate(&title, 40)));
+        } else if cell.needs_attention {
+            items.push(("blocked", truncate(&title, 40)));
+        }
+    }
+    for task in st.board_tasks.values() {
+        if task.group != group || task.lane == "Done" || task.lane == ARCHIVED_LANE {
+            continue;
+        }
+        let mut tag = "";
+        for label in &task.labels {
+            match label.as_str() {
+                "error" => {
+                    tag = "error";
+                    break;
+                }
+                "blocked" => {
+                    if tag.is_empty() {
+                        tag = "blocked";
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !tag.is_empty() {
+            items.push((tag, truncate(&task.task, 40)));
+        }
+    }
+    if items.is_empty() {
+        return String::new();
+    }
+    // error > blocked — mirror HEALTH_SEVERITY intent.
+    items.sort_by(|a, b| severity(b.0).cmp(&severity(a.0)).then(a.1.cmp(&b.1)));
+    let preview = items
+        .iter()
+        .take(limit)
+        .map(|(tag, title)| format!("{tag}: {title}"))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    format!("Attention: {preview}")
+}
+
+fn severity(tag: &str) -> i32 {
+    match tag {
+        "error" => 3,
+        "blocked" => 2,
+        "risk" => 1,
+        _ => 0,
+    }
+}
+
+fn context_warning(tokens_in: i64, tokens_out: i64) -> String {
+    let total = tokens_in.saturating_add(tokens_out);
+    if total <= 800_000 {
+        return String::new();
+    }
+    let pct = (total / 10_000).clamp(0, 99);
+    format!(
+        "!! Context usage: ~{pct}% (~{}K tokens). Consider writing a checkpoint.",
+        total / 1000
+    )
+}
+
+fn truncate(text: &str, limit: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= limit {
+        return text.to_string();
+    }
+    let cutoff = limit.saturating_sub(1);
+    let mut out: String = chars.into_iter().take(cutoff).collect();
+    out.push('…');
+    out
+}
+
+fn format_digest(events: &[Value], ctx: &DigestContext) -> String {
+    let event_limit = if ctx.verbosity == "compact" {
+        Some(5)
+    } else {
+        None
+    };
     let mut lines = vec![format!(
         "## Loom Digest ({} event{})",
         events.len(),
@@ -423,12 +585,38 @@ fn format_digest(events: &[Value], board_summary: &str) -> String {
     if events.is_empty() {
         lines.push("  No new events since last digest.".into());
     } else {
-        for event in events {
+        let visible: Vec<&Value> = match event_limit {
+            Some(n) => events.iter().take(n).collect(),
+            None => events.iter().collect(),
+        };
+        for event in &visible {
             lines.push(format!("  {}", format_event_line(event)));
+        }
+        let hidden = events.len().saturating_sub(visible.len());
+        if hidden > 0 {
+            lines.push(format!(
+                "  … {hidden} more event{}",
+                if hidden == 1 { "" } else { "s" }
+            ));
         }
     }
     lines.push(String::new());
-    lines.push(format!("Board: {board_summary}"));
+    lines.push(format!("Board: {}", ctx.board_summary));
+
+    // Python shows active + attention only in `detailed` mode, or when no
+    // events (so a quiet digest still carries context).
+    let include_extras = ctx.verbosity == "detailed" || events.is_empty();
+    if include_extras {
+        if !ctx.active_summary.is_empty() {
+            lines.push(format!("Active: {}", ctx.active_summary));
+        }
+        if !ctx.attention_summary.is_empty() {
+            lines.push(ctx.attention_summary.clone());
+        }
+    }
+    if !ctx.context_warning.is_empty() {
+        lines.push(ctx.context_warning.clone());
+    }
     lines.push("---".into());
     lines.join("\n")
 }

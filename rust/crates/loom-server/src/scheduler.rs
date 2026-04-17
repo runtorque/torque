@@ -258,12 +258,8 @@ async fn tick(state: &Arc<Mutex<MatrixState>>, db: &LoomDb, bus: &EventBus) {
             .collect()
     };
 
-    if fires.is_empty() {
-        return;
-    }
-
     let mut to_save = Vec::new();
-    {
+    if !fires.is_empty() {
         let mut st = state.lock().await;
         for id in &fires {
             if let Some(t) = st.board_tasks.get_mut(id) {
@@ -275,6 +271,12 @@ async fn tick(state: &Arc<Mutex<MatrixState>>, db: &LoomDb, bus: &EventBus) {
             }
             st.emit_task(id);
         }
+    }
+
+    fire_due_schedules(state, db, &now).await;
+
+    {
+        let mut st = state.lock().await;
         if let Some((seq, ops)) = st.drain_deltas() {
             bus.send(loom_core::events::OutMessage::Delta { seq, ops });
         }
@@ -283,6 +285,156 @@ async fn tick(state: &Arc<Mutex<MatrixState>>, db: &LoomDb, bus: &EventBus) {
     for t in to_save {
         let _ = db.save_board_task(&t).await;
     }
+}
+
+/// Fire every `Schedule` whose `next_run_at` / `scheduled_at` has arrived.
+/// Creates a board task via `board_add_task` semantics, dispatches it (no
+/// PTY — the scheduler tick is HTTP-free, so we just put it in `To Do`;
+/// the user or an auto-dispatch queue picks it up), and updates the schedule
+/// record's run metadata. Mirrors Python `_scheduler_loop`.
+async fn fire_due_schedules(
+    state: &Arc<Mutex<MatrixState>>,
+    db: &LoomDb,
+    now: &chrono::DateTime<chrono::Utc>,
+) {
+    let now_iso = now.to_rfc3339();
+    let due_ids: Vec<String> = {
+        let st = state.lock().await;
+        st.schedules
+            .values()
+            .filter(|s| s.enabled && schedule_is_due(s, &now_iso))
+            .map(|s| s.id.clone())
+            .collect()
+    };
+    if due_ids.is_empty() {
+        return;
+    }
+
+    for sid in due_ids {
+        if let Err(err) = fire_one_schedule(state, db, &sid, now).await {
+            tracing::warn!(schedule = %sid, ?err, "schedule fire failed");
+        }
+    }
+}
+
+fn schedule_is_due(sched: &loom_core::state::Schedule, now_iso: &str) -> bool {
+    // Prefer next_run_at (populated for cron schedules), fall back to
+    // scheduled_at (one-shot) — matching Python's `schedule_get_due`.
+    let candidate = if !sched.next_run_at.is_empty() {
+        &sched.next_run_at
+    } else if !sched.scheduled_at.is_empty() {
+        &sched.scheduled_at
+    } else {
+        return false;
+    };
+    candidate.as_str() <= now_iso
+}
+
+async fn fire_one_schedule(
+    state: &Arc<Mutex<MatrixState>>,
+    db: &LoomDb,
+    sched_id: &str,
+    now: &chrono::DateTime<chrono::Utc>,
+) -> anyhow::Result<()> {
+    use loom_core::delta::DeltaOp;
+    use loom_core::state::BoardTask;
+    use loom_core::task_ids::{format_root_task_id, normalize_group_prefix};
+
+    let now_iso = now.to_rfc3339();
+
+    // Phase 1: allocate the task + update schedule under the state lock.
+    let (task, updated_sched, prefix, trunk) = {
+        let mut st = state.lock().await;
+        let Some(sched) = st.schedules.get(sched_id).cloned() else {
+            return Ok(());
+        };
+        if !st.groups.contains_key(&sched.group) {
+            tracing::warn!(
+                schedule = %sched.name,
+                group = %sched.group,
+                "schedule group missing — skipping"
+            );
+            return Ok(());
+        }
+
+        let prefix = normalize_group_prefix(&sched.group);
+        let counter = st.task_id_counters.entry(prefix.clone()).or_insert(0);
+        *counter += 1;
+        let trunk = *counter;
+        let task_id = format_root_task_id(&sched.group, trunk);
+
+        let title_template = if sched.task_template.is_empty() {
+            sched.name.clone()
+        } else {
+            sched.task_template.clone()
+        };
+        let title = title_template
+            .replace("{date}", &now.format("%Y-%m-%d").to_string())
+            .replace("{time}", &now.format("%H:%M").to_string())
+            .replace("{datetime}", &now.format("%Y-%m-%d %H:%M").to_string());
+
+        let mut task = BoardTask::new_minimal(task_id.clone(), title);
+        task.group = sched.group.clone();
+        task.pipeline_root_id = task_id.clone();
+        task.lane = "Backlog".into();
+        task.action_name = sched.action_name.clone();
+        task.action_vars = sched.action_vars.clone();
+        task.agent_template = sched.agent_template.clone();
+        task.labels = sched.labels.clone();
+        task.description = sched.description.clone();
+        task.created_at = now_iso.clone();
+        task.updated_at = now_iso.clone();
+        task.lane_entered_at = now_iso.clone();
+        st.upsert_task(task.clone())?;
+
+        // Mutate the schedule record.
+        let mut updated = sched.clone();
+        updated.last_run_at = now_iso.clone();
+        updated.run_count += 1;
+        updated.last_task_id = task_id.clone();
+        updated.updated_at = now_iso.clone();
+        if !updated.cron_expr.is_empty() {
+            match loom_core::cron::next_run(&updated.cron_expr, *now, &updated.timezone) {
+                Ok(nxt) => updated.next_run_at = nxt.to_rfc3339(),
+                Err(err) => {
+                    tracing::error!(
+                        schedule = %updated.name,
+                        cron = %updated.cron_expr,
+                        %err,
+                        "invalid cron — disabling"
+                    );
+                    updated.enabled = false;
+                    updated.next_run_at.clear();
+                }
+            }
+        } else {
+            // One-shot — consumed.
+            updated.enabled = false;
+            updated.next_run_at.clear();
+        }
+        st.schedules.insert(sched_id.to_string(), updated.clone());
+        st.emit(DeltaOp::ScheduleUpsert(
+            serde_json::to_value(&updated).unwrap_or(serde_json::Value::Null),
+        ));
+
+        (
+            st.board_tasks.get(&task_id).cloned().unwrap_or(task),
+            updated,
+            prefix,
+            trunk,
+        )
+    };
+
+    // Phase 2: persist outside the state lock.
+    db.save_task_id_counter(&prefix, trunk as u64).await?;
+    db.save_board_task(&task).await?;
+    db.save_schedule(&updated_sched).await?;
+    tracing::info!(
+        schedule = %updated_sched.name,
+        task = %task.id,
+        "schedule fired"
+    );
+    Ok(())
 }
 
 #[cfg(test)]

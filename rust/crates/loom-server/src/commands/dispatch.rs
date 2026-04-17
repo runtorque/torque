@@ -91,6 +91,96 @@ fn parent_has_open_human_asks(
     })
 }
 
+/// Copy the worktree fields of `source_agent_id` onto `target_agent_id`.
+/// Returns true if the source had a worktree and the target was updated.
+/// Mirrors the explicit `inherit_worktree_from` branch in
+/// `loom/server.py:4520-4540`.
+fn apply_inherited_worktree(
+    st: &mut loom_core::state::MatrixState,
+    target_agent_id: &str,
+    source_agent_id: &str,
+) -> bool {
+    let src = match st.agents.get(source_agent_id) {
+        Some(agent) if !agent.worktree_path.is_empty() => agent.clone(),
+        _ => return false,
+    };
+    if let Some(target) = st.agents.get_mut(target_agent_id) {
+        target.worktree_path = src.worktree_path.clone();
+        target.worktree_branch = src.worktree_branch.clone();
+        target.worktree_repo_root = src.worktree_repo_root.clone();
+        target.worktree_base_branch = src.worktree_base_branch.clone();
+        target.worktree_changed_files = src.worktree_changed_files.clone();
+        target.directory = src.worktree_path.clone();
+        st.emit_agent(target_agent_id);
+        return true;
+    }
+    false
+}
+
+/// Walk the `parent_task_id` chain until we find an agent with an active
+/// worktree, then copy it to `target_agent_id`. Mirrors the HITL / derive
+/// fallback branch in `loom/server.py:4541-4573`.
+fn inherit_worktree_from_parent_chain(
+    st: &mut loom_core::state::MatrixState,
+    target_agent_id: &str,
+    start_parent_task_id: &str,
+) -> bool {
+    let mut pid = start_parent_task_id.to_string();
+    while !pid.is_empty() {
+        let parent_task = match st.board_tasks.get(&pid) {
+            Some(t) => t.clone(),
+            None => break,
+        };
+        if !parent_task.agent_id.is_empty()
+            && apply_inherited_worktree(st, target_agent_id, &parent_task.agent_id)
+        {
+            return true;
+        }
+        pid = parent_task.parent_task_id.clone();
+    }
+    false
+}
+
+/// Walk up the parent chain from `task_id`, completing ancestors whose
+/// descendant branches are all Done. Mirrors `_cascade_done` in
+/// `loom/server.py`. Returns every task that was moved to Done so the caller
+/// can persist them.
+fn cascade_done(
+    st: &mut loom_core::state::MatrixState,
+    task_id: &str,
+) -> Vec<loom_core::state::BoardTask> {
+    let mut updated = Vec::new();
+    let Some(start) = st.board_tasks.get(task_id) else {
+        return updated;
+    };
+    let mut pid = start.parent_task_id.clone();
+    while !pid.is_empty() {
+        let parent = match st.board_tasks.get(&pid) {
+            Some(p) => p.clone(),
+            None => break,
+        };
+        if loom_core::state::board_task_is_closed(Some(&parent)) {
+            pid = parent.parent_task_id.clone();
+            continue;
+        }
+        if st.task_has_unresolved_descendants(&pid) {
+            break;
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut promoted = parent.clone();
+        promoted.status.clear();
+        promoted.lane = "Done".into();
+        promoted.lane_entered_at = now.clone();
+        promoted.updated_at = now;
+        if st.upsert_task(promoted.clone()).is_err() {
+            break;
+        }
+        updated.push(promoted.clone());
+        pid = promoted.parent_task_id.clone();
+    }
+    updated
+}
+
 fn clear_parent_awaiting_input(
     st: &mut loom_core::state::MatrixState,
     parent_task_id: &str,
@@ -259,12 +349,41 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         )
     };
 
-    // Bootstrap a git worktree for the fresh worker if the group opted in
-    // and the task's directory is a git repo. Must happen *before* the PTY
-    // spawns so the shell starts inside the worktree. Mirrors the branch
-    // of `add_agent` that handles manual agent creation.
+    // Bootstrap a git worktree for the fresh worker. Three paths, in order:
+    //   1. Explicit `inherit_worktree_from` request field — copy the named
+    //      source agent's worktree fields (pipeline dispatch).
+    //   2. No worktree yet + task has a `parent_task_id` — walk the parent
+    //      chain until we find an agent with a worktree (HITL / derive).
+    //   3. Fresh `worktree_create` if the group opted in.
+    // Matches `loom/server.py:4519-4573`. Must run *before* the PTY spawns
+    // so the shell starts inside the worktree.
     if is_new_agent {
-        if let Some(settings) = new_agent_group_settings.as_ref() {
+        let inherit_from = optional_str(req, "inherit_worktree_from")
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        // Path 1 + 2: inherit from another agent.
+        let inherited = if !inherit_from.is_empty() {
+            let mut st = ctx.state.lock().await;
+            apply_inherited_worktree(&mut st, &target_agent_id, &inherit_from)
+        } else if !task.parent_task_id.is_empty() {
+            let mut st = ctx.state.lock().await;
+            inherit_worktree_from_parent_chain(&mut st, &target_agent_id, &task.parent_task_id)
+        } else {
+            false
+        };
+
+        if inherited {
+            let cell_snapshot = {
+                let st = ctx.state.lock().await;
+                st.agents.get(&target_agent_id).cloned()
+            };
+            if let Some(cell) = cell_snapshot {
+                let _ = ctx.db.save_agent(&cell).await;
+            }
+        } else if let Some(settings) = new_agent_group_settings.as_ref() {
+            // Path 3: fresh worktree.
             let worktree_wanted = settings.git_worktree
                 && req
                     .get("worktree")
@@ -286,7 +405,7 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     }
 
     // Render the prompt.
-    let rendered = if task.action_name.is_empty() || force_no_action {
+    let mut rendered = if task.action_name.is_empty() || force_no_action {
         // Fall back to the task's raw text (+ description).
         if task.description.is_empty() {
             task.task.clone()
@@ -322,6 +441,21 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
             Err(other) => return Err(CmdError::BadRequest(other.to_string())),
         }
     };
+
+    // Append uploaded attachments and artifacts (+ upstream handoff) so the
+    // agent sees them in the dispatched prompt. Mirrors
+    // `_append_task_artifacts` in `loom/server_agent.py`.
+    let upstream_artifacts: Vec<Value> = req
+        .get("upstream_artifacts")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    rendered = loom_core::artifacts::append_task_artifacts(
+        &rendered,
+        &task.attachments,
+        &task.artifacts,
+        &upstream_artifacts,
+    );
 
     // Provider-specific hook install. Runs before the prompt is sent so the
     // hooks are in place the moment the agent boots (or, for a re-dispatch,
@@ -979,7 +1113,7 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
             .await;
     }
 
-    let (task, agent) = {
+    let (task, agent, cascaded) = {
         let mut st = ctx.state.lock().await;
         if !st.agents.contains_key(&agent_id) {
             return Err(CmdError::BadRequest(format!(
@@ -1019,6 +1153,7 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
 
         // Update linked task.
         let mut task = None;
+        let mut cascaded: Vec<loom_core::state::BoardTask> = Vec::new();
         if !task_id.is_empty() {
             if let Some(t) = st.board_tasks.get_mut(&task_id) {
                 match action.as_str() {
@@ -1050,13 +1185,22 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
                 task = Some(t.clone());
             }
             st.emit_task(&task_id);
+
+            // Cascade completion: if all siblings of the parent are now Done,
+            // promote the parent; walk the chain.
+            if matches!(action.as_str(), "done" | "ready") {
+                cascaded = cascade_done(&mut st, &task_id);
+            }
         }
         let agent = st.agents.get(&agent_id).cloned().unwrap();
-        (task, agent)
+        (task, agent, cascaded)
     };
 
     if let Some(t) = &task {
         ctx.db.save_board_task(t).await?;
+    }
+    for promoted in &cascaded {
+        ctx.db.save_board_task(promoted).await?;
     }
     ctx.db.save_agent(&agent).await?;
     ctx.db
@@ -1568,6 +1712,21 @@ pub async fn spawn_cell_session(
     // Strip any stale append-system-prompt-file flag we appended on a prior
     // boot so we don't stack the flag on each respawn.
     let base_command = loom_core::prompts::strip_append_system_prompt_flag(&base_command);
+    // If the cell opted in to session resume and we've persisted a provider
+    // session id from a prior SessionStart hook, rewrite the boot command
+    // to the adapter's resume form (e.g. `claude --resume <sid>`). Matches
+    // Python local_pty.py:609 + iterm2_bridge_core.py:469.
+    let base_command = if cell.session_resume && !cell.agent_session_id.trim().is_empty() {
+        if let Some(adapter) = adapter_for_cell(cell) {
+            adapter
+                .resume_command(&base_command, &cell.agent_session_id)
+                .unwrap_or(base_command)
+        } else {
+            base_command
+        }
+    } else {
+        base_command
+    };
     let cwd = if cell.directory.is_empty() {
         None
     } else {

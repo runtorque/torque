@@ -99,6 +99,14 @@ async fn handle_event(
                         cell.error_message.clear();
                         cell.needs_attention = false;
                         cell.last_event_text = "Session started".into();
+                        // Persist the provider's session id so the next
+                        // relaunch can call `claude --resume <id>` /
+                        // `codex resume <id>`. Matches Python events.py.
+                        if !event.session_id.is_empty()
+                            && cell.agent_session_id != event.session_id
+                        {
+                            cell.agent_session_id = event.session_id.clone();
+                        }
                     }
                     "session_end" => {
                         cell.activity.clear();
@@ -260,6 +268,12 @@ async fn handle_event(
             )
             .await;
         }
+        // Fire a macOS notification if the group opted in. Mirrors the
+        // `notifier.on_event` branch in Python `EventBus.emit`.
+        {
+            let st = app.state.lock().await;
+            app.notifier.on_event(&st, &agent.id, &event.kind).await;
+        }
         let mut st = app.state.lock().await;
         if let Some((seq, ops)) = st.drain_deltas() {
             app.bus.send(OutMessage::Delta { seq, ops });
@@ -310,6 +324,7 @@ fn spawn_auto_checkpoint(app: &AppState, agent: &loom_core::state::AgentCell) {
             terminal_bridge: app.terminal_bridge.clone(),
             terminals: app.terminals.clone(),
             weaver_buffer: app.weaver_buffer.clone(),
+            notifier: app.notifier.clone(),
         };
         match crate::commands::worktree::do_checkpoint_for_agent(&ctx, &agent_id, &message).await {
             Ok(sha) => {

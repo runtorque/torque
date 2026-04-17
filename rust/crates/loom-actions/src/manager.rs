@@ -297,12 +297,21 @@ struct RawAction {
     max_depth: Option<i32>,
 }
 
-/// Every action must reference {{ TASK }} at least once.
+/// Every action must reference {{ TASK }} at least once, and must not
+/// declare `loom` as a variable (that name is reserved for the runtime
+/// context namespace). Mirrors `loom/server.py:2626-2637`.
 pub fn validate_prompt(prompt: &str) -> Result<(), ActionError> {
     if !prompt.contains("TASK") {
         return Err(ActionError::Validation(
             "action prompt must reference {{ TASK }}".into(),
         ));
+    }
+    for var in crate::render::discover_variables(prompt) {
+        if var.name == "loom" {
+            return Err(ActionError::Validation(
+                "'loom' is a reserved variable name".into(),
+            ));
+        }
     }
     Ok(())
 }

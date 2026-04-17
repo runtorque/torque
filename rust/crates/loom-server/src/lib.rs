@@ -4,6 +4,7 @@ pub mod app;
 pub mod commands;
 pub mod events;
 pub mod mcp;
+pub mod notifications;
 pub mod paths;
 pub mod pty_backend;
 pub mod scheduler;

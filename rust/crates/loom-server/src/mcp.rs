@@ -42,6 +42,7 @@ async fn handle_mcp(
         terminal_bridge: app.terminal_bridge.clone(),
         terminals: app.terminals.clone(),
         weaver_buffer: app.weaver_buffer.clone(),
+            notifier: app.notifier.clone(),
     };
 
     if req.get("id").is_none() {

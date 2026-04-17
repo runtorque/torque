@@ -5,10 +5,9 @@
 //! See `loom/weaver.py` for the Python reference.
 
 use loom_core::state::{
-    GroupSettings, MatrixState, WeaverSettings, DEFAULT_WEAVER_AUTONOMY_MODE,
-    DEFAULT_WEAVER_DIGEST_VERBOSITY, DEFAULT_WEAVER_ESCALATION_STYLE,
-    DEFAULT_WEAVER_SAME_AGENT_FOLLOW_UP_PREFERENCE, DEFAULT_WEAVER_WAVE_SIZE_PREFERENCE,
-    DEFAULT_WORKTREE_MERGE_CLEANUP,
+    GroupSettings, WeaverSettings, DEFAULT_WEAVER_AUTONOMY_MODE, DEFAULT_WEAVER_DIGEST_VERBOSITY,
+    DEFAULT_WEAVER_ESCALATION_STYLE, DEFAULT_WEAVER_SAME_AGENT_FOLLOW_UP_PREFERENCE,
+    DEFAULT_WEAVER_WAVE_SIZE_PREFERENCE, DEFAULT_WORKTREE_MERGE_CLEANUP,
 };
 
 const BASE_SYSTEM_PROMPT: &str = r#"You are the Weaver — the orchestrator agent for the "__GROUP__" group in Loom.
@@ -504,21 +503,8 @@ pub fn build_weaver_system_prompt(
     format!("{}\n", parts.join("\n\n"))
 }
 
-/// Placeholder — real implementation lands in Phase 6.
-pub struct Weaver {
-    pub group: String,
-}
-
-impl Weaver {
-    pub fn new(group: impl Into<String>) -> Self {
-        Self {
-            group: group.into(),
-        }
-    }
-
-    /// Compute a digest for the next push. Returns None if nothing new to say.
-    pub fn compute_digest(&self, _state: &MatrixState) -> Option<serde_json::Value> {
-        // TODO: port `loom/weaver.py::_compose_digest`
-        None
-    }
-}
+// Digest composition + delivery lives in
+// `loom-server::weaver_buffer::{format_digest, flush_group_inner}`. There's
+// no `loom-weaver::Weaver::compute_digest` anymore — that stub was never
+// wired up and hid the fact that the real implementation already existed in
+// the server crate.

@@ -35,6 +35,7 @@ async fn spawn_test_server_full() -> (SocketAddr, Arc<Mutex<MatrixState>>, UiAge
         terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
         weaver_buffer: loom_server::weaver_buffer::WeaverEventBuffer::default(),
+        notifier: loom_server::notifications::NotificationManager::new(),
     };
 
     let router = loom_server::app::build_router(app_state);

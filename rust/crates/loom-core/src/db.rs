@@ -411,6 +411,11 @@ fn row_i64(row: &Row<'_>, name: &str, default: i64) -> i64 {
 }
 
 fn clear_agent_ephemeral(agent: &mut AgentCell) {
+    // Match loom/state.py::_EPHEMERAL_FIELDS.
+    agent.current_process = String::new();
+    agent.current_path = String::new();
+    agent.current_branch = String::new();
+    agent.git_root = String::new();
     agent.activity = String::new();
     agent.activity_detail = String::new();
     agent.last_event_at = 0.0;

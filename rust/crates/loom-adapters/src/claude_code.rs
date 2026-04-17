@@ -595,6 +595,14 @@ impl AgentAdapter for ClaudeCodeAdapter {
         if cell_id.is_empty() || hook_event.is_empty() {
             return Vec::new();
         }
+        // All Claude Code hook payloads carry a `session_id` field. Capture
+        // it here so `events.rs::_apply` can stamp `cell.agent_session_id`,
+        // enabling `claude --resume <id>` on the next relaunch.
+        let session_id = payload
+            .get("session_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
         let mut event = match hook_event {
             "SessionStart" => AgentEvent::new(cell_id, "session_start"),
             "Stop" | "SessionEnd" => {
@@ -668,8 +676,17 @@ impl AgentAdapter for ClaudeCodeAdapter {
             "SubagentStop" => AgentEvent::new(cell_id, "activity_change"),
             _ => return Vec::new(),
         };
+        event.session_id = session_id;
         event.raw = payload.clone();
         vec![event]
+    }
+
+    fn resume_command(&self, boot_cmd: &str, session_id: &str) -> Option<String> {
+        let sid = session_id.trim();
+        if sid.is_empty() {
+            return None;
+        }
+        Some(format!("{boot_cmd} --resume {}", shell_words::quote(sid)))
     }
 
     async fn install_hooks(&self, working_dir: &Path) -> Result<()> {
@@ -738,12 +755,9 @@ fn shell_quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use tempfile::TempDir;
 
-    /// `LOOM_PORT` is a process-wide env var — tests that touch it must
-    /// serialize so they don't stomp on each other.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use crate::ENV_LOCK;
 
     async fn read_json(path: &Path) -> Value {
         let text = fs::read_to_string(path).await.expect("read back");

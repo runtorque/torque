@@ -80,6 +80,7 @@ impl EngineBridge {
             terminal_bridge: self.state.terminal_bridge.clone(),
             terminals: self.state.terminals.clone(),
             weaver_buffer: self.state.weaver_buffer.clone(),
+            notifier: self.state.notifier.clone(),
         }
     }
 

@@ -672,8 +672,23 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
         }
     }
 
-    // Clear worktree fields on the cell.
-    let agent = {
+    // Resolve the merge commit sha for boundary bookkeeping.
+    let merge_sha = tokio::process::Command::new("git")
+        .args(["-C", &repo_root, "rev-parse", "HEAD"])
+        .output()
+        .await
+        .ok()
+        .and_then(|out| {
+            if out.status.success() {
+                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    // Clear worktree fields on the cell AND mark any boundary tasks merged.
+    let (agent, boundary_tasks) = {
         let mut st = ctx.state.lock().await;
         if let Some(cell) = st.agents.get_mut(&agent_id) {
             if cleanup {
@@ -687,9 +702,18 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
             }
         }
         st.emit_agent(&agent_id);
-        st.agents.get(&agent_id).cloned().unwrap()
+        let boundary_tasks = loom_weaver::streams::mark_branch_boundaries_merged(
+            &mut st, &repo_root, &branch, &merge_sha, None,
+        );
+        (
+            st.agents.get(&agent_id).cloned().unwrap(),
+            boundary_tasks,
+        )
     };
     ctx.db.save_agent(&agent).await?;
+    for task in &boundary_tasks {
+        ctx.db.save_board_task(task).await?;
+    }
     flush(ctx).await;
     Ok(json!({
         "type": "worktree_merge",
@@ -698,6 +722,7 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
         "branch": branch,
         "base": base,
         "squash": squash,
+        "boundary_tasks_merged": boundary_tasks.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
     }))
 }
 

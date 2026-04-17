@@ -29,6 +29,11 @@ pub struct AgentEvent {
     pub error_message: String,
     #[serde(default)]
     pub summary: String,
+    /// Agent-provider session id, e.g. Claude Code's `session_id` from the
+    /// SessionStart hook. Promoted onto `AgentCell.agent_session_id` so the
+    /// next `relaunch_agent` can pass `--resume <id>`.
+    #[serde(default)]
+    pub session_id: String,
     #[serde(default)]
     pub raw: serde_json::Value,
 }
@@ -45,6 +50,7 @@ impl AgentEvent {
             needs_attention: false,
             error_message: String::new(),
             summary: String::new(),
+            session_id: String::new(),
             raw: serde_json::Value::Null,
         }
     }
@@ -157,5 +163,13 @@ pub trait AgentAdapter: Send + Sync {
         _working_dir: &std::path::Path,
         _filename: &str,
     ) {
+    }
+
+    /// Given the agent's boot command + a persisted provider session id,
+    /// return the command that resumes that session — or `None` if the
+    /// provider doesn't support resume. Mirrors Python
+    /// `AgentAdapter.get_resume_command`.
+    fn resume_command(&self, _boot_cmd: &str, _session_id: &str) -> Option<String> {
+        None
     }
 }

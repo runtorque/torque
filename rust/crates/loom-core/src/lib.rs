@@ -2,6 +2,7 @@
 
 pub mod artifacts;
 pub mod config;
+pub mod cron;
 pub mod db;
 pub mod delta;
 pub mod error;

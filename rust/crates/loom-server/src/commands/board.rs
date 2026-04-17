@@ -97,6 +97,19 @@ pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         .and_then(|v| v.as_str())
         .map(String::from)
         .unwrap_or_else(|| "Backlog".into());
+    // Validate the lane exists, falling back silently if not — matches
+    // Python `state.board_add_task` which returns None for unknown lanes;
+    // here we keep the task but coerce to Backlog so we don't corrupt the
+    // board with a ghost lane.
+    {
+        let st = ctx.state.lock().await;
+        if !st.board_lanes.contains(&task.lane) {
+            return Err(CmdError::BadRequest(format!(
+                "lane '{}' not found",
+                task.lane
+            )));
+        }
+    }
     task.created_at = chrono::Utc::now().to_rfc3339();
     task.updated_at = task.created_at.clone();
     task.lane_entered_at = task.created_at.clone();
@@ -194,6 +207,17 @@ pub async fn remove_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         st.remove_task(&id)?;
     }
     ctx.db.delete_board_task(&id).await?;
+
+    // Delete any uploaded attachments for this task. Matches Python
+    // `server.py:4221-4223` — keeps the attachments directory from
+    // accumulating orphan files.
+    let attachments = loom_core::config::attachments_dir().join(&id);
+    if attachments.exists() {
+        if let Err(err) = tokio::fs::remove_dir_all(&attachments).await {
+            tracing::warn!(task = %id, ?err, "failed to remove task attachments dir");
+        }
+    }
+
     flush(ctx).await;
     ok()
 }
@@ -343,31 +367,75 @@ pub async fn remove_lane(ctx: &CmdContext, req: &Value) -> CmdResult {
             "cannot remove reserved lane '{name}'"
         )));
     }
-    let lanes = {
+    let requested_target = optional_str(req, "move_tasks_to")
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    let (lanes, moved_tasks) = {
         let mut st = ctx.state.lock().await;
+        if !st.board_lanes.contains(&name) {
+            return Err(CmdError::BadRequest(format!("lane '{name}' not found")));
+        }
+        if st.board_lanes.len() <= 1 {
+            return Err(CmdError::BadRequest(
+                "cannot remove the last remaining lane".into(),
+            ));
+        }
+
         let new_lanes: Vec<String> = st
             .board_lanes
             .iter()
             .filter(|l| *l != &name)
             .cloned()
             .collect();
+
+        // Pick the target lane: explicit `move_tasks_to` if it still exists,
+        // otherwise the first remaining lane. Matches Python
+        // `MatrixState.board_remove_lane`.
+        let target = if !requested_target.is_empty() && new_lanes.contains(&requested_target) {
+            requested_target
+        } else {
+            new_lanes[0].clone()
+        };
+
         st.set_lanes(new_lanes.clone())?;
-        // tasks in the removed lane fall back to Backlog
+
+        // Stack the migrated tasks at the bottom of the target lane so we
+        // don't collide with existing positions.
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut max_pos = st
+            .board_tasks
+            .values()
+            .filter(|t| t.lane == target)
+            .map(|t| t.position)
+            .max()
+            .unwrap_or(-1);
         let affected: Vec<String> = st
             .board_tasks
             .values()
             .filter(|t| t.lane == name)
             .map(|t| t.id.clone())
             .collect();
+        let mut moved = Vec::with_capacity(affected.len());
         for tid in &affected {
             if let Some(t) = st.board_tasks.get_mut(tid) {
-                t.lane = "Backlog".into();
+                max_pos += 1;
+                t.lane = target.clone();
+                t.position = max_pos;
+                t.updated_at = now.clone();
+                t.lane_entered_at = now.clone();
+                moved.push(t.clone());
             }
             st.emit_task(tid);
         }
-        new_lanes
+        (new_lanes, moved)
     };
+
     ctx.db.save_board_lanes(&lanes).await?;
+    for t in &moved_tasks {
+        ctx.db.save_board_task(t).await?;
+    }
     flush(ctx).await;
     ok()
 }

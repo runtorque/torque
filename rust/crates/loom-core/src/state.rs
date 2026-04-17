@@ -489,6 +489,8 @@ impl AgentCell {
 }
 
 // Ephemeral fields — cleared on load (not persisted meaningfully).
+// Mirrors `loom/state.py::_EPHEMERAL_FIELDS`. Actual clearing happens in
+// `loom-core::db::clear_agent_ephemeral`; keep the two lists in sync.
 pub const EPHEMERAL_FIELDS: &[&str] = &[
     "current_process",
     "current_path",
@@ -1558,6 +1560,54 @@ impl MatrixState {
             .all(|dep_id| board_task_counts_as_done(self.board_tasks.get(dep_id)))
     }
 
+    /// Tasks that declare `task_id` in their `depends_on` list.
+    pub fn board_get_dependents(&self, task_id: &str) -> Vec<&BoardTask> {
+        self.board_tasks
+            .values()
+            .filter(|t| t.depends_on.iter().any(|d| d == task_id))
+            .collect()
+    }
+
+    /// Direct children of `task_id` — tasks whose `parent_task_id` equals it.
+    pub fn board_get_children(&self, task_id: &str) -> Vec<&BoardTask> {
+        self.board_tasks
+            .values()
+            .filter(|t| t.parent_task_id == task_id)
+            .collect()
+    }
+
+    /// Walk the subtree rooted at `task_id` and return every descendant that
+    /// is not yet Done/Archived-as-Done. Mirrors Python
+    /// `MatrixState.task_open_descendants`.
+    pub fn task_open_descendants(&self, task_id: &str) -> Vec<&BoardTask> {
+        if task_id.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut stack: Vec<&BoardTask> = self.board_get_children(task_id);
+        while let Some(current) = stack.pop() {
+            for child in self.board_get_children(&current.id) {
+                stack.push(child);
+            }
+            if board_task_counts_as_done(Some(current)) {
+                continue;
+            }
+            out.push(current);
+        }
+        out.sort_by(|a, b| {
+            a.pipeline_depth
+                .cmp(&b.pipeline_depth)
+                .then_with(|| a.created_at.cmp(&b.created_at))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        out
+    }
+
+    /// True if any descendant of `task_id` is still unresolved.
+    pub fn task_has_unresolved_descendants(&self, task_id: &str) -> bool {
+        !self.task_open_descendants(task_id).is_empty()
+    }
+
     pub fn task_occupies_execution_slot(&self, task: Option<&BoardTask>, agent_id: &str) -> bool {
         let Some(task) = task else { return false };
         if board_task_is_closed(Some(task)) {
@@ -1681,6 +1731,11 @@ impl MatrixState {
                 "group '{name}' already exists"
             )));
         }
+        if let Some(conflict) = self.group_prefix_conflict(name, None) {
+            return Err(crate::Error::Conflict(format!(
+                "group '{name}' would share a task-ID prefix with existing group '{conflict}'"
+            )));
+        }
         let slug = unique_slug(&slugify(name), &self.all_group_slugs());
         self.groups.insert(name.to_string(), Vec::new());
         self.groups_order.push(name.to_string());
@@ -1689,6 +1744,26 @@ impl MatrixState {
             .insert(name.to_string(), GroupSettings::default());
         self.emit_group(name);
         Ok(())
+    }
+
+    /// Return the name of an existing group whose normalized task-ID prefix
+    /// collides with `candidate`, or `None` if no collision. Mirrors
+    /// `loom/state.py::group_prefix_conflict`.
+    pub fn group_prefix_conflict(
+        &self,
+        candidate: &str,
+        exclude_name: Option<&str>,
+    ) -> Option<String> {
+        let wanted = crate::task_ids::normalize_group_prefix(candidate);
+        for existing in self.groups.keys() {
+            if exclude_name == Some(existing.as_str()) {
+                continue;
+            }
+            if crate::task_ids::normalize_group_prefix(existing) == wanted {
+                return Some(existing.clone());
+            }
+        }
+        None
     }
 
     pub fn remove_group(&mut self, name: &str) -> crate::Result<Vec<String>> {
@@ -1722,6 +1797,11 @@ impl MatrixState {
         if self.groups.contains_key(new) {
             return Err(crate::Error::Conflict(format!(
                 "group '{new}' already exists"
+            )));
+        }
+        if let Some(conflict) = self.group_prefix_conflict(new, Some(old)) {
+            return Err(crate::Error::Conflict(format!(
+                "renaming to '{new}' would share a task-ID prefix with existing group '{conflict}'"
             )));
         }
         let Some(members) = self.groups.remove(old) else {

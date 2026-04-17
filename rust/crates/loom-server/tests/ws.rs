@@ -28,6 +28,7 @@ async fn spawn_test_server() -> SocketAddr {
         terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
         weaver_buffer: loom_server::weaver_buffer::WeaverEventBuffer::default(),
+        notifier: loom_server::notifications::NotificationManager::new(),
     };
 
     let router = loom_server::app::build_router(app_state);
@@ -52,6 +53,7 @@ async fn spawn_test_server_with_app() -> (SocketAddr, loom_server::app::AppState
         terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
         weaver_buffer: loom_server::weaver_buffer::WeaverEventBuffer::default(),
+        notifier: loom_server::notifications::NotificationManager::new(),
     };
 
     let router = loom_server::app::build_router(app_state.clone());

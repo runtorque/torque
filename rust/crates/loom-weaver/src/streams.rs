@@ -38,6 +38,90 @@ pub fn branch_key(repo_root: &str, branch: &str) -> String {
     format!("{}::{}", repo_root.trim(), branch.trim())
 }
 
+/// Pull the `worktree_boundary` JSON object off a task. Returns an empty
+/// map if absent or malformed — matches Python `task_boundary`.
+fn task_boundary(task: &BoardTask) -> serde_json::Map<String, Value> {
+    task.worktree_boundary.clone()
+}
+
+fn task_branch_key(task: &BoardTask) -> String {
+    let boundary = task_boundary(task);
+    let repo_root = boundary
+        .get("repo_root")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let branch = boundary
+        .get("branch")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if repo_root.is_empty() || branch.is_empty() {
+        return String::new();
+    }
+    branch_key(repo_root, branch)
+}
+
+/// Flip every `worktree_boundary` on tasks that pointed at `branch` to
+/// `status="merged"`, stamping merge_commit_sha + merged_at, and append
+/// the `merged` label. Returns every task that was updated so the caller
+/// can persist/emit them.
+///
+/// Mirrors `loom/worktree_boundaries.py::mark_branch_boundaries_merged`,
+/// minus the root-task propagation (which requires pipeline walking).
+/// Root-task boundary sync can land as a follow-up.
+pub fn mark_branch_boundaries_merged(
+    state: &mut MatrixState,
+    repo_root: &str,
+    branch: &str,
+    merge_sha: &str,
+    merged_at: Option<&str>,
+) -> Vec<BoardTask> {
+    if repo_root.trim().is_empty() || branch.trim().is_empty() {
+        return Vec::new();
+    }
+    let wanted = branch_key(repo_root, branch);
+    let now = match merged_at {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => Utc::now().to_rfc3339(),
+    };
+    let mut updated = Vec::new();
+    let ids: Vec<String> = state
+        .board_tasks
+        .values()
+        .filter(|t| task_branch_key(t) == wanted)
+        .filter(|t| {
+            let status = t
+                .worktree_boundary
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            status == "open" || status == "superseded"
+        })
+        .map(|t| t.id.clone())
+        .collect();
+    for id in ids {
+        let Some(task) = state.board_tasks.get_mut(&id) else {
+            continue;
+        };
+        task.worktree_boundary
+            .insert("status".into(), Value::String("merged".into()));
+        task.worktree_boundary
+            .insert("merged_at".into(), Value::String(now.clone()));
+        task.worktree_boundary
+            .insert("merge_commit_sha".into(), Value::String(merge_sha.to_string()));
+        task.worktree_boundary
+            .insert("superseded_by_task_id".into(), Value::String(String::new()));
+        task.worktree_boundary.remove("reason");
+        if !task.labels.iter().any(|l| l == "merged") {
+            task.labels.push("merged".into());
+        }
+        updated.push(task.clone());
+    }
+    for t in &updated {
+        state.emit_task(&t.id);
+    }
+    updated
+}
+
 pub fn stream_id(repo_root: &str, branch: &str) -> String {
     format!("stream:{}", branch_key(repo_root, branch))
 }

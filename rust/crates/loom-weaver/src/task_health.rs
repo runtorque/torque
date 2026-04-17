@@ -477,6 +477,105 @@ fn timestamp_to_datetime(ts: f64) -> Option<DateTime<Utc>> {
     Utc.timestamp_opt(secs, nanos).single()
 }
 
+/// Recompute advisory health for every task in `state` and write the new
+/// `health_state` / `health_since` / `health_details` fields back onto the
+/// `BoardTask` rows. Emits `task_upsert` deltas for every changed task
+/// (plus any ancestor whose rolled-up health needs refreshing). Returns
+/// the list of task ids that changed.
+///
+/// Mirrors `loom/state.py::MatrixState.recompute_task_health`.
+pub fn recompute_task_health(
+    state: &mut loom_core::state::MatrixState,
+    now_ts: Option<f64>,
+) -> Vec<String> {
+    if state.board_tasks.is_empty() {
+        return Vec::new();
+    }
+
+    let snapshots = compute_task_health(&state.board_tasks, &state.agents, now_ts);
+    let snapshot_now = now_iso(now_ts);
+
+    let mut changed: Vec<String> = Vec::new();
+    let mut changed_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for (tid, snapshot) in &snapshots {
+        let Some(task) = state.board_tasks.get_mut(tid) else {
+            continue;
+        };
+        let old_state = if task.health_state.is_empty() {
+            "healthy".to_string()
+        } else {
+            task.health_state.clone()
+        };
+        let old_source = task
+            .health_details
+            .get("source_task_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let new_source = snapshot
+            .details
+            .get("source_task_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let state_changed = old_state != snapshot.state;
+        let source_changed = old_source != new_source;
+        let next_since = if state_changed || source_changed || task.health_since.is_empty() {
+            snapshot_now.clone()
+        } else {
+            task.health_since.clone()
+        };
+        if task.health_state == snapshot.state
+            && task.health_since == next_since
+            && task.health_details == snapshot.details
+        {
+            continue;
+        }
+        task.health_state = snapshot.state.clone();
+        task.health_since = next_since;
+        task.health_details = snapshot.details.clone();
+        changed.push(tid.clone());
+        changed_set.insert(tid.clone());
+    }
+
+    if changed.is_empty() {
+        return Vec::new();
+    }
+
+    // Re-emit ancestors whose rolled-up health depends on these changes so
+    // root cards refresh without waiting on their own direct mutation.
+    let ancestor_ids: Vec<String> = {
+        let mut acc: Vec<String> = Vec::new();
+        for tid in &changed {
+            let mut pid = state
+                .board_tasks
+                .get(tid)
+                .map(|t| t.parent_task_id.clone())
+                .unwrap_or_default();
+            while !pid.is_empty() {
+                if changed_set.contains(&pid) {
+                    break;
+                }
+                let next_parent = match state.board_tasks.get(&pid) {
+                    Some(p) => p.parent_task_id.clone(),
+                    None => break,
+                };
+                acc.push(pid.clone());
+                changed_set.insert(pid.clone());
+                pid = next_parent;
+            }
+        }
+        acc
+    };
+    changed.extend(ancestor_ids);
+
+    for tid in &changed {
+        state.emit_task(tid);
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -49,6 +49,7 @@ async fn handle_ws(app: AppState, socket: WebSocket) {
         terminal_bridge: app.terminal_bridge.clone(),
         terminals: app.terminals.clone(),
         weaver_buffer: app.weaver_buffer.clone(),
+            notifier: app.notifier.clone(),
     };
 
     let snapshot = build_snapshot(&app).await;
@@ -211,6 +212,7 @@ async fn handle_terminal_ws(app: AppState, cell_id: String, socket: WebSocket) {
                                     terminal_bridge: app.terminal_bridge.clone(),
                                     terminals: app.terminals.clone(),
                                     weaver_buffer: app.weaver_buffer.clone(),
+            notifier: app.notifier.clone(),
                                 }).await;
                             }
                             _ => {}

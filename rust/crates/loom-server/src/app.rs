@@ -199,6 +199,7 @@ pub struct AppState {
     pub terminal_bridge: TerminalBridgeClient,
     pub terminals: TerminalHub,
     pub weaver_buffer: WeaverEventBuffer,
+    pub notifier: crate::notifications::NotificationManager,
 }
 
 pub struct ServerHandle {
@@ -232,6 +233,43 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
     let state = Arc::new(Mutex::new(state));
     let bus = EventBus::new();
 
+    // Recompute task health on every throttled broadcast so any burst of
+    // mutations picks up a fresh `health_state` before the frame goes out.
+    // Mirrors Python `EventBus._fire_broadcast` coalescing
+    // `recompute_task_health` with the trailing-edge broadcast.
+    {
+        let db_hook = db.clone();
+        let hook: loom_core::events::PreFlushHook = std::sync::Arc::new(move |state_arc| {
+            let db_hook = db_hook.clone();
+            Box::pin(async move {
+                let changed = {
+                    let mut st = state_arc.lock().await;
+                    loom_weaver::task_health::recompute_task_health(&mut st, None)
+                };
+                if changed.is_empty() {
+                    return;
+                }
+                let tasks = {
+                    let st = state_arc.lock().await;
+                    changed
+                        .iter()
+                        .filter_map(|tid| st.board_tasks.get(tid).cloned())
+                        .collect::<Vec<_>>()
+                };
+                for t in tasks {
+                    if let Err(err) = db_hook.save_board_task(&t).await {
+                        tracing::warn!(
+                            task = %t.id,
+                            ?err,
+                            "task health save failed"
+                        );
+                    }
+                }
+            })
+        });
+        bus.set_pre_flush_hook(hook).await;
+    }
+
     let terminals = TerminalHub::default();
     let (pty, mut pty_rx) = build_pty_backend(&config).await;
 
@@ -244,6 +282,7 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
         terminal_bridge: TerminalBridgeClient::from_env(),
         terminals: terminals.clone(),
         weaver_buffer: WeaverEventBuffer::default(),
+        notifier: crate::notifications::NotificationManager::new(),
     };
 
     // PTY event pump → state mutations.

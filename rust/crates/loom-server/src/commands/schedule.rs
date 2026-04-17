@@ -54,6 +54,18 @@ pub async fn create(ctx: &CmdContext, req: &Value) -> CmdResult {
         updated_at: chrono::Utc::now().to_rfc3339(),
     };
 
+    // Reject schedules with neither form of timing.
+    if sched.cron_expr.trim().is_empty() && sched.scheduled_at.trim().is_empty() {
+        return Err(CmdError::BadRequest(
+            "Either cron_expr or scheduled_at is required".into(),
+        ));
+    }
+
+    // Compute the first next_run_at if the caller didn't pass one.
+    if sched.next_run_at.trim().is_empty() {
+        sched.next_run_at = compute_next_run_at(&sched.cron_expr, &sched.scheduled_at, &sched.timezone)?;
+    }
+
     {
         let mut st = ctx.state.lock().await;
         if !st.groups.contains_key(&group) {
@@ -69,6 +81,25 @@ pub async fn create(ctx: &CmdContext, req: &Value) -> CmdResult {
     ctx.db.save_schedule(&sched).await?;
     flush(ctx).await;
     Ok(json!({ "ok": true, "schedule_id": sched.id, "slug": sched.slug }))
+}
+
+fn compute_next_run_at(
+    cron_expr: &str,
+    scheduled_at: &str,
+    tz: &str,
+) -> Result<String, CmdError> {
+    let cron_expr = cron_expr.trim();
+    let scheduled_at = scheduled_at.trim();
+    if !cron_expr.is_empty() {
+        let now = chrono::Utc::now();
+        let nxt = loom_core::cron::next_run(cron_expr, now, tz)
+            .map_err(|e| CmdError::BadRequest(format!("invalid cron_expr: {e}")))?;
+        Ok(nxt.to_rfc3339())
+    } else if !scheduled_at.is_empty() {
+        Ok(scheduled_at.to_string())
+    } else {
+        Ok(String::new())
+    }
 }
 
 pub async fn update(ctx: &CmdContext, req: &Value) -> CmdResult {
@@ -98,8 +129,21 @@ pub async fn update(ctx: &CmdContext, req: &Value) -> CmdResult {
                 Value::String(chrono::Utc::now().to_rfc3339()),
             );
         }
-        let updated: Schedule =
+        let mut updated: Schedule =
             serde_json::from_value(current).map_err(|e| CmdError::BadRequest(e.to_string()))?;
+        // Recompute next_run_at whenever timing fields were touched.
+        let timing_touched = patch
+            .as_object()
+            .map(|obj| {
+                obj.contains_key("cron_expr")
+                    || obj.contains_key("scheduled_at")
+                    || obj.contains_key("timezone")
+            })
+            .unwrap_or(false);
+        if timing_touched {
+            updated.next_run_at =
+                compute_next_run_at(&updated.cron_expr, &updated.scheduled_at, &updated.timezone)?;
+        }
         let op_payload = serde_json::to_value(&updated).unwrap_or(Value::Null);
         st.schedules.insert(id.clone(), updated.clone());
         st.emit(DeltaOp::ScheduleUpsert(op_payload));
