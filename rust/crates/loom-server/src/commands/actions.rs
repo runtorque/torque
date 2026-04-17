@@ -228,6 +228,9 @@ pub async fn discover_pipelines(ctx: &CmdContext, _req: &Value) -> CmdResult {
     for info in &actions {
         all_nodes.insert(info.name.clone());
         for t in &info.transitions {
+            if t.action.trim().is_empty() {
+                continue;
+            }
             all_nodes.insert(t.action.clone());
             adj.entry(info.name.clone())
                 .or_default()
@@ -271,13 +274,18 @@ pub async fn discover_pipelines(ctx: &CmdContext, _req: &Value) -> CmdResult {
     let edges: Vec<Value> = actions
         .iter()
         .flat_map(|info| {
-            info.transitions.iter().map(move |t| {
-                json!({
-                    "from": info.name,
-                    "to": t.action,
-                    "when": t.when,
-                    "status": t.status,
-                })
+            info.transitions.iter().filter_map(move |t| {
+                if t.action.trim().is_empty() {
+                    None
+                } else {
+                    Some(json!({
+                        "from": info.name,
+                        "to": t.action,
+                        "when": t.when,
+                        "status": t.status,
+                        "target": t.target,
+                    }))
+                }
             })
         })
         .collect();
@@ -299,7 +307,11 @@ fn project_actions_root() -> Option<PathBuf> {
 /// Exposed for sibling modules (e.g. dispatch.rs) that need the same path.
 pub fn project_actions_root_pub() -> Option<PathBuf> {
     if let Ok(root) = std::env::var("LOOM_PROJECT_ROOT") {
-        return Some(PathBuf::from(root).join(".loom").join("actions"));
+        return Some(
+            crate::paths::expand_user_path(&root)
+                .join(".loom")
+                .join("actions"),
+        );
     }
     std::env::current_dir()
         .ok()

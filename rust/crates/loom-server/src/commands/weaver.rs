@@ -232,6 +232,445 @@ pub async fn action_show(ctx: &CmdContext, req: &Value) -> CmdResult {
     crate::commands::actions::get_action(ctx, &forwarded).await
 }
 
+pub async fn task_create(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let title = required_str(req, "title")?.to_string();
+    let mut payload = json!({
+        "task": title,
+        "group": group,
+        "description": optional_str(req, "description").unwrap_or(""),
+        "lane": optional_str(req, "lane").unwrap_or(""),
+        "action_name": optional_str(req, "action").unwrap_or(""),
+        "action_vars": req.get("action_vars").cloned().unwrap_or_else(|| json!({})),
+        "labels": req.get("labels").cloned().unwrap_or_else(|| json!([])),
+        "verification_mode": optional_str(req, "verification_mode").unwrap_or(""),
+        "verification_state": optional_str(req, "verification_state").unwrap_or(""),
+        "verification_notes": optional_str(req, "verification_notes").unwrap_or(""),
+        "verification_summary": req
+            .get("verification_summary")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+    });
+    if let Some(obj) = payload.as_object_mut() {
+        obj.retain(|_, value| match value {
+            Value::String(s) => !s.is_empty(),
+            Value::Array(a) => !a.is_empty(),
+            Value::Object(o) => !o.is_empty(),
+            _ => true,
+        });
+    }
+    crate::commands::board::add_task(ctx, &payload).await
+}
+
+pub async fn task_edit(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let task_ident = required_str(req, "task")?;
+    let task_id = {
+        let st = ctx.state.lock().await;
+        resolve_group_task_id(&st, &group, task_ident)
+            .ok_or_else(|| CmdError::BadRequest("Task not found".into()))?
+    };
+
+    let mut fields = Map::new();
+    if let Some(value) = req.get("title") {
+        fields.insert("task".into(), value.clone());
+    }
+    if let Some(value) = req.get("description") {
+        fields.insert("description".into(), value.clone());
+    }
+    if let Some(value) = req.get("labels") {
+        fields.insert("labels".into(), value.clone());
+    }
+    if let Some(value) = req.get("action") {
+        fields.insert("action_name".into(), value.clone());
+    }
+    if let Some(value) = req.get("action_vars") {
+        fields.insert("action_vars".into(), value.clone());
+    }
+    for key in [
+        "verification_mode",
+        "verification_state",
+        "verification_notes",
+        "verification_summary",
+    ] {
+        if let Some(value) = req.get(key) {
+            fields.insert(key.to_string(), value.clone());
+        }
+    }
+
+    crate::commands::board::update_task(
+        ctx,
+        &json!({
+            "id": task_id,
+            "fields": fields,
+        }),
+    )
+    .await
+}
+
+pub async fn task_verify(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let task_ident = required_str(req, "task")?;
+    let task_id = {
+        let st = ctx.state.lock().await;
+        resolve_group_task_id(&st, &group, task_ident)
+            .ok_or_else(|| CmdError::BadRequest("Task not found".into()))?
+    };
+    let actor_name = {
+        let st = ctx.state.lock().await;
+        let weaver_id = optional_str(req, "_weaver_id").unwrap_or("");
+        st.agents
+            .get(weaver_id)
+            .map(agent_display_name)
+            .unwrap_or_else(|| "weaver".into())
+    };
+
+    crate::commands::board::verify_task(
+        ctx,
+        &json!({
+            "id": task_id,
+            "state": optional_str(req, "state").unwrap_or(""),
+            "mode": optional_str(req, "mode").unwrap_or(""),
+            "notes": optional_str(req, "notes").unwrap_or(""),
+            "updated_by": format!("weaver:{actor_name}"),
+        }),
+    )
+    .await
+}
+
+pub async fn task_move(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let task_ident = required_str(req, "task")?;
+    let task_id = {
+        let st = ctx.state.lock().await;
+        resolve_group_task_id(&st, &group, task_ident)
+            .ok_or_else(|| CmdError::BadRequest("Task not found".into()))?
+    };
+    crate::commands::board::move_task(
+        ctx,
+        &json!({
+            "id": task_id,
+            "lane": required_str(req, "lane")?,
+        }),
+    )
+    .await
+}
+
+pub async fn task_dispatch(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let weaver_id = required_str(req, "_weaver_id")?.to_string();
+    let task_ident = required_str(req, "task")?;
+    let task_id = {
+        let st = ctx.state.lock().await;
+        resolve_group_task_id(&st, &group, task_ident)
+            .ok_or_else(|| CmdError::BadRequest("Task not found".into()))?
+    };
+
+    let mut payload = json!({
+        "task_id": task_id,
+        "_weaver_dispatch_group": group,
+        "_weaver_dispatch_id": weaver_id,
+    });
+    if let Some(agent_ident) = optional_str(req, "agent")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let agent_id = {
+            let st = ctx.state.lock().await;
+            resolve_visible_agent_id(&st, &group, Some(&weaver_id), agent_ident)
+                .ok_or_else(|| CmdError::BadRequest(format!("Agent not found: {agent_ident}")))?
+        };
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("agent_id".into(), Value::String(agent_id));
+        }
+    } else if let Some(obj) = payload.as_object_mut() {
+        obj.insert(
+            "_created_by_weaver_id".into(),
+            Value::String(weaver_id.clone()),
+        );
+        let (target_session_id, target_window_id) = {
+            let st = ctx.state.lock().await;
+            let weaver = st.agents.get(&weaver_id);
+            (
+                weaver
+                    .and_then(|cell| cell.session_id.as_ref())
+                    .map(|value| Value::String(value.clone()))
+                    .unwrap_or(Value::Null),
+                weaver
+                    .map(|cell| Value::String(cell.window_id.clone()))
+                    .unwrap_or(Value::Null),
+            )
+        };
+        if !target_session_id.is_null() {
+            obj.insert("target_session_id".into(), target_session_id);
+        }
+        if !target_window_id.is_null()
+            && target_window_id
+                .as_str()
+                .is_some_and(|value| !value.is_empty())
+        {
+            obj.insert("target_window_id".into(), target_window_id);
+        }
+    }
+
+    for key in ["name", "agent_type", "command", "model", "reasoning_effort"] {
+        if let Some(value) = req.get(key).cloned() {
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert(key.into(), value);
+            }
+        }
+    }
+
+    crate::commands::dispatch::dispatch_task(ctx, &payload).await
+}
+
+pub async fn batch_dispatch(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let weaver_id = required_str(req, "_weaver_id")?.to_string();
+    let raw_tasks = req
+        .get("tasks")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| CmdError::BadRequest("tasks must be a non-empty array".into()))?;
+    if raw_tasks.is_empty() {
+        return Err(CmdError::BadRequest(
+            "tasks must be a non-empty array".into(),
+        ));
+    }
+
+    let max_concurrent = match req.get("max_concurrent").and_then(Value::as_i64) {
+        Some(value) if value >= 1 => value as usize,
+        Some(_) => {
+            return Err(CmdError::BadRequest(
+                "max_concurrent must be an integer >= 1".into(),
+            ))
+        }
+        None => {
+            let st = ctx.state.lock().await;
+            st.get_weaver_settings(&group)
+                .default_worker_concurrency
+                .max(1) as usize
+        }
+    };
+
+    let active_before = {
+        let st = ctx.state.lock().await;
+        active_worker_ids(&st, &group, Some(&weaver_id)).len()
+    };
+    let mut active_agents = {
+        let st = ctx.state.lock().await;
+        active_worker_ids(&st, &group, Some(&weaver_id))
+    };
+    let mut group_agents = HashMap::<String, String>::new();
+    let mut seen_task_ids = HashSet::<String>::new();
+    let mut results = Vec::<Value>::new();
+
+    for (idx, raw_entry) in raw_tasks.iter().enumerate() {
+        let Some(entry) = raw_entry.as_object() else {
+            results.push(json!({
+                "index": idx,
+                "status": "failed",
+                "reason": "invalid_entry",
+                "message": "Each tasks entry must be an object.",
+            }));
+            continue;
+        };
+        let task_ident = entry
+            .get("task")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if task_ident.is_empty() {
+            results.push(json!({
+                "index": idx,
+                "status": "failed",
+                "reason": "invalid_entry",
+                "message": "Each tasks entry must include a task string.",
+            }));
+            continue;
+        }
+        let agent_group = entry
+            .get("agent_group")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        let task_id = {
+            let st = ctx.state.lock().await;
+            resolve_group_task_id(&st, &group, &task_ident)
+        };
+        let Some(task_id) = task_id else {
+            results.push(json!({
+                "index": idx,
+                "task": task_ident,
+                "status": "failed",
+                "reason": "task_not_found",
+                "message": "Task not found.",
+            }));
+            continue;
+        };
+        if !seen_task_ids.insert(task_id.clone()) {
+            results.push(json!({
+                "index": idx,
+                "task": task_ident,
+                "task_id": task_id,
+                "status": "failed",
+                "reason": "duplicate_task",
+                "message": "Task appears more than once in this batch.",
+            }));
+            continue;
+        }
+
+        let validation_error = {
+            let st = ctx.state.lock().await;
+            match st.board_tasks.get(&task_id) {
+                None => Some(("task_not_found", "Task not found.".to_string())),
+                Some(task) if !task.agent_id.trim().is_empty() => Some((
+                    "already_assigned",
+                    "Task is already linked to an agent.".to_string(),
+                )),
+                Some(task) if task.lane == ARCHIVED_LANE => {
+                    Some(("already_archived", "Task is archived.".to_string()))
+                }
+                Some(task) if task.lane == "Done" => {
+                    Some(("already_done", "Task is already Done.".to_string()))
+                }
+                Some(task) if task.lane == "In Progress" => Some((
+                    "already_in_progress",
+                    "Task is already in the dispatch lane.".to_string(),
+                )),
+                Some(task) if !st.board_deps_met(task) => {
+                    let unmet = blocked_dependency_titles(&st, task);
+                    Some((
+                        "blocked_by_dependencies",
+                        format!("Blocked by dependencies: {}", unmet.join(", ")),
+                    ))
+                }
+                Some(_) => None,
+            }
+        };
+        if let Some((reason, message)) = validation_error {
+            results.push(json!({
+                "index": idx,
+                "task": task_ident,
+                "task_id": task_id,
+                "status": "failed",
+                "reason": reason,
+                "message": message,
+            }));
+            continue;
+        }
+
+        let target_agent_id = if !agent_group.is_empty() {
+            group_agents.get(&agent_group).cloned().unwrap_or_default()
+        } else {
+            String::new()
+        };
+        if !target_agent_id.is_empty() && active_agents.contains(&target_agent_id) {
+            results.push(json!({
+                "index": idx,
+                "task": task_ident,
+                "task_id": task_id,
+                "status": "deferred",
+                "reason": "agent_group_busy",
+                "message": "The agent_group worker is still busy; dispatch this follow-up after it finishes.",
+                "agent_group": agent_group,
+                "agent_id": target_agent_id,
+            }));
+            continue;
+        }
+        if target_agent_id.is_empty() && active_agents.len() >= max_concurrent {
+            results.push(json!({
+                "index": idx,
+                "task": task_ident,
+                "task_id": task_id,
+                "status": "deferred",
+                "reason": "max_concurrent_reached",
+                "message": "Dispatch would exceed max_concurrent for the group.",
+                "agent_group": agent_group,
+            }));
+            continue;
+        }
+
+        let mut payload = json!({
+            "group": group,
+            "_weaver_id": weaver_id,
+            "task": task_id,
+        });
+        if !target_agent_id.is_empty() {
+            if let Some(obj) = payload.as_object_mut() {
+                obj.insert("agent".into(), Value::String(target_agent_id.clone()));
+            }
+        }
+        let result = task_dispatch(ctx, &payload).await;
+        match result {
+            Ok(value) => {
+                let resolved_agent_id = value
+                    .get("agent_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                if !resolved_agent_id.is_empty() {
+                    active_agents.insert(resolved_agent_id.clone());
+                    if !agent_group.is_empty() {
+                        group_agents.insert(agent_group.clone(), resolved_agent_id.clone());
+                    }
+                }
+                results.push(json!({
+                    "index": idx,
+                    "task": task_ident,
+                    "task_id": task_id,
+                    "status": "dispatched",
+                    "agent_group": agent_group,
+                    "agent_id": resolved_agent_id,
+                }));
+            }
+            Err(err) => {
+                results.push(json!({
+                    "index": idx,
+                    "task": task_ident,
+                    "task_id": task_id,
+                    "status": "failed",
+                    "reason": "dispatch_error",
+                    "message": match err {
+                        CmdError::BadRequest(msg) => msg,
+                        CmdError::Engine(engine) => engine.to_string(),
+                        CmdError::NotImplemented => "dispatch not implemented".to_string(),
+                    },
+                }));
+            }
+        }
+    }
+
+    Ok(json!({
+        "type": "ok",
+        "max_concurrent": max_concurrent,
+        "active_before": active_before,
+        "active_after": active_agents.len(),
+        "results": results,
+    }))
+}
+
+pub async fn task_resolve(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let task_ident = required_str(req, "task")?;
+    let task_id = {
+        let st = ctx.state.lock().await;
+        resolve_group_task_id(&st, &group, task_ident)
+            .ok_or_else(|| CmdError::BadRequest("Task not found".into()))?
+    };
+    crate::commands::dispatch::resolve_ask(
+        ctx,
+        &json!({
+            "task_id": task_id,
+            "reply": required_str(req, "answer")?,
+        }),
+    )
+    .await
+}
+
 pub async fn events(ctx: &CmdContext, req: &Value) -> CmdResult {
     let group = required_str(req, "group")?.to_string();
     let since_id = req.get("since_id").and_then(Value::as_u64).unwrap_or(0);
@@ -405,6 +844,46 @@ pub async fn note(ctx: &CmdContext, req: &Value) -> CmdResult {
     .await?;
     flush(ctx).await;
     Ok(json!({ "ok": true, "settings": settings }))
+}
+
+pub async fn agent_message(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let weaver_id = required_str(req, "_weaver_id")?.to_string();
+    let agent_ident = required_str(req, "agent")?.to_string();
+    let message = required_str(req, "message")?.to_string();
+    if message.trim().is_empty() {
+        return Err(CmdError::BadRequest("Message is required".into()));
+    }
+    let agent_id = {
+        let st = ctx.state.lock().await;
+        resolve_visible_agent_id(&st, &group, Some(&weaver_id), &agent_ident)
+            .ok_or_else(|| CmdError::BadRequest(format!("Agent not found: {agent_ident}")))?
+    };
+    send_weaver_message_to_agent(ctx, &weaver_id, &agent_id, &message).await
+}
+
+pub async fn agent_close(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let weaver_id = required_str(req, "_weaver_id")?.to_string();
+    let agent_ident = required_str(req, "agent")?.to_string();
+    let agent_id = {
+        let st = ctx.state.lock().await;
+        resolve_visible_agent_id(&st, &group, Some(&weaver_id), &agent_ident)
+            .ok_or_else(|| CmdError::BadRequest(format!("Agent not found: {agent_ident}")))?
+    };
+    crate::commands::agents::remove_agent(ctx, &json!({ "id": agent_id })).await
+}
+
+pub async fn agent_relaunch(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let weaver_id = required_str(req, "_weaver_id")?.to_string();
+    let agent_ident = required_str(req, "agent")?.to_string();
+    let agent_id = {
+        let st = ctx.state.lock().await;
+        resolve_visible_agent_id(&st, &group, Some(&weaver_id), &agent_ident)
+            .ok_or_else(|| CmdError::BadRequest(format!("Agent not found: {agent_ident}")))?
+    };
+    crate::commands::dispatch::relaunch_agent(ctx, &json!({ "id": agent_id })).await
 }
 
 pub async fn dismiss_note(ctx: &CmdContext, req: &Value) -> CmdResult {
@@ -585,7 +1064,9 @@ pub async fn launch_settings(ctx: &CmdContext, req: &Value) -> CmdResult {
     Ok(json!({ "ok": true, "settings": settings }))
 }
 
-pub async fn flush_now(_ctx: &CmdContext, _req: &Value) -> CmdResult {
+pub async fn flush_now(ctx: &CmdContext, req: &Value) -> CmdResult {
+    let group = required_str(req, "group")?.to_string();
+    let _ = ctx.weaver_buffer.flush_group(ctx, &group).await;
     Ok(json!({ "ok": true }))
 }
 
@@ -1388,6 +1869,118 @@ fn resolve_visible_agent_id(
     Some(agent_id)
 }
 
+fn resolve_group_task_id(st: &MatrixState, group: &str, ident: &str) -> Option<String> {
+    let task_id = st.resolve_task_ident(ident)?;
+    let task = st.board_tasks.get(&task_id)?;
+    if task.group != group {
+        return None;
+    }
+    Some(task_id)
+}
+
+fn active_worker_ids(st: &MatrixState, group: &str, weaver_id: Option<&str>) -> HashSet<String> {
+    st.agents
+        .values()
+        .filter(|cell| cell.cell_type == "agent")
+        .filter(|cell| cell.group == group)
+        .filter(|cell| weaver_id.map(str::trim).unwrap_or("") != cell.id)
+        .filter(|cell| agent_visible(st, weaver_id, &cell.id))
+        .filter(|cell| st.agent_is_busy(&cell.id))
+        .map(|cell| cell.id.clone())
+        .collect()
+}
+
+fn blocked_dependency_titles(st: &MatrixState, task: &BoardTask) -> Vec<String> {
+    task.depends_on
+        .iter()
+        .filter_map(|dep_id| st.board_tasks.get(dep_id))
+        .filter(|dependency| !loom_core::state::board_task_counts_as_done(Some(dependency)))
+        .map(|dependency| dependency.task.chars().take(40).collect::<String>())
+        .collect()
+}
+
+fn summarize_weaver_message(message: &str, limit: usize) -> String {
+    let summary = message
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_else(|| message.trim());
+    if summary.is_empty() {
+        return "Weaver follow-up".into();
+    }
+    let char_count = summary.chars().count();
+    if char_count <= limit {
+        return summary.to_string();
+    }
+    let mut truncated = summary
+        .chars()
+        .take(limit.saturating_sub(1))
+        .collect::<String>();
+    truncated.push('…');
+    truncated
+}
+
+fn weaver_followup_task_title(message: &str) -> String {
+    format!("Weaver: {}", summarize_weaver_message(message, 72))
+}
+
+fn format_weaver_message_prompt(message: &str, task_id: &str) -> String {
+    format!(
+        "\n## Message from Weaver\n{message}\n\nTask: {task_id}\nReply with: loom_reply(task=\"{task_id}\", message=\"your response\")\n---\n"
+    )
+}
+
+fn resolve_pending_weaver_reply_task(
+    st: &MatrixState,
+    agent_id: &str,
+    task_id: &str,
+) -> Result<String, CmdError> {
+    let pending = st.agent_pending_weaver_reply_tasks(agent_id);
+    let task_id = task_id.trim();
+    if !task_id.is_empty() {
+        let resolved = st
+            .resolve_task_ident(task_id)
+            .ok_or_else(|| CmdError::BadRequest(format!("Task not found: {task_id}")))?;
+        let task = st
+            .board_tasks
+            .get(&resolved)
+            .ok_or_else(|| CmdError::BadRequest(format!("Task not found: {task_id}")))?;
+        if task.reply_agent_id != agent_id {
+            return Err(CmdError::BadRequest(format!(
+                "Task {} is not awaiting a reply from this agent",
+                task.id
+            )));
+        }
+        if board_task_is_closed(Some(task)) {
+            return Err(CmdError::BadRequest(format!(
+                "Task {} is already closed",
+                task.id
+            )));
+        }
+        return Ok(task.id.clone());
+    }
+    match pending.len() {
+        0 => Err(CmdError::BadRequest(
+            "No pending weaver message to reply to".into(),
+        )),
+        1 => Ok(pending[0].id.clone()),
+        _ => {
+            let mut ids = pending
+                .iter()
+                .take(5)
+                .map(|task| task.id.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+            if pending.len() > 5 {
+                ids.push_str(", …");
+            }
+            Err(CmdError::BadRequest(format!(
+                "Multiple pending weaver messages; reply with task=<id>. Open reply tasks: {ids}"
+            )))
+        }
+    }
+}
+
 fn format_human_reply(answer: &str) -> String {
     format!("\n## Human Reply\n{answer}\n---\n")
 }
@@ -1451,29 +2044,236 @@ async fn append_panel_event(
             .unwrap_or_default();
         (weaver_id, agent_name)
     };
-    let timestamp = Utc::now().timestamp_millis() as f64 / 1000.0;
-    let id = ctx
-        .db
-        .append_panel_event(
-            kind,
-            &cell_id,
-            &agent_name,
-            group,
+    crate::commands::compat::record_panel_event(
+        &ctx.state,
+        &ctx.db,
+        &ctx.weaver_buffer,
+        kind,
+        &cell_id,
+        &agent_name,
+        group,
+        message,
+        task_id,
+        false,
+    )
+    .await
+    .map_err(CmdError::from)
+}
+
+pub async fn send_weaver_message_to_agent(
+    ctx: &CmdContext,
+    weaver_id: &str,
+    target_agent_id: &str,
+    message: &str,
+) -> CmdResult {
+    let (target, add_payload) = {
+        let st = ctx.state.lock().await;
+        let target = st
+            .agents
+            .get(target_agent_id)
+            .cloned()
+            .ok_or_else(|| CmdError::BadRequest("Agent not found".into()))?;
+        let active_task = st.agent_current_task(target_agent_id).cloned();
+        let mut labels = vec![Value::String("loom:weaver-message".into())];
+        let mut payload = Map::from_iter([
+            (
+                "task".into(),
+                Value::String(weaver_followup_task_title(message)),
+            ),
+            ("description".into(), Value::String(message.to_string())),
+            ("lane".into(), Value::String("Backlog".into())),
+            ("status".into(), Value::String("Awaiting Reply".into())),
+            (
+                "reply_agent_id".into(),
+                Value::String(target_agent_id.to_string()),
+            ),
+        ]);
+        if let Some(task) = active_task {
+            labels.insert(0, Value::String("loom:derived".into()));
+            payload.insert("group".into(), Value::String(task.group.clone()));
+            payload.insert("parent_task_id".into(), Value::String(task.id.clone()));
+            payload.insert(
+                "pipeline_depth".into(),
+                Value::Number((task.pipeline_depth + 1).into()),
+            );
+            payload.insert(
+                "pipeline_root_id".into(),
+                Value::String(if task.pipeline_root_id.is_empty() {
+                    task.id
+                } else {
+                    task.pipeline_root_id
+                }),
+            );
+        } else {
+            payload.insert("group".into(), Value::String(target.group.clone()));
+        }
+        payload.insert("labels".into(), Value::Array(labels));
+        (target, Value::Object(payload))
+    };
+
+    let created = crate::commands::board::add_task(ctx, &add_payload).await?;
+    let task_id = created
+        .get("task_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if task_id.is_empty() {
+        return Err(CmdError::BadRequest(
+            "Failed to create Weaver follow-up task".into(),
+        ));
+    }
+
+    let prompt = format_weaver_message_prompt(message, &task_id);
+    if let Err(err) =
+        crate::commands::dispatch::send_text_to_cell(ctx, target_agent_id, &prompt).await
+    {
+        let _ = crate::commands::board::remove_task(ctx, &json!({ "id": task_id })).await;
+        return Err(CmdError::BadRequest(format!(
+            "Failed to send message: {err:?}"
+        )));
+    }
+
+    let (task, agent, weaver_name) = {
+        let mut st = ctx.state.lock().await;
+        let weaver_name = st
+            .agents
+            .get(weaver_id)
+            .map(agent_display_name)
+            .unwrap_or_else(|| "Weaver".into());
+        let mut task =
+            st.board_tasks.get(&task_id).cloned().ok_or_else(|| {
+                CmdError::BadRequest("Failed to create Weaver follow-up task".into())
+            })?;
+        task.messages.push(json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "action": "weaver_message",
+            "message": message,
+            "agent_name": weaver_name,
+        }));
+        st.upsert_task(task.clone())?;
+        let Some(agent) = st.agents.get_mut(target_agent_id) else {
+            return Err(CmdError::BadRequest("Agent not found".into()));
+        };
+        agent.pending_weaver_message = true;
+        let agent = agent.clone();
+        st.emit_task(&task_id);
+        st.emit_agent(target_agent_id);
+        (task, agent, weaver_name)
+    };
+
+    ctx.db.save_board_task(&task).await?;
+    ctx.db.save_agent(&agent).await?;
+    ctx.db
+        .save_agent_message_record(
+            &agent.id,
+            &task.id,
+            Utc::now().timestamp() as f64,
+            "weaver_message",
             message,
-            task_id,
-            timestamp,
         )
         .await?;
+    let _ = crate::commands::compat::record_panel_event(
+        &ctx.state,
+        &ctx.db,
+        &ctx.weaver_buffer,
+        "weaver_message",
+        &agent.id,
+        &agent.name,
+        &target.group,
+        &message.chars().take(200).collect::<String>(),
+        &task.id,
+        false,
+    )
+    .await;
+    flush(ctx).await;
     Ok(json!({
-        "id": id,
-        "timestamp": timestamp,
-        "kind": kind,
-        "cell_id": cell_id,
-        "agent_name": agent_name,
-        "group": group,
-        "message": message,
-        "task_id": task_id,
+        "ok": true,
+        "task_id": task.id,
+        "agent_id": agent.id,
+        "agent_name": agent_display_name(&agent),
+        "weaver_name": weaver_name,
     }))
+}
+
+pub async fn handle_weaver_reply(
+    ctx: &CmdContext,
+    agent_id: &str,
+    task_id: &str,
+    message: &str,
+) -> CmdResult {
+    if message.trim().is_empty() {
+        return Err(CmdError::BadRequest("Reply message is required".into()));
+    }
+
+    let resolved_task_id = {
+        let st = ctx.state.lock().await;
+        resolve_pending_weaver_reply_task(&st, agent_id, task_id)?
+    };
+
+    let (task, agent, group) = {
+        let mut st = ctx.state.lock().await;
+        let mut task = st
+            .board_tasks
+            .get(&resolved_task_id)
+            .cloned()
+            .ok_or_else(|| CmdError::BadRequest("Task not found".into()))?;
+        task.messages.push(json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "action": "reply",
+            "message": message,
+            "agent_name": st.agents.get(agent_id).map(|cell| cell.name.clone()).unwrap_or_default(),
+        }));
+        task.status.clear();
+        if !board_task_is_closed(Some(&task)) {
+            task.lane = "Done".into();
+            task.lane_entered_at = chrono::Utc::now().to_rfc3339();
+        }
+        task.updated_at = chrono::Utc::now().to_rfc3339();
+        st.upsert_task(task.clone())?;
+        let still_pending = st
+            .agent_pending_weaver_reply_tasks(agent_id)
+            .into_iter()
+            .any(|pending| pending.id != task.id);
+        let agent = {
+            let agent = st
+                .agents
+                .get_mut(agent_id)
+                .ok_or_else(|| CmdError::BadRequest("agent not found".into()))?;
+            agent.pending_weaver_message = still_pending;
+            agent.clone()
+        };
+        let group = agent.group.clone();
+        st.emit_task(&task.id);
+        st.emit_agent(agent_id);
+        (task, agent, group)
+    };
+
+    ctx.db.save_board_task(&task).await?;
+    ctx.db.save_agent(&agent).await?;
+    ctx.db
+        .save_agent_message_record(
+            &agent.id,
+            &task.id,
+            Utc::now().timestamp() as f64,
+            "reply",
+            message,
+        )
+        .await?;
+    let _ = crate::commands::compat::record_panel_event(
+        &ctx.state,
+        &ctx.db,
+        &ctx.weaver_buffer,
+        "agent_reply",
+        &agent.id,
+        &agent.name,
+        &group,
+        &message.chars().take(200).collect::<String>(),
+        &task.id,
+        false,
+    )
+    .await;
+    flush(ctx).await;
+    Ok(json!({ "ok": true, "task_id": task.id }))
 }
 
 fn read_journal_entries(

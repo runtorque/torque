@@ -312,8 +312,11 @@ pub async fn update_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
         let old_name = cell.name.clone();
 
         // Deserialize back
-        let new_cell: AgentCell =
+        let mut new_cell: AgentCell =
             serde_json::from_value(current).map_err(|e| CmdError::BadRequest(e.to_string()))?;
+        if !new_cell.directory.is_empty() {
+            new_cell.directory = crate::paths::expand_user_path_string(&new_cell.directory);
+        }
         let group = new_cell.group.clone();
         st.agents.insert(id.clone(), new_cell);
 
@@ -579,7 +582,7 @@ fn apply_common_fields(cell: &mut AgentCell, req: &Value) {
         cell.command = cmd.to_string();
     }
     if let Some(dir) = req.get("directory").and_then(|v| v.as_str()) {
-        cell.directory = dir.to_string();
+        cell.directory = crate::paths::expand_user_path_string(dir);
     }
     if let Some(profile) = req.get("profile").and_then(|v| v.as_str()) {
         cell.profile = profile.to_string();
@@ -721,11 +724,11 @@ pub(crate) fn apply_agent_defaults(
     req: &Value,
 ) {
     if cell.directory.is_empty() {
-        cell.directory = first_nonempty([
+        cell.directory = crate::paths::expand_user_path_string(&first_nonempty([
             settings.agent_directory.clone(),
             settings.default_directory.clone(),
             project_root_fallback(),
-        ]);
+        ]));
     }
     if cell.profile == "Default" {
         cell.profile = first_nonempty([
@@ -851,12 +854,12 @@ fn apply_terminal_defaults(
         ]);
     }
     if cell.directory.is_empty() {
-        cell.directory = first_nonempty([
+        cell.directory = crate::paths::expand_user_path_string(&first_nonempty([
             parent_worktree.to_string(),
             settings.terminal_directory.clone(),
             settings.default_directory.clone(),
             project_root_fallback(),
-        ]);
+        ]));
     }
     if cell.tab_color.is_empty() {
         let terminal_color = settings.terminal_tab_color.clone();
@@ -952,10 +955,12 @@ fn shell_escape(value: &str) -> String {
 }
 
 fn project_root_fallback() -> String {
-    std::env::var("LOOM_PROJECT_ROOT")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| crate::app::repo_root().to_string_lossy().to_string())
+    crate::paths::expand_user_path_string(
+        &std::env::var("LOOM_PROJECT_ROOT")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| crate::app::repo_root().to_string_lossy().to_string()),
+    )
 }
 
 pub(crate) fn first_nonempty<const N: usize>(values: [String; N]) -> String {

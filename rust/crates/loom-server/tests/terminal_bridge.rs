@@ -143,6 +143,7 @@ async fn spawn_loom_server(bridge_url: Option<String>) -> (SocketAddr, Arc<Mutex
         ui_agents: Default::default(),
         terminal_bridge: terminal_bridge_client,
         terminals: Default::default(),
+        weaver_buffer: loom_server::weaver_buffer::WeaverEventBuffer::default(),
     };
 
     let router = Router::new()

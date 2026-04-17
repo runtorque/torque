@@ -250,7 +250,11 @@ fn resolve_path(name: &str) -> Option<(PathBuf, &'static str)> {
 
 fn project_templates_root() -> Option<PathBuf> {
     if let Ok(root) = std::env::var("LOOM_PROJECT_ROOT") {
-        return Some(PathBuf::from(root).join(".loom").join("agents"));
+        return Some(
+            crate::paths::expand_user_path(&root)
+                .join(".loom")
+                .join("agents"),
+        );
     }
     std::env::current_dir()
         .ok()

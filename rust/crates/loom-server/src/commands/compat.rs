@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 use loom_core::delta::DeltaOp;
 use loom_core::state::MatrixState;
 
+use crate::weaver_buffer::WeaverEventBuffer;
 use loom_core::db::LoomDb;
 
 use super::{ok, optional_str, required_str, CmdContext, CmdResult};
@@ -155,6 +156,7 @@ fn sanitize_filename(value: &str) -> PathBuf {
 pub async fn record_panel_event(
     state: &Arc<Mutex<MatrixState>>,
     db: &LoomDb,
+    weaver_buffer: &WeaverEventBuffer,
     kind: &str,
     cell_id: &str,
     agent_name: &str,
@@ -183,6 +185,7 @@ pub async fn record_panel_event(
     };
     db.trim_panel_events(500).await?;
     let mut st = state.lock().await;
+    weaver_buffer.record_event(&st, &event).await;
     st.emit(DeltaOp::EventAppend(event.clone()));
     Ok(event)
 }

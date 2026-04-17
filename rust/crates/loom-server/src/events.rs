@@ -205,6 +205,7 @@ async fn handle_event(
             let _ = crate::commands::compat::record_panel_event(
                 &app.state,
                 &app.db,
+                &app.weaver_buffer,
                 &kind,
                 &agent.id,
                 &agent.name,
@@ -219,14 +220,12 @@ async fn handle_event(
         if let Some((seq, ops)) = st.drain_deltas() {
             app.bus.send(OutMessage::Delta { seq, ops });
         }
+        drop(st);
+        app.weaver_buffer.maybe_flush_due_for_app(&app).await;
     }
     (StatusCode::OK, Json(json!({ "ok": true })))
 }
 
 fn canonical_path(path: &str) -> String {
-    let candidate = std::path::Path::new(path);
-    std::fs::canonicalize(candidate)
-        .unwrap_or_else(|_| candidate.to_path_buf())
-        .to_string_lossy()
-        .to_string()
+    crate::paths::canonical_user_path(path)
 }

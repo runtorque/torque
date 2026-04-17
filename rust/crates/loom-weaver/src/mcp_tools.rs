@@ -91,6 +91,129 @@ pub fn weaver_tool_specs() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "weaver_task_create",
+            "description": "Create a new task on the board.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                    "group": {"type": "string"},
+                    "lane": {"type": "string"},
+                    "action": {"type": "string"},
+                    "action_vars": {"type": "object"},
+                    "labels": {"type": "array", "items": {"type": "string"}},
+                    "verification_mode": {"type": "string"},
+                    "verification_state": {"type": "string"},
+                    "verification_notes": {"type": "string"},
+                    "verification_summary": {"type": "object"}
+                },
+                "required": ["title"]
+            }
+        }),
+        json!({
+            "name": "weaver_task_edit",
+            "description": "Edit fields on an existing task.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string"},
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                    "labels": {"type": "array", "items": {"type": "string"}},
+                    "action": {"type": "string"},
+                    "action_vars": {"type": "object"},
+                    "verification_mode": {"type": "string"},
+                    "verification_state": {"type": "string"},
+                    "verification_notes": {"type": "string"},
+                    "verification_summary": {"type": "object"}
+                },
+                "required": ["task"]
+            }
+        }),
+        json!({
+            "name": "weaver_task_verify",
+            "description": "Record verification status on a task.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string"},
+                    "mode": {"type": "string"},
+                    "state": {"type": "string"},
+                    "notes": {"type": "string"},
+                    "tests_run": {"type": "string"},
+                    "human_validation_pending": {"type": "string"},
+                    "deploy_needed": {"type": "boolean"},
+                    "attempted": {"type": "boolean"},
+                    "smoke": {"type": "string"}
+                },
+                "required": ["task"]
+            }
+        }),
+        json!({
+            "name": "weaver_task_move",
+            "description": "Move a task to a different lane on the board.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string"},
+                    "lane": {"type": "string"}
+                },
+                "required": ["task", "lane"]
+            }
+        }),
+        json!({
+            "name": "weaver_task_dispatch",
+            "description": "Dispatch a task to an existing or new agent.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string"},
+                    "agent": {"type": "string"},
+                    "name": {"type": "string"},
+                    "agent_type": {"type": "string"},
+                    "command": {"type": "string"},
+                    "model": {"type": "string"},
+                    "reasoning_effort": {"type": "string"}
+                },
+                "required": ["task"]
+            }
+        }),
+        json!({
+            "name": "weaver_batch_dispatch",
+            "description": "Dispatch a planned batch of tasks with an explicit or default concurrency cap.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "task": {"type": "string"},
+                                "agent_group": {"type": "string"}
+                            },
+                            "required": ["task"]
+                        }
+                    },
+                    "max_concurrent": {"type": "integer"}
+                },
+                "required": ["tasks"]
+            }
+        }),
+        json!({
+            "name": "weaver_task_resolve",
+            "description": "Resolve an ask task by providing an answer.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string"},
+                    "answer": {"type": "string"}
+                },
+                "required": ["task", "answer"]
+            }
+        }),
+        json!({
             "name": "weaver_events",
             "description": "Read recent events for the weaver's group.",
             "inputSchema": {
@@ -178,6 +301,36 @@ pub fn weaver_tool_specs() -> Vec<Value> {
                     "kind": {"type": "string", "enum": ["note", "question"]}
                 },
                 "required": ["message"]
+            }
+        }),
+        json!({
+            "name": "weaver_agent_message",
+            "description": "Send a message to an agent's terminal and create a visible follow-up task for the exchange.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string"},
+                    "message": {"type": "string"}
+                },
+                "required": ["agent", "message"]
+            }
+        }),
+        json!({
+            "name": "weaver_agent_close",
+            "description": "Close an agent and remove it from the group.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"agent": {"type": "string"}},
+                "required": ["agent"]
+            }
+        }),
+        json!({
+            "name": "weaver_agent_relaunch",
+            "description": "Relaunch a stopped agent.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"agent": {"type": "string"}},
+                "required": ["agent"]
             }
         }),
     ]

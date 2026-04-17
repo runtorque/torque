@@ -48,6 +48,7 @@ async fn handle_ws(app: AppState, socket: WebSocket) {
         ui_agents: app.ui_agents.clone(),
         terminal_bridge: app.terminal_bridge.clone(),
         terminals: app.terminals.clone(),
+        weaver_buffer: app.weaver_buffer.clone(),
     };
 
     let snapshot = build_snapshot(&app).await;
@@ -199,6 +200,7 @@ async fn handle_terminal_ws(app: AppState, cell_id: String, socket: WebSocket) {
                                     ui_agents: app.ui_agents.clone(),
                                     terminal_bridge: app.terminal_bridge.clone(),
                                     terminals: app.terminals.clone(),
+                                    weaver_buffer: app.weaver_buffer.clone(),
                                 }).await;
                             }
                             _ => {}
@@ -257,11 +259,18 @@ fn cmd_error_message(cmd: &str, err: CmdError) -> String {
 /// Build the same snapshot shape Python emits on connect.
 pub async fn build_snapshot(app: &AppState) -> Value {
     let panel_events = app.db.load_panel_events(50, None).await.unwrap_or_default();
-    build_snapshot_locked(&app.state, &panel_events, app.pty.is_some()).await
+    build_snapshot_locked(
+        &app.state,
+        &app.weaver_buffer,
+        &panel_events,
+        app.pty.is_some(),
+    )
+    .await
 }
 
 async fn build_snapshot_locked(
     state: &Arc<tokio::sync::Mutex<loom_core::state::MatrixState>>,
+    weaver_buffer: &crate::weaver_buffer::WeaverEventBuffer,
     panel_events: &[Value],
     embedded_terminal: bool,
 ) -> Value {
@@ -294,6 +303,8 @@ async fn build_snapshot_locked(
         );
     }
 
+    let (weaver_buffer_stats, weaver_sent_events) = weaver_buffer.export_state(&st).await;
+
     json!({
         "type": "state",
         "seq": st.current_seq(),
@@ -325,8 +336,8 @@ async fn build_snapshot_locked(
         "weaver_worklog": &st.weaver_worklog,
         "weaver_streams": weaver_streams,
         "weaver_session_maps": weaver_session_maps,
-        "weaver_buffer_stats": {},
-        "weaver_sent_events": {},
+        "weaver_buffer_stats": weaver_buffer_stats,
+        "weaver_sent_events": weaver_sent_events,
         "panel_events": panel_events,
         "selected_agent_id": &st.selected_agent_id,
         "content_layout": &st.content_layout,

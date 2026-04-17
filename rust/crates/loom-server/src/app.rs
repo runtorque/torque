@@ -15,6 +15,7 @@ use tokio::sync::{mpsc, Mutex};
 use tower_http::services::ServeDir;
 
 use crate::terminal_bridge::TerminalBridgeClient;
+use crate::weaver_buffer::WeaverEventBuffer;
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
 use loom_core::state::MatrixState;
@@ -194,6 +195,7 @@ pub struct AppState {
     /// Optional HTTP client for the thin Python+iTerm2 bridge runtime.
     pub terminal_bridge: TerminalBridgeClient,
     pub terminals: TerminalHub,
+    pub weaver_buffer: WeaverEventBuffer,
 }
 
 pub struct ServerHandle {
@@ -239,17 +241,15 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle> {
         ui_agents: UiAgentRegistry::default(),
         terminal_bridge: TerminalBridgeClient::from_env(),
         terminals: terminals.clone(),
+        weaver_buffer: WeaverEventBuffer::default(),
     };
 
     // PTY event pump → state mutations.
     {
-        let state_clone = state.clone();
-        let bus_clone = bus.clone();
-        let db_clone = db.clone();
-        let terminals_clone = terminals.clone();
+        let app_clone = app_state.clone();
         tokio::spawn(async move {
             while let Some(evt) = pty_rx.recv().await {
-                handle_pty_event(&state_clone, &bus_clone, &db_clone, &terminals_clone, evt).await;
+                handle_pty_event(&app_clone, evt).await;
             }
         });
     }
@@ -350,13 +350,7 @@ fn guess_content_type(filename: &str) -> &'static str {
     }
 }
 
-async fn handle_pty_event(
-    state: &Arc<Mutex<MatrixState>>,
-    bus: &EventBus,
-    db: &LoomDb,
-    terminals: &TerminalHub,
-    evt: loom_pty::PtyEvent,
-) {
+async fn handle_pty_event(app: &AppState, evt: loom_pty::PtyEvent) {
     use loom_core::events::OutMessage;
     use loom_pty::PtyEvent;
 
@@ -368,7 +362,7 @@ async fn handle_pty_event(
     };
 
     let (agent_snapshot, panel_event, clear_buffer, pending_output) = {
-        let mut st = state.lock().await;
+        let mut st = app.state.lock().await;
         let Some(cell) = st.agents.get_mut(&cell_id) else {
             return;
         };
@@ -426,20 +420,23 @@ async fn handle_pty_event(
         (agent_snapshot, panel_event, clear_buffer, pending_output)
     };
     if clear_buffer {
-        terminals
+        app.terminals
             .set_session(&cell_id, agent_snapshot.session_id.clone(), true)
             .await;
     }
     if let Some((session_id, text)) = pending_output {
-        terminals.append_output(&cell_id, &session_id, &text).await;
+        app.terminals
+            .append_output(&cell_id, &session_id, &text)
+            .await;
     }
     if agent_snapshot.session_id.is_none() {
-        terminals.set_session(&cell_id, None, false).await;
+        app.terminals.set_session(&cell_id, None, false).await;
     }
     if let Some((kind, message, task_id)) = panel_event {
         let _ = crate::commands::compat::record_panel_event(
-            state,
-            db,
+            &app.state,
+            &app.db,
+            &app.weaver_buffer,
             &kind,
             &agent_snapshot.id,
             &agent_snapshot.name,
@@ -450,9 +447,11 @@ async fn handle_pty_event(
         )
         .await;
     }
-    let _ = db.save_agent(&agent_snapshot).await;
-    let mut st = state.lock().await;
+    let _ = app.db.save_agent(&agent_snapshot).await;
+    let mut st = app.state.lock().await;
     if let Some((seq, ops)) = st.drain_deltas() {
-        bus.send(OutMessage::Delta { seq, ops });
+        app.bus.send(OutMessage::Delta { seq, ops });
     }
+    drop(st);
+    app.weaver_buffer.maybe_flush_due_for_app(app).await;
 }

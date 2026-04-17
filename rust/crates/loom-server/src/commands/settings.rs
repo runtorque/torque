@@ -217,7 +217,7 @@ fn current_context_payload(
         let path = if !cell.current_path.is_empty() {
             cell.current_path.clone()
         } else {
-            cell.directory.clone()
+            crate::paths::expand_user_path_string(&cell.directory)
         };
         if current_path.is_empty() && !path.is_empty() {
             current_path = path.clone();
@@ -235,11 +235,13 @@ fn current_context_payload(
     }
 
     if current_path.is_empty() {
-        current_path = std::env::var("LOOM_PROJECT_ROOT")
-            .ok()
-            .filter(|value| !value.is_empty())
-            .or_else(|| Some(crate::app::repo_root().to_string_lossy().to_string()))
-            .unwrap_or_default();
+        current_path = crate::paths::expand_user_path_string(
+            &std::env::var("LOOM_PROJECT_ROOT")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .or_else(|| Some(crate::app::repo_root().to_string_lossy().to_string()))
+                .unwrap_or_default(),
+        );
     }
 
     (current_path, current_profile, group_cells)
@@ -260,11 +262,11 @@ fn resolved_agent_defaults(settings: &GroupSettings, global_default_command: &st
         "command": command,
         "model": settings.agent_model,
         "reasoning_effort": settings.agent_reasoning_effort,
-        "directory": first_nonempty([
+        "directory": crate::paths::expand_user_path_string(&first_nonempty([
             settings.agent_directory.clone(),
             settings.default_directory.clone(),
             project_root_or_cwd(),
-        ]),
+        ])),
         "profile": first_nonempty([
             settings.agent_profile.clone(),
             settings.profile.clone(),
@@ -299,9 +301,11 @@ fn first_nonempty<const N: usize>(values: [String; N]) -> String {
 }
 
 fn project_root_or_cwd() -> String {
-    std::env::var("LOOM_PROJECT_ROOT")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .or_else(|| crate::app::repo_root().into_os_string().into_string().ok())
-        .unwrap_or_default()
+    crate::paths::expand_user_path_string(
+        &std::env::var("LOOM_PROJECT_ROOT")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .or_else(|| crate::app::repo_root().into_os_string().into_string().ok())
+            .unwrap_or_default(),
+    )
 }

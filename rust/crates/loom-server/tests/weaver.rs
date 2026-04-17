@@ -30,6 +30,7 @@ async fn spawn() -> (SocketAddr, Arc<Mutex<MatrixState>>, LoomDb, UiAgentRegistr
         ui_agents: ui_agents.clone(),
         terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
+        weaver_buffer: loom_server::weaver_buffer::WeaverEventBuffer::default(),
     };
 
     let router = Router::new()
@@ -505,6 +506,50 @@ async fn weaver_events_use_stable_panel_event_ids() {
     assert_eq!(second_events.len(), 1, "second events: {second:?}");
     assert_eq!(second_events[0]["id"].as_i64(), Some(id3));
     assert_eq!(second_events[0]["kind"], "task_dispatched");
+}
+
+#[tokio::test]
+async fn idle_designated_weaver_receives_digest_for_buffered_panel_events() {
+    let (addr, state, db, ui_agents) = spawn().await;
+    let (weaver_id, worker_id) = seed_weaver_group(&state, &db).await;
+    let mut inbox = ui_agents.register(weaver_id.clone());
+
+    {
+        let mut st = state.lock().await;
+        let weaver = st.agents.get_mut(&weaver_id).unwrap();
+        weaver.status = "running".into();
+        weaver.activity.clear();
+        weaver.activity_detail.clear();
+    }
+
+    let dispatched = post(
+        addr,
+        json!({
+            "cmd": "dispatch_task",
+            "task_id": "eng-1a1",
+            "agent_id": worker_id,
+            "force_no_action": true,
+        }),
+    )
+    .await;
+    assert_eq!(dispatched["ok"], true, "dispatch: {dispatched:?}");
+
+    let first = tokio::time::timeout(std::time::Duration::from_secs(2), inbox.recv())
+        .await
+        .expect("digest text should arrive")
+        .expect("ui channel still open");
+    let digest = match first {
+        UiAgentInput::Text(text) => text,
+        other => panic!("expected digest text first, got {other:?}"),
+    };
+    assert!(digest.contains("## Loom Digest"), "digest: {digest}");
+    assert!(digest.contains("task_dispatched"), "digest: {digest}");
+
+    let second = tokio::time::timeout(std::time::Duration::from_secs(2), inbox.recv())
+        .await
+        .expect("submit should arrive")
+        .expect("ui channel still open");
+    assert!(matches!(second, UiAgentInput::Submit));
 }
 
 #[tokio::test]

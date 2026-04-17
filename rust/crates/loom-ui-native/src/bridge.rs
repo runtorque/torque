@@ -39,6 +39,7 @@ impl EngineBridge {
             ui_agents: self.state.ui_agents.clone(),
             terminal_bridge: self.state.terminal_bridge.clone(),
             terminals: self.state.terminals.clone(),
+            weaver_buffer: self.state.weaver_buffer.clone(),
         }
     }
 
@@ -166,7 +167,7 @@ pub fn resolve_cwd(cell: &loom_core::state::AgentCell) -> Option<String> {
     if cell.directory.is_empty() {
         None
     } else {
-        Some(cell.directory.clone())
+        Some(loom_server::paths::expand_user_path_string(&cell.directory))
     }
 }
 
@@ -224,5 +225,15 @@ mod tests {
         let mut cell = AgentCell::new("a", "Worker", "g");
         cell.directory = "/tmp/x".into();
         assert_eq!(resolve_cwd(&cell).as_deref(), Some("/tmp/x"));
+    }
+
+    #[test]
+    fn resolve_cwd_expands_home_directory() {
+        let mut cell = AgentCell::new("a", "Worker", "g");
+        cell.directory = "~/tmp".into();
+        assert_eq!(
+            resolve_cwd(&cell).as_deref(),
+            Some(loom_server::paths::expand_user_path_string("~/tmp").as_str())
+        );
     }
 }

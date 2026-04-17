@@ -54,11 +54,16 @@ pub struct ActionInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transition {
+    #[serde(default)]
     pub action: String,
+    #[serde(default)]
+    pub ask: bool,
     #[serde(default)]
     pub when: String,
     #[serde(default)]
     pub status: String,
+    #[serde(default)]
+    pub target: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

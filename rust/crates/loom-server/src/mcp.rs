@@ -41,6 +41,7 @@ async fn handle_mcp(
         ui_agents: app.ui_agents.clone(),
         terminal_bridge: app.terminal_bridge.clone(),
         terminals: app.terminals.clone(),
+        weaver_buffer: app.weaver_buffer.clone(),
     };
 
     if req.get("id").is_none() {
@@ -93,10 +94,10 @@ fn loom_tool_specs() -> Vec<Value> {
         json!({"name": "loom_error", "description": "Report an error encountered.", "inputSchema": {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}}),
         json!({"name": "loom_ask", "description": "Pause for human input only when the current task cannot proceed safely without a blocking human decision or approval.", "inputSchema": {"type": "object", "properties": {"question": {"type": "string"}, "description": {"type": "string"}}, "required": ["question"]}}),
         json!({"name": "loom_context", "description": "Read back the current agent/task context.", "inputSchema": {"type": "object"}}),
-        json!({"name": "loom_derive", "description": "Derive a follow-up task and dispatch it.", "inputSchema": {"type": "object", "properties": {"description": {"type": "string"}, "action": {"type": "string"}}, "required": ["description"]}}),
+        json!({"name": "loom_derive", "description": "Derive a follow-up task and dispatch it.", "inputSchema": {"type": "object", "properties": {"description": {"type": "string"}, "context": {"type": "string"}, "action": {"type": "string"}, "action_vars": {"type": "object"}, "group": {"type": "string"}}, "required": ["description"]}}),
         json!({"name": "loom_verify", "description": "Record verification status on the current task.", "inputSchema": {"type": "object", "properties": {"state": {"type": "string"}, "notes": {"type": "string"}, "mode": {"type": "string"}}, "required": ["state"]}}),
         json!({"name": "loom_name", "description": "Update the current agent's display name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}),
-        json!({"name": "loom_reply", "description": "Reply to a pending loom_ask task.", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string"}, "task": {"type": "string"}, "reply": {"type": "string"}, "message": {"type": "string"}}, "required": ["task_id", "reply"]}}),
+        json!({"name": "loom_reply", "description": "Reply to a message from the weaver (orchestrator agent).", "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}, "message": {"type": "string"}}, "required": ["message"]}}),
         json!({"name": "loom_memory_publish", "description": "Publish a shared memory entry.", "inputSchema": {"type": "object", "properties": {"entry_type": {"type": "string"}, "title": {"type": "string"}, "content": {"type": "string"}, "group": {"type": "string"}, "scope_kind": {"type": "string"}, "scope_ref": {"type": "string"}, "task_id": {"type": "string"}, "pinned": {"type": "boolean"}}, "required": ["entry_type", "title"]}}),
         json!({"name": "loom_memory_list", "description": "List memory entries with optional filters.", "inputSchema": {"type": "object", "properties": {"group": {"type": "string"}, "entry_type": {"type": "string"}, "task_id": {"type": "string"}, "pinned_only": {"type": "boolean"}, "search": {"type": "string"}}}}),
         json!({"name": "loom_memory_read", "description": "Read a single memory entry by id.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}),
@@ -139,7 +140,7 @@ async fn handle_tool_call(ctx: &CmdContext, req: &Value, cell_id: &str) -> Resul
         "loom_context" => return agent_context(ctx, &agent_id).await,
         "loom_verify" => return verify_current_task(ctx, &agent_id, &args).await,
         "loom_name" => return rename_agent(ctx, &agent_id, &args).await,
-        "loom_reply" => return resolve_ask_tool(ctx, &args).await,
+        "loom_reply" => "reply",
         "loom_memory_publish"
         | "loom_memory_list"
         | "loom_memory_read"
@@ -161,6 +162,11 @@ async fn handle_tool_call(ctx: &CmdContext, req: &Value, cell_id: &str) -> Resul
         "action": action,
         "agent_id": agent_id,
         "message": message,
+        "task_id": args
+            .get("task_id")
+            .cloned()
+            .or_else(|| args.get("task").cloned())
+            .unwrap_or(Value::Null),
         "description": args.get("description").cloned().unwrap_or(Value::Null),
     });
     let value = dispatch_cmd::ai_report(ctx, &report_req)
@@ -191,6 +197,13 @@ async fn handle_weaver_tool_call(
         "weaver_agent_show" => weaver_cmd::agent_show(ctx, &req).await,
         "weaver_actions_list" => weaver_cmd::actions_list(ctx, &req).await,
         "weaver_action_show" => weaver_cmd::action_show(ctx, &req).await,
+        "weaver_task_create" => weaver_cmd::task_create(ctx, &req).await,
+        "weaver_task_edit" => weaver_cmd::task_edit(ctx, &req).await,
+        "weaver_task_verify" => weaver_cmd::task_verify(ctx, &req).await,
+        "weaver_task_move" => weaver_cmd::task_move(ctx, &req).await,
+        "weaver_task_dispatch" => weaver_cmd::task_dispatch(ctx, &req).await,
+        "weaver_batch_dispatch" => weaver_cmd::batch_dispatch(ctx, &req).await,
+        "weaver_task_resolve" => weaver_cmd::task_resolve(ctx, &req).await,
         "weaver_events" => weaver_cmd::events(ctx, &req).await,
         "weaver_launch_settings" => weaver_cmd::launch_settings(ctx, &req).await,
         "weaver_notifications" => weaver_cmd::notifications(ctx, &req).await,
@@ -215,6 +228,9 @@ async fn handle_weaver_tool_call(
         }
         "weaver_ask" => weaver_cmd::ask(ctx, &req).await,
         "weaver_note" => weaver_cmd::note(ctx, &req).await,
+        "weaver_agent_message" => weaver_cmd::agent_message(ctx, &req).await,
+        "weaver_agent_close" => weaver_cmd::agent_close(ctx, &req).await,
+        "weaver_agent_relaunch" => weaver_cmd::agent_relaunch(ctx, &req).await,
         other => return Err(format!("unknown weaver tool: {other}")),
     }
     .map_err(|e| format!("{e:?}"))?;
@@ -236,7 +252,14 @@ fn with_group_and_weaver(args: &Value, group: &str, weaver_id: &str) -> Value {
         req = json!({});
     }
     if let Some(obj) = req.as_object_mut() {
-        obj.insert("group".into(), Value::String(group.to_string()));
+        let has_group = obj
+            .get("group")
+            .and_then(Value::as_str)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+        if !has_group {
+            obj.insert("group".into(), Value::String(group.to_string()));
+        }
         obj.insert("_weaver_id".into(), Value::String(weaver_id.to_string()));
     }
     req
@@ -293,53 +316,172 @@ async fn agent_context(ctx: &CmdContext, agent_id: &str) -> Result<Value, String
 }
 
 async fn derive_task(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<Value, String> {
-    let description = args
+    let title = args
         .get("description")
         .and_then(Value::as_str)
         .ok_or_else(|| "missing 'description'".to_string())?
+        .to_string();
+    let context = args
+        .get("context")
+        .and_then(Value::as_str)
+        .unwrap_or("")
         .to_string();
     let action_name = args
         .get("action")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
+    let derive_group = args
+        .get("group")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let action_vars = args
+        .get("action_vars")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
 
-    let (parent_task, parent_depth, group, max_depth) = {
+    let action_mgr = loom_actions::manager::ActionManager::new(
+        crate::commands::actions::project_actions_root_pub(),
+        Some(crate::commands::actions::user_actions_root_pub()),
+    );
+
+    let (agent, parent_task, group, max_depth, transitions) = {
         let st = ctx.state.lock().await;
         let agent = st
             .agents
             .get(agent_id)
+            .cloned()
             .ok_or_else(|| format!("agent '{agent_id}' not found"))?;
-        let parent_task = if agent.current_task_id.is_empty() {
+        let parent_task = st.agent_current_task(agent_id).cloned();
+        let Some(parent_task) = parent_task else {
+            return Err("No linked task to derive from".into());
+        };
+        let group = parent_task.group.clone();
+        let parent_action = parent_task.action_name.clone();
+        let transitions = if parent_action.trim().is_empty() {
+            Vec::new()
+        } else {
+            action_mgr
+                .get_action(&parent_action)
+                .map(|info| info.transitions)
+                .unwrap_or_default()
+        };
+        let target_max_depth = if action_name.trim().is_empty() {
             None
         } else {
-            st.board_tasks.get(&agent.current_task_id).cloned()
+            action_mgr
+                .get_action(&action_name)
+                .ok()
+                .and_then(|info| info.max_depth)
         };
-        let depth = parent_task
-            .as_ref()
-            .map(|task| task.pipeline_depth)
-            .unwrap_or(0);
-        let group = parent_task
-            .as_ref()
-            .map(|task| task.group.clone())
-            .unwrap_or_else(|| agent.group.clone());
         (
+            agent,
             parent_task,
-            depth,
             group,
-            st.global_settings.max_pipeline_depth,
+            target_max_depth.unwrap_or(st.global_settings.max_pipeline_depth),
+            transitions,
         )
     };
 
-    if max_depth > 0 && parent_depth + 1 > max_depth {
+    if !transitions.is_empty()
+        && !action_name.trim().is_empty()
+        && !transitions
+            .iter()
+            .any(|transition| transition.action == action_name)
+    {
+        let valid = transitions
+            .iter()
+            .filter_map(|transition| {
+                let action = transition.action.trim();
+                if action.is_empty() {
+                    None
+                } else {
+                    Some(action.to_string())
+                }
+            })
+            .collect::<Vec<_>>();
+        return Err(format!(
+            "Action '{}' cannot transition to '{}'. Valid: {}",
+            parent_task.action_name,
+            action_name,
+            valid.join(", ")
+        ));
+    }
+
+    if max_depth > 0 && parent_task.pipeline_depth + 1 > max_depth {
         return Err("max_pipeline_depth exceeded".into());
     }
 
+    let derive_status = transitions
+        .iter()
+        .find(|transition| transition.action == action_name)
+        .and_then(|transition| {
+            let status = transition.status.trim();
+            if status.is_empty() {
+                None
+            } else {
+                Some(status.to_string())
+            }
+        })
+        .or_else(|| {
+            let action = action_name.trim();
+            if action.is_empty() {
+                None
+            } else {
+                Some(action.to_string())
+            }
+        })
+        .unwrap_or_default();
+    let root_id = if parent_task.pipeline_root_id.trim().is_empty() {
+        parent_task.id.clone()
+    } else {
+        parent_task.pipeline_root_id.clone()
+    };
+
+    {
+        let mut st = ctx.state.lock().await;
+        if let Some(source_agent) = st.agents.get_mut(agent_id) {
+            source_agent.activity.clear();
+            source_agent.activity_detail.clear();
+            source_agent.needs_attention = false;
+            source_agent.error_message.clear();
+        }
+        st.emit_agent(agent_id);
+        if let Some(task) = st.board_tasks.get_mut(&parent_task.id) {
+            task.status = derive_status.clone();
+            task.updated_at = chrono::Utc::now().to_rfc3339();
+            task.messages.push(json!({
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "action": "derive",
+                "message": title,
+                "agent_id": agent_id,
+                "agent_name": agent.name,
+            }));
+        }
+        st.emit_task(&parent_task.id);
+        if root_id != parent_task.id {
+            if let Some(root_task) = st.board_tasks.get_mut(&root_id) {
+                root_task.status = derive_status.clone();
+                root_task.updated_at = chrono::Utc::now().to_rfc3339();
+            }
+            st.emit_task(&root_id);
+        }
+    }
+
     let add_req = json!({
-        "task": description,
-        "group": group,
+        "task": title,
+        "group": if derive_group.is_empty() { group } else { derive_group },
+        "lane": "Backlog",
         "action_name": action_name,
-        "labels": ["derived"],
+        "action_vars": action_vars,
+        "labels": ["loom:derived"],
+        "parent_task_id": parent_task.id,
+        "pipeline_depth": parent_task.pipeline_depth + 1,
+        "pipeline_root_id": root_id,
+        "description": context,
     });
     let value = crate::commands::board::add_task(ctx, &add_req)
         .await
@@ -349,29 +491,138 @@ async fn derive_task(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<V
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
+    if new_id.is_empty() {
+        return Err("Failed to create derived task".into());
+    }
 
-    if let Some(parent) = parent_task {
-        let mut st = ctx.state.lock().await;
-        if let Some(task) = st.board_tasks.get_mut(&new_id) {
-            task.parent_task_id = parent.id.clone();
-            task.pipeline_depth = parent.pipeline_depth + 1;
-            task.pipeline_root_id = if parent.pipeline_root_id.is_empty() {
-                parent.id
-            } else {
-                parent.pipeline_root_id
-            };
+    let _ = crate::commands::compat::record_panel_event(
+        &ctx.state,
+        &ctx.db,
+        &ctx.weaver_buffer,
+        "task_derived",
+        agent_id,
+        &agent.name,
+        &parent_task.group,
+        &title.chars().take(80).collect::<String>(),
+        &new_id,
+        false,
+    )
+    .await;
+
+    let dispatch_target_id = {
+        let st = ctx.state.lock().await;
+        let transition_target = transitions
+            .iter()
+            .find(|transition| transition.action == action_name)
+            .map(|transition| transition.target.trim().to_string())
+            .unwrap_or_default();
+        match transition_target.as_str() {
+            "self" => Some(agent_id.to_string()),
+            "parent" => {
+                let parent_id = parent_task.parent_task_id.trim();
+                if parent_id.is_empty() {
+                    None
+                } else {
+                    st.board_tasks.get(parent_id).and_then(|task| {
+                        let agent_id = task.agent_id.trim();
+                        if agent_id.is_empty() || !st.agents.contains_key(agent_id) {
+                            None
+                        } else {
+                            Some(agent_id.to_string())
+                        }
+                    })
+                }
+            }
+            "root" => st.board_tasks.get(&root_id).and_then(|task| {
+                let agent_id = task.agent_id.trim();
+                if agent_id.is_empty() || !st.agents.contains_key(agent_id) {
+                    None
+                } else {
+                    Some(agent_id.to_string())
+                }
+            }),
+            _ if !transitions.is_empty() && !action_name.trim().is_empty() => {
+                nearest_ancestor_agent_for_action_stage(&st, &parent_task, &action_name)
+            }
+            _ => None,
         }
-        st.emit_task(&new_id);
-        if let Some((seq, ops)) = st.drain_deltas() {
-            ctx.bus
-                .send(loom_core::events::OutMessage::Delta { seq, ops });
+    };
+
+    let dispatch_req = if let Some(target_id) = dispatch_target_id.clone() {
+        json!({"task_id": new_id, "agent_id": target_id})
+    } else {
+        json!({"task_id": new_id})
+    };
+    let dispatch_result = dispatch_cmd::dispatch_task(ctx, &dispatch_req)
+        .await
+        .map_err(|err| format!("{err:?}"))?;
+    let dispatched_agent_id = dispatch_result
+        .get("agent_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or(dispatch_target_id.clone());
+    if dispatch_result
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        let updated_agent = {
+            let mut st = ctx.state.lock().await;
+            if let Some(source_agent) = st.agents.get_mut(agent_id) {
+                if source_agent.current_task_id == parent_task.id {
+                    source_agent.current_task_id.clear();
+                    let cloned = source_agent.clone();
+                    st.emit_agent(agent_id);
+                    Some(cloned)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        if let Some(updated_agent) = updated_agent {
+            let _ = ctx.db.save_agent(&updated_agent).await;
         }
     }
 
     Ok(json!({
         "content": [{"type": "text", "text": format!("derived task {new_id}")}],
-        "loom": {"task_id": new_id, "description": description, "action": action_name},
+        "loom": {"task_id": new_id, "description": title, "action": action_name, "agent_id": dispatched_agent_id},
     }))
+}
+
+fn agent_can_receive_dispatch(agent: Option<&loom_core::state::AgentCell>) -> bool {
+    matches!(
+        agent,
+        Some(cell)
+            if cell.cell_type == "agent"
+                && cell.session_id.is_some()
+                && cell.status != "stopped"
+                && cell.status != "error"
+    )
+}
+
+fn nearest_ancestor_agent_for_action_stage(
+    st: &loom_core::state::MatrixState,
+    task: &loom_core::state::BoardTask,
+    action_name: &str,
+) -> Option<String> {
+    if action_name.trim().is_empty() {
+        return None;
+    }
+    let mut ancestor_id = task.parent_task_id.clone();
+    while !ancestor_id.trim().is_empty() {
+        let ancestor = st.board_tasks.get(&ancestor_id)?;
+        if ancestor.action_name == action_name && !ancestor.agent_id.trim().is_empty() {
+            let agent = st.agents.get(&ancestor.agent_id);
+            if agent_can_receive_dispatch(agent) {
+                return Some(ancestor.agent_id.clone());
+            }
+        }
+        ancestor_id = ancestor.parent_task_id.clone();
+    }
+    None
 }
 
 async fn verify_current_task(
@@ -441,29 +692,6 @@ async fn rename_agent(ctx: &CmdContext, agent_id: &str, args: &Value) -> Result<
     Ok(json!({
         "content": [{"type": "text", "text": format!("renamed to {new_name}")}],
         "loom": {"agent_id": agent_id, "name": new_name, "slug": agent.slug},
-    }))
-}
-
-async fn resolve_ask_tool(ctx: &CmdContext, args: &Value) -> Result<Value, String> {
-    let task_id = args
-        .get("task_id")
-        .or_else(|| args.get("task"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| "missing 'task_id'".to_string())?
-        .to_string();
-    let reply = args
-        .get("reply")
-        .or_else(|| args.get("message"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| "missing 'reply'".to_string())?
-        .to_string();
-    let req = json!({"task_id": task_id, "reply": reply});
-    let value = crate::commands::dispatch::resolve_ask(ctx, &req)
-        .await
-        .map_err(|e| format!("{e:?}"))?;
-    Ok(json!({
-        "content": [{"type": "text", "text": "ask resolved"}],
-        "loom": value,
     }))
 }
 

@@ -132,7 +132,7 @@ fn clear_parent_awaiting_input(
     Some((updated_parent, Some(updated_root)))
 }
 
-async fn mark_agent_running(
+async fn mark_agent_running_quiet(
     ctx: &CmdContext,
     agent_id: &str,
 ) -> Result<Option<AgentCell>, CmdError> {
@@ -149,8 +149,16 @@ async fn mark_agent_running(
         cloned
     };
     ctx.db.save_agent(&agent).await?;
-    flush(ctx).await;
     Ok(Some(agent))
+}
+
+async fn mark_agent_running(
+    ctx: &CmdContext,
+    agent_id: &str,
+) -> Result<Option<AgentCell>, CmdError> {
+    let agent = mark_agent_running_quiet(ctx, agent_id).await?;
+    flush(ctx).await;
+    Ok(agent)
 }
 
 // ---------------------------------------------------------------------------
@@ -227,10 +235,12 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
                 cell.terminal_backend = "iterm2".into();
             }
             if cell.directory.is_empty() {
-                cell.directory = crate::commands::agents::first_nonempty([
-                    std::env::var("LOOM_PROJECT_ROOT").unwrap_or_default(),
-                    crate::app::repo_root().to_string_lossy().to_string(),
-                ]);
+                cell.directory = crate::paths::expand_user_path_string(
+                    &crate::commands::agents::first_nonempty([
+                        std::env::var("LOOM_PROJECT_ROOT").unwrap_or_default(),
+                        crate::app::repo_root().to_string_lossy().to_string(),
+                    ]),
+                );
             }
             let id = cell.id.clone();
             st.add_agent(cell)?;
@@ -365,7 +375,7 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
                 let cwd = if agent.directory.is_empty() {
                     None
                 } else {
-                    Some(std::path::PathBuf::from(&agent.directory))
+                    Some(crate::paths::expand_user_path(&agent.directory))
                 };
                 let mut env = std::collections::HashMap::new();
                 env.insert(loom_core::config::ENV_CELL_ID.to_string(), agent.id.clone());
@@ -456,6 +466,7 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     let _ = crate::commands::compat::record_panel_event(
         &ctx.state,
         &ctx.db,
+        &ctx.weaver_buffer,
         "task_dispatched",
         &agent_final.id,
         &agent_final.name,
@@ -477,7 +488,7 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
 // send_text / broadcast_to_group
 // ---------------------------------------------------------------------------
 
-pub async fn send_text_to_cell(
+pub(crate) async fn send_text_to_cell_quiet(
     ctx: &CmdContext,
     cell_id: &str,
     text: &str,
@@ -490,25 +501,22 @@ pub async fn send_text_to_cell(
 
     if text == "\r" || text == "\n" || text == "\r\n" {
         if ctx.ui_agents.send_submit(cell_id) {
-            let _ = mark_agent_running(ctx, cell_id).await?;
             return Ok(());
         }
     } else if ctx.ui_agents.is_attached(cell_id) {
         ctx.ui_agents.send_text(cell_id, text.to_string());
         tokio::time::sleep(Duration::from_millis(50)).await;
         ctx.ui_agents.send_submit(cell_id);
-        let _ = mark_agent_running(ctx, cell_id).await?;
         return Ok(());
     }
 
-    let bridge_agent = ensure_bridge_session(ctx, &cell_id, None).await?;
+    let bridge_agent = ensure_bridge_session_quiet(ctx, &cell_id, None).await?;
     if let Some(agent) = bridge_agent.as_ref() {
         if bridge_manages_cell(&ctx.terminal_bridge, &agent) && agent.session_id.is_some() {
             ctx.terminal_bridge
                 .send_text(&cell_id, agent.session_id.as_deref(), &text, false)
                 .await
                 .map_err(|e| CmdError::BadRequest(e.to_string()))?;
-            let _ = mark_agent_running(ctx, cell_id).await?;
             return Ok(());
         }
     }
@@ -530,13 +538,22 @@ pub async fn send_text_to_cell(
         } else {
             send_prompt_to_local_pty(ctx, &agent, text, true).await?;
         }
-        let _ = mark_agent_running(ctx, cell_id).await?;
         return Ok(());
     }
 
     Err(CmdError::BadRequest(format!(
         "agent '{cell_id}' has no live delivery path"
     )))
+}
+
+pub async fn send_text_to_cell(
+    ctx: &CmdContext,
+    cell_id: &str,
+    text: &str,
+) -> Result<(), CmdError> {
+    send_text_to_cell_quiet(ctx, cell_id, text).await?;
+    let _ = mark_agent_running(ctx, cell_id).await?;
+    Ok(())
 }
 
 pub async fn send_text(ctx: &CmdContext, req: &Value) -> CmdResult {
@@ -815,6 +832,7 @@ async fn handle_agent_ask(
     let _ = crate::commands::compat::record_panel_event(
         &ctx.state,
         &ctx.db,
+        &ctx.weaver_buffer,
         "ask_created",
         &agent.id,
         &agent.name,
@@ -848,6 +866,10 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
 
     if action == "ask" {
         return handle_agent_ask(ctx, &agent_id, &task_id, &message, &description).await;
+    }
+    if action == "reply" {
+        return crate::commands::weaver::handle_weaver_reply(ctx, &agent_id, &task_id, &message)
+            .await;
     }
 
     let (task, agent) = {
@@ -945,6 +967,7 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
             let _ = crate::commands::compat::record_panel_event(
                 &ctx.state,
                 &ctx.db,
+                &ctx.weaver_buffer,
                 "task_completed",
                 &agent.id,
                 &agent.name,
@@ -963,6 +986,7 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
             let _ = crate::commands::compat::record_panel_event(
                 &ctx.state,
                 &ctx.db,
+                &ctx.weaver_buffer,
                 "agent_blocked",
                 &agent.id,
                 &agent.name,
@@ -977,6 +1001,7 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
             let _ = crate::commands::compat::record_panel_event(
                 &ctx.state,
                 &ctx.db,
+                &ctx.weaver_buffer,
                 "agent_error",
                 &agent.id,
                 &agent.name,
@@ -991,6 +1016,7 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
             let _ = crate::commands::compat::record_panel_event(
                 &ctx.state,
                 &ctx.db,
+                &ctx.weaver_buffer,
                 "agent_progress",
                 &agent.id,
                 &agent.name,
@@ -1005,6 +1031,7 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
             let _ = crate::commands::compat::record_panel_event(
                 &ctx.state,
                 &ctx.db,
+                &ctx.weaver_buffer,
                 "task_verification_updated",
                 &agent.id,
                 &agent.name,
@@ -1134,6 +1161,7 @@ pub async fn resolve_ask(ctx: &CmdContext, req: &Value) -> CmdResult {
     let _ = crate::commands::compat::record_panel_event(
         &ctx.state,
         &ctx.db,
+        &ctx.weaver_buffer,
         "ask_resolved",
         &parent_agent_id,
         &agent_name,
@@ -1289,7 +1317,7 @@ pub(crate) async fn send_prompt_to_local_pty(
     Ok(())
 }
 
-async fn ensure_bridge_session(
+async fn ensure_bridge_session_quiet(
     ctx: &CmdContext,
     cell_id: &str,
     options: Option<&CreateSessionOptions>,
@@ -1331,8 +1359,17 @@ async fn ensure_bridge_session(
         st.agents.get(&bridged.id).cloned().unwrap()
     };
     ctx.db.save_agent(&saved).await?;
-    flush(ctx).await;
     Ok(Some(saved))
+}
+
+async fn ensure_bridge_session(
+    ctx: &CmdContext,
+    cell_id: &str,
+    options: Option<&CreateSessionOptions>,
+) -> Result<Option<loom_core::state::AgentCell>, CmdError> {
+    let saved = ensure_bridge_session_quiet(ctx, cell_id, options).await?;
+    flush(ctx).await;
+    Ok(saved)
 }
 
 async fn bridge_create_session_options(
@@ -1391,7 +1428,7 @@ pub async fn spawn_cell_session(
     let cwd = if cell.directory.is_empty() {
         None
     } else {
-        Some(std::path::PathBuf::from(&cell.directory))
+        Some(crate::paths::expand_user_path(&cell.directory))
     };
     if let Some(dir) = cwd.as_deref() {
         install_provider_integration(dir, &command).await;

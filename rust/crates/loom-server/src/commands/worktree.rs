@@ -33,7 +33,7 @@ fn agent_repo_root(
     } else if !agent.git_root.is_empty() {
         agent.git_root.clone()
     } else if !agent.directory.is_empty() {
-        agent.directory.clone()
+        crate::paths::expand_user_path_string(&agent.directory)
     } else {
         return Err(CmdError::BadRequest(format!(
             "no git repo root known for agent '{agent_id}'"
@@ -54,7 +54,7 @@ pub async fn create(ctx: &CmdContext, req: &Value) -> CmdResult {
             if a.worktree_base_dir.is_empty() {
                 None
             } else {
-                let candidate = PathBuf::from(&a.worktree_base_dir);
+                let candidate = crate::paths::expand_user_path(&a.worktree_base_dir);
                 // Relative base_dir is interpreted relative to the repo root.
                 let resolved = if candidate.is_absolute() {
                     candidate

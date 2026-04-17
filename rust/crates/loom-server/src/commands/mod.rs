@@ -22,6 +22,7 @@ use loom_pty::LocalPtyBackend;
 
 use crate::app::{AppState, TerminalHub, UiAgentRegistry};
 use crate::terminal_bridge::TerminalBridgeClient;
+use crate::weaver_buffer::WeaverEventBuffer;
 
 pub mod actions;
 pub mod agents;
@@ -62,6 +63,7 @@ async fn handle_cmd(State(app): State<AppState>, Json(req): Json<Value>) -> impl
         ui_agents: app.ui_agents.clone(),
         terminal_bridge: app.terminal_bridge.clone(),
         terminals: app.terminals.clone(),
+        weaver_buffer: app.weaver_buffer.clone(),
     };
 
     let result = dispatch_command(&ctx, &cmd, &req).await;
@@ -106,6 +108,7 @@ pub struct CmdContext {
     pub ui_agents: UiAgentRegistry,
     pub terminal_bridge: TerminalBridgeClient,
     pub terminals: TerminalHub,
+    pub weaver_buffer: WeaverEventBuffer,
 }
 
 #[derive(Debug)]
@@ -284,6 +287,7 @@ async fn dispatch(ctx: &CmdContext, cmd: &str, req: &Value) -> CmdResult {
                 ui_agents: ctx.ui_agents.clone(),
                 terminal_bridge: ctx.terminal_bridge.clone(),
                 terminals: ctx.terminals.clone(),
+                weaver_buffer: ctx.weaver_buffer.clone(),
             })
             .await;
             Ok(snap)
@@ -384,9 +388,12 @@ async fn normalize_request(ctx: &CmdContext, cmd: &str, req: &Value) -> Value {
 /// Drain accumulated deltas from state and broadcast them.
 pub async fn flush(ctx: &CmdContext) {
     let mut st = ctx.state.lock().await;
-    if let Some((seq, ops)) = st.drain_deltas() {
+    let drained = st.drain_deltas();
+    drop(st);
+    if let Some((seq, ops)) = drained {
         ctx.bus.send(OutMessage::Delta { seq, ops });
     }
+    ctx.weaver_buffer.maybe_flush_due(ctx).await;
 }
 
 /// Extract a required string field from the request body.

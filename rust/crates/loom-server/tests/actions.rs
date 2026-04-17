@@ -46,6 +46,7 @@ async fn spawn_with_actions() -> SocketAddr {
         ui_agents: Default::default(),
         terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
+        weaver_buffer: loom_server::weaver_buffer::WeaverEventBuffer::default(),
     };
 
     let router = loom_server::app::build_router(app_state);

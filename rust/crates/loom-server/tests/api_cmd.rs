@@ -26,6 +26,7 @@ async fn spawn_test_server() -> (SocketAddr, tokio::task::JoinHandle<()>) {
         ui_agents: Default::default(),
         terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
+        weaver_buffer: loom_server::weaver_buffer::WeaverEventBuffer::default(),
     };
 
     let router = loom_server::app::build_router(app_state);
@@ -54,6 +55,7 @@ async fn spawn_test_server_with_pty() -> (
         ui_agents: Default::default(),
         terminal_bridge: loom_server::terminal_bridge::TerminalBridgeClient::default(),
         terminals: Default::default(),
+        weaver_buffer: loom_server::weaver_buffer::WeaverEventBuffer::default(),
     };
 
     let router = loom_server::app::build_router(app_state);
@@ -319,6 +321,63 @@ async fn add_agent_starts_local_pty_session_and_uses_repo_root_defaults() {
     assert_eq!(agent.command, "codex");
     assert_eq!(agent.agent_type, "codex");
     assert_eq!(agent.directory, expected_repo_root);
+}
+
+#[tokio::test]
+async fn add_agent_expands_tilde_directory_before_spawn_and_storage() {
+    let (addr, state, mut pty_rx) = spawn_test_server_with_pty().await;
+    let home = dirs::home_dir().expect("home directory should exist in tests");
+    let tmp = tempfile::Builder::new()
+        .prefix("loom-home-dir-")
+        .tempdir_in(&home)
+        .unwrap();
+    let relative = tmp.path().strip_prefix(&home).unwrap();
+    let requested_directory = format!("~/{}", relative.to_string_lossy());
+
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+    let v = post(
+        addr,
+        json!({
+            "cmd": "update_global_settings",
+            "settings": {"default_command": "codex"}
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "add_agent",
+            "name": "Worker",
+            "group": "Eng",
+            "directory": requested_directory,
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "add_agent response: {v:?}");
+    let agent_id = v["data"]["agent_id"].as_str().unwrap().to_string();
+
+    let spawned = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match pty_rx.recv().await {
+                Some(PtyEvent::Spawned { cell_id, .. }) if cell_id == agent_id => break true,
+                Some(_) => continue,
+                None => break false,
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for PTY spawn event");
+    assert!(spawned, "PTY event stream closed before agent spawn");
+
+    let st = state.lock().await;
+    let agent = st.agents.get(&agent_id).expect("agent missing after add");
+    assert_eq!(
+        agent.directory,
+        tmp.path().to_string_lossy().to_string(),
+        "agent directory should be expanded before storage"
+    );
 }
 
 #[tokio::test]
@@ -884,6 +943,54 @@ async fn send_text_submits_to_idle_local_pty_agent() {
     .await
     .expect("timed out waiting for send_text delivery");
     assert!(delivered.contains("resume work"));
+}
+
+#[tokio::test]
+async fn loom_reply_completes_weaver_followup_task() {
+    let (addr, _h) = spawn_test_server().await;
+    post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
+
+    let agent = post(
+        addr,
+        json!({"cmd": "add_agent", "name": "Worker", "group": "Eng"}),
+    )
+    .await;
+    let agent_id = agent["data"]["agent_id"].as_str().unwrap().to_string();
+
+    let followup = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Weaver: Check status",
+            "description": "Follow-up from the weaver",
+            "group": "Eng",
+            "lane": "Backlog",
+            "status": "Awaiting Reply",
+            "labels": ["loom:weaver-message"],
+            "reply_agent_id": agent_id,
+        }),
+    )
+    .await;
+    let task_id = followup["data"]["task_id"].as_str().unwrap().to_string();
+
+    let reply = mcp_tool_call(
+        addr,
+        &agent_id,
+        "loom_reply",
+        json!({"task": task_id, "message": "On it"}),
+    )
+    .await;
+    assert!(reply["error"].is_null(), "loom_reply response: {reply:?}");
+
+    let snap = post(addr, json!({"cmd": "refresh"})).await;
+    let task = snap["data"]["board_tasks"].get(&task_id).unwrap();
+    assert_eq!(task["lane"], "Done");
+    assert_eq!(task["status"], "");
+    assert!(task["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["action"] == "reply" && entry["message"] == "On it"));
 }
 
 #[tokio::test]
