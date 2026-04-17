@@ -408,17 +408,22 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
             let has_live_session = pty.has_session(&agent.id).await;
             let mut spawned_now = false;
             if !has_live_session {
-                // Boot the agent's command.
-                let command = if agent.command.is_empty() {
+                // Boot the agent's command. Strip any stale append-system-
+                // prompt-file flag before re-applying so we don't stack.
+                let base_command = if agent.command.is_empty() {
                     loom_core::config::default_command()
                 } else {
                     agent.command.clone()
                 };
+                let base_command =
+                    loom_core::prompts::strip_append_system_prompt_flag(&base_command);
                 let cwd = if agent.directory.is_empty() {
                     None
                 } else {
                     Some(crate::paths::expand_user_path(&agent.directory))
                 };
+                let command =
+                    apply_persistent_prompt_flag(ctx, &agent, &base_command, cwd.as_deref()).await;
                 let mut env = std::collections::HashMap::new();
                 env.insert(loom_core::config::ENV_CELL_ID.to_string(), agent.id.clone());
                 let _ = pty.spawn(&agent.id, &command, cwd, env, 40, 120).await;
@@ -1538,19 +1543,28 @@ pub async fn spawn_cell_session(
     if cell.status == "running" && cell.session_id.is_some() {
         return Ok(());
     }
-    let command = if cell.command.is_empty() {
+    let base_command = if cell.command.is_empty() {
         loom_core::config::default_command()
     } else {
         cell.command.clone()
     };
+    // Strip any stale append-system-prompt-file flag we appended on a prior
+    // boot so we don't stack the flag on each respawn.
+    let base_command = loom_core::prompts::strip_append_system_prompt_flag(&base_command);
     let cwd = if cell.directory.is_empty() {
         None
     } else {
         Some(crate::paths::expand_user_path(&cell.directory))
     };
     if let Some(dir) = cwd.as_deref() {
-        install_provider_integration(dir, &command).await;
+        install_provider_integration(dir, &base_command).await;
     }
+    // Install the persistent Loom system prompt file (worker-role prompt,
+    // or the weaver prompt for a designated weaver cell) and append the
+    // adapter's boot flag. Best-effort — if the adapter doesn't produce a
+    // flag (e.g. Codex writes to a config file), the command goes out
+    // unchanged. Mirrors Python's `apply_persistent_prompt` in server_agent.
+    let command = apply_persistent_prompt_flag(ctx, cell, &base_command, cwd.as_deref()).await;
     let mut env = std::collections::HashMap::new();
     // Inherit the parent environment so the user's PATH, HOME, SSH agent,
     // shell-specific XDG dirs, etc. are all present. Strip iTerm-injected
@@ -1590,6 +1604,73 @@ pub async fn spawn_cell_session(
         .await
         .map_err(|e| CmdError::BadRequest(e.to_string()))?;
     Ok(())
+}
+
+/// Build the adapter-specific persistent prompt for `cell` and return the
+/// boot command with the appropriate CLI flag appended (e.g.
+/// `claude --append-system-prompt-file <path>` for Claude Code).
+/// No-op when the cell has no working directory, no detected adapter, or
+/// the adapter doesn't emit a flag. Called every spawn — the adapter
+/// writes the prompt file fresh so changes to group / weaver settings are
+/// picked up on the next boot.
+async fn apply_persistent_prompt_flag(
+    ctx: &CmdContext,
+    cell: &AgentCell,
+    base_command: &str,
+    working_dir: Option<&std::path::Path>,
+) -> String {
+    let Some(dir) = working_dir else {
+        return base_command.to_string();
+    };
+    // Resolve which adapter drives this cell. Prefer the explicit
+    // `agent_type`; fall back to command-sniffing for legacy cells that
+    // never got an agent_type written.
+    let adapter = if !cell.agent_type.is_empty() {
+        loom_adapters::registry::get_adapter(&cell.agent_type)
+    } else {
+        loom_adapters::registry::detect_by_command(base_command)
+            .and_then(loom_adapters::registry::get_adapter)
+    };
+    let Some(adapter) = adapter else {
+        return base_command.to_string();
+    };
+
+    // Pick the right prompt body: designated weaver cells get the weaver
+    // prompt; everyone else gets the worker system prompt. User-supplied
+    // system_prompt overrides (Python's `launch_cfg["system_prompt"]`)
+    // aren't persisted in GroupSettings yet, so we feed an empty extra
+    // prompt for now — the core Loom instructions still go through.
+    let (prompt_text, filename) = {
+        let st = ctx.state.lock().await;
+        let gs = st.get_group_settings(&cell.group);
+        let is_weaver = !gs.weaver_agent_id.is_empty() && gs.weaver_agent_id == cell.id;
+        if is_weaver {
+            let ws = st.get_weaver_settings(&cell.group);
+            let body = loom_weaver::weaver::build_weaver_system_prompt(
+                &cell.group,
+                Some(&ws),
+                "",
+                Some(&gs),
+            );
+            (body, loom_core::prompts::weaver_prompt_filename(&cell.group))
+        } else {
+            let body = loom_core::prompts::build_dispatch_persistent_prompt("");
+            (body, loom_core::prompts::persistent_prompt_filename(&cell.id))
+        }
+    };
+
+    if prompt_text.trim().is_empty() {
+        return base_command.to_string();
+    }
+
+    let suffix = adapter
+        .inject_persistent_prompt(dir, &filename, &prompt_text)
+        .await;
+    if suffix.is_empty() {
+        base_command.to_string()
+    } else {
+        format!("{}{}", base_command.trim_end(), suffix)
+    }
 }
 
 fn now_ts() -> f64 {

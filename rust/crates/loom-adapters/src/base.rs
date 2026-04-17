@@ -132,4 +132,30 @@ pub trait AgentAdapter: Send + Sync {
     async fn uninstall_skills(&self, _working_dir: &std::path::Path) -> anyhow::Result<()> {
         Ok(())
     }
+
+    /// Write a persistent system prompt for this agent and return the CLI
+    /// flag suffix that should be appended to the boot command (including a
+    /// leading space), or an empty string if the adapter embeds the prompt
+    /// via a config file rather than a flag.
+    ///
+    /// Mirrors `AgentAdapter.inject_persistent_prompt` in Python
+    /// (loom/adapters/base.py). Errors should be swallowed (return "") —
+    /// the dispatch path cannot fail because of a missing filesystem.
+    async fn inject_persistent_prompt(
+        &self,
+        _working_dir: &std::path::Path,
+        _filename: &str,
+        _text: &str,
+    ) -> String {
+        String::new()
+    }
+
+    /// Remove previously-installed persistent prompt files. Called when an
+    /// agent is deleted so `.loom/` doesn't accrue stale prompts.
+    async fn uninstall_persistent_prompt(
+        &self,
+        _working_dir: &std::path::Path,
+        _filename: &str,
+    ) {
+    }
 }

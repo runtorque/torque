@@ -438,6 +438,43 @@ impl ClaudeCodeAdapter {
         Ok(())
     }
 
+    /// Write a persistent system prompt file under `.loom/` and return the
+    /// `--append-system-prompt-file` flag (with a leading space) so callers
+    /// can append it to the boot command. Idempotent — re-invoking
+    /// overwrites the file. Empty `text` → no file + no flag.
+    pub async fn inject_persistent_prompt(
+        &self,
+        working_dir: &Path,
+        filename: &str,
+        text: &str,
+    ) -> String {
+        if text.is_empty() || filename.is_empty() {
+            return String::new();
+        }
+        let loom_dir = working_dir.join(".loom");
+        if fs::create_dir_all(&loom_dir).await.is_err() {
+            return String::new();
+        }
+        let path = loom_dir.join(filename);
+        // Match Python's trailing-newline normalization so the file roundtrips
+        // cleanly and diffs don't flap on reinstall.
+        let mut body = text.trim_end().to_string();
+        body.push('\n');
+        if fs::write(&path, body).await.is_err() {
+            return String::new();
+        }
+        format!(" --append-system-prompt-file {}", shell_quote(&path.to_string_lossy()))
+    }
+
+    /// Remove a previously-installed persistent prompt file. Called when the
+    /// owning agent is deleted.
+    pub async fn uninstall_persistent_prompt(&self, working_dir: &Path, filename: &str) {
+        if filename.is_empty() {
+            return;
+        }
+        let _ = fs::remove_file(working_dir.join(".loom").join(filename)).await;
+    }
+
     /// Remove only the `loom-*` directories under `.claude/skills/`. Leaves
     /// the skills dir itself alone (user may have other skills there).
     pub async fn uninstall_skills(&self, working_dir: &Path) -> Result<()> {
@@ -657,6 +694,40 @@ impl AgentAdapter for ClaudeCodeAdapter {
 
     async fn uninstall_skills(&self, working_dir: &Path) -> Result<()> {
         ClaudeCodeAdapter::uninstall_skills(self, working_dir).await
+    }
+
+    async fn inject_persistent_prompt(
+        &self,
+        working_dir: &Path,
+        filename: &str,
+        text: &str,
+    ) -> String {
+        ClaudeCodeAdapter::inject_persistent_prompt(self, working_dir, filename, text).await
+    }
+
+    async fn uninstall_persistent_prompt(&self, working_dir: &Path, filename: &str) {
+        ClaudeCodeAdapter::uninstall_persistent_prompt(self, working_dir, filename).await
+    }
+}
+
+/// Shell-quote a path for safe inclusion on a command line. Python uses
+/// `shlex.quote`; this is a minimal single-quote-wrapping equivalent that
+/// handles the filesystem paths we produce here (no shell metacharacters
+/// other than spaces are expected, but we quote defensively).
+fn shell_quote(s: &str) -> String {
+    if s.is_empty() {
+        return "''".to_string();
+    }
+    // Fast path: if the string is clearly safe (alnum + `_-./=`), return it
+    // as-is. Otherwise wrap in single quotes and escape embedded ones.
+    let safe = s.chars().all(|c| {
+        c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '=' | ':' | ',' | '+')
+    });
+    if safe {
+        s.to_string()
+    } else {
+        let escaped = s.replace('\'', "'\\''");
+        format!("'{escaped}'")
     }
 }
 
@@ -942,6 +1013,49 @@ mod tests {
             assert!(!p.exists(), "{name} should be gone");
         }
         assert!(user.join("SKILL.md").exists());
+    }
+
+    #[tokio::test]
+    async fn inject_persistent_prompt_writes_file_and_returns_flag() {
+        let tmp = TempDir::new().unwrap();
+        let adapter = ClaudeCodeAdapter;
+        let flag = adapter
+            .inject_persistent_prompt(tmp.path(), "loom-system-prompt-abc.md", "Hello\n")
+            .await;
+        assert!(flag.starts_with(" --append-system-prompt-file "));
+        let expected_path = tmp.path().join(".loom/loom-system-prompt-abc.md");
+        assert!(expected_path.exists(), "prompt file should be written");
+        let body = fs::read_to_string(&expected_path).await.unwrap();
+        assert_eq!(body, "Hello\n");
+        // Path appears in the returned flag.
+        assert!(flag.contains(&expected_path.to_string_lossy().to_string()));
+    }
+
+    #[tokio::test]
+    async fn inject_persistent_prompt_noop_on_empty_text() {
+        let tmp = TempDir::new().unwrap();
+        let adapter = ClaudeCodeAdapter;
+        let flag = adapter
+            .inject_persistent_prompt(tmp.path(), "loom-system-prompt-abc.md", "")
+            .await;
+        assert!(flag.is_empty());
+        assert!(!tmp.path().join(".loom").exists());
+    }
+
+    #[tokio::test]
+    async fn uninstall_persistent_prompt_removes_file() {
+        let tmp = TempDir::new().unwrap();
+        let adapter = ClaudeCodeAdapter;
+        let _ = adapter
+            .inject_persistent_prompt(tmp.path(), "loom-system-prompt-abc.md", "body\n")
+            .await;
+        adapter
+            .uninstall_persistent_prompt(tmp.path(), "loom-system-prompt-abc.md")
+            .await;
+        assert!(
+            !tmp.path().join(".loom/loom-system-prompt-abc.md").exists(),
+            "prompt file should be removed"
+        );
     }
 
     #[test]
