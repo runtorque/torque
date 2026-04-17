@@ -37,7 +37,9 @@ impl WorktreeManager {
     }
 
     /// Create a worktree using `git worktree add`. Branch is created if it
-    /// doesn't already exist.
+    /// doesn't already exist. If `base_branch` is empty, falls back to the
+    /// main worktree's currently checked-out branch so downstream code
+    /// (checkpoint listing, diff vs base) always has a valid ref.
     pub async fn create(&self, branch: &str, base_branch: &str) -> Result<WorktreeInfo> {
         std::fs::create_dir_all(&self.base_dir)?;
         let short = branch.rsplit_once('/').map(|(_, s)| s).unwrap_or(branch);
@@ -45,6 +47,15 @@ impl WorktreeManager {
         if path.exists() {
             bail!("worktree path already exists: {}", path.display());
         }
+        // Resolve the fork point before we spawn the worktree so we can
+        // persist it regardless of whether the caller passed one. Mirrors
+        // Python's fallback to `get_current_branch(repo_root)` when
+        // `base_branch` is empty (see loom/worktree.py line 850).
+        let resolved_base = if base_branch.is_empty() {
+            current_branch(&self.repo_root).await.unwrap_or_default()
+        } else {
+            base_branch.to_string()
+        };
         let mut cmd = tokio::process::Command::new("git");
         cmd.current_dir(&self.repo_root)
             .arg("worktree")
@@ -52,8 +63,8 @@ impl WorktreeManager {
             .arg("-B")
             .arg(branch);
         cmd.arg(&path);
-        if !base_branch.is_empty() {
-            cmd.arg(base_branch);
+        if !resolved_base.is_empty() {
+            cmd.arg(&resolved_base);
         }
         let out = cmd.output().await.context("git worktree add")?;
         if !out.status.success() {
@@ -65,7 +76,7 @@ impl WorktreeManager {
         Ok(WorktreeInfo {
             path,
             branch: branch.to_string(),
-            base_branch: base_branch.to_string(),
+            base_branch: resolved_base,
             repo_root: self.repo_root.clone(),
         })
     }
@@ -124,6 +135,27 @@ impl WorktreeManager {
             );
         }
         parse_worktree_list(&String::from_utf8_lossy(&out.stdout), &self.repo_root)
+    }
+}
+
+/// Resolve the branch currently checked out at `repo_root`. Returns `None`
+/// if the repo is in a detached-HEAD state (which would otherwise leak the
+/// literal string "HEAD" as a branch name).
+async fn current_branch(repo_root: &Path) -> Option<String> {
+    let out = tokio::process::Command::new("git")
+        .current_dir(repo_root)
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
     }
 }
 

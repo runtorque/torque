@@ -392,14 +392,22 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
         return Err(CmdError::BadRequest(format!(
             "agent '{target_agent_id}' has no live terminal bridge session"
         )));
-    } else if let Some(_pty) = &ctx_pty(ctx).await {
+    } else if let Some(pty) = &ctx_pty(ctx).await {
         let agent = {
             let st = ctx.state.lock().await;
             st.agents.get(&target_agent_id).cloned()
         };
         if let Some(agent) = agent {
+            // Only boot a fresh shell if the agent has no live PTY session.
+            // Checking `agent.status != "running"` was wrong: an agent that
+            // finished a turn is "idle" but its shell + Claude are still
+            // alive. Spawning a new PTY on top of that would leave the old
+            // session orphaned and re-run the boot command in a second
+            // shell, which is what the user saw as "a new terminal opens
+            // and claude runs again".
+            let has_live_session = pty.has_session(&agent.id).await;
             let mut spawned_now = false;
-            if agent.status != "running" {
+            if !has_live_session {
                 // Boot the agent's command.
                 let command = if agent.command.is_empty() {
                     loom_core::config::default_command()
@@ -413,7 +421,7 @@ pub async fn dispatch_task(ctx: &CmdContext, req: &Value) -> CmdResult {
                 };
                 let mut env = std::collections::HashMap::new();
                 env.insert(loom_core::config::ENV_CELL_ID.to_string(), agent.id.clone());
-                let _ = _pty.spawn(&agent.id, &command, cwd, env, 40, 120).await;
+                let _ = pty.spawn(&agent.id, &command, cwd, env, 40, 120).await;
                 spawned_now = true;
             }
             send_prompt_to_local_pty(
@@ -1032,6 +1040,39 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
     ctx.db
         .save_agent_message_record(&agent.id, &task_id, now_ts(), &action, &message)
         .await?;
+
+    // Progress-triggered auto-checkpoint. Python throttles to one commit per
+    // 5 minutes via `_checkpoint_on_report`; mirror that exactly — including
+    // the "no-op if no worktree or not opted in" guards — so an agent that
+    // reports progress every few seconds doesn't spam commits.
+    if action == "progress"
+        && agent.cell_type == "agent"
+        && agent.checkpoint_on_progress
+        && !agent.worktree_path.is_empty()
+    {
+        let now = chrono::Utc::now().timestamp() as f64;
+        let due = agent.last_checkpoint_at == 0.0
+            || (now - agent.last_checkpoint_at)
+                >= crate::commands::worktree::PROGRESS_CHECKPOINT_INTERVAL_SECS;
+        if due {
+            let msg = crate::commands::worktree::auto_checkpoint_message(
+                &agent.name,
+                agent.worktree_checkpoints,
+                &message,
+            );
+            match crate::commands::worktree::do_checkpoint_for_agent(ctx, &agent.id, &msg).await {
+                Ok(sha) => {
+                    if sha.is_some() {
+                        tracing::info!(agent = %agent.id, "progress-checkpoint committed");
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(agent = %agent.id, ?err, "progress-checkpoint failed");
+                }
+            }
+        }
+    }
+
     match action.as_str() {
         "done" | "ready" => {
             if !task_id.is_empty() {

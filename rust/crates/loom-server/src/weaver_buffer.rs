@@ -43,6 +43,21 @@ impl WeaverEventBuffer {
         if group.is_empty() || kind.is_empty() || !should_buffer_event(st, &group, &kind) {
             return;
         }
+        // Drop events emitted by the weaver itself — otherwise its own
+        // `session_end` / `agent_progress` hooks land in the next digest
+        // and the weaver keeps reading back "Agent finished" from itself
+        // in a feedback loop.
+        let cell_id = event
+            .get("cell_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if !cell_id.is_empty() {
+            let weaver_id = st.get_group_settings(&group).weaver_agent_id.clone();
+            if !weaver_id.is_empty() && cell_id == weaver_id {
+                return;
+            }
+        }
         let now = chrono::Utc::now().timestamp_millis() as f64 / 1000.0;
         let push_interval = st.get_weaver_settings(&group).push_interval.max(0) as f64;
         let (buffered, first_queued_at, queued_snapshot) = {

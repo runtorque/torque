@@ -336,4 +336,11 @@ impl LocalPtyBackend {
         sessions.remove(cell_id);
         Ok(())
     }
+
+    /// True iff a PTY session exists for `cell_id`. Used by dispatch to
+    /// decide between "boot the agent" vs "send the prompt to the already
+    /// running shell" when the UI dispatches a task to an existing agent.
+    pub async fn has_session(&self, cell_id: &str) -> bool {
+        self.sessions.lock().await.contains_key(cell_id)
+    }
 }

@@ -160,10 +160,23 @@ pub async fn checkpoint_cmd(ctx: &CmdContext, req: &Value) -> CmdResult {
     let message = optional_str(req, "message")
         .unwrap_or("loom: checkpoint")
         .to_string();
+    let sha = do_checkpoint_for_agent(ctx, &agent_id, &message).await?;
+    flush(ctx).await;
+    Ok(json!({ "ok": true, "sha": sha }))
+}
 
+/// Helper shared by the explicit `worktree_checkpoint` command and the
+/// auto-triggers in the hook / ai_report paths. Returns the new commit sha
+/// (or `None` if the worktree had no changes to commit). Updates the cell's
+/// `worktree_checkpoints` + `last_checkpoint_at` and broadcasts the delta.
+pub async fn do_checkpoint_for_agent(
+    ctx: &CmdContext,
+    agent_id: &str,
+    message: &str,
+) -> Result<Option<String>, CmdError> {
     let path = {
         let st = ctx.state.lock().await;
-        let Some(cell) = st.agents.get(&agent_id) else {
+        let Some(cell) = st.agents.get(agent_id) else {
             return Err(CmdError::BadRequest(format!(
                 "agent '{agent_id}' not found"
             )));
@@ -173,13 +186,14 @@ pub async fn checkpoint_cmd(ctx: &CmdContext, req: &Value) -> CmdResult {
         }
         PathBuf::from(&cell.worktree_path)
     };
-    let sha = do_checkpoint(&path, &message).await.map_err(worktree_err)?;
+    let sha = do_checkpoint(&path, message).await.map_err(worktree_err)?;
 
-    // update checkpoint count
+    // Update checkpoint count regardless of whether a new commit was
+    // created (the count includes pre-existing commits on the branch).
     let base = {
         let st = ctx.state.lock().await;
         st.agents
-            .get(&agent_id)
+            .get(agent_id)
             .map(|a| a.worktree_base_branch.clone())
             .unwrap_or_default()
     };
@@ -187,22 +201,42 @@ pub async fn checkpoint_cmd(ctx: &CmdContext, req: &Value) -> CmdResult {
         let n = count_commits(&path, &base).await.unwrap_or(0);
         let agent = {
             let mut st = ctx.state.lock().await;
-            if let Some(cell) = st.agents.get_mut(&agent_id) {
+            if let Some(cell) = st.agents.get_mut(agent_id) {
                 cell.worktree_checkpoints = n;
                 cell.last_checkpoint_at = chrono::Utc::now().timestamp() as f64;
             }
-            st.emit_agent(&agent_id);
-            st.agents.get(&agent_id).cloned().unwrap()
+            st.emit_agent(agent_id);
+            st.agents.get(agent_id).cloned().unwrap()
         };
         ctx.db.save_agent(&agent).await?;
     }
-    flush(ctx).await;
-    Ok(json!({ "ok": true, "sha": sha }))
+    Ok(sha)
 }
+
+/// Format the Python-compatible subject + summary body for an automatic
+/// checkpoint commit. Mirrors `_checkpoint_message` in loom/server.py.
+pub fn auto_checkpoint_message(
+    name: &str,
+    checkpoints_so_far: i32,
+    summary: &str,
+) -> String {
+    let n = checkpoints_so_far + 1;
+    let subject = format!("loom: checkpoint {n} — {name}");
+    let trimmed = summary.trim();
+    if trimmed.is_empty() {
+        subject
+    } else {
+        format!("{subject}\n\n{trimmed}")
+    }
+}
+
+/// Minimum seconds between progress-triggered checkpoints per agent.
+/// Matches Python's `_CHECKPOINT_INTERVAL`.
+pub const PROGRESS_CHECKPOINT_INTERVAL_SECS: f64 = 300.0;
 
 pub async fn history(ctx: &CmdContext, req: &Value) -> CmdResult {
     let agent_id = required_str(req, "agent_id")?.to_string();
-    let (path, base, branch) = {
+    let (path, mut base, branch) = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
             return Err(CmdError::BadRequest(format!(
@@ -215,6 +249,33 @@ pub async fn history(ctx: &CmdContext, req: &Value) -> CmdResult {
             cell.worktree_branch.clone(),
         )
     };
+
+    // Older agents may have been created before base_branch was resolved at
+    // worktree creation time — recover by asking git directly. Uses `@{u}`
+    // (upstream) if set, then falls back to "main" / "master". Keeps the
+    // history view populated for those agents instead of silently showing
+    // "No commits on this branch yet".
+    if base.is_empty() && !path.as_os_str().is_empty() {
+        base = resolve_fork_point(&path).await.unwrap_or_default();
+        if !base.is_empty() {
+            // Persist the recovered value so the next call (and other
+            // worktree operations like diff/check_merge) find it.
+            let mut st = ctx.state.lock().await;
+            if let Some(cell) = st.agents.get_mut(&agent_id) {
+                cell.worktree_base_branch = base.clone();
+            }
+            st.emit_agent(&agent_id);
+            drop(st);
+            if let Some(cell) = {
+                let st = ctx.state.lock().await;
+                st.agents.get(&agent_id).cloned()
+            } {
+                let _ = ctx.db.save_agent(&cell).await;
+            }
+            flush(ctx).await;
+        }
+    }
+
     let commits = if path.as_os_str().is_empty() || base.is_empty() {
         Vec::new()
     } else {
@@ -227,6 +288,50 @@ pub async fn history(ctx: &CmdContext, req: &Value) -> CmdResult {
         "base_branch": base,
         "commits": commits,
     }))
+}
+
+/// Resolve a usable "fork point" branch for a worktree when the cell's
+/// `worktree_base_branch` field is empty. Prefers the upstream of the
+/// current branch; falls back to `main` / `master` by existence check.
+async fn resolve_fork_point(worktree_path: &PathBuf) -> Option<String> {
+    // 1. Upstream of the worktree's branch, e.g. origin/main.
+    if let Ok(out) = tokio::process::Command::new("git")
+        .args([
+            "-C",
+            &worktree_path.to_string_lossy(),
+            "rev-parse",
+            "--abbrev-ref",
+            "@{upstream}",
+        ])
+        .output()
+        .await
+    {
+        if out.status.success() {
+            let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+    }
+    // 2. Common defaults — pick whichever branch actually exists.
+    for candidate in ["main", "master"] {
+        if let Ok(out) = tokio::process::Command::new("git")
+            .args([
+                "-C",
+                &worktree_path.to_string_lossy(),
+                "rev-parse",
+                "--verify",
+                candidate,
+            ])
+            .output()
+            .await
+        {
+            if out.status.success() {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+    None
 }
 
 pub async fn diff(ctx: &CmdContext, req: &Value) -> CmdResult {

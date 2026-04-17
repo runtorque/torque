@@ -76,14 +76,14 @@ pub fn spawn_worktree_refresher(app: AppState) {
 
 async fn refresh_worktrees(app: &AppState) {
     // Snapshot the cells with active worktrees — we don't want to hold the
-    // state lock while shelling out to git.
+    // state lock while shelling out to git. We include cells with an empty
+    // `worktree_base_branch` so we can backfill from git on legacy cells
+    // whose base wasn't persisted at creation time.
     let jobs: Vec<(String, String, String)> = {
         let st = app.state.lock().await;
         st.agents
             .values()
-            .filter(|cell| {
-                !cell.worktree_path.is_empty() && !cell.worktree_base_branch.is_empty()
-            })
+            .filter(|cell| !cell.worktree_path.is_empty())
             .map(|cell| {
                 (
                     cell.id.clone(),
@@ -97,7 +97,26 @@ async fn refresh_worktrees(app: &AppState) {
         return;
     }
 
-    for (agent_id, worktree_path, base_branch) in jobs {
+    for (agent_id, worktree_path, mut base_branch) in jobs {
+        if base_branch.is_empty() {
+            let path = std::path::PathBuf::from(&worktree_path);
+            if let Some(resolved) = resolve_fork_point(&path).await {
+                base_branch = resolved;
+                let mut st = app.state.lock().await;
+                if let Some(cell) = st.agents.get_mut(&agent_id) {
+                    cell.worktree_base_branch = base_branch.clone();
+                    st.emit_agent(&agent_id);
+                }
+                if let Some(cell) = {
+                    let st = app.state.lock().await;
+                    st.agents.get(&agent_id).cloned()
+                } {
+                    let _ = app.db.save_agent(&cell).await;
+                }
+            } else {
+                continue;
+            }
+        }
         // Three cheap git calls per cell. Swallow errors — a stale cell
         // (worktree deleted out from under us) should just leave the old
         // stats in place until the next create/remove resolves it.
@@ -187,6 +206,39 @@ async fn has_uncommitted(worktree_path: &str) -> bool {
         return false;
     };
     !out.stdout.is_empty()
+}
+
+/// Backfill helper for legacy worktrees that were persisted without a
+/// `worktree_base_branch`. Prefers the upstream of the worktree's branch;
+/// falls back to `main` / `master` by existence check. Duplicated from
+/// `commands::worktree::resolve_fork_point` to keep the two call sites
+/// free of a cross-module dependency on command helpers.
+async fn resolve_fork_point(worktree_path: &std::path::Path) -> Option<String> {
+    let path = worktree_path.to_string_lossy().to_string();
+    if let Ok(out) = tokio::process::Command::new("git")
+        .args(["-C", &path, "rev-parse", "--abbrev-ref", "@{upstream}"])
+        .output()
+        .await
+    {
+        if out.status.success() {
+            let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+    }
+    for candidate in ["main", "master"] {
+        if let Ok(out) = tokio::process::Command::new("git")
+            .args(["-C", &path, "rev-parse", "--verify", candidate])
+            .output()
+            .await
+        {
+            if out.status.success() {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+    None
 }
 
 async fn tick(state: &Arc<Mutex<MatrixState>>, db: &LoomDb, bus: &EventBus) {
