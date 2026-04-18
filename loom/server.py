@@ -2704,7 +2704,13 @@ async def main(connection=None):
                 return await _state_payload()
 
             elif cmd == "add_group":
-                state.add_group(data["group"])
+                group_name = data["group"]
+                state.add_group(group_name)
+                default_directory = (data.get("default_directory") or "").strip()
+                if default_directory and group_name in state.groups:
+                    state.update_group_settings(
+                        group_name, default_directory=default_directory
+                    )
 
             elif cmd == "update_group_settings":
                 settings = data.get("settings", {})

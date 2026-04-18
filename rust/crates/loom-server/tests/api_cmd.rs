@@ -131,6 +131,32 @@ async fn add_group_then_add_agent_supports_python_field_aliases() {
 }
 
 #[tokio::test]
+async fn add_group_accepts_optional_default_directory() {
+    let (addr, _h) = spawn_test_server().await;
+    let v = post(
+        addr,
+        json!({"cmd": "add_group", "group": "Eng", "default_directory": "/tmp/eng"}),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+
+    let snap = post(addr, json!({"cmd": "refresh"})).await;
+    assert_eq!(
+        snap["data"]["group_settings"]["Eng"]["default_directory"],
+        "/tmp/eng"
+    );
+
+    // Blank directory omitted behaves like before — field is empty.
+    let v = post(addr, json!({"cmd": "add_group", "group": "Ops"})).await;
+    assert_eq!(v["ok"], true);
+    let snap = post(addr, json!({"cmd": "refresh"})).await;
+    assert_eq!(
+        snap["data"]["group_settings"]["Ops"]["default_directory"],
+        ""
+    );
+}
+
+#[tokio::test]
 async fn board_task_update_accepts_top_level_python_fields() {
     let (addr, _h) = spawn_test_server().await;
     post(addr, json!({"cmd": "add_group", "group": "Eng"})).await;
