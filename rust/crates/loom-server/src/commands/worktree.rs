@@ -1094,8 +1094,20 @@ pub async fn rebase(ctx: &CmdContext, req: &Value) -> CmdResult {
         .await
         .unwrap_or(0);
 
-    let agent = {
+    let (agent, refreshed_boundary) = {
         let mut st = ctx.state.lock().await;
+        let (boundary_repo, boundary_branch) = st
+            .agents
+            .get(&agent_id)
+            .map(|cell| {
+                let repo = if !cell.worktree_repo_root.is_empty() {
+                    cell.worktree_repo_root.clone()
+                } else {
+                    cell.git_root.clone()
+                };
+                (repo, cell.worktree_branch.clone())
+            })
+            .unwrap_or_default();
         if let Some(cell) = st.agents.get_mut(&agent_id) {
             cell.worktree_checkpoints = new_count;
             cell.worktree_dirty = dirty_after;
@@ -1103,9 +1115,27 @@ pub async fn rebase(ctx: &CmdContext, req: &Value) -> CmdResult {
             cell.worktree_changed_files.clear();
         }
         st.emit_agent(&agent_id);
-        st.agents.get(&agent_id).cloned().unwrap()
+        // After a *clean* rebase, re-anchor the latest open branch
+        // boundary so the stream doesn't report "advanced beyond
+        // reviewed boundary" on every rebase. Dirty rebases leave the
+        // boundary alone — the operator hasn't committed yet.
+        let refreshed = if !dirty_after {
+            loom_weaver::streams::refresh_latest_boundary_after_rebase(
+                &mut st,
+                &boundary_repo,
+                &boundary_branch,
+                &previous_head,
+                &rebased_head,
+            )
+        } else {
+            None
+        };
+        (st.agents.get(&agent_id).cloned().unwrap(), refreshed)
     };
     ctx.db.save_agent(&agent).await?;
+    if let Some(task) = refreshed_boundary {
+        ctx.db.save_board_task(&task).await?;
+    }
     flush(ctx).await;
 
     Ok(json!({

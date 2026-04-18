@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 
 use loom_core::db::LoomDb;
 use loom_core::events::EventBus;
-use loom_core::state::{AgentCell, MatrixState};
+use loom_core::state::{AgentCell, BoardTask, MatrixState};
 
 fn git_available() -> bool {
     Command::new("git")
@@ -995,5 +995,215 @@ async fn worktree_merge_runs_pre_merge_checkpoint_synchronously() {
     assert!(
         main_has_file,
         "uncommitted work was not preserved through the pre-merge checkpoint"
+    );
+}
+
+/// Helper: read HEAD SHA out of a git dir.
+fn head_sha(dir: &Path) -> String {
+    String::from_utf8(
+        Command::new("git")
+            .current_dir(dir)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string()
+}
+
+/// After a clean rebase, the latest open boundary task whose `commit_sha`
+/// still pointed at the pre-rebase branch tip should be re-anchored to the
+/// new HEAD. Mirrors Python's `refresh_latest_boundary_after_rebase` —
+/// without it the stream goes red on every Loom-managed rebase because the
+/// reviewed commit no longer matches HEAD.
+#[tokio::test]
+async fn worktree_rebase_refreshes_latest_open_boundary() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+
+    let (addr, state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/boundary-refresh",
+            "base": "main"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    let worktree_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+
+    // Make a commit on the branch, then capture the pre-rebase head.
+    std::fs::write(worktree_path.join("a.txt"), "a\n").unwrap();
+    run_git(&worktree_path, &["add", "."]);
+    run_git(&worktree_path, &["commit", "-q", "-m", "a"]);
+    let pre_rebase_head = head_sha(&worktree_path);
+
+    // Advance main so the rebase actually moves HEAD.
+    std::fs::write(repo.join("main-file.txt"), "m\n").unwrap();
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "main advance"]);
+
+    // Seed a board task that records the pre-rebase head as its open
+    // boundary — the exact shape Loom's review flow produces.
+    let repo_root_str = repo.to_string_lossy().to_string();
+    {
+        let mut st = state.lock().await;
+        let cell = st.agents.get_mut(&agent_id).unwrap();
+        cell.worktree_base_branch = "main".into();
+        let mut task = BoardTask::new_minimal("eng-1", "Implement feature");
+        task.group = "Eng".into();
+        task.lane = "In Progress".into();
+        task.agent_id = agent_id.clone();
+        task.worktree_boundary
+            .insert("repo_root".into(), json!(repo_root_str));
+        task.worktree_boundary
+            .insert("branch".into(), json!("loom/boundary-refresh"));
+        task.worktree_boundary
+            .insert("status".into(), json!("open"));
+        task.worktree_boundary
+            .insert("commit_sha".into(), json!(pre_rebase_head.clone()));
+        task.worktree_boundary
+            .insert("recorded_at".into(), json!("2026-04-18T00:00:00Z"));
+        task.worktree_boundary
+            .insert("reason".into(), json!("some stale reason"));
+        st.upsert_task(task).unwrap();
+        st.drain_deltas();
+    }
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_rebase",
+            "agent_id": &agent_id,
+        }),
+    )
+    .await;
+    assert_eq!(v["data"]["ok"], true, "rebase response: {v:?}");
+
+    let post_rebase_head = head_sha(&worktree_path);
+    assert_ne!(
+        pre_rebase_head, post_rebase_head,
+        "test setup: rebase should have moved HEAD"
+    );
+
+    let st = state.lock().await;
+    let task = st.board_tasks.get("eng-1").unwrap();
+    assert_eq!(
+        task.worktree_boundary
+            .get("commit_sha")
+            .and_then(|v| v.as_str()),
+        Some(post_rebase_head.as_str()),
+        "boundary commit_sha should be re-anchored to the new HEAD"
+    );
+    assert_eq!(
+        task.worktree_boundary
+            .get("status")
+            .and_then(|v| v.as_str()),
+        Some("open"),
+        "boundary status should remain 'open'"
+    );
+    assert!(
+        !task.worktree_boundary.contains_key("reason"),
+        "stale 'reason' field should be cleared on refresh"
+    );
+}
+
+/// If a successor task has already started (lane not Backlog/To Do), the
+/// boundary must NOT be refreshed — that preserves the normal safety
+/// model for histories someone has already continued against.
+#[tokio::test]
+async fn worktree_rebase_leaves_boundary_alone_when_successor_started() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+
+    let (addr, state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/boundary-successor",
+            "base": "main"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    let worktree_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+
+    std::fs::write(worktree_path.join("a.txt"), "a\n").unwrap();
+    run_git(&worktree_path, &["add", "."]);
+    run_git(&worktree_path, &["commit", "-q", "-m", "a"]);
+    let pre_rebase_head = head_sha(&worktree_path);
+
+    std::fs::write(repo.join("main-file.txt"), "m\n").unwrap();
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "main advance"]);
+
+    let repo_root_str = repo.to_string_lossy().to_string();
+    {
+        let mut st = state.lock().await;
+        let cell = st.agents.get_mut(&agent_id).unwrap();
+        cell.worktree_base_branch = "main".into();
+
+        let mut boundary = BoardTask::new_minimal("eng-1", "Implement feature");
+        boundary.group = "Eng".into();
+        boundary.lane = "In Progress".into();
+        boundary.worktree_boundary
+            .insert("repo_root".into(), json!(repo_root_str));
+        boundary.worktree_boundary
+            .insert("branch".into(), json!("loom/boundary-successor"));
+        boundary.worktree_boundary
+            .insert("status".into(), json!("open"));
+        boundary.worktree_boundary
+            .insert("commit_sha".into(), json!(pre_rebase_head.clone()));
+        boundary.worktree_boundary
+            .insert("recorded_at".into(), json!("2026-04-18T00:00:00Z"));
+        st.upsert_task(boundary).unwrap();
+
+        // Successor already in In Progress — the review flow considers
+        // the boundary spoken-for from here on.
+        let mut successor = BoardTask::new_minimal("eng-1a1", "Continue work");
+        successor.group = "Eng".into();
+        successor.lane = "In Progress".into();
+        successor.resume_after_boundary_task_id = "eng-1".into();
+        st.upsert_task(successor).unwrap();
+        st.drain_deltas();
+    }
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_rebase",
+            "agent_id": &agent_id,
+        }),
+    )
+    .await;
+    assert_eq!(v["data"]["ok"], true);
+
+    let st = state.lock().await;
+    let task = st.board_tasks.get("eng-1").unwrap();
+    assert_eq!(
+        task.worktree_boundary
+            .get("commit_sha")
+            .and_then(|v| v.as_str()),
+        Some(pre_rebase_head.as_str()),
+        "boundary with a started successor must not be refreshed"
     );
 }

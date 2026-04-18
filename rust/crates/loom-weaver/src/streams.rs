@@ -126,6 +126,107 @@ pub fn stream_id(repo_root: &str, branch: &str) -> String {
     format!("stream:{}", branch_key(repo_root, branch))
 }
 
+/// Re-anchor the latest open branch boundary after a Loom-managed rebase.
+///
+/// Mirrors `loom/worktree_boundaries.py::refresh_latest_boundary_after_rebase`.
+/// Only updates the boundary when it still points at the exact pre-rebase
+/// branch tip (`commit_sha == previous_head_sha`) and has no started successor
+/// tasks. That preserves the normal safety model for stale or already-continued
+/// histories while letting Loom's own clean rebases keep the merge boundary
+/// current — the boundary task otherwise goes red on every rebase because its
+/// recorded `commit_sha` no longer matches `HEAD`, and the weaver panel reports
+/// the stream as "advanced beyond reviewed boundary".
+///
+/// Returns the updated task (cloned) when the boundary is refreshed so the
+/// caller can persist it. Returns `None` when any guard trips.
+pub fn refresh_latest_boundary_after_rebase(
+    state: &mut MatrixState,
+    repo_root: &str,
+    branch: &str,
+    previous_head_sha: &str,
+    rebased_head_sha: &str,
+) -> Option<BoardTask> {
+    let previous_head_sha = previous_head_sha.trim();
+    let rebased_head_sha = rebased_head_sha.trim();
+    if repo_root.is_empty() || branch.is_empty() {
+        return None;
+    }
+    if previous_head_sha.is_empty() || rebased_head_sha.is_empty() {
+        return None;
+    }
+    if previous_head_sha == rebased_head_sha {
+        return None;
+    }
+
+    let wanted = branch_key(repo_root, branch);
+    let mut matched: Vec<&BoardTask> = state
+        .board_tasks
+        .values()
+        .filter(|t| task_branch_key(t) == wanted)
+        .filter(|t| {
+            t.worktree_boundary
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                == "open"
+        })
+        .collect();
+    matched.sort_by(|a, b| {
+        let a_key = (
+            a.worktree_boundary
+                .get("recorded_at")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+            a.updated_at.as_str(),
+        );
+        let b_key = (
+            b.worktree_boundary
+                .get("recorded_at")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+            b.updated_at.as_str(),
+        );
+        a_key.cmp(&b_key)
+    });
+    let latest_id = matched.last().map(|t| t.id.clone())?;
+
+    // Snapshot what we need before borrowing mutably.
+    let (stored_sha, started_count) = {
+        let latest = state.board_tasks.get(&latest_id)?;
+        let stored = latest
+            .worktree_boundary
+            .get("commit_sha")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let started = state
+            .board_tasks
+            .values()
+            .filter(|t| {
+                t.resume_after_boundary_task_id == latest_id
+                    && !QUEUED_LANES.contains(&t.lane.as_str())
+            })
+            .count();
+        (stored, started)
+    };
+    if stored_sha != previous_head_sha {
+        return None;
+    }
+    if started_count > 0 {
+        return None;
+    }
+
+    let latest = state.board_tasks.get_mut(&latest_id)?;
+    latest.worktree_boundary.insert(
+        "commit_sha".into(),
+        Value::String(rebased_head_sha.to_string()),
+    );
+    latest.worktree_boundary.remove("reason");
+    let cloned = latest.clone();
+    state.emit_task(&latest_id);
+    Some(cloned)
+}
+
 pub fn stream_identity_for_agent(cell: &AgentCell) -> Option<(String, String)> {
     let repo_root = if !cell.worktree_repo_root.is_empty() {
         cell.worktree_repo_root.clone()
