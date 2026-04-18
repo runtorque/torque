@@ -61,6 +61,9 @@
     <label>Group name</label>
     <input id="group-name-input" placeholder="e.g. frontend" autocomplete="off"
            onkeydown="if(event.key==='Enter')submitGroup();if(event.key==='Escape')closeModals();">
+    <label>Directory <span class="label-hint">(optional)</span></label>
+    <input id="group-directory-input" placeholder="/path/to/project" autocomplete="off"
+           onkeydown="if(event.key==='Enter')submitGroup();if(event.key==='Escape')closeModals();">
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" onclick="submitGroup()">Create</button>

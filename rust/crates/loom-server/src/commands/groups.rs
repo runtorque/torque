@@ -1,14 +1,30 @@
 //! Group CRUD commands.
 
+use loom_core::delta::DeltaOp;
 use serde_json::{json, Value};
 
 use super::{flush, ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
 
 pub async fn add_group(ctx: &CmdContext, req: &Value) -> CmdResult {
     let name = required_str(req, "name")?.to_string();
+    let default_directory = optional_str(req, "default_directory")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     {
         let mut st = ctx.state.lock().await;
         st.add_group(&name)?;
+        if let Some(dir) = default_directory {
+            let settings = st.group_settings.entry(name.clone()).or_default();
+            settings.default_directory = dir;
+            let fields = serde_json::to_value(&*settings)
+                .ok()
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+            st.emit(DeltaOp::GroupSettingsUpdate {
+                name: name.clone(),
+                fields,
+            });
+        }
     }
     persist_group(ctx, &name).await?;
     flush(ctx).await;

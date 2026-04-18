@@ -302,12 +302,18 @@ function openAddGroup() {
   }
   const inp = document.getElementById('group-name-input');
   inp.value = '';
+  const dir = document.getElementById('group-directory-input');
+  if (dir) dir.value = '';
   inp.focus();
 }
 function submitGroup() {
   const name = document.getElementById('group-name-input').value.trim();
   if (!name) return;
-  send({ cmd: 'add_group', group: name });
+  const dirEl = document.getElementById('group-directory-input');
+  const directory = dirEl ? dirEl.value.trim() : '';
+  const payload = { cmd: 'add_group', group: name };
+  if (directory) payload.default_directory = directory;
+  send(payload);
   const standalone = !!(state && state.runtime && state.runtime.embedded_terminal);
   closeModals();
   if (standalone && typeof openAddAgent === 'function') openAddAgent(name);
