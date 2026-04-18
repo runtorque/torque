@@ -533,9 +533,9 @@ class GroupSettings:
     git_worktree: bool = False
     worktree_base_dir: str = ".loom/worktrees"  # directory for worktrees (relative to repo)
     worktree_base_branch: str = ""  # branch to fork from (empty = current HEAD)
-    worktree_auto_checkpoint: bool = False  # auto-checkpoint on agent stop
+    worktree_auto_checkpoint: bool = True  # auto-checkpoint on agent stop
     checkpoint_on_progress: bool = False  # auto-checkpoint on loom ai progress/done
-    worktree_merge_squash: bool = True  # squash commits when merging to main
+    worktree_merge_squash: bool = False  # squash commits when merging to main
     worktree_merge_instructions: str = ""  # additional instructions appended to merge prompt
     worktree_merge_cleanup: str = "keep"  # keep | close | remove | close_remove
     worktree_merge_preserve_diff: bool = False  # save the pre-merge patch on the latest boundary task
