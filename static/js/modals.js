@@ -702,7 +702,7 @@ function _showGroupSettings(group, data) {
   _renderWtSymlinks();
   _toggleWorktreeFields();
   document.getElementById('gs-session-resume').checked = s.agent_session_resume !== false;
-  document.getElementById('gs-agent-idle-timeout').value = s.agent_idle_timeout != null ? s.agent_idle_timeout : 5;
+  document.getElementById('gs-agent-idle-timeout').value = s.agent_idle_timeout != null ? s.agent_idle_timeout : 0;
   document.getElementById('gs-agent-always-custom').checked = s.agent_always_custom_dialog || false;
   document.getElementById('gs-dispatch-auto-terminals').checked = s.dispatch_auto_terminals || false;
   document.getElementById('gs-notifications').checked = s.notifications || false;

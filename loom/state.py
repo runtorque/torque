@@ -337,7 +337,7 @@ class AgentCell:
     created_by_weaver_id: str = ""  # immutable Weaver provenance (persisted)
     current_task_id: str = ""  # most recently dispatched task (ephemeral)
     session_resume: bool = True  # whether relaunch should resume the prior session
-    idle_timeout: int = 5  # per-agent idle timeout in minutes
+    idle_timeout: int = 0  # per-agent idle timeout in minutes (0=disable)
     # Worktree status (Phase 2, ephemeral)
     worktree_dirty: bool = False  # has uncommitted changes
     worktree_diff: dict = field(default_factory=dict)  # {files, insertions, deletions}
@@ -541,7 +541,7 @@ class GroupSettings:
     worktree_merge_preserve_diff: bool = False  # save the pre-merge patch on the latest boundary task
     worktree_symlinks: list[str] = field(default_factory=list)  # repo-relative paths or glob patterns to symlink from repo root
     agent_session_resume: bool = True  # resume session on relaunch
-    agent_idle_timeout: int = 5  # minutes before flagging agent as stuck (0=disable)
+    agent_idle_timeout: int = 0  # minutes before flagging agent as stuck (0=disable)
     agent_always_custom_dialog: bool = False
     # Agent notifications
     notifications: bool = False

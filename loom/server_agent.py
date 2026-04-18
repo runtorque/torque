@@ -388,7 +388,7 @@ class AgentLaunchService:
         if not cell:
             return None
         cell.session_resume = bool(launch_cfg.get("session_resume", True))
-        cell.idle_timeout = int(launch_cfg.get("idle_timeout", 5) or 0)
+        cell.idle_timeout = int(launch_cfg.get("idle_timeout", 0) or 0)
         cell.worktree_base_dir = (
             launch_cfg.get("worktree_base_dir") or ".loom/worktrees"
         )

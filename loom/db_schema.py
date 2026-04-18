@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS agents (
     agent_type            TEXT NOT NULL DEFAULT '',
     agent_session_id      TEXT NOT NULL DEFAULT '',
     session_resume        INTEGER NOT NULL DEFAULT 1,
-    idle_timeout          INTEGER NOT NULL DEFAULT 5,
+    idle_timeout          INTEGER NOT NULL DEFAULT 0,
     tasks_dispatched      INTEGER NOT NULL DEFAULT 0,
     created_by_weaver_id  TEXT NOT NULL DEFAULT ''
 );
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     worktree_merge_preserve_diff INTEGER NOT NULL DEFAULT 0,
     worktree_symlinks           TEXT NOT NULL DEFAULT '[]',
     agent_session_resume        INTEGER NOT NULL DEFAULT 1,
-    agent_idle_timeout          INTEGER NOT NULL DEFAULT 5,
+    agent_idle_timeout          INTEGER NOT NULL DEFAULT 0,
     agent_always_custom_dialog  INTEGER NOT NULL DEFAULT 0,
     notifications               INTEGER NOT NULL DEFAULT 0,
     notify_on_finish            INTEGER NOT NULL DEFAULT 1,
@@ -642,7 +642,7 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
         ("checkpoint_on_progress", "INTEGER", "0"),
         ("worktree_merge_squash", "INTEGER", "1"),
         ("session_resume", "INTEGER", "1"),
-        ("idle_timeout", "INTEGER", "5"),
+        ("idle_timeout", "INTEGER", "0"),
     ]:
         try:
             conn.execute(f"SELECT {col} FROM agents LIMIT 0")
