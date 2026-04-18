@@ -59,6 +59,29 @@ async fn spawn_server_with_agent(
         let id = cell.id.clone();
         st.add_agent(cell).unwrap();
         st.drain_deltas(); // clear accumulator
+        // Persist so commands that write to FK-linked tables (e.g.
+        // `agent_messages` → `agent_history` in `ai_report`) don't fail
+        // on a missing parent row.
+        let persisted = st.agents.get(&id).cloned().unwrap();
+        drop(st);
+        db.save_agent(&persisted).await.unwrap();
+        db.save_agent_history_record(
+            &persisted.id,
+            &persisted.name,
+            &persisted.slug,
+            &persisted.group,
+            &persisted.agent_type,
+            &persisted.template,
+            0.0,
+            None,
+            &persisted.worktree_branch,
+            0,
+            0,
+            0,
+            "active",
+        )
+        .await
+        .unwrap();
         id
     };
 
@@ -996,6 +1019,93 @@ async fn worktree_merge_runs_pre_merge_checkpoint_synchronously() {
         main_has_file,
         "uncommitted work was not preserved through the pre-merge checkpoint"
     );
+}
+
+/// Regression for "auto-checkpoint-on-stop doesn't fire on loom_done":
+/// calling `ai_report(done)` on an agent whose group opted into
+/// `worktree_auto_checkpoint` must synchronously commit dirty files on the
+/// worker's branch before the MCP reply returns. Previously only the
+/// session_end hook fired the checkpoint — if Claude Code exited before the
+/// Stop hook shipped, dirty work was silently dropped.
+#[tokio::test]
+async fn ai_report_done_runs_auto_checkpoint_synchronously() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+
+    let (addr, state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/done-cp",
+            "base": "main"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    let worktree_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+
+    // Simulate the inheritance that apply_agent_defaults now does: the
+    // agent's cell.worktree_auto_checkpoint is populated from the group
+    // setting at creation time.
+    {
+        let mut st = state.lock().await;
+        let cell = st.agents.get_mut(&agent_id).unwrap();
+        cell.worktree_auto_checkpoint = true;
+    }
+
+    // Leave uncommitted work in the worktree.
+    std::fs::write(worktree_path.join("dirty.txt"), "work\n").unwrap();
+
+    let branch_head_before = head_sha(&worktree_path);
+
+    // Call the same server command loom_done routes to.
+    let v = post(
+        addr,
+        json!({
+            "cmd": "ai_report",
+            "action": "done",
+            "agent_id": &agent_id,
+            "message": "all set",
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "ai_report(done) failed: {v:?}");
+
+    // Branch HEAD must have advanced — the checkpoint committed.
+    let branch_head_after = head_sha(&worktree_path);
+    assert_ne!(
+        branch_head_before, branch_head_after,
+        "branch HEAD did not advance; auto-checkpoint on done did not fire"
+    );
+
+    // Worktree must be clean after the commit.
+    let status_out = Command::new("git")
+        .current_dir(&worktree_path)
+        .args(["status", "--porcelain"])
+        .output()
+        .unwrap();
+    assert!(
+        status_out.stdout.is_empty(),
+        "worktree still dirty after done checkpoint: {}",
+        String::from_utf8_lossy(&status_out.stdout)
+    );
+
+    // And the committed file is on the branch.
+    let branch_has_file = Command::new("git")
+        .current_dir(&worktree_path)
+        .args(["cat-file", "-e", "HEAD:dirty.txt"])
+        .status()
+        .unwrap()
+        .success();
+    assert!(branch_has_file, "dirty.txt did not land in the checkpoint");
 }
 
 /// Helper: read HEAD SHA out of a git dir.

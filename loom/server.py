@@ -5549,6 +5549,30 @@ async def main(connection=None):
                                     task, cell, message or "Done"
                                 )
                             state._emit_agent(cell)
+                            # Auto-checkpoint on done. The session_end hook
+                            # callback (_on_agent_session_end, wired at
+                            # server.py:1541) already checkpoints, but it
+                            # only fires when Claude Code's
+                            # Stop/SessionEnd/idle_prompt hook reaches us —
+                            # racy and skipped when the agent calls
+                            # loom_done mid-turn. Running the same
+                            # checkpoint synchronously here ensures dirty
+                            # work lands on the branch before the MCP
+                            # reply returns, mirroring the pre-merge
+                            # checkpoint in worktree_merge.
+                            if (cell.worktree_path
+                                    and cell.cell_type == "agent"
+                                    and cell.worktree_auto_checkpoint):
+                                try:
+                                    cp_msg = _checkpoint_message(cell)
+                                    sha = await worktree_mgr.checkpoint(
+                                        cell, message=cp_msg)
+                                    if sha:
+                                        state._db_save_agent(cell)
+                                except Exception:
+                                    log.exception(
+                                        "done auto-checkpoint failed for"
+                                        " '%s'", cell.name)
                             if task and not task_counts_as_done(task):
                                 state.board_move_task(task.id, "Done")
                             if task:
