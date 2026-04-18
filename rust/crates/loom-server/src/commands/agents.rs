@@ -210,6 +210,21 @@ pub(crate) async fn try_create_agent_worktree(
     if cell.directory.trim().is_empty() {
         return cell;
     }
+    // Defensive: never overwrite an existing worktree attachment on
+    // the cell. Re-dispatch flows (dispatch.rs:380-409) sometimes try
+    // to create a fresh worktree for an agent that already inherited
+    // one earlier in the chain — overwriting orphans the prior branch
+    // + directory. Python guards this at the `dispatch_task` layer
+    // with `not cell.worktree_path`.
+    if !cell.worktree_path.is_empty() {
+        tracing::debug!(
+            agent = %cell.name,
+            existing_path = %cell.worktree_path,
+            existing_branch = %cell.worktree_branch,
+            "skipping try_create_agent_worktree: agent already has a worktree"
+        );
+        return cell;
+    }
     let start = PathBuf::from(crate::paths::expand_user_path_string(&cell.directory));
     let repo_root = find_git_root(&start);
     let Some(repo_root) = repo_root else {

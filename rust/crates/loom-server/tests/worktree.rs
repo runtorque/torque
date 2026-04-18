@@ -437,6 +437,67 @@ async fn worktree_merge_blocks_on_dirty_without_auto_checkpoint() {
     assert!(!agent.worktree_merged);
 }
 
+/// Explicit `worktree_remove` must also delete the branch ref, not
+/// just unregister the worktree directory. Python's `_safe_remove_worktree`
+/// path runs both steps (`loom/worktree.py::remove_path` lines
+/// 988-1028); the earlier Rust handler left a zombie `loom/...`
+/// branch behind on every call.
+#[tokio::test]
+async fn worktree_remove_deletes_branch_ref_too() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+
+    let (addr, state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/explicit-remove",
+            "base": "main"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    let worktree_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+
+    let v = post(
+        addr,
+        json!({"cmd": "worktree_remove", "agent_id": &agent_id}),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "worktree_remove response: {v:?}");
+
+    // Directory gone.
+    assert!(
+        !worktree_path.exists(),
+        "worktree dir survived worktree_remove"
+    );
+
+    // Branch gone too.
+    let branch_show = Command::new("git")
+        .current_dir(&repo)
+        .args(["show-ref", "--verify", "refs/heads/loom/explicit-remove"])
+        .status()
+        .unwrap();
+    assert!(
+        !branch_show.success(),
+        "branch survived worktree_remove"
+    );
+
+    // Cell state cleared.
+    let st = state.lock().await;
+    let cell = st.agents.get(&agent_id).unwrap();
+    assert!(cell.worktree_path.is_empty());
+    assert!(cell.worktree_branch.is_empty());
+}
+
 /// `worktree_create` must refuse when the agent already has a
 /// worktree. Python's `dispatch_task` gates with `not cell.worktree_path`;
 /// the earlier Rust port overwrote `cell.worktree_path` and orphaned

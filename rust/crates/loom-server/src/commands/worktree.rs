@@ -202,7 +202,7 @@ pub(crate) async fn safe_remove_for_cell(
 pub async fn remove(ctx: &CmdContext, req: &Value) -> CmdResult {
     let agent_id = required_str(req, "agent_id")?.to_string();
 
-    let (repo_root, path) = {
+    let cell = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
             return Err(CmdError::BadRequest(format!(
@@ -212,14 +212,16 @@ pub async fn remove(ctx: &CmdContext, req: &Value) -> CmdResult {
         if cell.worktree_path.is_empty() {
             return Err(CmdError::BadRequest("agent has no worktree".into()));
         }
-        (
-            PathBuf::from(&cell.worktree_repo_root),
-            PathBuf::from(&cell.worktree_path),
-        )
+        cell.clone()
     };
 
-    let mgr = WorktreeManager::new(&repo_root, None);
-    mgr.remove(&path).await.map_err(worktree_err)?;
+    // Delegate to `safe_remove_for_cell` so we match Python's behavior
+    // (`loom/server.py:3182-3187` → `_safe_remove_worktree` →
+    // `WorktreeManager.remove_path`) which removes the worktree
+    // directory AND the branch ref. The previous Rust handler only
+    // unregistered the worktree, leaving a zombie `loom/<name>-<id>`
+    // branch behind on every explicit remove.
+    safe_remove_for_cell(ctx, &cell).await;
 
     let agent = {
         let mut st = ctx.state.lock().await;
@@ -231,6 +233,7 @@ pub async fn remove(ctx: &CmdContext, req: &Value) -> CmdResult {
             cell.worktree_checkpoints = 0;
             cell.worktree_dirty = false;
             cell.worktree_diff = serde_json::Map::new();
+            cell.worktree_changed_files.clear();
         }
         st.emit_agent(&agent_id);
         st.agents.get(&agent_id).cloned().unwrap()
