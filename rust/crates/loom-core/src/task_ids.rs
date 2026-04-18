@@ -11,7 +11,12 @@ static CANONICAL_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^(?P<group>[a-z0-9\-]+)-(?P<trunk>\d+)(?P<derived>[a-z0-9]*)$").unwrap()
 });
 
-static DRAFT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-z0-9\-]+-draft-[0-9a-f]+$").unwrap());
+// The frontend emits bare `draft-<hex>` IDs (see
+// `static/js/modals/task-artifacts.js:_generateDraftId`); older call sites also
+// prefixed with a group slug (`<slug>-draft-<hex>`). Accept both so the server
+// can recognize either as a transient placeholder.
+static DRAFT_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^(?:[a-z0-9\-]+-)?draft-[0-9a-f]+$").unwrap());
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedTaskId {
@@ -73,7 +78,9 @@ mod tests {
     #[test]
     fn is_draft() {
         assert!(is_draft_task_token("general-draft-abc123"));
+        assert!(is_draft_task_token("draft-a1021592"));
         assert!(!is_draft_task_token("general-42"));
+        assert!(!is_draft_task_token("test-1a"));
     }
 
     #[test]
