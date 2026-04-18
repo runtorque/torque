@@ -382,13 +382,18 @@ class ServerWebSocketResyncTests(unittest.IsolatedAsyncioTestCase):
 
         state.add_group('new-group')
         await state.broadcast()
+        # Drain the deferred weaver-stream recompute so the resync
+        # snapshot sees a settled seq instead of racing the follow-up
+        # broadcast spawned by the group mutation.
+        if state._weaver_recompute_task is not None:
+            await state._weaver_recompute_task
 
         release_snapshot.set()
         ok = await register
 
         self.assertTrue(ok)
         self.assertIn(ws, state._ws_clients)
-        self.assertEqual(ws.messages, [('state', 0), ('state', 1)])
+        self.assertEqual(ws.messages, [('state', 0), ('state', state._seq)])
         self.assertEqual(ws.state_payloads[-1]['groups'], {'new-group': []})
 
     async def test_register_ready_ui_ws_client_resync_replays_current_state_after_blocked_send(self):
@@ -446,14 +451,25 @@ class ServerWebSocketResyncTests(unittest.IsolatedAsyncioTestCase):
 
         state.add_group('resynced-group')
         await state.broadcast()
+        # Drain the deferred weaver-stream recompute so seq numbers are
+        # settled before the resync retry observes them. Without this
+        # the ready_ws client also receives the follow-up weaver_streams
+        # delta, which isn't what this test is exercising.
+        if state._weaver_recompute_task is not None:
+            await state._weaver_recompute_task
+        settled_seq = state._seq
+        settled_ready_msgs = list(ready_ws.messages)
 
         release_snapshot.set()
         ok = await register
 
         self.assertTrue(ok)
         self.assertIn(resync_ws, state._ws_clients)
-        self.assertEqual(ready_ws.messages, [('delta', 1)])
-        self.assertEqual(resync_ws.messages, [('state', 0), ('state', 1)])
+        self.assertEqual(ready_ws.messages, settled_ready_msgs)
+        self.assertEqual(
+            resync_ws.messages,
+            [('state', 0), ('state', settled_seq)],
+        )
         self.assertEqual(
             resync_ws.state_payloads[-1]['groups'],
             {'resynced-group': []},

@@ -676,10 +676,18 @@ class MatrixState:
         self._delta_ops: list[dict] = []
         self._seq: int = 0
         # Per-agent fingerprint of weaver-relevant fields. Lets
-        # `_append_weaver_stream_delta_ops` skip recomputing a group's
+        # `_collect_weaver_affected_groups` skip recomputing a group's
         # weaver streams when an agent_upsert only changes ephemeral
         # fields (activity, path, last_event_at, etc.).
         self._agent_weaver_fingerprints: dict[str, tuple] = {}
+        # Deferred weaver-stream recompute. `broadcast()` queues affected
+        # groups into `_weaver_recompute_pending` and spawns a single
+        # worker task that prefills branch-existence, computes each
+        # group's stream payload, and emits a follow-up `weaver_streams`
+        # delta. Keeps the primary delta frame off the git-subprocess
+        # hot path so UI mutations feel instant.
+        self._weaver_recompute_pending: set[str] = set()
+        self._weaver_recompute_task = None
 
     # -- Delta emission -----------------------------------------------------
 
@@ -830,7 +838,16 @@ class MatrixState:
             str(op.get("cell_type", "") or ""),
         )
 
-    def _append_weaver_stream_delta_ops(self, ops: list[dict]) -> list[dict]:
+    def _collect_weaver_affected_groups(self, ops: list[dict]) -> set[str]:
+        """Return the set of groups whose weaver streams need recomputing.
+
+        Scans ``ops`` for trigger ops (task/agent/group mutations) and,
+        as a side effect, updates the per-agent fingerprint cache used
+        to dedupe ephemeral-only agent_upserts. The caller is expected
+        to recompute + emit stream payloads for each returned group
+        outside the broadcast hot path so the UI delta doesn't wait on
+        git.
+        """
         affected_groups: set[str] = set()
         for op in ops:
             op_name = str((op or {}).get("op", "") or "")
@@ -860,42 +877,55 @@ class MatrixState:
                     self._agent_weaver_fingerprints.pop(agent_id, None)
             affected_groups.add(str(op.get("group", "") or "").strip())
         affected_groups.discard("")
-        if not affected_groups:
-            return list(ops)
+        return affected_groups
 
-        next_ops = list(ops)
+    def _emit_weaver_stream_ops(self, groups: set[str]) -> bool:
+        """Emit `weaver_streams` delta ops for each group in ``groups``.
+
+        Returns True when at least one op was emitted. Safe to call when
+        the per-repo branch-exists cache is cold, but in practice
+        callers should prefill first so no subprocess runs inline.
+        """
+        if not groups:
+            return False
+        known_groups = set(self._weaver_stream_groups())
         existing_groups = {
             str((op or {}).get("group", "") or "").strip()
-            for op in next_ops
+            for op in self._delta_ops
             if str((op or {}).get("op", "") or "") in {
                 "weaver_streams",
                 "weaver_streams_update",
             }
         }
-        known_groups = set(self._weaver_stream_groups())
-        for group in affected_groups:
-            if group in existing_groups:
+        emitted = False
+        for group in groups:
+            if not group or group in existing_groups:
                 continue
             if group not in known_groups:
                 # Group was just removed; emit an empty payload so clients
                 # clear it from their local state.
-                next_ops.append({
-                    "op": "weaver_streams",
-                    "group": group,
-                    "streams": {
+                self._emit(
+                    "weaver_streams",
+                    group=group,
+                    streams={
                         "count": 0,
                         "by_state": {},
                         "items": [],
                         "truncated": False,
                     },
-                })
+                )
+                emitted = True
                 continue
-            next_ops.append({
-                "op": "weaver_streams",
-                "group": group,
-                "streams": self._weaver_stream_payload(group),
-            })
-        return next_ops
+            try:
+                payload = self._weaver_stream_payload(group)
+            except Exception:
+                log.exception(
+                    "weaver stream payload failed for group '%s'", group
+                )
+                continue
+            self._emit("weaver_streams", group=group, streams=payload)
+            emitted = True
+        return emitted
 
     # -- Serialization ------------------------------------------------------
 
@@ -3110,33 +3140,28 @@ class MatrixState:
         If there are no delta ops (e.g. broadcast after a focus change
         where the _emit was called), this is a no-op — the delta was
         already queued by _emit().
+
+        Weaver-stream recompute + `git for-each-ref` prefill are deferred
+        to a background worker (`_weaver_recompute_worker`) so UI
+        mutations don't wait on git. The worker fires a follow-up
+        broadcast with the computed `weaver_streams` ops; clients treat
+        it as any other delta frame.
         """
-        # Cheap pre-lock bail-out: if nothing has been emitted, skip. This
-        # also spares us the prefill cost on the focus-only hot path.
+        # Cheap pre-lock bail-out: if nothing has been emitted, skip.
         if not self._delta_ops:
             return
-        # Warm the per-repo branch-exists cache asynchronously before the
-        # weaver-stream recompute runs under the WS lock. Without this, the
-        # sync _branch_exists_locally fallback forks subprocess on the event
-        # loop, stalling focus/select clicks while git runs.
-        if any(
-            str((op or {}).get("op", "") or "")
-            in _WEAVER_STREAM_DELTA_TRIGGER_OPS
-            for op in self._delta_ops
-        ):
-            try:
-                from .worktree_streams import prefill_branch_exists_for_state
-                await prefill_branch_exists_for_state(self)
-            except Exception:
-                log.exception("Branch-exists prefill failed")
+        # Collect weaver-stream affected groups before draining ops so
+        # the background worker has something to chew on after the
+        # primary frame goes out. Fingerprint cache is updated as a
+        # side effect (dedupes ephemeral-only agent_upserts).
+        weaver_groups = self._collect_weaver_affected_groups(self._delta_ops)
         async with self._ws_clients_lock:
             if not self._delta_ops:
                 return
-            ops = self._append_weaver_stream_delta_ops(self._delta_ops)
             self._seq += 1
             msg = json.dumps({
                 "type": "delta", "seq": self._seq,
-                "ops": ops,
+                "ops": self._delta_ops,
             })
             self._delta_ops = []
             clients = list(self._ws_clients)
@@ -3154,3 +3179,48 @@ class MatrixState:
         if dead:
             async with self._ws_clients_lock:
                 self._ws_clients -= dead
+        if weaver_groups:
+            self._schedule_weaver_recompute(weaver_groups)
+
+    def _schedule_weaver_recompute(self, groups: set[str]) -> None:
+        """Queue a deferred weaver-stream recompute for ``groups``.
+
+        Spawns a single worker task. If one is already running, merges
+        the new groups into its pending set — the worker re-checks
+        after each iteration so it drains everything before exiting.
+        """
+        if not groups:
+            return
+        self._weaver_recompute_pending |= set(groups)
+        task = self._weaver_recompute_task
+        if task is not None and not task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No event loop; caller is off the async path. Skip silently —
+            # the next real broadcast will re-queue anything still dirty.
+            return
+        self._weaver_recompute_task = loop.create_task(
+            self._weaver_recompute_worker()
+        )
+
+    async def _weaver_recompute_worker(self) -> None:
+        """Drain `_weaver_recompute_pending`: prefill branch existence,
+        compute stream payloads, broadcast a follow-up delta."""
+        from .worktree_streams import prefill_branch_exists_for_state
+        try:
+            while self._weaver_recompute_pending:
+                pending = self._weaver_recompute_pending
+                self._weaver_recompute_pending = set()
+                try:
+                    await prefill_branch_exists_for_state(self)
+                except Exception:
+                    log.exception("Branch-exists prefill failed")
+                if self._emit_weaver_stream_ops(pending):
+                    # The follow-up broadcast's own _collect_weaver_*
+                    # call returns empty (weaver_streams isn't a trigger
+                    # op), so this does not recurse into another worker.
+                    await self.broadcast()
+        finally:
+            self._weaver_recompute_task = None

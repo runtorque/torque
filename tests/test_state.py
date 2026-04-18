@@ -1172,13 +1172,31 @@ class MatrixStateWeaverStreamTests(unittest.IsolatedAsyncioTestCase):
         state._ws_clients.add(ws)
         state._emit("task_upsert", **self.state_mod.asdict(product))
 
+        # Primary broadcast: UI-facing ops land immediately; the expensive
+        # weaver-stream recompute is deferred to a background worker so
+        # mutations don't wait on `git for-each-ref`.
         await state.broadcast()
 
-        self.assertEqual(len(ws.messages), 1)
-        ops = ws.messages[0]["ops"]
-        task_ops = [op for op in ops if op["op"] == "task_upsert"]
-        stream_ops = [op for op in ops if op["op"] == "weaver_streams"]
-        self.assertEqual(len(task_ops), 1)
+        self.assertEqual(len(ws.messages), 1, ws.messages)
+        primary_ops = ws.messages[0]["ops"]
+        self.assertEqual(
+            [op["op"] for op in primary_ops if op["op"] == "task_upsert"],
+            ["task_upsert"],
+        )
+        self.assertFalse(
+            any(op["op"] == "weaver_streams" for op in primary_ops),
+            "weaver_streams should not block the primary delta frame",
+        )
+
+        # Drain the deferred recompute and its follow-up broadcast.
+        self.assertIsNotNone(state._weaver_recompute_task)
+        await state._weaver_recompute_task
+
+        self.assertEqual(len(ws.messages), 2, ws.messages)
+        followup_ops = ws.messages[1]["ops"]
+        stream_ops = [
+            op for op in followup_ops if op["op"] == "weaver_streams"
+        ]
         self.assertEqual(len(stream_ops), 1)
         self.assertEqual(stream_ops[0]["group"], "g")
         self.assertEqual(stream_ops[0]["streams"]["count"], 1)
