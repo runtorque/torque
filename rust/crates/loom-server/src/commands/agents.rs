@@ -384,6 +384,18 @@ pub async fn remove_agent(ctx: &CmdContext, req: &Value) -> CmdResult {
             }
         }
     }
+    // Force-remove each removed cell's worktree + branch. Matches
+    // Python's `remove_agent` handler (`loom/server.py:2897-2903`)
+    // which calls `_safe_remove_worktree(c)` for every cascade-closed
+    // cell. Without this loop the branches + `.loom/worktrees/<name>/`
+    // directories leak on every agent close — the user ends up with
+    // hundreds of orphaned worktrees polluting `git worktree list` and
+    // occupying disk space.
+    for cell in &removed_cells {
+        if cell.cell_type == "agent" && !cell.worktree_path.is_empty() {
+            let _ = crate::commands::worktree::safe_remove_for_cell(ctx, cell).await;
+        }
+    }
     for rid in &removed {
         ctx.db.delete_agent(rid).await?;
     }

@@ -437,6 +437,135 @@ async fn worktree_merge_blocks_on_dirty_without_auto_checkpoint() {
     assert!(!agent.worktree_merged);
 }
 
+/// `worktree_create` must refuse when the agent already has a
+/// worktree. Python's `dispatch_task` gates with `not cell.worktree_path`;
+/// the earlier Rust port overwrote `cell.worktree_path` and orphaned
+/// the old branch + directory.
+#[tokio::test]
+async fn worktree_create_refuses_when_worktree_already_exists() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+
+    let (addr, state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/first",
+            "base": "main"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    let first_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+
+    // A second create should refuse and NOT touch the existing worktree.
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/second",
+            "base": "main"
+        }),
+    )
+    .await;
+    assert_eq!(
+        v["data"]["ok"], false,
+        "second worktree_create should refuse: {v:?}"
+    );
+    let err = v["data"]["error"].as_str().unwrap_or("");
+    assert!(
+        err.contains("already has a worktree"),
+        "expected guard error, got: {err}"
+    );
+
+    // The original worktree + branch must still be intact.
+    assert!(first_path.exists());
+    let branch_show = Command::new("git")
+        .current_dir(&repo)
+        .args(["show-ref", "--verify", "refs/heads/loom/first"])
+        .status()
+        .unwrap();
+    assert!(branch_show.success(), "original branch was destroyed");
+
+    // The second branch should NOT exist (create refused before running git).
+    let second_branch = Command::new("git")
+        .current_dir(&repo)
+        .args(["show-ref", "--verify", "refs/heads/loom/second"])
+        .status()
+        .unwrap();
+    assert!(
+        !second_branch.success(),
+        "second branch was created despite the guard"
+    );
+
+    // Cell state still reflects the original worktree.
+    let st = state.lock().await;
+    let cell = st.agents.get(&agent_id).unwrap();
+    assert_eq!(cell.worktree_branch, "loom/first");
+}
+
+/// `remove_agent` must cascade worktree cleanup — otherwise every
+/// closed agent leaks a branch + a `.loom/worktrees/<name>/` directory.
+/// Python does this at `loom/server.py:2897-2903` via
+/// `_safe_remove_worktree` for every cascade-closed cell.
+#[tokio::test]
+async fn remove_agent_cleans_up_worktree_and_branch() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+
+    let (addr, _state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/to-cleanup",
+            "base": "main"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    let worktree_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+    assert!(worktree_path.exists());
+
+    // Close the agent via remove_agent.
+    let v = post(addr, json!({"cmd": "remove_agent", "id": &agent_id})).await;
+    assert_eq!(v["ok"], true, "remove_agent response: {v:?}");
+
+    // Worktree directory on disk must be gone.
+    assert!(
+        !worktree_path.exists(),
+        "worktree dir leaked after remove_agent: {}",
+        worktree_path.display()
+    );
+
+    // Branch ref must be gone.
+    let branch_show = Command::new("git")
+        .current_dir(&repo)
+        .args(["show-ref", "--verify", "refs/heads/loom/to-cleanup"])
+        .status()
+        .unwrap();
+    assert!(
+        !branch_show.success(),
+        "branch ref leaked after remove_agent"
+    );
+}
+
 /// Rebase must refuse to run when the worktree has untracked files
 /// that would be overwritten by the rebase. Previously Rust passed
 /// straight through to `git rebase`, which can silently clobber them.

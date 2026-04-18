@@ -47,10 +47,11 @@ pub async fn create(ctx: &CmdContext, req: &Value) -> CmdResult {
     let branch = required_str(req, "branch")?.to_string();
     let base = optional_str(req, "base").unwrap_or("").to_string();
 
-    let (repo_root, base_dir) = {
+    let (repo_root, base_dir, existing) = {
         let st = ctx.state.lock().await;
         let repo = agent_repo_root(&st, &agent_id)?;
-        let base_dir = st.agents.get(&agent_id).and_then(|a| {
+        let agent = st.agents.get(&agent_id);
+        let base_dir = agent.and_then(|a| {
             if a.worktree_base_dir.is_empty() {
                 None
             } else {
@@ -64,8 +65,29 @@ pub async fn create(ctx: &CmdContext, req: &Value) -> CmdResult {
                 Some(resolved)
             }
         });
-        (repo, base_dir)
+        let existing = agent
+            .map(|a| (a.worktree_path.clone(), a.worktree_branch.clone()))
+            .unwrap_or_default();
+        (repo, base_dir, existing)
     };
+
+    // Refuse to create a second worktree on top of an existing one.
+    // Python guards this at `loom/server.py::dispatch_task` with
+    // `if cell and not cell.worktree_path and cell.directory`, so a
+    // repeat `worktree_create` for the same agent is a no-op. Without
+    // this guard, Rust overwrites `cell.worktree_path`, orphaning the
+    // old branch + worktree directory with no way to reach them.
+    if !existing.0.is_empty() {
+        return Ok(json!({
+            "ok": false,
+            "error": format!(
+                "agent already has a worktree on branch '{}' at '{}'; remove it before creating a new one",
+                existing.1, existing.0
+            ),
+            "path": existing.0,
+            "branch": existing.1,
+        }));
+    }
 
     let mgr = WorktreeManager::new(&repo_root, base_dir);
     let info = mgr.create(&branch, &base).await.map_err(worktree_err)?;
@@ -92,6 +114,89 @@ pub async fn create(ctx: &CmdContext, req: &Value) -> CmdResult {
         "path": info.path.to_string_lossy(),
         "branch": info.branch,
     }))
+}
+
+/// Force-remove a cell's worktree + branch on disk. Returns true when
+/// the git operations succeeded (or when the worktree was already
+/// shared with another agent and therefore only unlinked from this
+/// cell's fields). Mirrors Python's `_safe_remove_worktree`
+/// (`loom/server.py:1314-1332`) — if any other agent still references
+/// this worktree_path, the on-disk worktree stays and we only clear
+/// the cell's own worktree fields.
+pub(crate) async fn safe_remove_for_cell(
+    ctx: &CmdContext,
+    cell: &loom_core::state::AgentCell,
+) -> bool {
+    if cell.worktree_path.is_empty() {
+        return true;
+    }
+    let shares_worktree = {
+        let st = ctx.state.lock().await;
+        st.agents
+            .values()
+            .any(|other| other.id != cell.id && other.worktree_path == cell.worktree_path)
+    };
+    if shares_worktree {
+        tracing::info!(
+            agent = %cell.id,
+            path = %cell.worktree_path,
+            "skipping on-disk worktree removal — shared with another agent"
+        );
+        return true;
+    }
+    let repo_root = if !cell.worktree_repo_root.is_empty() {
+        PathBuf::from(&cell.worktree_repo_root)
+    } else if !cell.git_root.is_empty() {
+        PathBuf::from(&cell.git_root)
+    } else {
+        // Best-effort fallback: strip the last two path segments
+        // (`.loom/worktrees/<name>`) off the worktree path. Matches
+        // Python's `os.path.dirname` fallback at `worktree.py:1075`.
+        PathBuf::from(&cell.worktree_path)
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from(&cell.worktree_path))
+    };
+    let mgr = WorktreeManager::new(&repo_root, None);
+    let removed_ok = match mgr.remove(&PathBuf::from(&cell.worktree_path)).await {
+        Ok(_) => true,
+        Err(err) => {
+            tracing::warn!(
+                agent = %cell.id,
+                path = %cell.worktree_path,
+                ?err,
+                "worktree remove failed"
+            );
+            false
+        }
+    };
+    // Matching Python `WorktreeManager.remove_path` (`loom/worktree.py:988-1028`)
+    // which also deletes the branch ref with `git branch -d` — the
+    // safe variant, so a branch with unmerged work is preserved and
+    // must be force-deleted manually. `WorktreeManager::remove` above
+    // only unregisters the worktree; without this follow-up, the
+    // branch ref leaks indefinitely.
+    if !cell.worktree_branch.is_empty() {
+        let out = tokio::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo_root)
+            .args(["branch", "-d", &cell.worktree_branch])
+            .output()
+            .await;
+        if let Ok(out) = out {
+            if !out.status.success() {
+                tracing::warn!(
+                    agent = %cell.id,
+                    branch = %cell.worktree_branch,
+                    stderr = %String::from_utf8_lossy(&out.stderr).trim(),
+                    "branch delete after agent close failed (likely unmerged commits — use worktree_merge first or branch -D manually)"
+                );
+            }
+        }
+    }
+    removed_ok
 }
 
 pub async fn remove(ctx: &CmdContext, req: &Value) -> CmdResult {
