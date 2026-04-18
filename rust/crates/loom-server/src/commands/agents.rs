@@ -956,6 +956,18 @@ pub(crate) fn apply_agent_defaults(
         cell.agent_type = agent_type;
     }
     cell.terminal_backend = "pty".into();
+
+    // Inherit worktree-related group defaults onto the agent cell. Mirrors
+    // Python's `server_agent.py::resolve_agent_launch_config` +
+    // `create_agent_with_config` (loom/server_agent.py:229, 395). Without
+    // this, every Rust-created agent boots with `worktree_auto_checkpoint =
+    // false` (the `AgentCell::default()` value) no matter what the group
+    // opted into, so the session_end auto-checkpoint (`events.rs:292`) and
+    // the pre-merge guard (`worktree.rs:744`) silently no-op and dirty
+    // trees never land on the branch.
+    cell.worktree_auto_checkpoint = settings.worktree_auto_checkpoint;
+    cell.checkpoint_on_progress = settings.checkpoint_on_progress;
+    cell.worktree_merge_squash = settings.worktree_merge_squash;
 }
 
 fn build_agent_create_session_options(
@@ -1245,4 +1257,48 @@ fn collect_removed_cells(st: &loom_core::state::MatrixState, id: &str) -> Vec<Ag
     let mut out = Vec::new();
     walk(st, id, &mut out);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_core::state::{AgentCell, GroupSettings};
+    use serde_json::json;
+
+    /// Regression: every worktree-related group setting must be copied
+    /// onto the agent cell at creation time. Missing this inheritance
+    /// was the root cause of "auto-checkpoint-on-stop doesn't fire" —
+    /// newly created agents had `worktree_auto_checkpoint = false`
+    /// regardless of the group's opt-in, so both the session_end hook
+    /// and the pre-merge guard silently no-op'd.
+    #[test]
+    fn apply_agent_defaults_inherits_worktree_flags_from_group() {
+        let mut settings = GroupSettings::default();
+        settings.worktree_auto_checkpoint = true;
+        settings.checkpoint_on_progress = true;
+        settings.worktree_merge_squash = true;
+
+        let mut cell = AgentCell::new("id", "worker", "Eng");
+        apply_agent_defaults(&mut cell, &settings, "claude", &json!({}));
+
+        assert!(cell.worktree_auto_checkpoint);
+        assert!(cell.checkpoint_on_progress);
+        assert!(cell.worktree_merge_squash);
+    }
+
+    #[test]
+    fn apply_agent_defaults_respects_false_group_flags() {
+        let mut settings = GroupSettings::default();
+        settings.worktree_auto_checkpoint = false;
+        settings.checkpoint_on_progress = false;
+        settings.worktree_merge_squash = false;
+
+        let mut cell = AgentCell::new("id", "worker", "Eng");
+        cell.worktree_auto_checkpoint = true; // simulate stale state
+        apply_agent_defaults(&mut cell, &settings, "claude", &json!({}));
+
+        assert!(!cell.worktree_auto_checkpoint);
+        assert!(!cell.checkpoint_on_progress);
+        assert!(!cell.worktree_merge_squash);
+    }
 }

@@ -1244,6 +1244,41 @@ pub async fn ai_report(ctx: &CmdContext, req: &Value) -> CmdResult {
         }
     }
 
+    // Done/ready-triggered auto-checkpoint. The session_end hook already
+    // checkpoints (`events.rs:292`), but it only fires when Claude Code's
+    // Stop/SessionEnd/idle_prompt hook reaches us — which is racy (the
+    // provider process can exit before the hook ships) and skipped
+    // entirely when the agent calls `loom_done` mid-turn. Run the same
+    // checkpoint synchronously here so the MCP reply only returns after
+    // dirty work has landed on the branch — mirrors the pre-merge
+    // checkpoint in `worktree.rs::merge` (Fix D).
+    if matches!(action.as_str(), "done" | "ready")
+        && agent.cell_type == "agent"
+        && agent.worktree_auto_checkpoint
+        && !agent.worktree_path.is_empty()
+    {
+        let summary = if !message.is_empty() {
+            &message
+        } else {
+            &agent.last_summary
+        };
+        let msg = crate::commands::worktree::auto_checkpoint_message(
+            &agent.name,
+            agent.worktree_checkpoints,
+            summary,
+        );
+        match crate::commands::worktree::do_checkpoint_for_agent(ctx, &agent.id, &msg).await {
+            Ok(sha) => {
+                if sha.is_some() {
+                    tracing::info!(agent = %agent.id, action = %action, "done-checkpoint committed");
+                }
+            }
+            Err(err) => {
+                tracing::warn!(agent = %agent.id, action = %action, ?err, "done-checkpoint failed");
+            }
+        }
+    }
+
     match action.as_str() {
         "done" | "ready" => {
             if !task_id.is_empty() {
