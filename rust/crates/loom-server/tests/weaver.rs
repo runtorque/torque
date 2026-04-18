@@ -559,6 +559,127 @@ async fn idle_designated_weaver_receives_digest_for_buffered_panel_events() {
 }
 
 #[tokio::test]
+async fn paused_weaver_does_not_receive_digest() {
+    let (addr, state, db, ui_agents) = spawn().await;
+    let (weaver_id, worker_id) = seed_weaver_group(&state, &db).await;
+    let mut inbox = ui_agents.register(weaver_id.clone());
+
+    {
+        let mut st = state.lock().await;
+        let weaver = st.agents.get_mut(&weaver_id).unwrap();
+        weaver.status = "running".into();
+        weaver.activity.clear();
+        weaver.activity_detail.clear();
+    }
+
+    let pause = post(addr, json!({"cmd": "weaver_pause", "group": "Eng"})).await;
+    assert_eq!(pause["ok"], true, "pause: {pause:?}");
+
+    let dispatched = post(
+        addr,
+        json!({
+            "cmd": "dispatch_task",
+            "task_id": "eng-1a1",
+            "agent_id": worker_id,
+            "force_no_action": true,
+        }),
+    )
+    .await;
+    assert_eq!(dispatched["ok"], true, "dispatch: {dispatched:?}");
+
+    let result = tokio::time::timeout(std::time::Duration::from_millis(500), inbox.recv()).await;
+    assert!(
+        result.is_err(),
+        "paused weaver must not receive digest, got {result:?}"
+    );
+
+    let flush_now = post(addr, json!({"cmd": "weaver_flush_now", "group": "Eng"})).await;
+    assert_eq!(flush_now["ok"], true, "flush_now: {flush_now:?}");
+    let result = tokio::time::timeout(std::time::Duration::from_millis(500), inbox.recv()).await;
+    assert!(
+        result.is_err(),
+        "flush_now must also honor pause, got {result:?}"
+    );
+
+    let resume = post(addr, json!({"cmd": "weaver_resume", "group": "Eng"})).await;
+    assert_eq!(resume["ok"], true, "resume: {resume:?}");
+
+    let first = tokio::time::timeout(std::time::Duration::from_secs(2), inbox.recv())
+        .await
+        .expect("digest text should arrive after resume")
+        .expect("ui channel still open");
+    match first {
+        UiAgentInput::Text(text) => {
+            assert!(text.contains("## Loom Digest"), "digest: {text}");
+        }
+        other => panic!("expected digest text after resume, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn weaver_ask_pauses_delivery_and_blocks_digest() {
+    let (addr, state, db, ui_agents) = spawn().await;
+    let (weaver_id, worker_id) = seed_weaver_group(&state, &db).await;
+    let mut inbox = ui_agents.register(weaver_id.clone());
+
+    {
+        let mut st = state.lock().await;
+        let weaver = st.agents.get_mut(&weaver_id).unwrap();
+        weaver.status = "running".into();
+        weaver.activity.clear();
+        weaver.activity_detail.clear();
+    }
+
+    let ask = post(
+        addr,
+        json!({"cmd": "weaver_ask", "group": "Eng", "question": "Ship?"}),
+    )
+    .await;
+    assert_eq!(ask["ok"], true, "ask: {ask:?}");
+
+    {
+        let st = state.lock().await;
+        let settings = st.get_weaver_settings("Eng");
+        assert!(settings.paused, "weaver_ask must pause delivery");
+        assert_eq!(settings.pending_question, "Ship?");
+    }
+
+    let dispatched = post(
+        addr,
+        json!({
+            "cmd": "dispatch_task",
+            "task_id": "eng-1a1",
+            "agent_id": worker_id,
+            "force_no_action": true,
+        }),
+    )
+    .await;
+    assert_eq!(dispatched["ok"], true, "dispatch: {dispatched:?}");
+
+    let result = tokio::time::timeout(std::time::Duration::from_millis(500), inbox.recv()).await;
+    assert!(
+        result.is_err(),
+        "weaver_ask-paused weaver must not receive digest, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn paused_flag_persists_across_db_reload() {
+    let (addr, _state, db, _ui_agents) = spawn().await;
+    let (_weaver_id, _worker_id) = seed_weaver_group(&_state, &db).await;
+
+    let pause = post(addr, json!({"cmd": "weaver_pause", "group": "Eng"})).await;
+    assert_eq!(pause["ok"], true, "pause: {pause:?}");
+
+    let reloaded = db.load_all().await.unwrap();
+    let settings = reloaded.get_weaver_settings("Eng");
+    assert!(
+        settings.paused,
+        "paused must persist across reload, got {settings:?}"
+    );
+}
+
+#[tokio::test]
 async fn weaver_reply_keeps_pending_question_when_not_deliverable() {
     let (addr, state, db, _ui_agents) = spawn().await;
     let (weaver_id, _worker_id) = seed_weaver_group(&state, &db).await;
