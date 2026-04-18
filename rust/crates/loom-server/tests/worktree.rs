@@ -437,6 +437,288 @@ async fn worktree_merge_blocks_on_dirty_without_auto_checkpoint() {
     assert!(!agent.worktree_merged);
 }
 
+/// Rebase must refuse to run when the worktree has untracked files
+/// that would be overwritten by the rebase. Previously Rust passed
+/// straight through to `git rebase`, which can silently clobber them.
+#[tokio::test]
+async fn worktree_rebase_refuses_untracked_overwrite() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+
+    let (addr, state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    // Create a worktree branched from main at the initial commit.
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/rebase-test",
+            "base": "main"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    let worktree_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+
+    // Advance `main` with a new file `target.txt` so that rebasing onto
+    // main would bring that file into the worktree.
+    std::fs::write(repo.join("target.txt"), "from-main\n").unwrap();
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "add target.txt on main"]);
+
+    // In the worktree, create `target.txt` UNTRACKED. A naive `git
+    // rebase` would refuse — but we want to assert our guard catches
+    // it FIRST with a clear error before git touches anything.
+    std::fs::write(worktree_path.join("target.txt"), "untracked-local\n").unwrap();
+    // Ensure the wt base_branch is set so the untracked-overwrite
+    // scan can run.
+    {
+        let mut st = state.lock().await;
+        let cell = st.agents.get_mut(&agent_id).unwrap();
+        cell.worktree_base_branch = "main".into();
+    }
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_rebase",
+            "agent_id": &agent_id,
+        }),
+    )
+    .await;
+    assert_eq!(
+        v["data"]["ok"], false,
+        "rebase should refuse untracked-overwrite: {v:?}"
+    );
+    let err = v["data"]["error"].as_str().unwrap_or("");
+    assert!(
+        err.contains("overwrite") && err.contains("target.txt"),
+        "expected untracked-overwrite error, got: {err}"
+    );
+    assert!(
+        worktree_path.join("target.txt").exists(),
+        "untracked file was deleted by the refused rebase"
+    );
+}
+
+/// Rebase must refuse when the worktree is dirty; Python explicitly
+/// tells the user to checkpoint/commit first.
+#[tokio::test]
+async fn worktree_rebase_refuses_dirty_worktree() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+
+    let (addr, state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/dirty-rebase",
+            "base": "main"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    let worktree_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+
+    // Advance main.
+    std::fs::write(repo.join("main.txt"), "from-main\n").unwrap();
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "main advance"]);
+
+    // Modify a tracked file in the worktree, leave uncommitted.
+    std::fs::write(worktree_path.join("README.md"), "dirty\n").unwrap();
+
+    {
+        let mut st = state.lock().await;
+        let cell = st.agents.get_mut(&agent_id).unwrap();
+        cell.worktree_base_branch = "main".into();
+    }
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_rebase",
+            "agent_id": &agent_id,
+        }),
+    )
+    .await;
+    assert_eq!(
+        v["data"]["ok"], false,
+        "rebase should refuse dirty worktree: {v:?}"
+    );
+    let err = v["data"]["error"].as_str().unwrap_or("");
+    assert!(
+        err.contains("uncommitted"),
+        "expected uncommitted-changes error, got: {err}"
+    );
+}
+
+/// Successful rebase refreshes worktree_checkpoints and clears the
+/// cached diff so the UI badges match reality.
+#[tokio::test]
+async fn worktree_rebase_refreshes_cell_state_on_success() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+
+    let (addr, state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/rebase-refresh",
+            "base": "main"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    let worktree_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+
+    // Make 2 commits on the branch.
+    std::fs::write(worktree_path.join("a.txt"), "a\n").unwrap();
+    run_git(&worktree_path, &["add", "."]);
+    run_git(&worktree_path, &["commit", "-q", "-m", "a"]);
+    std::fs::write(worktree_path.join("b.txt"), "b\n").unwrap();
+    run_git(&worktree_path, &["add", "."]);
+    run_git(&worktree_path, &["commit", "-q", "-m", "b"]);
+
+    // Advance main so rebase has something to replay onto.
+    std::fs::write(repo.join("main-file.txt"), "m\n").unwrap();
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "main advance"]);
+
+    {
+        let mut st = state.lock().await;
+        let cell = st.agents.get_mut(&agent_id).unwrap();
+        cell.worktree_base_branch = "main".into();
+        // Pretend the cached state is stale so we can observe the
+        // refresh overwrite it.
+        cell.worktree_checkpoints = 99;
+        cell.worktree_dirty = true;
+    }
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_rebase",
+            "agent_id": &agent_id,
+        }),
+    )
+    .await;
+    assert_eq!(v["data"]["ok"], true, "rebase response: {v:?}");
+
+    let st = state.lock().await;
+    let cell = st.agents.get(&agent_id).unwrap();
+    assert_eq!(
+        cell.worktree_checkpoints, 2,
+        "worktree_checkpoints should be recomputed to the real ahead count"
+    );
+    assert!(
+        !cell.worktree_dirty,
+        "worktree_dirty should be cleared after a clean rebase"
+    );
+}
+
+/// After `worktree_rollback`, the cell's worktree_checkpoints count
+/// and dirty flag must be refreshed, and the delta broadcast. Python
+/// updates these via `_emit_agent` + `_db_save_agent` after rollback.
+#[tokio::test]
+async fn worktree_rollback_refreshes_cell_state() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+
+    let (addr, state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/rollback-test",
+            "base": "main"
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    let worktree_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+
+    // Make two commits.
+    std::fs::write(worktree_path.join("c1.txt"), "1\n").unwrap();
+    run_git(&worktree_path, &["add", "."]);
+    run_git(&worktree_path, &["commit", "-q", "-m", "c1"]);
+    let c1_sha = String::from_utf8(
+        Command::new("git")
+            .current_dir(&worktree_path)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap()
+    .trim()
+    .to_string();
+    std::fs::write(worktree_path.join("c2.txt"), "2\n").unwrap();
+    run_git(&worktree_path, &["add", "."]);
+    run_git(&worktree_path, &["commit", "-q", "-m", "c2"]);
+
+    {
+        let mut st = state.lock().await;
+        let cell = st.agents.get_mut(&agent_id).unwrap();
+        cell.worktree_base_branch = "main".into();
+        // Force checkpoint count + dirty to stale-ish values.
+        cell.worktree_checkpoints = 2;
+        cell.worktree_dirty = true;
+    }
+
+    // Rollback to c1 — now branch should have only 1 ahead commit.
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_rollback",
+            "agent_id": &agent_id,
+            "sha": &c1_sha,
+        }),
+    )
+    .await;
+    assert_eq!(v["data"]["ok"], true, "rollback response: {v:?}");
+
+    let st = state.lock().await;
+    let cell = st.agents.get(&agent_id).unwrap();
+    assert_eq!(
+        cell.worktree_checkpoints, 1,
+        "worktree_checkpoints should reflect post-rollback count"
+    );
+    assert!(
+        !cell.worktree_dirty,
+        "worktree_dirty should be cleared after rollback"
+    );
+}
+
 /// With auto-checkpoint enabled, a dirty worktree should be committed
 /// synchronously BEFORE the merge runs. Verifies Fix D.
 #[tokio::test]

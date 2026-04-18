@@ -279,15 +279,22 @@ async fn handle_event(
             app.bus.send(OutMessage::Delta { seq, ops });
         }
         drop(st);
-        // Auto-checkpoint on session_end when the cell opted in. Spawn off
-        // the hook path so we don't block the HTTP response on git I/O.
-        // Mirrors Python's `_on_agent_session_end` in loom/server.py.
+        // Auto-checkpoint on session_end when the cell opted in. Runs
+        // synchronously — Python's `_on_agent_session_end`
+        // (`loom/server.py:1442`) is awaited inside `EventBus.emit`
+        // (`loom/events.py:178`), so the checkpoint has landed before
+        // the hook returns. The previous Rust port spawned this as a
+        // detached `tokio::spawn` task to avoid blocking the HTTP
+        // response, but that let any follow-up command (merge, remove,
+        // relaunch) race with the pending checkpoint and wipe the
+        // worktree before the commit landed — silent data loss.
+        // Correctness beats hook latency here.
         if event.kind == "session_end"
             && agent.cell_type == "agent"
             && agent.worktree_auto_checkpoint
             && !agent.worktree_path.is_empty()
         {
-            spawn_auto_checkpoint(&app, &agent);
+            run_auto_checkpoint(&app, &agent).await;
         }
         // Spawn the flush — see comment in `app.rs handle_pty_event`.
         // Awaiting here can deadlock the hook HTTP handler on the weaver's
@@ -303,41 +310,40 @@ async fn handle_event(
     (StatusCode::OK, Json(json!({ "ok": true })))
 }
 
-/// Spawn a background task to run a git checkpoint for an agent, updating
-/// `worktree_checkpoints` + `last_checkpoint_at` on success. Used by the
-/// auto-trigger paths (session_end, ai progress).
-fn spawn_auto_checkpoint(app: &AppState, agent: &loom_core::state::AgentCell) {
-    let app = app.clone();
+/// Run a git checkpoint synchronously for an agent on session_end,
+/// updating `worktree_checkpoints` + `last_checkpoint_at` on success.
+/// Mirrors Python's `_on_agent_session_end` in `loom/server.py:1442`
+/// which is awaited (not spawned) inside `EventBus.emit`
+/// (`loom/events.py:178`).
+async fn run_auto_checkpoint(app: &AppState, agent: &loom_core::state::AgentCell) {
     let agent_id = agent.id.clone();
     let message = crate::commands::worktree::auto_checkpoint_message(
         &agent.name,
         agent.worktree_checkpoints,
         &agent.last_summary,
     );
-    tokio::spawn(async move {
-        let ctx = crate::commands::CmdContext {
-            state: app.state.clone(),
-            db: app.db.clone(),
-            bus: app.bus.clone(),
-            pty: app.pty.clone(),
-            ui_agents: app.ui_agents.clone(),
-            terminal_bridge: app.terminal_bridge.clone(),
-            terminals: app.terminals.clone(),
-            weaver_buffer: app.weaver_buffer.clone(),
-            notifier: app.notifier.clone(),
-        };
-        match crate::commands::worktree::do_checkpoint_for_agent(&ctx, &agent_id, &message).await {
-            Ok(sha) => {
-                if sha.is_some() {
-                    tracing::info!(agent = %agent_id, "auto-checkpoint committed");
-                }
-                crate::commands::flush(&ctx).await;
+    let ctx = crate::commands::CmdContext {
+        state: app.state.clone(),
+        db: app.db.clone(),
+        bus: app.bus.clone(),
+        pty: app.pty.clone(),
+        ui_agents: app.ui_agents.clone(),
+        terminal_bridge: app.terminal_bridge.clone(),
+        terminals: app.terminals.clone(),
+        weaver_buffer: app.weaver_buffer.clone(),
+        notifier: app.notifier.clone(),
+    };
+    match crate::commands::worktree::do_checkpoint_for_agent(&ctx, &agent_id, &message).await {
+        Ok(sha) => {
+            if sha.is_some() {
+                tracing::info!(agent = %agent_id, "auto-checkpoint committed");
             }
-            Err(err) => {
-                tracing::warn!(agent = %agent_id, ?err, "auto-checkpoint failed");
-            }
+            crate::commands::flush(&ctx).await;
         }
-    });
+        Err(err) => {
+            tracing::warn!(agent = %agent_id, ?err, "auto-checkpoint failed");
+        }
+    }
 }
 
 fn canonical_path(path: &str) -> String {

@@ -380,16 +380,42 @@ pub async fn diff(ctx: &CmdContext, req: &Value) -> CmdResult {
 pub async fn rollback(ctx: &CmdContext, req: &Value) -> CmdResult {
     let agent_id = required_str(req, "agent_id")?.to_string();
     let sha = required_str(req, "sha")?.to_string();
-    let path = {
+    let (path, base) = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
             return Err(CmdError::BadRequest(format!(
                 "agent '{agent_id}' not found"
             )));
         };
-        PathBuf::from(&cell.worktree_path)
+        (
+            PathBuf::from(&cell.worktree_path),
+            if cell.worktree_base_branch.is_empty() {
+                "main".to_string()
+            } else {
+                cell.worktree_base_branch.clone()
+            },
+        )
     };
     rollback_to(&path, &sha).await.map_err(worktree_err)?;
+
+    // Mirror Python's post-rollback bookkeeping in `loom/server.py`
+    // (`worktree_rollback` handler): refresh checkpoint count, clear
+    // cached diff, persist, and broadcast so the UI's checkpoint badge
+    // and dirty indicator match reality.
+    let new_count = count_commits(&path, &base).await.unwrap_or(0);
+    let agent = {
+        let mut st = ctx.state.lock().await;
+        if let Some(cell) = st.agents.get_mut(&agent_id) {
+            cell.worktree_checkpoints = new_count;
+            cell.worktree_dirty = false;
+            cell.worktree_diff = serde_json::Map::new();
+            cell.worktree_changed_files.clear();
+        }
+        st.emit_agent(&agent_id);
+        st.agents.get(&agent_id).cloned().unwrap()
+    };
+    ctx.db.save_agent(&agent).await?;
+    flush(ctx).await;
     ok()
 }
 
@@ -864,6 +890,18 @@ async fn git_head_sha(repo: &str) -> Option<String> {
 }
 
 /// Rebase the agent's branch onto its base. Runs inside the worktree.
+///
+/// Invariants (mirroring Python `loom/server.py` `worktree_rebase` handler):
+///   1. Refuse to rebase if a `git rebase` would overwrite untracked files
+///      in the worktree. Python's `rebase_untracked_overwrite_paths` guard
+///      — the unchecked Rust path could silently clobber untracked work.
+///   2. Refuse to rebase if the worktree has uncommitted changes. A
+///      rebase onto dirty state produces undefined behavior; Python
+///      blocks with an explicit message asking the operator to
+///      checkpoint or commit first.
+///   3. After a successful rebase, refresh the cell's
+///      `worktree_checkpoints` (counts change after squash/drop),
+///      `worktree_dirty`, `worktree_diff`, and broadcast the delta.
 pub async fn rebase(ctx: &CmdContext, req: &Value) -> CmdResult {
     let agent_id = required_str(req, "agent_id")?.to_string();
     let (path, base) = {
@@ -890,6 +928,36 @@ pub async fn rebase(ctx: &CmdContext, req: &Value) -> CmdResult {
             "error": "agent has no worktree",
         }));
     }
+
+    // ── Guard 1: untracked overwrite ─────────────────────────────────
+    let overwrite = rebase_untracked_overwrite_paths(&path, &base).await;
+    if !overwrite.is_empty() {
+        return Ok(json!({
+            "type": "worktree_rebase",
+            "id": agent_id,
+            "ok": false,
+            "error": format!(
+                "Rebase would overwrite untracked files: {}. Commit, stash, or delete them first.",
+                overwrite.join(", ")
+            ),
+            "overwrite_paths": overwrite,
+            "conflicts": [],
+        }));
+    }
+
+    // ── Guard 2: dirty worktree ──────────────────────────────────────
+    if has_uncommitted_changes(&path).await {
+        return Ok(json!({
+            "type": "worktree_rebase",
+            "id": agent_id,
+            "ok": false,
+            "error": "Worktree has uncommitted changes. Create a checkpoint or commit them before rebasing.",
+            "conflicts": [],
+        }));
+    }
+
+    let previous_head = git_head_sha(&path).await.unwrap_or_default();
+
     let out = tokio::process::Command::new("git")
         .args(["-C", &path, "rebase", &base])
         .output()
@@ -906,18 +974,102 @@ pub async fn rebase(ctx: &CmdContext, req: &Value) -> CmdResult {
             "id": agent_id,
             "ok": false,
             "error": stderr.trim(),
+            "conflicts": [],
         }));
     }
+
+    // Successful rebase — refresh derived cell state so the UI's
+    // checkpoint badge + dirty indicator match reality.
+    let rebased_head = git_head_sha(&path).await.unwrap_or_default();
+    let dirty_after = has_uncommitted_changes(&path).await;
+    let new_count = count_commits(&PathBuf::from(&path), &base)
+        .await
+        .unwrap_or(0);
+
+    let agent = {
+        let mut st = ctx.state.lock().await;
+        if let Some(cell) = st.agents.get_mut(&agent_id) {
+            cell.worktree_checkpoints = new_count;
+            cell.worktree_dirty = dirty_after;
+            cell.worktree_diff = serde_json::Map::new();
+            cell.worktree_changed_files.clear();
+        }
+        st.emit_agent(&agent_id);
+        st.agents.get(&agent_id).cloned().unwrap()
+    };
+    ctx.db.save_agent(&agent).await?;
+    flush(ctx).await;
+
     Ok(json!({
         "type": "worktree_rebase",
         "id": agent_id,
         "ok": true,
         "base": base,
+        "previous_head": previous_head,
+        "rebased_head": rebased_head,
     }))
+}
+
+/// Return worktree untracked files that would be overwritten by a rebase
+/// onto `base`. Mirrors Python `WorktreeManager.rebase_untracked_overwrite_paths`
+/// (`loom/worktree.py:738`) — intersect `git diff --name-only HEAD <base>`
+/// with the current untracked-files list from `git ls-files --others
+/// --exclude-standard`.
+async fn rebase_untracked_overwrite_paths(worktree_path: &str, base: &str) -> Vec<String> {
+    let diff_out = tokio::process::Command::new("git")
+        .args(["-C", worktree_path, "diff", "--name-only", "-z", "HEAD", base])
+        .output()
+        .await;
+    let target_paths: std::collections::HashSet<String> = match diff_out {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(|s| s.to_string())
+            .collect(),
+        _ => return Vec::new(),
+    };
+    if target_paths.is_empty() {
+        return Vec::new();
+    }
+    let untracked_out = tokio::process::Command::new("git")
+        .args([
+            "-C",
+            worktree_path,
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ])
+        .output()
+        .await;
+    let untracked: Vec<String> = match untracked_out {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(|s| s.to_string())
+            .collect(),
+        _ => return Vec::new(),
+    };
+    untracked
+        .into_iter()
+        .filter(|u| target_paths.contains(u))
+        .collect()
 }
 
 /// Open a pull request for this agent's branch via the `gh` CLI. Requires
 /// `gh auth login` to have been run. Returns `{url, number}` on success.
+///
+/// Invariants (mirroring Python `loom/worktree.py::create_pr`):
+///   1. Fail early with a clear message if `gh` CLI is not installed
+///      (Python line 2045-2056). Don't let `gh pr create` fail later
+///      with an opaque error.
+///   2. Fail early if this isn't a GitHub repo (Python line 2058-2069).
+///   3. Fail early if the branch has no commits ahead of base (Python
+///      line 2071-2075) — otherwise `gh pr create` reports a cryptic
+///      "no commits between" GitHub API error.
+///   4. If `gh pr create` fails with "already exists", look up the
+///      existing PR URL (Python line 2102-2113) so the operator gets
+///      something actionable back instead of a noisy failure.
 pub async fn create_pr(ctx: &CmdContext, req: &Value) -> CmdResult {
     let agent_id = required_str(req, "agent_id")?.to_string();
     let title = optional_str(req, "title").unwrap_or("").to_string();
@@ -939,14 +1091,73 @@ pub async fn create_pr(ctx: &CmdContext, req: &Value) -> CmdResult {
         )
     };
     let working_dir = if !worktree_path.is_empty() {
-        worktree_path
+        worktree_path.clone()
     } else if !repo_root.is_empty() {
         repo_root
     } else {
         return Err(CmdError::BadRequest("agent has no git path".into()));
     };
+    let resolved_base = if base.is_empty() {
+        "main".to_string()
+    } else {
+        base.clone()
+    };
 
-    // Push the branch first — `gh pr create` requires an upstream.
+    // ── Guard 1: `gh` CLI available ──────────────────────────────────
+    let gh_version = tokio::process::Command::new("gh")
+        .arg("--version")
+        .output()
+        .await;
+    let gh_ok = matches!(gh_version, Ok(ref out) if out.status.success());
+    if !gh_ok {
+        return Ok(json!({
+            "ok": false,
+            "error": "GitHub CLI (gh) is not installed.",
+        }));
+    }
+
+    // ── Guard 2: this is a GitHub-hosted repo ────────────────────────
+    let repo_view = tokio::process::Command::new("gh")
+        .args(["-C", &working_dir, "repo", "view", "--json", "name"])
+        .output()
+        .await;
+    match repo_view {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+            let msg = if stderr.to_lowercase().contains("not a git repository") {
+                "Not a git repository.".to_string()
+            } else {
+                format!("Not a GitHub repository: {}", stderr.trim())
+            };
+            return Ok(json!({
+                "ok": false,
+                "error": msg,
+            }));
+        }
+        Err(e) => {
+            return Ok(json!({
+                "ok": false,
+                "error": format!("gh repo view: {e}"),
+            }));
+        }
+    }
+
+    // ── Guard 3: branch has commits ahead of base ────────────────────
+    let ahead = count_commits(&PathBuf::from(&working_dir), &resolved_base)
+        .await
+        .unwrap_or(0);
+    if ahead == 0 {
+        return Ok(json!({
+            "ok": false,
+            "error": format!(
+                "Branch {} has no commits ahead of {}.",
+                branch, resolved_base
+            ),
+        }));
+    }
+
+    // Push the branch — `gh pr create` requires an upstream.
     let push = tokio::process::Command::new("git")
         .args(["-C", &working_dir, "push", "-u", "origin", &branch])
         .output()
@@ -955,7 +1166,10 @@ pub async fn create_pr(ctx: &CmdContext, req: &Value) -> CmdResult {
     if !push.status.success() {
         return Ok(json!({
             "ok": false,
-            "error": String::from_utf8_lossy(&push.stderr).trim(),
+            "error": format!(
+                "Failed to push branch: {}",
+                String::from_utf8_lossy(&push.stderr).trim()
+            ),
         }));
     }
 
@@ -973,11 +1187,11 @@ pub async fn create_pr(ctx: &CmdContext, req: &Value) -> CmdResult {
         &resolved_title,
         "--body",
         &body,
+        "--base",
+        &resolved_base,
+        "--head",
+        &branch,
     ];
-    if !base.is_empty() {
-        args.push("--base");
-        args.push(&base);
-    }
     if draft {
         args.push("--draft");
     }
@@ -987,9 +1201,43 @@ pub async fn create_pr(ctx: &CmdContext, req: &Value) -> CmdResult {
         .await
         .map_err(|e| CmdError::BadRequest(format!("gh pr create spawn: {e}")))?;
     if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        // If a PR already exists for this branch, return its URL rather
+        // than bubbling the `gh` failure. Matches Python's recovery
+        // path so the operator still gets a usable link.
+        if stderr.to_lowercase().contains("already exists") {
+            let view = tokio::process::Command::new("gh")
+                .args([
+                    "-C",
+                    &working_dir,
+                    "pr",
+                    "view",
+                    &branch,
+                    "--json",
+                    "url",
+                    "-q",
+                    ".url",
+                ])
+                .output()
+                .await;
+            if let Ok(view_out) = view {
+                if view_out.status.success() {
+                    let existing_url =
+                        String::from_utf8_lossy(&view_out.stdout).trim().to_string();
+                    if !existing_url.is_empty() {
+                        return Ok(json!({
+                            "ok": true,
+                            "url": existing_url,
+                            "branch": branch,
+                            "existing": true,
+                        }));
+                    }
+                }
+            }
+        }
         return Ok(json!({
             "ok": false,
-            "error": String::from_utf8_lossy(&out.stderr).trim(),
+            "error": format!("Failed to create PR: {}", stderr.trim()),
         }));
     }
     let url = String::from_utf8_lossy(&out.stdout).trim().to_string();
