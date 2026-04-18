@@ -3,7 +3,9 @@
 use serde_json::{json, Value};
 
 use loom_core::state::{BoardTask, ARCHIVED_LANE};
-use loom_core::task_ids::{format_root_task_id, normalize_group_prefix};
+use loom_core::task_ids::{
+    format_root_task_id, is_canonical_task_id, is_draft_task_token, normalize_group_prefix,
+};
 
 use super::{flush, ok, optional_str, required_str, CmdContext, CmdError, CmdResult};
 
@@ -40,10 +42,22 @@ fn allocate_derived_task_id(
 pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
     let title = required_str(req, "task")?.to_string();
     let group = required_str(req, "group")?.to_string();
-    let explicit_id = optional_str(req, "id")
+    let incoming_id = optional_str(req, "id")
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
+
+    // A `draft-*` token (or any other non-canonical id) is a transient
+    // placeholder the frontend generates so attachments can be uploaded
+    // before the task exists — it must not be persisted as the real id.
+    // Strip it off here; the canonical-allocation path below will mint a
+    // proper `<group-slug>-<N>` id. The stripped value is surfaced as
+    // `draft_upload_id` in the response so the client can rekey any
+    // in-flight attachment references.
+    let (explicit_id, draft_upload_id) = match incoming_id {
+        Some(id) if is_draft_task_token(&id) || !is_canonical_task_id(&id) => (None, Some(id)),
+        other => (other, None),
+    };
 
     let (id, prefix, next_root_number, next_child_number, parent_task_id, pipeline_root_id) = {
         let mut st = ctx.state.lock().await;
@@ -160,8 +174,57 @@ pub async fn add_task(ctx: &CmdContext, req: &Value) -> CmdResult {
             .await?;
     }
     ctx.db.save_board_task(&task).await?;
+    if let Some(ref draft_id) = draft_upload_id {
+        if draft_id != &task.id {
+            move_draft_attachments(draft_id, &task.id).await;
+        }
+    }
     flush(ctx).await;
-    Ok(json!({ "ok": true, "task_id": task.id, "slug": task.slug }))
+    let mut response = json!({ "ok": true, "task_id": task.id, "slug": task.slug });
+    if let Some(draft_id) = draft_upload_id {
+        response["draft_upload_id"] = Value::String(draft_id);
+    }
+    Ok(response)
+}
+
+/// Move any files uploaded under `attachments/<draft_id>/` over to
+/// `attachments/<canonical_id>/`. Best-effort — logged and ignored on error
+/// so a filesystem hiccup can't fail task creation.
+async fn move_draft_attachments(draft_id: &str, canonical_id: &str) {
+    let base = loom_core::config::attachments_dir();
+    let src = base.join(draft_id);
+    let dst = base.join(canonical_id);
+    if !src.exists() {
+        return;
+    }
+    if dst.exists() {
+        let mut entries = match tokio::fs::read_dir(&src).await {
+            Ok(entries) => entries,
+            Err(err) => {
+                tracing::warn!(src = %src.display(), ?err, "failed to read draft attachments dir");
+                return;
+            }
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let target = dst.join(entry.file_name());
+            if target.exists() {
+                let _ = tokio::fs::remove_file(&target).await;
+            }
+            if let Err(err) = tokio::fs::rename(entry.path(), &target).await {
+                tracing::warn!(to = %target.display(), ?err, "failed to move draft attachment");
+            }
+        }
+        if let Err(err) = tokio::fs::remove_dir_all(&src).await {
+            tracing::warn!(src = %src.display(), ?err, "failed to clean up draft attachments dir");
+        }
+    } else if let Err(err) = tokio::fs::rename(&src, &dst).await {
+        tracing::warn!(
+            src = %src.display(),
+            dst = %dst.display(),
+            ?err,
+            "failed to move draft attachments dir",
+        );
+    }
 }
 
 pub async fn update_task(ctx: &CmdContext, req: &Value) -> CmdResult {

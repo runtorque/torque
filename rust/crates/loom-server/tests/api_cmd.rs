@@ -841,6 +841,48 @@ async fn board_add_task_preserves_child_lineage_fields() {
 }
 
 #[tokio::test]
+async fn board_add_task_rejects_draft_id_and_allocates_canonical() {
+    // Regression: the inline add-task flow in board.js forwards a client-
+    // generated `draft-<hex>` id so attachments can be uploaded before the
+    // task exists. That placeholder must never be persisted as the real id.
+    let (addr, _h) = spawn_test_server().await;
+    post(addr, json!({"cmd": "add_group", "group": "Test"})).await;
+
+    let resp = post(
+        addr,
+        json!({
+            "cmd": "board_add_task",
+            "task": "Inline task",
+            "group": "Test",
+            "id": "draft-a1021592",
+        }),
+    )
+    .await;
+    assert_eq!(resp["ok"], true, "response: {resp:?}");
+    let task_id = resp["data"]["task_id"].as_str().unwrap();
+    assert!(
+        !task_id.starts_with("draft-"),
+        "draft id leaked into persisted task_id: {task_id}"
+    );
+    assert_eq!(task_id, "test-1", "expected canonical <slug>-<N> id");
+    assert_eq!(
+        resp["data"]["draft_upload_id"], "draft-a1021592",
+        "response should surface the original draft id for attachment rekey"
+    );
+
+    let snap = post(addr, json!({"cmd": "refresh"})).await;
+    let tasks = &snap["data"]["board_tasks"];
+    assert!(
+        tasks.get("draft-a1021592").is_none(),
+        "draft id must not exist in board_tasks"
+    );
+    assert!(
+        tasks.get("test-1").is_some(),
+        "canonical id should exist in board_tasks"
+    );
+}
+
+#[tokio::test]
 async fn loom_ask_creates_human_child_task_and_marks_parent_awaiting_input() {
     let (addr, _state, _pty_rx) = spawn_test_server_with_pty().await;
     let tmp = tempfile::tempdir().unwrap();
