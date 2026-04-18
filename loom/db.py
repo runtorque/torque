@@ -1472,7 +1472,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     a.get("agent_type", ""),
                     a.get("agent_session_id", ""),
                     int(a.get("session_resume", True)),
-                    a.get("idle_timeout", 5),
+                    a.get("idle_timeout", 0),
                     a.get("tasks_dispatched", 0),
                     a.get("created_by_weaver_id", ""),
                 ))

@@ -95,7 +95,7 @@ class AgentEvent:
 |---|---|---|---|
 | `agent_boot_command` | str | "" | Override default boot command (e.g. "codex") |
 | `agent_session_resume` | bool | True | Resume session on relaunch (`claude --resume`) |
-| `agent_idle_timeout` | int | 5 | Minutes before flagging as stuck (0 = disable) |
+| `agent_idle_timeout` | int | 0 | Minutes before flagging as stuck (0 = disable) |
 | `notifications` | bool | False | Master toggle for macOS notifications |
 | `notify_on_finish` | bool | True | Notify when agent finishes |
 | `notify_on_error` | bool | True | Notify on errors |

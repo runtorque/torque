@@ -63,8 +63,8 @@ fn default_five_hundred() -> i32 {
     500
 }
 
-fn default_five_int() -> i32 {
-    5
+fn default_idle_timeout() -> i32 {
+    0
 }
 
 fn default_two() -> i32 {
@@ -400,7 +400,7 @@ pub struct AgentCell {
     pub current_task_id: String,
     #[serde(default = "default_true")]
     pub session_resume: bool,
-    #[serde(default = "default_five_int")]
+    #[serde(default = "default_idle_timeout")]
     pub idle_timeout: i32,
 
     // worktree status (ephemeral)
@@ -473,7 +473,7 @@ impl AgentCell {
             created_by_weaver_id: String::new(),
             current_task_id: String::new(),
             session_resume: true,
-            idle_timeout: 5,
+            idle_timeout: 0,
             worktree_dirty: false,
             worktree_diff: serde_json::Map::new(),
             worktree_changed_files: Vec::new(),
@@ -589,7 +589,7 @@ pub struct GroupSettings {
     pub worktree_symlinks: Vec<String>,
     #[serde(default = "default_true")]
     pub agent_session_resume: bool,
-    #[serde(default = "default_five_int")]
+    #[serde(default = "default_idle_timeout")]
     pub agent_idle_timeout: i32,
     #[serde(default)]
     pub agent_always_custom_dialog: bool,
@@ -687,7 +687,7 @@ impl Default for GroupSettings {
             worktree_merge_preserve_diff: false,
             worktree_symlinks: Vec::new(),
             agent_session_resume: true,
-            agent_idle_timeout: 5,
+            agent_idle_timeout: 0,
             agent_always_custom_dialog: false,
             notifications: false,
             notify_on_finish: true,

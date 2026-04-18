@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS agents (
     agent_type TEXT NOT NULL DEFAULT '',
     agent_session_id TEXT NOT NULL DEFAULT '',
     session_resume INTEGER NOT NULL DEFAULT 1,
-    idle_timeout INTEGER NOT NULL DEFAULT 5,
+    idle_timeout INTEGER NOT NULL DEFAULT 0,
     tasks_dispatched INTEGER NOT NULL DEFAULT 0,
     created_by_weaver_id TEXT NOT NULL DEFAULT '',
     data TEXT NOT NULL DEFAULT ''
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS group_settings (
     worktree_merge_preserve_diff INTEGER NOT NULL DEFAULT 0,
     worktree_symlinks TEXT NOT NULL DEFAULT '[]',
     agent_session_resume INTEGER NOT NULL DEFAULT 1,
-    agent_idle_timeout INTEGER NOT NULL DEFAULT 5,
+    agent_idle_timeout INTEGER NOT NULL DEFAULT 0,
     agent_always_custom_dialog INTEGER NOT NULL DEFAULT 0,
     notifications INTEGER NOT NULL DEFAULT 0,
     notify_on_finish INTEGER NOT NULL DEFAULT 1,
@@ -487,7 +487,7 @@ fn decode_agent_row(row: &Row<'_>) -> AgentCell {
     agent.agent_type = row_string(row, "agent_type");
     agent.agent_session_id = row_string(row, "agent_session_id");
     agent.session_resume = row_bool(row, "session_resume", true);
-    agent.idle_timeout = row_i32(row, "idle_timeout", 5);
+    agent.idle_timeout = row_i32(row, "idle_timeout", 0);
     agent.tasks_dispatched = row_i32(row, "tasks_dispatched", 0);
     agent.created_by_weaver_id = row_string(row, "created_by_weaver_id");
     clear_agent_ephemeral(&mut agent);
@@ -649,7 +649,7 @@ fn decode_group_settings_row(row: &Row<'_>) -> GroupSettings {
         worktree_merge_preserve_diff: row_bool(row, "worktree_merge_preserve_diff", false),
         worktree_symlinks: parse_json_or_default(&row_string(row, "worktree_symlinks")),
         agent_session_resume: row_bool(row, "agent_session_resume", true),
-        agent_idle_timeout: row_i32(row, "agent_idle_timeout", 5),
+        agent_idle_timeout: row_i32(row, "agent_idle_timeout", 0),
         agent_always_custom_dialog: row_bool(row, "agent_always_custom_dialog", false),
         notifications: row_bool(row, "notifications", false),
         notify_on_finish: row_bool(row, "notify_on_finish", true),
@@ -812,7 +812,7 @@ fn migrate_compat_schema(conn: &Connection) -> crate::Result<()> {
                 ("agent_type", "TEXT NOT NULL DEFAULT ''"),
                 ("agent_session_id", "TEXT NOT NULL DEFAULT ''"),
                 ("session_resume", "INTEGER NOT NULL DEFAULT 1"),
-                ("idle_timeout", "INTEGER NOT NULL DEFAULT 5"),
+                ("idle_timeout", "INTEGER NOT NULL DEFAULT 0"),
                 ("tasks_dispatched", "INTEGER NOT NULL DEFAULT 0"),
                 ("created_by_weaver_id", "TEXT NOT NULL DEFAULT ''"),
                 ("data", "TEXT NOT NULL DEFAULT ''"),
@@ -862,7 +862,7 @@ fn migrate_compat_schema(conn: &Connection) -> crate::Result<()> {
                 ("worktree_merge_preserve_diff", "INTEGER NOT NULL DEFAULT 0"),
                 ("worktree_symlinks", "TEXT NOT NULL DEFAULT '[]'"),
                 ("agent_session_resume", "INTEGER NOT NULL DEFAULT 1"),
-                ("agent_idle_timeout", "INTEGER NOT NULL DEFAULT 5"),
+                ("agent_idle_timeout", "INTEGER NOT NULL DEFAULT 0"),
                 ("agent_always_custom_dialog", "INTEGER NOT NULL DEFAULT 0"),
                 ("notifications", "INTEGER NOT NULL DEFAULT 0"),
                 ("notify_on_finish", "INTEGER NOT NULL DEFAULT 1"),

@@ -378,7 +378,7 @@ class TemplateManager:
                 group_settings, "agent_session_resume", True
             ),
             "idle_timeout": getattr(
-                group_settings, "agent_idle_timeout", 5
+                group_settings, "agent_idle_timeout", 0
             ),
         }
         result = _merge_agent_config(result, group_overrides)
