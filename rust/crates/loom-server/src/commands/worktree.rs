@@ -1556,13 +1556,49 @@ pub async fn check_merge(ctx: &CmdContext, req: &Value) -> CmdResult {
         }));
     }
 
-    // 2. Run merge-tree --write-tree on the shared repo root. Success => clean
-    //    merge, tree_sha on stdout. Failure => parse conflicts.
     let effective_repo = if !repo_root.is_empty() {
         repo_root
     } else {
         worktree_path.clone()
     };
+
+    // 1b. Target-worktree overlap check — `git merge-tree` below is a
+    //     pure tree-level simulation that doesn't look at the base
+    //     branch's *working tree*. If the base worktree has uncommitted
+    //     edits that overlap the branch's changed paths, `git merge`
+    //     will refuse with "Your local changes would be overwritten"
+    //     and the merge silently fails further down the pipeline. Catch
+    //     that here so the caller gets a precise, actionable error.
+    if effective_repo != worktree_path {
+        let base_dirty = base_worktree_dirty_paths(&effective_repo).await;
+        if !base_dirty.is_empty() {
+            let branch_paths =
+                branch_changed_paths(&effective_repo, &base, &branch).await;
+            let overlap: Vec<String> = base_dirty
+                .iter()
+                .filter(|p| branch_paths.iter().any(|b| b == *p))
+                .cloned()
+                .collect();
+            if !overlap.is_empty() {
+                return Ok(json!({
+                    "type": "worktree_check_merge",
+                    "id": agent_id,
+                    "clean": false,
+                    "dirty": false,
+                    "conflicts": [],
+                    "error": format!(
+                        "base worktree for '{}' has uncommitted changes that would be overwritten by the merge: {}",
+                        base,
+                        overlap.join(", ")
+                    ),
+                    "base_worktree_dirty_overlap": overlap,
+                }));
+            }
+        }
+    }
+
+    // 2. Run merge-tree --write-tree on the shared repo root. Success => clean
+    //    merge, tree_sha on stdout. Failure => parse conflicts.
     let out = tokio::process::Command::new("git")
         .args(["-C", &effective_repo, "merge-tree", "--write-tree", &base, &branch])
         .output()
@@ -1647,6 +1683,61 @@ async fn has_uncommitted_changes(worktree_path: &str) -> bool {
         return false;
     };
     !out.stdout.is_empty()
+}
+
+/// List tracked paths that show up as modified/added/deleted in the
+/// given worktree. Used by `check_merge` to catch a dirty base worktree
+/// that `git merge-tree` (tree-level) cannot see.
+async fn base_worktree_dirty_paths(worktree_path: &str) -> Vec<String> {
+    let Ok(out) = tokio::process::Command::new("git")
+        .args(["-C", worktree_path, "status", "--porcelain"])
+        .output()
+        .await
+    else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(parse_porcelain_path)
+        .collect()
+}
+
+/// Parse a single `git status --porcelain` line and return the tracked
+/// path. Each line is `XY PATH` or `XY ORIG -> NEW` for renames; return
+/// the currently-tracked path (the new one for renames) since that's
+/// what `git merge` refuses to overwrite. Quoted paths (containing
+/// special chars) get unquoted best-effort.
+fn parse_porcelain_path(line: &str) -> Option<String> {
+    let rest = line.get(3..)?.trim();
+    if rest.is_empty() {
+        return None;
+    }
+    let path = rest.rsplit_once(" -> ").map(|(_, new)| new).unwrap_or(rest);
+    Some(path.trim_matches('"').to_string())
+}
+
+/// List paths changed by `branch` relative to `base` using the
+/// three-dot form so only commits unique to `branch` are counted.
+async fn branch_changed_paths(repo_root: &str, base: &str, branch: &str) -> Vec<String> {
+    let spec = format!("{base}...{branch}");
+    let Ok(out) = tokio::process::Command::new("git")
+        .args(["-C", repo_root, "diff", "--name-only", &spec])
+        .output()
+        .await
+    else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
 }
 
 /// Retained for the ambient merge-state on cell load. Not called from the

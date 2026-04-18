@@ -1207,3 +1207,157 @@ async fn worktree_rebase_leaves_boundary_alone_when_successor_started() {
         "boundary with a started successor must not be refreshed"
     );
 }
+
+/// Regression for the silent-merge-failure scenario that surfaced during
+/// the wave-2 sanity check: `git merge-tree --write-tree` only looks at
+/// committed trees, so `check_merge` previously returned `clean: true`
+/// even when the base worktree had uncommitted edits that overlap the
+/// branch's changed paths. The real `git merge` would then refuse with
+/// "Your local changes to the following files would be overwritten by
+/// merge" and `merge()` bailed with an error the MCP text layer was
+/// hiding. The fix adds a porcelain-level overlap check inside
+/// `check_merge` so the merge is refused up front with an actionable
+/// error.
+#[tokio::test]
+async fn worktree_check_merge_catches_base_dirty_overlap() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+    // Seed a second file on main so the branch and the base worktree
+    // can overlap on a non-README path.
+    std::fs::write(repo.join("shared.txt"), "base-v1\n").unwrap();
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "seed shared.txt"]);
+
+    let (addr, _state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/overlap",
+            "base": "main",
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "create response: {v:?}");
+    let worktree_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+
+    // Branch changes `shared.txt` and commits cleanly.
+    std::fs::write(worktree_path.join("shared.txt"), "branch-v2\n").unwrap();
+    run_git(&worktree_path, &["add", "."]);
+    run_git(&worktree_path, &["commit", "-q", "-m", "feat: bump shared.txt"]);
+
+    // Base worktree gets a conflicting uncommitted edit on the same file.
+    std::fs::write(repo.join("shared.txt"), "base-dirty\n").unwrap();
+
+    let check = post(
+        addr,
+        json!({
+            "cmd": "worktree_check_merge",
+            "agent_id": &agent_id,
+        }),
+    )
+    .await;
+    assert_eq!(check["ok"], true, "check_merge transport: {check:?}");
+    assert_eq!(
+        check["data"]["clean"], false,
+        "check_merge must refuse when base worktree has overlapping dirt"
+    );
+    let err = check["data"]["error"].as_str().unwrap_or("");
+    assert!(
+        err.contains("shared.txt"),
+        "error should name the overlapping path, got: {err:?}"
+    );
+    let overlap = check["data"]["base_worktree_dirty_overlap"]
+        .as_array()
+        .expect("base_worktree_dirty_overlap array missing");
+    assert_eq!(overlap.len(), 1);
+    assert_eq!(overlap[0], "shared.txt");
+
+    // worktree_merge must propagate the same refusal (it calls
+    // check_merge first) and preserve the branch + worktree.
+    let merge = post(
+        addr,
+        json!({
+            "cmd": "worktree_merge",
+            "agent_id": &agent_id,
+        }),
+    )
+    .await;
+    assert_eq!(merge["ok"], true, "merge transport: {merge:?}");
+    assert_eq!(merge["data"]["ok"], false);
+    let merge_err = merge["data"]["error"].as_str().unwrap_or("");
+    assert!(
+        merge_err.contains("shared.txt"),
+        "merge error should name the overlapping path, got: {merge_err:?}"
+    );
+    assert!(worktree_path.exists(), "worktree destroyed despite refusal");
+    let branch_show = Command::new("git")
+        .current_dir(&repo)
+        .args(["show-ref", "--verify", "refs/heads/loom/overlap"])
+        .status()
+        .unwrap();
+    assert!(branch_show.success(), "branch destroyed despite refusal");
+}
+
+/// Companion test: if the base worktree is dirty but on paths the
+/// branch doesn't touch, the merge must still be allowed. Guards
+/// against a regression where the new overlap check becomes overly
+/// strict and starts blocking perfectly-safe merges.
+#[tokio::test]
+async fn worktree_check_merge_ignores_non_overlapping_base_dirt() {
+    if !git_available() {
+        eprintln!("git not available, skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().to_path_buf();
+    init_repo(&repo);
+    std::fs::write(repo.join("shared.txt"), "base\n").unwrap();
+    std::fs::write(repo.join("unrelated.txt"), "base\n").unwrap();
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-q", "-m", "seed"]);
+
+    let (addr, _state, agent_id) = spawn_server_with_agent(&repo).await;
+
+    let v = post(
+        addr,
+        json!({
+            "cmd": "worktree_create",
+            "agent_id": &agent_id,
+            "branch": "loom/non-overlap",
+            "base": "main",
+        }),
+    )
+    .await;
+    assert_eq!(v["ok"], true);
+    let worktree_path = PathBuf::from(v["data"]["path"].as_str().unwrap());
+
+    // Branch changes `shared.txt`.
+    std::fs::write(worktree_path.join("shared.txt"), "branch-v2\n").unwrap();
+    run_git(&worktree_path, &["add", "."]);
+    run_git(&worktree_path, &["commit", "-q", "-m", "feat: bump shared"]);
+
+    // Base gets dirt on a *different* file — must not block the merge.
+    std::fs::write(repo.join("unrelated.txt"), "dirty-in-base\n").unwrap();
+
+    let check = post(
+        addr,
+        json!({
+            "cmd": "worktree_check_merge",
+            "agent_id": &agent_id,
+        }),
+    )
+    .await;
+    assert_eq!(check["ok"], true);
+    assert_eq!(
+        check["data"]["clean"], true,
+        "non-overlapping base dirt must not block merge: {check:?}"
+    );
+}

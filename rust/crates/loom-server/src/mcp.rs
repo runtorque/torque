@@ -15,6 +15,28 @@ use crate::commands::{dispatch as dispatch_cmd, weaver as weaver_cmd, CmdContext
 const PROTOCOL_VERSION: &str = "2025-03-26";
 const INSTRUCTIONS: &str = "Loom manages AI agent sessions and tasks in iTerm2. Use these tools to report progress, complete tasks, derive subtasks, and coordinate with other agents in the pipeline.";
 
+/// Build the MCP `content.text` summary for a tool response.
+///
+/// The inner command handlers (e.g. `worktree::merge`, `memory::publish`,
+/// `ai_report`) return structured JSON with an `ok` boolean and, on failure,
+/// an `error` string. The MCP spec only surfaces `content` to the client, so
+/// if we always emit `"ok: {tool}"` a caller cannot tell success from
+/// failure — which previously masked a silent `weaver_merge` failure where
+/// the real result lived in a sibling `loom` field that nobody reads.
+/// Surface the outcome in the text itself.
+fn mcp_text_for_result(label: &str, value: &Value) -> String {
+    if matches!(value.get("ok").and_then(Value::as_bool), Some(false)) {
+        let err = value
+            .get("error")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("unknown error");
+        return format!("error: {label}: {err}");
+    }
+    format!("ok: {label}")
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new().route("/mcp", post(handle_mcp))
 }
@@ -177,8 +199,9 @@ async fn handle_tool_call(ctx: &CmdContext, req: &Value, cell_id: &str) -> Resul
     let value = dispatch_cmd::ai_report(ctx, &report_req)
         .await
         .map_err(|e| format!("{e:?}"))?;
+    let text = mcp_text_for_result(action, &value);
     Ok(json!({
-        "content": [{"type": "text", "text": format!("ok: {action}")}],
+        "content": [{"type": "text", "text": text}],
         "loom": value,
     }))
 }
@@ -739,8 +762,9 @@ async fn memory_proxy(
         other => return Err(format!("unknown memory tool: {other}")),
     }
     .map_err(|e| format!("{e:?}"))?;
+    let text = mcp_text_for_result(tool, &value);
     Ok(json!({
-        "content": [{"type": "text", "text": format!("ok: {tool}")}],
+        "content": [{"type": "text", "text": text}],
         "loom": value,
     }))
 }
@@ -769,8 +793,9 @@ async fn upload_artifact_proxy(
     let value = crate::commands::misc::task_upload_artifact(ctx, &req)
         .await
         .map_err(|e| format!("{e:?}"))?;
+    let text = mcp_text_for_result("loom_task_upload_artifact", &value);
     Ok(json!({
-        "content": [{"type": "text", "text": "ok: loom_task_upload_artifact"}],
+        "content": [{"type": "text", "text": text}],
         "loom": value,
     }))
 }
@@ -820,8 +845,9 @@ async fn weaver_worktree_proxy(
         other => return Err(format!("unknown weaver worktree tool: {other}")),
     }
     .map_err(|e| format!("{e:?}"))?;
+    let text = mcp_text_for_result(tool, &value);
     Ok(json!({
-        "content": [{"type": "text", "text": format!("ok: {tool}")}],
+        "content": [{"type": "text", "text": text}],
         "loom": value,
     }))
 }
@@ -841,8 +867,52 @@ async fn weaver_upload_artifact_proxy(
     let value = crate::commands::misc::task_upload_artifact(ctx, &req)
         .await
         .map_err(|e| format!("{e:?}"))?;
+    let text = mcp_text_for_result("weaver_task_upload_artifact", &value);
     Ok(json!({
-        "content": [{"type": "text", "text": "ok: weaver_task_upload_artifact"}],
+        "content": [{"type": "text", "text": text}],
         "loom": value,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_text_for_result_returns_ok_when_ok_missing() {
+        let v = json!({"type": "something", "other": 42});
+        assert_eq!(mcp_text_for_result("weaver_merge", &v), "ok: weaver_merge");
+    }
+
+    #[test]
+    fn mcp_text_for_result_returns_ok_when_ok_true() {
+        let v = json!({"ok": true, "merge_sha": "abc"});
+        assert_eq!(mcp_text_for_result("weaver_merge", &v), "ok: weaver_merge");
+    }
+
+    #[test]
+    fn mcp_text_for_result_surfaces_error_text_when_ok_false() {
+        let v = json!({
+            "ok": false,
+            "error": "branch produced no new commits",
+        });
+        assert_eq!(
+            mcp_text_for_result("weaver_merge", &v),
+            "error: weaver_merge: branch produced no new commits",
+        );
+    }
+
+    #[test]
+    fn mcp_text_for_result_falls_back_when_error_missing_or_blank() {
+        let v = json!({"ok": false});
+        assert_eq!(
+            mcp_text_for_result("loom_done", &v),
+            "error: loom_done: unknown error",
+        );
+        let v = json!({"ok": false, "error": "   "});
+        assert_eq!(
+            mcp_text_for_result("loom_done", &v),
+            "error: loom_done: unknown error",
+        );
+    }
 }
