@@ -531,6 +531,21 @@ pub async fn check_conflicts(ctx: &CmdContext, req: &Value) -> CmdResult {
 
 /// Merge the agent's worktree branch back into its base. Supports squash +
 /// non-squash. Optionally removes the worktree + branch afterward.
+///
+/// Invariants (mirroring Python `loom/server.py::handle_command["worktree_merge"]`
+/// + `loom/worktree.py::WorktreeManager.server_merge`):
+///   1. If the group opts into `worktree_auto_checkpoint`, commit pending
+///      dirty files BEFORE touching git state, synchronously — not via a
+///      detached task. Otherwise a racing cleanup can delete the worktree
+///      before the checkpoint runs, silently losing work.
+///   2. Refuse to merge a dirty worktree (after the optional checkpoint
+///      above) or a merge that would produce conflicts.
+///   3. Refuse to treat "Already up to date." as success. If the base
+///      branch HEAD does not advance across the `git merge` call, no
+///      commit landed and cleanup MUST NOT run.
+///   4. Cleanup (worktree remove + branch delete) and the cell-field
+///      clear are gated on the HEAD-advanced check; a failed or no-op
+///      merge leaves the branch + worktree intact for operator recovery.
 pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
     let agent_id = required_str(req, "agent_id")?.to_string();
     let squash = req.get("squash").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -540,7 +555,16 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    let (repo_root, worktree_path, branch, base) = {
+    let (
+        repo_root,
+        worktree_path,
+        branch,
+        base,
+        auto_checkpoint,
+        cp_count,
+        last_summary,
+        agent_name,
+    ) = {
         let st = ctx.state.lock().await;
         let Some(cell) = st.agents.get(&agent_id) else {
             return Err(CmdError::BadRequest(format!(
@@ -560,6 +584,10 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
             } else {
                 cell.worktree_base_branch.clone()
             },
+            cell.worktree_auto_checkpoint,
+            cell.worktree_checkpoints,
+            cell.last_summary.clone(),
+            cell.name.clone(),
         )
     };
     if repo_root.is_empty() || branch.is_empty() {
@@ -568,6 +596,78 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
             "id": agent_id,
             "ok": false,
             "error": "agent has no worktree branch",
+        }));
+    }
+
+    // ── Fix D (synchronous pre-merge auto-checkpoint) ────────────────
+    // Commit pending dirty files BEFORE merging so the merge has
+    // something to merge and so a later cleanup cannot delete the
+    // worktree out from under uncommitted work. Python runs this
+    // synchronously via `EventBus.on_session_end → _on_agent_session_end`
+    // in `loom/server.py`; the Rust port previously spawned it
+    // asynchronously (see `events.rs::spawn_auto_checkpoint`) which
+    // raced with this function's cleanup and silently lost work.
+    if auto_checkpoint
+        && !worktree_path.is_empty()
+        && has_uncommitted_changes(&worktree_path).await
+    {
+        let message = auto_checkpoint_message(&agent_name, cp_count, &last_summary);
+        match do_checkpoint_for_agent(ctx, &agent_id, &message).await {
+            Ok(sha) => {
+                if sha.is_some() {
+                    tracing::info!(
+                        agent = %agent_id,
+                        "pre-merge auto-checkpoint committed"
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    agent = %agent_id,
+                    ?err,
+                    "pre-merge auto-checkpoint failed; the next guard will block the merge"
+                );
+            }
+        }
+    }
+
+    // ── Fix A (pre-merge validation) ─────────────────────────────────
+    // Refuse to merge a dirty worktree or a branch that would produce
+    // conflicts. Mirrors `_run_worktree_merge_check` in Python
+    // (`loom/mcp_weaver.py`). We do this inside `merge()` rather than
+    // in the MCP layer so every caller (MCP tool, WS cmd, HTTP cmd)
+    // gets the same guarantee.
+    let check = check_merge(ctx, req).await?;
+    let check_clean = check
+        .get("clean")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !check_clean {
+        let dirty = check.get("dirty").and_then(Value::as_bool).unwrap_or(false);
+        let has_conflicts = check
+            .get("conflicts")
+            .and_then(Value::as_array)
+            .map(|c| !c.is_empty())
+            .unwrap_or(false);
+        let reported_error = check
+            .get("error")
+            .and_then(Value::as_str)
+            .map(|s| s.to_string());
+        let error = reported_error.unwrap_or_else(|| {
+            if dirty {
+                "worktree has uncommitted changes".into()
+            } else if has_conflicts {
+                "merge would produce conflicts".into()
+            } else {
+                "pre-merge check failed".into()
+            }
+        });
+        return Ok(json!({
+            "type": "worktree_merge",
+            "id": agent_id,
+            "ok": false,
+            "error": error,
+            "check": check,
         }));
     }
 
@@ -596,6 +696,11 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
             ),
         }));
     }
+
+    // ── Fix B (capture pre-merge HEAD) ────────────────────────────────
+    // We compare this to the post-merge HEAD below to detect the
+    // "Already up to date." path that git silently returns with exit 0.
+    let base_head_before = git_head_sha(&repo_root).await;
 
     // Run the merge.
     let merge_args: Vec<&str> = if squash {
@@ -641,6 +746,34 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
         }
     }
 
+    // ── Fix B/C (no-op detection + gated cleanup) ───────────────────
+    // If the base branch HEAD did not advance, git reported "Already
+    // up to date." (or `--no-ff` refused to create a degenerate
+    // merge). No commit landed. DO NOT run cleanup — that would
+    // delete the branch + worktree while pretending the merge
+    // succeeded, which is exactly the silent data-loss bug this
+    // function previously had.
+    let base_head_after = git_head_sha(&repo_root).await;
+    let merge_landed = match (&base_head_before, &base_head_after) {
+        (Some(before), Some(after)) => before != after && !after.is_empty(),
+        _ => false,
+    };
+    if !merge_landed {
+        return Ok(json!({
+            "type": "worktree_merge",
+            "id": agent_id,
+            "ok": false,
+            "error": format!(
+                "branch '{}' produced no new commits on '{}' (already up to date or degenerate merge); worktree preserved",
+                branch, base
+            ),
+            "base_head": base_head_after.clone().unwrap_or_default(),
+        }));
+    }
+
+    let merge_sha = base_head_after.clone().unwrap_or_default();
+
+    // Cleanup now gated on `merge_landed == true`.
     if cleanup && !worktree_path.is_empty() {
         let remove = tokio::process::Command::new("git")
             .args(["-C", &repo_root, "worktree", "remove", "--force", &worktree_path])
@@ -671,21 +804,6 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
             }
         }
     }
-
-    // Resolve the merge commit sha for boundary bookkeeping.
-    let merge_sha = tokio::process::Command::new("git")
-        .args(["-C", &repo_root, "rev-parse", "HEAD"])
-        .output()
-        .await
-        .ok()
-        .and_then(|out| {
-            if out.status.success() {
-                Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_default();
 
     // Clear worktree fields on the cell AND mark any boundary tasks merged.
     let (agent, boundary_tasks) = {
@@ -722,8 +840,27 @@ pub async fn merge(ctx: &CmdContext, req: &Value) -> CmdResult {
         "branch": branch,
         "base": base,
         "squash": squash,
+        "merge_sha": merge_sha,
         "boundary_tasks_merged": boundary_tasks.iter().map(|t| t.id.clone()).collect::<Vec<_>>(),
     }))
+}
+
+/// Return HEAD sha for `repo`, or None if git rev-parse fails.
+async fn git_head_sha(repo: &str) -> Option<String> {
+    let out = tokio::process::Command::new("git")
+        .args(["-C", repo, "rev-parse", "HEAD"])
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if sha.is_empty() {
+        None
+    } else {
+        Some(sha)
+    }
 }
 
 /// Rebase the agent's branch onto its base. Runs inside the worktree.
