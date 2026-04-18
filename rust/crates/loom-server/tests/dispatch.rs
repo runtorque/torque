@@ -589,12 +589,17 @@ async fn ai_report_done_cascades_to_root_when_all_descendants_done() {
 }
 
 #[tokio::test]
-async fn resolve_ask_cascades_to_parent_after_sibling_done() {
-    // Exact live-weaver scenario: worker emits loom_done on loom-1a3
-    // (deepest fix task) BEFORE the human has answered the ask (loom-1a).
-    // That cascade stops at loom-1 because loom-1a is still open. The
-    // human then resolves the ask, which must continue the cascade and
-    // mark loom-1 Done.
+async fn resolve_ask_resumes_parent_without_completing_or_unlinking() {
+    // Live weaver bug: worker dispatches on loom-1, opens an ask (loom-1a)
+    // as its only child, and is still mid-task (steps 2–3 pending). Human
+    // answers the ask. Before this fix, resolve_ask ran cascade_done and
+    // promoted loom-1 to Done (because loom-1a was the only child and now
+    // Done) *and* cleared the worker's current_task_id. The worker then
+    // hit "No linked task to derive from" on its next loom_derive.
+    //
+    // Correct behavior (matches Python server.py's resolve_ask): mark the
+    // ask Done, clear the parent's "Awaiting Input" status so the worker
+    // resumes, but leave the parent's lane and the agent→task link alone.
     let (addr, state, ui_agents) = spawn_test_server_full().await;
 
     post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
@@ -611,8 +616,6 @@ async fn resolve_ask_cascades_to_parent_after_sibling_done() {
     .await;
     let worker_id = dispatch["data"]["agent_id"].as_str().unwrap().to_string();
 
-    // Ask task opened while worker still on loom-1. Label `loom:human`
-    // replicates handle_agent_ask.
     let ask = post(
         addr,
         json!({
@@ -628,78 +631,17 @@ async fn resolve_ask_cascades_to_parent_after_sibling_done() {
     .await;
     let ask_id = ask["data"]["task_id"].as_str().unwrap().to_string();
 
-    // Reviewer branch + fix branch.
-    let review = post(
-        addr,
-        json!({
-            "cmd": "board_add_task",
-            "task": "Review it",
-            "group": "Eng",
-            "parent_task_id": &root_id,
-            "pipeline_root_id": &root_id,
-            "lane": "In Progress",
-            "labels": ["loom:derived"]
-        }),
-    )
-    .await;
-    let review_id = review["data"]["task_id"].as_str().unwrap().to_string();
-    let fix = post(
-        addr,
-        json!({
-            "cmd": "board_add_task",
-            "task": "Fix it",
-            "group": "Eng",
-            "parent_task_id": &review_id,
-            "pipeline_root_id": &root_id,
-            "labels": ["loom:derived"]
-        }),
-    )
-    .await;
-    let fix_id = fix["data"]["task_id"].as_str().unwrap().to_string();
-
-    // Worker finishes the fix first.
+    // Worker is still actively on loom-1 (current_task_id → root). Parent
+    // carries "Awaiting Input" while the ask is open — mirror that so we
+    // can verify it gets cleared on resolve.
     {
         let mut st = state.lock().await;
-        st.agents.get_mut(&worker_id).unwrap().current_task_id = fix_id.clone();
-    }
-    post(
-        addr,
-        json!({
-            "cmd": "ai_report",
-            "action": "done",
-            "agent_id": &worker_id,
-            "task_id": &fix_id,
-            "message": "fix shipped"
-        }),
-    )
-    .await;
-    // At this point review should have cascaded to Done, but root should
-    // still be In Progress because the ask is open.
-    {
-        let st = state.lock().await;
-        assert_eq!(st.board_tasks.get(&review_id).unwrap().lane, "Done");
-        assert_ne!(
-            st.board_tasks.get(&root_id).unwrap().lane,
-            "Done",
-            "root should NOT be Done yet — ask is still open"
-        );
-    }
-
-    // Human answers the ask. This must continue the cascade.
-    let ask_task = {
-        let st = state.lock().await;
-        st.board_tasks.get(&ask_id).cloned().unwrap()
-    };
-    // Give the ask a linked agent so resolve_ask can route the reply; use
-    // the worker as the parent agent (matches the real flow where the
-    // asking agent is still registered against loom-1).
-    let mut rx = ui_agents.register(worker_id.clone());
-    {
-        let mut st = state.lock().await;
+        st.agents.get_mut(&worker_id).unwrap().current_task_id = root_id.clone();
         let parent = st.board_tasks.get_mut(&root_id).unwrap();
         parent.agent_id = worker_id.clone();
-        let _ = ask_task;
+        parent.status = "Awaiting Input".into();
     }
+    let mut rx = ui_agents.register(worker_id.clone());
 
     post(
         addr,
@@ -710,24 +652,23 @@ async fn resolve_ask_cascades_to_parent_after_sibling_done() {
         }),
     )
     .await;
-    // Drain any text that resolve_ask delivered to the worker so the
-    // channel doesn't fill up.
     let _ = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
 
     let st = state.lock().await;
     assert_eq!(st.board_tasks.get(&ask_id).unwrap().lane, "Done");
-    assert_eq!(
-        st.board_tasks.get(&root_id).unwrap().lane,
-        "Done",
-        "resolve_ask cascade should have promoted root now that every child is Done"
+    let root = st.board_tasks.get(&root_id).unwrap();
+    assert_ne!(
+        root.lane, "Done",
+        "parent must NOT be cascade-completed — worker still has work to do"
     );
-    // The worker was still linked to root (never fired its own loom_done
-    // because the done landed on the fixer). Cascade-promoting root to
-    // Done should have cleared the worker's stale current_task_id.
-    let worker = st.agents.get(&worker_id).unwrap();
     assert!(
-        worker.current_task_id.is_empty(),
-        "cascade should have unlinked the worker from the promoted root (got {:?})",
-        worker.current_task_id
+        root.status.is_empty(),
+        "parent's 'Awaiting Input' status should be cleared (got {:?})",
+        root.status
+    );
+    let worker = st.agents.get(&worker_id).unwrap();
+    assert_eq!(
+        worker.current_task_id, root_id,
+        "resolve_ask must preserve the worker→parent link so loom_derive still works"
     );
 }

@@ -32,7 +32,7 @@ async-trait = "0.1"
 # Web server
 axum = { version = "0.7", features = ["ws", "multipart", "macros"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "trace", "set-header"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

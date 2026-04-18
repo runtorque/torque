@@ -724,28 +724,48 @@ pub async fn set_standalone_panel_layout(ctx: &CmdContext, req: &Value) -> CmdRe
     ok()
 }
 
-/// Set per-group board filter state. Payload: `{ "group": "Eng", "filters": {...} }`.
-/// Persisted as JSON in `ui_state[board_filters_by_group]`.
+/// Replace the entire filters-by-group map.
+/// Payload: `{ "filters_by_group": { "Eng": {...}, "Ops": {...} } }`.
+/// Matches the Python server's shape — the browser persists its full
+/// in-memory map on every filter change (see
+/// `static/js/board/view-state.js:_boardPersistFilterState`). Accepting
+/// a per-group `{"group":…, "filters":…}` payload here would trip
+/// `missing 'group'` any time the board or history panel re-persists
+/// state.
 pub async fn set_filters(ctx: &CmdContext, req: &Value) -> CmdResult {
-    set_per_group_ui(ctx, req, "filters", "board_filters_by_group", |st| {
-        &mut st.board_filters_by_group
-    })
+    replace_per_group_ui(
+        ctx,
+        req,
+        "filters_by_group",
+        "board_filters_by_group",
+        |st| &mut st.board_filters_by_group,
+    )
     .await
 }
 
-/// Set per-group saved views. Payload: `{ "group": "Eng", "views": [...] }`.
+/// Replace the entire saved-views-by-group map.
+/// Payload: `{ "saved_views_by_group": { "Eng": [...], … } }`.
 pub async fn set_saved_views(ctx: &CmdContext, req: &Value) -> CmdResult {
-    set_per_group_ui(ctx, req, "views", "board_saved_views_by_group", |st| {
-        &mut st.board_saved_views_by_group
-    })
+    replace_per_group_ui(
+        ctx,
+        req,
+        "saved_views_by_group",
+        "board_saved_views_by_group",
+        |st| &mut st.board_saved_views_by_group,
+    )
     .await
 }
 
-/// Set per-group lane sort rules. Payload: `{ "group": "Eng", "sorts": {...} }`.
+/// Replace the entire lane-sorts-by-group map.
+/// Payload: `{ "lane_sorts_by_group": { "Eng": {...}, … } }`.
 pub async fn set_lane_sorts(ctx: &CmdContext, req: &Value) -> CmdResult {
-    set_per_group_ui(ctx, req, "sorts", "board_lane_sorts_by_group", |st| {
-        &mut st.board_lane_sorts_by_group
-    })
+    replace_per_group_ui(
+        ctx,
+        req,
+        "lane_sorts_by_group",
+        "board_lane_sorts_by_group",
+        |st| &mut st.board_lane_sorts_by_group,
+    )
     .await
 }
 
@@ -775,7 +795,12 @@ pub async fn set_card_density(ctx: &CmdContext, req: &Value) -> CmdResult {
     Ok(json!({ "ok": true, "group": group, "density": density }))
 }
 
-async fn set_per_group_ui(
+/// Replace an entire per-group UI map from a single payload field. The
+/// payload shape matches what the Python server accepts:
+/// `{ "<payload_key>": { "<group>": <value>, … } }`. Non-dict payloads
+/// reset the map to empty (Python behavior — the browser sometimes
+/// sends `null` to clear state).
+async fn replace_per_group_ui(
     ctx: &CmdContext,
     req: &Value,
     payload_key: &str,
@@ -784,42 +809,30 @@ async fn set_per_group_ui(
         &mut loom_core::state::MatrixState,
     ) -> &mut std::collections::HashMap<String, Value>,
 ) -> CmdResult {
-    let group = required_str(req, "group")?.to_string();
-    let value = req
-        .get(payload_key)
-        .cloned()
-        .ok_or_else(|| CmdError::BadRequest(format!("missing '{payload_key}'")))?;
+    let incoming: std::collections::HashMap<String, Value> = match req.get(payload_key) {
+        Some(Value::Object(map)) => map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+        _ => std::collections::HashMap::new(),
+    };
 
     let full_map = {
         let mut st = ctx.state.lock().await;
-        let map = select(&mut st);
-        map.insert(group.clone(), value.clone());
-        let clone = map.clone();
+        let target = select(&mut st);
+        *target = incoming;
+        let clone = target.clone();
         st.emit(loom_core::delta::DeltaOp::UiUpdate {
             key: ui_state_key.to_string(),
             value: json!(clone),
         });
-        st_map_clone(&st, ui_state_key)
+        clone
     };
 
     let encoded = serde_json::to_string(&full_map)
         .map_err(|e| CmdError::BadRequest(format!("encode: {e}")))?;
     ctx.db.set_ui_state(ui_state_key, &encoded).await?;
     flush(ctx).await;
-    Ok(json!({ "ok": true, "group": group }))
+    ok()
 }
 
-/// Snapshot the relevant map by key name. Needed because the closure in
-/// `set_per_group_ui` holds a `&mut` on the state and we need to clone before
-/// releasing the lock.
-fn st_map_clone(
-    st: &loom_core::state::MatrixState,
-    key: &str,
-) -> std::collections::HashMap<String, Value> {
-    match key {
-        "board_filters_by_group" => st.board_filters_by_group.clone(),
-        "board_saved_views_by_group" => st.board_saved_views_by_group.clone(),
-        "board_lane_sorts_by_group" => st.board_lane_sorts_by_group.clone(),
-        _ => Default::default(),
-    }
-}

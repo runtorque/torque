@@ -4336,12 +4336,19 @@ body.runtime-embedded .board-empty-action:focus-visible {
 
 /* Message rows in detail */
 .ah-messages { display: flex; flex-direction: column; gap: 1px; max-height: 200px; overflow-y: auto; }
-.ah-msg-row { display: flex; align-items: baseline; gap: 4px; padding: 1px 0; font-size: 10px; }
-.ah-msg-row.ah-clickable { cursor: pointer; border-radius: 3px; padding: 1px 4px; }
+/* Use the same horizontal padding on every row so clickable and
+   non-clickable rows share the same left edge — otherwise clickable
+   rows get +4px left padding and all their columns visibly shift. */
+.ah-msg-row { display: flex; align-items: baseline; gap: 6px; padding: 1px 4px; font-size: 10px; border-radius: 3px; }
+.ah-msg-row.ah-clickable { cursor: pointer; }
 .ah-msg-row.ah-clickable:hover { background: var(--hover); }
-.ah-msg-icon { flex-shrink: 0; width: 12px; text-align: center; }
-.ah-msg-action { font-weight: 600; flex-shrink: 0; min-width: 50px; }
-.ah-msg-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.ah-msg-icon { flex: 0 0 12px; text-align: center; }
+/* Fixed-width action column keeps message text aligned across rows —
+   without it, "session_end" pushes text further right than "done",
+   producing the cascade-like misalignment. Width fits the longest
+   action label in the wild (`session_end` / `tool_start`). */
+.ah-msg-action { font-weight: 600; flex: 0 0 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ah-msg-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
 .ah-msg-expanded {
   display: none; padding: 3px 8px 3px 28px; font-size: 10px; color: var(--fg-dim);
   white-space: pre-wrap; word-break: break-word; background: var(--bg); border-radius: 3px;

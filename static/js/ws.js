@@ -531,6 +531,21 @@ function _applyDelta(ops) {
       }
       case 'agent_remove':
         delete state.agents[op.id];
+        // Selection globals (`selectedAgentId` / `selectedTerminalId` /
+        // `focusedItemId`) are browser-local — the server doesn't know
+        // about them. When the agent they reference gets removed
+        // (cascade, `loom ai ready`, group delete, etc.), clear the
+        // stale id here so the detail panel + terminal drawer don't
+        // keep rendering the ghost cell.
+        if (typeof selectedAgentId !== 'undefined' && selectedAgentId === op.id) {
+          selectedAgentId = null;
+        }
+        if (typeof selectedTerminalId !== 'undefined' && selectedTerminalId === op.id) {
+          selectedTerminalId = null;
+        }
+        if (typeof focusedItemId !== 'undefined' && focusedItemId === op.id) {
+          focusedItemId = null;
+        }
         if (typeof _clearAgentDoneFlourish === 'function') {
           _clearAgentDoneFlourish(op.id);
         }

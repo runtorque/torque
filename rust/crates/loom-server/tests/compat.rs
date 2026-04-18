@@ -122,6 +122,20 @@ async fn get_events_and_history_commands_return_python_compat_shapes() {
     assert!(history["data"]["records"].is_array());
     assert_eq!(history["data"]["records"][0]["total_tasks"], 1);
 
+    // The live UI sends a `status` filter (e.g. "active" or "removed"). The
+    // filtered branch previously collided on ?1 (WHERE status=?1 vs LIMIT
+    // ?1) and rusqlite rejected the bind with "Got 3, needed 2".
+    let filtered = post(
+        addr,
+        json!({"cmd": "get_agent_history", "status": "active", "limit": 10}),
+    )
+    .await;
+    assert_eq!(
+        filtered["ok"], true,
+        "status-filtered history must not hit a param-count mismatch: {filtered:?}"
+    );
+    assert_eq!(filtered["data"]["type"], "agent_history_list");
+
     let detail = post(
         addr,
         json!({"cmd": "get_agent_history_detail", "agent_id": agent_id}),

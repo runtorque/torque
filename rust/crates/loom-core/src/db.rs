@@ -2154,10 +2154,15 @@ impl LoomDb {
                                created_at, removed_at, worktree_branch, total_tokens_in, \
                                total_tokens_out, total_tasks, status \
                         FROM agent_history";
-        let order = " ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, created_at DESC LIMIT ?1 OFFSET ?2";
+        let order_no_filter = " ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, created_at DESC LIMIT ?1 OFFSET ?2";
+        // When a status filter is present, status=?1 already occupies slot
+        // 1, so LIMIT/OFFSET must move to ?2/?3. Sharing one `order` string
+        // across both branches previously collided on ?1 and tripped
+        // SQLite's parameter-count check (got 3, needed 2).
+        let order_with_filter = " ORDER BY CASE WHEN status='active' THEN 0 ELSE 1 END, created_at DESC LIMIT ?2 OFFSET ?3";
         let mut out = Vec::new();
         if status_filter.is_empty() {
-            let mut stmt = conn.prepare(&(sql_base.to_string() + order))?;
+            let mut stmt = conn.prepare(&(sql_base.to_string() + order_no_filter))?;
             let rows = stmt.query_map(params![limit, offset], |r| {
                 Ok(serde_json::json!({
                     "id": r.get::<_, String>(0)?,
@@ -2179,7 +2184,7 @@ impl LoomDb {
                 out.push(row?);
             }
         } else {
-            let sql = format!("{sql_base} WHERE status=?1{order}");
+            let sql = format!("{sql_base} WHERE status=?1{order_with_filter}");
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(params![status_filter, limit, offset], |r| {
                 Ok(serde_json::json!({

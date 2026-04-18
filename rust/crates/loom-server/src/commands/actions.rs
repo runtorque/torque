@@ -218,83 +218,153 @@ pub async fn delete_action(_ctx: &CmdContext, req: &Value) -> CmdResult {
 }
 
 /// Discover pipelines: connected components in the action transition graph.
+///
+/// Response shape matches `loom/actions.py::discover_pipelines` — the UI
+/// (`static/js/actions.js::renderPipelinesView`) reads `p.actions`,
+/// `p.edges`, and `p.asks` off each pipeline entry, so emitting plain
+/// `Vec<String>` per pipeline makes the renderer crash with
+/// "Cannot read properties of undefined (reading 'length')".
 pub async fn discover_pipelines(ctx: &CmdContext, _req: &Value) -> CmdResult {
     let mgr = build_manager(ctx).await?;
     let actions = mgr.list_actions().map_err(action_err)?;
 
-    // Build adjacency.
-    let mut adj: HashMap<String, HashSet<String>> = HashMap::new();
-    let mut all_nodes: HashSet<String> = HashSet::new();
+    // Per-action outgoing directed edges and ask transitions.
+    let mut out_edges: HashMap<String, Vec<(String, String)>> = HashMap::new(); // name -> [(to, when)]
+    let mut out_asks: HashMap<String, Vec<String>> = HashMap::new(); // name -> [when]
+    let mut all_names: HashSet<String> = HashSet::new();
     for info in &actions {
-        all_nodes.insert(info.name.clone());
+        all_names.insert(info.name.clone());
         for t in &info.transitions {
-            if t.action.trim().is_empty() {
-                continue;
+            if !t.action.trim().is_empty() {
+                out_edges
+                    .entry(info.name.clone())
+                    .or_default()
+                    .push((t.action.clone(), t.when.clone()));
+            } else if t.ask {
+                out_asks
+                    .entry(info.name.clone())
+                    .or_default()
+                    .push(t.when.clone());
             }
-            all_nodes.insert(t.action.clone());
-            adj.entry(info.name.clone())
-                .or_default()
-                .insert(t.action.clone());
-            // bidirectional for connected-components analysis
-            adj.entry(t.action.clone())
-                .or_default()
-                .insert(info.name.clone());
         }
     }
 
-    // Connected components via BFS.
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut pipelines: Vec<Vec<String>> = Vec::new();
+    // Undirected adjacency over edges whose target is a known action —
+    // this mirrors the Python pass that skips "dangling" targets.
+    let mut adj: HashMap<String, HashSet<String>> = HashMap::new();
+    for (src, edges) in &out_edges {
+        for (to, _) in edges {
+            if !all_names.contains(to) {
+                continue;
+            }
+            adj.entry(src.clone()).or_default().insert(to.clone());
+            adj.entry(to.clone()).or_default().insert(src.clone());
+        }
+    }
 
-    for node in &all_nodes {
+    // Connected components via BFS. Only keep components that have at
+    // least one real edge (standalone actions aren't pipelines).
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut components: Vec<HashSet<String>> = Vec::new();
+    for node in &all_names {
         if visited.contains(node) {
             continue;
         }
-        let mut component: Vec<String> = Vec::new();
+        let mut component: HashSet<String> = HashSet::new();
         let mut q: VecDeque<String> = VecDeque::new();
         q.push_back(node.clone());
         visited.insert(node.clone());
+        component.insert(node.clone());
         while let Some(cur) = q.pop_front() {
-            component.push(cur.clone());
             if let Some(neighbors) = adj.get(&cur) {
                 for n in neighbors {
                     if visited.insert(n.clone()) {
                         q.push_back(n.clone());
+                        component.insert(n.clone());
                     }
                 }
             }
         }
-        if component.len() > 1 {
-            component.sort();
-            pipelines.push(component);
+        let has_edges = component.iter().any(|n| {
+            out_edges
+                .get(n)
+                .map(|es| es.iter().any(|(to, _)| component.contains(to)))
+                .unwrap_or(false)
+        });
+        if has_edges {
+            components.push(component);
         }
     }
 
-    // Include transition edges for UI rendering.
-    let edges: Vec<Value> = actions
-        .iter()
-        .flat_map(|info| {
-            info.transitions.iter().filter_map(move |t| {
-                if t.action.trim().is_empty() {
-                    None
-                } else {
-                    Some(json!({
-                        "from": info.name,
-                        "to": t.action,
-                        "when": t.when,
-                        "status": t.status,
-                        "target": t.target,
-                    }))
+    // Build the pipeline dicts the UI expects.
+    let mut pipelines: Vec<Value> = Vec::with_capacity(components.len());
+    for comp in &components {
+        // Entry points: nodes with no incoming edges from inside the
+        // component. If none (fully cyclic), fall back to sorted first.
+        let mut incoming: HashSet<String> = HashSet::new();
+        for n in comp {
+            if let Some(edges) = out_edges.get(n) {
+                for (to, _) in edges {
+                    if comp.contains(to) {
+                        incoming.insert(to.clone());
+                    }
                 }
-            })
-        })
-        .collect();
+            }
+        }
+        let mut entry_points: Vec<String> =
+            comp.iter().filter(|n| !incoming.contains(*n)).cloned().collect();
+        entry_points.sort();
+        let mut sorted_comp: Vec<String> = comp.iter().cloned().collect();
+        sorted_comp.sort();
+        let pipeline_name = entry_points
+            .first()
+            .cloned()
+            .or_else(|| sorted_comp.first().cloned())
+            .unwrap_or_default();
+
+        let mut edges: Vec<Value> = Vec::new();
+        for n in &sorted_comp {
+            if let Some(es) = out_edges.get(n) {
+                for (to, when) in es {
+                    if comp.contains(to) {
+                        edges.push(json!({
+                            "from": n,
+                            "to": to,
+                            "when": when,
+                        }));
+                    }
+                }
+            }
+        }
+        let mut asks: Vec<Value> = Vec::new();
+        for n in &sorted_comp {
+            if let Some(as_) = out_asks.get(n) {
+                for when in as_ {
+                    asks.push(json!({
+                        "from": n,
+                        "when": when,
+                    }));
+                }
+            }
+        }
+
+        pipelines.push(json!({
+            "name": pipeline_name,
+            "actions": sorted_comp,
+            "edges": edges,
+            "asks": asks,
+        }));
+    }
+    pipelines.sort_by(|a, b| {
+        a.get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .cmp(b.get("name").and_then(Value::as_str).unwrap_or(""))
+    });
 
     Ok(json!({
         "type": "pipelines",
         "pipelines": pipelines,
-        "edges": edges,
-        "actions": actions.iter().map(|a| &a.name).collect::<Vec<_>>(),
     }))
 }
 

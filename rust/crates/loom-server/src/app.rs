@@ -13,6 +13,7 @@ use axum::routing::get;
 use axum::Router;
 use tokio::sync::{mpsc, Mutex};
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::pty_backend::PtyBackend;
 use crate::terminal_bridge::TerminalBridgeClient;
@@ -209,10 +210,22 @@ pub struct ServerHandle {
 }
 
 pub fn base_router() -> Router<AppState> {
+    // Static assets (JS/CSS) get `Cache-Control: no-cache` so browser
+    // always revalidates against the server. Without this, tower-http's
+    // defaults combined with Chrome's heuristic caching produced hours
+    // of "my fix isn't loading" confusion during dev. `no-cache` still
+    // allows 304 revalidation via ETag, so the wire cost is minimal.
+    let static_service = ServeDir::new(frontend_static_dir());
+    let no_cache = SetResponseHeaderLayer::overriding(
+        header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-cache"),
+    );
     Router::new()
         .route("/", get(handle_index))
         .route("/attachments/{task_id}/{filename}", get(handle_attachment))
-        .nest_service("/static", ServeDir::new(frontend_static_dir()))
+        .nest_service("/static", tower::ServiceBuilder::new()
+            .layer(no_cache)
+            .service(static_service))
         .merge(crate::ws::routes())
         .merge(crate::commands::routes())
         .merge(crate::terminal_bridge::routes())

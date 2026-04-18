@@ -360,12 +360,14 @@ async fn board_view_state_persists_per_group() {
     post(addr, json!({"cmd": "add_group", "name": "Eng"})).await;
     post(addr, json!({"cmd": "add_group", "name": "Ops"})).await;
 
+    // Payload shape matches what the browser sends: the full
+    // `*_by_group` map replaces the stored state (not a per-group
+    // patch). Mirrors Python `loom/server.py`'s board_set_* handlers.
     post(
         addr,
         json!({
             "cmd": "board_set_filters",
-            "group": "Eng",
-            "filters": {"label": "blocked"}
+            "filters_by_group": {"Eng": {"label": "blocked"}}
         }),
     )
     .await;
@@ -373,8 +375,7 @@ async fn board_view_state_persists_per_group() {
         addr,
         json!({
             "cmd": "board_set_saved_views",
-            "group": "Eng",
-            "views": [{"id": "v1", "name": "My blocked"}]
+            "saved_views_by_group": {"Eng": [{"id": "v1", "name": "My blocked"}]}
         }),
     )
     .await;
@@ -382,8 +383,7 @@ async fn board_view_state_persists_per_group() {
         addr,
         json!({
             "cmd": "board_set_lane_sorts",
-            "group": "Eng",
-            "sorts": {"In Progress": "age_desc"}
+            "lane_sorts_by_group": {"Eng": {"In Progress": "age_desc"}}
         }),
     )
     .await;

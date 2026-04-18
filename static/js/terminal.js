@@ -41,16 +41,31 @@ function _terminalTargetAgent(cell) {
 function _terminalGroupCells(group) {
   const out = [];
   if (!group || !state || !state.groups || !state.agents) return out;
+  // `state.groups[group]` already contains every cell in the group —
+  // agents AND their child terminals (see `add_agent` in
+  // `rust/crates/loom-core/src/state.rs`, which pushes every new cell,
+  // regardless of `cell_type`, into the group list). The previous loop
+  // then also expanded each agent's `state.children`, so every child
+  // terminal was pushed twice, producing two "Terminal 1 TERM" tabs for
+  // a single cell in the embedded workspace top bar. Dedupe by id.
+  const seen = Object.create(null);
   const ids = state.groups[group] || [];
   for (let i = 0; i < ids.length; i++) {
-    const cell = state.agents[ids[i]];
+    const id = ids[i];
+    if (seen[id]) continue;
+    const cell = state.agents[id];
     if (!cell) continue;
+    seen[id] = true;
     out.push(cell);
     if (cell.cell_type === 'agent') {
       const kids = state.children && state.children[cell.id] ? state.children[cell.id] : [];
       for (let j = 0; j < kids.length; j++) {
-        const child = state.agents[kids[j]];
-        if (child) out.push(child);
+        const childId = kids[j];
+        if (seen[childId]) continue;
+        const child = state.agents[childId];
+        if (!child) continue;
+        seen[childId] = true;
+        out.push(child);
       }
     }
   }
