@@ -700,7 +700,7 @@ function _showGroupSettings(group, data) {
   document.getElementById('gs-wt-base-branch').value = s.worktree_base_branch || '';
   document.getElementById('gs-wt-auto-checkpoint').checked = s.worktree_auto_checkpoint || false;
   document.getElementById('gs-wt-checkpoint-on-progress').checked = s.checkpoint_on_progress || false;
-  document.getElementById('gs-wt-merge-squash').checked = s.worktree_merge_squash !== false;
+  document.getElementById('gs-wt-merge-squash').checked = s.worktree_merge_squash === true;
   document.getElementById('gs-wt-merge-instructions').value = s.worktree_merge_instructions || '';
   _setSelectValue('gs-wt-merge-cleanup', s.worktree_merge_cleanup, 'keep');
   document.getElementById('gs-wt-merge-preserve-diff').checked = !!s.worktree_merge_preserve_diff;

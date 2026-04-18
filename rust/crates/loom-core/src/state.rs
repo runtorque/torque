@@ -573,11 +573,11 @@ pub struct GroupSettings {
     pub worktree_base_dir: String,
     #[serde(default)]
     pub worktree_base_branch: String,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub worktree_auto_checkpoint: bool,
     #[serde(default)]
     pub checkpoint_on_progress: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub worktree_merge_squash: bool,
     #[serde(default)]
     pub worktree_merge_instructions: String,
@@ -649,7 +649,7 @@ pub struct GroupSettings {
 
 impl Default for GroupSettings {
     /// Go through serde so `#[serde(default = "…")]` field defaults are
-    /// honored (e.g. `git_worktree = true`, `worktree_merge_squash = true`).
+    /// honored (e.g. `git_worktree = true`, `worktree_auto_checkpoint = true`).
     /// Falls back to `unwrap_or_else` safety net, though the `{}` payload
     /// should always deserialize cleanly.
     fn default() -> Self {
@@ -679,9 +679,9 @@ impl Default for GroupSettings {
             git_worktree: true,
             worktree_base_dir: default_loom_worktrees(),
             worktree_base_branch: String::new(),
-            worktree_auto_checkpoint: false,
+            worktree_auto_checkpoint: true,
             checkpoint_on_progress: false,
-            worktree_merge_squash: true,
+            worktree_merge_squash: false,
             worktree_merge_instructions: String::new(),
             worktree_merge_cleanup: default_keep(),
             worktree_merge_preserve_diff: false,
