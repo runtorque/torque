@@ -255,11 +255,40 @@ function _embeddedTerminalDroppedFiles(dataTransfer) {
   return Array.prototype.slice.call(dataTransfer.files);
 }
 
+function _embeddedTerminalHasDraggedFiles(dataTransfer) {
+  if (!dataTransfer) return false;
+  if (dataTransfer.types && typeof dataTransfer.types.length === 'number') {
+    if (Array.prototype.indexOf.call(dataTransfer.types, 'Files') !== -1) return true;
+  }
+  if (dataTransfer.items && typeof dataTransfer.items.length === 'number') {
+    for (var i = 0; i < dataTransfer.items.length; i++) {
+      var item = dataTransfer.items[i];
+      if (item && item.kind === 'file') return true;
+    }
+  }
+  return _embeddedTerminalDroppedFiles(dataTransfer).length > 0;
+}
+
 function _embeddedTerminalDroppedImages(dataTransfer) {
   var files = _embeddedTerminalDroppedFiles(dataTransfer);
   return files.filter(function(file) {
     return !!(file && file.type && file.type.indexOf('image/') === 0);
   });
+}
+
+function _embeddedTerminalDraggedImagesVisible(dataTransfer) {
+  if (dataTransfer && dataTransfer.items && typeof dataTransfer.items.length === 'number') {
+    var sawFile = false;
+    for (var i = 0; i < dataTransfer.items.length; i++) {
+      var item = dataTransfer.items[i];
+      if (!item || item.kind !== 'file') continue;
+      sawFile = true;
+      if (item.type && item.type.indexOf('image/') === 0) return true;
+    }
+    if (sawFile) return false;
+  }
+  return _embeddedTerminalDroppedImages(dataTransfer).length > 0
+    || _embeddedTerminalHasDraggedFiles(dataTransfer);
 }
 
 function _embeddedTerminalDropUploadId(cell) {
@@ -307,23 +336,20 @@ function _attachEmbeddedTerminalDropHandlers(cell, surface) {
   _embeddedTerminalDropDepth = 0;
   _embeddedTerminalDropHandlers = {
     dragenter: function(e) {
-      var files = _embeddedTerminalDroppedFiles(e && e.dataTransfer);
-      if (!files.length) return;
+      if (!_embeddedTerminalHasDraggedFiles(e && e.dataTransfer)) return;
       _embeddedTerminalDropDepth += 1;
-      if (_embeddedTerminalDroppedImages(e.dataTransfer).length) {
-        _setEmbeddedTerminalDropTarget(surface, true);
-      }
+      _setEmbeddedTerminalDropTarget(
+        surface, _embeddedTerminalDraggedImagesVisible(e.dataTransfer));
     },
     dragover: function(e) {
-      var files = _embeddedTerminalDroppedFiles(e && e.dataTransfer);
-      if (!files.length) return;
+      if (!_embeddedTerminalHasDraggedFiles(e && e.dataTransfer)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-      _setEmbeddedTerminalDropTarget(surface, _embeddedTerminalDroppedImages(e.dataTransfer).length > 0);
+      _setEmbeddedTerminalDropTarget(
+        surface, _embeddedTerminalDraggedImagesVisible(e.dataTransfer));
     },
     dragleave: function(e) {
-      var files = _embeddedTerminalDroppedFiles(e && e.dataTransfer);
-      if (!files.length) return;
+      if (!_embeddedTerminalHasDraggedFiles(e && e.dataTransfer)) return;
       _embeddedTerminalDropDepth = Math.max(0, _embeddedTerminalDropDepth - 1);
       if (_embeddedTerminalDropDepth > 0) return;
       if (e.relatedTarget && typeof surface.contains === 'function' && surface.contains(e.relatedTarget)) {
@@ -358,6 +384,8 @@ function _attachEmbeddedTerminalDropHandlers(cell, surface) {
       focusEmbeddedTerminalWorkspace(false);
     },
   };
+  // Capture-phase listeners ensure the workspace still sees file drags
+  // before xterm's helper textarea can swallow them.
   surface.addEventListener('dragenter', _embeddedTerminalDropHandlers.dragenter, true);
   surface.addEventListener('dragover', _embeddedTerminalDropHandlers.dragover, true);
   surface.addEventListener('dragleave', _embeddedTerminalDropHandlers.dragleave, true);
