@@ -2040,22 +2040,67 @@ body.runtime-embedded #standalone-right-rail {
   font: inherit;
   font-size: 10px;
   padding: 3px 8px;
+  transition: color .15s, border-color .15s, background .15s, box-shadow .15s;
 }
 .standalone-panel-tab:hover,
 .standalone-panel-zone-btn:hover {
   color: var(--text);
   border-color: var(--text-dim);
 }
+.standalone-panel-zone-btn:focus-visible {
+  outline: none;
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-cell));
+  position: relative;
+  z-index: 1;
+}
 .standalone-panel-tab.active {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-cell));
 }
-.standalone-panel-zone-actions {
+.standalone-panel-zone-actions,
+.standalone-float-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
+  margin-left: auto;
   flex-shrink: 0;
+}
+.standalone-panel-zone-btn-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 0;
+  flex: 0 0 auto;
+}
+.standalone-panel-zone-btn-icon + .standalone-panel-zone-btn-icon {
+  margin-left: -1px;
+}
+.standalone-panel-zone-btn-icon:first-child {
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+.standalone-panel-zone-btn-icon:last-child {
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+.standalone-panel-zone-btn-icon:hover,
+.standalone-panel-zone-btn-icon:focus-visible {
+  z-index: 1;
+}
+.standalone-panel-zone-btn-glyph {
+  width: 14px;
+  height: 14px;
+  display: block;
+  stroke: currentColor;
+  fill: none;
+  pointer-events: none;
 }
 .standalone-panel-zone-body {
   display: flex;
@@ -2141,10 +2186,6 @@ body.runtime-embedded.standalone-panel-dragging #standalone-right-rail {
   font-size: 11px;
   font-weight: 600;
   color: var(--text);
-}
-.standalone-float-actions {
-  display: flex;
-  gap: 6px;
 }
 .standalone-float-body {
   flex: 1;

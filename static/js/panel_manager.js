@@ -623,6 +623,66 @@ function _makeStandaloneNode(tag, classNames, text) {
   return el;
 }
 
+function _standaloneSvgNode(tag, attrs) {
+  var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  var names = Object.keys(attrs || {});
+  for (var i = 0; i < names.length; i++) {
+    el.setAttribute(names[i], attrs[names[i]]);
+  }
+  return el;
+}
+
+function _standalonePanelActionIcon(iconName) {
+  var svg = _standaloneSvgNode('svg', {
+    class: 'standalone-panel-zone-btn-glyph',
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    'stroke-width': '1.5',
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+    'aria-hidden': 'true',
+    focusable: 'false',
+  });
+
+  function addPath(d) {
+    svg.appendChild(_standaloneSvgNode('path', { d: d }));
+  }
+
+  function addLine(x1, y1, x2, y2) {
+    svg.appendChild(_standaloneSvgNode('line', {
+      x1: String(x1),
+      y1: String(y1),
+      x2: String(x2),
+      y2: String(y2),
+    }));
+  }
+
+  if (iconName === 'float') {
+    addPath('M9.5 3.5H12.5V6.5');
+    addPath('M12.5 3.5L7 9');
+    addPath('M10.5 9.5V11.25C10.5 11.9404 9.9404 12.5 9.25 12.5H4.75C4.0596 12.5 3.5 11.9404 3.5 11.25V6.75C3.5 6.0596 4.0596 5.5 4.75 5.5H6.5');
+  } else if (iconName === 'dock') {
+    addPath('M3.5 12.25H12.5');
+    addPath('M5.75 8.75L8 11.25L10.25 8.75');
+    addPath('M8 4V11');
+  } else {
+    addLine(4.75, 4.75, 11.25, 11.25);
+    addLine(11.25, 4.75, 4.75, 11.25);
+  }
+  return svg;
+}
+
+function _standalonePanelActionButton(label, iconName, onClick) {
+  var btn = _makeStandaloneNode('button', 'standalone-panel-zone-btn standalone-panel-zone-btn-icon');
+  btn.type = 'button';
+  btn.draggable = false;
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+  btn.appendChild(_standalonePanelActionIcon(iconName));
+  btn.onclick = onClick;
+  return btn;
+}
+
 function _standaloneZoneTab(app, active) {
   var btn = _makeStandaloneNode('button', 'standalone-panel-tab' + (active ? ' active' : ''), _standalonePanelTitle(app));
   btn.dataset.app = app;
@@ -662,14 +722,12 @@ function _standaloneBuildZone(zoneName, rootEl, roots, placed) {
 
     var actions = _makeStandaloneNode('div', 'standalone-panel-zone-actions');
     if (zone.active) {
-      var floatBtn = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Float');
-      floatBtn.onclick = function(activeApp) {
+      var floatBtn = _standalonePanelActionButton('Float', 'float', function(activeApp) {
         return function() { _standaloneMovePanelToZone(activeApp, 'float'); };
-      }(zone.active);
+      }(zone.active));
       actions.appendChild(floatBtn);
     }
-    var closeBtn = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Hide');
-    closeBtn.onclick = function() { _standaloneToggleZone(zoneName); };
+    var closeBtn = _standalonePanelActionButton('Hide', 'hide', function() { _standaloneToggleZone(zoneName); });
     actions.appendChild(closeBtn);
     header.appendChild(actions);
     rootEl.appendChild(header);
@@ -697,11 +755,11 @@ function _standaloneFloatHeader(app) {
   var title = _makeStandaloneNode('div', 'standalone-float-title', _standalonePanelTitle(app));
   header.appendChild(title);
   var actions = _makeStandaloneNode('div', 'standalone-float-actions');
-  var dockBottom = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Dock');
-  dockBottom.onclick = function() { _standaloneMovePanelToZone(app, _standalonePanelDefaults[app] || 'bottom'); };
+  var dockBottom = _standalonePanelActionButton('Dock', 'dock', function() {
+    _standaloneMovePanelToZone(app, _standalonePanelDefaults[app] || 'bottom');
+  });
   actions.appendChild(dockBottom);
-  var closeBtn = _makeStandaloneNode('button', 'standalone-panel-zone-btn', 'Hide');
-  closeBtn.onclick = function() { standalonePanelClose(app); };
+  var closeBtn = _standalonePanelActionButton('Hide', 'hide', function() { standalonePanelClose(app); });
   actions.appendChild(closeBtn);
   header.appendChild(actions);
   return header;
