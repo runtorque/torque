@@ -624,7 +624,9 @@ function _makeStandaloneNode(tag, classNames, text) {
 }
 
 function _standaloneSvgNode(tag, attrs) {
-  var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  var el = document && typeof document.createElementNS === 'function'
+    ? document.createElementNS('http://www.w3.org/2000/svg', tag)
+    : document.createElement(tag);
   var names = Object.keys(attrs || {});
   for (var i = 0; i < names.length; i++) {
     el.setAttribute(names[i], attrs[names[i]]);
