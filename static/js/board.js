@@ -852,13 +852,25 @@ function _boardRenderAddTaskSection(lane) {
   return html;
 }
 
-function _boardRenderLaneSection(lane, allTasks, childrenOf, filtersActive) {
+function _boardRenderWideAddTaskSection() {
+  var lane = _boardSelectedLane || _boardDefaultAddTaskLane();
+  if (!lane) return '';
+  var html = '<div class="board-wide-add-task-wrap">';
+  html += _boardRenderAddTaskSection(lane);
+  html += _boardRenderActionListSection();
+  html += '</div>';
+  return html;
+}
+
+function _boardRenderLaneSection(lane, allTasks, childrenOf, filtersActive, skipAddTask) {
   var html = '';
   var rootTasks = _boardRootTasksForLane(lane, allTasks);
   var renderCap = Math.min(rootTasks.length, _boardRenderLimit);
 
-  html += _boardRenderAddTaskSection(lane);
-  if (lane === _boardSelectedLane) {
+  if (!skipAddTask) {
+    html += _boardRenderAddTaskSection(lane);
+  }
+  if (!skipAddTask && lane === _boardSelectedLane) {
     html += _boardRenderActionListSection();
   }
 
@@ -902,7 +914,7 @@ function _boardRenderWideLaneColumn(lane, allTasks, childrenOf, filtersActive) {
   var escLane = esc(lane).replace(/'/g, "\\'");
   var laneCount = _boardLaneCount(lane);
   var active = lane === _boardSelectedLane;
-  var section = _boardRenderLaneSection(lane, allTasks, childrenOf, filtersActive);
+  var section = _boardRenderLaneSection(lane, allTasks, childrenOf, filtersActive, true);
   var html = '<section class="board-wide-lane' + (active ? ' active' : '') + '"'
     + ' data-lane="' + esc(lane) + '" data-board-lane-column="1">';
   html += '<div class="board-wide-lane-head">';
@@ -1203,6 +1215,9 @@ function renderBoard() {
   var allTasks = _boardVisibleTasks();
   var childrenOf = _boardChildrenOfVisibleTasks(allTasks);
   var nextLaneEntryDelay = 0;
+  if (wideLayout) {
+    html += _boardRenderWideAddTaskSection();
+  }
   html += '<div class="board-cards board-density-' + _boardCardDensityMode()
     + (wideLayout ? ' board-wide-grid' : '') + '" id="board-cards">';
   if (wideLayout) {

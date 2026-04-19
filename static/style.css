@@ -2265,6 +2265,16 @@ body.runtime-embedded .panel-resize-handle::after {
   position: relative;
 }
 .board-cards > * { flex-shrink: 0; }
+.runtime-embedded #panel-board .board-wide-add-task-wrap {
+  position: relative;
+  padding: 8px 8px 0;
+}
+body.runtime-embedded #panel-board .board-wide-add-task-wrap {
+  padding: 10px 12px 0;
+}
+.runtime-embedded #panel-board .board-wide-add-task-wrap .board-add-task {
+  width: 100%;
+}
 .runtime-embedded #panel-board .board-cards.board-wide-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
