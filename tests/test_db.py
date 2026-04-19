@@ -48,6 +48,11 @@ class LoomDBTests(unittest.TestCase):
             idle_timeout=9,
             tasks_dispatched=3,
             created_by_weaver_id="weaver-1",
+            kind="worker",
+            role="researcher",
+            owner_engineer_id="engineer-1",
+            hired_by_architect_id="architect-1",
+            persistent=True,
         )
         self.db.save_agent(cell)
         self.db.save_groups({"g": [cell.id]}, {"g": "g"})
@@ -80,6 +85,9 @@ class LoomDBTests(unittest.TestCase):
                 lane="In Progress",
                 position=2,
                 agent_id=cell.id,
+                assigned_engineer_id="engineer-1",
+                created_by_architect_id="architect-1",
+                suggested_action="feature/review",
                 reply_agent_id="agent-2",
                 labels=["loom:blocked", "keep"],
                 created_at="2026-04-06T00:00:00+00:00",
@@ -170,6 +178,17 @@ class LoomDBTests(unittest.TestCase):
             loaded["agents"]["agent-1"]["created_by_weaver_id"],
             "weaver-1",
         )
+        self.assertEqual(loaded["agents"]["agent-1"]["kind"], "worker")
+        self.assertEqual(loaded["agents"]["agent-1"]["role"], "researcher")
+        self.assertEqual(
+            loaded["agents"]["agent-1"]["owner_engineer_id"],
+            "engineer-1",
+        )
+        self.assertEqual(
+            loaded["agents"]["agent-1"]["hired_by_architect_id"],
+            "architect-1",
+        )
+        self.assertTrue(loaded["agents"]["agent-1"]["persistent"])
         self.assertEqual(
             loaded["group_settings"]["g"]["default_terminal_backend"],
             "pty",
@@ -209,6 +228,18 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["reply_agent_id"],
             "agent-2",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["assigned_engineer_id"],
+            "engineer-1",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["created_by_architect_id"],
+            "architect-1",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["suggested_action"],
+            "feature/review",
         )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["lane_entered_at"],
@@ -269,6 +300,89 @@ class LoomDBTests(unittest.TestCase):
             "weaver-1",
         )
 
+    def test_save_agent_and_board_task_update_preserve_kinds_fields(self):
+        cell = AgentCell(
+            id="agent-kinds",
+            name="Kinds Worker",
+            group="g",
+            slug="kinds-worker",
+            kind="worker",
+            role="researcher",
+            owner_engineer_id="engineer-1",
+            hired_by_architect_id="architect-1",
+            persistent=False,
+        )
+        task = BoardTask(
+            id="task-kinds",
+            task="Kinds task",
+            group="g",
+            slug="kinds-task",
+            agent_id=cell.id,
+            assigned_engineer_id="engineer-1",
+            created_by_architect_id="architect-1",
+            suggested_action="feature/review",
+        )
+
+        self.db.save_agent(cell)
+        self.db.save_board_task(task)
+
+        cell.kind = "architect"
+        cell.role = "lead"
+        cell.owner_engineer_id = "engineer-2"
+        cell.hired_by_architect_id = "architect-2"
+        cell.persistent = True
+        task.assigned_engineer_id = "engineer-2"
+        task.created_by_architect_id = "architect-2"
+        task.suggested_action = "feature/fix-review"
+
+        self.db.save_agent(cell)
+        self.db.save_board_task(task)
+
+        row = self.db._conn.execute(
+            "SELECT kind, role, owner_engineer_id, hired_by_architect_id, "
+            "persistent FROM agents WHERE id=?",
+            (cell.id,),
+        ).fetchone()
+        self.assertEqual(
+            row,
+            ("architect", "lead", "engineer-2", "architect-2", 1),
+        )
+
+        task_row = self.db._conn.execute(
+            "SELECT assigned_engineer_id, created_by_architect_id, "
+            "suggested_action FROM board_tasks WHERE id=?",
+            (task.id,),
+        ).fetchone()
+        self.assertEqual(
+            task_row,
+            ("engineer-2", "architect-2", "feature/fix-review"),
+        )
+
+        loaded = self.db.load_all()
+        self.assertEqual(loaded["agents"][cell.id]["kind"], "architect")
+        self.assertEqual(loaded["agents"][cell.id]["role"], "lead")
+        self.assertEqual(
+            loaded["agents"][cell.id]["owner_engineer_id"],
+            "engineer-2",
+        )
+        self.assertEqual(
+            loaded["agents"][cell.id]["hired_by_architect_id"],
+            "architect-2",
+        )
+        self.assertTrue(loaded["agents"][cell.id]["persistent"])
+        self.assertEqual(
+            loaded["board_tasks"][task.id]["assigned_engineer_id"],
+            "engineer-2",
+        )
+        self.assertEqual(
+            loaded["board_tasks"][task.id]["created_by_architect_id"],
+            "architect-2",
+        )
+        self.assertEqual(
+            loaded["board_tasks"][task.id]["suggested_action"],
+            "feature/fix-review",
+        )
+
     def test_load_all_restores_board_filters_by_group(self):
         filters = {
             "alpha": {
@@ -284,6 +398,64 @@ class LoomDBTests(unittest.TestCase):
         loaded = self.db.load_all()
 
         self.assertEqual(loaded["board_filters_by_group"], filters)
+
+    def test_save_all_preserves_kinds_fields(self):
+        self.db.save_all(
+            {
+                "agents": {
+                    "agent-1": {
+                        "id": "agent-1",
+                        "name": "Architect",
+                        "group": "g",
+                        "slug": "architect",
+                        "kind": "architect",
+                        "role": "lead",
+                        "owner_engineer_id": "engineer-1",
+                        "hired_by_architect_id": "architect-root",
+                        "persistent": 1,
+                    }
+                },
+                "groups": {"g": ["agent-1"]},
+                "group_slugs": {"g": "g"},
+                "board_tasks": {
+                    "task-1": {
+                        "id": "task-1",
+                        "task": "Plan next wave",
+                        "group": "g",
+                        "slug": "plan-next-wave",
+                        "assigned_engineer_id": "engineer-1",
+                        "created_by_architect_id": "architect-root",
+                        "suggested_action": "feature/review",
+                    }
+                },
+            }
+        )
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["agents"]["agent-1"]["kind"], "architect")
+        self.assertEqual(loaded["agents"]["agent-1"]["role"], "lead")
+        self.assertEqual(
+            loaded["agents"]["agent-1"]["owner_engineer_id"],
+            "engineer-1",
+        )
+        self.assertEqual(
+            loaded["agents"]["agent-1"]["hired_by_architect_id"],
+            "architect-root",
+        )
+        self.assertTrue(loaded["agents"]["agent-1"]["persistent"])
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["assigned_engineer_id"],
+            "engineer-1",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["created_by_architect_id"],
+            "architect-root",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["suggested_action"],
+            "feature/review",
+        )
 
     def test_init_migrates_legacy_task_ids_and_rewrites_references(self):
         legacy_db = Path(self.tmp.name) / "legacy.db"
@@ -1185,7 +1357,7 @@ class LoomDBTests(unittest.TestCase):
             loaded["agents"]["agent-kinds"]["owner_engineer_id"],
             "",
         )
-        self.assertEqual(loaded["agents"]["agent-kinds"]["persistent"], 0)
+        self.assertFalse(loaded["agents"]["agent-kinds"]["persistent"])
         self.assertEqual(
             loaded["board_tasks"]["task-kinds"]["assigned_engineer_id"],
             "",

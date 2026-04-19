@@ -52,7 +52,15 @@ _AGENT_PERSISTED_COLS = [
     "worktree_merge_squash", "agent_type",
     "agent_session_id", "session_resume", "idle_timeout",
     "tasks_dispatched", "created_by_weaver_id",
+    "kind", "role", "owner_engineer_id", "hired_by_architect_id",
+    "persistent",
 ]
+
+_AGENT_INSERT_SQL = """
+    INSERT OR REPLACE INTO agents
+        ({columns})
+    VALUES ({placeholders})
+"""
 
 # GroupSettings fields that store dicts — persisted as JSON text.
 _GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars",
@@ -69,6 +77,48 @@ _GS_BOOL_FIELDS = {
     "notify_on_attention", "terminal_always_custom_dialog",
     "terminal_close_on_disconnect",
 }
+
+
+def _serialize_agent_cell(cell):
+    d = asdict(cell) if not isinstance(cell, dict) else dict(cell)
+    group_name = d.pop("group", d.pop("group_name", ""))
+    return (
+        d.get("id", ""),
+        d.get("name", ""),
+        d.get("slug", ""),
+        group_name,
+        d.get("cell_type", "agent"),
+        d.get("terminal_backend", "iterm2"),
+        d.get("session_id"),
+        d.get("profile", "Default"),
+        d.get("command", ""),
+        d.get("directory", ""),
+        d.get("tab_color", ""),
+        d.get("icon", ""),
+        d.get("template", ""),
+        d.get("window_id", ""),
+        d.get("parent_id", ""),
+        d.get("status", "stopped"),
+        d.get("worktree_path", ""),
+        d.get("worktree_branch", ""),
+        d.get("worktree_repo_root", ""),
+        d.get("worktree_base_dir", ".loom/worktrees"),
+        d.get("worktree_base_branch", ""),
+        int(d.get("worktree_auto_checkpoint", False)),
+        int(d.get("checkpoint_on_progress", False)),
+        int(d.get("worktree_merge_squash", True)),
+        d.get("agent_type", ""),
+        d.get("agent_session_id", ""),
+        int(d.get("session_resume", True)),
+        d.get("idle_timeout", 0),
+        d.get("tasks_dispatched", 0),
+        d.get("created_by_weaver_id", ""),
+        d.get("kind", ""),
+        d.get("role", ""),
+        d.get("owner_engineer_id", ""),
+        d.get("hired_by_architect_id", ""),
+        int(d.get("persistent", 0) or 0),
+    )
 
 
 
@@ -157,34 +207,14 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
     def save_agent(self, cell):
         """Upsert a single agent/terminal cell (persisted fields only)."""
-        self._conn.execute("""
-            INSERT OR REPLACE INTO agents
-                (id, name, slug, group_name, cell_type, terminal_backend,
-                 session_id, profile,
-                 command, directory, tab_color, icon, template, window_id,
-                 parent_id, status, worktree_path, worktree_branch,
-                 worktree_repo_root, worktree_base_dir, worktree_base_branch,
-                 worktree_auto_checkpoint, checkpoint_on_progress,
-                 worktree_merge_squash,
-                 agent_type, agent_session_id, session_resume, idle_timeout,
-                 tasks_dispatched, created_by_weaver_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            cell.id, cell.name, cell.slug, cell.group, cell.cell_type,
-            cell.terminal_backend, cell.session_id, cell.profile,
-            cell.command, cell.directory, cell.tab_color, cell.icon,
-            cell.template, cell.window_id, cell.parent_id, cell.status,
-            cell.worktree_path,
-            cell.worktree_branch, cell.worktree_repo_root,
-            cell.worktree_base_dir, cell.worktree_base_branch,
-            int(cell.worktree_auto_checkpoint),
-            int(cell.checkpoint_on_progress),
-            int(cell.worktree_merge_squash), cell.agent_type,
-            cell.agent_session_id, int(cell.session_resume),
-            cell.idle_timeout,
-            cell.tasks_dispatched,
-            cell.created_by_weaver_id,
-        ))
+        values = _serialize_agent_cell(cell)
+        self._conn.execute(
+            _AGENT_INSERT_SQL.format(
+                columns=", ".join(_AGENT_PERSISTED_COLS),
+                placeholders=",".join(["?"] * len(values)),
+            ),
+            values,
+        )
         self._conn.commit()
 
     def delete_agent(self, agent_id: str):
@@ -1439,51 +1469,16 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             # Agents
             c.execute("DELETE FROM agents")
             for aid, a in state_dict.get("agents", {}).items():
-                c.execute("""
-                    INSERT INTO agents
-                        (id, name, slug, group_name, cell_type,
-                         terminal_backend, session_id,
-                         profile, command, directory, tab_color, icon,
-                         template, window_id, parent_id, status,
-                         worktree_path, worktree_branch, worktree_repo_root,
-                         worktree_base_dir, worktree_base_branch,
-                         worktree_auto_checkpoint, checkpoint_on_progress,
-                         worktree_merge_squash,
-                         agent_type, agent_session_id, session_resume,
-                         idle_timeout, tasks_dispatched, created_by_weaver_id)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (
-                    a.get("id", aid),
-                    a.get("name", ""),
-                    a.get("slug", ""),
-                    a.get("group", ""),
-                    a.get("cell_type", "agent"),
-                    a.get("terminal_backend", "iterm2"),
-                    a.get("session_id"),
-                    a.get("profile", "Default"),
-                    a.get("command", ""),
-                    a.get("directory", ""),
-                    a.get("tab_color", ""),
-                    a.get("icon", ""),
-                    a.get("template", ""),
-                    a.get("window_id", ""),
-                    a.get("parent_id", ""),
-                    a.get("status", "stopped"),
-                    a.get("worktree_path", ""),
-                    a.get("worktree_branch", ""),
-                    a.get("worktree_repo_root", ""),
-                    a.get("worktree_base_dir", ".loom/worktrees"),
-                    a.get("worktree_base_branch", ""),
-                    int(a.get("worktree_auto_checkpoint", False)),
-                    int(a.get("checkpoint_on_progress", False)),
-                    int(a.get("worktree_merge_squash", True)),
-                    a.get("agent_type", ""),
-                    a.get("agent_session_id", ""),
-                    int(a.get("session_resume", True)),
-                    a.get("idle_timeout", 0),
-                    a.get("tasks_dispatched", 0),
-                    a.get("created_by_weaver_id", ""),
-                ))
+                item = dict(a) if isinstance(a, dict) else asdict(a)
+                item.setdefault("id", aid)
+                values = _serialize_agent_cell(item)
+                c.execute(
+                    _AGENT_INSERT_SQL.format(
+                        columns=", ".join(_AGENT_PERSISTED_COLS),
+                        placeholders=",".join(["?"] * len(values)),
+                    ),
+                    values,
+                )
 
             # Groups + members
             c.execute("DELETE FROM groups")
@@ -1529,63 +1524,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             # Board tasks
             c.execute("DELETE FROM board_tasks")
             for tid, t in state_dict.get("board_tasks", {}).items():
-                d = dict(t) if isinstance(t, dict) else asdict(t)
-                labels = json.dumps(d.pop("labels", []))
-                action_vars = json.dumps(d.pop("action_vars", {}))
-                messages = json.dumps(d.pop("messages", []))
-                depends_on = json.dumps(d.pop("depends_on", []))
-                attachments = json.dumps(d.pop("attachments", []))
-                health_details = json.dumps(d.pop("health_details", {}))
-                artifacts = json.dumps(d.pop("artifacts", []))
-                verification_summary = json.dumps(
-                    d.pop("verification_summary", {})
-                )
-                group_name = d.pop("group", "")
-                values = (
-                    d.get("id", tid), d.get("task", ""),
-                    d.get("description", ""), d.get("slug", ""),
-                    group_name, d.get("action_name", ""),
-                    d.get("agent_template", ""), action_vars,
-                    d.get("instructions", ""),
-                    d.get("context", ""), d.get("criteria", ""),
-                    d.get("lane", "Backlog"), d.get("position", 0),
-                    d.get("agent_id", ""), labels,
-                    d.get("created_at", ""), d.get("updated_at", ""),
-                    d.get("lane_entered_at", ""),
-                    d.get("provider", ""), d.get("external_id", ""),
-                    d.get("external_url", ""),
-                    d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
-                    d.get("pipeline_root_id", ""), d.get("status", ""),
-                    d.get("scheduled_at", ""), messages, depends_on,
-                    attachments, d.get("health_state", "healthy"),
-                    d.get("health_since", ""), health_details,
-                    artifacts,
-                    d.get("verification_mode", ""),
-                    d.get("verification_state", ""),
-                    d.get("verification_notes", ""),
-                    d.get("verification_updated_at", ""),
-                    d.get("verification_updated_by", ""),
-                    verification_summary,
-                    d.get("archived_at", ""),
-                    d.get("archived_from_lane", ""),
-                )
-                c.execute("""
-                    INSERT INTO board_tasks
-                        (id, task, description, slug, group_name,
-                         action_name, agent_template,
-                         action_vars, instructions, context,
-                         criteria, lane, position, agent_id, labels,
-                         created_at, updated_at, lane_entered_at, provider, external_id,
-                         external_url, parent_task_id, pipeline_depth,
-                         pipeline_root_id, status, scheduled_at, messages,
-                         depends_on, attachments, health_state, health_since,
-                         health_details, artifacts, verification_mode,
-                         verification_state, verification_notes,
-                         verification_updated_at, verification_updated_by,
-                         verification_summary, archived_at,
-                         archived_from_lane)
-                    VALUES ({placeholders})
-                """.format(placeholders=",".join(["?"] * len(values))), values)
+                item = dict(t) if isinstance(t, dict) else asdict(t)
+                item.setdefault("id", tid)
+                insert_board_task(c, item)
 
             # Auto-dispatch queues
             c.execute("DELETE FROM auto_dispatch_queue")
@@ -1698,6 +1639,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 d.get("checkpoint_on_progress", 0))
             d["worktree_merge_squash"] = bool(
                 d.get("worktree_merge_squash", 1))
+            d["persistent"] = bool(d.get("persistent", 0))
             d["session_resume"] = bool(d.get("session_resume", 1))
             agents[d["id"]] = d
 
