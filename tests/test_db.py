@@ -55,9 +55,29 @@ class LoomDBTests(unittest.TestCase):
             "UPDATE meta SET value='2026-04-19T00:00:00+00:00' "
             "WHERE key='schema_kinds_migration_migrated_at'"
         )
+        conn.execute(
+            "UPDATE agents SET kind='', role='', owner_engineer_id='', "
+            "hired_by_architect_id='', persistent=0"
+        )
+        conn.execute(
+            "UPDATE board_tasks SET assigned_engineer_id='', "
+            "created_by_architect_id='', suggested_action=''"
+        )
         conn.commit()
         conn.close()
         return path
+
+    def _add_legacy_board_task_owner_column(self, conn=None):
+        close_conn = False
+        if conn is None:
+            conn = sqlite3.connect(str(self.db.db_path))
+            close_conn = True
+        conn.execute(
+            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
+        )
+        conn.commit()
+        if close_conn:
+            conn.close()
 
     def test_load_all_roundtrips_json_and_boolean_fields(self):
         cell = AgentCell(
@@ -85,7 +105,7 @@ class LoomDBTests(unittest.TestCase):
             created_by_weaver_id="weaver-1",
             kind="worker",
             role="researcher",
-            owner_engineer_id="engineer-1",
+            owner_engineer_id="weaver-1",
             hired_by_architect_id="architect-1",
             persistent=True,
         )
@@ -217,7 +237,7 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(loaded["agents"]["agent-1"]["role"], "researcher")
         self.assertEqual(
             loaded["agents"]["agent-1"]["owner_engineer_id"],
-            "engineer-1",
+            "weaver-1",
         )
         self.assertEqual(
             loaded["agents"]["agent-1"]["hired_by_architect_id"],
@@ -418,6 +438,130 @@ class LoomDBTests(unittest.TestCase):
             "feature/fix-review",
         )
 
+    def test_save_agent_dual_writes_legacy_and_kinds_fields(self):
+        self.db.save_agent(
+            AgentCell(
+                id="agent-dual-write",
+                name="Dual Writer",
+                group="g",
+                template="researcher",
+                created_by_weaver_id="weaver-1",
+            )
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT template, role, created_by_weaver_id, owner_engineer_id "
+                "FROM agents WHERE id='agent-dual-write'"
+            ).fetchone(),
+            ("researcher", "researcher", "weaver-1", "weaver-1"),
+        )
+
+        self.db.save_agent(
+            AgentCell(
+                id="agent-dual-write",
+                name="Dual Writer",
+                group="g",
+                role="planner",
+                owner_engineer_id="weaver-2",
+            )
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT template, role, created_by_weaver_id, owner_engineer_id "
+                "FROM agents WHERE id='agent-dual-write'"
+            ).fetchone(),
+            ("planner", "planner", "weaver-2", "weaver-2"),
+        )
+
+    def test_save_agent_dual_write_warns_and_prefers_legacy_fields(self):
+        with self.assertLogs("loom", level="WARNING") as cm:
+            self.db.save_agent(
+                AgentCell(
+                    id="agent-dual-conflict",
+                    name="Conflict",
+                    group="g",
+                    template="researcher",
+                    role="planner",
+                    created_by_weaver_id="weaver-1",
+                    owner_engineer_id="weaver-2",
+                )
+            )
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn("template='researcher' != role='planner'", joined_logs)
+        self.assertIn(
+            "created_by_weaver_id='weaver-1' != owner_engineer_id='weaver-2'",
+            joined_logs,
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT template, role, created_by_weaver_id, owner_engineer_id "
+                "FROM agents WHERE id='agent-dual-conflict'"
+            ).fetchone(),
+            ("researcher", "researcher", "weaver-1", "weaver-1"),
+        )
+
+    def test_save_board_task_dual_writes_legacy_and_new_owner_fields(self):
+        self._add_legacy_board_task_owner_column()
+
+        self.db.save_board_task(
+            {
+                "id": "task-dual-assigned",
+                "task": "Assigned-first",
+                "group": "g",
+                "assigned_engineer_id": "weaver-1",
+            }
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT assigned_engineer_id, weaver_owner_id "
+                "FROM board_tasks WHERE id='task-dual-assigned'"
+            ).fetchone(),
+            ("weaver-1", "weaver-1"),
+        )
+
+        self.db.save_board_task(
+            {
+                "id": "task-dual-legacy",
+                "task": "Legacy-first",
+                "group": "g",
+                "weaver_owner_id": "weaver-2",
+            }
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT assigned_engineer_id, weaver_owner_id "
+                "FROM board_tasks WHERE id='task-dual-legacy'"
+            ).fetchone(),
+            ("weaver-2", "weaver-2"),
+        )
+
+    def test_save_board_task_dual_write_warns_and_prefers_legacy_owner(self):
+        self._add_legacy_board_task_owner_column()
+
+        with self.assertLogs("loom", level="WARNING") as cm:
+            self.db.save_board_task(
+                {
+                    "id": "task-dual-conflict",
+                    "task": "Conflict",
+                    "group": "g",
+                    "assigned_engineer_id": "engineer-new",
+                    "weaver_owner_id": "engineer-legacy",
+                }
+            )
+
+        self.assertIn(
+            "weaver_owner_id='engineer-legacy' != assigned_engineer_id='engineer-new'",
+            "\n".join(cm.output),
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT assigned_engineer_id, weaver_owner_id "
+                "FROM board_tasks WHERE id='task-dual-conflict'"
+            ).fetchone(),
+            ("engineer-legacy", "engineer-legacy"),
+        )
+
     def test_load_all_restores_board_filters_by_group(self):
         filters = {
             "alpha": {
@@ -490,6 +634,69 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["suggested_action"],
             "feature/review",
+        )
+
+    def test_save_all_coalesces_legacy_and_kinds_fields(self):
+        self._add_legacy_board_task_owner_column()
+
+        self.db.save_all(
+            {
+                "agents": {
+                    "agent-1": {
+                        "id": "agent-1",
+                        "name": "Worker",
+                        "group": "g",
+                        "role": "researcher",
+                        "owner_engineer_id": "weaver-1",
+                    },
+                    "agent-2": {
+                        "id": "agent-2",
+                        "name": "Legacy Worker",
+                        "group": "g",
+                        "template": "planner",
+                        "created_by_weaver_id": "weaver-2",
+                    },
+                },
+                "groups": {"g": ["agent-1", "agent-2"]},
+                "group_slugs": {"g": "g"},
+                "board_tasks": {
+                    "task-1": {
+                        "id": "task-1",
+                        "task": "Assigned-first",
+                        "group": "g",
+                        "assigned_engineer_id": "weaver-1",
+                    },
+                    "task-2": {
+                        "id": "task-2",
+                        "task": "Legacy-first",
+                        "group": "g",
+                        "weaver_owner_id": "weaver-2",
+                    },
+                },
+            }
+        )
+
+        agent_rows = self.db._conn.execute(
+            "SELECT id, template, role, created_by_weaver_id, owner_engineer_id "
+            "FROM agents ORDER BY id"
+        ).fetchall()
+        self.assertEqual(
+            agent_rows,
+            [
+                ("agent-1", "researcher", "researcher", "weaver-1", "weaver-1"),
+                ("agent-2", "planner", "planner", "weaver-2", "weaver-2"),
+            ],
+        )
+        task_rows = self.db._conn.execute(
+            "SELECT id, assigned_engineer_id, weaver_owner_id "
+            "FROM board_tasks ORDER BY id"
+        ).fetchall()
+        self.assertEqual(
+            task_rows,
+            [
+                ("task-1", "weaver-1", "weaver-1"),
+                ("task-2", "weaver-2", "weaver-2"),
+            ],
         )
 
     def test_init_migrates_legacy_task_ids_and_rewrites_references(self):

@@ -85,6 +85,70 @@ _GS_BOOL_FIELDS = {
 }
 
 
+def _coalesce_agent_kinds_fields(row: dict) -> None:
+    """Keep legacy agent columns authoritative until stage 6.
+
+    During stages 1–5, writes may still target either legacy or new columns.
+    Mirror whichever side is populated into the empty side. If both are set
+    but disagree, prefer the legacy value and log a warning.
+    """
+    template = str(row.get("template", "") or "")
+    role = str(row.get("role", "") or "")
+    if template and not role:
+        row["role"] = template
+    elif role and not template:
+        row["template"] = role
+    elif template and role and template != role:
+        log.warning(
+            "kinds dual-write: template=%r != role=%r on agent %s; preferring template",
+            template,
+            role,
+            row.get("id"),
+        )
+        row["role"] = template
+
+    created_by_weaver_id = str(row.get("created_by_weaver_id", "") or "")
+    owner_engineer_id = str(row.get("owner_engineer_id", "") or "")
+    if created_by_weaver_id and not owner_engineer_id:
+        row["owner_engineer_id"] = created_by_weaver_id
+    elif owner_engineer_id and not created_by_weaver_id:
+        row["created_by_weaver_id"] = owner_engineer_id
+    elif (
+        created_by_weaver_id
+        and owner_engineer_id
+        and created_by_weaver_id != owner_engineer_id
+    ):
+        log.warning(
+            "kinds dual-write: created_by_weaver_id=%r != owner_engineer_id=%r on agent %s; preferring created_by_weaver_id",
+            created_by_weaver_id,
+            owner_engineer_id,
+            row.get("id"),
+        )
+        row["owner_engineer_id"] = created_by_weaver_id
+
+
+def _coalesce_task_kinds_fields(row: dict) -> None:
+    """Keep legacy task ownership columns authoritative until stage 6."""
+    weaver_owner_id = str(row.get("weaver_owner_id", "") or "")
+    assigned_engineer_id = str(row.get("assigned_engineer_id", "") or "")
+    if weaver_owner_id and not assigned_engineer_id:
+        row["assigned_engineer_id"] = weaver_owner_id
+    elif assigned_engineer_id and not weaver_owner_id:
+        row["weaver_owner_id"] = assigned_engineer_id
+    elif (
+        weaver_owner_id
+        and assigned_engineer_id
+        and weaver_owner_id != assigned_engineer_id
+    ):
+        log.warning(
+            "kinds dual-write: weaver_owner_id=%r != assigned_engineer_id=%r on task %s; preferring weaver_owner_id",
+            weaver_owner_id,
+            assigned_engineer_id,
+            row.get("id"),
+        )
+        row["assigned_engineer_id"] = weaver_owner_id
+
+
 def _serialize_agent_cell(cell):
     d = asdict(cell) if not isinstance(cell, dict) else dict(cell)
     group_name = d.pop("group", d.pop("group_name", ""))
@@ -152,6 +216,44 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+
+    def _prepare_agent_row(self, cell) -> dict:
+        row = dict(cell) if isinstance(cell, dict) else asdict(cell)
+        _coalesce_agent_kinds_fields(row)
+        return row
+
+    def _insert_agent_row(self, executor, cell) -> None:
+        row = self._prepare_agent_row(cell)
+        values = _serialize_agent_cell(row)
+        executor.execute(
+            _AGENT_INSERT_SQL.format(
+                columns=", ".join(_AGENT_PERSISTED_COLS),
+                placeholders=",".join(["?"] * len(values)),
+            ),
+            values,
+        )
+
+    def _prepare_board_task_row(self, task) -> dict:
+        row = dict(task) if isinstance(task, dict) else asdict(task)
+        _coalesce_task_kinds_fields(row)
+        return row
+
+    def _sync_legacy_board_task_owner(self, executor, task_row: dict) -> None:
+        task_id = str(task_row.get("id", "") or "")
+        if not task_id:
+            return
+        try:
+            executor.execute(
+                "UPDATE board_tasks SET weaver_owner_id=? WHERE id=?",
+                (str(task_row.get("weaver_owner_id", "") or ""), task_id),
+            )
+        except sqlite3.OperationalError:
+            return
+
+    def _insert_board_task_row(self, executor, task) -> None:
+        row = self._prepare_board_task_row(task)
+        insert_board_task(executor, row)
+        self._sync_legacy_board_task_owner(executor, row)
 
     def init(self):
         """Open connection, enable WAL, create tables if needed."""
@@ -231,14 +333,12 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
     def save_agent(self, cell):
         """Upsert a single agent/terminal cell (persisted fields only)."""
-        values = _serialize_agent_cell(cell)
-        self._conn.execute(
-            _AGENT_INSERT_SQL.format(
-                columns=", ".join(_AGENT_PERSISTED_COLS),
-                placeholders=",".join(["?"] * len(values)),
-            ),
-            values,
-        )
+        self._insert_agent_row(self._conn, cell)
+        self._conn.commit()
+
+    def save_board_task(self, task):
+        """Upsert a board task."""
+        self._insert_board_task_row(self._conn, task)
         self._conn.commit()
 
     def delete_agent(self, agent_id: str):
@@ -634,7 +734,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
         self._conn.execute("DELETE FROM board_tasks")
         for task in updated_tasks:
-            insert_board_task(self._conn, task)
+            self._insert_board_task_row(self._conn, task)
 
         def _rewrite_single_ref(table: str, column: str):
             table_rows = self._conn.execute(
@@ -1495,14 +1595,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             for aid, a in state_dict.get("agents", {}).items():
                 item = dict(a) if isinstance(a, dict) else asdict(a)
                 item.setdefault("id", aid)
-                values = _serialize_agent_cell(item)
-                c.execute(
-                    _AGENT_INSERT_SQL.format(
-                        columns=", ".join(_AGENT_PERSISTED_COLS),
-                        placeholders=",".join(["?"] * len(values)),
-                    ),
-                    values,
-                )
+                self._insert_agent_row(c, item)
 
             # Groups + members
             c.execute("DELETE FROM groups")
@@ -1550,7 +1643,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             for tid, t in state_dict.get("board_tasks", {}).items():
                 item = dict(t) if isinstance(t, dict) else asdict(t)
                 item.setdefault("id", tid)
-                insert_board_task(c, item)
+                self._insert_board_task_row(c, item)
 
             # Auto-dispatch queues
             c.execute("DELETE FROM auto_dispatch_queue")
