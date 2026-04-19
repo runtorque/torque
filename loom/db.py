@@ -14,6 +14,7 @@ import logging
 import shutil
 import sqlite3
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -35,6 +36,11 @@ from loom.task_ids import (
 )
 
 log = logging.getLogger("loom")
+
+_KINDS_SCHEMA_MIGRATION_VERSION = 1
+_KINDS_SCHEMA_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
+_KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
+_KINDS_SCHEMA_BACKUP_NAME = "loom.db.pre-kinds.bak"
 
 _AGENT_PERSISTED_COLS = [
     "id", "name", "slug", "group_name", "cell_type", "terminal_backend",
@@ -76,8 +82,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
     def init(self):
         """Open connection, enable WAL, create tables if needed."""
+        self._maybe_backup_pre_kinds_db()
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
+        self._migrate_kinds_schema_if_needed()
         self.migrate_task_ids_if_needed()
 
     def close(self):
@@ -1866,6 +1874,140 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         groups = self._conn.execute(
             "SELECT COUNT(*) FROM groups").fetchone()
         return (row and row[0] > 0) or (groups and groups[0] > 0)
+
+    def _kinds_backup_path(self) -> Path:
+        return self.db_path.with_name(_KINDS_SCHEMA_BACKUP_NAME)
+
+    def _read_meta_value(self, key: str, *, db_path: Optional[Path] = None) -> Optional[str]:
+        path = Path(db_path or self.db_path)
+        if not path.exists():
+            return None
+        conn = None
+        try:
+            conn = sqlite3.connect(str(path))
+            table = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='meta'"
+            ).fetchone()
+            if not table:
+                return None
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key=?",
+                (key,),
+            ).fetchone()
+            return None if not row else str(row[0])
+        except sqlite3.OperationalError:
+            return None
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def _current_kinds_migration_version(self) -> int:
+        raw = self._read_meta_value(_KINDS_SCHEMA_MIGRATION_VERSION_KEY)
+        try:
+            return int(raw or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _maybe_backup_pre_kinds_db(self):
+        if not self.db_path.exists():
+            return
+        if self._kinds_backup_path().exists():
+            return
+        if self._current_kinds_migration_version() >= _KINDS_SCHEMA_MIGRATION_VERSION:
+            return
+
+        backup_path = self._kinds_backup_path()
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+
+        source = target = None
+        try:
+            source = sqlite3.connect(str(self.db_path))
+            target = sqlite3.connect(str(backup_path))
+            source.backup(target)
+        except Exception:
+            if backup_path.exists():
+                backup_path.unlink()
+            raise
+        finally:
+            if target is not None:
+                target.close()
+            if source is not None:
+                source.close()
+
+        log.info("migration: created pre-kinds backup at %s", backup_path)
+
+    def _migrate_kinds_schema_if_needed(self):
+        if self._current_kinds_migration_version() >= _KINDS_SCHEMA_MIGRATION_VERSION:
+            return
+
+        for col, col_type, default in [
+            ("kind", "TEXT", "''"),
+            ("role", "TEXT", "''"),
+            ("owner_engineer_id", "TEXT", "''"),
+            ("hired_by_architect_id", "TEXT", "''"),
+            ("persistent", "INTEGER", "0"),
+        ]:
+            try:
+                self._conn.execute(f"SELECT {col} FROM agents LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE agents ADD COLUMN {col} "
+                    f"{col_type} NOT NULL DEFAULT {default}"
+                )
+                self._conn.commit()
+
+        for col, col_type, default in [
+            ("assigned_engineer_id", "TEXT", "''"),
+            ("created_by_architect_id", "TEXT", "''"),
+            ("suggested_action", "TEXT", "''"),
+        ]:
+            try:
+                self._conn.execute(f"SELECT {col} FROM board_tasks LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE board_tasks ADD COLUMN {col} "
+                    f"{col_type} NOT NULL DEFAULT {default}"
+                )
+                self._conn.commit()
+
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS decisions (
+                id TEXT PRIMARY KEY,
+                architect_id TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                rationale TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'proposed',
+                supersedes TEXT DEFAULT NULL,
+                linked_task_ids TEXT NOT NULL DEFAULT '[]',
+                linked_engineer_ids TEXT NOT NULL DEFAULT '[]',
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_decisions_architect "
+            "ON decisions(architect_id)"
+        )
+
+        migrated_at = datetime.now(timezone.utc).isoformat()
+        self._conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            (
+                _KINDS_SCHEMA_MIGRATION_VERSION_KEY,
+                str(_KINDS_SCHEMA_MIGRATION_VERSION),
+            ),
+        )
+        self._conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            (_KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY, migrated_at),
+        )
+        self._conn.commit()
+        log.info(
+            "migration: kinds schema applied (version=1, backup=%s)",
+            self._kinds_backup_path(),
+        )
 
     # -- Migration ----------------------------------------------------------
 

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import logging
 from pathlib import Path
 import json
 import sqlite3
@@ -1076,3 +1077,152 @@ class LoomDBTests(unittest.TestCase):
             "PRAGMA table_info(memory_entries)"
         ).fetchall()
         self.assertIn("retention_kind", [row[1] for row in cols])
+
+    def test_init_applies_kinds_schema_migration_once_with_backup(self):
+        legacy_path = Path(self.tmp.name) / "legacy-kinds.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute("CREATE TABLE keep (id TEXT PRIMARY KEY)")
+        conn.execute("INSERT INTO keep (id) VALUES ('row-1')")
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(legacy_path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        backup_path = legacy_path.with_name("loom.db.pre-kinds.bak")
+        joined_logs = "\n".join(cm.output)
+        self.assertIn(
+            f"migration: created pre-kinds backup at {backup_path}",
+            joined_logs,
+        )
+        self.assertIn(
+            f"migration: kinds schema applied (version=1, backup={backup_path})",
+            joined_logs,
+        )
+        self.assertTrue(backup_path.exists())
+        self.assertGreater(backup_path.stat().st_size, 0)
+
+        backup_conn = sqlite3.connect(str(backup_path))
+        self.addCleanup(backup_conn.close)
+        self.assertEqual(
+            backup_conn.execute("SELECT id FROM keep").fetchone()[0],
+            "row-1",
+        )
+
+        agent_cols = {
+            row[1]: row
+            for row in migrated._conn.execute("PRAGMA table_info(agents)").fetchall()
+        }
+        for col, default in {
+            "kind": "''",
+            "role": "''",
+            "owner_engineer_id": "''",
+            "hired_by_architect_id": "''",
+            "persistent": "0",
+        }.items():
+            self.assertIn(col, agent_cols)
+            self.assertEqual(str(agent_cols[col][4]), default)
+
+        task_cols = {
+            row[1]: row
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(board_tasks)"
+            ).fetchall()
+        }
+        for col in (
+            "assigned_engineer_id",
+            "created_by_architect_id",
+            "suggested_action",
+        ):
+            self.assertIn(col, task_cols)
+            self.assertEqual(str(task_cols[col][4]), "''")
+
+        decisions_sql = migrated._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='decisions'"
+        ).fetchone()[0]
+        self.assertIn("CREATE TABLE decisions", decisions_sql)
+        self.assertIn("architect_id TEXT NOT NULL DEFAULT ''", decisions_sql)
+        self.assertIn("linked_engineer_ids TEXT NOT NULL DEFAULT '[]'", decisions_sql)
+        self.assertIsNotNone(
+            migrated._conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='index' AND name='idx_decisions_architect'"
+            ).fetchone()
+        )
+
+        version = migrated._conn.execute(
+            "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+        ).fetchone()[0]
+        migrated_at = migrated._conn.execute(
+            "SELECT value FROM meta WHERE key='schema_kinds_migration_migrated_at'"
+        ).fetchone()[0]
+        self.assertEqual(version, "1")
+        self.assertTrue(migrated_at)
+
+        migrated.save_agent(
+            AgentCell(
+                id="agent-kinds",
+                name="Kinds Worker",
+                group="g",
+                slug="kinds-worker",
+            )
+        )
+        migrated.save_board_task(
+            BoardTask(
+                id="task-kinds",
+                task="Kinds Task",
+                slug="kinds-task",
+                group="g",
+            )
+        )
+        loaded = migrated.load_all()
+        self.assertEqual(loaded["agents"]["agent-kinds"]["kind"], "")
+        self.assertEqual(loaded["agents"]["agent-kinds"]["role"], "")
+        self.assertEqual(
+            loaded["agents"]["agent-kinds"]["owner_engineer_id"],
+            "",
+        )
+        self.assertEqual(loaded["agents"]["agent-kinds"]["persistent"], 0)
+        self.assertEqual(
+            loaded["board_tasks"]["task-kinds"]["assigned_engineer_id"],
+            "",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-kinds"]["created_by_architect_id"],
+            "",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-kinds"]["suggested_action"],
+            "",
+        )
+
+        backup_mtime_ns = backup_path.stat().st_mtime_ns
+        migrated.close()
+
+        rerun = LoomDB(legacy_path)
+        self.addCleanup(rerun.close)
+        logger = logging.getLogger("loom")
+        handler = logging.Handler()
+        captured_messages = []
+        handler.emit = lambda record: captured_messages.append(record.getMessage())
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        try:
+            rerun.init()
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+
+        self.assertEqual(backup_path.stat().st_mtime_ns, backup_mtime_ns)
+        self.assertFalse(
+            any("pre-kinds backup" in msg for msg in captured_messages),
+            captured_messages,
+        )
+        self.assertFalse(
+            any("kinds schema applied" in msg for msg in captured_messages),
+            captured_messages,
+        )
