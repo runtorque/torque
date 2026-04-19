@@ -7623,12 +7623,11 @@ test('standalone sidebar formats repo and home paths compactly', () => {
   );
 });
 
-test('desktop runtime metadata does not change standalone embedded-runtime detection', () => {
+test('standalone runtime metadata does not change embedded-runtime detection', () => {
   const { context, sandbox } = createStandaloneRenderHarness();
 
   sandbox.state.runtime = {
     embedded_terminal: true,
-    desktop_shell: 'pywebview',
     profile: 'desktop',
     data_dir: '/Users/aleks/.loom/profiles/desktop',
     port: 18933,

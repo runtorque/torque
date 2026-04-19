@@ -380,20 +380,26 @@ function render() {
       wid = state.current_window_id;
     }
 
-    // Only agent-type cells render in the main grid. Terminals always
-    // live under their parent agent's drawer (see the drawer render
-    // below). `state.groups[group]` from the server contains both
-    // agents and terminals, so we explicitly skip non-agents here.
+    // Only agent-type cells render in the main grid. Standalone/root
+    // terminals render in their own group drawer below; child terminals
+    // render under their parent agent's drawer. `state.groups[group]`
+    // from the server contains both agents and terminals, so we split
+    // them explicitly here.
     const agents = [];
+    const standaloneTerms = [];
     for (const id of aids) {
       const c = state.agents[id];
       if (!c) continue;
       if (wid && c.window_id && c.window_id !== wid) continue;
-      if (c.cell_type === 'agent') agents.push(c);
+      if (c.cell_type === 'agent') {
+        agents.push(c);
+      } else if (c.cell_type === 'terminal' && (!c.parent_id || !state.agents[c.parent_id])) {
+        standaloneTerms.push(c);
+      }
     }
     // Hide group only if it has cells but none in this window;
     // always show truly empty groups so the user can populate them.
-    if (wid && agents.length === 0 && aids.length > 0) continue;
+    if (wid && agents.length === 0 && standaloneTerms.length === 0 && aids.length > 0) continue;
     navGroupOrder.push(gname);
     const groupNav = [];
 
@@ -441,6 +447,12 @@ function render() {
         }
       }
       html += renderAgentCell(a);
+    }
+    if (!collapsed) {
+      for (const t of standaloneTerms) {
+        navItems.push(t.id);
+        groupNav.push(t.id);
+      }
     }
     const atCap = gsLocal.max_agents > 0 && agents.length >= gsLocal.max_agents;
     if (atCap) {
@@ -496,14 +508,18 @@ function render() {
       html += `</div>`;
     }
 
-    /* Intentionally no standalone "Terminals" section — every terminal
-       is parented to an agent and renders inside that agent's drawer
-       (see `renderAgentDetails` above). Loom previously showed a
-       standalone list here, but combined with `state.groups[group]`
-       including child terminals (see `loom-core/src/state.rs::add_agent`)
-       it meant every parented terminal rendered twice — once in the
-       drawer, once here. The UI model is now: "terminals live under
-       their agent, full stop." */
+    if (standaloneTerms.length) {
+      html += `<div class="terminal-drawer">`;
+      html += `<div class="drawer-hdr">`;
+      html += `  <span class="drawer-label">Group terminals</span>`;
+      html += `  <span class="drawer-count">${standaloneTerms.length}</span>`;
+      html += `</div>`;
+      html += `<div class="term-list" data-drop-type="terminal" data-drop-group="${esc(gname)}">`;
+      for (const t of standaloneTerms) html += renderTerminalRow(t);
+      html += `</div>`;
+      html += renderTermAddBtn(gname, '');
+      html += `</div>`;
+    }
 
     html += `</div></div>`;
     html += `</div>`;

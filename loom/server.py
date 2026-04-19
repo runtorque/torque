@@ -1551,7 +1551,6 @@ async def main(connection=None):
             "home_directory": str(Path.home()),
             "profile": os.environ.get("LOOM_PROFILE", "").strip(),
             "data_dir": str(DATA_DIR),
-            "desktop_shell": os.environ.get("LOOM_DESKTOP_SHELL", "").strip(),
             "port": WS_PORT,
             "default_command": state.get_default_command(),
         }

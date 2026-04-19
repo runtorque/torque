@@ -10,9 +10,9 @@ iterm2 = _core.iterm2
 class ITerm2Adapter(ITerm2BridgeCore):
     """Compatibility wrapper for the classic Python backend.
 
-    The reusable iTerm2 control/monitor implementation now lives in
-    ``loom.iterm2_bridge_core`` so the Rust bridge runtime can reuse it
-    without turning ``loom.bridge`` into a second backend.
+    The reusable iTerm2 control/monitor implementation lives in
+    ``loom.iterm2_bridge_core`` so the public adapter surface here can
+    stay tiny.
     """
 
     pass

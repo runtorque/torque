@@ -2654,7 +2654,6 @@ def cmd_desktop(args):
     env["LOOM_DATA_DIR"] = str(data_dir)
     env["LOOM_DESKTOP_MODE"] = launch_mode
     env["LOOM_DESKTOP_ATTACH"] = "1" if launch_mode == "attach" else "0"
-    env.setdefault("LOOM_DESKTOP_SHELL", "pywebview")
 
     print(f"Loom desktop {launch_mode}: http://127.0.0.1:{port}/")
     print(f"Profile: {profile}")

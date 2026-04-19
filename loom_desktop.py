@@ -33,8 +33,6 @@ os.environ["LOOM_PORT"] = desktop_port
 os.environ["LOOM_DATA_DIR"] = desktop_data_dir
 if not os.environ.get("LOOM_DESKTOP_MODE"):
     os.environ["LOOM_DESKTOP_MODE"] = "spawn"
-if not os.environ.get("LOOM_DESKTOP_SHELL"):
-    os.environ["LOOM_DESKTOP_SHELL"] = "pywebview"
 
 from loom.config import init_paths  # noqa: E402
 

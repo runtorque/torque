@@ -128,7 +128,6 @@ def build_server_env(settings: DesktopSettings,
     env_map["LOOM_DESKTOP_ATTACH"] = (
         "1" if settings.launch_mode == DESKTOP_MODE_ATTACH else "0"
     )
-    env_map.setdefault("LOOM_DESKTOP_SHELL", "pywebview")
     return env_map
 
 

@@ -132,7 +132,6 @@ class DesktopLauncherTests(unittest.TestCase):
         self.assertEqual(env["LOOM_PROFILE"], "desktop")
         self.assertEqual(env["LOOM_PORT"], "18933")
         self.assertEqual(env["LOOM_DATA_DIR"], str(settings.data_dir))
-        self.assertEqual(env["LOOM_DESKTOP_SHELL"], "pywebview")
 
     def test_resolve_settings_honors_attach_mode(self):
         settings = self.desktop_mod.resolve_desktop_settings(
