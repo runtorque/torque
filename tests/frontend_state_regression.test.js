@@ -5457,6 +5457,32 @@ test('embedded terminal auto-focuses new sessions when standalone mode is active
   assert.equal(terminals[0].focusCount, 1);
 });
 
+test('embedded terminal dragover accepts file drags before the browser exposes dropped files', () => {
+  const { context, status } = createEmbeddedTerminalHarness();
+  const surface = new FakeElement('surface');
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  const dragOverEvent = {
+    dataTransfer: {
+      types: ['Files'],
+      items: [{ kind: 'file', type: 'image/png' }],
+      files: [],
+    },
+    preventDefaultCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+  };
+  surface.listeners.dragover(dragOverEvent);
+
+  assert.equal(dragOverEvent.preventDefaultCalled, true);
+  assert.equal(surface.classList.contains('terminal-drop-target'), true);
+  assert.equal(status.classList.contains('terminal-drop-target'), true);
+});
+
 test('embedded terminal image drops upload files and paste quoted paths into the CLI buffer', async () => {
   const uploads = [];
   const uploadResponses = [
@@ -5497,7 +5523,11 @@ test('embedded terminal image drops upload files and paste quoted paths into the
   `);
 
   const dragOverEvent = {
-    dataTransfer: { files: [imageOne, nonImage, imageTwo] },
+    dataTransfer: {
+      types: ['Files'],
+      items: [{ kind: 'file', type: 'image/png' }],
+      files: [],
+    },
     preventDefaultCalled: false,
     preventDefault() { this.preventDefaultCalled = true; },
   };
@@ -5576,6 +5606,32 @@ test('embedded terminal ignores non-image file drops', async () => {
   assert.equal(dropEvent.preventDefaultCalled, true);
   assert.equal(fetchCalls, 0);
   assert.equal(sockets[0].sent.length, initialSentCount);
+});
+
+test('embedded terminal ignores non-file drags', () => {
+  const { context, status } = createEmbeddedTerminalHarness();
+  const surface = new FakeElement('surface');
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  const dragOverEvent = {
+    dataTransfer: {
+      types: ['text/plain'],
+      items: [{ kind: 'string', type: 'text/plain' }],
+      files: [],
+    },
+    preventDefaultCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+  };
+  surface.listeners.dragover(dragOverEvent);
+
+  assert.equal(dragOverEvent.preventDefaultCalled, false);
+  assert.equal(surface.classList.contains('terminal-drop-target'), false);
+  assert.equal(status.classList.contains('terminal-drop-target'), false);
 });
 
 test('embedded terminal removes drop listeners when disposed', () => {
