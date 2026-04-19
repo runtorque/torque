@@ -9,6 +9,7 @@ They are not the primary user-facing docs. For day-to-day usage, start from [Get
 - [Auto-Generated Playbooks](auto-generated-playbooks.md)
 - [Agent Awareness](agent-awareness.md)
 - [Agent Context Preservation](agent-context.md)
+- [Agent Kinds Refactor](agent-kinds-refactor.md)
 - [CLI & REST API](cli.md)
 - [CLI AI Commands](cli_ai_commands.md)
 - [Git Worktree Lifecycle](git-worktree-lifecycle.md)
