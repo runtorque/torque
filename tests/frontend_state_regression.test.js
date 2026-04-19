@@ -1468,6 +1468,12 @@ test('renderBoard uses a wide multi-lane layout only for embedded wide panels', 
   context.renderBoard();
 
   assert.match(panel.innerHTML, /board-wide-grid/);
+  assert.match(panel.innerHTML, /board-wide-add-task-wrap/);
+  assert.equal((panel.innerHTML.match(/\+ Add task/g) || []).length, 1);
+  assert.equal(
+    panel.innerHTML.indexOf('board-wide-add-task-wrap') < panel.innerHTML.indexOf('board-wide-grid'),
+    true,
+  );
   assert.equal((panel.innerHTML.match(/data-board-lane-column="1"/g) || []).length, 4);
   assert.match(panel.innerHTML, /board-wide-lane-name">Backlog/);
   assert.match(panel.innerHTML, /board-wide-lane-name">Done/);
@@ -1475,6 +1481,8 @@ test('renderBoard uses a wide multi-lane layout only for embedded wide panels', 
   panel.clientWidth = 820;
   context.renderBoard();
   assert.doesNotMatch(panel.innerHTML, /board-wide-grid/);
+  assert.doesNotMatch(panel.innerHTML, /board-wide-add-task-wrap/);
+  assert.match(panel.innerHTML, /\+ Add task/);
 
   document.body.classList.remove('runtime-embedded');
   panel.clientWidth = 1200;
@@ -4643,6 +4651,33 @@ test('renderBoard shows the inline add-task lane picker with Backlog as the defa
 
   assert.match(panel.innerHTML, /boardToggleLaneDropdown\(\)/);
   assert.match(panel.innerHTML, />Backlog &#9662;<\/button>/);
+});
+
+test('renderBoard keeps the inline add-task composer in the shared wide strip', () => {
+  const { context, document } = createBoardHarness();
+  const panel = document.register('panel-board');
+  document.register('board-cards');
+
+  context.state.board_lanes = ['Backlog', 'Done'];
+  runInContext(context, `
+    _boardSelectedLane = 'Done';
+    _boardAddingTask = true;
+    _boardAddingTaskLane = '';
+  `);
+
+  document.body.classList.add('runtime-embedded');
+  panel.clientWidth = 1200;
+  context.renderBoard();
+
+  assert.match(panel.innerHTML, /board-wide-add-task-wrap/);
+  assert.equal((panel.innerHTML.match(/board-add-task-active/g) || []).length, 1);
+  assert.match(panel.innerHTML, /board-add-task-input/);
+  assert.match(panel.innerHTML, /boardToggleLaneDropdown\(\)/);
+  assert.match(panel.innerHTML, />Backlog &#9662;<\/button>/);
+  assert.equal(
+    panel.innerHTML.indexOf('board-wide-add-task-wrap') < panel.innerHTML.indexOf('board-wide-grid'),
+    true,
+  );
 });
 
 test('boardStartAddTaskForLane defaults inline task placement to Backlog', () => {
