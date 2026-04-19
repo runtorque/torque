@@ -11,6 +11,8 @@ than json.dumps() + write_text().
 
 import json
 import logging
+import os
+import re
 import shutil
 import sqlite3
 from dataclasses import asdict
@@ -38,9 +40,13 @@ from loom.task_ids import (
 log = logging.getLogger("loom")
 
 _KINDS_SCHEMA_MIGRATION_VERSION = 1
+_KINDS_BACKFILL_MIGRATION_VERSION = 2
 _KINDS_SCHEMA_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
 _KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
 _KINDS_SCHEMA_BACKUP_NAME = "loom.db.pre-kinds.bak"
+_KINDS_WEAVER_OVERRIDE_ENV = "LOOM_MIGRATE_WEAVER_ID"
+_KINDS_WEAVER_GROUP = "loom"
+_KINDS_WEAVER_NAME = "Weaver"
 
 _AGENT_PERSISTED_COLS = [
     "id", "name", "slug", "group_name", "cell_type", "terminal_backend",
@@ -121,6 +127,23 @@ def _serialize_agent_cell(cell):
     )
 
 
+def _slugify(value: str, max_len: int = 40) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
+    slug = re.sub(r"-+", "-", slug)
+    if len(slug) > max_len:
+        slug = slug[:max_len].rsplit("-", 1)[0]
+    return slug or "unnamed"
+
+
+def _unique_value(base: str, existing: set[str]) -> str:
+    if base not in existing:
+        return base
+    i = 2
+    while f"{base}-{i}" in existing:
+        i += 1
+    return f"{base}-{i}"
+
+
 
 
 class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
@@ -136,6 +159,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
         self._migrate_kinds_schema_if_needed()
+        self._backfill_kinds_if_needed()
         self.migrate_task_ids_if_needed()
 
     def close(self):
@@ -1949,6 +1973,185 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         log.info(
             "migration: kinds schema applied (version=1, backup=%s)",
             self._kinds_backup_path(),
+        )
+
+    def _find_weaver_candidate_ids(self) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT id, name, template, created_by_weaver_id "
+            "FROM agents WHERE cell_type='agent' AND group_name=?",
+            (_KINDS_WEAVER_GROUP,),
+        ).fetchall()
+        referenced_ids = {
+            str(created_by_weaver_id or "").strip()
+            for _agent_id, _name, _template, created_by_weaver_id in rows
+            if str(created_by_weaver_id or "").strip()
+        }
+        candidates = set()
+        for agent_id, name, template, created_by_weaver_id in rows:
+            agent_id = str(agent_id or "").strip()
+            if not agent_id:
+                continue
+            if re.search(r"weaver", str(name or ""), re.IGNORECASE):
+                candidates.add(agent_id)
+                continue
+            if str(template or "").strip().lower() == "weaver":
+                candidates.add(agent_id)
+                continue
+            if not str(created_by_weaver_id or "").strip() and agent_id in referenced_ids:
+                candidates.add(agent_id)
+        return sorted(candidates)
+
+    def _resolve_weaver_backfill_target(self) -> tuple[Optional[str], bool]:
+        candidate_ids = self._find_weaver_candidate_ids()
+        if not candidate_ids:
+            log.info("migration: no Weaver found, skipping engineer backfill")
+            return None, True
+        if len(candidate_ids) == 1:
+            return candidate_ids[0], True
+
+        override = str(os.getenv(_KINDS_WEAVER_OVERRIDE_ENV, "") or "").strip()
+        if override and override in candidate_ids:
+            return override, True
+
+        if override:
+            log.error(
+                "migration: multiple Weaver candidates found %s; %s=%r did not match",
+                candidate_ids,
+                _KINDS_WEAVER_OVERRIDE_ENV,
+                override,
+            )
+        else:
+            log.error(
+                "migration: multiple Weaver candidates found %s; set %s to continue",
+                candidate_ids,
+                _KINDS_WEAVER_OVERRIDE_ENV,
+            )
+        return None, False
+
+    def _resolve_backfilled_weaver_identity(self, engineer_id: str) -> tuple[str, str]:
+        rows = self._conn.execute(
+            "SELECT id, name, slug FROM agents"
+        ).fetchall()
+        existing_names = {
+            str(name or "").strip()
+            for agent_id, name, _slug in rows
+            if str(agent_id or "") != str(engineer_id or "")
+            and str(name or "").strip()
+        }
+        target_name = _unique_value(_KINDS_WEAVER_NAME, existing_names)
+        existing_slugs = {
+            str(slug or "").strip()
+            for agent_id, _name, slug in rows
+            if str(agent_id or "") != str(engineer_id or "")
+            and str(slug or "").strip()
+        }
+        target_slug = _unique_value(_slugify(target_name), existing_slugs)
+        return target_name, target_slug
+
+    def _column_exists(self, table: str, column: str) -> bool:
+        try:
+            self._conn.execute(f"SELECT {column} FROM {table} LIMIT 0")
+            return True
+        except sqlite3.OperationalError:
+            return False
+
+    def _backfill_kinds_if_needed(self):
+        version = self._current_kinds_migration_version()
+        if version < _KINDS_SCHEMA_MIGRATION_VERSION:
+            return
+        if version >= _KINDS_BACKFILL_MIGRATION_VERSION:
+            return
+
+        engineer_id, proceed = self._resolve_weaver_backfill_target()
+        if not proceed:
+            return
+
+        worker_count = 0
+        task_count = 0
+        try:
+            self._conn.execute("BEGIN")
+
+            engineer_name = engineer_slug = ""
+            if engineer_id:
+                engineer_name, engineer_slug = self._resolve_backfilled_weaver_identity(
+                    engineer_id
+                )
+
+            rows = self._conn.execute(
+                "SELECT id, cell_type, template, created_by_weaver_id "
+                "FROM agents"
+            ).fetchall()
+            for agent_id, cell_type, template, created_by_weaver_id in rows:
+                agent_id = str(agent_id or "").strip()
+                cell_type = str(cell_type or "").strip()
+                if not agent_id:
+                    continue
+                if cell_type == "terminal":
+                    self._conn.execute(
+                        "UPDATE agents SET kind='terminal' WHERE id=?",
+                        (agent_id,),
+                    )
+                    continue
+                if cell_type != "agent":
+                    continue
+                if engineer_id and agent_id == engineer_id:
+                    self._conn.execute(
+                        "UPDATE agents "
+                        "SET name=?, slug=?, kind='engineer', role='', "
+                        "owner_engineer_id='', hired_by_architect_id='', persistent=1 "
+                        "WHERE id=?",
+                        (engineer_name, engineer_slug, agent_id),
+                    )
+                    continue
+                self._conn.execute(
+                    "UPDATE agents "
+                    "SET kind='worker', role=?, owner_engineer_id=?, "
+                    "hired_by_architect_id='', persistent=0 "
+                    "WHERE id=?",
+                    (
+                        str(template or ""),
+                        str(created_by_weaver_id or ""),
+                        agent_id,
+                    ),
+                )
+                worker_count += 1
+
+            task_count = int(
+                self._conn.execute("SELECT COUNT(*) FROM board_tasks").fetchone()[0]
+            )
+            task_owner_expr = (
+                "COALESCE(weaver_owner_id, '')"
+                if self._column_exists("board_tasks", "weaver_owner_id")
+                else "''"
+            )
+            self._conn.execute(
+                "UPDATE board_tasks "
+                f"SET assigned_engineer_id={task_owner_expr}, "
+                "created_by_architect_id='', suggested_action=''"
+            )
+
+            migrated_at = datetime.now(timezone.utc).isoformat()
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (
+                    _KINDS_SCHEMA_MIGRATION_VERSION_KEY,
+                    str(_KINDS_BACKFILL_MIGRATION_VERSION),
+                ),
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (_KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY, migrated_at),
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
+        log.info(
+            "migration: kinds backfill applied (engineer=%s, workers=%d, tasks=%d)",
+            engineer_id,
+            worker_count,
+            task_count,
         )
 
     # -- Migration ----------------------------------------------------------
