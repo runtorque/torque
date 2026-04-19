@@ -102,6 +102,10 @@ class FakeElement {
     this.listeners[type] = handler;
   }
 
+  removeEventListener(type, handler) {
+    if (this.listeners[type] === handler) delete this.listeners[type];
+  }
+
   setAttribute(name, value) {
     this.attributes[name] = String(value);
   }
@@ -329,7 +333,7 @@ function loadBoardScripts(context) {
   loadScript(context, 'static/js/board/card-actions.js');
 }
 
-function createEmbeddedTerminalHarness() {
+function createEmbeddedTerminalHarness(overrides = {}) {
   const sockets = [];
   const terminals = [];
 
@@ -412,13 +416,13 @@ function createEmbeddedTerminalHarness() {
     this.readyState = 3;
   };
 
-  const { sandbox, document } = createSandbox({
+  const { sandbox, document } = createSandbox(Object.assign({
     Terminal: FakeTerminal,
     FitAddon: { FitAddon: FakeFitAddon },
     ResizeObserver: FakeResizeObserver,
     WebSocket: FakeWebSocket,
     location: { protocol: 'http:', host: 'localhost:9000' },
-  });
+  }, overrides));
   const workspace = document.register('terminal-workspace');
   const status = new FakeElement('terminal-statusbar');
   workspace.setQuerySelector('.terminal-statusbar', status);
@@ -5451,6 +5455,150 @@ test('embedded terminal auto-focuses new sessions when standalone mode is active
   sockets[0].onopen();
 
   assert.equal(terminals[0].focusCount, 1);
+});
+
+test('embedded terminal image drops upload files and paste quoted paths into the CLI buffer', async () => {
+  const uploads = [];
+  const uploadResponses = [
+    { ok: true, data: [{ path: '/tmp/with space/first.png' }] },
+    { ok: true, data: [{ path: "/tmp/O'Reilly/second.jpg" }] },
+  ];
+
+  class FakeFormData {
+    constructor() {
+      this.entries = [];
+    }
+
+    append(name, value) {
+      this.entries.push([name, value]);
+    }
+  }
+
+  const { context, sockets, terminals, status } = createEmbeddedTerminalHarness({
+    FormData: FakeFormData,
+    fetch(url, options) {
+      uploads.push({ url, entries: options.body.entries });
+      return Promise.resolve({
+        json() {
+          return Promise.resolve(uploadResponses.shift());
+        },
+      });
+    },
+  });
+  const surface = new FakeElement('surface');
+  const imageOne = { type: 'image/png', name: 'first.png' };
+  const nonImage = { type: 'application/pdf', name: 'skip.pdf' };
+  const imageTwo = { type: 'image/jpeg', name: 'second.jpg' };
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  const dragOverEvent = {
+    dataTransfer: { files: [imageOne, nonImage, imageTwo] },
+    preventDefaultCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+  };
+  surface.listeners.dragover(dragOverEvent);
+  assert.equal(dragOverEvent.preventDefaultCalled, true);
+  assert.equal(surface.classList.contains('terminal-drop-target'), true);
+  assert.equal(status.classList.contains('terminal-drop-target'), true);
+
+  const dropEvent = {
+    dataTransfer: { files: [imageOne, nonImage, imageTwo] },
+    preventDefaultCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+  };
+  await surface.listeners.drop(dropEvent);
+
+  assert.equal(dropEvent.preventDefaultCalled, true);
+  assert.equal(surface.classList.contains('terminal-drop-target'), false);
+  assert.equal(status.classList.contains('terminal-drop-target'), false);
+  assert.equal(uploads.length, 2);
+  assert.deepEqual(uploads.map((upload) => upload.url), ['/api/upload', '/api/upload']);
+  assert.deepEqual(uploads[0].entries, [
+    ['task_id', 'terminal-drop-term-1-session-1'],
+    ['file', imageOne],
+  ]);
+  assert.deepEqual(uploads[1].entries, [
+    ['task_id', 'terminal-drop-term-1-session-1'],
+    ['file', imageTwo],
+  ]);
+  assert.deepEqual(sockets[0].sent[sockets[0].sent.length - 1], {
+    type: 'input',
+    data: "'/tmp/with space/first.png' '/tmp/O'\"'\"'Reilly/second.jpg' ",
+  });
+  assert.equal(terminals[0].focusCount, 1);
+});
+
+test('embedded terminal ignores non-image file drops', async () => {
+  let fetchCalls = 0;
+  const { context, sockets, status } = createEmbeddedTerminalHarness({
+    FormData: function FakeFormData() {},
+    fetch() {
+      fetchCalls += 1;
+      return Promise.resolve({
+        json() {
+          return Promise.resolve({ ok: true, data: [] });
+        },
+      });
+    },
+  });
+  const surface = new FakeElement('surface');
+  const pdf = { type: 'application/pdf', name: 'notes.pdf' };
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  const initialSentCount = sockets[0].sent.length;
+  const dragOverEvent = {
+    dataTransfer: { files: [pdf] },
+    preventDefaultCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+  };
+  surface.listeners.dragover(dragOverEvent);
+  assert.equal(dragOverEvent.preventDefaultCalled, true);
+  assert.equal(surface.classList.contains('terminal-drop-target'), false);
+  assert.equal(status.classList.contains('terminal-drop-target'), false);
+
+  const dropEvent = {
+    dataTransfer: { files: [pdf] },
+    preventDefaultCalled: false,
+    preventDefault() { this.preventDefaultCalled = true; },
+  };
+  await surface.listeners.drop(dropEvent);
+
+  assert.equal(dropEvent.preventDefaultCalled, true);
+  assert.equal(fetchCalls, 0);
+  assert.equal(sockets[0].sent.length, initialSentCount);
+});
+
+test('embedded terminal removes drop listeners when disposed', () => {
+  const { context } = createEmbeddedTerminalHarness();
+  const surface = new FakeElement('surface');
+  context.__surface = surface;
+
+  runInContext(context, `
+    state.runtime = { embedded_terminal: true };
+    _connectEmbeddedTerminal({ id: 'term-1', session_id: 'session-1' }, __surface);
+  `);
+
+  assert.equal(typeof surface.listeners.dragenter, 'function');
+  assert.equal(typeof surface.listeners.dragover, 'function');
+  assert.equal(typeof surface.listeners.dragleave, 'function');
+  assert.equal(typeof surface.listeners.drop, 'function');
+
+  runInContext(context, `_disposeEmbeddedTerminal();`);
+
+  assert.equal(surface.listeners.dragenter, undefined);
+  assert.equal(surface.listeners.dragover, undefined);
+  assert.equal(surface.listeners.dragleave, undefined);
+  assert.equal(surface.listeners.drop, undefined);
 });
 
 test('embedded terminal does not steal focus from an active editor input', () => {

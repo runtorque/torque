@@ -6,6 +6,9 @@ let _embeddedTerminalSessionKey = '';
 let _embeddedTerminalResizeObserver = null;
 let _embeddedTerminalDataHandler = null;
 let _embeddedTerminalPendingFocusKey = '';
+let _embeddedTerminalDropSurface = null;
+let _embeddedTerminalDropHandlers = null;
+let _embeddedTerminalDropDepth = 0;
 
 function isEmbeddedTerminalMode() {
   return !!(state && state.runtime && state.runtime.embedded_terminal);
@@ -205,6 +208,18 @@ function _renderTerminalTabs(cells, activeId) {
 }
 
 function _disposeEmbeddedTerminal() {
+  if (_embeddedTerminalDropSurface && _embeddedTerminalDropHandlers) {
+    if (typeof _embeddedTerminalDropSurface.removeEventListener === 'function') {
+      _embeddedTerminalDropSurface.removeEventListener('dragenter', _embeddedTerminalDropHandlers.dragenter, true);
+      _embeddedTerminalDropSurface.removeEventListener('dragover', _embeddedTerminalDropHandlers.dragover, true);
+      _embeddedTerminalDropSurface.removeEventListener('dragleave', _embeddedTerminalDropHandlers.dragleave, true);
+      _embeddedTerminalDropSurface.removeEventListener('drop', _embeddedTerminalDropHandlers.drop, true);
+    }
+    _setEmbeddedTerminalDropTarget(_embeddedTerminalDropSurface, false);
+  }
+  _embeddedTerminalDropSurface = null;
+  _embeddedTerminalDropHandlers = null;
+  _embeddedTerminalDropDepth = 0;
   if (_embeddedTerminalResizeObserver) {
     _embeddedTerminalResizeObserver.disconnect();
     _embeddedTerminalResizeObserver = null;
@@ -233,6 +248,120 @@ function _disposeEmbeddedTerminal() {
 function _embeddedTerminalUrl(cell) {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return protocol + '//' + location.host + '/ws/terminal/' + encodeURIComponent(cell.id);
+}
+
+function _embeddedTerminalDroppedFiles(dataTransfer) {
+  if (!dataTransfer || !dataTransfer.files || !dataTransfer.files.length) return [];
+  return Array.prototype.slice.call(dataTransfer.files);
+}
+
+function _embeddedTerminalDroppedImages(dataTransfer) {
+  var files = _embeddedTerminalDroppedFiles(dataTransfer);
+  return files.filter(function(file) {
+    return !!(file && file.type && file.type.indexOf('image/') === 0);
+  });
+}
+
+function _embeddedTerminalDropUploadId(cell) {
+  var raw = 'terminal-drop-' + (cell && cell.id ? cell.id : 'session') + '-' + (cell && cell.session_id ? cell.session_id : 'session');
+  raw = raw.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+  return raw || 'terminal-drop';
+}
+
+function _shellQuoteTerminalPath(path) {
+  return "'" + String(path || '').replace(/'/g, "'\"'\"'") + "'";
+}
+
+function _setEmbeddedTerminalDropTarget(surface, active) {
+  if (!surface || !surface.classList) return;
+  surface.classList.toggle('terminal-drop-target', !!active);
+  var status = document.querySelector('#terminal-workspace .terminal-statusbar');
+  if (status && status.classList) status.classList.toggle('terminal-drop-target', !!active);
+}
+
+async function _uploadEmbeddedTerminalImages(cell, files) {
+  var taskId = _embeddedTerminalDropUploadId(cell);
+  var uploaded = await Promise.all(files.map(async function(file) {
+    var fd = new FormData();
+    fd.append('task_id', taskId);
+    fd.append('file', file);
+    try {
+      var r = await fetch('/api/upload', { method: 'POST', body: fd });
+      var res = await r.json();
+      if (!res || !res.ok || !Array.isArray(res.data)) return [];
+      return res.data
+        .map(function(entry) { return entry && entry.path ? entry.path : ''; })
+        .filter(Boolean);
+    } catch (e) {
+      return [];
+    }
+  }));
+  return uploaded.reduce(function(paths, batch) {
+    return paths.concat(batch);
+  }, []);
+}
+
+function _attachEmbeddedTerminalDropHandlers(cell, surface) {
+  if (!surface || typeof surface.addEventListener !== 'function') return;
+  _embeddedTerminalDropSurface = surface;
+  _embeddedTerminalDropDepth = 0;
+  _embeddedTerminalDropHandlers = {
+    dragenter: function(e) {
+      var files = _embeddedTerminalDroppedFiles(e && e.dataTransfer);
+      if (!files.length) return;
+      _embeddedTerminalDropDepth += 1;
+      if (_embeddedTerminalDroppedImages(e.dataTransfer).length) {
+        _setEmbeddedTerminalDropTarget(surface, true);
+      }
+    },
+    dragover: function(e) {
+      var files = _embeddedTerminalDroppedFiles(e && e.dataTransfer);
+      if (!files.length) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      _setEmbeddedTerminalDropTarget(surface, _embeddedTerminalDroppedImages(e.dataTransfer).length > 0);
+    },
+    dragleave: function(e) {
+      var files = _embeddedTerminalDroppedFiles(e && e.dataTransfer);
+      if (!files.length) return;
+      _embeddedTerminalDropDepth = Math.max(0, _embeddedTerminalDropDepth - 1);
+      if (_embeddedTerminalDropDepth > 0) return;
+      if (e.relatedTarget && typeof surface.contains === 'function' && surface.contains(e.relatedTarget)) {
+        return;
+      }
+      _setEmbeddedTerminalDropTarget(surface, false);
+    },
+    drop: async function(e) {
+      var files = _embeddedTerminalDroppedFiles(e && e.dataTransfer);
+      if (!files.length) return;
+      e.preventDefault();
+      _embeddedTerminalDropDepth = 0;
+      _setEmbeddedTerminalDropTarget(surface, false);
+      var sessionKey = _embeddedTerminalSessionKey;
+      var images = _embeddedTerminalDroppedImages(e.dataTransfer);
+      if (!images.length) {
+        if (_embeddedTerminalSessionKey === sessionKey) {
+          _embeddedTerminalPendingFocusKey = _embeddedTerminalSessionKey;
+          focusEmbeddedTerminalWorkspace(false);
+        }
+        return;
+      }
+      var paths = await _uploadEmbeddedTerminalImages(cell, images);
+      if (_embeddedTerminalSessionKey !== sessionKey) return;
+      if (paths.length && _embeddedTerminalWs && _embeddedTerminalWs.readyState === WebSocket.OPEN) {
+        _embeddedTerminalWs.send(JSON.stringify({
+          type: 'input',
+          data: paths.map(_shellQuoteTerminalPath).join(' ') + ' ',
+        }));
+      }
+      _embeddedTerminalPendingFocusKey = _embeddedTerminalSessionKey;
+      focusEmbeddedTerminalWorkspace(false);
+    },
+  };
+  surface.addEventListener('dragenter', _embeddedTerminalDropHandlers.dragenter, true);
+  surface.addEventListener('dragover', _embeddedTerminalDropHandlers.dragover, true);
+  surface.addEventListener('dragleave', _embeddedTerminalDropHandlers.dragleave, true);
+  surface.addEventListener('drop', _embeddedTerminalDropHandlers.drop, true);
 }
 
 function _scheduleEmbeddedTerminalFit() {
@@ -283,6 +412,7 @@ function _connectEmbeddedTerminal(cell, surface) {
   _embeddedTerminalFit = new FitAddon.FitAddon();
   _embeddedTerminal.loadAddon(_embeddedTerminalFit);
   _embeddedTerminal.open(surface);
+  _attachEmbeddedTerminalDropHandlers(cell, surface);
   try { _embeddedTerminalFit.fit(); } catch (e) { /* container not measurable yet */ }
   // Shift+Enter → send ESC+CR so TUIs like Claude Code treat it as a
   // soft newline instead of submitting. xterm.js default maps Shift+Enter
