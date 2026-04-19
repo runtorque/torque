@@ -80,6 +80,7 @@ For dual mode, also run `make open` to get a browser window alongside the toolbe
 - `loom/db.py` dual-write coalescing keeps the new columns populated from those legacy values and warns on drift.
 - Treat `loom doctor` as the migration verification surface after any schema/backfill/dual-write change.
 - The staged source of truth is [Agent Kinds Refactor](docs/plans/agent-kinds-refactor.md).
+
 - **Loom context namespace**: Action templates can reference a `loom` dict injected at render time containing agent identity (`loom.agent.*`), dispatch context (`loom.context.is_clean`, `loom.context.tasks_dispatched`, `loom.context.previous_tasks`), worktree state (`loom.worktree.*`), task metadata (`loom.task.*`), and child terminals (`loom.terminals`). `loom` is a reserved variable name — rejected on action save. Preview renders use `LOOM_CONTEXT_STUB` (safe defaults with `is_clean=True`).
 
 ## Code conventions
