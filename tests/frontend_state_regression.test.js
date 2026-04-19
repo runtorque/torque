@@ -5587,7 +5587,11 @@ test('embedded terminal ignores non-image file drops', async () => {
 
   const initialSentCount = sockets[0].sent.length;
   const dragOverEvent = {
-    dataTransfer: { files: [pdf] },
+    dataTransfer: {
+      types: ['Files'],
+      items: [{ kind: 'file', type: 'application/pdf' }],
+      files: [],
+    },
     preventDefaultCalled: false,
     preventDefault() { this.preventDefaultCalled = true; },
   };

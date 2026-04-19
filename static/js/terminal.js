@@ -276,6 +276,21 @@ function _embeddedTerminalDroppedImages(dataTransfer) {
   });
 }
 
+function _embeddedTerminalDraggedImagesVisible(dataTransfer) {
+  if (dataTransfer && dataTransfer.items && typeof dataTransfer.items.length === 'number') {
+    var sawFile = false;
+    for (var i = 0; i < dataTransfer.items.length; i++) {
+      var item = dataTransfer.items[i];
+      if (!item || item.kind !== 'file') continue;
+      sawFile = true;
+      if (item.type && item.type.indexOf('image/') === 0) return true;
+    }
+    if (sawFile) return false;
+  }
+  return _embeddedTerminalDroppedImages(dataTransfer).length > 0
+    || _embeddedTerminalHasDraggedFiles(dataTransfer);
+}
+
 function _embeddedTerminalDropUploadId(cell) {
   var raw = 'terminal-drop-' + (cell && cell.id ? cell.id : 'session') + '-' + (cell && cell.session_id ? cell.session_id : 'session');
   raw = raw.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
@@ -323,13 +338,15 @@ function _attachEmbeddedTerminalDropHandlers(cell, surface) {
     dragenter: function(e) {
       if (!_embeddedTerminalHasDraggedFiles(e && e.dataTransfer)) return;
       _embeddedTerminalDropDepth += 1;
-      _setEmbeddedTerminalDropTarget(surface, true);
+      _setEmbeddedTerminalDropTarget(
+        surface, _embeddedTerminalDraggedImagesVisible(e.dataTransfer));
     },
     dragover: function(e) {
       if (!_embeddedTerminalHasDraggedFiles(e && e.dataTransfer)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-      _setEmbeddedTerminalDropTarget(surface, true);
+      _setEmbeddedTerminalDropTarget(
+        surface, _embeddedTerminalDraggedImagesVisible(e.dataTransfer));
     },
     dragleave: function(e) {
       if (!_embeddedTerminalHasDraggedFiles(e && e.dataTransfer)) return;
