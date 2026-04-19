@@ -2001,7 +2001,27 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 candidates.add(agent_id)
         return sorted(candidates)
 
+    def _configured_weaver_candidate_id(self) -> str:
+        row = self._conn.execute(
+            "SELECT weaver_agent_id FROM group_settings WHERE group_name=?",
+            (_KINDS_WEAVER_GROUP,),
+        ).fetchone()
+        configured_id = str(row[0] or "").strip() if row else ""
+        if not configured_id:
+            return ""
+        exists = self._conn.execute(
+            "SELECT 1 FROM agents "
+            "WHERE id=? AND cell_type='agent' AND group_name=? "
+            "LIMIT 1",
+            (configured_id, _KINDS_WEAVER_GROUP),
+        ).fetchone()
+        return configured_id if exists else ""
+
     def _resolve_weaver_backfill_target(self) -> tuple[Optional[str], bool]:
+        configured_id = self._configured_weaver_candidate_id()
+        if configured_id:
+            return configured_id, True
+
         candidate_ids = self._find_weaver_candidate_ids()
         if not candidate_ids:
             log.info("migration: no Weaver found, skipping engineer backfill")

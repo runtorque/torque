@@ -25,7 +25,14 @@ class LoomDBTests(unittest.TestCase):
         self.db.init()
         self.addCleanup(self.db.close)
 
-    def _seed_stage1a_db(self, filename: str, *, agents=None, tasks=None):
+    def _seed_stage1a_db(
+        self,
+        filename: str,
+        *,
+        agents=None,
+        tasks=None,
+        group_settings=None,
+    ):
         path = Path(self.tmp.name) / filename
         seeded = LoomDB(path)
         seeded.init()
@@ -35,6 +42,9 @@ class LoomDBTests(unittest.TestCase):
         if tasks:
             for task in tasks:
                 seeded.save_board_task(task)
+        if group_settings:
+            for group_name, settings in group_settings.items():
+                seeded.save_group_settings(group_name, settings)
         seeded.close()
 
         conn = sqlite3.connect(str(path))
@@ -1550,6 +1560,62 @@ class LoomDBTests(unittest.TestCase):
             captured,
         )
 
+    def test_init_backfills_configured_loom_weaver_without_heuristic_match(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-configured-weaver.db",
+            agents=[
+                AgentCell(
+                    id="root-1",
+                    name="Coordinator",
+                    group="loom",
+                    slug="coordinator",
+                ),
+                AgentCell(
+                    id="agent-1",
+                    name="Planner",
+                    group="alpha",
+                    slug="planner",
+                    template="planner",
+                ),
+            ],
+            tasks=[BoardTask(id="ALPHA:1", task="Task", group="alpha")],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="root-1"),
+            },
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn(
+            "migration: kinds backfill applied (engineer=root-1, workers=1, tasks=1)",
+            joined_logs,
+        )
+        self.assertNotIn("no Weaver found", joined_logs)
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT name, slug, kind, persistent FROM agents WHERE id='root-1'"
+            ).fetchone(),
+            ("Weaver", "weaver", "engineer", 1),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT kind, role, owner_engineer_id, persistent "
+                "FROM agents WHERE id='agent-1'"
+            ).fetchone(),
+            ("worker", "planner", "", 0),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "2",
+        )
+
     def test_init_backfills_existing_agents_without_promoting_when_no_weaver_found(self):
         path = self._seed_stage1a_db(
             "kinds-backfill-no-weaver.db",
@@ -1685,6 +1751,85 @@ class LoomDBTests(unittest.TestCase):
                 .replace("task-1", "LOOM:1")
             ).fetchone()[0],
             "",
+        )
+
+    def test_init_uses_configured_loom_weaver_to_disambiguate_candidates(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-configured-disambiguation.db",
+            agents=[
+                AgentCell(
+                    id="weaver-a",
+                    name="Weaver Alpha",
+                    group="loom",
+                    slug="weaver-alpha",
+                ),
+                AgentCell(
+                    id="weaver-b",
+                    name="Bob",
+                    group="loom",
+                    slug="bob",
+                    template="weaver",
+                ),
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="loom",
+                    slug="worker",
+                    template="researcher",
+                    created_by_weaver_id="weaver-b",
+                ),
+            ],
+            tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="weaver-b"),
+            },
+        )
+        conn = sqlite3.connect(str(path))
+        conn.execute(
+            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
+        )
+        conn.execute(
+            "UPDATE board_tasks SET weaver_owner_id='weaver-b' WHERE id='LOOM:1'"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn(
+            "migration: kinds backfill applied (engineer=weaver-b, workers=2, tasks=1)",
+            joined_logs,
+        )
+        self.assertNotIn("multiple Weaver candidates found", joined_logs)
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT name, slug, kind, persistent FROM agents WHERE id='weaver-b'"
+            ).fetchone(),
+            ("Weaver", "weaver", "engineer", 1),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT kind, role, owner_engineer_id, persistent "
+                "FROM agents WHERE id='weaver-a'"
+            ).fetchone(),
+            ("worker", "", "", 0),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+            ).fetchone()[0],
+            "weaver-b",
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "2",
         )
 
     def test_init_uses_env_override_for_ambiguous_weaver_backfill(self):
