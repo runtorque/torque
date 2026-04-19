@@ -402,5 +402,38 @@ def format_doctor_report(report: dict) -> str:
     ]
     failed_checks = list(report.get("failed_checks", []) or [])
     if failed_checks:
-        lines.append("Failed checks: " + ", ".join(failed_checks))
+        lines.append("Failed checks:")
+        for check in report.get("checks", []) or []:
+            if check.get("status") == "pass":
+                continue
+            name = str(check.get("name", "") or "")
+            details = check.get("details", {}) or {}
+            if name == "migration_version":
+                lines.append(
+                    "  - migration version is "
+                    f"{details.get('actual', 0)} "
+                    f"(expected >= {details.get('expected_min', 2)})"
+                )
+            elif name == "unmigrated_agents":
+                lines.append(
+                    "  - unmigrated agent rows: "
+                    f"{details.get('count', 0)}"
+                )
+            elif name == "agents_template_role_drift":
+                lines.append(
+                    "  - agents.template ↔ role drift: "
+                    f"{details.get('count', 0)}"
+                )
+            elif name == "agents_created_by_owner_drift":
+                lines.append(
+                    "  - agents.created_by_weaver_id ↔ owner_engineer_id drift: "
+                    f"{details.get('count', 0)}"
+                )
+            elif name == "board_tasks_owner_drift":
+                lines.append(
+                    "  - board_tasks.weaver_owner_id ↔ assigned_engineer_id drift: "
+                    f"{details.get('count', 0)}"
+                )
+            else:
+                lines.append(f"  - {name}")
     return "\n".join(lines)

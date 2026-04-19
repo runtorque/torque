@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import signal
 import subprocess
 import sys
@@ -413,12 +414,19 @@ def get_state_local(port):
 
 
 def get_doctor_local(port):
-    """Try SQLite first, fall back to the daemon doctor endpoint."""
-    if _db_available():
-        try:
-            return db_read_doctor_report()
-        except Exception:
+    """Prefer the live daemon doctor endpoint; fall back to SQLite offline."""
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.2):
             pass
+    except OSError:
+        if _db_available():
+            try:
+                return db_read_doctor_report()
+            except Exception:
+                pass
+    else:
+        resp = api_call("doctor", port=port)
+        return check_ok(resp)
     resp = api_call("doctor", port=port)
     return check_ok(resp)
 
