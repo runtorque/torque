@@ -13,6 +13,7 @@ import os
 import sys
 from copy import deepcopy
 
+from .mcp_stdio_proxy import serve_http_proxy
 from .mcp_tools_shared import authorize_caller, dispatch_scoped_tool
 from .mcp_weaver_tools.tool_specs import WEAVER_TOOLS
 
@@ -93,5 +94,4 @@ async def _dispatch_engineer_tool(name, args, handle_command, state,
 
 
 if __name__ == "__main__":
-    exit_if_invalid_engineer_binding()
-    sys.exit(0)
+    sys.exit(serve_http_proxy(exit_if_invalid_engineer_binding()))

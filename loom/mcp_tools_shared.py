@@ -556,6 +556,17 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         ]
         archived_tasks = [t for t in tasks if t.lane == ARCHIVED_LANE]
         visible_tasks = [t for t in tasks if t.lane != ARCHIVED_LANE]
+        if tool_prefix == "engineer_" and caller_kind == "engineer":
+            visible_tasks = [
+                t for t in visible_tasks
+                if _effective_assigned_engineer_id(t) == str(caller_id or "").strip()
+            ]
+            archived_tasks = [
+                t for t in archived_tasks
+                if _effective_assigned_engineer_id(t) == str(caller_id or "").strip()
+            ]
+        summary_state = copy.copy(state)
+        summary_state.board_tasks = {task.id: task for task in visible_tasks}
 
         lane_counts = {
             lane_name: 0 for lane_name in state.board_lanes
@@ -762,7 +773,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             },
         }
         hints = compute_weaver_hints(
-            state,
+            summary_state,
             _weaver_group,
             weaver_id=_weaver_cell.id if _weaver_cell else "",
         )

@@ -169,6 +169,25 @@ class AgentTemplateAdapterTests(unittest.TestCase):
                 },
             )
 
+    def test_claude_engineer_mcp_config_uses_local_stdio_entrypoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = ClaudeCodeAdapter()
+
+            self.assertTrue(
+                adapter.install_mcp_config(
+                    tmp, mcp_entrypoint="loom/mcp_engineer.py"
+                )
+            )
+
+            installed = json.loads((Path(tmp) / ".mcp.json").read_text())
+            loom_entry = installed["mcpServers"]["loom"]
+            self.assertEqual(loom_entry["type"], "stdio")
+            self.assertIn("command", loom_entry)
+            self.assertIn("args", loom_entry)
+            self.assertIn("loom.mcp_engineer", " ".join(loom_entry["args"]))
+            self.assertNotIn("url", loom_entry)
+            self.assertNotIn("headers", loom_entry)
+
     def test_codex_system_prompt_and_model_flags_use_cli_args(self):
         adapter = CodexAdapter()
         self.assertEqual(
@@ -351,6 +370,23 @@ class AgentTemplateAdapterTests(unittest.TestCase):
             self.assertIn("loom-system-prompt-agent-1.md", installed)
             self.assertIn("[mcp_servers.loom]", installed)
             self.assertIn("codex_hooks = true", installed)
+
+    def test_codex_engineer_mcp_config_uses_local_stdio_entrypoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = CodexAdapter()
+
+            self.assertTrue(
+                adapter.install_mcp_config(
+                    tmp, mcp_entrypoint="loom/mcp_engineer.py"
+                )
+            )
+
+            installed = (Path(tmp) / ".codex" / "config.toml").read_text()
+            self.assertIn("[mcp_servers.loom]", installed)
+            self.assertIn("command = ", installed)
+            self.assertIn("loom.mcp_engineer", installed)
+            self.assertNotIn('url = "http://127.0.0.1', installed)
+            self.assertNotIn('env_http_headers = { "X-Loom-Cell-Id"', installed)
 
     def test_generic_adapter_is_noop_for_template_specific_flags(self):
         adapter = GenericAdapter()
