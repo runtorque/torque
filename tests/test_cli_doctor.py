@@ -211,7 +211,8 @@ class CliDoctorTests(unittest.TestCase):
                     "details": {
                         "count": 0,
                         "hint": (
-                            "no engineer exists; weaver_* tool aliases will fail until one is created"
+                            "no engineer exists; create one from the Engineers panel "
+                            "before using engineer MCP tools"
                         ),
                     },
                 }
@@ -219,8 +220,6 @@ class CliDoctorTests(unittest.TestCase):
             "checks": [],
             "engineers": {
                 "total": 0,
-                "default_engineer_id": "",
-                "default_engineer_name": "",
                 "engineers": [],
             },
         }
@@ -232,33 +231,17 @@ class CliDoctorTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("Result: PASS (with warnings)", text)
         self.assertIn(
-            "no engineer exists; weaver_* tool aliases will fail until one is created",
+            "no engineer exists; create one from the Engineers panel before using engineer MCP tools",
             text,
         )
 
-    def test_cmd_doctor_prints_ambiguous_default_engineer_warning(self):
+    def test_cmd_doctor_no_longer_prints_default_engineer_routing(self):
         report = {
             "result": "pass",
-            "warnings": [
-                {
-                    "name": "ambiguous_default_engineer_routing",
-                    "status": "warn",
-                    "details": {
-                        "count": 2,
-                        "default_engineer_id": "eng-alice",
-                        "default_engineer_name": "Alice",
-                        "hint": (
-                            "multiple engineers but no canonical 'Weaver' for default routing; "
-                            "weaver_* aliases will pick the earliest by creation order"
-                        ),
-                    },
-                }
-            ],
+            "warnings": [],
             "checks": [],
             "engineers": {
                 "total": 2,
-                "default_engineer_id": "eng-alice",
-                "default_engineer_name": "Alice",
                 "engineers": [
                     {
                         "id": "eng-alice",
@@ -285,12 +268,7 @@ class CliDoctorTests(unittest.TestCase):
                 self.cli.cmd_doctor(SimpleNamespace(port=18932, json=False))
 
         text = out.getvalue()
-        self.assertIn("default (weaver_* routing):   Alice (id=eng-alice)", text)
-        self.assertIn(
-            "multiple engineers but no canonical 'Weaver' for default routing; "
-            "weaver_* aliases will pick the earliest by creation order",
-            text,
-        )
+        self.assertNotIn("default (weaver_* routing)", text)
 
     def test_cmd_doctor_exits_nonzero_for_invalid_architect_state(self):
         report = {

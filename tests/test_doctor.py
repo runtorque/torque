@@ -107,7 +107,8 @@ class LoomDoctorTests(unittest.TestCase):
                     "details": {
                         "count": 0,
                         "hint": (
-                            "no engineer exists; weaver_* tool aliases will fail until one is created"
+                            "no engineer exists; create one from the Engineers panel "
+                            "before using engineer MCP tools"
                         ),
                     },
                 }
@@ -116,12 +117,11 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["tasks"]["unassigned"], 1)
         self.assertEqual(report["tasks"]["unassigned_when_engineer_present"], 0)
         self.assertEqual(report["engineers"]["total"], 0)
-        self.assertEqual(report["engineers"]["default_engineer_id"], "")
         self.assertEqual(report["roles"]["roles_file_count"], 0)
         self.assertEqual(report["roles"]["legacy_templates_file_count"], 0)
         self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertIn(
-            "no engineer exists; weaver_* tool aliases will fail until one is created",
+            "no engineer exists; create one from the Engineers panel before using engineer MCP tools",
             rendered,
         )
         self.assertIn("roles_dir:                      ~/.loom/roles (0 files)", rendered)
@@ -191,8 +191,6 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["agents"]["engineer"], 1)
         self.assertEqual(report["agents"]["engineer_name"], "Weaver")
         self.assertEqual(report["engineers"]["total"], 1)
-        self.assertEqual(report["engineers"]["default_engineer_name"], "Weaver")
-        self.assertEqual(report["engineers"]["default_engineer_id"], "weaver-1")
         self.assertEqual(
             report["engineers"]["engineers"],
             [
@@ -230,7 +228,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertIn("[engineers]", rendered)
         self.assertIn("[architects]", rendered)
         self.assertIn("[pending_hires]", rendered)
-        self.assertIn("default (weaver_* routing):   Weaver (id=weaver-1)", rendered)
+        self.assertNotIn("default (weaver_* routing)", rendered)
         self.assertIn(
             "legacy_templates_dir:           ~/.loom/agents (1 files)",
             rendered,
@@ -550,7 +548,8 @@ class LoomDoctorTests(unittest.TestCase):
                     "details": {
                         "count": 0,
                         "hint": (
-                            "no engineer exists; weaver_* tool aliases will fail until one is created"
+                            "no engineer exists; create one from the Engineers panel "
+                            "before using engineer MCP tools"
                         ),
                     },
                 }
@@ -604,7 +603,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertIn("engineer present but unassigned tasks remain: 1", rendered)
 
-    def test_build_doctor_report_warns_when_multiple_engineers_lack_weaver_name(self):
+    def test_build_doctor_report_does_not_warn_about_default_engineer_routing(self):
         home = self._home_dir()
         self.db.save_agent(
             AgentCell(
@@ -635,29 +634,9 @@ class LoomDoctorTests(unittest.TestCase):
 
         self.assertEqual(report["result"], "pass")
         self.assertEqual(report["engineers"]["total"], 2)
-        self.assertEqual(report["engineers"]["default_engineer_name"], "Alice")
-        self.assertIn(
-            {
-                "name": "ambiguous_default_engineer_routing",
-                "status": "warn",
-                "details": {
-                    "count": 2,
-                    "default_engineer_id": "eng-alice",
-                    "default_engineer_name": "Alice",
-                    "hint": (
-                        "multiple engineers but no canonical 'Weaver' for default routing; "
-                        "weaver_* aliases will pick the earliest by creation order"
-                    ),
-                },
-            },
-            report["warnings"],
-        )
-        self.assertIn("Result: PASS (with warnings)", rendered)
-        self.assertIn(
-            "multiple engineers but no canonical 'Weaver' for default routing; "
-            "weaver_* aliases will pick the earliest by creation order",
-            rendered,
-        )
+        self.assertEqual(report["warnings"], [])
+        self.assertIn("Result: PASS", rendered)
+        self.assertNotIn("default (weaver_* routing)", rendered)
 
     def test_build_doctor_report_passes_for_multiple_engineers_when_weaver_exists(self):
         home = self._home_dir()
@@ -691,9 +670,7 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["result"], "pass")
         self.assertEqual(report["warnings"], [])
         self.assertEqual(report["engineers"]["total"], 2)
-        self.assertEqual(report["engineers"]["default_engineer_id"], "eng-weaver")
-        self.assertEqual(report["engineers"]["default_engineer_name"], "Weaver")
-        self.assertIn("default (weaver_* routing):   Weaver (id=eng-weaver)", rendered)
+        self.assertNotIn("default (weaver_* routing)", rendered)
 
     def test_build_doctor_report_flags_drift_and_unmigrated_rows(self):
         home = self._home_dir()
@@ -805,7 +782,8 @@ class LoomDoctorTests(unittest.TestCase):
                     "details": {
                         "count": 0,
                         "hint": (
-                            "no engineer exists; weaver_* tool aliases will fail until one is created"
+                            "no engineer exists; create one from the Engineers panel "
+                            "before using engineer MCP tools"
                         ),
                     },
                 }
@@ -817,7 +795,7 @@ class LoomDoctorTests(unittest.TestCase):
             rendered,
         )
         self.assertIn(
-            "no engineer exists; weaver_* tool aliases will fail until one is created",
+            "no engineer exists; create one from the Engineers panel before using engineer MCP tools",
             rendered,
         )
 

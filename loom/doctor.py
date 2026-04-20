@@ -196,8 +196,6 @@ def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
     if not _column_exists(conn, "agents", "kind"):
         return {
             "total": 0,
-            "default_engineer_id": "",
-            "default_engineer_name": "",
             "engineers": [],
             "binding_env_mismatches": [],
         }
@@ -272,27 +270,6 @@ def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
             }
         )
 
-    def _sort_key(entry: dict):
-        created_at = entry.get("_created_at")
-        if isinstance(created_at, (int, float)) and created_at:
-            return (0, float(created_at), int(entry.get("_rowid", 0) or 0))
-        return (1, int(entry.get("_rowid", 0) or 0))
-
-    default_engineer_id = ""
-    default_engineer_name = ""
-    if len(engineers) == 1:
-        default_engineer_id = engineers[0]["id"]
-        default_engineer_name = engineers[0]["name"]
-    elif engineers:
-        weaver_named = [
-            engineer for engineer in engineers
-            if engineer.get("name", "") == "Weaver"
-        ]
-        candidates = weaver_named or engineers
-        candidates = sorted(candidates, key=_sort_key)
-        default_engineer_id = candidates[0]["id"]
-        default_engineer_name = candidates[0]["name"]
-
     binding_env_mismatches = []
     for engineer in engineers:
         actual = str(engineer.get("loom_engineer_id", engineer["id"]) or "")
@@ -312,8 +289,6 @@ def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
 
     return {
         "total": len(engineers),
-        "default_engineer_id": default_engineer_id,
-        "default_engineer_name": default_engineer_name,
         "engineers": engineers,
         "binding_env_mismatches": binding_env_mismatches,
     }
@@ -752,33 +727,8 @@ def _warn_no_engineers(report: dict) -> dict | None:
         "details": {
             "count": 0,
             "hint": (
-                "no engineer exists; weaver_* tool aliases will fail until one is created"
-            ),
-        },
-    }
-
-
-def _warn_ambiguous_default_engineer(report: dict) -> dict | None:
-    engineers = report.get("engineers", {}) or {}
-    entries = list(engineers.get("engineers", []) or [])
-    if len(entries) <= 1:
-        return None
-    if any(str(entry.get("name", "") or "") == "Weaver" for entry in entries):
-        return None
-    return {
-        "name": "ambiguous_default_engineer_routing",
-        "status": "warn",
-        "details": {
-            "count": len(entries),
-            "default_engineer_id": str(
-                engineers.get("default_engineer_id", "") or ""
-            ),
-            "default_engineer_name": str(
-                engineers.get("default_engineer_name", "") or ""
-            ),
-            "hint": (
-                "multiple engineers but no canonical 'Weaver' for default routing; "
-                "weaver_* aliases will pick the earliest by creation order"
+                "no engineer exists; create one from the Engineers panel "
+                "before using engineer MCP tools"
             ),
         },
     }
@@ -872,7 +822,6 @@ _DOCTOR_WARNINGS = [
     _warn_unassigned_tasks_when_engineer_present,
     _warn_shadowed_legacy_templates,
     _warn_no_engineers,
-    _warn_ambiguous_default_engineer,
     _warn_engineer_binding_env_mismatch,
     _warn_stale_pending_hires,
     _warn_dangling_decision_architects,
@@ -958,19 +907,6 @@ def format_doctor_report(report: dict) -> str:
     legacy_templates_count = int(
         roles.get("legacy_templates_file_count", 0) or 0
     )
-    default_engineer_name = str(
-        engineers.get("default_engineer_name", "") or ""
-    ).strip()
-    default_engineer_id = str(
-        engineers.get("default_engineer_id", "") or ""
-    ).strip()
-    default_engineer_display = "<none>"
-    if default_engineer_id:
-        default_engineer_display = (
-            f"{default_engineer_name or default_engineer_id} "
-            f"(id={default_engineer_id})"
-        )
-
     lines = [
         "Loom doctor — kinds refactor",
         "",
@@ -991,7 +927,6 @@ def format_doctor_report(report: dict) -> str:
         "",
         "[engineers]",
         f"  total:                        {int(engineers.get('total', 0) or 0)}",
-        f"  default (weaver_* routing):   {default_engineer_display}",
         "  engineers:",
     ]
     for engineer in list(engineers.get("engineers", []) or []):
@@ -1093,12 +1028,8 @@ def format_doctor_report(report: dict) -> str:
                 lines.append(line)
             elif name == "no_engineers":
                 lines.append(
-                    "  - no engineer exists; weaver_* tool aliases will fail until one is created"
-                )
-            elif name == "ambiguous_default_engineer_routing":
-                lines.append(
-                    "  - multiple engineers but no canonical 'Weaver' for default routing; "
-                    "weaver_* aliases will pick the earliest by creation order"
+                    "  - no engineer exists; create one from the Engineers panel "
+                    "before using engineer MCP tools"
                 )
             elif name == "engineer_binding_env_mismatch":
                 mismatches = details.get("mismatches", []) or []

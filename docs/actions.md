@@ -357,7 +357,7 @@ prompt: |
 | `loom.task.artifacts` | list | Combined task artifacts, including synthetic image artifacts plus structured refs like logs, diffs, reports, snippets, docs, and file refs. |
 | `loom.task.upstream_artifacts` | list | Direct-parent handoff artifacts for derived tasks, including source-task metadata plus the same combined artifact payload and task-owned URLs used in MCP views. Empty for root tasks or when the parent has no artifacts. |
 
-When you inspect tasks through MCP (`loom_context` or `weaver_task_show`), Loom also returns a `task_artifacts` combined view with task linkage and derived file URLs for task-owned uploads.
+When you inspect tasks through MCP (`loom_context` or `engineer_task_show`), Loom also returns a `task_artifacts` combined view with task linkage and derived file URLs for task-owned uploads.
 
 **Example --- pipeline-aware instructions:**
 

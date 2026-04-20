@@ -1,16 +1,16 @@
 # Weaver
 
-The legacy `weaver_*` compatibility surface routes to a designated per-group engineer. That engineer watches the board, receives event digests, dispatches work to agents, keeps a persistent journal, and asks the human for guidance when needed.
+Each group can designate an engineer to watch the board, receive event digests, dispatch work to agents, keep a persistent journal, and ask the human for guidance when needed.
 
 That engineer is deliberately semi-autonomous:
 
 - it can plan, dispatch, review, merge, and clean up on its own
-- it should use `weaver_ask` only when priorities, approvals, or design choices need a blocking human decision
+- it should use `engineer_ask` only when priorities, approvals, or design choices need a blocking human decision
 - it should recover from `/clear` or restart by reading the journal and current board state instead of relying on chat history
 
 ## What the designated engineer does
 
-Each group can have multiple engineers. The legacy `weaver_*` compatibility layer binds to one designated engineer for that group's orchestration loop:
+Each group can have multiple engineers. One designated engineer owns that group's orchestration loop and uses the `engineer_*` MCP surface:
 
 1. Read the board and decide what should happen next.
 2. Dispatch tasks to agents in waves.
@@ -25,9 +25,9 @@ The journal belongs to the group, not the individual agent. If you recreate that
 
 Use the target group's **+ New** dropdown and choose **Engineer**.
 
-After that engineer exists, open **Group Settings** for that group and switch to the **Weaver** compatibility tab to manage its operating-style presets, advanced digest settings, and expert overrides.
+After that engineer exists, open **Group Settings** for that group and switch to the **Weaver** tab to manage its operating-style presets, advanced digest settings, and expert overrides.
 
-The designated engineer still uses Loom's legacy Weaver launch/settings flow because Loom needs to boot it with a persistent system prompt. You cannot retroactively convert an arbitrary existing agent into that compatibility endpoint.
+The designated engineer still uses Loom's persistent Weaver launch/settings flow because Loom needs to boot it with a dedicated system prompt. You cannot retroactively convert an arbitrary existing agent into that orchestration endpoint.
 
 ### Engineers panel
 
@@ -46,11 +46,11 @@ In standalone mode, the **Board** remains the default lower workspace. Open **En
 
 When event delivery is paused, Loom keeps buffering matching events for that engineer instead of dropping them. Resuming delivery flushes the buffered events in order, so pausing is safe even during busy boards.
 
-### Group Settings → Weaver compatibility
+### Group Settings → Weaver
 
-The designated engineer compatibility tab in group settings contains the editable designated-engineer configuration:
+The Weaver tab in group settings contains the editable designated-engineer configuration:
 
-- **Agent** section shows the current designated engineer for the compatibility surface or the create button.
+- **Agent** section shows the current designated engineer for the group or the create button.
 - **Launch controls** let you set or relaunch the designated engineer's provider, boot command, model, reasoning effort, and custom instructions from the same modal flow.
 - **Operating style** sets the designated engineer's autonomy mode and default worker concurrency.
 - **Digest details** configures push interval, max interval, heartbeat interval, and which optional event types appear in digests.
@@ -80,9 +80,9 @@ See [Streams & Waves](streams-and-waves.md) for the detailed model and UI interp
 
 ### A practical day-to-day loop
 
-1. Read the current state with `weaver_board_summary`.
-2. Use `weaver_task_show`, `weaver_agent_show`, or `weaver_action_show` only for the tasks that need deeper inspection.
-3. Dispatch a wave of work with `weaver_task_dispatch` or `weaver_batch_dispatch`.
+1. Read the current state with `engineer_board_summary`.
+2. Use `engineer_task_show`, `engineer_agent_show`, or `engineer_action_show` only for the tasks that need deeper inspection.
+3. Dispatch a wave of work with `engineer_task_dispatch` or `engineer_batch_dispatch`.
 4. Wait for Loom digests instead of polling constantly.
 5. When a digest arrives, react to the changed tasks and agents only.
 6. Journal significant decisions and write periodic checkpoints.
@@ -178,10 +178,10 @@ The journal is the designated engineer's persistent memory. It is what lets the 
 After `/clear` or restart, the current product behavior is to recover in this order:
 
 ```text
-weaver_journal_read -> weaver_session_map -> weaver_events
+engineer_journal_read -> engineer_session_map -> engineer_events
 ```
 
-Use `weaver_board_summary` when the compact summary is enough, and `weaver_board_list` only when you need the full task inventory. That keeps recovery fast and avoids blowing context on the full board when the summary already tells you what changed.
+Use `engineer_board_summary` when the compact summary is enough, and `engineer_board_list` only when you need the full task inventory. That keeps recovery fast and avoids blowing context on the full board when the summary already tells you what changed.
 
 ### Journal discipline
 
@@ -199,11 +199,11 @@ The Journal tab in the UI shows entries newest-first, and entries can be deleted
 
 ## Asking the human
 
-`weaver_note` is the non-blocking path for notes, soft questions, status
+`engineer_note` is the non-blocking path for notes, soft questions, status
 updates, or proposed next waves that should stay visible without pausing
 orchestration.
 
-`weaver_ask` is the designated engineer's blocking human-in-the-loop mechanism. Use
+`engineer_ask` is the designated engineer's blocking human-in-the-loop mechanism. Use
 it only when the next orchestration step should stop until the human
 answers.
 
@@ -223,82 +223,82 @@ When the designated engineer asks a question:
 
 If the board is idle with backlog remaining and the designated engineer only needs to
 surface its recommended next wave or a soft preference question, it
-should use `weaver_note`, not `weaver_ask`.
+should use `engineer_note`, not `engineer_ask`.
 
 ### Reply paths
 
 The human can answer in two ways:
 
 - **Via the panel**: Loom sends the reply to the designated engineer terminal and automatically unpauses events.
-- **Directly in the terminal**: the designated engineer receives the reply in its own session and should call `weaver_resume` after handling it.
+- **Directly in the terminal**: the designated engineer receives the reply in its own session and should call `engineer_resume` after handling it.
 
 If the designated engineer becomes active again after being idle with a pending question, Loom clears the pending-question state and unpauses delivery. The safest explicit pattern is still:
 
 1. receive the answer
 2. incorporate it into the plan
-3. call `weaver_resume`
+3. call `engineer_resume`
 
 ## MCP tool surface
 
-All `weaver_*` compatibility tools are available through the same `/mcp` endpoint as agent tools.
+All `engineer_*` tools are available through the same `/mcp` endpoint as agent tools.
 
 However, they are **only** visible and callable from the designated engineer session for that group. Loom authorizes them using the caller's `X-Loom-Cell-Id` header:
 
-- the designated engineer sees both `loom_*` and `weaver_*` tools
+- the designated engineer sees both `loom_*` and `engineer_*` tools
 - regular agents only see `loom_*` tools
-- direct calls to `weaver_*` from other agents are rejected
+- direct calls to `engineer_*` from other agents are rejected
 
-In other words, `weaver_*` tools are group-scoped **and** designated-engineer-only.
+In other words, `engineer_*` tools are group-scoped **and** designated-engineer-only.
 
 ### Board and planning
 
 | Tool | What it is for |
 |------|-----------------|
-| `weaver_board_summary` | Compact overview of lanes, asks, labels, and agent state |
-| `weaver_session_map` | Deterministic structured recovery snapshot for the current group |
-| `weaver_board_list` | Full lane-grouped task list with optional filters |
-| `weaver_task_show` | Full details for one task, including pipeline chain plus task artifact metadata when relevant |
-| `weaver_agents_list` | Quick view of all agents in the group |
-| `weaver_agent_show` | Deep inspection of one agent: session, worktree, tasks, terminals |
-| `weaver_actions_list` | Discover available actions and their variables |
-| `weaver_action_show` | Inspect one action's YAML, variables, and transitions |
+| `engineer_board_summary` | Compact overview of lanes, asks, labels, and agent state |
+| `engineer_session_map` | Deterministic structured recovery snapshot for the current group |
+| `engineer_board_list` | Full lane-grouped task list with optional filters |
+| `engineer_task_show` | Full details for one task, including pipeline chain plus task artifact metadata when relevant |
+| `engineer_agents_list` | Quick view of all agents in the group |
+| `engineer_agent_show` | Deep inspection of one agent: session, worktree, tasks, terminals |
+| `engineer_actions_list` | Discover available actions and their variables |
+| `engineer_action_show` | Inspect one action's YAML, variables, and transitions |
 
 ### Task editing and dispatch
 
 | Tool | What it is for |
 |------|-----------------|
-| `weaver_task_create` | Create a board task |
-| `weaver_task_edit` | Change task title, description, labels, action, or action vars |
-| `weaver_task_upload_artifact` | Upload and attach an image or other artifact directly to a task |
-| `weaver_task_verify` | Record deploy/restart attempted, smoke passed/failed, and verification notes |
-| `weaver_task_move` | Move a task between lanes |
-| `weaver_task_dispatch` | Dispatch one task to a new or existing agent |
-| `weaver_batch_dispatch` | Dispatch a planned batch with concurrency control |
-| `weaver_task_resolve` | Resolve an ask task and send the answer back to the waiting agent |
+| `engineer_task_create` | Create a board task |
+| `engineer_task_edit` | Change task title, description, labels, action, or action vars |
+| `engineer_task_upload_artifact` | Upload and attach an image or other artifact directly to a task |
+| `engineer_task_verify` | Record deploy/restart attempted, smoke passed/failed, and verification notes |
+| `engineer_task_move` | Move a task between lanes |
+| `engineer_task_dispatch` | Dispatch one task to a new or existing agent |
+| `engineer_batch_dispatch` | Dispatch a planned batch with concurrency control |
+| `engineer_task_resolve` | Resolve an ask task and send the answer back to the waiting agent |
 
 ### Events and recovery
 
 | Tool | What it is for |
 |------|-----------------|
-| `weaver_events` | Poll recent panel events, especially after recovery |
-| `weaver_notifications` | Configure digest timing and optional event types |
-| `weaver_resume` | Unpause event delivery after a `weaver_ask` exchange |
-| `weaver_journal` | Append a journal entry |
-| `weaver_journal_read` | Read recent journal entries |
+| `engineer_events` | Poll recent panel events, especially after recovery |
+| `engineer_notifications` | Configure digest timing and optional event types |
+| `engineer_resume` | Unpause event delivery after a `engineer_ask` exchange |
+| `engineer_journal` | Append a journal entry |
+| `engineer_journal_read` | Read recent journal entries |
 
 ### Communication and agent control
 
 | Tool | What it is for |
 |------|-----------------|
-| `weaver_agent_message` | Send a message into another agent's terminal and create a visible follow-up task for the reply |
-| `weaver_note` | Post a non-blocking note or soft question for the human |
-| `weaver_ask` | Ask the human a question and pause event pushes |
-| `weaver_agent_close` | Close an agent session while leaving its worktree on disk |
-| `weaver_agent_relaunch` | Relaunch a stopped agent, reusing worktree and provider resume when available |
+| `engineer_agent_message` | Send a message into another agent's terminal and create a visible follow-up task for the reply |
+| `engineer_note` | Post a non-blocking note or soft question for the human |
+| `engineer_ask` | Ask the human a question and pause event pushes |
+| `engineer_agent_close` | Close an agent session while leaving its worktree on disk |
+| `engineer_agent_relaunch` | Relaunch a stopped agent, reusing worktree and provider resume when available |
 
 ### Weaver-to-worker follow-up tasks
 
-`weaver_agent_message` is now audited on the board instead of being a purely ephemeral terminal nudge:
+`engineer_agent_message` is now audited on the board instead of being a purely ephemeral terminal nudge:
 
 - If the target worker already has an active task, Loom creates a derived follow-up task under that task.
 - If the worker is otherwise idle, Loom creates a standalone root follow-up task in the same group.
@@ -306,7 +306,7 @@ In other words, `weaver_*` tools are group-scoped **and** designated-engineer-on
 
 Workers answer through `loom_reply(...)`:
 
-- If there is only one open Weaver-message follow-up task for that worker, `loom_reply(message=\"...\")` is enough.
+- If there is only one open designated-engineer follow-up task for that worker, `loom_reply(message=\"...\")` is enough.
 - If multiple follow-ups are open, the worker must pass the specific task as well.
 
 When the worker replies, Loom appends the reply to the follow-up task's history and marks only that follow-up task as answered/done. It does **not** auto-complete the parent implementation/review task just because the side conversation is over.
@@ -315,16 +315,16 @@ When the worker replies, Loom appends the reply to the follow-up task's history 
 
 | Tool | What it is for |
 |------|-----------------|
-| `weaver_diff` | Review structured summaries, diff stats, or full diffs before merge |
-| `weaver_merge` | Merge a worktree branch into its base branch |
-| `weaver_rebase` | Rebase a conflicted worktree branch onto its base branch |
-| `weaver_create_pr` | Push and open a GitHub PR with `gh` |
-| `weaver_worktree_checkpoint` | Snapshot the worktree before a risky operation |
-| `weaver_worktree_remove` | Remove the worktree after merge or cleanup |
+| `engineer_diff` | Review structured summaries, diff stats, or full diffs before merge |
+| `engineer_merge` | Merge a worktree branch into its base branch |
+| `engineer_rebase` | Rebase a conflicted worktree branch onto its base branch |
+| `engineer_create_pr` | Push and open a GitHub PR with `gh` |
+| `engineer_worktree_checkpoint` | Snapshot the worktree before a risky operation |
+| `engineer_worktree_remove` | Remove the worktree after merge or cleanup |
 
 ## Batch dispatch and orchestration patterns
 
-`weaver_batch_dispatch` is the designated engineer's main tool for deliberate orchestration instead of ad-hoc dispatching.
+`engineer_batch_dispatch` is the designated engineer's main tool for deliberate orchestration instead of ad-hoc dispatching.
 
 ### How batch dispatch works
 
@@ -362,31 +362,31 @@ The designated engineer is expected to handle the operational end of agent work,
 
 A practical review sequence is:
 
-1. inspect the agent with `weaver_agent_show`
-2. start with `weaver_diff(..., summary_only=true)` to get machine-readable changed-file signals without loading raw patch text
-3. use `weaver_diff(..., stat_only=true)` if you want a quick human-readable diffstat to size the change
-4. inspect specific risky paths with `weaver_diff(..., paths=[...])` if needed
-5. ask the agent for clarification with `weaver_agent_message` if the diff is unclear
+1. inspect the agent with `engineer_agent_show`
+2. start with `engineer_diff(..., summary_only=true)` to get machine-readable changed-file signals without loading raw patch text
+3. use `engineer_diff(..., stat_only=true)` if you want a quick human-readable diffstat to size the change
+4. inspect specific risky paths with `engineer_diff(..., paths=[...])` if needed
+5. ask the agent for clarification with `engineer_agent_message` if the diff is unclear
 
-For shared same-agent branches, `weaver_agent_show` also exposes task-boundary metadata so the designated engineer can tell which completed task is the latest clean mergeable boundary and which queued tasks resume after it.
+For shared same-agent branches, `engineer_agent_show` also exposes task-boundary metadata so the designated engineer can tell which completed task is the latest clean mergeable boundary and which queued tasks resume after it.
 
 ### Merge flow
 
-`weaver_merge` is a server-side merge operation. If Loom detects conflicts, it returns an error with conflict context and the designated engineer can run `weaver_rebase` before retrying the merge.
+`engineer_merge` is a server-side merge operation. If Loom detects conflicts, it returns an error with conflict context and the designated engineer can run `engineer_rebase` before retrying the merge.
 
-On shared sequential branches, `weaver_merge` also refuses to merge when the latest task boundary is no longer cleanly mergeable, for example because a queued follow-up already started or the branch tip moved after the boundary was recorded.
+On shared sequential branches, `engineer_merge` also refuses to merge when the latest task boundary is no longer cleanly mergeable, for example because a queued follow-up already started or the branch tip moved after the boundary was recorded.
 
-`weaver_rebase` uses the same merge-readiness checks before it runs, aborts automatically if the rebase hits conflicts, and returns enough conflict detail for the designated engineer to decide whether to retry or escalate to the human for a manual plan.
+`engineer_rebase` uses the same merge-readiness checks before it runs, aborts automatically if the rebase hits conflicts, and returns enough conflict detail for the designated engineer to decide whether to retry or escalate to the human for a manual plan.
 
 Typical flow:
 
 1. review diff
-2. merge with `weaver_merge`
-3. if merge reports conflicts, run `weaver_rebase` and retry `weaver_merge`
-4. optionally create a PR with `weaver_create_pr`
+2. merge with `engineer_merge`
+3. if merge reports conflicts, run `engineer_rebase` and retry `engineer_merge`
+4. optionally create a PR with `engineer_create_pr`
 5. close the agent and/or remove the worktree
 
-`weaver_merge` also supports:
+`engineer_merge` also supports:
 
 - `close_agent_on_merge`
 - `remove_worktree_on_merge`
@@ -395,9 +395,9 @@ Typical flow:
 
 After merge, the designated engineer can use:
 
-- `weaver_agent_close` to remove the live session
-- `weaver_worktree_remove` to clean the branch checkout from disk
-- `weaver_agent_relaunch` when a stopped agent should continue working instead of being retired
+- `engineer_agent_close` to remove the live session
+- `engineer_worktree_remove` to clean the branch checkout from disk
+- `engineer_agent_relaunch` when a stopped agent should continue working instead of being retired
 
 ## Practical usage patterns
 
@@ -409,9 +409,9 @@ When there is no useful journal history yet, the designated engineer should intr
 
 Use a compact pattern:
 
-1. `weaver_board_summary`
-2. `weaver_actions_list` or `weaver_action_show` if action choice matters
-3. `weaver_batch_dispatch` for the next wave
+1. `engineer_board_summary`
+2. `engineer_actions_list` or `engineer_action_show` if action choice matters
+3. `engineer_batch_dispatch` for the next wave
 4. wait for Loom digests
 
 ### Idle board with backlog remaining
@@ -421,12 +421,12 @@ When a wave finishes, the designated engineer should distinguish between two sta
 - **Waiting on active work**: agents are still running or tasks are still in `In Progress`. In that case, wait for Loom digests.
 - **Idle with backlog remaining**: there are 0 active agents, 0 `In Progress` tasks, and work still sits in `Backlog` or `To Do`. That is not a terminal steady state.
 
-In the second case, the designated engineer should read `weaver_board_summary` and then either:
+In the second case, the designated engineer should read `engineer_board_summary` and then either:
 
 - dispatch the next best wave if the user's standing priorities already make the next step clear
-- post a `weaver_note` that proposes the next wave and explains what ambiguity or constraint is preventing automatic dispatch
+- post a `engineer_note` that proposes the next wave and explains what ambiguity or constraint is preventing automatic dispatch
 
-Use `weaver_ask` in this state only if the missing information is a
+Use `engineer_ask` in this state only if the missing information is a
 blocking human checkpoint and the board should pause until the answer
 arrives.
 
@@ -448,8 +448,8 @@ When an agent is blocked or errors:
 
 - inspect the task and agent state
 - message the agent if more context can unblock it
-- use `weaver_task_resolve` if the blocker is a human-answer task
-- use `weaver_ask` if the next decision belongs to the human
+- use `engineer_task_resolve` if the blocker is a human-answer task
+- use `engineer_ask` if the next decision belongs to the human
 
 ## CLI
 
