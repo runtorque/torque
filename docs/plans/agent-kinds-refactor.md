@@ -123,12 +123,18 @@ One shared tool implementation layer takes a `caller_kind` + `caller_id` and app
 
 The core query: "what can engineer E see?"
 
-- Agents where `owner_engineer_id == E.id`.
-- Tasks where `assigned_engineer_id == E.id`.
+- The engineer row for `E` itself, plus worker/terminal agents where
+  `owner_engineer_id == E.id`.
+- Tasks in the engineer's own group where `assigned_engineer_id == E.id`.
+- Unassigned tasks (`assigned_engineer_id == ''`) in the engineer's own group as
+  a shared inbox. These stay out of `engineer_board_summary` until assigned.
 - Derived descendants: walk `parent_task_id` / `pipeline_root_id` — since ownership follows parent on derive, this is implicit in the FK, no graph walk needed at read time.
 - Children (terminals) of visible worker agents.
+- Writes that create agents or tasks stamp `owner_engineer_id` /
+  `assigned_engineer_id` to `E.id`; stage 3 engineers cannot override that.
 
-Implemented as a SQL `WHERE` clause in `db.py` readers (`load_agents_for_engineer(engineer_id)` etc.). The UI is unaffected — it reads unfiltered state; scoping is enforced at the MCP tool layer only.
+Implemented in the shared MCP tool layer, not the UI: the UI still reads
+unfiltered state over WebSocket deltas.
 
 Architect scoping is symmetric: `architect_id == self.id` on engineers it hired, tasks it created.
 
@@ -149,7 +155,7 @@ The UI stays "see everything" but the order changes:
 
 - **Hire (architect → engineer)**: architect calls `architect_engineer_hire`. This queues a pending hire visible to the user with approve/reject. On approve, a new engineer row is created (`persistent=1`) with `hired_by_architect_id=architect.id`. On reject, the architect gets a tool error and logs the rejection in its journal. Every hire requires user approval in v1 — no pre-approved/trusted-architect mode. We'll revisit after observing usage.
 - **Relaunch engineer**: existing agent relaunch flow; works because `persistent=1` keeps the row alive after session end.
-- **Delete engineer**: hard delete only via the Engineers panel with user confirmation. On delete: all agents with `owner_engineer_id == deleted.id` get `owner_engineer_id=''` (transfer to user); all tasks with `assigned_engineer_id == deleted.id` get `assigned_engineer_id=''`. Worktrees stay (cleanup is separate).
+- **Delete engineer**: hard delete only via the Engineers panel with user confirmation. On delete: all agents with `owner_engineer_id == deleted.id` get `owner_engineer_id=''` (transfer to user); all tasks with `assigned_engineer_id == deleted.id` get `assigned_engineer_id=''`. Worktrees stay (cleanup is separate). Deleting the last engineer is still allowed; `weaver_*` aliases then fail with a clear "create an engineer" error until one exists again.
 - **Delete architect**: same pattern — its engineers transfer to user (they keep running). Its decision log is archived (kept readable but marked `archived=1`), not deleted, so the audit trail survives.
 
 ## 6. Branch namespacing
@@ -224,10 +230,10 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 **Deliverable**: the user can create multiple named engineers; each sees only its own agents and tasks; existing `weaver_*` clients still work via an alias.
 
 - **Engineer launch infra**: new "Add Engineer" action in the Engineers panel. Prompts for name + provider/command (default: the same Claude Code command the Weaver uses today). Spawns a persistent agent with `kind='engineer'`, unique `LOOM_ENGINEER_ID` env var, and the engineer MCP config pointing at `mcp_engineer.py`.
-- **MCP session binding**: engineer MCP server reads `LOOM_ENGINEER_ID` on startup, rejects tool calls if the env var is missing or the referenced engineer has been deleted, and scopes every read/write by that id.
-- Split the tool implementation: the existing single-surface module splits into a shared core (ownership-filtered CRUD) and per-kind entrypoints. `weaver_*` names stay as aliases routed to a deterministic "default engineer" — the one named `"Weaver"` if present, else the first engineer by creation order. If zero engineers exist, the alias returns a clear error telling the user to create one.
-- Enforce ownership scoping on all `engineer_*` reads and writes. Writes that create agents or tasks auto-stamp `owner_engineer_id` / `assigned_engineer_id` to the caller.
-- CLI: `loom task create` from a terminal remains unassigned by default (`assigned_engineer_id=''`). Add `--engineer <slug>` flag for explicit assignment. User can reassign from UI.
+- **MCP session binding**: engineer MCP server runs through a local stdio entrypoint (`mcp_engineer.py`), reads `LOOM_ENGINEER_ID` on startup, rejects tool calls if the env var is missing or the referenced engineer has been deleted, and scopes every read/write by that id.
+- Split the tool implementation: the existing single-surface module splits into a shared core (ownership-filtered CRUD) and per-kind entrypoints. `weaver_*` names stay as aliases routed to a deterministic "default engineer" — the one named `"Weaver"` if present, else the first engineer by creation order. When the alias is called from a bound legacy Weaver or engineer session, it stays bound to that session instead of jumping to the global default. If zero engineers exist, the alias returns a clear error telling the user to create one.
+- Enforce ownership scoping on all `engineer_*` reads and writes. Writes that create agents or tasks auto-stamp `owner_engineer_id` / `assigned_engineer_id` to the caller, and engineer task access is group-scoped.
+- CLI: `loom task create` from a terminal remains unassigned by default (`assigned_engineer_id=''`). Add `--engineer <slug>` for explicit assignment, extend `loom task edit` with the same reassignment flag, and add offline-capable `loom engineer list`.
 - Keybindings: `Cmd+Option+A` continues to add a worker (default); new `Cmd+Option+E` adds an engineer. Document in settings.
 - UI:
   - Rename "Weaver" panel → "Engineers" panel, list all engineers with status/rename/delete controls.
@@ -308,10 +314,10 @@ Each stage lands with:
 
 These apply across multiple stages; listed here once to avoid repetition.
 
-- **Agent launch paths**: engineers and architects are launched the same way the current Weaver is (spawn a Claude Code process with an MCP config + boot prompt), but parameterized by kind. A shared helper in `server_agent.py` (or a new `agent_launch.py`) takes `kind`, `name`, `command`, `provider` and sets the right env vars (`LOOM_ENGINEER_ID` or `LOOM_ARCHITECT_ID`), MCP config path, and boot prompt. Unifies stage 3 and stage 4 launch code.
+- **Agent launch paths**: engineers and architects are launched through the shared helpers in `server_agent.py`, which stamp the right env vars (`LOOM_ENGINEER_ID` or `LOOM_ARCHITECT_ID`), choose the MCP entrypoint, and install the per-provider MCP config. Engineers use the local stdio `mcp_engineer.py` entrypoint so session binding is validated before proxying tool calls to the daemon.
 - **MCP tool registration**: add `mcp_engineer.py` and `mcp_architect.py` as thin entrypoints that import from a shared implementation module. Each entrypoint registers only the tools permitted for its kind. The existing `mcp_weaver.py` stays as a compat shim that delegates to `mcp_engineer.py` via the default-engineer alias.
 - **Delta protocol additions**: `static/js/ws.js` must learn new op types — `decision_upsert`, `decision_remove`, `pending_hire_upsert`, `pending_hire_resolve`. Server-side `_emit()` helpers mirror the existing pattern.
-- **CLI ownership behavior**: user-originated `loom task create` commands default to `assigned_engineer_id=''` (unassigned). Add `--engineer <slug>` for explicit assignment. Unassigned tasks are visible to all engineers but scoped out of their `engineer_board_summary` until assigned.
+- **CLI ownership behavior**: user-originated `loom task create` commands default to `assigned_engineer_id=''` (unassigned). `loom task create` and `loom task edit` accept `--engineer <slug>` for explicit assignment / reassignment. Unassigned tasks are visible to all engineers within their own group but scoped out of `engineer_board_summary` until assigned.
 - **Keybindings**: `Cmd+Option+A` → add worker (existing), `Cmd+Option+E` → add engineer (stage 3), `Cmd+Option+P` → add architect (stage 4). All user-configurable via the existing keybindings settings.
 - **Backup on migration**: the stage-1 migration writes `loom.db.pre-kinds.bak` before altering the schema. Idempotent — skipped on second run.
 - **Boot-prompt management**: engineer and architect boot prompts live in `loom/prompts/engineer_boot.md` and `loom/prompts/architect_boot.md`, loaded at launch. Not user-editable in v1 but easy to find for iteration.

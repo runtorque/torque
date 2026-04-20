@@ -30,7 +30,7 @@ class LoomDoctorTests(unittest.TestCase):
         (home / ".loom" / "agents").mkdir(parents=True, exist_ok=True)
         return home
 
-    def test_build_doctor_report_passes_without_warnings_when_no_engineer_exists(self):
+    def test_build_doctor_report_warns_when_no_engineer_exists(self):
         home = self._home_dir()
         self.db.save_board_task(
             BoardTask(
@@ -46,13 +46,32 @@ class LoomDoctorTests(unittest.TestCase):
             rendered = format_doctor_report(report)
 
         self.assertEqual(report["result"], "pass")
-        self.assertEqual(report["warnings"], [])
+        self.assertEqual(
+            report["warnings"],
+            [
+                {
+                    "name": "no_engineers",
+                    "status": "warn",
+                    "details": {
+                        "count": 0,
+                        "hint": (
+                            "no engineer exists; weaver_* tool aliases will fail until one is created"
+                        ),
+                    },
+                }
+            ],
+        )
         self.assertEqual(report["tasks"]["unassigned"], 1)
         self.assertEqual(report["tasks"]["unassigned_when_engineer_present"], 0)
+        self.assertEqual(report["engineers"]["total"], 0)
+        self.assertEqual(report["engineers"]["default_engineer_id"], "")
         self.assertEqual(report["roles"]["roles_file_count"], 0)
         self.assertEqual(report["roles"]["legacy_templates_file_count"], 0)
-        self.assertIn("Result: PASS", rendered)
-        self.assertNotIn("with warnings", rendered)
+        self.assertIn("Result: PASS (with warnings)", rendered)
+        self.assertIn(
+            "no engineer exists; weaver_* tool aliases will fail until one is created",
+            rendered,
+        )
         self.assertIn("roles_dir:                      ~/.loom/roles (0 files)", rendered)
 
     def test_build_doctor_report_passes_for_fully_assigned_engineer_db(self):
@@ -117,6 +136,22 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["agents"]["total"], 2)
         self.assertEqual(report["agents"]["engineer"], 1)
         self.assertEqual(report["agents"]["engineer_name"], "Weaver")
+        self.assertEqual(report["engineers"]["total"], 1)
+        self.assertEqual(report["engineers"]["default_engineer_name"], "Weaver")
+        self.assertEqual(report["engineers"]["default_engineer_id"], "weaver-1")
+        self.assertEqual(
+            report["engineers"]["engineers"],
+            [
+                {
+                    "id": "weaver-1",
+                    "name": "Weaver",
+                    "slug": "weaver",
+                    "persistent": 1,
+                    "worker_count": 1,
+                    "task_count": 1,
+                }
+            ],
+        )
         self.assertEqual(report["agents"]["worker"], 1)
         self.assertEqual(report["agents"]["unmigrated"], 0)
         self.assertEqual(
@@ -138,6 +173,8 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["roles"]["legacy_templates_file_count"], 1)
         self.assertIn("Loom doctor — kinds refactor", rendered)
         self.assertIn("Result: PASS", rendered)
+        self.assertIn("[engineers]", rendered)
+        self.assertIn("default (weaver_* routing):   Weaver (id=weaver-1)", rendered)
         self.assertIn(
             "legacy_templates_dir:           ~/.loom/agents (1 files)",
             rendered,
@@ -160,7 +197,21 @@ class LoomDoctorTests(unittest.TestCase):
             rendered = format_doctor_report(report)
 
         self.assertEqual(report["result"], "pass")
-        self.assertEqual(report["warnings"], [])
+        self.assertEqual(
+            report["warnings"],
+            [
+                {
+                    "name": "no_engineers",
+                    "status": "warn",
+                    "details": {
+                        "count": 0,
+                        "hint": (
+                            "no engineer exists; weaver_* tool aliases will fail until one is created"
+                        ),
+                    },
+                }
+            ],
+        )
         self.assertEqual(report["roles"]["roles_file_count"], 2)
         self.assertEqual(report["roles"]["roles_with_preamble"], 1)
         self.assertEqual(report["roles"]["roles_with_priorities"], 1)
@@ -208,6 +259,97 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["tasks"]["unassigned_when_engineer_present"], 1)
         self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertIn("engineer present but unassigned tasks remain: 1", rendered)
+
+    def test_build_doctor_report_warns_when_multiple_engineers_lack_weaver_name(self):
+        home = self._home_dir()
+        self.db.save_agent(
+            AgentCell(
+                id="eng-alice",
+                name="Alice",
+                group="loom",
+                slug="alice",
+                cell_type="agent",
+                kind="engineer",
+                persistent=True,
+            )
+        )
+        self.db.save_agent(
+            AgentCell(
+                id="eng-bob",
+                name="Bob",
+                group="loom",
+                slug="bob",
+                cell_type="agent",
+                kind="engineer",
+                persistent=True,
+            )
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertEqual(report["engineers"]["total"], 2)
+        self.assertEqual(report["engineers"]["default_engineer_name"], "Alice")
+        self.assertIn(
+            {
+                "name": "ambiguous_default_engineer_routing",
+                "status": "warn",
+                "details": {
+                    "count": 2,
+                    "default_engineer_id": "eng-alice",
+                    "default_engineer_name": "Alice",
+                    "hint": (
+                        "multiple engineers but no canonical 'Weaver' for default routing; "
+                        "weaver_* aliases will pick the earliest by creation order"
+                    ),
+                },
+            },
+            report["warnings"],
+        )
+        self.assertIn("Result: PASS (with warnings)", rendered)
+        self.assertIn(
+            "multiple engineers but no canonical 'Weaver' for default routing; "
+            "weaver_* aliases will pick the earliest by creation order",
+            rendered,
+        )
+
+    def test_build_doctor_report_passes_for_multiple_engineers_when_weaver_exists(self):
+        home = self._home_dir()
+        self.db.save_agent(
+            AgentCell(
+                id="eng-weaver",
+                name="Weaver",
+                group="loom",
+                slug="weaver",
+                cell_type="agent",
+                kind="engineer",
+                persistent=True,
+            )
+        )
+        self.db.save_agent(
+            AgentCell(
+                id="eng-alice",
+                name="Alice",
+                group="loom",
+                slug="alice",
+                cell_type="agent",
+                kind="engineer",
+                persistent=True,
+            )
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertEqual(report["warnings"], [])
+        self.assertEqual(report["engineers"]["total"], 2)
+        self.assertEqual(report["engineers"]["default_engineer_id"], "eng-weaver")
+        self.assertEqual(report["engineers"]["default_engineer_name"], "Weaver")
+        self.assertIn("default (weaver_* routing):   Weaver (id=eng-weaver)", rendered)
 
     def test_build_doctor_report_flags_drift_and_unmigrated_rows(self):
         home = self._home_dir()
@@ -313,12 +455,26 @@ class LoomDoctorTests(unittest.TestCase):
                             "consider migrating the legacy file"
                         ),
                     },
+                },
+                {
+                    "name": "no_engineers",
+                    "status": "warn",
+                    "details": {
+                        "count": 0,
+                        "hint": (
+                            "no engineer exists; weaver_* tool aliases will fail until one is created"
+                        ),
+                    },
                 }
             ],
         )
         self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertIn(
             "legacy template shadowed by new role; consider migrating the legacy file: shared",
+            rendered,
+        )
+        self.assertIn(
+            "no engineer exists; weaver_* tool aliases will fail until one is created",
             rendered,
         )
 

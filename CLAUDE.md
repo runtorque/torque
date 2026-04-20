@@ -90,6 +90,17 @@ For dual mode, also run `make open` to get a browser window alongside the toolbe
 - The DB / wire field name `agent_template` still carries the role slug until the later stage-6 rename.
 - `loom doctor` reports role counts plus shadow warnings for legacy templates masked by new roles.
 
+### Kinds refactor (stage 3 invariants)
+- Multiple engineers can coexist; `kind='engineer'` rows are persistent and relaunchable.
+- `LOOM_ENGINEER_ID` binds an engineer's MCP session to its own agent id.
+- `engineer_*` MCP tools enforce ownership scoping: an engineer sees only itself, its owned workers/terminals, and tasks assigned to it inside its group.
+- Unassigned tasks remain visible to all engineers as the shared inbox, but they stay out of `engineer_board_summary` until assigned.
+- `weaver_*` tools remain as compatibility aliases routed to the default engineer (`"Weaver"` when present, otherwise the earliest engineer by creation order).
+- Worker auto-stamping is mandatory: engineer-created agents get `owner_engineer_id=<engineer.id>` and engineer-created tasks get `assigned_engineer_id=<engineer.id>`.
+- Engineer deletion transfers owned workers and assigned tasks back to the user by clearing the ownership ids.
+- The CLI supports offline-capable `loom engineer list` plus `--engineer <slug>` on `loom task create` and `loom task edit` for explicit assignment and reassignment.
+- `loom doctor` includes an `[engineers]` section and warns when default `weaver_*` routing is missing or ambiguous.
+
 - **Loom context namespace**: Action templates can reference a `loom` dict injected at render time containing agent identity (`loom.agent.*`), dispatch context (`loom.context.is_clean`, `loom.context.tasks_dispatched`, `loom.context.previous_tasks`), worktree state (`loom.worktree.*`), task metadata (`loom.task.*`), and child terminals (`loom.terminals`). `loom` is a reserved variable name — rejected on action save. Preview renders use `LOOM_CONTEXT_STUB` (safe defaults with `is_clean=True`).
 
 ## Code conventions

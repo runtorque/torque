@@ -1,0 +1,216 @@
+import contextlib
+import importlib.util
+import io
+import json
+import unittest
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+
+def _load_cli_module():
+    path = Path(__file__).resolve().parents[1] / "bin" / "loom"
+    loader = SourceFileLoader("loom_cli_engineer", str(path))
+    spec = importlib.util.spec_from_loader("loom_cli_engineer", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+class CliEngineerTests(unittest.TestCase):
+    def setUp(self):
+        self.cli = _load_cli_module()
+
+    def test_parser_accepts_task_create_engineer_flag(self):
+        parser = self.cli.build_parser()
+        args = parser.parse_args(["task", "create", "Ship it", "--engineer", "alice"])
+        self.assertEqual(args.command, "task")
+        self.assertEqual(args.task_cmd, "create")
+        self.assertEqual(args.engineer, "alice")
+
+    def test_parser_accepts_task_edit_engineer_flag(self):
+        parser = self.cli.build_parser()
+        args = parser.parse_args(["task", "edit", "task-1", "--engineer", "alice"])
+        self.assertEqual(args.command, "task")
+        self.assertEqual(args.task_cmd, "edit")
+        self.assertEqual(args.engineer, "alice")
+
+    def test_parser_accepts_engineer_list_json_flag(self):
+        parser = self.cli.build_parser()
+        args = parser.parse_args(["engineer", "list", "--json"])
+        self.assertEqual(args.command, "engineer")
+        self.assertEqual(args.engineer_cmd, "list")
+        self.assertTrue(args.json)
+
+    def test_cmd_task_create_sets_assigned_engineer_id_from_slug(self):
+        state = {
+            "agents": {
+                "eng-alice": {
+                    "id": "eng-alice",
+                    "name": "Alice",
+                    "slug": "alice",
+                    "kind": "engineer",
+                    "cell_type": "agent",
+                }
+            }
+        }
+        args = SimpleNamespace(
+            port=18932,
+            description="Ship it",
+            group="loom",
+            engineer="alice",
+            context=None,
+            labels=None,
+            action=None,
+            var=None,
+            at=None,
+            depends_on=None,
+        )
+        with mock.patch.object(self.cli, "get_state", return_value=state), \
+             mock.patch.object(self.cli, "api_call", return_value={"ok": True, "data": {}}) as api_call:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_task_create(args)
+
+        api_call.assert_called_once_with(
+            "board_add_task",
+            port=18932,
+            task="Ship it",
+            group="loom",
+            lane="Backlog",
+            assigned_engineer_id="eng-alice",
+        )
+        self.assertIn("Task added to Backlog", out.getvalue())
+
+    def test_cmd_task_create_rejects_unknown_engineer_slug(self):
+        state = {"agents": {}}
+        args = SimpleNamespace(
+            port=18932,
+            description="Ship it",
+            group="loom",
+            engineer="alice",
+            context=None,
+            labels=None,
+            action=None,
+            var=None,
+            at=None,
+            depends_on=None,
+        )
+        err = io.StringIO()
+        with mock.patch.object(self.cli, "get_state", return_value=state), \
+             contextlib.redirect_stderr(err), \
+             self.assertRaises(SystemExit) as cm:
+            self.cli.cmd_task_create(args)
+
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("no engineer with slug 'alice'", err.getvalue())
+
+    def test_cmd_task_edit_sets_assigned_engineer_id_from_slug(self):
+        state = {
+            "agents": {
+                "eng-alice": {
+                    "id": "eng-alice",
+                    "name": "Alice",
+                    "slug": "alice",
+                    "kind": "engineer",
+                    "cell_type": "agent",
+                }
+            },
+            "board_tasks": {
+                "task-1": {
+                    "id": "task-1",
+                    "task": "Ship it",
+                    "slug": "ship-it",
+                    "group": "loom",
+                    "verification_summary": {},
+                }
+            },
+        }
+        args = SimpleNamespace(
+            port=18932,
+            identifier="task-1",
+            task=None,
+            action=None,
+            var=None,
+            labels=None,
+            group=None,
+            engineer="alice",
+            at=None,
+            depends_on=None,
+            verify_mode=None,
+            verify_state=None,
+            verify_note=None,
+            verify_tests=None,
+            verify_smoke_done=False,
+            verify_deploy_needed=False,
+            verify_deploy_attempted=False,
+            verify_human=None,
+        )
+        with mock.patch.object(self.cli, "get_state_local", return_value=state), \
+             mock.patch.object(self.cli, "api_call", return_value={"ok": True, "data": {}}) as api_call:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_task_edit(args)
+
+        api_call.assert_called_once_with(
+            "board_update_task",
+            port=18932,
+            id="task-1",
+            assigned_engineer_id="eng-alice",
+        )
+        self.assertIn("Updated task ship-it", out.getvalue())
+
+    def test_cmd_engineer_list_outputs_json_with_worker_and_task_counts(self):
+        state = {
+            "agents": {
+                "eng-alice": {
+                    "id": "eng-alice",
+                    "name": "Alice",
+                    "slug": "alice",
+                    "kind": "engineer",
+                    "cell_type": "agent",
+                    "status": "running",
+                },
+                "worker-1": {
+                    "id": "worker-1",
+                    "name": "Worker 1",
+                    "slug": "worker-1",
+                    "kind": "worker",
+                    "cell_type": "agent",
+                    "owner_engineer_id": "eng-alice",
+                },
+                "eng-bob": {
+                    "id": "eng-bob",
+                    "name": "Bob",
+                    "slug": "bob",
+                    "kind": "engineer",
+                    "cell_type": "agent",
+                    "status": "stopped",
+                },
+            },
+            "board_tasks": {
+                "task-1": {
+                    "id": "task-1",
+                    "task": "Owned",
+                    "assigned_engineer_id": "eng-alice",
+                }
+            },
+        }
+        with mock.patch.object(self.cli, "get_state_local", return_value=state):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_engineer_list(SimpleNamespace(port=18932, json=True))
+
+        payload = json.loads(out.getvalue())
+        self.assertEqual(len(payload["engineers"]), 2)
+        self.assertEqual(payload["engineers"][0]["id"], "eng-alice")
+        self.assertEqual(payload["engineers"][0]["worker_count"], 1)
+        self.assertEqual(payload["engineers"][0]["task_count"], 1)
+        self.assertEqual(payload["engineers"][1]["id"], "eng-bob")
+        self.assertEqual(payload["engineers"][1]["worker_count"], 0)
+        self.assertEqual(payload["engineers"][1]["task_count"], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
