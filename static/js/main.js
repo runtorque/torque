@@ -690,7 +690,8 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     if (typeof openAddArchitectModal === 'function') {
       var architectGroup = '';
-      if (typeof _weaverCurrentGroup === 'function') architectGroup = _weaverCurrentGroup() || '';
+      if (typeof _agentPanelCurrentGroup === 'function') architectGroup = _agentPanelCurrentGroup() || '';
+      else if (typeof _currentGroup === 'function') architectGroup = _currentGroup() || '';
       openAddArchitectModal(architectGroup);
     }
     return;

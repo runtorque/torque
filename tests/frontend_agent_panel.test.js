@@ -65,7 +65,7 @@ function createHarness() {
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
   const context = vm.createContext(sandbox);
-  loadScript(context, 'static/js/weaver.js');
+  loadScript(context, 'static/js/agent_panel.js');
   loadScript(context, 'static/js/agent_panel.js');
   return { context, panel, captureCalls, restoreCalls, intervalCalls, clearIntervalCalls };
 }
