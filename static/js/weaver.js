@@ -746,7 +746,7 @@ function _weaverResetSessionMapMeta(options) {
     }
     if (wasLoading && _weaverShouldRenderCurrentGroup(group)) shouldRender = true;
   }
-  if (shouldRender && typeof renderWeaverPanel === 'function') renderWeaverPanel();
+  if (shouldRender) _weaverRenderCurrentSurface();
 }
 
 function _weaverIsSessionMapOpen(group) {
@@ -760,26 +760,34 @@ function _weaverShouldRenderCurrentGroup(group) {
     && _weaverCurrentGroup() === group;
 }
 
+function _weaverRenderCurrentSurface() {
+  if (typeof renderAgentPanel === 'function') {
+    renderAgentPanel();
+    return;
+  }
+  if (typeof renderWeaverPanel === 'function') renderWeaverPanel();
+}
+
 function weaverOpenSessionMap(group) {
   group = group || _weaverCurrentGroup();
   if (!group) return;
   _weaverJournalSubviewByGroup[group] = 'session_map';
   _weaverRequestSessionMap(group, false);
-  renderWeaverPanel();
+  _weaverRenderCurrentSurface();
 }
 
 function weaverCloseSessionMap(group) {
   group = group || _weaverCurrentGroup();
   if (!group) return;
   _weaverJournalSubviewByGroup[group] = 'journal';
-  renderWeaverPanel();
+  _weaverRenderCurrentSurface();
 }
 
 function weaverRefreshSessionMap(group) {
   group = group || _weaverCurrentGroup();
   if (!group) return;
   _weaverRequestSessionMap(group, true);
-  renderWeaverPanel();
+  _weaverRenderCurrentSurface();
 }
 
 function _weaverReceiveSessionMap(msg) {
@@ -789,7 +797,7 @@ function _weaverReceiveSessionMap(msg) {
   meta.loading = false;
   meta.stale = false;
   if (_weaverShouldRenderCurrentGroup(group)) {
-    renderWeaverPanel();
+    _weaverRenderCurrentSurface();
   }
 }
 
@@ -806,7 +814,7 @@ function _weaverMarkSessionMapStale(groups) {
       if (_weaverShouldRenderCurrentGroup(group)) shouldRender = true;
     }
   }
-  if (shouldRender) renderWeaverPanel();
+  if (shouldRender) _weaverRenderCurrentSurface();
 }
 
 function _weaverRenderTabs(group, activeTab) {

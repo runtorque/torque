@@ -45,6 +45,42 @@ function createHarness() {
   return { context, panel, captureCalls, restoreCalls };
 }
 
+function createWeaverSessionMapHarness() {
+  const panel = {
+    innerHTML: '',
+    querySelector() { return null; },
+  };
+  const sandbox = {
+    console,
+    Date,
+    state: {
+      agents: {},
+      groups: { alpha: [] },
+      weaver_session_maps: {},
+    },
+    focusedItemId: '',
+    _activePanelApp: 'weaver',
+    document: {
+      activeElement: null,
+      getElementById(id) {
+        return id === 'panel-agent' ? panel : null;
+      },
+    },
+    _captureSurfaceState() {
+      return { focus: null, scrolls: [] };
+    },
+    _restoreSurfaceState() {},
+    _currentGroup() { return 'alpha'; },
+    _weaverStopEventsCountdownTimer() {},
+  };
+  sandbox.global = sandbox;
+  sandbox.globalThis = sandbox;
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/weaver.js');
+  loadScript(context, 'static/js/agent_panel.js');
+  return { context, panel };
+}
+
 function setFocusedAgent(context, agent) {
   context.state.agents = {};
   context.focusedItemId = '';
@@ -103,4 +139,48 @@ test('_resolveFocusedAgent returns null when focusedItemId does not resolve', ()
   context.focusedItemId = 'missing-agent';
 
   assert.equal(vm.runInContext(`_resolveFocusedAgent()`, context), null);
+});
+
+test('_weaverReceiveSessionMap keeps the focused-agent stub rendered when weaver.js is loaded', () => {
+  const { context, panel } = createWeaverSessionMapHarness();
+  setFocusedAgent(context, {
+    id: 'worker-1',
+    name: 'Worker Bee',
+    kind: 'worker',
+    cell_type: 'agent',
+    group: 'alpha',
+  });
+
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /Agent: Worker Bee · Kind: worker/);
+
+  context._weaverReceiveSessionMap({
+    group: 'alpha',
+    session_map: { group: 'alpha', streams: { items: [] } },
+  });
+
+  assert.match(panel.innerHTML, /Agent: Worker Bee · Kind: worker/);
+  assert.doesNotMatch(panel.innerHTML, /Architects &amp; Engineers/);
+});
+
+test('_weaverResetSessionMapMeta keeps the focused-agent stub rendered during session-map reconnect resets', () => {
+  const { context, panel } = createWeaverSessionMapHarness();
+  setFocusedAgent(context, {
+    id: 'worker-1',
+    name: 'Worker Bee',
+    kind: 'worker',
+    cell_type: 'agent',
+    group: 'alpha',
+  });
+
+  context.renderAgentPanel();
+  vm.runInContext(`
+    _weaverSessionMapMetaByGroup.alpha = { loading: true, stale: false };
+  `, context);
+
+  context._weaverResetSessionMapMeta({ clearStale: false });
+
+  assert.match(panel.innerHTML, /Agent: Worker Bee · Kind: worker/);
+  assert.doesNotMatch(panel.innerHTML, /Architects &amp; Engineers/);
+  assert.equal(vm.runInContext(`_weaverSessionMapMetaByGroup.alpha.loading`, context), false);
 });
