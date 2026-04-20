@@ -267,6 +267,123 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
             ["eng-a", "worker-a", "term-1", "eng-b", "worker-b", "user-1"],
         )
 
+    async def test_engineer_hierarchy_preserves_manual_group_order_within_buckets(self):
+        state = self.state_mod.MatrixState()
+        state.groups = {
+            "loom": [
+                "worker-a-2",
+                "eng-b",
+                "worker-b-2",
+                "eng-a",
+                "worker-b-1",
+                "user-1",
+                "worker-a-1",
+            ]
+        }
+        state._children = {
+            "eng-a": [],
+            "eng-b": [],
+            "worker-a-1": [],
+            "worker-a-2": [],
+            "worker-b-1": [],
+            "worker-b-2": [],
+            "user-1": [],
+        }
+
+        engineer_a = self.state_mod.AgentCell(
+            id="eng-a",
+            name="Alice",
+            kind="engineer",
+            group="loom",
+            slug="alice",
+            cell_type="agent",
+            session_id="session-eng-a",
+            window_id="window-a",
+        )
+        engineer_b = self.state_mod.AgentCell(
+            id="eng-b",
+            name="Bob",
+            kind="engineer",
+            group="loom",
+            slug="bob",
+            cell_type="agent",
+            session_id="session-eng-b",
+            window_id="window-a",
+        )
+        worker_a_1 = self.state_mod.AgentCell(
+            id="worker-a-1",
+            name="Worker A1",
+            group="loom",
+            slug="worker-a-1",
+            cell_type="agent",
+            session_id="session-worker-a-1",
+            window_id="window-a",
+            owner_engineer_id="eng-a",
+        )
+        worker_a_2 = self.state_mod.AgentCell(
+            id="worker-a-2",
+            name="Worker A2",
+            group="loom",
+            slug="worker-a-2",
+            cell_type="agent",
+            session_id="session-worker-a-2",
+            window_id="window-a",
+            owner_engineer_id="eng-a",
+        )
+        worker_b_1 = self.state_mod.AgentCell(
+            id="worker-b-1",
+            name="Worker B1",
+            group="loom",
+            slug="worker-b-1",
+            cell_type="agent",
+            session_id="session-worker-b-1",
+            window_id="window-a",
+            owner_engineer_id="eng-b",
+        )
+        worker_b_2 = self.state_mod.AgentCell(
+            id="worker-b-2",
+            name="Worker B2",
+            group="loom",
+            slug="worker-b-2",
+            cell_type="agent",
+            session_id="session-worker-b-2",
+            window_id="window-a",
+            owner_engineer_id="eng-b",
+        )
+        user_worker = self.state_mod.AgentCell(
+            id="user-1",
+            name="User Worker",
+            group="loom",
+            slug="user-worker",
+            cell_type="agent",
+            session_id="session-user-1",
+            window_id="window-a",
+        )
+        state.agents = {
+            engineer_a.id: engineer_a,
+            engineer_b.id: engineer_b,
+            worker_a_1.id: worker_a_1,
+            worker_a_2.id: worker_a_2,
+            worker_b_1.id: worker_b_1,
+            worker_b_2.id: worker_b_2,
+            user_worker.id: user_worker,
+        }
+
+        ordered_agents = self.keybindings_mod.get_ordered_agents(state, "window-a")
+
+        self.assertEqual(
+            [cell.id for cell in ordered_agents],
+            [
+                "eng-b",
+                "worker-b-2",
+                "worker-b-1",
+                "eng-a",
+                "worker-a-2",
+                "worker-a-1",
+                "user-1",
+            ],
+        )
+
     async def test_install_and_remove_preserve_displaced_bindings(self):
         displaced = self.binding_mod.KeyBinding(
             character=0xF701,

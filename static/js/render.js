@@ -106,15 +106,6 @@ function _renderWeaverMenuItem(group, groupSettings) {
   return `<button onclick="event.stopPropagation();closeMenus();newWeaver('${esc(group)}')">Weaver</button>`;
 }
 
-function _cellSortValue(cell) {
-  if (!cell) return '';
-  return String(cell.created_at || cell.updated_at || cell.id || '');
-}
-
-function _sortByCreatedAt(a, b) {
-  return _cellSortValue(a).localeCompare(_cellSortValue(b));
-}
-
 function _sortAgentsHierarchically(agents) {
   const visibleById = {};
   const architects = [];
@@ -146,13 +137,6 @@ function _sortAgentsHierarchically(agents) {
       continue;
     }
     userOwned.push(agent);
-  }
-
-  architects.sort(_sortByCreatedAt);
-  engineers.sort(_sortByCreatedAt);
-  userOwned.sort(_sortByCreatedAt);
-  for (const ownerId of Object.keys(workersByEngineer)) {
-    workersByEngineer[ownerId].sort(_sortByCreatedAt);
   }
 
   const ordered = [];

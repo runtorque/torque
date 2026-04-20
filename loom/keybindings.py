@@ -243,17 +243,14 @@ def _get_group_display_ids(state, group_name):
         else:
             standalone.append(cell_id)
 
-    def sort_value(cell):
-        return str(getattr(cell, "created_at", "")
-                   or getattr(cell, "updated_at", "")
-                   or getattr(cell, "id", "")
-                   or "")
-
     architects = []
     engineers = []
     user_owned = []
     workers_by_engineer = {}
-    for cell in visible_agents.values():
+    for cell_id in ordered_ids:
+        cell = visible_agents.get(cell_id)
+        if not cell:
+            continue
         kind = str(getattr(cell, "kind", "") or "").strip()
         if kind == "architect":
             architects.append(cell)
@@ -267,12 +264,6 @@ def _get_group_display_ids(state, group_name):
             workers_by_engineer.setdefault(owner_id, []).append(cell)
             continue
         user_owned.append(cell)
-
-    architects.sort(key=sort_value)
-    engineers.sort(key=sort_value)
-    user_owned.sort(key=sort_value)
-    for owner_id, workers in workers_by_engineer.items():
-        workers.sort(key=sort_value)
 
     ordered = []
     for cell in architects:

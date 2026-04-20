@@ -8194,6 +8194,103 @@ test('main render uses engineer hierarchy in the visible and navigable agent ord
   assert.match(main.innerHTML, /engineer-owned-worker/);
 });
 
+test('main render preserves manual state.groups ordering within engineer hierarchy buckets', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = {
+    loom: ['worker-a-2', 'eng-b', 'worker-b-2', 'eng-a', 'worker-b-1', 'agent-user', 'worker-a-1'],
+  };
+  sandbox.state.group_settings = {
+    loom: { collapsed_default: false, weaver_agent_id: 'eng-a' },
+  };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'eng-a': {
+      id: 'eng-a',
+      name: 'Alice',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+      session_id: 'sess-eng-a',
+    },
+    'eng-b': {
+      id: 'eng-b',
+      name: 'Bob',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'B',
+      status: 'running',
+      session_id: 'sess-eng-b',
+    },
+    'worker-a-1': {
+      id: 'worker-a-1',
+      name: 'Worker A1',
+      owner_engineer_id: 'eng-a',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: '1',
+      status: 'running',
+      session_id: 'sess-worker-a-1',
+    },
+    'worker-a-2': {
+      id: 'worker-a-2',
+      name: 'Worker A2',
+      owner_engineer_id: 'eng-a',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: '2',
+      status: 'running',
+      session_id: 'sess-worker-a-2',
+    },
+    'worker-b-1': {
+      id: 'worker-b-1',
+      name: 'Worker B1',
+      owner_engineer_id: 'eng-b',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: '3',
+      status: 'running',
+      session_id: 'sess-worker-b-1',
+    },
+    'worker-b-2': {
+      id: 'worker-b-2',
+      name: 'Worker B2',
+      owner_engineer_id: 'eng-b',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: '4',
+      status: 'running',
+      session_id: 'sess-worker-b-2',
+    },
+    'agent-user': {
+      id: 'agent-user',
+      name: 'User Worker',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'U',
+      status: 'running',
+      session_id: 'sess-user',
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'eng-b',
+    'worker-b-2',
+    'worker-b-1',
+    'eng-a',
+    'worker-a-2',
+    'worker-a-1',
+    'agent-user',
+  ]);
+  assert.match(main.innerHTML, /Bob[\s\S]*Worker B2[\s\S]*Worker B1[\s\S]*Alice[\s\S]*Worker A2[\s\S]*Worker A1[\s\S]*User Worker/);
+});
+
 test('main render restores the main scroll position across rerenders', () => {
   const { context, document, sandbox } = createMainRenderHarness();
   const main = document.getElementById('main');
