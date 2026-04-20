@@ -7,6 +7,8 @@ import types
 import unittest
 from pathlib import Path
 
+import yaml
+
 try:
     from helpers import install_aiohttp_stub
 except ModuleNotFoundError:
@@ -288,7 +290,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
                         'group': 'g',
                         'name': 'demo',
                         'scope': 'user',
-                        'template': {
+                        'data': {
                             'name': 'demo',
                             'preamble': 'Be careful.',
                             'priorities': ['ship small', 'test first'],
@@ -304,6 +306,24 @@ class ServerModuleExtractionTests(unittest.TestCase):
                         if item['name'] == 'demo')
             self.assertEqual(demo['preamble'], 'Be careful.')
             self.assertEqual(demo['priorities'], ['ship small', 'test first'])
+            saved_role = yaml.safe_load(
+                (home / '.loom' / 'roles' / 'demo.yaml').read_text(
+                    encoding='utf-8'
+                )
+            )
+            self.assertEqual(saved_role['preamble'], 'Be careful.\n')
+            self.assertEqual(
+                saved_role['priorities'],
+                ['ship small', 'test first'],
+            )
+            self.assertEqual(
+                role_mgr.load_role('demo', base_dir=str(project)),
+                {
+                    'name': 'demo',
+                    'preamble': 'Be careful.',
+                    'priorities': ['ship small', 'test first'],
+                },
+            )
 
             list_roles = asyncio.run(
                 self.server_mod._handle_role_template_command(

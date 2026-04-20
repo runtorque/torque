@@ -126,6 +126,21 @@ class RoleManagerTests(unittest.TestCase):
         self.assertEqual(user_entry["description"], "user role")
         self.assertTrue(user_entry["shadowed"])
 
+    def test_list_roles_returns_single_user_entry_without_project_shadow(self):
+        project_in_home = self.user_home / "workspace" / "repo" / "subdir"
+        project_in_home.mkdir(parents=True)
+        (self.user_roles / "solo.yaml").write_text(
+            "name: solo\ndescription: User role\n"
+        )
+
+        listed = self.mgr.list_roles(str(project_in_home))
+
+        matches = [item for item in listed if item["name"] == "solo"]
+        self.assertEqual(len(matches), 1)
+        self.assertTrue(matches[0]["global"])
+        self.assertFalse(matches[0]["shadowed"])
+        self.assertEqual(matches[0]["dir"], str(self.user_roles))
+
     def test_save_role_writes_to_roles_directory_even_for_legacy_origin(self):
         legacy_path = self.user_templates / "bar.yaml"
         legacy_path.write_text("name: bar\ndescription: Legacy\n")

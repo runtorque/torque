@@ -63,15 +63,18 @@ class RoleManager(TemplateManager):
 
     GLOBAL_ROLES_DIR = os.path.expanduser("~/.loom/roles")
 
-    @staticmethod
-    def _find_project_dir(base_dir: str = "", leaf: str = "roles") -> str | None:
+    @classmethod
+    def _find_project_dir(cls, base_dir: str = "",
+                          leaf: str = "roles") -> str | None:
         d = os.path.expanduser(base_dir) if base_dir else os.getcwd()
         if not os.path.isdir(d):
             d = os.getcwd()
+        global_dir = os.path.realpath(cls._global_dir(leaf))
         for _ in range(20):
             candidate = os.path.join(d, ".loom", leaf)
             if os.path.isdir(candidate):
-                return candidate
+                if os.path.realpath(candidate) != global_dir:
+                    return candidate
             parent = os.path.dirname(d)
             if parent == d:
                 break
@@ -121,6 +124,20 @@ class RoleManager(TemplateManager):
     def find_legacy_template_dirs(base_dir: str = "") -> list[str]:
         return TemplateManager.find_templates_dirs(base_dir)
 
+    @staticmethod
+    def _dedupe_source_dirs(
+        dirs: list[tuple[str, bool, bool]]
+    ) -> list[tuple[str, bool, bool]]:
+        unique: list[tuple[str, bool, bool]] = []
+        seen_paths: set[str] = set()
+        for root_dir, is_global, is_legacy in dirs:
+            real_dir = os.path.realpath(root_dir) if root_dir else ""
+            if not real_dir or real_dir in seen_paths:
+                continue
+            seen_paths.add(real_dir)
+            unique.append((root_dir, is_global, is_legacy))
+        return unique
+
     @classmethod
     def _source_dirs(cls, base_dir: str = "", scope: str = "") -> list[tuple[str, bool, bool]]:
         project_role_dir = cls._find_project_dir(base_dir, "roles")
@@ -134,13 +151,13 @@ class RoleManager(TemplateManager):
                 dirs.append((project_role_dir, False, False))
             if project_legacy_dir:
                 dirs.append((project_legacy_dir, False, True))
-            return dirs
+            return cls._dedupe_source_dirs(dirs)
         if scope == "user":
             if os.path.isdir(global_role_dir):
                 dirs.append((global_role_dir, True, False))
             if os.path.isdir(global_legacy_dir):
                 dirs.append((global_legacy_dir, True, True))
-            return dirs
+            return cls._dedupe_source_dirs(dirs)
 
         if project_role_dir:
             dirs.append((project_role_dir, False, False))
@@ -150,7 +167,7 @@ class RoleManager(TemplateManager):
             dirs.append((global_role_dir, True, False))
         if os.path.isdir(global_legacy_dir):
             dirs.append((global_legacy_dir, True, True))
-        return dirs
+        return cls._dedupe_source_dirs(dirs)
 
     @staticmethod
     def _iter_named_yaml_paths(root_dir: str) -> list[tuple[str, str]]:

@@ -1051,7 +1051,9 @@ async def _handle_role_template_command(data: dict, role_mgr,
     if cmd in {"save_role", "save_template"}:
         scope = data.get("scope", "project")
         old_name = data.get("old_name", "").strip()
-        payload = data.get("role")
+        payload = data.get("data")
+        if payload is None:
+            payload = data.get("role")
         if payload is None:
             payload = data.get("template", {})
         if old_name and old_name != name:
