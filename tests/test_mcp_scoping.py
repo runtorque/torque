@@ -42,6 +42,24 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         state.groups["loom"].append(agent_id)
         return engineer
 
+    def _add_legacy_weaver(self, state, agent_id, name, group):
+        if group not in state.groups:
+            state.groups[group] = []
+        weaver = self.state_mod.AgentCell(
+            id=agent_id,
+            name=name,
+            slug=name.lower().replace(" ", "-"),
+            group=group,
+            cell_type="agent",
+            status="running",
+        )
+        state.agents[agent_id] = weaver
+        state.groups[group].append(agent_id)
+        state.group_settings[group] = self.state_mod.GroupSettings(
+            weaver_agent_id=agent_id
+        )
+        return weaver
+
     def _add_worker(self, state, agent_id, name, owner_id):
         worker = self.state_mod.AgentCell(
             id=agent_id,
@@ -57,6 +75,18 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         state.agents[agent_id] = worker
         state.groups["loom"].append(agent_id)
         return worker
+
+    def _add_task(self, state, task_id, title, *, group="loom",
+                  assigned_engineer_id=""):
+        task = self.state_mod.BoardTask(
+            id=task_id,
+            task=title,
+            group=group,
+            lane="Backlog",
+            assigned_engineer_id=assigned_engineer_id,
+        )
+        state.board_tasks[task.id] = task
+        return task
 
     async def test_engineer_agents_list_scopes_to_single_engineer(self):
         state = self._make_state()
@@ -143,6 +173,26 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0]["assigned_engineer_id"], alice.id)
         self.assertEqual(json.loads(text)["task_id"], "LOOM:1")
 
+    async def test_engineer_task_edit_rejects_unassigned_task_in_other_group(self):
+        state = self._make_state()
+        state.groups["other"] = []
+        alice = self._add_engineer(state, "eng-alice", "Alice")
+        self._add_task(state, "task-b", "Other group task", group="other")
+
+        async def fake_handle_command(_payload):
+            self.fail("cross-group task should be rejected before mutation")
+
+        text, is_error = await self.mcp_engineer_mod._dispatch_engineer_tool(
+            "engineer_task_edit",
+            {"task": "task-b", "title": "Hacked"},
+            fake_handle_command,
+            state,
+            caller_id=alice.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(text, "Task not found")
+
     async def test_engineer_agent_message_rejects_out_of_scope_target(self):
         state = self._make_state()
         alice = self._add_engineer(state, "eng-alice", "Alice")
@@ -185,6 +235,36 @@ class MCPScopingTests(unittest.IsolatedAsyncioTestCase):
             {item["id"] for item in json.loads(text)["agents"]},
             {weaver.id, weaver_worker.id},
         )
+
+    async def test_weaver_alias_uses_bound_legacy_weaver_session_group(self):
+        state = self._make_state()
+        del state.groups["loom"]
+        weaver_a = self._add_legacy_weaver(state, "weaver-a", "Weaver", "group-a")
+        weaver_b = self._add_legacy_weaver(state, "weaver-b", "Beta Weaver", "group-b")
+        self._add_task(state, "task-a", "Group A task", group="group-a")
+        self._add_task(state, "task-b", "Group B task", group="group-b")
+
+        async def fake_handle_command(_payload):
+            self.fail("read tool should not call handle_command")
+
+        default_text, default_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+        )
+        bound_text, bound_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_board_summary",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=weaver_b.id,
+        )
+
+        self.assertFalse(default_error, default_text)
+        self.assertFalse(bound_error, bound_text)
+        self.assertEqual(json.loads(default_text)["group"], weaver_a.group)
+        self.assertEqual(json.loads(bound_text)["group"], weaver_b.group)
 
     async def test_weaver_alias_returns_no_engineer_error_when_none_exist(self):
         state = self._make_state()

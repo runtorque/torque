@@ -166,8 +166,14 @@ def _filter_tasks_for_caller(state, caller_kind: str,
     if caller_kind != "engineer":
         return {}
     caller_id = str(caller_id or "").strip()
+    caller = state.agents.get(caller_id)
+    caller_group = str(getattr(caller, "group", "") or "").strip() if caller else ""
+    if not caller_group:
+        return {}
     filtered = {}
     for task in state.board_tasks.values():
+        if str(getattr(task, "group", "") or "").strip() != caller_group:
+            continue
         assigned_engineer_id = _effective_assigned_engineer_id(task)
         if not assigned_engineer_id or assigned_engineer_id == caller_id:
             filtered[task.id] = task
@@ -255,24 +261,38 @@ def resolve_default_engineer(state) -> str | None:
 
 def authorize_caller(state, *, caller_kind: str, caller_id: str):
     caller_id = str(caller_id or "").strip()
-    if caller_kind != "engineer":
+    label = "engineer" if caller_kind == "engineer" else "weaver"
+    if caller_kind not in {"engineer", "legacy_weaver"}:
         return None, "", caller_kind, json.dumps({
             "type": "error",
             "message": f"unsupported caller kind: {caller_kind}",
         }), True
     if not caller_id:
+        missing_message = (
+            "LOOM_ENGINEER_ID is required"
+            if caller_kind == "engineer"
+            else "legacy weaver session id is required"
+        )
         return None, "", caller_kind, json.dumps({
             "type": "error",
-            "message": "LOOM_ENGINEER_ID is required",
+            "message": missing_message,
         }), True
     cell = state.agents.get(caller_id)
     if not _is_engineer_like_cell(state, cell):
-        return None, "", caller_kind, engineer_not_found_error(caller_id), True
+        error_text = (
+            engineer_not_found_error(caller_id)
+            if caller_kind == "engineer"
+            else json.dumps({
+                "type": "error",
+                "message": f"no weaver with id={caller_id} exists",
+            })
+        )
+        return None, "", caller_kind, error_text, True
     group = str(getattr(cell, "group", "") or "").strip()
     if not group:
         return None, "", caller_kind, json.dumps({
             "type": "error",
-            "message": f"engineer {caller_id} is not assigned to a group",
+            "message": f"{label} {caller_id} is not assigned to a group",
         }), True
     effective_kind = (
         "engineer"
