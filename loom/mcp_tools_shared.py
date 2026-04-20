@@ -1502,7 +1502,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             ).strip()
             if not assigned_engineer_ident:
                 return "assigned_engineer_id is required", True
-            assigned_engineer_id, engineer_error = _resolve_architect_engineer(
+            assigned_engineer_id, engineer_error = _resolve_architect_hired_engineer(
                 real_state, caller_id, assigned_engineer_ident
             )
             if not assigned_engineer_id:
@@ -1579,7 +1579,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         engineer_ident = str(args.get("new_engineer_id", "") or "").strip()
         if not engineer_ident:
             return "new_engineer_id is required", True
-        engineer_id, engineer_error = _resolve_architect_engineer(
+        engineer_id, engineer_error = _resolve_architect_hired_engineer(
             real_state, caller_id, engineer_ident
         )
         if not engineer_id:

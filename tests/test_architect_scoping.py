@@ -205,6 +205,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         alice = self._add_engineer(
             "eng-alice", "Alice", hired_by_architect_id=architect.id
         )
+        visible_engineer = self._add_engineer("eng-visible", "Visible Engineer")
         bob = self._add_engineer(
             "eng-bob", "Bob", hired_by_architect_id=other_architect.id
         )
@@ -232,6 +233,20 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.action_name, "")
         self.assertEqual(task.action_vars, {"TEST_COMMAND": "python3 -m unittest"})
 
+        visible_denied_text, visible_denied_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Visible engineer assign",
+                "group": "loom",
+                "assigned_engineer_id": visible_engineer.id,
+            },
+            architect.id,
+        )
+
+        self.assertTrue(visible_denied_error)
+        self.assertEqual(visible_denied_text, "engineer not found in scope")
+        self.assertEqual(len(self.state.board_tasks), 1)
+
         denied_text, denied_error = await self._call(
             "architect_task_create",
             {
@@ -250,6 +265,9 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         other_architect = self._add_architect("arch-2", "Other Architect")
         alice = self._add_engineer(
             "eng-alice", "Alice", hired_by_architect_id=architect.id
+        )
+        hired_peer = self._add_engineer(
+            "eng-peer", "Peer", hired_by_architect_id=architect.id
         )
         user_engineer = self._add_engineer("eng-user", "User Owned")
         own_task = self._add_task(
@@ -274,15 +292,24 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(denied_text, "Task was not created by this architect")
         self.assertEqual(self.state.board_tasks[other_task.id].assigned_engineer_id, alice.id)
 
-        ok_text, ok_error = await self._call(
+        visible_denied_text, visible_denied_error = await self._call(
             "architect_task_reassign",
             {"task": own_task.id, "new_engineer_id": user_engineer.id},
+            architect.id,
+        )
+        self.assertTrue(visible_denied_error)
+        self.assertEqual(visible_denied_text, "engineer not found in scope")
+        self.assertEqual(self.state.board_tasks[own_task.id].assigned_engineer_id, alice.id)
+
+        ok_text, ok_error = await self._call(
+            "architect_task_reassign",
+            {"task": own_task.id, "new_engineer_id": hired_peer.id},
             architect.id,
         )
         self.assertFalse(ok_error, ok_text)
         self.assertEqual(
             self.state.board_tasks[own_task.id].assigned_engineer_id,
-            user_engineer.id,
+            hired_peer.id,
         )
 
     async def test_architect_task_create_and_reassign_reject_non_engineer_targets(self):
