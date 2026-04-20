@@ -650,7 +650,8 @@ function createWsRenderHarness() {
     renderTemplatesPanel = function() { renderCalls.actions++; };
     renderContextPanel = function() { renderCalls.context++; };
     renderEvents = function() { renderCalls.events++; };
-    renderWeaverPanel = function() { renderCalls.weaver++; };
+    renderAgentPanel = function() { renderCalls.weaver++; };
+    renderWeaverPanel = function() {};
     renderAgentTemplatesPanel = function() { renderCalls.templates++; };
     updateEventsAttentionBadge = function() {};
     _expectedSeq = 1;
@@ -685,6 +686,7 @@ function createMainHarness(overrides = {}) {
     renderBoard() {},
     tplEditorLoad() {},
     renderEvents() {},
+    renderAgentPanel() {},
     renderWeaverPanel() {},
     agentTemplateEditorLoad() {},
     agentHistoryLoad() {},
@@ -783,7 +785,8 @@ function createStandaloneWsSyncHarness() {
     renderTemplatesPanel = function() { renderCalls.actions++; };
     renderContextPanel = function() { renderCalls.context++; };
     renderEvents = function() { renderCalls.events++; };
-    renderWeaverPanel = function() { renderCalls.weaver++; };
+    renderAgentPanel = function() { renderCalls.weaver++; };
+    renderWeaverPanel = function() {};
     renderAgentTemplatesPanel = function() { renderCalls.templates++; };
     updateEventsAttentionBadge = function() {};
     _panelStateRestored = true;
@@ -5528,6 +5531,36 @@ test('classic terminal selection keeps the current agent context on the toolbelt
   assert.equal(context.focusEmbeddedTerminalWorkspaceCalls, 0);
 });
 
+test('clicking empty main-grid space clears focusedItemId and re-renders the agent panel surface', () => {
+  const { sandbox, document } = createSandbox();
+  sandbox.renderCalls = { main: 0, agent: 0 };
+  const main = document.register('main');
+  const context = vm.createContext(sandbox);
+  loadScript(context, 'static/js/commands.js');
+  runInContext(context, `
+    var dragInProgress = false;
+    var focusedItemId = 'agent-1';
+    render = function() {
+      renderCalls.main++;
+      if (typeof renderAgentPanel === 'function') renderAgentPanel();
+    };
+    renderAgentPanel = function() { renderCalls.agent++; };
+  `);
+
+  context.setupDrag();
+  main.listeners.click({
+    target: {
+      closest() { return null; },
+    },
+  });
+
+  assert.equal(jsonValue(context, 'focusedItemId'), null);
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.renderCalls)), {
+    main: 1,
+    agent: 1,
+  });
+});
+
 test('terminal workspace stays inert when embedded runtime is disabled', () => {
   const { context, document, sockets } = createEmbeddedTerminalHarness();
   const workspace = document.getElementById('terminal-workspace');
@@ -6658,6 +6691,38 @@ test('weaver sent-event deltas rerender only the active Weaver panel', () => {
   assert.deepEqual(jsonValue(context, 'state.weaver_sent_events.alpha'), [
     { id: 11, kind: 'task_completed', message: 'Merged cleanly', timestamp: 1, delivered_at: 2 },
   ]);
+});
+
+test('renderActivePanel routes the weaver surface through renderAgentPanel instead of renderWeaverPanel', () => {
+  const { context, sandbox } = createWsRenderHarness();
+  sandbox._activePanelApp = 'weaver';
+  sandbox.renderCalls.agent = 0;
+  sandbox.renderCalls.legacy = 0;
+  runInContext(context, `
+    renderAgentPanel = function() { renderCalls.agent++; };
+    renderWeaverPanel = function() { renderCalls.legacy++; };
+  `);
+
+  context.renderActivePanel();
+
+  assert.equal(sandbox.renderCalls.agent, 1);
+  assert.equal(sandbox.renderCalls.legacy, 0);
+});
+
+test('togglePanel renders the weaver surface through renderAgentPanel instead of renderWeaverPanel', () => {
+  const { context, sandbox } = createMainHarness({
+    renderAgentPanel() {
+      sandbox.agentPanelCalls = (sandbox.agentPanelCalls || 0) + 1;
+    },
+    renderWeaverPanel() {
+      sandbox.legacyWeaverCalls = (sandbox.legacyWeaverCalls || 0) + 1;
+    },
+  });
+
+  context.togglePanel('weaver');
+
+  assert.equal(sandbox.agentPanelCalls, 1);
+  assert.equal(sandbox.legacyWeaverCalls || 0, 0);
 });
 
 test('weaver worklog deltas rerender only the active Weaver panel', () => {

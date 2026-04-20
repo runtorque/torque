@@ -146,7 +146,7 @@ function togglePanel(appName) {
     _loadPanelApp(appName);
     if (appName === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
-    if (appName === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
+    if (appName === 'weaver' && typeof renderAgentPanel === 'function') renderAgentPanel();
   }
   // Persist panel state to server
   send({ cmd: 'board_set_panel', active: _activePanelApp || '' });
@@ -194,7 +194,7 @@ function _restorePanelState() {
     _loadPanelApp(active);
     if (active === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
-    if (active === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
+    if (active === 'weaver' && typeof renderAgentPanel === 'function') renderAgentPanel();
   }
 }
 

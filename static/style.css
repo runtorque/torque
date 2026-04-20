@@ -5493,6 +5493,7 @@ body.diff-view-open #ctx-menu {
   height: calc(100% - 5px);
   min-height: 0;
 }
+.agent-panel,
 .agent-panel-panel {
   display: flex;
   flex-direction: column;
