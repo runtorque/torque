@@ -3116,7 +3116,7 @@ function _weaverGetSettings(group) {
 function _weaverPanelEmptyMessage(group, ws, weaver, bstats) {
   if (!group) return 'Select a group to inspect Weaver orchestration state.';
   if (_weaverHasPanelState(group, ws, weaver, bstats)) return '';
-  return 'No Weaver configured for ' + group + '. Create one from the group\'s + New menu or Group Settings -> Weaver.';
+  return 'No Weaver configured for ' + group + ' yet.';
 }
 
 function _weaverHasPanelState(group, ws, weaver, bstats) {

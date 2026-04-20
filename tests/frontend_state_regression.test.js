@@ -651,7 +651,6 @@ function createWsRenderHarness() {
     renderContextPanel = function() { renderCalls.context++; };
     renderEvents = function() { renderCalls.events++; };
     renderAgentPanel = function() { renderCalls.weaver++; };
-    renderAgentPanel = function() {};
     renderAgentTemplatesPanel = function() { renderCalls.templates++; };
     updateEventsAttentionBadge = function() {};
     _expectedSeq = 1;
@@ -686,7 +685,6 @@ function createMainHarness(overrides = {}) {
     renderBoard() {},
     tplEditorLoad() {},
     renderEvents() {},
-    renderAgentPanel() {},
     renderAgentPanel() {},
     agentTemplateEditorLoad() {},
     agentHistoryLoad() {},
@@ -6266,6 +6264,16 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-agent');
   panel.querySelector = function() { return null; };
+  context.state.agents = {
+    'eng-1': {
+      id: 'eng-1',
+      name: 'Engineer One',
+      group: 'alpha',
+      kind: 'engineer',
+      cell_type: 'agent',
+    },
+  };
+  context.focusedItemId = 'eng-1';
   context.state.weaver_buffer_stats = {
     alpha: {
       buffered_events: 1,
@@ -6283,14 +6291,14 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
   };
 
   context.renderAgentPanel();
-  runInContext(context, `weaverSelectTab('events')`);
+  runInContext(context, `agentPanelSelectTab('events')`);
 
-  assert.match(panel.innerHTML, /id="weaver-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Queued for next digest/);
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /id="weaver-tab-events" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Already sent to Weaver/);
 });
 
@@ -6322,18 +6330,19 @@ test('renderAgentPanel preserves the selected Worklog tab across rerenders', () 
     },
   };
   context.state.agents = {
-    'agent-1': { id: 'agent-1', name: 'Worker', group: 'alpha', cell_type: 'agent' },
+    'agent-1': { id: 'agent-1', name: 'Engineer One', group: 'alpha', kind: 'engineer', cell_type: 'agent' },
   };
+  context.focusedItemId = 'agent-1';
 
   context.renderAgentPanel();
-  runInContext(context, `weaverSelectTab('worklog')`);
+  runInContext(context, `agentPanelSelectTab('worklog')`);
 
-  assert.match(panel.innerHTML, /id="weaver-tab-worklog" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Dispatched tasks/);
 
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /id="weaver-tab-worklog" class="agent-panel-tab active"/);
+  assert.match(panel.innerHTML, /id="agent-panel-tab-worklog" class="agent-panel-tab active"/);
   assert.match(panel.innerHTML, /Awaiting approval/);
 });
 
@@ -6578,8 +6587,9 @@ test('renderAgentPanel shows branch review-point summary in Session Map view', (
     },
     'agent-1': {
       id: 'agent-1',
-      name: 'Worker',
+      name: 'Engineer One',
       group: 'alpha',
+      kind: 'engineer',
       cell_type: 'agent',
       status: 'running',
       worktree_path: '/repo/.loom/worktrees/worker',
@@ -6608,6 +6618,7 @@ test('renderAgentPanel shows branch review-point summary in Session Map view', (
     },
   };
   context._weaverJournalSubviewByGroup.alpha = 'session_map';
+  context.focusedItemId = 'agent-1';
 
   context.renderAgentPanel();
 
@@ -6662,7 +6673,7 @@ test('weaver settings deltas rerender the main grid for card pause state updates
   });
 });
 
-test('weaver sent-event deltas rerender only the active Weaver panel', () => {
+test('weaver sent-event deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'weaver';
 
@@ -6693,39 +6704,32 @@ test('weaver sent-event deltas rerender only the active Weaver panel', () => {
   ]);
 });
 
-test('renderActivePanel routes the weaver surface through renderAgentPanel instead of renderAgentPanel', () => {
+test('renderActivePanel routes the agent slot through renderAgentPanel only', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'weaver';
   sandbox.renderCalls.agent = 0;
-  sandbox.renderCalls.legacy = 0;
   runInContext(context, `
     renderAgentPanel = function() { renderCalls.agent++; };
-    renderAgentPanel = function() { renderCalls.legacy++; };
   `);
 
   context.renderActivePanel();
 
   assert.equal(sandbox.renderCalls.agent, 1);
-  assert.equal(sandbox.renderCalls.legacy, 0);
 });
 
-test('togglePanel renders the weaver surface through renderAgentPanel instead of renderAgentPanel', () => {
+test('togglePanel renders the agent slot through renderAgentPanel only', () => {
   const { context, sandbox } = createMainHarness({
     renderAgentPanel() {
       sandbox.agentPanelCalls = (sandbox.agentPanelCalls || 0) + 1;
-    },
-    renderAgentPanel() {
-      sandbox.legacyWeaverCalls = (sandbox.legacyWeaverCalls || 0) + 1;
     },
   });
 
   context.togglePanel('weaver');
 
   assert.equal(sandbox.agentPanelCalls, 1);
-  assert.equal(sandbox.legacyWeaverCalls || 0, 0);
 });
 
-test('weaver worklog deltas rerender only the active Weaver panel', () => {
+test('weaver worklog deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'weaver';
 
@@ -6770,7 +6774,7 @@ test('weaver worklog deltas rerender only the active Weaver panel', () => {
   ]);
 });
 
-test('weaver stream deltas rerender only the active Weaver panel', () => {
+test('weaver stream deltas rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'weaver';
 
@@ -6819,7 +6823,7 @@ test('weaver stream deltas rerender only the active Weaver panel', () => {
   });
 });
 
-test('weaver Session Map responses rerender only the active Weaver panel', () => {
+test('weaver Session Map responses rerender only the active agent panel surface', () => {
   const { context, sandbox } = createWsRenderHarness();
   sandbox._activePanelApp = 'weaver';
   runInContext(context, `
@@ -7111,20 +7115,15 @@ test('standalone panel title renames templates surface to library', () => {
   assert.equal(jsonValue(context, `_standalonePanelTitle('templates')`), 'Library');
 });
 
-test('renderAgentPanel shows a group-scoped empty state before a weaver exists', () => {
+test('renderAgentPanel shows the focused-agent empty state when nothing is focused', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-agent');
   panel.querySelector = function() { return null; };
 
-  runInContext(context, `
-    state.groups = { alpha: [] };
-    state.group_settings = {};
-  `);
-
   context.renderAgentPanel();
 
-  assert.match(panel.innerHTML, /No Weaver configured for alpha/);
-  assert.doesNotMatch(panel.innerHTML, /weaver-tab-journal/);
+  assert.match(panel.innerHTML, /Select an agent from the grid to see its context\./);
+  assert.doesNotMatch(panel.innerHTML, /agent-panel-tab-/);
 });
 
 test('opening agents panel requests history when history is the active view', () => {

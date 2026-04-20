@@ -501,7 +501,7 @@ test('worker worklog updates after task changes and preserves the current anchor
   assert.equal(newContent.scrollTop, 20);
 });
 
-test('_weaverReceiveSessionMap keeps the focused-agent panel rendered when weaver.js is loaded', () => {
+test('_weaverReceiveSessionMap keeps the focused-agent panel rendered when agent panel support is loaded', () => {
   const { context, panel } = createHarness();
   setFocusedAgent(context, {
     id: 'worker-1',
