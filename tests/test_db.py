@@ -2159,6 +2159,99 @@ class LoomDBTests(unittest.TestCase):
             "1",
         )
 
+    def test_init_ignores_stale_group_settings_weaver_without_engineer(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-stale-group-weaver.db",
+            agents=[
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="alpha",
+                    slug="worker",
+                ),
+            ],
+            tasks=[BoardTask(id="LOOM:1", task="Loom task", group="loom")],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="stale-id"),
+            },
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        self.assertIn(
+            "migration: ignoring stale weaver_agent_id='stale-id' for group='loom'",
+            "\n".join(cm.output),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+            ).fetchone()[0],
+            "",
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "2",
+        )
+
+    def test_init_ignores_stale_group_settings_weaver_with_heuristic_engineer(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-stale-group-weaver-heuristic.db",
+            agents=[
+                AgentCell(
+                    id="root-1",
+                    name="Weaver",
+                    group="loom",
+                    slug="weaver",
+                ),
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="loom",
+                    slug="worker",
+                    created_by_weaver_id="root-1",
+                ),
+            ],
+            tasks=[BoardTask(id="LOOM:1", task="Loom task", group="loom")],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="stale-id"),
+            },
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="WARNING") as cm:
+            migrated.init()
+
+        self.assertIn(
+            "migration: ignoring stale weaver_agent_id='stale-id' for group='loom'",
+            "\n".join(cm.output),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT kind, persistent FROM agents WHERE id='root-1'"
+            ).fetchone(),
+            ("engineer", 1),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+            ).fetchone()[0],
+            "",
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "2",
+        )
+
     def test_init_fixes_version2_unassigned_tasks_from_group_settings(self):
         path = self._seed_stage1a_db(
             "kinds-backfill-fixup.db",
@@ -2235,6 +2328,69 @@ class LoomDBTests(unittest.TestCase):
                 ("ALPHA:1", "explicit-owner"),
                 ("LOOM:1", "root-1"),
             ],
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key=?",
+                ("schema_kinds_task_assignment_fixup_applied",),
+            ).fetchone()[0],
+            "1",
+        )
+
+    def test_init_fixup_ignores_stale_group_settings_weaver_for_unassigned_tasks(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-fixup-stale-group-weaver.db",
+            agents=[
+                AgentCell(
+                    id="root-1",
+                    name="Weaver",
+                    group="loom",
+                    slug="weaver",
+                    kind="engineer",
+                    persistent=True,
+                ),
+            ],
+            tasks=[BoardTask(id="LOOM:1", task="Needs fixup", group="loom")],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="stale-id"),
+            },
+        )
+        conn = sqlite3.connect(str(path))
+        conn.execute(
+            "UPDATE meta SET value='2' WHERE key='schema_kinds_migration_version'"
+        )
+        conn.execute(
+            "DELETE FROM meta WHERE key='schema_kinds_task_assignment_fixup_applied'"
+        )
+        conn.execute(
+            "UPDATE agents SET kind='engineer', persistent=1 WHERE id='root-1'"
+        )
+        conn.execute(
+            "UPDATE board_tasks SET assigned_engineer_id='' WHERE id='LOOM:1'"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="WARNING") as cm:
+            migrated.init()
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn(
+            "migration: ignoring stale weaver_agent_id='stale-id' for group='loom'",
+            joined_logs,
+        )
+        self.assertIn(
+            "migration: kinds task assignment fixup applied (updated=0)",
+            joined_logs,
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+            ).fetchone()[0],
+            "",
         )
         self.assertEqual(
             migrated._conn.execute(

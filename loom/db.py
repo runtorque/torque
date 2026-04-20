@@ -2190,14 +2190,40 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             return False
 
     def _load_group_weaver_map(self) -> dict[str, str]:
+        valid_agent_ids_by_group: dict[str, set[str]] = {}
+        for agent_id, group_name in self._conn.execute(
+            "SELECT id, group_name FROM agents WHERE cell_type='agent'"
+        ).fetchall():
+            agent_id = str(agent_id or "").strip()
+            group_name = str(group_name or "").strip()
+            if not agent_id or not group_name:
+                continue
+            valid_agent_ids_by_group.setdefault(group_name, set()).add(agent_id)
+
         rows = self._conn.execute(
             "SELECT group_name, weaver_agent_id FROM group_settings"
         ).fetchall()
-        return {
-            str(group_name or "").strip(): str(weaver_agent_id or "").strip()
-            for group_name, weaver_agent_id in rows
-            if str(group_name or "").strip()
-        }
+        group_weaver_map: dict[str, str] = {}
+        for group_name, weaver_agent_id in rows:
+            group_name = str(group_name or "").strip()
+            if not group_name:
+                continue
+            weaver_agent_id = str(weaver_agent_id or "").strip()
+            if (
+                weaver_agent_id
+                and weaver_agent_id
+                in valid_agent_ids_by_group.get(group_name, set())
+            ):
+                group_weaver_map[group_name] = weaver_agent_id
+                continue
+            if weaver_agent_id:
+                log.warning(
+                    "migration: ignoring stale weaver_agent_id=%r for group=%r",
+                    weaver_agent_id,
+                    group_name,
+                )
+            group_weaver_map[group_name] = ""
+        return group_weaver_map
 
     def _backfill_task_assignments_from_group_settings(
         self,
@@ -2316,8 +2342,6 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             )
             group_weaver_map = self._load_group_weaver_map()
             configured_loom_weaver_id = group_weaver_map.get(_KINDS_WEAVER_GROUP, "")
-            if engineer_id and configured_loom_weaver_id:
-                assert configured_loom_weaver_id == engineer_id
             self._backfill_task_assignments_from_group_settings(
                 group_weaver_map,
                 only_unassigned=False,
