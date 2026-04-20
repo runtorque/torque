@@ -349,3 +349,32 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(cell)
         self.assertEqual(cell.created_by_weaver_id, "weaver-1")
+
+    def test_runtime_env_vars_for_engineer_adds_binding(self):
+        cell = types.SimpleNamespace(
+            id="eng-1",
+            cell_type="agent",
+            kind="engineer",
+        )
+
+        env = self.server_agent_mod.runtime_env_vars_for_cell(
+            cell, {"BASE": "1"}
+        )
+
+        self.assertEqual(
+            env,
+            {"BASE": "1", "LOOM_ENGINEER_ID": "eng-1"},
+        )
+
+    def test_mcp_entrypoint_for_cell_uses_engineer_entrypoint(self):
+        engineer = types.SimpleNamespace(cell_type="agent", kind="engineer")
+        worker = types.SimpleNamespace(cell_type="agent", kind="worker")
+
+        self.assertEqual(
+            self.server_agent_mod.mcp_entrypoint_for_cell(engineer),
+            self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,
+        )
+        self.assertEqual(
+            self.server_agent_mod.mcp_entrypoint_for_cell(worker),
+            self.server_agent_mod.DEFAULT_MCP_ENTRYPOINT,
+        )
