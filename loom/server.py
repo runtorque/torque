@@ -5032,6 +5032,9 @@ async def main(connection=None):
                 # Preview rendered prompt for a task or inline params
                 tid = data.get("id", "")
                 act_name = data.get("action_name", "")
+                preview_role_slug = str(
+                    data.get("agent_template", "") or ""
+                ).strip()
                 task_text = data.get("task", "")
                 avars = data.get("action_vars", {})
                 act_group = data.get("group", "")
@@ -5043,6 +5046,10 @@ async def main(connection=None):
                     if t:
                         task_text = t.task
                         act_name = act_name or t.action_name
+                        preview_role_slug = (
+                            preview_role_slug
+                            or str(t.agent_template or "").strip()
+                        )
                         avars = avars or t.action_vars or {}
                         act_group = act_group or t.group
                         attachments = t.attachments or []
@@ -5061,6 +5068,26 @@ async def main(connection=None):
                     preview_cell = state.agents.get(preview_agent_id)
                 elif preview_task and preview_task.agent_id:
                     preview_cell = state.agents.get(preview_task.agent_id)
+                elif preview_role_slug:
+                    preview_cell = SimpleNamespace(
+                        id="",
+                        name="",
+                        slug="",
+                        group=act_group,
+                        cell_type="agent",
+                        agent_type="",
+                        directory="",
+                        kind="worker",
+                        role=preview_role_slug,
+                        template=preview_role_slug,
+                        owner_engineer_id="",
+                        created_by_weaver_id="",
+                        worktree_repo_root="",
+                        git_root="",
+                        worktree_branch="",
+                        worktree_auto_checkpoint=False,
+                        checkpoint_on_progress=False,
+                    )
 
                 preview_task_obj = preview_task or SimpleNamespace(
                     id=tid,
@@ -5084,6 +5111,7 @@ async def main(connection=None):
                     attachments=attachments or [],
                     artifacts=artifacts or [],
                     action_name=act_name,
+                    agent_template=preview_role_slug,
                     created_at="",
                     updated_at="",
                     agent_id=preview_agent_id,

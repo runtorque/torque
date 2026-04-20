@@ -158,6 +158,23 @@ class RoleManagerTests(unittest.TestCase):
         self.assertTrue(deleted)
         self.assertFalse(legacy_path.exists())
 
+    def test_delete_role_removes_legacy_only_entry(self):
+        legacy_path = self.user_templates / "legacy.yaml"
+        legacy_path.write_text("name: legacy\ndescription: Legacy\n")
+
+        listed = self.mgr.list_roles(str(self.project))
+        legacy = next(item for item in listed if item["name"] == "legacy")
+        self.assertTrue(legacy["legacy"])
+
+        deleted = self.mgr.delete_role(
+            "legacy",
+            scope="user",
+            base_dir=str(self.project),
+        )
+
+        self.assertTrue(deleted)
+        self.assertFalse(legacy_path.exists())
+
     def test_render_preamble_formats_all_supported_shapes(self):
         render = self.mgr.render_preamble
 

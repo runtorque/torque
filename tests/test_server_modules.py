@@ -341,6 +341,24 @@ class ServerModuleExtractionTests(unittest.TestCase):
 
             legacy_user_template = home / '.loom' / 'agents' / 'legacy.yaml'
             legacy_user_template.write_text('name: legacy\ndescription: Legacy\n')
+            delete_role_legacy = asyncio.run(
+                self.server_mod._handle_role_template_command(
+                    {
+                        'cmd': 'delete_role',
+                        'group': 'g',
+                        'name': 'legacy',
+                        'scope': 'user',
+                    },
+                    role_mgr,
+                    resolve_base_dir,
+                )
+            )
+
+            self.assertEqual(delete_role_legacy['type'], 'roles')
+            self.assertEqual(delete_role_legacy['deleted'], 'legacy')
+            self.assertFalse(legacy_user_template.exists())
+
+            legacy_user_template.write_text('name: legacy\ndescription: Legacy\n')
             delete_template = asyncio.run(
                 self.server_mod._handle_role_template_command(
                     {

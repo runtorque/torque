@@ -339,7 +339,7 @@ class RoleManager(TemplateManager):
                 if os.path.isfile(path):
                     os.remove(path)
                     return True
-        return False
+        return self.delete_template(name, scope=scope, base_dir=base_dir)
 
     def delete_template(self, name: str,
                         scope: str = "", base_dir: str = "") -> bool:

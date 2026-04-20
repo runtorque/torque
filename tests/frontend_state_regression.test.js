@@ -7006,6 +7006,38 @@ test('openEditTask populates modal state from the task and preserves editable ve
   ]);
 });
 
+test('previewTaskPrompt includes the currently selected role in the preview request', () => {
+  const { context, document } = createModalHarness();
+
+  document.register('task-task-input').value = 'Review role preview';
+  document.register('task-description-input').value = 'Make sure the preamble shows up';
+  document.register('task-group-select').value = 'beta';
+
+  runInContext(context, `
+    _taskSelectedAction = 'feature/review';
+    _taskSelectedTemplate = 'worker/reviewer';
+    _taskAttachments = [];
+    _taskArtifacts = [];
+    _taskEditId = 'task-1';
+    previewTaskPrompt();
+  `);
+
+  assert.deepEqual(jsonValue(context, 'sendCalls'), [
+    {
+      cmd: 'preview_prompt',
+      task: 'Review role preview',
+      description: 'Make sure the preamble shows up',
+      action_name: 'feature/review',
+      action_vars: {},
+      agent_template: 'worker/reviewer',
+      group: 'beta',
+      attachments: [],
+      artifacts: [],
+      id: 'task-1',
+    },
+  ]);
+});
+
 test('openEditTask clears past scheduled times instead of showing stale dispatch state', () => {
   const { context, document } = createModalHarness();
 

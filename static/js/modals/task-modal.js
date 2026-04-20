@@ -763,6 +763,7 @@ function previewTaskPrompt() {
     description: description,
     action_name: _taskSelectedAction,
     action_vars: actionVars,
+    agent_template: _taskSelectedTemplate,
     group: document.getElementById('task-group-select').value,
     attachments: _taskAttachments.slice(),
     artifacts: _taskArtifacts.slice(),
