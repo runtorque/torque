@@ -175,6 +175,33 @@ class ServerModuleExtractionTests(unittest.TestCase):
             {'type': 'error', 'message': 'Delivery is paused'},
         )
 
+    def test_doctor_command_returns_stage1_report(self):
+        from loom.db import LoomDB
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = LoomDB(Path(tmp) / 'loom.db')
+            db.init()
+            self.addCleanup(db.close)
+            db.save_agent(
+                self.state_mod.AgentCell(
+                    id='weaver-1',
+                    name='Weaver',
+                    group='loom',
+                    slug='weaver',
+                    cell_type='agent',
+                    kind='engineer',
+                    persistent=True,
+                )
+            )
+
+            result = self.server_mod._handle_doctor_command(db)
+
+        self.assertEqual(result['schema_version'], 1)
+        self.assertEqual(result['result'], 'pass')
+        self.assertIn('migration', result)
+        self.assertIn('checks', result)
+        self.assertEqual(result['agents']['engineer'], 1)
+
     def test_emit_task_artifact_uploaded_event_uses_digest_friendly_summary(self):
         task = self.state_mod.BoardTask(
             id='task-1',

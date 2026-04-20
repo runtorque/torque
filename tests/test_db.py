@@ -1,8 +1,10 @@
 import tempfile
 import unittest
+import logging
 from pathlib import Path
 import json
 import sqlite3
+from unittest import mock
 
 try:
     from helpers import install_aiohttp_stub
@@ -22,6 +24,60 @@ class LoomDBTests(unittest.TestCase):
         self.db = LoomDB(Path(self.tmp.name) / "loom.db")
         self.db.init()
         self.addCleanup(self.db.close)
+
+    def _seed_stage1a_db(
+        self,
+        filename: str,
+        *,
+        agents=None,
+        tasks=None,
+        group_settings=None,
+    ):
+        path = Path(self.tmp.name) / filename
+        seeded = LoomDB(path)
+        seeded.init()
+        if agents:
+            for agent in agents:
+                seeded.save_agent(agent)
+        if tasks:
+            for task in tasks:
+                seeded.save_board_task(task)
+        if group_settings:
+            for group_name, settings in group_settings.items():
+                seeded.save_group_settings(group_name, settings)
+        seeded.close()
+
+        conn = sqlite3.connect(str(path))
+        conn.execute(
+            "UPDATE meta SET value='1' WHERE key='schema_kinds_migration_version'"
+        )
+        conn.execute(
+            "UPDATE meta SET value='2026-04-19T00:00:00+00:00' "
+            "WHERE key='schema_kinds_migration_migrated_at'"
+        )
+        conn.execute(
+            "UPDATE agents SET kind='', role='', owner_engineer_id='', "
+            "hired_by_architect_id='', persistent=0"
+        )
+        conn.execute(
+            "UPDATE board_tasks SET assigned_engineer_id='', "
+            "created_by_architect_id='', suggested_action=''"
+        )
+        conn.commit()
+        conn.close()
+        return path
+
+    def _add_legacy_board_task_owner_column(self, conn=None):
+        close_conn = False
+        if conn is None:
+            conn = sqlite3.connect(str(self.db.db_path))
+            close_conn = True
+        conn.execute(
+            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
+        )
+        conn.commit()
+        if close_conn:
+            conn.close()
 
     def test_load_all_roundtrips_json_and_boolean_fields(self):
         cell = AgentCell(
@@ -47,6 +103,11 @@ class LoomDBTests(unittest.TestCase):
             idle_timeout=9,
             tasks_dispatched=3,
             created_by_weaver_id="weaver-1",
+            kind="worker",
+            role="researcher",
+            owner_engineer_id="weaver-1",
+            hired_by_architect_id="architect-1",
+            persistent=True,
         )
         self.db.save_agent(cell)
         self.db.save_groups({"g": [cell.id]}, {"g": "g"})
@@ -79,6 +140,9 @@ class LoomDBTests(unittest.TestCase):
                 lane="In Progress",
                 position=2,
                 agent_id=cell.id,
+                assigned_engineer_id="engineer-1",
+                created_by_architect_id="architect-1",
+                suggested_action="feature/review",
                 reply_agent_id="agent-2",
                 labels=["loom:blocked", "keep"],
                 created_at="2026-04-06T00:00:00+00:00",
@@ -169,6 +233,17 @@ class LoomDBTests(unittest.TestCase):
             loaded["agents"]["agent-1"]["created_by_weaver_id"],
             "weaver-1",
         )
+        self.assertEqual(loaded["agents"]["agent-1"]["kind"], "worker")
+        self.assertEqual(loaded["agents"]["agent-1"]["role"], "researcher")
+        self.assertEqual(
+            loaded["agents"]["agent-1"]["owner_engineer_id"],
+            "weaver-1",
+        )
+        self.assertEqual(
+            loaded["agents"]["agent-1"]["hired_by_architect_id"],
+            "architect-1",
+        )
+        self.assertTrue(loaded["agents"]["agent-1"]["persistent"])
         self.assertEqual(
             loaded["group_settings"]["g"]["default_terminal_backend"],
             "pty",
@@ -208,6 +283,18 @@ class LoomDBTests(unittest.TestCase):
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["reply_agent_id"],
             "agent-2",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["assigned_engineer_id"],
+            "engineer-1",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["created_by_architect_id"],
+            "architect-1",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["suggested_action"],
+            "feature/review",
         )
         self.assertEqual(
             loaded["board_tasks"]["task-1"]["lane_entered_at"],
@@ -268,6 +355,231 @@ class LoomDBTests(unittest.TestCase):
             "weaver-1",
         )
 
+    def test_save_agent_and_board_task_update_preserve_kinds_fields(self):
+        cell = AgentCell(
+            id="agent-kinds",
+            name="Kinds Worker",
+            group="g",
+            slug="kinds-worker",
+            kind="worker",
+            role="researcher",
+            owner_engineer_id="engineer-1",
+            hired_by_architect_id="architect-1",
+            persistent=False,
+        )
+        task = BoardTask(
+            id="task-kinds",
+            task="Kinds task",
+            group="g",
+            slug="kinds-task",
+            agent_id=cell.id,
+            assigned_engineer_id="engineer-1",
+            created_by_architect_id="architect-1",
+            suggested_action="feature/review",
+        )
+
+        self.db.save_agent(cell)
+        self.db.save_board_task(task)
+
+        cell.kind = "architect"
+        cell.role = "lead"
+        cell.owner_engineer_id = "engineer-2"
+        cell.hired_by_architect_id = "architect-2"
+        cell.persistent = True
+        task.assigned_engineer_id = "engineer-2"
+        task.created_by_architect_id = "architect-2"
+        task.suggested_action = "feature/fix-review"
+
+        self.db.save_agent(cell)
+        self.db.save_board_task(task)
+
+        row = self.db._conn.execute(
+            "SELECT kind, role, owner_engineer_id, hired_by_architect_id, "
+            "persistent FROM agents WHERE id=?",
+            (cell.id,),
+        ).fetchone()
+        self.assertEqual(
+            row,
+            ("architect", "lead", "engineer-2", "architect-2", 1),
+        )
+
+        task_row = self.db._conn.execute(
+            "SELECT assigned_engineer_id, created_by_architect_id, "
+            "suggested_action FROM board_tasks WHERE id=?",
+            (task.id,),
+        ).fetchone()
+        self.assertEqual(
+            task_row,
+            ("engineer-2", "architect-2", "feature/fix-review"),
+        )
+
+        loaded = self.db.load_all()
+        self.assertEqual(loaded["agents"][cell.id]["kind"], "architect")
+        self.assertEqual(loaded["agents"][cell.id]["role"], "lead")
+        self.assertEqual(
+            loaded["agents"][cell.id]["owner_engineer_id"],
+            "engineer-2",
+        )
+        self.assertEqual(
+            loaded["agents"][cell.id]["hired_by_architect_id"],
+            "architect-2",
+        )
+        self.assertTrue(loaded["agents"][cell.id]["persistent"])
+        self.assertEqual(
+            loaded["board_tasks"][task.id]["assigned_engineer_id"],
+            "engineer-2",
+        )
+        self.assertEqual(
+            loaded["board_tasks"][task.id]["created_by_architect_id"],
+            "architect-2",
+        )
+        self.assertEqual(
+            loaded["board_tasks"][task.id]["suggested_action"],
+            "feature/fix-review",
+        )
+
+    def test_save_agent_dual_writes_legacy_and_kinds_fields(self):
+        self.db.save_agent(
+            AgentCell(
+                id="agent-dual-write",
+                name="Dual Writer",
+                group="g",
+                template="researcher",
+                created_by_weaver_id="weaver-1",
+            )
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT template, role, created_by_weaver_id, owner_engineer_id "
+                "FROM agents WHERE id='agent-dual-write'"
+            ).fetchone(),
+            ("researcher", "researcher", "weaver-1", "weaver-1"),
+        )
+
+        self.db.save_agent(
+            AgentCell(
+                id="agent-dual-write",
+                name="Dual Writer",
+                group="g",
+                role="planner",
+                owner_engineer_id="weaver-2",
+            )
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT template, role, created_by_weaver_id, owner_engineer_id "
+                "FROM agents WHERE id='agent-dual-write'"
+            ).fetchone(),
+            ("planner", "planner", "weaver-2", "weaver-2"),
+        )
+
+    def test_save_agent_dual_write_warns_and_prefers_legacy_fields(self):
+        with self.assertLogs("loom", level="WARNING") as cm:
+            self.db.save_agent(
+                AgentCell(
+                    id="agent-dual-conflict",
+                    name="Conflict",
+                    group="g",
+                    template="researcher",
+                    role="planner",
+                    created_by_weaver_id="weaver-1",
+                    owner_engineer_id="weaver-2",
+                )
+            )
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn("template='researcher' != role='planner'", joined_logs)
+        self.assertIn(
+            "created_by_weaver_id='weaver-1' != owner_engineer_id='weaver-2'",
+            joined_logs,
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT template, role, created_by_weaver_id, owner_engineer_id "
+                "FROM agents WHERE id='agent-dual-conflict'"
+            ).fetchone(),
+            ("researcher", "researcher", "weaver-1", "weaver-1"),
+        )
+
+    def test_save_board_task_dual_writes_legacy_and_new_owner_fields(self):
+        self._add_legacy_board_task_owner_column()
+
+        self.db.save_board_task(
+            {
+                "id": "task-dual-assigned",
+                "task": "Assigned-first",
+                "group": "g",
+                "assigned_engineer_id": "weaver-1",
+            }
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT assigned_engineer_id, weaver_owner_id "
+                "FROM board_tasks WHERE id='task-dual-assigned'"
+            ).fetchone(),
+            ("weaver-1", "weaver-1"),
+        )
+
+        self.db.save_board_task(
+            {
+                "id": "task-dual-legacy",
+                "task": "Legacy-first",
+                "group": "g",
+                "weaver_owner_id": "weaver-2",
+            }
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT assigned_engineer_id, weaver_owner_id "
+                "FROM board_tasks WHERE id='task-dual-legacy'"
+            ).fetchone(),
+            ("weaver-2", "weaver-2"),
+        )
+
+    def test_save_board_task_dual_write_warns_and_prefers_legacy_owner(self):
+        self._add_legacy_board_task_owner_column()
+
+        with self.assertLogs("loom", level="WARNING") as cm:
+            self.db.save_board_task(
+                {
+                    "id": "task-dual-conflict",
+                    "task": "Conflict",
+                    "group": "g",
+                    "assigned_engineer_id": "engineer-new",
+                    "weaver_owner_id": "engineer-legacy",
+                }
+            )
+
+        self.assertIn(
+            "weaver_owner_id='engineer-legacy' != assigned_engineer_id='engineer-new'",
+            "\n".join(cm.output),
+        )
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT assigned_engineer_id, weaver_owner_id "
+                "FROM board_tasks WHERE id='task-dual-conflict'"
+            ).fetchone(),
+            ("engineer-legacy", "engineer-legacy"),
+        )
+
+    def test_save_board_task_ignores_legacy_owner_when_column_is_absent(self):
+        self.db.save_board_task(
+            {
+                "id": "task-no-legacy-owner",
+                "task": "No legacy owner column",
+                "group": "g",
+                "weaver_owner_id": "engineer-legacy",
+            }
+        )
+
+        self.assertEqual(
+            self.db._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks "
+                "WHERE id='task-no-legacy-owner'"
+            ).fetchone(),
+            ("",),
+        )
+
     def test_load_all_restores_board_filters_by_group(self):
         filters = {
             "alpha": {
@@ -283,6 +595,127 @@ class LoomDBTests(unittest.TestCase):
         loaded = self.db.load_all()
 
         self.assertEqual(loaded["board_filters_by_group"], filters)
+
+    def test_save_all_preserves_kinds_fields(self):
+        self.db.save_all(
+            {
+                "agents": {
+                    "agent-1": {
+                        "id": "agent-1",
+                        "name": "Architect",
+                        "group": "g",
+                        "slug": "architect",
+                        "kind": "architect",
+                        "role": "lead",
+                        "owner_engineer_id": "engineer-1",
+                        "hired_by_architect_id": "architect-root",
+                        "persistent": 1,
+                    }
+                },
+                "groups": {"g": ["agent-1"]},
+                "group_slugs": {"g": "g"},
+                "board_tasks": {
+                    "task-1": {
+                        "id": "task-1",
+                        "task": "Plan next wave",
+                        "group": "g",
+                        "slug": "plan-next-wave",
+                        "assigned_engineer_id": "engineer-1",
+                        "created_by_architect_id": "architect-root",
+                        "suggested_action": "feature/review",
+                    }
+                },
+            }
+        )
+
+        loaded = self.db.load_all()
+
+        self.assertEqual(loaded["agents"]["agent-1"]["kind"], "architect")
+        self.assertEqual(loaded["agents"]["agent-1"]["role"], "lead")
+        self.assertEqual(
+            loaded["agents"]["agent-1"]["owner_engineer_id"],
+            "engineer-1",
+        )
+        self.assertEqual(
+            loaded["agents"]["agent-1"]["hired_by_architect_id"],
+            "architect-root",
+        )
+        self.assertTrue(loaded["agents"]["agent-1"]["persistent"])
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["assigned_engineer_id"],
+            "engineer-1",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["created_by_architect_id"],
+            "architect-root",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-1"]["suggested_action"],
+            "feature/review",
+        )
+
+    def test_save_all_coalesces_legacy_and_kinds_fields(self):
+        self._add_legacy_board_task_owner_column()
+
+        self.db.save_all(
+            {
+                "agents": {
+                    "agent-1": {
+                        "id": "agent-1",
+                        "name": "Worker",
+                        "group": "g",
+                        "role": "researcher",
+                        "owner_engineer_id": "weaver-1",
+                    },
+                    "agent-2": {
+                        "id": "agent-2",
+                        "name": "Legacy Worker",
+                        "group": "g",
+                        "template": "planner",
+                        "created_by_weaver_id": "weaver-2",
+                    },
+                },
+                "groups": {"g": ["agent-1", "agent-2"]},
+                "group_slugs": {"g": "g"},
+                "board_tasks": {
+                    "task-1": {
+                        "id": "task-1",
+                        "task": "Assigned-first",
+                        "group": "g",
+                        "assigned_engineer_id": "weaver-1",
+                    },
+                    "task-2": {
+                        "id": "task-2",
+                        "task": "Legacy-first",
+                        "group": "g",
+                        "weaver_owner_id": "weaver-2",
+                    },
+                },
+            }
+        )
+
+        agent_rows = self.db._conn.execute(
+            "SELECT id, template, role, created_by_weaver_id, owner_engineer_id "
+            "FROM agents ORDER BY id"
+        ).fetchall()
+        self.assertEqual(
+            agent_rows,
+            [
+                ("agent-1", "researcher", "researcher", "weaver-1", "weaver-1"),
+                ("agent-2", "planner", "planner", "weaver-2", "weaver-2"),
+            ],
+        )
+        task_rows = self.db._conn.execute(
+            "SELECT id, assigned_engineer_id, weaver_owner_id "
+            "FROM board_tasks ORDER BY id"
+        ).fetchall()
+        self.assertEqual(
+            task_rows,
+            [
+                ("task-1", "weaver-1", "weaver-1"),
+                ("task-2", "weaver-2", "weaver-2"),
+            ],
+        )
 
     def test_init_migrates_legacy_task_ids_and_rewrites_references(self):
         legacy_db = Path(self.tmp.name) / "legacy.db"
@@ -1076,3 +1509,893 @@ class LoomDBTests(unittest.TestCase):
             "PRAGMA table_info(memory_entries)"
         ).fetchall()
         self.assertIn("retention_kind", [row[1] for row in cols])
+
+    def test_init_applies_kinds_schema_migration_once_with_backup(self):
+        legacy_path = Path(self.tmp.name) / "legacy-kinds.db"
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute("CREATE TABLE keep (id TEXT PRIMARY KEY)")
+        conn.execute("INSERT INTO keep (id) VALUES ('row-1')")
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(legacy_path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        backup_path = legacy_path.with_name("loom.db.pre-kinds.bak")
+        joined_logs = "\n".join(cm.output)
+        self.assertIn(
+            f"migration: created pre-kinds backup at {backup_path}",
+            joined_logs,
+        )
+        self.assertIn(
+            f"migration: kinds schema applied (version=1, backup={backup_path})",
+            joined_logs,
+        )
+        self.assertIn(
+            "migration: no Weaver found, skipping engineer backfill",
+            joined_logs,
+        )
+        self.assertIn(
+            "migration: kinds backfill applied (engineer=None, workers=0, tasks=0)",
+            joined_logs,
+        )
+        self.assertTrue(backup_path.exists())
+        self.assertGreater(backup_path.stat().st_size, 0)
+
+        backup_conn = sqlite3.connect(str(backup_path))
+        self.addCleanup(backup_conn.close)
+        self.assertEqual(
+            backup_conn.execute("SELECT id FROM keep").fetchone()[0],
+            "row-1",
+        )
+
+        agent_cols = {
+            row[1]: row
+            for row in migrated._conn.execute("PRAGMA table_info(agents)").fetchall()
+        }
+        for col, default in {
+            "kind": "''",
+            "role": "''",
+            "owner_engineer_id": "''",
+            "hired_by_architect_id": "''",
+            "persistent": "0",
+        }.items():
+            self.assertIn(col, agent_cols)
+            self.assertEqual(str(agent_cols[col][4]), default)
+
+        task_cols = {
+            row[1]: row
+            for row in migrated._conn.execute(
+                "PRAGMA table_info(board_tasks)"
+            ).fetchall()
+        }
+        for col in (
+            "assigned_engineer_id",
+            "created_by_architect_id",
+            "suggested_action",
+        ):
+            self.assertIn(col, task_cols)
+            self.assertEqual(str(task_cols[col][4]), "''")
+
+        decisions_sql = migrated._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='decisions'"
+        ).fetchone()[0]
+        self.assertIn("CREATE TABLE decisions", decisions_sql)
+        self.assertIn("architect_id TEXT NOT NULL DEFAULT ''", decisions_sql)
+        self.assertIn("linked_engineer_ids TEXT NOT NULL DEFAULT '[]'", decisions_sql)
+        self.assertIsNotNone(
+            migrated._conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='index' AND name='idx_decisions_architect'"
+            ).fetchone()
+        )
+
+        version = migrated._conn.execute(
+            "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+        ).fetchone()[0]
+        migrated_at = migrated._conn.execute(
+            "SELECT value FROM meta WHERE key='schema_kinds_migration_migrated_at'"
+        ).fetchone()[0]
+        self.assertEqual(version, "2")
+        self.assertTrue(migrated_at)
+
+        migrated.save_agent(
+            AgentCell(
+                id="agent-kinds",
+                name="Kinds Worker",
+                group="g",
+                slug="kinds-worker",
+            )
+        )
+        migrated.save_board_task(
+            BoardTask(
+                id="task-kinds",
+                task="Kinds Task",
+                slug="kinds-task",
+                group="g",
+            )
+        )
+        loaded = migrated.load_all()
+        self.assertEqual(loaded["agents"]["agent-kinds"]["kind"], "")
+        self.assertEqual(loaded["agents"]["agent-kinds"]["role"], "")
+        self.assertEqual(
+            loaded["agents"]["agent-kinds"]["owner_engineer_id"],
+            "",
+        )
+        self.assertFalse(loaded["agents"]["agent-kinds"]["persistent"])
+        self.assertEqual(
+            loaded["board_tasks"]["task-kinds"]["assigned_engineer_id"],
+            "",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-kinds"]["created_by_architect_id"],
+            "",
+        )
+        self.assertEqual(
+            loaded["board_tasks"]["task-kinds"]["suggested_action"],
+            "",
+        )
+
+        backup_mtime_ns = backup_path.stat().st_mtime_ns
+        migrated.close()
+
+        rerun = LoomDB(legacy_path)
+        self.addCleanup(rerun.close)
+        logger = logging.getLogger("loom")
+        handler = logging.Handler()
+        captured_messages = []
+        handler.emit = lambda record: captured_messages.append(record.getMessage())
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        try:
+            rerun.init()
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+
+        self.assertEqual(backup_path.stat().st_mtime_ns, backup_mtime_ns)
+        self.assertFalse(
+            any("pre-kinds backup" in msg for msg in captured_messages),
+            captured_messages,
+        )
+        self.assertFalse(
+            any("kinds schema applied" in msg for msg in captured_messages),
+            captured_messages,
+        )
+        self.assertFalse(
+            any("kinds backfill applied" in msg for msg in captured_messages),
+            captured_messages,
+        )
+
+    def test_init_backfills_kinds_with_root_weaver_candidate(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-root.db",
+            agents=[
+                AgentCell(
+                    id="root-1",
+                    name="Coordinator",
+                    group="loom",
+                    slug="coordinator",
+                ),
+                AgentCell(
+                    id="worker-1",
+                    name="Worker One",
+                    group="loom",
+                    slug="worker-one",
+                    template="researcher",
+                    created_by_weaver_id="root-1",
+                ),
+                AgentCell(
+                    id="other-weaver",
+                    name="Weaver",
+                    group="alpha",
+                    slug="weaver",
+                ),
+                AgentCell(
+                    id="term-1",
+                    name="Logs",
+                    group="loom",
+                    slug="loom:logs",
+                    cell_type="terminal",
+                ),
+            ],
+            tasks=[
+                BoardTask(id="LOOM:1", task="Owned task", group="loom"),
+                BoardTask(id="ALPHA:1", task="Unowned task", group="alpha"),
+            ],
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn(
+            "migration: kinds backfill applied (engineer=root-1, workers=2, tasks=2)",
+            joined_logs,
+        )
+
+        engineer = migrated._conn.execute(
+            "SELECT name, slug, kind, role, owner_engineer_id, persistent "
+            "FROM agents WHERE id='root-1'"
+        ).fetchone()
+        self.assertEqual(engineer, ("Weaver-2", "weaver-2", "engineer", "", "", 1))
+
+        worker = migrated._conn.execute(
+            "SELECT kind, role, owner_engineer_id, hired_by_architect_id, persistent "
+            "FROM agents WHERE id='worker-1'"
+        ).fetchone()
+        self.assertEqual(worker, ("worker", "researcher", "root-1", "", 0))
+
+        terminal = migrated._conn.execute(
+            "SELECT kind, role, owner_engineer_id, persistent "
+            "FROM agents WHERE id='term-1'"
+        ).fetchone()
+        self.assertEqual(terminal, ("terminal", "", "", 0))
+
+        task_rows = migrated._conn.execute(
+            "SELECT id, assigned_engineer_id, created_by_architect_id, suggested_action "
+            "FROM board_tasks ORDER BY id"
+        ).fetchall()
+        self.assertEqual(
+            task_rows,
+            [
+                ("ALPHA:1", "", "", ""),
+                ("LOOM:1", "", "", ""),
+            ],
+        )
+        version = migrated._conn.execute(
+            "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+        ).fetchone()[0]
+        self.assertEqual(version, "2")
+
+        migrated.close()
+
+        rerun = LoomDB(path)
+        self.addCleanup(rerun.close)
+        logger = logging.getLogger("loom")
+        handler = logging.Handler()
+        captured = []
+        handler.emit = lambda record: captured.append(record.getMessage())
+        old_level = logger.level
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        try:
+            rerun.init()
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+        self.assertFalse(
+            any("kinds backfill applied" in msg for msg in captured),
+            captured,
+        )
+
+    def test_init_backfills_configured_loom_weaver_without_heuristic_match(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-configured-weaver.db",
+            agents=[
+                AgentCell(
+                    id="root-1",
+                    name="Coordinator",
+                    group="loom",
+                    slug="coordinator",
+                ),
+                AgentCell(
+                    id="agent-1",
+                    name="Planner",
+                    group="alpha",
+                    slug="planner",
+                    template="planner",
+                ),
+            ],
+            tasks=[
+                BoardTask(id="LOOM:1", task="Loom task", group="loom"),
+                BoardTask(id="ALPHA:1", task="Alpha task", group="alpha"),
+            ],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="root-1"),
+            },
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn(
+            "migration: kinds backfill applied (engineer=root-1, workers=1, tasks=2)",
+            joined_logs,
+        )
+        self.assertNotIn("no Weaver found", joined_logs)
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT name, slug, kind, persistent FROM agents WHERE id='root-1'"
+            ).fetchone(),
+            ("Weaver", "weaver", "engineer", 1),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT kind, role, owner_engineer_id, persistent "
+                "FROM agents WHERE id='agent-1'"
+            ).fetchone(),
+            ("worker", "planner", "", 0),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT id, assigned_engineer_id FROM board_tasks ORDER BY id"
+            ).fetchall(),
+            [
+                ("ALPHA:1", ""),
+                ("LOOM:1", "root-1"),
+            ],
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "2",
+        )
+
+    def test_init_backfills_existing_agents_without_promoting_when_no_weaver_found(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-no-weaver.db",
+            agents=[
+                AgentCell(
+                    id="agent-1",
+                    name="Planner",
+                    group="alpha",
+                    slug="planner",
+                    template="planner",
+                ),
+                AgentCell(
+                    id="agent-2",
+                    name="Coordinator",
+                    group="loom",
+                    slug="coordinator",
+                    template="default",
+                ),
+            ],
+            tasks=[BoardTask(id="ALPHA:1", task="Task", group="alpha")],
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn(
+            "migration: no Weaver found, skipping engineer backfill",
+            joined_logs,
+        )
+        self.assertIn(
+            "migration: kinds backfill applied (engineer=None, workers=2, tasks=1)",
+            joined_logs,
+        )
+
+        rows = migrated._conn.execute(
+            "SELECT id, kind, role, owner_engineer_id, persistent "
+            "FROM agents ORDER BY id"
+        ).fetchall()
+        self.assertEqual(
+            rows,
+            [
+                ("agent-1", "worker", "planner", "", 0),
+                ("agent-2", "worker", "default", "", 0),
+            ],
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='task-1'"
+                .replace("task-1", "ALPHA:1")
+            ).fetchone()[0],
+            "",
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "2",
+        )
+
+    def test_init_skips_ambiguous_weaver_backfill_without_override(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-ambiguous.db",
+            agents=[
+                AgentCell(
+                    id="weaver-a",
+                    name="Weaver Alpha",
+                    group="loom",
+                    slug="weaver-alpha",
+                ),
+                AgentCell(
+                    id="weaver-b",
+                    name="Bob",
+                    group="loom",
+                    slug="bob",
+                    template="weaver",
+                ),
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="loom",
+                    slug="worker",
+                    created_by_weaver_id="weaver-a",
+                ),
+            ],
+            tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="ERROR") as cm:
+            migrated.init()
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn("multiple Weaver candidates found", joined_logs)
+        self.assertIn("weaver-a", joined_logs)
+        self.assertIn("weaver-b", joined_logs)
+
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "1",
+        )
+        rows = migrated._conn.execute(
+            "SELECT id, kind, role, owner_engineer_id, persistent "
+            "FROM agents ORDER BY id"
+        ).fetchall()
+        self.assertEqual(
+            rows,
+            [
+                ("weaver-a", "", "", "", 0),
+                ("weaver-b", "", "", "", 0),
+                ("worker-1", "", "", "", 0),
+            ],
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='task-1'"
+                .replace("task-1", "LOOM:1")
+            ).fetchone()[0],
+            "",
+        )
+
+    def test_init_uses_configured_loom_weaver_to_disambiguate_candidates(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-configured-disambiguation.db",
+            agents=[
+                AgentCell(
+                    id="weaver-a",
+                    name="Weaver Alpha",
+                    group="loom",
+                    slug="weaver-alpha",
+                ),
+                AgentCell(
+                    id="weaver-b",
+                    name="Bob",
+                    group="loom",
+                    slug="bob",
+                    template="weaver",
+                ),
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="loom",
+                    slug="worker",
+                    template="researcher",
+                    created_by_weaver_id="weaver-b",
+                ),
+            ],
+            tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="weaver-b"),
+            },
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn(
+            "migration: kinds backfill applied (engineer=weaver-b, workers=2, tasks=1)",
+            joined_logs,
+        )
+        self.assertNotIn("multiple Weaver candidates found", joined_logs)
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT name, slug, kind, persistent FROM agents WHERE id='weaver-b'"
+            ).fetchone(),
+            ("Weaver", "weaver", "engineer", 1),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT kind, role, owner_engineer_id, persistent "
+                "FROM agents WHERE id='weaver-a'"
+            ).fetchone(),
+            ("worker", "", "", 0),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+            ).fetchone()[0],
+            "weaver-b",
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "2",
+        )
+
+    def test_init_uses_env_override_for_ambiguous_weaver_backfill(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-override.db",
+            agents=[
+                AgentCell(
+                    id="weaver-a",
+                    name="Weaver Alpha",
+                    group="loom",
+                    slug="weaver-alpha",
+                ),
+                AgentCell(
+                    id="weaver-b",
+                    name="Bob",
+                    group="loom",
+                    slug="bob",
+                    template="weaver",
+                ),
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="loom",
+                    slug="worker",
+                    template="researcher",
+                    created_by_weaver_id="weaver-b",
+                ),
+            ],
+            tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with mock.patch.dict("os.environ", {"LOOM_MIGRATE_WEAVER_ID": "weaver-b"}):
+            with self.assertLogs("loom", level="INFO") as cm:
+                migrated.init()
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn(
+            "migration: kinds backfill applied (engineer=weaver-b, workers=2, tasks=1)",
+            joined_logs,
+        )
+
+        engineer = migrated._conn.execute(
+            "SELECT name, slug, kind, persistent FROM agents WHERE id='weaver-b'"
+        ).fetchone()
+        self.assertEqual(engineer, ("Weaver", "weaver", "engineer", 1))
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT kind, role, owner_engineer_id, persistent "
+                "FROM agents WHERE id='worker-1'"
+            ).fetchone(),
+            ("worker", "researcher", "weaver-b", 0),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='task-1'"
+                .replace("task-1", "LOOM:1")
+            ).fetchone()[0],
+            "",
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "2",
+        )
+
+    def test_init_backfills_task_assignments_from_group_settings_weaver(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-task-assignment.db",
+            agents=[
+                AgentCell(
+                    id="root-1",
+                    name="Coordinator",
+                    group="loom",
+                    slug="coordinator",
+                ),
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="alpha",
+                    slug="worker",
+                    template="researcher",
+                ),
+            ],
+            tasks=[
+                BoardTask(id="LOOM:1", task="Loom task", group="loom"),
+                BoardTask(id="LOOM:2", task="Second loom task", group="loom"),
+                BoardTask(id="ALPHA:1", task="Alpha task", group="alpha"),
+            ],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="root-1"),
+            },
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT id, assigned_engineer_id FROM board_tasks ORDER BY id"
+            ).fetchall(),
+            [
+                ("ALPHA:1", ""),
+                ("LOOM:1", "root-1"),
+                ("LOOM:2", "root-1"),
+            ],
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key=?",
+                ("schema_kinds_task_assignment_fixup_applied",),
+            ).fetchone()[0],
+            "1",
+        )
+
+    def test_init_ignores_stale_group_settings_weaver_without_engineer(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-stale-group-weaver.db",
+            agents=[
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="alpha",
+                    slug="worker",
+                ),
+            ],
+            tasks=[BoardTask(id="LOOM:1", task="Loom task", group="loom")],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="stale-id"),
+            },
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        self.assertIn(
+            "migration: ignoring stale weaver_agent_id='stale-id' for group='loom'",
+            "\n".join(cm.output),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+            ).fetchone()[0],
+            "",
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "2",
+        )
+
+    def test_init_ignores_stale_group_settings_weaver_with_heuristic_engineer(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-stale-group-weaver-heuristic.db",
+            agents=[
+                AgentCell(
+                    id="root-1",
+                    name="Weaver",
+                    group="loom",
+                    slug="weaver",
+                ),
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="loom",
+                    slug="worker",
+                    created_by_weaver_id="root-1",
+                ),
+            ],
+            tasks=[BoardTask(id="LOOM:1", task="Loom task", group="loom")],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="stale-id"),
+            },
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="WARNING") as cm:
+            migrated.init()
+
+        self.assertIn(
+            "migration: ignoring stale weaver_agent_id='stale-id' for group='loom'",
+            "\n".join(cm.output),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT kind, persistent FROM agents WHERE id='root-1'"
+            ).fetchone(),
+            ("engineer", 1),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+            ).fetchone()[0],
+            "",
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
+            ).fetchone()[0],
+            "2",
+        )
+
+    def test_init_fixes_version2_unassigned_tasks_from_group_settings(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-fixup.db",
+            agents=[
+                AgentCell(
+                    id="root-1",
+                    name="Weaver",
+                    group="loom",
+                    slug="weaver",
+                    kind="engineer",
+                    persistent=True,
+                ),
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="alpha",
+                    slug="worker",
+                    template="researcher",
+                    kind="worker",
+                    role="researcher",
+                ),
+            ],
+            tasks=[
+                BoardTask(id="LOOM:1", task="Needs fixup", group="loom"),
+                BoardTask(
+                    id="ALPHA:1",
+                    task="Already assigned",
+                    group="alpha",
+                    assigned_engineer_id="explicit-owner",
+                ),
+            ],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="root-1"),
+            },
+        )
+        conn = sqlite3.connect(str(path))
+        conn.execute(
+            "UPDATE meta SET value='2' WHERE key='schema_kinds_migration_version'"
+        )
+        conn.execute(
+            "DELETE FROM meta WHERE key='schema_kinds_task_assignment_fixup_applied'"
+        )
+        conn.execute(
+            "UPDATE agents SET kind='engineer', persistent=1 WHERE id='root-1'"
+        )
+        conn.execute(
+            "UPDATE agents SET kind='worker', role='researcher' WHERE id='worker-1'"
+        )
+        conn.execute(
+            "UPDATE board_tasks SET assigned_engineer_id='explicit-owner' "
+            "WHERE id='ALPHA:1'"
+        )
+        conn.execute(
+            "UPDATE board_tasks SET assigned_engineer_id='' WHERE id='LOOM:1'"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        self.assertIn(
+            "migration: kinds task assignment fixup applied (updated=1)",
+            "\n".join(cm.output),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT id, assigned_engineer_id FROM board_tasks ORDER BY id"
+            ).fetchall(),
+            [
+                ("ALPHA:1", "explicit-owner"),
+                ("LOOM:1", "root-1"),
+            ],
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key=?",
+                ("schema_kinds_task_assignment_fixup_applied",),
+            ).fetchone()[0],
+            "1",
+        )
+
+    def test_init_fixup_ignores_stale_group_settings_weaver_for_unassigned_tasks(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-fixup-stale-group-weaver.db",
+            agents=[
+                AgentCell(
+                    id="root-1",
+                    name="Weaver",
+                    group="loom",
+                    slug="weaver",
+                    kind="engineer",
+                    persistent=True,
+                ),
+            ],
+            tasks=[BoardTask(id="LOOM:1", task="Needs fixup", group="loom")],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="stale-id"),
+            },
+        )
+        conn = sqlite3.connect(str(path))
+        conn.execute(
+            "UPDATE meta SET value='2' WHERE key='schema_kinds_migration_version'"
+        )
+        conn.execute(
+            "DELETE FROM meta WHERE key='schema_kinds_task_assignment_fixup_applied'"
+        )
+        conn.execute(
+            "UPDATE agents SET kind='engineer', persistent=1 WHERE id='root-1'"
+        )
+        conn.execute(
+            "UPDATE board_tasks SET assigned_engineer_id='' WHERE id='LOOM:1'"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        joined_logs = "\n".join(cm.output)
+        self.assertIn(
+            "migration: ignoring stale weaver_agent_id='stale-id' for group='loom'",
+            joined_logs,
+        )
+        self.assertIn(
+            "migration: kinds task assignment fixup applied (updated=0)",
+            joined_logs,
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT assigned_engineer_id FROM board_tasks WHERE id='LOOM:1'"
+            ).fetchone()[0],
+            "",
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key=?",
+                ("schema_kinds_task_assignment_fixup_applied",),
+            ).fetchone()[0],
+            "1",
+        )

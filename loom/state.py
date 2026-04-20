@@ -207,6 +207,9 @@ class BoardTask:
     lane: str = "Backlog"
     position: int = 0
     agent_id: str = ""          # concrete agent working on this (optional)
+    assigned_engineer_id: str = ""  # owning engineer responsible for the task
+    created_by_architect_id: str = ""  # architect provenance
+    suggested_action: str = ""  # non-binding architect action hint
     reply_agent_id: str = ""    # worker expected to answer this follow-up
     labels: list[str] = field(default_factory=list)
     created_at: str = ""        # ISO 8601
@@ -335,6 +338,11 @@ class AgentCell:
     # Context preservation (dispatch history)
     tasks_dispatched: int = 0  # number of tasks sent to this agent (persisted)
     created_by_weaver_id: str = ""  # immutable Weaver provenance (persisted)
+    kind: str = ""  # "" | architect | engineer | worker | terminal
+    role: str = ""  # worker-role slug mirrored from template during migration
+    owner_engineer_id: str = ""  # owning engineer for worker/terminal agents
+    hired_by_architect_id: str = ""  # architect provenance for hires
+    persistent: bool = False  # architect/engineer survive across sessions
     current_task_id: str = ""  # most recently dispatched task (ephemeral)
     session_resume: bool = True  # whether relaunch should resume the prior session
     idle_timeout: int = 0  # per-agent idle timeout in minutes (0=disable)

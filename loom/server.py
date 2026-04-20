@@ -27,6 +27,7 @@ from .config import (
     log,
 )
 from .db import LoomDB
+from .doctor import build_doctor_report
 from dataclasses import asdict
 from .state import (
     ARCHIVED_LANE,
@@ -995,6 +996,10 @@ def _handle_board_unarchive_command(state: MatrixState, data: dict) -> dict | No
         position=data.get("position"),
     )
     return None
+
+
+def _handle_doctor_command(db: LoomDB) -> dict:
+    return build_doctor_report(db._conn, db.db_path)
 
 
 def _resolve_memory_cell_and_task(state, cell_id: str = "",
@@ -2356,6 +2361,9 @@ async def main(connection=None):
                 "settings": asdict(state.global_settings),
                 "keybinding_defaults": keybindings.get_default_bindings(),
             }
+
+        if cmd == "doctor":
+            return _handle_doctor_command(db)
 
         # get_events: paginated event log query
         if cmd == "get_events":

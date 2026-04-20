@@ -11,9 +11,12 @@ than json.dumps() + write_text().
 
 import json
 import logging
+import os
+import re
 import shutil
 import sqlite3
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -36,6 +39,16 @@ from loom.task_ids import (
 
 log = logging.getLogger("loom")
 
+_KINDS_SCHEMA_MIGRATION_VERSION = 1
+_KINDS_BACKFILL_MIGRATION_VERSION = 2
+_KINDS_SCHEMA_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
+_KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
+_KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY = "schema_kinds_task_assignment_fixup_applied"
+_KINDS_SCHEMA_BACKUP_NAME = "loom.db.pre-kinds.bak"
+_KINDS_WEAVER_OVERRIDE_ENV = "LOOM_MIGRATE_WEAVER_ID"
+_KINDS_WEAVER_GROUP = "loom"
+_KINDS_WEAVER_NAME = "Weaver"
+
 _AGENT_PERSISTED_COLS = [
     "id", "name", "slug", "group_name", "cell_type", "terminal_backend",
     "session_id", "profile",
@@ -46,7 +59,15 @@ _AGENT_PERSISTED_COLS = [
     "worktree_merge_squash", "agent_type",
     "agent_session_id", "session_resume", "idle_timeout",
     "tasks_dispatched", "created_by_weaver_id",
+    "kind", "role", "owner_engineer_id", "hired_by_architect_id",
+    "persistent",
 ]
+
+_AGENT_INSERT_SQL = """
+    INSERT OR REPLACE INTO agents
+        ({columns})
+    VALUES ({placeholders})
+"""
 
 # GroupSettings fields that store dicts — persisted as JSON text.
 _GS_JSON_FIELDS = {"env_vars", "agent_env_vars", "terminal_env_vars",
@@ -65,6 +86,141 @@ _GS_BOOL_FIELDS = {
 }
 
 
+def _coalesce_agent_kinds_fields(row: dict) -> None:
+    """Keep legacy agent columns authoritative until stage 6.
+
+    During stages 1–5, writes may still target either legacy or new columns.
+    Mirror whichever side is populated into the empty side. If both are set
+    but disagree, prefer the legacy value and log a warning.
+    """
+    template = str(row.get("template", "") or "")
+    role = str(row.get("role", "") or "")
+    if template and not role:
+        row["role"] = template
+    elif role and not template:
+        row["template"] = role
+    elif template and role and template != role:
+        log.warning(
+            "kinds dual-write: template=%r != role=%r on agent %s; preferring template",
+            template,
+            role,
+            row.get("id"),
+        )
+        row["role"] = template
+
+    created_by_weaver_id = str(row.get("created_by_weaver_id", "") or "")
+    owner_engineer_id = str(row.get("owner_engineer_id", "") or "")
+    if created_by_weaver_id and not owner_engineer_id:
+        row["owner_engineer_id"] = created_by_weaver_id
+    elif owner_engineer_id and not created_by_weaver_id:
+        row["created_by_weaver_id"] = owner_engineer_id
+    elif (
+        created_by_weaver_id
+        and owner_engineer_id
+        and created_by_weaver_id != owner_engineer_id
+    ):
+        log.warning(
+            "kinds dual-write: created_by_weaver_id=%r != owner_engineer_id=%r on agent %s; preferring created_by_weaver_id",
+            created_by_weaver_id,
+            owner_engineer_id,
+            row.get("id"),
+        )
+        row["owner_engineer_id"] = created_by_weaver_id
+
+
+def _coalesce_task_kinds_fields(
+    row: dict,
+    *,
+    legacy_owner_supported: bool,
+) -> None:
+    """Keep legacy task ownership columns authoritative until stage 6.
+
+    Task ownership was historically group-level, not a persisted board_tasks
+    column. Only mirror the legacy task owner when a compatibility column
+    actually exists on disk.
+    """
+    if not legacy_owner_supported:
+        return
+
+    weaver_owner_id = str(row.get("weaver_owner_id", "") or "")
+    assigned_engineer_id = str(row.get("assigned_engineer_id", "") or "")
+    if weaver_owner_id and not assigned_engineer_id:
+        row["assigned_engineer_id"] = weaver_owner_id
+    elif assigned_engineer_id and not weaver_owner_id:
+        row["weaver_owner_id"] = assigned_engineer_id
+    elif (
+        weaver_owner_id
+        and assigned_engineer_id
+        and weaver_owner_id != assigned_engineer_id
+    ):
+        log.warning(
+            "kinds dual-write: weaver_owner_id=%r != assigned_engineer_id=%r on task %s; preferring weaver_owner_id",
+            weaver_owner_id,
+            assigned_engineer_id,
+            row.get("id"),
+        )
+        row["assigned_engineer_id"] = weaver_owner_id
+
+
+def _serialize_agent_cell(cell):
+    d = asdict(cell) if not isinstance(cell, dict) else dict(cell)
+    group_name = d.pop("group", d.pop("group_name", ""))
+    return (
+        d.get("id", ""),
+        d.get("name", ""),
+        d.get("slug", ""),
+        group_name,
+        d.get("cell_type", "agent"),
+        d.get("terminal_backend", "iterm2"),
+        d.get("session_id"),
+        d.get("profile", "Default"),
+        d.get("command", ""),
+        d.get("directory", ""),
+        d.get("tab_color", ""),
+        d.get("icon", ""),
+        d.get("template", ""),
+        d.get("window_id", ""),
+        d.get("parent_id", ""),
+        d.get("status", "stopped"),
+        d.get("worktree_path", ""),
+        d.get("worktree_branch", ""),
+        d.get("worktree_repo_root", ""),
+        d.get("worktree_base_dir", ".loom/worktrees"),
+        d.get("worktree_base_branch", ""),
+        int(d.get("worktree_auto_checkpoint", False)),
+        int(d.get("checkpoint_on_progress", False)),
+        int(d.get("worktree_merge_squash", True)),
+        d.get("agent_type", ""),
+        d.get("agent_session_id", ""),
+        int(d.get("session_resume", True)),
+        d.get("idle_timeout", 0),
+        d.get("tasks_dispatched", 0),
+        d.get("created_by_weaver_id", ""),
+        d.get("kind", ""),
+        d.get("role", ""),
+        d.get("owner_engineer_id", ""),
+        d.get("hired_by_architect_id", ""),
+        int(d.get("persistent", 0) or 0),
+    )
+
+
+def _slugify(value: str, max_len: int = 40) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
+    slug = re.sub(r"-+", "-", slug)
+    if len(slug) > max_len:
+        slug = slug[:max_len].rsplit("-", 1)[0]
+    return slug or "unnamed"
+
+
+def _unique_value(base: str, existing: set[str]) -> str:
+    if base not in existing:
+        return base
+    i = 2
+    while f"{base}-{i}" in existing:
+        i += 1
+    return f"{base}-{i}"
+
+
 
 
 class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
@@ -74,10 +230,59 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
 
+    def _prepare_agent_row(self, cell) -> dict:
+        row = dict(cell) if isinstance(cell, dict) else asdict(cell)
+        _coalesce_agent_kinds_fields(row)
+        return row
+
+    def _insert_agent_row(self, executor, cell) -> None:
+        row = self._prepare_agent_row(cell)
+        values = _serialize_agent_cell(row)
+        executor.execute(
+            _AGENT_INSERT_SQL.format(
+                columns=", ".join(_AGENT_PERSISTED_COLS),
+                placeholders=",".join(["?"] * len(values)),
+            ),
+            values,
+        )
+
+    def _prepare_board_task_row(self, task) -> dict:
+        row = dict(task) if isinstance(task, dict) else asdict(task)
+        _coalesce_task_kinds_fields(
+            row,
+            legacy_owner_supported=self._legacy_board_task_owner_supported(),
+        )
+        return row
+
+    def _legacy_board_task_owner_supported(self) -> bool:
+        return bool(self._conn) and self._column_exists(
+            "board_tasks", "weaver_owner_id"
+        )
+
+    def _sync_legacy_board_task_owner(self, executor, task_row: dict) -> None:
+        if not self._legacy_board_task_owner_supported():
+            return
+        task_id = str(task_row.get("id", "") or "")
+        if not task_id:
+            return
+        executor.execute(
+            "UPDATE board_tasks SET weaver_owner_id=? WHERE id=?",
+            (str(task_row.get("weaver_owner_id", "") or ""), task_id),
+        )
+
+    def _insert_board_task_row(self, executor, task) -> None:
+        row = self._prepare_board_task_row(task)
+        insert_board_task(executor, row)
+        self._sync_legacy_board_task_owner(executor, row)
+
     def init(self):
         """Open connection, enable WAL, create tables if needed."""
+        self._maybe_backup_pre_kinds_db()
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
+        self._migrate_kinds_schema_if_needed()
+        self._backfill_kinds_if_needed()
+        self._fixup_kinds_task_assignments_if_needed()
         self.migrate_task_ids_if_needed()
 
     def close(self):
@@ -149,34 +354,12 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
     def save_agent(self, cell):
         """Upsert a single agent/terminal cell (persisted fields only)."""
-        self._conn.execute("""
-            INSERT OR REPLACE INTO agents
-                (id, name, slug, group_name, cell_type, terminal_backend,
-                 session_id, profile,
-                 command, directory, tab_color, icon, template, window_id,
-                 parent_id, status, worktree_path, worktree_branch,
-                 worktree_repo_root, worktree_base_dir, worktree_base_branch,
-                 worktree_auto_checkpoint, checkpoint_on_progress,
-                 worktree_merge_squash,
-                 agent_type, agent_session_id, session_resume, idle_timeout,
-                 tasks_dispatched, created_by_weaver_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            cell.id, cell.name, cell.slug, cell.group, cell.cell_type,
-            cell.terminal_backend, cell.session_id, cell.profile,
-            cell.command, cell.directory, cell.tab_color, cell.icon,
-            cell.template, cell.window_id, cell.parent_id, cell.status,
-            cell.worktree_path,
-            cell.worktree_branch, cell.worktree_repo_root,
-            cell.worktree_base_dir, cell.worktree_base_branch,
-            int(cell.worktree_auto_checkpoint),
-            int(cell.checkpoint_on_progress),
-            int(cell.worktree_merge_squash), cell.agent_type,
-            cell.agent_session_id, int(cell.session_resume),
-            cell.idle_timeout,
-            cell.tasks_dispatched,
-            cell.created_by_weaver_id,
-        ))
+        self._insert_agent_row(self._conn, cell)
+        self._conn.commit()
+
+    def save_board_task(self, task):
+        """Upsert a board task."""
+        self._insert_board_task_row(self._conn, task)
         self._conn.commit()
 
     def delete_agent(self, agent_id: str):
@@ -572,7 +755,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
         self._conn.execute("DELETE FROM board_tasks")
         for task in updated_tasks:
-            insert_board_task(self._conn, task)
+            self._insert_board_task_row(self._conn, task)
 
         def _rewrite_single_ref(table: str, column: str):
             table_rows = self._conn.execute(
@@ -1431,51 +1614,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             # Agents
             c.execute("DELETE FROM agents")
             for aid, a in state_dict.get("agents", {}).items():
-                c.execute("""
-                    INSERT INTO agents
-                        (id, name, slug, group_name, cell_type,
-                         terminal_backend, session_id,
-                         profile, command, directory, tab_color, icon,
-                         template, window_id, parent_id, status,
-                         worktree_path, worktree_branch, worktree_repo_root,
-                         worktree_base_dir, worktree_base_branch,
-                         worktree_auto_checkpoint, checkpoint_on_progress,
-                         worktree_merge_squash,
-                         agent_type, agent_session_id, session_resume,
-                         idle_timeout, tasks_dispatched, created_by_weaver_id)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (
-                    a.get("id", aid),
-                    a.get("name", ""),
-                    a.get("slug", ""),
-                    a.get("group", ""),
-                    a.get("cell_type", "agent"),
-                    a.get("terminal_backend", "iterm2"),
-                    a.get("session_id"),
-                    a.get("profile", "Default"),
-                    a.get("command", ""),
-                    a.get("directory", ""),
-                    a.get("tab_color", ""),
-                    a.get("icon", ""),
-                    a.get("template", ""),
-                    a.get("window_id", ""),
-                    a.get("parent_id", ""),
-                    a.get("status", "stopped"),
-                    a.get("worktree_path", ""),
-                    a.get("worktree_branch", ""),
-                    a.get("worktree_repo_root", ""),
-                    a.get("worktree_base_dir", ".loom/worktrees"),
-                    a.get("worktree_base_branch", ""),
-                    int(a.get("worktree_auto_checkpoint", False)),
-                    int(a.get("checkpoint_on_progress", False)),
-                    int(a.get("worktree_merge_squash", True)),
-                    a.get("agent_type", ""),
-                    a.get("agent_session_id", ""),
-                    int(a.get("session_resume", True)),
-                    a.get("idle_timeout", 0),
-                    a.get("tasks_dispatched", 0),
-                    a.get("created_by_weaver_id", ""),
-                ))
+                item = dict(a) if isinstance(a, dict) else asdict(a)
+                item.setdefault("id", aid)
+                self._insert_agent_row(c, item)
 
             # Groups + members
             c.execute("DELETE FROM groups")
@@ -1521,63 +1662,9 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             # Board tasks
             c.execute("DELETE FROM board_tasks")
             for tid, t in state_dict.get("board_tasks", {}).items():
-                d = dict(t) if isinstance(t, dict) else asdict(t)
-                labels = json.dumps(d.pop("labels", []))
-                action_vars = json.dumps(d.pop("action_vars", {}))
-                messages = json.dumps(d.pop("messages", []))
-                depends_on = json.dumps(d.pop("depends_on", []))
-                attachments = json.dumps(d.pop("attachments", []))
-                health_details = json.dumps(d.pop("health_details", {}))
-                artifacts = json.dumps(d.pop("artifacts", []))
-                verification_summary = json.dumps(
-                    d.pop("verification_summary", {})
-                )
-                group_name = d.pop("group", "")
-                values = (
-                    d.get("id", tid), d.get("task", ""),
-                    d.get("description", ""), d.get("slug", ""),
-                    group_name, d.get("action_name", ""),
-                    d.get("agent_template", ""), action_vars,
-                    d.get("instructions", ""),
-                    d.get("context", ""), d.get("criteria", ""),
-                    d.get("lane", "Backlog"), d.get("position", 0),
-                    d.get("agent_id", ""), labels,
-                    d.get("created_at", ""), d.get("updated_at", ""),
-                    d.get("lane_entered_at", ""),
-                    d.get("provider", ""), d.get("external_id", ""),
-                    d.get("external_url", ""),
-                    d.get("parent_task_id", ""), d.get("pipeline_depth", 0),
-                    d.get("pipeline_root_id", ""), d.get("status", ""),
-                    d.get("scheduled_at", ""), messages, depends_on,
-                    attachments, d.get("health_state", "healthy"),
-                    d.get("health_since", ""), health_details,
-                    artifacts,
-                    d.get("verification_mode", ""),
-                    d.get("verification_state", ""),
-                    d.get("verification_notes", ""),
-                    d.get("verification_updated_at", ""),
-                    d.get("verification_updated_by", ""),
-                    verification_summary,
-                    d.get("archived_at", ""),
-                    d.get("archived_from_lane", ""),
-                )
-                c.execute("""
-                    INSERT INTO board_tasks
-                        (id, task, description, slug, group_name,
-                         action_name, agent_template,
-                         action_vars, instructions, context,
-                         criteria, lane, position, agent_id, labels,
-                         created_at, updated_at, lane_entered_at, provider, external_id,
-                         external_url, parent_task_id, pipeline_depth,
-                         pipeline_root_id, status, scheduled_at, messages,
-                         depends_on, attachments, health_state, health_since,
-                         health_details, artifacts, verification_mode,
-                         verification_state, verification_notes,
-                         verification_updated_at, verification_updated_by,
-                         verification_summary, archived_at,
-                         archived_from_lane)
-                    VALUES ({placeholders})
-                """.format(placeholders=",".join(["?"] * len(values))), values)
+                item = dict(t) if isinstance(t, dict) else asdict(t)
+                item.setdefault("id", tid)
+                self._insert_board_task_row(c, item)
 
             # Auto-dispatch queues
             c.execute("DELETE FROM auto_dispatch_queue")
@@ -1690,6 +1777,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 d.get("checkpoint_on_progress", 0))
             d["worktree_merge_squash"] = bool(
                 d.get("worktree_merge_squash", 1))
+            d["persistent"] = bool(d.get("persistent", 0))
             d["session_resume"] = bool(d.get("session_resume", 1))
             agents[d["id"]] = d
 
@@ -1866,6 +1954,458 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         groups = self._conn.execute(
             "SELECT COUNT(*) FROM groups").fetchone()
         return (row and row[0] > 0) or (groups and groups[0] > 0)
+
+    def _kinds_backup_path(self) -> Path:
+        return self.db_path.with_name(_KINDS_SCHEMA_BACKUP_NAME)
+
+    def _read_meta_value(self, key: str, *, db_path: Optional[Path] = None) -> Optional[str]:
+        path = Path(db_path or self.db_path)
+        if not path.exists():
+            return None
+        conn = None
+        try:
+            conn = sqlite3.connect(str(path))
+            table = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='meta'"
+            ).fetchone()
+            if not table:
+                return None
+            row = conn.execute(
+                "SELECT value FROM meta WHERE key=?",
+                (key,),
+            ).fetchone()
+            return None if not row else str(row[0])
+        except sqlite3.OperationalError:
+            return None
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def _current_kinds_migration_version(self) -> int:
+        raw = self._read_meta_value(_KINDS_SCHEMA_MIGRATION_VERSION_KEY)
+        try:
+            return int(raw or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _maybe_backup_pre_kinds_db(self):
+        if not self.db_path.exists():
+            return
+        if self._kinds_backup_path().exists():
+            return
+        if self._current_kinds_migration_version() >= _KINDS_SCHEMA_MIGRATION_VERSION:
+            return
+
+        backup_path = self._kinds_backup_path()
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+
+        source = target = None
+        try:
+            source = sqlite3.connect(str(self.db_path))
+            target = sqlite3.connect(str(backup_path))
+            source.backup(target)
+        except Exception:
+            if backup_path.exists():
+                backup_path.unlink()
+            raise
+        finally:
+            if target is not None:
+                target.close()
+            if source is not None:
+                source.close()
+
+        log.info("migration: created pre-kinds backup at %s", backup_path)
+
+    def _migrate_kinds_schema_if_needed(self):
+        if self._current_kinds_migration_version() >= _KINDS_SCHEMA_MIGRATION_VERSION:
+            return
+
+        for col, col_type, default in [
+            ("kind", "TEXT", "''"),
+            ("role", "TEXT", "''"),
+            ("owner_engineer_id", "TEXT", "''"),
+            ("hired_by_architect_id", "TEXT", "''"),
+            ("persistent", "INTEGER", "0"),
+        ]:
+            try:
+                self._conn.execute(f"SELECT {col} FROM agents LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE agents ADD COLUMN {col} "
+                    f"{col_type} NOT NULL DEFAULT {default}"
+                )
+                self._conn.commit()
+
+        for col, col_type, default in [
+            ("assigned_engineer_id", "TEXT", "''"),
+            ("created_by_architect_id", "TEXT", "''"),
+            ("suggested_action", "TEXT", "''"),
+        ]:
+            try:
+                self._conn.execute(f"SELECT {col} FROM board_tasks LIMIT 0")
+            except sqlite3.OperationalError:
+                self._conn.execute(
+                    f"ALTER TABLE board_tasks ADD COLUMN {col} "
+                    f"{col_type} NOT NULL DEFAULT {default}"
+                )
+                self._conn.commit()
+
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS decisions (
+                id TEXT PRIMARY KEY,
+                architect_id TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                rationale TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'proposed',
+                supersedes TEXT DEFAULT NULL,
+                linked_task_ids TEXT NOT NULL DEFAULT '[]',
+                linked_engineer_ids TEXT NOT NULL DEFAULT '[]',
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_decisions_architect "
+            "ON decisions(architect_id)"
+        )
+
+        migrated_at = datetime.now(timezone.utc).isoformat()
+        self._conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            (
+                _KINDS_SCHEMA_MIGRATION_VERSION_KEY,
+                str(_KINDS_SCHEMA_MIGRATION_VERSION),
+            ),
+        )
+        self._conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            (_KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY, migrated_at),
+        )
+        self._conn.commit()
+        log.info(
+            "migration: kinds schema applied (version=1, backup=%s)",
+            self._kinds_backup_path(),
+        )
+
+    def _find_weaver_candidate_ids(self) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT id, name, template, created_by_weaver_id "
+            "FROM agents WHERE cell_type='agent' AND group_name=?",
+            (_KINDS_WEAVER_GROUP,),
+        ).fetchall()
+        referenced_ids = {
+            str(created_by_weaver_id or "").strip()
+            for _agent_id, _name, _template, created_by_weaver_id in rows
+            if str(created_by_weaver_id or "").strip()
+        }
+        candidates = set()
+        for agent_id, name, template, created_by_weaver_id in rows:
+            agent_id = str(agent_id or "").strip()
+            if not agent_id:
+                continue
+            if re.search(r"weaver", str(name or ""), re.IGNORECASE):
+                candidates.add(agent_id)
+                continue
+            if str(template or "").strip().lower() == "weaver":
+                candidates.add(agent_id)
+                continue
+            if not str(created_by_weaver_id or "").strip() and agent_id in referenced_ids:
+                candidates.add(agent_id)
+        return sorted(candidates)
+
+    def _configured_weaver_candidate_id(self) -> str:
+        row = self._conn.execute(
+            "SELECT weaver_agent_id FROM group_settings WHERE group_name=?",
+            (_KINDS_WEAVER_GROUP,),
+        ).fetchone()
+        configured_id = str(row[0] or "").strip() if row else ""
+        if not configured_id:
+            return ""
+        exists = self._conn.execute(
+            "SELECT 1 FROM agents "
+            "WHERE id=? AND cell_type='agent' AND group_name=? "
+            "LIMIT 1",
+            (configured_id, _KINDS_WEAVER_GROUP),
+        ).fetchone()
+        return configured_id if exists else ""
+
+    def _resolve_weaver_backfill_target(self) -> tuple[Optional[str], bool]:
+        configured_id = self._configured_weaver_candidate_id()
+        if configured_id:
+            return configured_id, True
+
+        candidate_ids = self._find_weaver_candidate_ids()
+        if not candidate_ids:
+            log.info("migration: no Weaver found, skipping engineer backfill")
+            return None, True
+        if len(candidate_ids) == 1:
+            return candidate_ids[0], True
+
+        override = str(os.getenv(_KINDS_WEAVER_OVERRIDE_ENV, "") or "").strip()
+        if override and override in candidate_ids:
+            return override, True
+
+        if override:
+            log.error(
+                "migration: multiple Weaver candidates found %s; %s=%r did not match",
+                candidate_ids,
+                _KINDS_WEAVER_OVERRIDE_ENV,
+                override,
+            )
+        else:
+            log.error(
+                "migration: multiple Weaver candidates found %s; set %s to continue",
+                candidate_ids,
+                _KINDS_WEAVER_OVERRIDE_ENV,
+            )
+        return None, False
+
+    def _resolve_backfilled_weaver_identity(self, engineer_id: str) -> tuple[str, str]:
+        rows = self._conn.execute(
+            "SELECT id, name, slug FROM agents"
+        ).fetchall()
+        existing_names = {
+            str(name or "").strip()
+            for agent_id, name, _slug in rows
+            if str(agent_id or "") != str(engineer_id or "")
+            and str(name or "").strip()
+        }
+        target_name = _unique_value(_KINDS_WEAVER_NAME, existing_names)
+        existing_slugs = {
+            str(slug or "").strip()
+            for agent_id, _name, slug in rows
+            if str(agent_id or "") != str(engineer_id or "")
+            and str(slug or "").strip()
+        }
+        target_slug = _unique_value(_slugify(target_name), existing_slugs)
+        return target_name, target_slug
+
+    def _column_exists(self, table: str, column: str) -> bool:
+        try:
+            self._conn.execute(f"SELECT {column} FROM {table} LIMIT 0")
+            return True
+        except sqlite3.OperationalError:
+            return False
+
+    def _load_group_weaver_map(self) -> dict[str, str]:
+        valid_agent_ids_by_group: dict[str, set[str]] = {}
+        for agent_id, group_name in self._conn.execute(
+            "SELECT id, group_name FROM agents WHERE cell_type='agent'"
+        ).fetchall():
+            agent_id = str(agent_id or "").strip()
+            group_name = str(group_name or "").strip()
+            if not agent_id or not group_name:
+                continue
+            valid_agent_ids_by_group.setdefault(group_name, set()).add(agent_id)
+
+        rows = self._conn.execute(
+            "SELECT group_name, weaver_agent_id FROM group_settings"
+        ).fetchall()
+        group_weaver_map: dict[str, str] = {}
+        for group_name, weaver_agent_id in rows:
+            group_name = str(group_name or "").strip()
+            if not group_name:
+                continue
+            weaver_agent_id = str(weaver_agent_id or "").strip()
+            if (
+                weaver_agent_id
+                and weaver_agent_id
+                in valid_agent_ids_by_group.get(group_name, set())
+            ):
+                group_weaver_map[group_name] = weaver_agent_id
+                continue
+            if weaver_agent_id:
+                log.warning(
+                    "migration: ignoring stale weaver_agent_id=%r for group=%r",
+                    weaver_agent_id,
+                    group_name,
+                )
+            group_weaver_map[group_name] = ""
+        return group_weaver_map
+
+    def _backfill_task_assignments_from_group_settings(
+        self,
+        group_weaver_map: dict[str, str],
+        *,
+        only_unassigned: bool,
+        reset_stage1_fields: bool,
+    ) -> int:
+        updated = 0
+        if only_unassigned:
+            rows = self._conn.execute(
+                "SELECT id, group_name FROM board_tasks WHERE assigned_engineer_id=''"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, group_name FROM board_tasks"
+            ).fetchall()
+
+        for task_id, group_name in rows:
+            task_id = str(task_id or "").strip()
+            if not task_id:
+                continue
+            assigned_engineer_id = group_weaver_map.get(
+                str(group_name or "").strip(),
+                "",
+            )
+            if only_unassigned:
+                if not assigned_engineer_id:
+                    continue
+                self._conn.execute(
+                    "UPDATE board_tasks SET assigned_engineer_id=? WHERE id=?",
+                    (assigned_engineer_id, task_id),
+                )
+                updated += 1
+                continue
+
+            if reset_stage1_fields:
+                self._conn.execute(
+                    "UPDATE board_tasks "
+                    "SET assigned_engineer_id=?, "
+                    "created_by_architect_id='', "
+                    "suggested_action='' "
+                    "WHERE id=?",
+                    (assigned_engineer_id, task_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE board_tasks SET assigned_engineer_id=? WHERE id=?",
+                    (assigned_engineer_id, task_id),
+                )
+        return updated
+
+    def _backfill_kinds_if_needed(self):
+        version = self._current_kinds_migration_version()
+        if version < _KINDS_SCHEMA_MIGRATION_VERSION:
+            return
+        if version >= _KINDS_BACKFILL_MIGRATION_VERSION:
+            return
+
+        engineer_id, proceed = self._resolve_weaver_backfill_target()
+        if not proceed:
+            return
+
+        worker_count = 0
+        task_count = 0
+        try:
+            self._conn.execute("BEGIN")
+
+            engineer_name = engineer_slug = ""
+            if engineer_id:
+                engineer_name, engineer_slug = self._resolve_backfilled_weaver_identity(
+                    engineer_id
+                )
+
+            rows = self._conn.execute(
+                "SELECT id, cell_type, template, created_by_weaver_id "
+                "FROM agents"
+            ).fetchall()
+            for agent_id, cell_type, template, created_by_weaver_id in rows:
+                agent_id = str(agent_id or "").strip()
+                cell_type = str(cell_type or "").strip()
+                if not agent_id:
+                    continue
+                if cell_type == "terminal":
+                    self._conn.execute(
+                        "UPDATE agents SET kind='terminal' WHERE id=?",
+                        (agent_id,),
+                    )
+                    continue
+                if cell_type != "agent":
+                    continue
+                if engineer_id and agent_id == engineer_id:
+                    self._conn.execute(
+                        "UPDATE agents "
+                        "SET name=?, slug=?, kind='engineer', role='', "
+                        "owner_engineer_id='', hired_by_architect_id='', persistent=1 "
+                        "WHERE id=?",
+                        (engineer_name, engineer_slug, agent_id),
+                    )
+                    continue
+                self._conn.execute(
+                    "UPDATE agents "
+                    "SET kind='worker', role=?, owner_engineer_id=?, "
+                    "hired_by_architect_id='', persistent=0 "
+                    "WHERE id=?",
+                    (
+                        str(template or ""),
+                        str(created_by_weaver_id or ""),
+                        agent_id,
+                    ),
+                )
+                worker_count += 1
+
+            task_count = int(
+                self._conn.execute("SELECT COUNT(*) FROM board_tasks").fetchone()[0]
+            )
+            group_weaver_map = self._load_group_weaver_map()
+            configured_loom_weaver_id = group_weaver_map.get(_KINDS_WEAVER_GROUP, "")
+            self._backfill_task_assignments_from_group_settings(
+                group_weaver_map,
+                only_unassigned=False,
+                reset_stage1_fields=True,
+            )
+
+            migrated_at = datetime.now(timezone.utc).isoformat()
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (
+                    _KINDS_SCHEMA_MIGRATION_VERSION_KEY,
+                    str(_KINDS_BACKFILL_MIGRATION_VERSION),
+                ),
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (_KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY, migrated_at),
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (_KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY, "1"),
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
+        log.info(
+            "migration: kinds backfill applied (engineer=%s, workers=%d, tasks=%d)",
+            engineer_id,
+            worker_count,
+            task_count,
+        )
+
+    def _fixup_kinds_task_assignments_if_needed(self):
+        version = self._current_kinds_migration_version()
+        if version != _KINDS_BACKFILL_MIGRATION_VERSION:
+            return
+
+        fixup_applied = str(
+            self._read_meta_value(_KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY) or ""
+        ).strip()
+        if fixup_applied == "1":
+            return
+
+        updated = 0
+        try:
+            self._conn.execute("BEGIN")
+            group_weaver_map = self._load_group_weaver_map()
+            updated = self._backfill_task_assignments_from_group_settings(
+                group_weaver_map,
+                only_unassigned=True,
+                reset_stage1_fields=False,
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (_KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY, "1"),
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
+        log.info("migration: kinds task assignment fixup applied (updated=%d)", updated)
 
     # -- Migration ----------------------------------------------------------
 

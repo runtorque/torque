@@ -72,6 +72,15 @@ For dual mode, also run `make open` to get a browser window alongside the toolbe
 - **Delta broadcasts**: Every mutation calls `_emit()` to queue a delta op. `broadcast()` sends `{"type": "delta", "seq": N, "ops": [...]}` to WS clients. Full state (`snapshot_msg()`) is sent only on initial WS connect or `resync` command. 12 delta op types: `agent_upsert`, `agent_remove`, `group_update`, `group_remove`, `group_rename`, `groups_reorder`, `group_settings_update`, `global_settings_update`, `task_upsert`, `task_remove`, `lanes_update`, `ui_update`, `focus_update`.
 - **Slugs**: Every agent, terminal, group, and board task has a `slug` column persisted in SQLite. Slugs are auto-generated from the resource name via `_slugify()` and are unique per resource type. On startup, any resource missing a slug (or a terminal with an old-format slug lacking `:`) gets one generated automatically. The CLI accepts slugs as identifiers everywhere IDs or names are accepted.
 - **Migration**: On first startup, if `loom.db` is empty but `state.json` exists, data is imported automatically and `state.json` is renamed to `state.json.bak`. Schema migrations (e.g. adding `slug`, `action_name`, `action_vars`, `tasks_dispatched` columns) use `ALTER TABLE ... ADD COLUMN` in `LoomDB.init()`, guarded by try/except. `action_vars` is stored as JSON text in SQLite, decoded on load.
+### Kinds refactor (stage 1 invariants)
+- `agents` now includes `kind`, `role`, `owner_engineer_id`, `hired_by_architect_id`, and `persistent`.
+- `board_tasks` now includes `assigned_engineer_id`, `created_by_architect_id`, and `suggested_action`.
+- A `decisions` table now exists for architect-level decision records; keep schema details in the plan doc, not here.
+- Through stage 5, legacy columns stay authoritative: `template`, `created_by_weaver_id`, and `weaver_owner_id` (when present).
+- `loom/db.py` dual-write coalescing keeps the new columns populated from those legacy values and warns on drift.
+- Treat `loom doctor` as the migration verification surface after any schema/backfill/dual-write change.
+- The staged source of truth is [Agent Kinds Refactor](docs/plans/agent-kinds-refactor.md).
+
 - **Loom context namespace**: Action templates can reference a `loom` dict injected at render time containing agent identity (`loom.agent.*`), dispatch context (`loom.context.is_clean`, `loom.context.tasks_dispatched`, `loom.context.previous_tasks`), worktree state (`loom.worktree.*`), task metadata (`loom.task.*`), and child terminals (`loom.terminals`). `loom` is a reserved variable name — rejected on action save. Preview renders use `LOOM_CONTEXT_STUB` (safe defaults with `is_clean=True`).
 
 ## Code conventions

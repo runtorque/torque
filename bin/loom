@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import signal
 import subprocess
 import sys
@@ -16,6 +17,8 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+
+from loom.doctor import build_doctor_report_for_db, format_doctor_report
 
 DEFAULT_PORT = 18932
 DESKTOP_DEFAULT_PORT = 18933
@@ -394,6 +397,11 @@ def db_read_state():
     return _db_read(_query)
 
 
+def db_read_doctor_report():
+    """Read the doctor report directly from SQLite."""
+    return build_doctor_report_for_db(LOOM_DB)
+
+
 def get_state_local(port):
     """Try SQLite first, fall back to HTTP daemon.
     Use for read-only commands that don't need ephemeral fields."""
@@ -403,6 +411,24 @@ def get_state_local(port):
         except Exception:
             pass
     return get_state(port)
+
+
+def get_doctor_local(port):
+    """Prefer the live daemon doctor endpoint; fall back to SQLite offline."""
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.2):
+            pass
+    except OSError:
+        if _db_available():
+            try:
+                return db_read_doctor_report()
+            except Exception:
+                pass
+    else:
+        resp = api_call("doctor", port=port)
+        return check_ok(resp)
+    resp = api_call("doctor", port=port)
+    return check_ok(resp)
 
 
 # ---------------------------------------------------------------------------
@@ -2632,6 +2658,16 @@ def cmd_logs(args):
         os.execvp("tail", ["tail", "-50", LOOM_LOG])
 
 
+def cmd_doctor(args):
+    report = get_doctor_local(args.port)
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(format_doctor_report(report))
+    if report.get("result") != "pass":
+        sys.exit(1)
+
+
 def cmd_desktop(args):
     entrypoint = _resolve_desktop_entrypoint()
     if not entrypoint.is_file():
@@ -3835,6 +3871,12 @@ def build_parser():
     p.add_argument("-a", "--all", action="store_true",
                    help="Show all windows (default: current window only)")
     p.set_defaults(func=cmd_status)
+
+    # -- doctor -------------------------------------------------------------
+    p = sub.add_parser("doctor", help="Run Stage 1 kinds migration checks")
+    p.add_argument("--json", action="store_true",
+                   help="Output raw JSON")
+    p.set_defaults(func=cmd_doctor)
 
     # -- desktop ------------------------------------------------------------
     p = sub.add_parser("desktop", help="Launch Loom in the native desktop shell")

@@ -359,6 +359,60 @@ class MatrixStateCleanupTests(unittest.TestCase):
             state.auto_dispatch_queues["g"][0].weaver_owner_id,
             "weaver-1",
         )
+
+    def test_load_restores_kinds_fields_on_agents_and_tasks(self):
+        from loom.db import LoomDB
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = LoomDB(Path(tmp.name) / "loom.db")
+        db.init()
+        self.addCleanup(db.close)
+        db.save_groups({"g": ["agent-1"]}, {"g": "g"})
+        db.save_group_members("g", ["agent-1"])
+        db.save_agent(
+            self.state_mod.AgentCell(
+                id="agent-1",
+                name="Architect",
+                group="g",
+                cell_type="agent",
+                created_by_weaver_id="weaver-1",
+            )
+        )
+        db.save_board_task(
+            self.state_mod.BoardTask(
+                id="task-1",
+                task="Plan work",
+                group="g",
+                lane="Backlog",
+            )
+        )
+        db._conn.execute(
+            "UPDATE agents SET kind=?, role=?, owner_engineer_id=?, "
+            "hired_by_architect_id=?, persistent=? WHERE id=?",
+            ("architect", "lead", "engineer-1", "architect-root", 1, "agent-1"),
+        )
+        db._conn.execute(
+            "UPDATE board_tasks SET assigned_engineer_id=?, "
+            "created_by_architect_id=?, suggested_action=? WHERE id=?",
+            ("engineer-1", "architect-root", "feature/review", "task-1"),
+        )
+        db._conn.commit()
+
+        state = self.state_mod.MatrixState(db=db)
+        state.load()
+
+        agent = state.agents["agent-1"]
+        self.assertEqual(agent.kind, "architect")
+        self.assertEqual(agent.role, "lead")
+        self.assertEqual(agent.owner_engineer_id, "engineer-1")
+        self.assertEqual(agent.hired_by_architect_id, "architect-root")
+        self.assertTrue(agent.persistent)
+
+        task = state.board_tasks["task-1"]
+        self.assertEqual(task.assigned_engineer_id, "engineer-1")
+        self.assertEqual(task.created_by_architect_id, "architect-root")
+        self.assertEqual(task.suggested_action, "feature/review")
         self.assertEqual(
             state.agents["agent-1"].created_by_weaver_id,
             "weaver-1",
