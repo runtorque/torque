@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from loom import __version__
 from loom.config import ATTACHMENTS_DIR
 from loom.db_board import (
     BoardPersistenceMixin,
@@ -2464,9 +2465,11 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             return
         if self._count_unmigrated_legacy_rows() <= 0:
             return
+        current_major = int(str(__version__ or "2.0.0").split(".", 1)[0] or 2)
+        prior_major = max(1, current_major - 1)
         message = (
             "ERROR: this version requires a prior kinds-refactor migration.\n"
-            "Install version X.Y first, boot once so the migration runs, then upgrade.\n"
+            f"Install Loom {prior_major}.x first, boot once so the kinds-refactor migration runs, then upgrade to Loom {__version__}.\n"
             "Current DB has unmigrated rows with legacy columns populated."
         )
         print(message, file=sys.stderr)

@@ -182,7 +182,7 @@ class Stage6CleanupMigrationTests(unittest.TestCase):
         self.assertNotEqual(exc.exception.code, 0)
         expected = (
             "ERROR: this version requires a prior kinds-refactor migration.\n"
-            "Install version X.Y first, boot once so the migration runs, then upgrade.\n"
+            "Install Loom 1.x first, boot once so the kinds-refactor migration runs, then upgrade to Loom 2.0.0.\n"
             "Current DB has unmigrated rows with legacy columns populated."
         )
         self.assertEqual(stderr.getvalue().strip(), expected)

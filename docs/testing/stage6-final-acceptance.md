@@ -53,7 +53,7 @@ Try booting this version against a pre-stage-1 DB (legacy columns populated, new
 Expected:
 
 - Loom refuses to start before serving HTTP
-- stderr / `loom.log` include the actionable migration error directing the operator to install the prior version first and boot once
+- stderr / `loom.log` include the actionable migration error directing the operator to install Loom 1.x first, boot once, then upgrade to Loom 2.0.0
 
 ## 5. Schema cleanup verification
 
