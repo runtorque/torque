@@ -1,4 +1,4 @@
-"""Role discovery, validation, storage, and legacy-template compatibility."""
+"""Role discovery, validation, storage, and config resolution."""
 
 from __future__ import annotations
 
@@ -8,14 +8,81 @@ import yaml
 
 from .actions import parse_yaml
 from .config import log
-from .templates import (
-    TemplateManager,
+
+
+class _BlockStr(str):
+    """Tagged string subclass so the YAML dumper emits block scalars."""
+
+
+class _TemplateDumper(yaml.SafeDumper):
+    pass
+
+
+_TemplateDumper.add_representer(
     _BlockStr,
-    _KNOWN_KEYS,
-    _TEMPLATE_KEY_ORDER,
-    _TemplateDumper,
-    _normalize_template_data,
+    lambda d, s: d.represent_scalar("tag:yaml.org,2002:str", s, style="|"),
 )
+
+_TEMPLATE_KEY_ORDER = [
+    "name",
+    "display_name",
+    "description",
+    "provider",
+    "command",
+    "model",
+    "reasoning_effort",
+    "permissions",
+    "max_turns",
+    "system_prompt",
+    "initial_prompt",
+    "session_resume",
+    "idle_timeout",
+    "tab_color",
+    "icon",
+    "worktree",
+    "worktree_base_branch",
+    "worktree_auto_checkpoint",
+    "checkpoint_on_progress",
+    "worktree_merge_squash",
+    "env_vars",
+    "env_file",
+    "terminals",
+]
+
+_SCALAR_KEYS = {
+    "name",
+    "display_name",
+    "description",
+    "provider",
+    "command",
+    "model",
+    "reasoning_effort",
+    "permissions",
+    "system_prompt",
+    "initial_prompt",
+    "tab_color",
+    "icon",
+    "worktree_base_branch",
+    "env_file",
+}
+
+_INT_KEYS = {"max_turns", "idle_timeout"}
+_BOOL_KEYS = {
+    "session_resume",
+    "worktree",
+    "worktree_auto_checkpoint",
+    "checkpoint_on_progress",
+    "worktree_merge_squash",
+}
+
+_KNOWN_KEYS = _SCALAR_KEYS | _INT_KEYS | _BOOL_KEYS | {"env_vars", "terminals"}
+_RUNTIME_OVERRIDE_KEYS = {
+    "directory",
+    "profile",
+    "shell",
+    "worktree_base_dir",
+    "worktree_name",
+}
 
 _ROLE_KEY_ORDER = [
     *(_TEMPLATE_KEY_ORDER[:11]),
@@ -24,6 +91,107 @@ _ROLE_KEY_ORDER = [
     *(_TEMPLATE_KEY_ORDER[11:]),
 ]
 _ROLE_KNOWN_KEYS = _KNOWN_KEYS | {"preamble", "priorities"}
+
+
+def _normalize_terminals(raw) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    result = []
+    for term in raw:
+        if not isinstance(term, dict):
+            continue
+        name = str(term.get("name", "") or "").strip()
+        command = str(term.get("command", "") or "").strip()
+        entry = {}
+        if name:
+            entry["name"] = name
+        if command:
+            entry["command"] = command
+        if entry:
+            result.append(entry)
+    return result
+
+
+def _normalize_template_data(data: dict | None, name_hint: str = "",
+                             allow_runtime_overrides: bool = False) -> dict:
+    data = dict(data or {})
+    result = {}
+
+    name = str(data.get("name", "") or name_hint or "").strip()
+    if name:
+        result["name"] = name
+
+    for key in _SCALAR_KEYS - {"name"}:
+        value = data.get(key, "")
+        if value is None:
+            continue
+        value = str(value).strip()
+        if value:
+            result[key] = value
+
+    for key in _INT_KEYS:
+        value = data.get(key, None)
+        if value in (None, ""):
+            continue
+        try:
+            result[key] = int(value)
+        except (TypeError, ValueError):
+            continue
+
+    for key in _BOOL_KEYS:
+        if key in data and data.get(key) is not None:
+            result[key] = bool(data.get(key))
+
+    env_vars = data.get("env_vars", {})
+    if isinstance(env_vars, dict):
+        clean_env = {}
+        for key, value in env_vars.items():
+            if key is None or value is None:
+                continue
+            k = str(key).strip()
+            if not k:
+                continue
+            clean_env[k] = str(value)
+        if clean_env:
+            result["env_vars"] = clean_env
+
+    terminals = _normalize_terminals(data.get("terminals"))
+    if terminals:
+        result["terminals"] = terminals
+
+    if allow_runtime_overrides:
+        for key in _RUNTIME_OVERRIDE_KEYS:
+            value = data.get(key, "")
+            if value is None:
+                continue
+            value = str(value).strip()
+            if value:
+                result[key] = value
+
+    return result
+
+
+def _merge_agent_config(base: dict, more_specific: dict) -> dict:
+    merged = dict(base)
+    for key, value in (more_specific or {}).items():
+        if key == "env_vars":
+            env = dict(merged.get("env_vars", {}))
+            env.update(value or {})
+            if env:
+                merged["env_vars"] = env
+            elif "env_vars" in merged:
+                merged.pop("env_vars", None)
+            continue
+        if key == "terminals":
+            merged["terminals"] = list(value or [])
+            continue
+        if isinstance(value, str):
+            if value:
+                merged[key] = value
+            continue
+        if value is not None:
+            merged[key] = value
+    return merged
 
 
 def _normalize_priorities(raw) -> list[str]:
@@ -58,10 +226,24 @@ def _normalize_role_data(data: dict | None, name_hint: str = "",
     return result
 
 
-class RoleManager(TemplateManager):
-    """Primary role manager with compatibility reads from legacy templates."""
+class RoleManager:
+    """Primary role manager. Role files live only under ``roles/``."""
 
     GLOBAL_ROLES_DIR = os.path.expanduser("~/.loom/roles")
+    _WARNED_IGNORED_LEGACY_FILES: set[str] = set()
+
+    def __init__(self):
+        self._warn_ignored_legacy_templates(scope="user")
+
+    @classmethod
+    def _display_path(cls, path: str) -> str:
+        raw = str(path or "")
+        home = os.path.expanduser("~")
+        if raw == home:
+            return "~"
+        if raw.startswith(home + os.sep):
+            return "~/" + raw[len(home) + 1:]
+        return raw
 
     @classmethod
     def _find_project_dir(cls, base_dir: str = "",
@@ -88,13 +270,9 @@ class RoleManager(TemplateManager):
 
     @classmethod
     def _default_project_role_dir(cls, base_dir: str = "") -> str:
-        existing_role_dir = cls._find_project_dir(base_dir, "roles")
-        if existing_role_dir:
-            return existing_role_dir
-        legacy_dir = cls._find_project_dir(base_dir, "agents")
-        if legacy_dir:
-            return os.path.join(os.path.dirname(legacy_dir), "roles")
-        return cls._default_project_dir(base_dir, "roles")
+        return cls.find_project_role_dir(base_dir) or cls._default_project_dir(
+            base_dir, "roles"
+        )
 
     @classmethod
     def _global_dir(cls, leaf: str = "roles") -> str:
@@ -120,58 +298,40 @@ class RoleManager(TemplateManager):
     def find_project_role_dir(cls, base_dir: str = "") -> str | None:
         return cls._find_project_dir(base_dir, "roles")
 
-    @staticmethod
-    def find_legacy_template_dirs(base_dir: str = "") -> list[str]:
-        return TemplateManager.find_templates_dirs(base_dir)
-
-    @staticmethod
-    def _dedupe_source_dirs(
-        dirs: list[tuple[str, bool, bool]]
-    ) -> list[tuple[str, bool, bool]]:
-        unique: list[tuple[str, bool, bool]] = []
-        seen_paths: set[str] = set()
-        for root_dir, is_global, is_legacy in dirs:
-            real_dir = os.path.realpath(root_dir) if root_dir else ""
-            if not real_dir or real_dir in seen_paths:
-                continue
-            seen_paths.add(real_dir)
-            unique.append((root_dir, is_global, is_legacy))
-        return unique
-
     @classmethod
-    def _source_dirs(cls, base_dir: str = "", scope: str = "") -> list[tuple[str, bool, bool]]:
-        project_role_dir = cls._find_project_dir(base_dir, "roles")
-        global_role_dir = cls._global_dir("roles")
-        project_legacy_dir = cls._find_project_dir(base_dir, "agents")
-        global_legacy_dir = cls._global_dir("agents")
-
-        dirs: list[tuple[str, bool, bool]] = []
-        if scope == "project":
-            if project_role_dir:
-                dirs.append((project_role_dir, False, False))
+    def _legacy_scope_pairs(
+        cls, base_dir: str = "", scope: str = ""
+    ) -> list[tuple[str, str, bool]]:
+        pairs: list[tuple[str, str, bool]] = []
+        if scope != "user":
+            project_legacy_dir = cls._find_project_dir(base_dir, "agents")
             if project_legacy_dir:
-                dirs.append((project_legacy_dir, False, True))
-            return cls._dedupe_source_dirs(dirs)
-        if scope == "user":
-            if os.path.isdir(global_role_dir):
-                dirs.append((global_role_dir, True, False))
+                pairs.append(
+                    (
+                        project_legacy_dir,
+                        cls._default_project_dir(base_dir, "roles"),
+                        False,
+                    )
+                )
+        if scope != "project":
+            global_legacy_dir = cls._global_dir("agents")
             if os.path.isdir(global_legacy_dir):
-                dirs.append((global_legacy_dir, True, True))
-            return cls._dedupe_source_dirs(dirs)
-
-        if project_role_dir:
-            dirs.append((project_role_dir, False, False))
-        if project_legacy_dir:
-            dirs.append((project_legacy_dir, False, True))
-        if os.path.isdir(global_role_dir):
-            dirs.append((global_role_dir, True, False))
-        if os.path.isdir(global_legacy_dir):
-            dirs.append((global_legacy_dir, True, True))
-        return cls._dedupe_source_dirs(dirs)
+                pairs.append((global_legacy_dir, cls._global_dir("roles"), True))
+        unique: list[tuple[str, str, bool]] = []
+        seen_legacy_dirs: set[str] = set()
+        for legacy_dir, role_dir, is_global in pairs:
+            real_dir = os.path.realpath(legacy_dir)
+            if real_dir in seen_legacy_dirs:
+                continue
+            seen_legacy_dirs.add(real_dir)
+            unique.append((legacy_dir, role_dir, is_global))
+        return unique
 
     @staticmethod
     def _iter_named_yaml_paths(root_dir: str) -> list[tuple[str, str]]:
         entries = []
+        if not root_dir or not os.path.isdir(root_dir):
+            return entries
         for dirpath, _dirnames, filenames in os.walk(root_dir):
             for fname in sorted(filenames):
                 if not fname.endswith((".yaml", ".yml")):
@@ -180,50 +340,63 @@ class RoleManager(TemplateManager):
                 entries.append((rel.rsplit(".", 1)[0], os.path.join(dirpath, fname)))
         return entries
 
-    @staticmethod
-    def _shadowed_legacy_keys(entries: list[dict]) -> set[tuple[str, bool]]:
-        role_keys = {
-            (entry["name"], entry["global"])
-            for entry in entries
-            if not entry["legacy"]
-        }
-        legacy_keys = {
-            (entry["name"], entry["global"])
-            for entry in entries
-            if entry["legacy"]
-        }
-        return role_keys & legacy_keys
+    @classmethod
+    def _ignored_legacy_template_entries(
+        cls, base_dir: str = "", scope: str = ""
+    ) -> list[tuple[str, str]]:
+        ignored = []
+        for legacy_dir, role_dir, _is_global in cls._legacy_scope_pairs(base_dir, scope):
+            role_slugs = {
+                name for name, _path in cls._iter_named_yaml_paths(role_dir)
+            }
+            for name, legacy_path in cls._iter_named_yaml_paths(legacy_dir):
+                if name in role_slugs:
+                    continue
+                ignored.append((legacy_path, role_dir))
+        return ignored
 
     @classmethod
-    def _warning_slugs(cls, entries: list[dict]) -> set[str]:
-        return {
-            name for name, _is_global in cls._shadowed_legacy_keys(entries)
-        }
-
-    @staticmethod
-    def _log_shadowed_legacy_templates(slugs: set[str]) -> None:
-        for slug in sorted(slugs):
-            log.warning("role '%s' shadows legacy template", slug)
-
-    def _collect_entries(self, base_dir: str = "", scope: str = "") -> list[dict]:
-        entries = []
-        for root_dir, is_global, is_legacy in self._source_dirs(base_dir, scope):
-            if not root_dir or not os.path.isdir(root_dir):
+    def _warn_ignored_legacy_templates(cls, base_dir: str = "", scope: str = "") -> None:
+        for legacy_path, role_dir in cls._ignored_legacy_template_entries(base_dir, scope):
+            real_path = os.path.realpath(legacy_path)
+            if real_path in cls._WARNED_IGNORED_LEGACY_FILES:
                 continue
-            for name, path in self._iter_named_yaml_paths(root_dir):
-                entries.append({
-                    "name": name,
-                    "path": path,
-                    "dir": root_dir,
-                    "global": is_global,
-                    "legacy": is_legacy,
-                })
-        return entries
+            cls._WARNED_IGNORED_LEGACY_FILES.add(real_path)
+            role_dir_display = cls._display_path(role_dir)
+            if not role_dir_display.endswith("/"):
+                role_dir_display += "/"
+            log.warning(
+                "legacy template file at %s is ignored; move it to %s to use as a role",
+                cls._display_path(legacy_path),
+                role_dir_display,
+            )
+
+    @classmethod
+    def _source_dirs(cls, base_dir: str = "", scope: str = "") -> list[tuple[str, bool]]:
+        dirs: list[tuple[str, bool]] = []
+        if scope == "project":
+            project_role_dir = cls.find_project_role_dir(base_dir)
+            if project_role_dir:
+                dirs.append((project_role_dir, False))
+            return dirs
+        if scope == "user":
+            global_role_dir = cls._global_dir("roles")
+            if os.path.isdir(global_role_dir):
+                dirs.append((global_role_dir, True))
+            return dirs
+
+        project_role_dir = cls.find_project_role_dir(base_dir)
+        if project_role_dir:
+            dirs.append((project_role_dir, False))
+        global_role_dir = cls._global_dir("roles")
+        if os.path.isdir(global_role_dir):
+            dirs.append((global_role_dir, True))
+        return dirs
 
     def _load_entry_meta(self, entry: dict) -> dict:
         name = entry["name"]
         try:
-            with open(entry["path"]) as f:
+            with open(entry["path"], encoding="utf-8") as f:
                 raw = f.read()
             meta = parse_yaml(raw) or {}
             meta = _normalize_role_data(meta, name_hint=name)
@@ -233,52 +406,44 @@ class RoleManager(TemplateManager):
 
     def _load_raw(self, name: str, base_dir: str = "",
                   scope: str = "") -> str | None:
+        self._warn_ignored_legacy_templates(base_dir, scope)
         name = str(name or "").strip()
         if not name:
             return None
-        entries = self._collect_entries(base_dir, scope=scope)
-        shadowed_legacy_keys = self._shadowed_legacy_keys(entries)
-        for entry in entries:
-            if entry["name"] != name:
+        for root_dir, _is_global in self._source_dirs(base_dir, scope):
+            if not root_dir:
                 continue
-            if not entry["legacy"] and (
-                name, entry["global"]
-            ) in shadowed_legacy_keys:
-                self._log_shadowed_legacy_templates({name})
-            with open(entry["path"]) as f:
-                return f.read()
+            for suffix in (".yaml", ".yml"):
+                path = os.path.join(root_dir, name + suffix)
+                if os.path.isfile(path):
+                    with open(path, encoding="utf-8") as f:
+                        return f.read()
         return None
 
     def list_roles(self, base_dir: str = "") -> list[dict]:
-        entries = self._collect_entries(base_dir)
-        shadowed_legacy_keys = self._shadowed_legacy_keys(entries)
-        warning_slugs = self._warning_slugs(entries)
-        if warning_slugs:
-            self._log_shadowed_legacy_templates(warning_slugs)
-
+        self._warn_ignored_legacy_templates(base_dir)
         results = []
         seen_names = set()
-        for entry in entries:
-            if entry["legacy"] and (
-                entry["name"], entry["global"]
-            ) in shadowed_legacy_keys:
+        for root_dir, is_global in self._source_dirs(base_dir):
+            if not root_dir or not os.path.isdir(root_dir):
                 continue
-            meta = self._load_entry_meta(entry)
-            shadowed = entry["global"] and entry["name"] in seen_names
-            results.append({
-                "name": entry["name"],
-                "display_name": meta.get("display_name", ""),
-                "description": meta.get("description", ""),
-                "provider": meta.get("provider", ""),
-                "preamble": meta.get("preamble", ""),
-                "priorities": list(meta.get("priorities", [])),
-                "global": entry["global"],
-                "dir": entry["dir"],
-                "shadowed": shadowed,
-                "legacy": entry["legacy"],
-            })
-            if not entry["global"]:
-                seen_names.add(entry["name"])
+            for name, path in self._iter_named_yaml_paths(root_dir):
+                meta = self._load_entry_meta({"name": name, "path": path})
+                shadowed = is_global and name in seen_names
+                results.append({
+                    "name": name,
+                    "display_name": meta.get("display_name", ""),
+                    "description": meta.get("description", ""),
+                    "provider": meta.get("provider", ""),
+                    "preamble": meta.get("preamble", ""),
+                    "priorities": list(meta.get("priorities", [])),
+                    "global": is_global,
+                    "dir": root_dir,
+                    "shadowed": shadowed,
+                    "legacy": False,
+                })
+                if not is_global:
+                    seen_names.add(name)
         return sorted(results, key=lambda role: (role["global"], role["name"]))
 
     def list_templates(self, base_dir: str = "") -> list[dict]:
@@ -301,6 +466,7 @@ class RoleManager(TemplateManager):
 
     def save_role(self, name: str, data: dict,
                   scope: str = "project", base_dir: str = "") -> str:
+        self._warn_ignored_legacy_templates(base_dir, scope)
         clean = _normalize_role_data(data, name_hint=name)
         clean["name"] = name
         unknown = sorted(set(data or {}) - _ROLE_KNOWN_KEYS - {"name"})
@@ -326,7 +492,7 @@ class RoleManager(TemplateManager):
                 ordered[key] = _BlockStr(value.rstrip("\n") + "\n")
             else:
                 ordered[key] = value
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(yaml.dump(
                 ordered,
                 Dumper=_TemplateDumper,
@@ -342,13 +508,13 @@ class RoleManager(TemplateManager):
 
     def delete_role(self, name: str,
                     scope: str = "", base_dir: str = "") -> bool:
-        dirs = self.find_roles_dirs(base_dir)
-        if scope == "user":
-            dirs = [self._global_dir("roles")]
-        elif scope == "project":
-            role_dir = self.find_project_role_dir(base_dir)
-            dirs = [role_dir] if role_dir else []
-        for role_dir in dirs:
+        self._warn_ignored_legacy_templates(base_dir, scope)
+        return self.delete_template(name, scope=scope, base_dir=base_dir)
+
+    def delete_template(self, name: str,
+                        scope: str = "", base_dir: str = "") -> bool:
+        self._warn_ignored_legacy_templates(base_dir, scope)
+        for role_dir, _is_global in self._source_dirs(base_dir, scope):
             if not role_dir:
                 continue
             for suffix in (".yaml", ".yml"):
@@ -356,21 +522,76 @@ class RoleManager(TemplateManager):
                 if os.path.isfile(path):
                     os.remove(path)
                     return True
-        return self.delete_template(name, scope=scope, base_dir=base_dir)
-
-    def delete_template(self, name: str,
-                        scope: str = "", base_dir: str = "") -> bool:
-        for template_dir, _is_global, _is_legacy in self._source_dirs(
-            base_dir, scope
-        ):
-            if not template_dir:
-                continue
-            for suffix in (".yaml", ".yml"):
-                path = os.path.join(template_dir, name + suffix)
-                if os.path.isfile(path):
-                    os.remove(path)
-                    return True
         return False
+
+    def resolve_agent_config(self, template_name: str,
+                             group_settings,
+                             overrides: dict | None,
+                             base_dir: str = "") -> dict:
+        self._warn_ignored_legacy_templates(base_dir)
+        result = {}
+        effective_template = ""
+
+        default_template = str(
+            getattr(group_settings, "default_agent_template", "") or ""
+        ).strip()
+        if default_template:
+            tpl = self.load_template(default_template, base_dir)
+            if tpl:
+                result = _merge_agent_config(result, tpl)
+                effective_template = default_template
+
+        group_overrides = {
+            "directory": getattr(group_settings, "agent_directory", ""),
+            "profile": getattr(group_settings, "agent_profile", ""),
+            "shell": getattr(group_settings, "agent_shell", ""),
+            "tab_color": getattr(group_settings, "agent_tab_color", ""),
+            "env_vars": getattr(group_settings, "agent_env_vars", {}),
+            "provider": getattr(group_settings, "agent_provider", ""),
+            "command": getattr(group_settings, "agent_boot_command", ""),
+            "model": getattr(group_settings, "agent_model", ""),
+            "reasoning_effort": getattr(
+                group_settings, "agent_reasoning_effort", ""
+            ),
+            "worktree": getattr(group_settings, "git_worktree", False),
+            "worktree_base_dir": getattr(
+                group_settings, "worktree_base_dir", ""
+            ),
+            "worktree_base_branch": getattr(
+                group_settings, "worktree_base_branch", ""
+            ),
+            "worktree_auto_checkpoint": getattr(
+                group_settings, "worktree_auto_checkpoint", False
+            ),
+            "checkpoint_on_progress": getattr(
+                group_settings, "checkpoint_on_progress", False
+            ),
+            "worktree_merge_squash": getattr(
+                group_settings, "worktree_merge_squash", True
+            ),
+            "session_resume": getattr(
+                group_settings, "agent_session_resume", True
+            ),
+            "idle_timeout": getattr(
+                group_settings, "agent_idle_timeout", 0
+            ),
+        }
+        result = _merge_agent_config(result, group_overrides)
+
+        explicit = str(template_name or "").strip()
+        if explicit:
+            tpl = self.load_template(explicit, base_dir)
+            if tpl:
+                result = _merge_agent_config(result, tpl)
+                effective_template = explicit
+
+        result = _merge_agent_config(
+            result,
+            _normalize_role_data(overrides or {}, allow_runtime_overrides=True),
+        )
+        if effective_template:
+            result["template"] = effective_template
+        return result
 
     @staticmethod
     def render_preamble(role: dict | None) -> str:
@@ -379,8 +600,8 @@ class RoleManager(TemplateManager):
         Exact format:
         - empty preamble + empty priorities => ""
         - preamble only => "<preamble>"
-        - priorities only => "Priorities:\\n- item\\n- item"
-        - both => "<preamble>\\n\\nPriorities:\\n- item\\n- item"
+        - priorities only => "Priorities:\n- item\n- item"
+        - both => "<preamble>\n\nPriorities:\n- item\n- item"
         """
         role = dict(role or {})
         preamble = str(role.get("preamble", "") or "").strip()

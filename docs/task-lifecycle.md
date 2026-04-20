@@ -243,7 +243,7 @@ When the test task completes, all children are Done and T1 cascades to Done.
 
 Not every follow-up task should advance the main implementation pipeline.
 
-When the designated engineer sends a worker a question with `weaver_agent_message(...)`, Loom creates a visible follow-up task for that side conversation. The worker answers with `loom_reply(...)`, and that follow-up task closes with an **answered** outcome.
+When the designated engineer sends a worker a question with `engineer_agent_message(...)`, Loom creates a visible follow-up task for that side conversation. The worker answers with `loom_reply(...)`, and that follow-up task closes with an **answered** outcome.
 
 This completion is intentionally **non-cascading**:
 

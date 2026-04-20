@@ -4,25 +4,25 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from loom.templates import TemplateManager
+from loom.roles import RoleManager
 
 
-class TemplateManagerTests(unittest.TestCase):
+class RoleManagerTemplateCompatTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.project = self.root / "repo" / "subdir"
         self.project.mkdir(parents=True)
-        self.project_templates = self.root / "repo" / ".loom" / "agents"
-        self.project_templates.mkdir(parents=True)
+        self.project_roles = self.root / "repo" / ".loom" / "roles"
+        self.project_roles.mkdir(parents=True)
         self.user_home = self.root / "home"
-        self.user_templates = self.user_home / ".loom" / "agents"
-        self.user_templates.mkdir(parents=True)
+        self.user_roles = self.user_home / ".loom" / "roles"
+        self.user_roles.mkdir(parents=True)
         self.prev_home = os.environ.get("HOME")
         os.environ["HOME"] = str(self.user_home)
         self.addCleanup(self._restore_home)
-        self.mgr = TemplateManager()
+        self.mgr = RoleManager()
 
     def _restore_home(self):
         if self.prev_home is None:
@@ -30,13 +30,19 @@ class TemplateManagerTests(unittest.TestCase):
         else:
             os.environ["HOME"] = self.prev_home
 
-    def test_list_templates_marks_shadowed_user_templates(self):
-        (self.project_templates / "researcher.yaml").write_text(
-            "name: researcher\ndescription: Project\n")
-        (self.user_templates / "researcher.yaml").write_text(
-            "name: researcher\ndescription: User\n")
-        (self.user_templates / "implementer.yaml").write_text(
-            "name: implementer\ndescription: User\n")
+    def test_list_templates_marks_shadowed_user_roles(self):
+        (self.project_roles / "researcher.yaml").write_text(
+            "name: researcher\ndescription: Project\n",
+            encoding="utf-8",
+        )
+        (self.user_roles / "researcher.yaml").write_text(
+            "name: researcher\ndescription: User\n",
+            encoding="utf-8",
+        )
+        (self.user_roles / "implementer.yaml").write_text(
+            "name: implementer\ndescription: User\n",
+            encoding="utf-8",
+        )
 
         listed = self.mgr.list_templates(str(self.project))
         by_name = {(item["name"], item["global"]): item for item in listed}

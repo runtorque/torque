@@ -2,7 +2,7 @@
 
 This guide explains how work moves through Loom from the moment you capture a task to the moment the work is complete. It is the best place to start if you want to understand the day-to-day workflow without reading source code.
 
-For deeper reference, see [Task Board](board.md), [Task Lifecycle](task-lifecycle.md), [Actions & Templates](actions.md), [Agent Templates](agent-templates.md), [Worktrees](worktrees.md), and the [CLI Reference](cli.md).
+For deeper reference, see [Task Board](board.md), [Task Lifecycle](task-lifecycle.md), [Actions & Roles](actions.md), [Agent Roles](agent-templates.md), [Worktrees](worktrees.md), and the [CLI Reference](cli.md).
 
 ## The workflow at a glance
 
@@ -11,7 +11,7 @@ Loom's workflow has seven moving parts:
 - **Tasks** are the units of work that appear on the board.
 - **Lanes** show where each task is in its lifecycle.
 - **Actions** define the prompt an agent receives when a task is dispatched.
-- **Agent templates** define how the agent is launched.
+- **Agent roles** define how the agent is launched.
 - **Dispatch** links a task to an agent and sends the work.
 - **Pipelines** let agents hand follow-up work to other agents.
 - **Schedules** create or dispatch work automatically at a future time.
@@ -57,21 +57,21 @@ For board mechanics and task fields, see [Task Board](board.md).
 Before dispatching, decide two separate things:
 
 - **What should the agent do?** Use an [action](actions.md).
-- **Who should do it, and with what runtime setup?** Use an [agent template](agent-templates.md).
+- **Who should do it, and with what runtime setup?** Use an [agent role](agent-templates.md).
 
 This split matters in daily use:
 
 - An **action** can describe an implementation step, review step, fix step, or research step.
-- An **agent template** can choose the provider, model, permissions, tab color, worktree behavior, environment variables, and companion terminals.
+- An **agent role** can choose the provider, model, permissions, tab color, worktree behavior, environment variables, companion terminals, and optional worker preamble.
 
-Example action + template pairing:
+Example action + role pairing:
 
 - `feature/implement` tells the agent how to implement the work.
 - `researcher` or `reviewer` tells Loom how to launch that agent.
 
 If a task has no action, Loom can still dispatch it. In that case the task text is sent as raw text instead of a rendered prompt.
 
-For the full action format, examples, and variable system, see [Actions & Templates](actions.md). For launch presets, see [Agent Templates](agent-templates.md).
+For the full action format, examples, and variable system, see [Actions & Roles](actions.md). For launch presets, see [Agent Roles](agent-templates.md).
 
 ## 3. Plan the board before dispatch
 
@@ -138,7 +138,7 @@ For schedule behavior and board UI details, see [Task Board](board.md#scheduled-
 Dispatch is the moment a task becomes active. Loom:
 
 1. Creates or selects an agent
-2. Applies the group defaults and any agent template
+2. Applies the group defaults and any agent role
 3. Creates a worktree if configured
 4. Renders the action prompt if the task has an action
 5. Links the task to the agent
@@ -168,7 +168,7 @@ Once an agent is working on a task, the agent can report back to Loom with MCP t
 
 These updates make the board readable without opening each agent session. A person scanning the board can see which tasks are moving, which are blocked, and which are waiting on a human decision.
 
-When the checkpoint needs to be recorded by Loom itself instead of the active agent, use `loom task verify ...` or `weaver_task_verify(...)` to mark deploy/restart attempted, smoke passed or failed, and any remaining verification notes.
+When the checkpoint needs to be recorded by Loom itself instead of the active agent, use `loom task verify ...` or `engineer_task_verify(...)` to mark deploy/restart attempted, smoke passed or failed, and any remaining verification notes.
 
 `loom_ask` is not a general status or suggestion channel. If the agent can keep moving, it should keep moving and report context through `loom_progress`, `loom_done`, `loom_blocked`, or derived-task context instead of pausing the task.
 
@@ -210,7 +210,7 @@ What Loom does next:
 
 This is how Loom keeps the board forward-moving without reopening old tasks. The original task remains the top-level story; the derived tasks show the detailed handoff chain.
 
-For transition syntax and pipeline examples, see [Actions & Templates](actions.md#pipelines). For how completion cascades back up the chain, see [Task Lifecycle](task-lifecycle.md#cascade-completion).
+For transition syntax and pipeline examples, see [Actions & Roles](actions.md#pipelines). For how completion cascades back up the chain, see [Task Lifecycle](task-lifecycle.md#cascade-completion).
 
 ## 7. Complete the work
 

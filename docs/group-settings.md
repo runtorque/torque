@@ -110,7 +110,7 @@ The **Weaver** tab owns per-group Weaver configuration.
 
 | Setting | Description |
 |---------|-------------|
-| **Agent** | Shows the designated engineer for the group’s legacy `weaver_*` surface. Create an engineer from the group’s **+ New** dropdown, then manage it here. |
+| **Agent** | Shows the group's designated engineer. Create an engineer from the group’s **+ New** dropdown, then manage it here. |
 | **Only show/manage agents launched by this engineer** | Restricts designated-engineer-only tools and views to worker agents originally created by that engineer. Human operators still see the full board. |
 | **Provider** | Optional backend override just for the designated engineer. Leave empty to inherit the group default. |
 | **Command override** | Optional boot command override for the designated engineer. |

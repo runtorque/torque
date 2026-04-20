@@ -341,7 +341,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_create_mcp_handler_hides_weaver_tools_from_regular_agents(self):
+    async def test_create_mcp_handler_exposes_only_current_mcp_surfaces(self):
         state = self.state_mod.MatrixState()
         weaver = self.state_mod.AgentCell(
             id="weaver-1",
@@ -400,8 +400,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("loom_memory_publish", tool_names)
         self.assertIn("loom_memory_read", tool_names)
         self.assertIn("loom_memory_link", tool_names)
-        self.assertIn("weaver_board_summary", tool_names)
-        self.assertIn("weaver_task_verify", tool_names)
+        self.assertNotIn("weaver_board_summary", tool_names)
+        self.assertNotIn("engineer_board_summary", tool_names)
+        self.assertNotIn("architect_board_summary", tool_names)
 
         listed_worker = await handler(
             FakeRequest(
@@ -414,6 +415,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertIn("loom_progress", worker_tool_names)
         self.assertNotIn("weaver_board_summary", worker_tool_names)
+        self.assertNotIn("engineer_board_summary", worker_tool_names)
         self.assertNotIn("architect_board_summary", worker_tool_names)
 
         listed_architect = await handler(
@@ -430,6 +432,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("architect_engineer_hire", architect_tool_names)
         self.assertIn("architect_engineer_message", architect_tool_names)
         self.assertNotIn("weaver_board_summary", architect_tool_names)
+        self.assertNotIn("engineer_board_summary", architect_tool_names)
 
         listed_engineer = await handler(
             FakeRequest(
@@ -440,9 +443,11 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         engineer_tool_names = [
             tool["name"] for tool in listed_engineer.payload["result"]["tools"]
         ]
-        self.assertIn("weaver_board_summary", engineer_tool_names)
+        self.assertIn("engineer_board_summary", engineer_tool_names)
+        self.assertIn("engineer_task_verify", engineer_tool_names)
         self.assertIn("engineer_message_architect", engineer_tool_names)
         self.assertIn("engineer_reply", engineer_tool_names)
+        self.assertNotIn("weaver_board_summary", engineer_tool_names)
 
         listed_weaver = await handler(
             FakeRequest(
@@ -453,9 +458,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         weaver_tool_names = [
             tool["name"] for tool in listed_weaver.payload["result"]["tools"]
         ]
-        self.assertIn("weaver_board_summary", weaver_tool_names)
-        self.assertIn("weaver_session_map", weaver_tool_names)
-        self.assertIn("weaver_task_verify", weaver_tool_names)
+        self.assertNotIn("weaver_board_summary", weaver_tool_names)
+        self.assertNotIn("engineer_board_summary", weaver_tool_names)
+        self.assertNotIn("architect_board_summary", weaver_tool_names)
 
         missing_header = await handler(
             FakeRequest(
@@ -473,37 +478,22 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             missing_header.payload["result"]["content"][0]["text"],
         )
 
-        alias_summary = await handler(
+        removed_alias = await handler(
             FakeRequest(
                 {
                     "jsonrpc": "2.0",
                     "id": 3,
                     "method": "tools/call",
-                    "params": {"name": "weaver_board_summary", "arguments": {}},
+                    "params": {"name": "weaver_agents_list", "arguments": {}},
                 }
             )
         )
-        self.assertFalse(alias_summary.payload["result"]["isError"])
         self.assertEqual(
-            json.loads(alias_summary.payload["result"]["content"][0]["text"])["group"],
-            "g",
-        )
-
-        denied_worker_summary = await handler(
-            FakeRequest(
-                {
-                    "jsonrpc": "2.0",
-                    "id": 4,
-                    "method": "tools/call",
-                    "params": {"name": "weaver_board_summary", "arguments": {}},
-                },
-                headers={"X-Loom-Cell-Id": worker.id},
-            )
-        )
-        self.assertTrue(denied_worker_summary.payload["result"]["isError"])
-        self.assertIn(
-            "only available to engineer sessions or external MCP clients",
-            denied_worker_summary.payload["result"]["content"][0]["text"],
+            removed_alias.payload["error"]["message"],
+            (
+                "weaver_* MCP tools were removed; use engineer_* or architect_* "
+                "instead (for example engineer_agents_list)"
+            ),
         )
 
         denied_architect_summary = await handler(
@@ -529,9 +519,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                     "jsonrpc": "2.0",
                     "id": 5,
                     "method": "tools/call",
-                    "params": {"name": "weaver_board_summary", "arguments": {}},
+                    "params": {"name": "engineer_board_summary", "arguments": {}},
                 },
-                headers={"X-Loom-Cell-Id": weaver.id},
+                headers={"X-Loom-Cell-Id": engineer.id},
             )
         )
         self.assertFalse(summary.payload["result"]["isError"])

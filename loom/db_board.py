@@ -80,6 +80,10 @@ def _serialize_board_task(task):
     verification_summary = json.dumps(d.pop("verification_summary", {}))
     worktree_boundary = json.dumps(d.pop("worktree_boundary", {}))
     group_name = d.pop("group", d.pop("group_name", ""))
+    assigned_engineer_id = (
+        d.get("assigned_engineer_id", "")
+        or d.get("weaver_owner_id", "")
+    )
     return (
         d.get("id", ""),
         d.get("task", ""),
@@ -95,7 +99,7 @@ def _serialize_board_task(task):
         d.get("lane", "Backlog"),
         d.get("position", 0),
         d.get("agent_id", ""),
-        d.get("assigned_engineer_id", ""),
+        assigned_engineer_id,
         d.get("created_by_architect_id", ""),
         d.get("suggested_action", ""),
         d.get("reply_agent_id", ""),
@@ -157,6 +161,10 @@ def decode_board_task_row(row, cols):
         {},
     )
     d["worktree_boundary"] = _json_loads(d.get("worktree_boundary", "{}"), {})
+    d.setdefault(
+        "weaver_owner_id",
+        str(d.get("assigned_engineer_id", "") or ""),
+    )
     return d
 
 

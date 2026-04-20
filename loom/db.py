@@ -15,11 +15,13 @@ import os
 import re
 import shutil
 import sqlite3
+import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from loom import __version__
 from loom.config import ATTACHMENTS_DIR
 from loom.db_board import (
     BoardPersistenceMixin,
@@ -41,6 +43,7 @@ log = logging.getLogger("loom")
 
 _KINDS_SCHEMA_MIGRATION_VERSION = 1
 _KINDS_BACKFILL_MIGRATION_VERSION = 2
+_KINDS_CLEANUP_MIGRATION_VERSION = 3
 _KINDS_SCHEMA_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
 _KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
 _KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY = "schema_kinds_task_assignment_fixup_applied"
@@ -52,13 +55,13 @@ _KINDS_WEAVER_NAME = "Weaver"
 _AGENT_PERSISTED_COLS = [
     "id", "name", "slug", "group_name", "cell_type", "terminal_backend",
     "session_id", "profile",
-    "command", "directory", "tab_color", "icon", "template", "window_id",
+    "command", "directory", "tab_color", "icon", "window_id",
     "parent_id", "status", "worktree_path", "worktree_branch",
     "worktree_repo_root", "worktree_base_dir", "worktree_base_branch",
     "worktree_auto_checkpoint", "checkpoint_on_progress",
     "worktree_merge_squash", "agent_type",
     "agent_session_id", "session_resume", "idle_timeout",
-    "tasks_dispatched", "created_by_weaver_id",
+    "tasks_dispatched",
     "kind", "role", "owner_engineer_id", "hired_by_architect_id",
     "persistent",
 ]
@@ -85,86 +88,14 @@ _GS_BOOL_FIELDS = {
     "terminal_close_on_disconnect",
 }
 
-
-def _coalesce_agent_kinds_fields(row: dict) -> None:
-    """Keep legacy agent columns authoritative until stage 6.
-
-    During stages 1–5, writes may still target either legacy or new columns.
-    Mirror whichever side is populated into the empty side. If both are set
-    but disagree, prefer the legacy value and log a warning.
-    """
-    template = str(row.get("template", "") or "")
-    role = str(row.get("role", "") or "")
-    if template and not role:
-        row["role"] = template
-    elif role and not template:
-        row["template"] = role
-    elif template and role and template != role:
-        log.warning(
-            "kinds dual-write: template=%r != role=%r on agent %s; preferring template",
-            template,
-            role,
-            row.get("id"),
-        )
-        row["role"] = template
-
-    created_by_weaver_id = str(row.get("created_by_weaver_id", "") or "")
-    owner_engineer_id = str(row.get("owner_engineer_id", "") or "")
-    if created_by_weaver_id and not owner_engineer_id:
-        row["owner_engineer_id"] = created_by_weaver_id
-    elif owner_engineer_id and not created_by_weaver_id:
-        row["created_by_weaver_id"] = owner_engineer_id
-    elif (
-        created_by_weaver_id
-        and owner_engineer_id
-        and created_by_weaver_id != owner_engineer_id
-    ):
-        log.warning(
-            "kinds dual-write: created_by_weaver_id=%r != owner_engineer_id=%r on agent %s; preferring created_by_weaver_id",
-            created_by_weaver_id,
-            owner_engineer_id,
-            row.get("id"),
-        )
-        row["owner_engineer_id"] = created_by_weaver_id
-
-
-def _coalesce_task_kinds_fields(
-    row: dict,
-    *,
-    legacy_owner_supported: bool,
-) -> None:
-    """Keep legacy task ownership columns authoritative until stage 6.
-
-    Task ownership was historically group-level, not a persisted board_tasks
-    column. Only mirror the legacy task owner when a compatibility column
-    actually exists on disk.
-    """
-    if not legacy_owner_supported:
-        return
-
-    weaver_owner_id = str(row.get("weaver_owner_id", "") or "")
-    assigned_engineer_id = str(row.get("assigned_engineer_id", "") or "")
-    if weaver_owner_id and not assigned_engineer_id:
-        row["assigned_engineer_id"] = weaver_owner_id
-    elif assigned_engineer_id and not weaver_owner_id:
-        row["weaver_owner_id"] = assigned_engineer_id
-    elif (
-        weaver_owner_id
-        and assigned_engineer_id
-        and weaver_owner_id != assigned_engineer_id
-    ):
-        log.warning(
-            "kinds dual-write: weaver_owner_id=%r != assigned_engineer_id=%r on task %s; preferring weaver_owner_id",
-            weaver_owner_id,
-            assigned_engineer_id,
-            row.get("id"),
-        )
-        row["assigned_engineer_id"] = weaver_owner_id
-
-
 def _serialize_agent_cell(cell):
     d = asdict(cell) if not isinstance(cell, dict) else dict(cell)
     group_name = d.pop("group", d.pop("group_name", ""))
+    role = d.get("role", "") or d.get("template", "")
+    owner_engineer_id = (
+        d.get("owner_engineer_id", "")
+        or d.get("created_by_weaver_id", "")
+    )
     return (
         d.get("id", ""),
         d.get("name", ""),
@@ -178,7 +109,6 @@ def _serialize_agent_cell(cell):
         d.get("directory", ""),
         d.get("tab_color", ""),
         d.get("icon", ""),
-        d.get("template", ""),
         d.get("window_id", ""),
         d.get("parent_id", ""),
         d.get("status", "stopped"),
@@ -195,10 +125,9 @@ def _serialize_agent_cell(cell):
         int(d.get("session_resume", True)),
         d.get("idle_timeout", 0),
         d.get("tasks_dispatched", 0),
-        d.get("created_by_weaver_id", ""),
         d.get("kind", ""),
-        d.get("role", ""),
-        d.get("owner_engineer_id", ""),
+        role,
+        owner_engineer_id,
         d.get("hired_by_architect_id", ""),
         int(d.get("persistent", 0) or 0),
     )
@@ -219,6 +148,10 @@ def _unique_value(base: str, existing: set[str]) -> str:
     while f"{base}-{i}" in existing:
         i += 1
     return f"{base}-{i}"
+
+
+def _quote_ident(name: str) -> str:
+    return '"' + str(name).replace('"', '""') + '"'
 
 
 def _decision_json_list(value) -> list[str]:
@@ -284,14 +217,8 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
 
-    def _prepare_agent_row(self, cell) -> dict:
-        row = dict(cell) if isinstance(cell, dict) else asdict(cell)
-        _coalesce_agent_kinds_fields(row)
-        return row
-
     def _insert_agent_row(self, executor, cell) -> None:
-        row = self._prepare_agent_row(cell)
-        values = _serialize_agent_cell(row)
+        values = _serialize_agent_cell(cell)
         executor.execute(
             _AGENT_INSERT_SQL.format(
                 columns=", ".join(_AGENT_PERSISTED_COLS),
@@ -300,43 +227,19 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             values,
         )
 
-    def _prepare_board_task_row(self, task) -> dict:
-        row = dict(task) if isinstance(task, dict) else asdict(task)
-        _coalesce_task_kinds_fields(
-            row,
-            legacy_owner_supported=self._legacy_board_task_owner_supported(),
-        )
-        return row
-
-    def _legacy_board_task_owner_supported(self) -> bool:
-        return bool(self._conn) and self._column_exists(
-            "board_tasks", "weaver_owner_id"
-        )
-
-    def _sync_legacy_board_task_owner(self, executor, task_row: dict) -> None:
-        if not self._legacy_board_task_owner_supported():
-            return
-        task_id = str(task_row.get("id", "") or "")
-        if not task_id:
-            return
-        executor.execute(
-            "UPDATE board_tasks SET weaver_owner_id=? WHERE id=?",
-            (str(task_row.get("weaver_owner_id", "") or ""), task_id),
-        )
-
     def _insert_board_task_row(self, executor, task) -> None:
-        row = self._prepare_board_task_row(task)
-        insert_board_task(executor, row)
-        self._sync_legacy_board_task_owner(executor, row)
+        insert_board_task(executor, task)
 
     def init(self):
         """Open connection, enable WAL, create tables if needed."""
         self._maybe_backup_pre_kinds_db()
         self._conn = sqlite3.connect(str(self.db_path))
         initialize_database(self._conn, self.backfill_agent_history)
+        self._refuse_unmigrated_legacy_rows_if_needed()
         self._migrate_kinds_schema_if_needed()
         self._backfill_kinds_if_needed()
         self._fixup_kinds_task_assignments_if_needed()
+        self._cleanup_kinds_legacy_columns_if_needed()
         self.migrate_task_ids_if_needed()
 
     def close(self):
@@ -1925,8 +1828,22 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
     def backfill_agent_history(self):
         """Create history records for existing agents that lack them."""
         import time
+        if (
+            self._column_exists("agents", "role")
+            and self._column_exists("agents", "template")
+        ):
+            template_expr = (
+                "CASE WHEN TRIM(COALESCE(role, '')) != '' "
+                "THEN role ELSE template END"
+            )
+        elif self._column_exists("agents", "role"):
+            template_expr = "role"
+        elif self._column_exists("agents", "template"):
+            template_expr = "template"
+        else:
+            template_expr = "''"
         rows = self._conn.execute(
-            "SELECT id, name, slug, group_name, agent_type, template, "
+            f"SELECT id, name, slug, group_name, agent_type, {template_expr}, "
             "worktree_branch, tasks_dispatched FROM agents "
             "WHERE cell_type='agent' AND id NOT IN "
             "(SELECT id FROM agent_history)").fetchall()
@@ -2106,6 +2023,11 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             d = dict(zip(cols, row))
             # Map group_name back to 'group' for AgentCell
             d["group"] = d.pop("group_name")
+            d.setdefault("template", str(d.get("role", "") or ""))
+            d.setdefault(
+                "created_by_weaver_id",
+                str(d.get("owner_engineer_id", "") or ""),
+            )
             d["worktree_auto_checkpoint"] = bool(
                 d.get("worktree_auto_checkpoint", 0))
             d["checkpoint_on_progress"] = bool(
@@ -2166,6 +2088,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             cols = [d[0] for d in c.description]
             for row in rows:
                 d = decode_board_task_row(row, cols)
+                d.setdefault(
+                    "weaver_owner_id",
+                    str(d.get("assigned_engineer_id", "") or ""),
+                )
                 board_tasks[d["id"]] = d
 
         # UI state
@@ -2425,8 +2351,12 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         )
 
     def _find_weaver_candidate_ids(self) -> list[str]:
+        template_sql = self._optional_column_sql("agents", "template")
+        created_by_sql = self._optional_column_sql(
+            "agents", "created_by_weaver_id"
+        )
         rows = self._conn.execute(
-            "SELECT id, name, template, created_by_weaver_id "
+            f"SELECT id, name, {template_sql}, {created_by_sql} "
             "FROM agents WHERE cell_type='agent' AND group_name=?",
             (_KINDS_WEAVER_GROUP,),
         ).fetchall()
@@ -2523,6 +2453,257 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             return True
         except sqlite3.OperationalError:
             return False
+
+    def _optional_column_sql(self, table: str, column: str) -> str:
+        if self._column_exists(table, column):
+            return _quote_ident(column)
+        return f"'' AS {_quote_ident(column)}"
+
+    def _refuse_unmigrated_legacy_rows_if_needed(self) -> None:
+        version = self._current_kinds_migration_version()
+        if version >= _KINDS_SCHEMA_MIGRATION_VERSION:
+            return
+        if self._count_unmigrated_legacy_rows() <= 0:
+            return
+        current_major = int(str(__version__ or "2.0.0").split(".", 1)[0] or 2)
+        prior_major = max(1, current_major - 1)
+        message = (
+            "ERROR: this version requires a prior kinds-refactor migration.\n"
+            f"Install Loom {prior_major}.x first, boot once so the kinds-refactor migration runs, then upgrade to Loom {__version__}.\n"
+            "Current DB has unmigrated rows with legacy columns populated."
+        )
+        print(message, file=sys.stderr)
+        log.error(message)
+        raise SystemExit(1)
+
+    def _count_unmigrated_legacy_rows(self) -> int:
+        count = 0
+        if self._column_exists("agents", "template"):
+            if not self._column_exists("agents", "kind"):
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM agents WHERE TRIM(COALESCE(template, '')) != ''"
+                ).fetchone()
+            elif not self._column_exists("agents", "role"):
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM agents "
+                    "WHERE TRIM(COALESCE(template, '')) != '' AND TRIM(COALESCE(kind, '')) = ''"
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM agents "
+                    "WHERE TRIM(COALESCE(template, '')) != '' "
+                    "AND (TRIM(COALESCE(kind, '')) = '' OR TRIM(COALESCE(role, '')) = '')"
+                ).fetchone()
+            count += int(row[0] or 0)
+
+        if self._column_exists("agents", "created_by_weaver_id"):
+            if not self._column_exists("agents", "kind"):
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM agents "
+                    "WHERE TRIM(COALESCE(created_by_weaver_id, '')) != ''"
+                ).fetchone()
+            elif not self._column_exists("agents", "owner_engineer_id"):
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM agents "
+                    "WHERE TRIM(COALESCE(created_by_weaver_id, '')) != '' "
+                    "AND TRIM(COALESCE(kind, '')) = ''"
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM agents "
+                    "WHERE TRIM(COALESCE(created_by_weaver_id, '')) != '' "
+                    "AND (TRIM(COALESCE(kind, '')) = '' "
+                    "OR TRIM(COALESCE(owner_engineer_id, '')) = '')"
+                ).fetchone()
+            count += int(row[0] or 0)
+
+        if self._column_exists("board_tasks", "weaver_owner_id"):
+            if not self._column_exists("board_tasks", "assigned_engineer_id"):
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM board_tasks "
+                    "WHERE TRIM(COALESCE(weaver_owner_id, '')) != ''"
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM board_tasks "
+                    "WHERE TRIM(COALESCE(weaver_owner_id, '')) != '' "
+                    "AND TRIM(COALESCE(assigned_engineer_id, '')) = ''"
+                ).fetchone()
+            count += int(row[0] or 0)
+
+        return count
+
+    def _legacy_cleanup_row_counts(self) -> tuple[int, int]:
+        mirrored_rows: set[tuple[str, str]] = set()
+        drift_rows: set[tuple[str, str]] = set()
+
+        if self._column_exists("agents", "template") and self._column_exists("agents", "role"):
+            for agent_id, template, role in self._conn.execute(
+                "SELECT id, template, role FROM agents"
+            ).fetchall():
+                template = str(template or "").strip()
+                role = str(role or "").strip()
+                if not template:
+                    continue
+                key = ("agents", str(agent_id or ""))
+                if template == role:
+                    mirrored_rows.add(key)
+                else:
+                    drift_rows.add(key)
+
+        if (
+            self._column_exists("agents", "created_by_weaver_id")
+            and self._column_exists("agents", "owner_engineer_id")
+        ):
+            for agent_id, legacy_owner, owner_engineer_id in self._conn.execute(
+                "SELECT id, created_by_weaver_id, owner_engineer_id FROM agents"
+            ).fetchall():
+                legacy_owner = str(legacy_owner or "").strip()
+                owner_engineer_id = str(owner_engineer_id or "").strip()
+                if not legacy_owner:
+                    continue
+                key = ("agents", str(agent_id or ""))
+                if legacy_owner == owner_engineer_id:
+                    mirrored_rows.add(key)
+                else:
+                    drift_rows.add(key)
+
+        if (
+            self._column_exists("board_tasks", "weaver_owner_id")
+            and self._column_exists("board_tasks", "assigned_engineer_id")
+        ):
+            for task_id, legacy_owner, assigned_engineer_id in self._conn.execute(
+                "SELECT id, weaver_owner_id, assigned_engineer_id FROM board_tasks"
+            ).fetchall():
+                legacy_owner = str(legacy_owner or "").strip()
+                assigned_engineer_id = str(assigned_engineer_id or "").strip()
+                if not legacy_owner:
+                    continue
+                key = ("board_tasks", str(task_id or ""))
+                if legacy_owner == assigned_engineer_id:
+                    mirrored_rows.add(key)
+                else:
+                    drift_rows.add(key)
+
+        return len(mirrored_rows), len(drift_rows)
+
+    def _captured_table_supporting_sql(self, table: str) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT type, name, sql FROM sqlite_master "
+            "WHERE tbl_name=? AND type IN ('index', 'trigger') "
+            "AND sql IS NOT NULL ORDER BY type, name",
+            (table,),
+        ).fetchall()
+        return [str(sql) for _type, _name, sql in rows if sql]
+
+    def _rebuild_table_without_columns(
+        self,
+        table: str,
+        *,
+        new_table: str,
+        drop_columns: set[str],
+    ) -> None:
+        columns = self._conn.execute(
+            f"PRAGMA table_info({_quote_ident(table)})"
+        ).fetchall()
+        kept_columns = [row for row in columns if str(row[1]) not in drop_columns]
+        if len(kept_columns) == len(columns):
+            return
+
+        defs: list[str] = []
+        pk_columns: list[tuple[int, str]] = []
+        for _cid, name, col_type, notnull, default, pk in kept_columns:
+            parts = [_quote_ident(name)]
+            if col_type:
+                parts.append(str(col_type))
+            if notnull:
+                parts.append("NOT NULL")
+            if default is not None:
+                parts.append(f"DEFAULT {default}")
+            defs.append(" ".join(parts))
+            if pk:
+                pk_columns.append((int(pk), str(name)))
+        if pk_columns:
+            ordered = ", ".join(
+                _quote_ident(name) for _pk, name in sorted(pk_columns)
+            )
+            defs.append(f"PRIMARY KEY ({ordered})")
+
+        create_sql = (
+            f"CREATE TABLE {_quote_ident(new_table)} (\n    "
+            + ",\n    ".join(defs)
+            + "\n)"
+        )
+        supporting_sql = self._captured_table_supporting_sql(table)
+        copy_columns = ", ".join(_quote_ident(row[1]) for row in kept_columns)
+
+        self._conn.execute(create_sql)
+        self._conn.execute(
+            f"INSERT INTO {_quote_ident(new_table)} ({copy_columns}) "
+            f"SELECT {copy_columns} FROM {_quote_ident(table)}"
+        )
+        self._conn.execute(f"DROP TABLE {_quote_ident(table)}")
+        self._conn.execute(
+            f"ALTER TABLE {_quote_ident(new_table)} RENAME TO {_quote_ident(table)}"
+        )
+        for sql in supporting_sql:
+            self._conn.execute(sql)
+
+    def _cleanup_kinds_legacy_columns_if_needed(self) -> None:
+        version = self._current_kinds_migration_version()
+        if version >= _KINDS_CLEANUP_MIGRATION_VERSION:
+            return
+
+        agents_has_legacy = any(
+            self._column_exists("agents", col)
+            for col in ("template", "created_by_weaver_id")
+        )
+        tasks_has_legacy = self._column_exists("board_tasks", "weaver_owner_id")
+        if version < _KINDS_BACKFILL_MIGRATION_VERSION and (
+            agents_has_legacy or tasks_has_legacy
+        ):
+            return
+        if not agents_has_legacy and not tasks_has_legacy:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (
+                    _KINDS_SCHEMA_MIGRATION_VERSION_KEY,
+                    str(_KINDS_CLEANUP_MIGRATION_VERSION),
+                ),
+            )
+            self._conn.commit()
+            return
+
+        mirrored_rows, drift_rows = self._legacy_cleanup_row_counts()
+        if mirrored_rows > 0 and drift_rows == 0:
+            log.warning(
+                "migration cleanup: dropping legacy columns with %d mirrored rows",
+                mirrored_rows,
+            )
+
+        try:
+            self._conn.execute("BEGIN")
+            self._rebuild_table_without_columns(
+                "agents",
+                new_table="agents_new",
+                drop_columns={"template", "created_by_weaver_id"},
+            )
+            self._rebuild_table_without_columns(
+                "board_tasks",
+                new_table="board_tasks_new",
+                drop_columns={"weaver_owner_id"},
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (
+                    _KINDS_SCHEMA_MIGRATION_VERSION_KEY,
+                    str(_KINDS_CLEANUP_MIGRATION_VERSION),
+                ),
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def _load_group_weaver_map(self) -> dict[str, str]:
         valid_agent_ids_by_group: dict[str, set[str]] = {}
@@ -2633,8 +2814,12 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                     engineer_id
                 )
 
+            template_sql = self._optional_column_sql("agents", "template")
+            created_by_sql = self._optional_column_sql(
+                "agents", "created_by_weaver_id"
+            )
             rows = self._conn.execute(
-                "SELECT id, cell_type, template, created_by_weaver_id "
+                f"SELECT id, cell_type, {template_sql}, {created_by_sql} "
                 "FROM agents"
             ).fetchall()
             for agent_id, cell_type, template, created_by_weaver_id in rows:

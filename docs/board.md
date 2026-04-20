@@ -217,9 +217,9 @@ When a task is dispatched with an action that has [transitions](actions.md#pipel
 
 When a worker has a pending Weaver-message follow-up task, it can answer through `loom_reply(...)`. That closes only the reply task with an `answered` outcome; it does not auto-complete the parent implementation or review task.
 
-For board-level checkpoint updates outside an agent session, use `loom task verify ...` from the CLI or `weaver_task_verify(...)` from the designated engineer. Those paths stamp verification audit fields and emit a `task_verification_updated` event so pending or failed checkpoints stay visible at the orchestration layer.
+For board-level checkpoint updates outside an agent session, use `loom task verify ...` from the CLI or `engineer_task_verify(...)` from the designated engineer. Those paths stamp verification audit fields and emit a `task_verification_updated` event so pending or failed checkpoints stay visible at the orchestration layer.
 
-For board-level task artifact uploads outside the active worker session, use `weaver_task_upload_artifact(...)`. Uploaded files reuse Loom's existing task artifact storage and immediately show up in the board's artifact browser/count badge for that task.
+For board-level task artifact uploads outside the active worker session, use `engineer_task_upload_artifact(...)`. Uploaded files reuse Loom's existing task artifact storage and immediately show up in the board's artifact browser/count badge for that task.
 
 ### The `done` vs `ready` distinction
 

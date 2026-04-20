@@ -232,7 +232,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
 
             result = self.server_mod._handle_doctor_command(db)
 
-        self.assertEqual(result['schema_version'], 1)
+        self.assertEqual(result['schema_version'], 2)
         self.assertEqual(result['result'], 'pass')
         self.assertIn('migration', result)
         self.assertIn('checks', result)
@@ -381,7 +381,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
             )
 
             self.assertEqual(save_template['type'], 'templates')
-            self.assertTrue((root / 'repo' / '.loom' / 'roles' / 'compat.yaml').is_file())
+            self.assertTrue((project / '.loom' / 'roles' / 'compat.yaml').is_file())
             self.assertFalse((root / 'repo' / '.loom' / 'agents' / 'compat.yaml').exists())
 
             legacy_user_template = home / '.loom' / 'agents' / 'legacy.yaml'
@@ -399,9 +399,11 @@ class ServerModuleExtractionTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual(delete_role_legacy['type'], 'roles')
-            self.assertEqual(delete_role_legacy['deleted'], 'legacy')
-            self.assertFalse(legacy_user_template.exists())
+            self.assertEqual(delete_role_legacy, {
+                'type': 'error',
+                'message': 'Role "legacy" not found',
+            })
+            self.assertTrue(legacy_user_template.exists())
 
             legacy_user_template.write_text('name: legacy\ndescription: Legacy\n')
             delete_template = asyncio.run(
@@ -417,9 +419,11 @@ class ServerModuleExtractionTests(unittest.TestCase):
                 )
             )
 
-            self.assertEqual(delete_template['type'], 'templates')
-            self.assertEqual(delete_template['deleted'], 'legacy')
-            self.assertFalse(legacy_user_template.exists())
+            self.assertEqual(delete_template, {
+                'type': 'error',
+                'message': 'Template "legacy" not found',
+            })
+            self.assertTrue(legacy_user_template.exists())
 
             legacy_rename_path = home / '.loom' / 'agents' / 'rename-me.yaml'
             legacy_rename_path.write_text('name: rename-me\ndescription: Legacy\n')
@@ -442,7 +446,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
             )
 
             self.assertEqual(rename_template['type'], 'templates')
-            self.assertFalse(legacy_rename_path.exists())
+            self.assertTrue(legacy_rename_path.exists())
             self.assertTrue((home / '.loom' / 'roles' / 'renamed.yaml').is_file())
 
             delete_role = asyncio.run(

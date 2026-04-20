@@ -49,6 +49,42 @@ class LoomDBTests(unittest.TestCase):
 
         conn = sqlite3.connect(str(path))
         conn.execute(
+            "ALTER TABLE agents ADD COLUMN template TEXT NOT NULL DEFAULT ''"
+        )
+        conn.execute(
+            "ALTER TABLE agents ADD COLUMN created_by_weaver_id TEXT NOT NULL DEFAULT ''"
+        )
+        conn.execute(
+            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
+        )
+        for agent in agents or []:
+            item = dict(agent) if isinstance(agent, dict) else agent.__dict__
+            conn.execute(
+                "UPDATE agents SET template=?, created_by_weaver_id=? WHERE id=?",
+                (
+                    str(item.get("template", "") or item.get("role", "") or ""),
+                    str(
+                        item.get("created_by_weaver_id", "")
+                        or item.get("owner_engineer_id", "")
+                        or ""
+                    ),
+                    str(item.get("id", "") or ""),
+                ),
+            )
+        for task in tasks or []:
+            item = dict(task) if isinstance(task, dict) else task.__dict__
+            conn.execute(
+                "UPDATE board_tasks SET weaver_owner_id=? WHERE id=?",
+                (
+                    str(
+                        item.get("weaver_owner_id", "")
+                        or item.get("assigned_engineer_id", "")
+                        or ""
+                    ),
+                    str(item.get("id", "") or ""),
+                ),
+            )
+        conn.execute(
             "UPDATE meta SET value='1' WHERE key='schema_kinds_migration_version'"
         )
         conn.execute(
@@ -438,7 +474,7 @@ class LoomDBTests(unittest.TestCase):
             "feature/fix-review",
         )
 
-    def test_save_agent_dual_writes_legacy_and_kinds_fields(self):
+    def test_save_agent_maps_legacy_inputs_into_kinds_columns(self):
         self.db.save_agent(
             AgentCell(
                 id="agent-dual-write",
@@ -450,10 +486,10 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertEqual(
             self.db._conn.execute(
-                "SELECT template, role, created_by_weaver_id, owner_engineer_id "
+                "SELECT role, owner_engineer_id "
                 "FROM agents WHERE id='agent-dual-write'"
             ).fetchone(),
-            ("researcher", "researcher", "weaver-1", "weaver-1"),
+            ("researcher", "weaver-1"),
         )
 
         self.db.save_agent(
@@ -467,43 +503,33 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertEqual(
             self.db._conn.execute(
-                "SELECT template, role, created_by_weaver_id, owner_engineer_id "
+                "SELECT role, owner_engineer_id "
                 "FROM agents WHERE id='agent-dual-write'"
             ).fetchone(),
-            ("planner", "planner", "weaver-2", "weaver-2"),
+            ("planner", "weaver-2"),
         )
 
-    def test_save_agent_dual_write_warns_and_prefers_legacy_fields(self):
-        with self.assertLogs("loom", level="WARNING") as cm:
-            self.db.save_agent(
-                AgentCell(
-                    id="agent-dual-conflict",
-                    name="Conflict",
-                    group="g",
-                    template="researcher",
-                    role="planner",
-                    created_by_weaver_id="weaver-1",
-                    owner_engineer_id="weaver-2",
-                )
+    def test_save_agent_prefers_kinds_columns_over_legacy_inputs(self):
+        self.db.save_agent(
+            AgentCell(
+                id="agent-dual-conflict",
+                name="Conflict",
+                group="g",
+                template="researcher",
+                role="planner",
+                created_by_weaver_id="weaver-1",
+                owner_engineer_id="weaver-2",
             )
-
-        joined_logs = "\n".join(cm.output)
-        self.assertIn("template='researcher' != role='planner'", joined_logs)
-        self.assertIn(
-            "created_by_weaver_id='weaver-1' != owner_engineer_id='weaver-2'",
-            joined_logs,
         )
         self.assertEqual(
             self.db._conn.execute(
-                "SELECT template, role, created_by_weaver_id, owner_engineer_id "
+                "SELECT role, owner_engineer_id "
                 "FROM agents WHERE id='agent-dual-conflict'"
             ).fetchone(),
-            ("researcher", "researcher", "weaver-1", "weaver-1"),
+            ("planner", "weaver-2"),
         )
 
-    def test_save_board_task_dual_writes_legacy_and_new_owner_fields(self):
-        self._add_legacy_board_task_owner_column()
-
+    def test_save_board_task_maps_legacy_owner_into_new_column(self):
         self.db.save_board_task(
             {
                 "id": "task-dual-assigned",
@@ -514,10 +540,10 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertEqual(
             self.db._conn.execute(
-                "SELECT assigned_engineer_id, weaver_owner_id "
+                "SELECT assigned_engineer_id "
                 "FROM board_tasks WHERE id='task-dual-assigned'"
             ).fetchone(),
-            ("weaver-1", "weaver-1"),
+            ("weaver-1",),
         )
 
         self.db.save_board_task(
@@ -530,39 +556,31 @@ class LoomDBTests(unittest.TestCase):
         )
         self.assertEqual(
             self.db._conn.execute(
-                "SELECT assigned_engineer_id, weaver_owner_id "
+                "SELECT assigned_engineer_id "
                 "FROM board_tasks WHERE id='task-dual-legacy'"
             ).fetchone(),
-            ("weaver-2", "weaver-2"),
+            ("weaver-2",),
         )
 
-    def test_save_board_task_dual_write_warns_and_prefers_legacy_owner(self):
-        self._add_legacy_board_task_owner_column()
-
-        with self.assertLogs("loom", level="WARNING") as cm:
-            self.db.save_board_task(
-                {
-                    "id": "task-dual-conflict",
-                    "task": "Conflict",
-                    "group": "g",
-                    "assigned_engineer_id": "engineer-new",
-                    "weaver_owner_id": "engineer-legacy",
-                }
-            )
-
-        self.assertIn(
-            "weaver_owner_id='engineer-legacy' != assigned_engineer_id='engineer-new'",
-            "\n".join(cm.output),
+    def test_save_board_task_prefers_assigned_engineer_over_legacy_owner(self):
+        self.db.save_board_task(
+            {
+                "id": "task-dual-conflict",
+                "task": "Conflict",
+                "group": "g",
+                "assigned_engineer_id": "engineer-new",
+                "weaver_owner_id": "engineer-legacy",
+            }
         )
         self.assertEqual(
             self.db._conn.execute(
-                "SELECT assigned_engineer_id, weaver_owner_id "
+                "SELECT assigned_engineer_id "
                 "FROM board_tasks WHERE id='task-dual-conflict'"
             ).fetchone(),
-            ("engineer-legacy", "engineer-legacy"),
+            ("engineer-new",),
         )
 
-    def test_save_board_task_ignores_legacy_owner_when_column_is_absent(self):
+    def test_save_board_task_uses_legacy_owner_when_new_column_is_empty(self):
         self.db.save_board_task(
             {
                 "id": "task-no-legacy-owner",
@@ -577,7 +595,7 @@ class LoomDBTests(unittest.TestCase):
                 "SELECT assigned_engineer_id FROM board_tasks "
                 "WHERE id='task-no-legacy-owner'"
             ).fetchone(),
-            ("",),
+            ("engineer-legacy",),
         )
 
     def test_load_all_restores_board_filters_by_group(self):
@@ -655,8 +673,6 @@ class LoomDBTests(unittest.TestCase):
         )
 
     def test_save_all_coalesces_legacy_and_kinds_fields(self):
-        self._add_legacy_board_task_owner_column()
-
         self.db.save_all(
             {
                 "agents": {
@@ -695,25 +711,25 @@ class LoomDBTests(unittest.TestCase):
         )
 
         agent_rows = self.db._conn.execute(
-            "SELECT id, template, role, created_by_weaver_id, owner_engineer_id "
+            "SELECT id, role, owner_engineer_id "
             "FROM agents ORDER BY id"
         ).fetchall()
         self.assertEqual(
             agent_rows,
             [
-                ("agent-1", "researcher", "researcher", "weaver-1", "weaver-1"),
-                ("agent-2", "planner", "planner", "weaver-2", "weaver-2"),
+                ("agent-1", "researcher", "weaver-1"),
+                ("agent-2", "planner", "weaver-2"),
             ],
         )
         task_rows = self.db._conn.execute(
-            "SELECT id, assigned_engineer_id, weaver_owner_id "
+            "SELECT id, assigned_engineer_id "
             "FROM board_tasks ORDER BY id"
         ).fetchall()
         self.assertEqual(
             task_rows,
             [
-                ("task-1", "weaver-1", "weaver-1"),
-                ("task-2", "weaver-2", "weaver-2"),
+                ("task-1", "weaver-1"),
+                ("task-2", "weaver-2"),
             ],
         )
 
@@ -1599,7 +1615,7 @@ class LoomDBTests(unittest.TestCase):
         migrated_at = migrated._conn.execute(
             "SELECT value FROM meta WHERE key='schema_kinds_migration_migrated_at'"
         ).fetchone()[0]
-        self.assertEqual(version, "2")
+        self.assertEqual(version, "3")
         self.assertTrue(migrated_at)
 
         migrated.save_agent(
@@ -1753,7 +1769,7 @@ class LoomDBTests(unittest.TestCase):
         version = migrated._conn.execute(
             "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
         ).fetchone()[0]
-        self.assertEqual(version, "2")
+        self.assertEqual(version, "3")
 
         migrated.close()
 
@@ -1841,7 +1857,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "2",
+            "3",
         )
 
     def test_init_backfills_existing_agents_without_promoting_when_no_weaver_found(self):
@@ -1904,7 +1920,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "2",
+            "3",
         )
 
     def test_init_skips_ambiguous_weaver_backfill_without_override(self):
@@ -2039,7 +2055,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "2",
+            "3",
         )
 
     def test_init_uses_env_override_for_ambiguous_weaver_backfill(self):
@@ -2106,7 +2122,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "2",
+            "3",
         )
 
     def test_init_backfills_task_assignments_from_group_settings_weaver(self):
@@ -2196,7 +2212,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "2",
+            "3",
         )
 
     def test_init_ignores_stale_group_settings_weaver_with_heuristic_engineer(self):
@@ -2249,7 +2265,7 @@ class LoomDBTests(unittest.TestCase):
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
-            "2",
+            "3",
         )
 
     def test_init_fixes_version2_unassigned_tasks_from_group_settings(self):

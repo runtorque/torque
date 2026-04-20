@@ -53,7 +53,7 @@ class CliDoctorTests(unittest.TestCase):
         api_call.assert_not_called()
 
     def test_cmd_doctor_prints_json_report(self):
-        report = {"schema_version": 1, "result": "pass", "checks": []}
+        report = {"schema_version": 2, "result": "pass", "checks": []}
         with mock.patch.object(self.cli, "get_doctor_local", return_value=report):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
@@ -161,19 +161,19 @@ class CliDoctorTests(unittest.TestCase):
             text,
         )
 
-    def test_cmd_doctor_keeps_zero_exit_for_shadowed_legacy_role_warning(self):
+    def test_cmd_doctor_keeps_zero_exit_for_ignored_legacy_role_warning(self):
         report = {
             "result": "pass",
             "warnings": [
                 {
-                    "name": "shadowed_legacy_templates",
+                    "name": "legacy_template_files_ignored",
                     "status": "warn",
                     "details": {
                         "count": 1,
-                        "slugs": ["shared"],
+                        "files": ["~/.loom/agents/shared.yaml"],
                         "hint": (
-                            "legacy template shadowed by new role; "
-                            "consider migrating the legacy file"
+                            "legacy template files in agents/ are ignored; "
+                            "move them into roles/"
                         ),
                     },
                 }
@@ -182,11 +182,13 @@ class CliDoctorTests(unittest.TestCase):
             "roles": {
                 "roles_dir": "/tmp/.loom/roles",
                 "roles_file_count": 1,
-                "legacy_templates_dir": "/tmp/.loom/agents",
-                "legacy_templates_file_count": 1,
-                "shadowed_legacy_templates": 1,
                 "roles_with_preamble": 1,
                 "roles_with_priorities": 0,
+            },
+            "stage_6_cleanup": {
+                "legacy_template_files_ignored": 1,
+                "legacy_columns_present": False,
+                "weaver_tool_aliases_present": False,
             },
         }
         with mock.patch.object(self.cli, "get_doctor_local", return_value=report):
@@ -197,7 +199,7 @@ class CliDoctorTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("Result: PASS (with warnings)", text)
         self.assertIn(
-            "legacy template shadowed by new role; consider migrating the legacy file: shared",
+            "legacy template files in agents/ are ignored; move them into roles/: ~/.loom/agents/shared.yaml",
             text,
         )
 
@@ -211,7 +213,8 @@ class CliDoctorTests(unittest.TestCase):
                     "details": {
                         "count": 0,
                         "hint": (
-                            "no engineer exists; weaver_* tool aliases will fail until one is created"
+                            "no engineer exists; create one from the Engineers panel "
+                            "before using engineer MCP tools"
                         ),
                     },
                 }
@@ -219,8 +222,6 @@ class CliDoctorTests(unittest.TestCase):
             "checks": [],
             "engineers": {
                 "total": 0,
-                "default_engineer_id": "",
-                "default_engineer_name": "",
                 "engineers": [],
             },
         }
@@ -232,33 +233,17 @@ class CliDoctorTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("Result: PASS (with warnings)", text)
         self.assertIn(
-            "no engineer exists; weaver_* tool aliases will fail until one is created",
+            "no engineer exists; create one from the Engineers panel before using engineer MCP tools",
             text,
         )
 
-    def test_cmd_doctor_prints_ambiguous_default_engineer_warning(self):
+    def test_cmd_doctor_no_longer_prints_default_engineer_routing(self):
         report = {
             "result": "pass",
-            "warnings": [
-                {
-                    "name": "ambiguous_default_engineer_routing",
-                    "status": "warn",
-                    "details": {
-                        "count": 2,
-                        "default_engineer_id": "eng-alice",
-                        "default_engineer_name": "Alice",
-                        "hint": (
-                            "multiple engineers but no canonical 'Weaver' for default routing; "
-                            "weaver_* aliases will pick the earliest by creation order"
-                        ),
-                    },
-                }
-            ],
+            "warnings": [],
             "checks": [],
             "engineers": {
                 "total": 2,
-                "default_engineer_id": "eng-alice",
-                "default_engineer_name": "Alice",
                 "engineers": [
                     {
                         "id": "eng-alice",
@@ -285,12 +270,7 @@ class CliDoctorTests(unittest.TestCase):
                 self.cli.cmd_doctor(SimpleNamespace(port=18932, json=False))
 
         text = out.getvalue()
-        self.assertIn("default (weaver_* routing):   Alice (id=eng-alice)", text)
-        self.assertIn(
-            "multiple engineers but no canonical 'Weaver' for default routing; "
-            "weaver_* aliases will pick the earliest by creation order",
-            text,
-        )
+        self.assertNotIn("default (weaver_* routing)", text)
 
     def test_cmd_doctor_exits_nonzero_for_invalid_architect_state(self):
         report = {

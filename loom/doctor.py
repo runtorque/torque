@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-DOCTOR_SCHEMA_VERSION = 1
+DOCTOR_SCHEMA_VERSION = 2
 _KINDS_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
 _KINDS_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
 _KINDS_BACKUP_NAME = "loom.db.pre-kinds.bak"
@@ -120,6 +120,60 @@ def _load_yaml_dict(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _find_project_config_dir(base_dir: str = "", leaf: str = "roles") -> Path | None:
+    d = Path(os.path.expanduser(base_dir) if base_dir else os.getcwd())
+    if not d.is_dir():
+        d = Path(os.getcwd())
+    global_dir = (Path.home() / ".loom" / leaf).resolve()
+    for _ in range(20):
+        candidate = d / ".loom" / leaf
+        if candidate.is_dir():
+            if candidate.resolve() != global_dir:
+                return candidate
+        parent = d.parent
+        if parent == d:
+            break
+        d = parent
+    return None
+
+
+def _collect_ignored_legacy_template_files(base_dir: str = "") -> list[dict]:
+    entries = []
+    scopes = []
+    project_legacy_dir = _find_project_config_dir(base_dir, "agents")
+    if project_legacy_dir:
+        scopes.append({
+            "legacy_dir": project_legacy_dir,
+            "roles_dir": _find_project_config_dir(base_dir, "roles")
+            or (project_legacy_dir.parent / "roles"),
+        })
+    global_legacy_dir = Path.home() / ".loom" / "agents"
+    if global_legacy_dir.is_dir():
+        scopes.append({
+            "legacy_dir": global_legacy_dir,
+            "roles_dir": Path.home() / ".loom" / "roles",
+        })
+
+    seen_dirs: set[str] = set()
+    for scope in scopes:
+        legacy_dir = Path(scope["legacy_dir"])
+        legacy_key = str(legacy_dir.resolve())
+        if legacy_key in seen_dirs:
+            continue
+        seen_dirs.add(legacy_key)
+        roles_dir = Path(scope["roles_dir"])
+        role_names = {name for name, _path in _iter_named_yaml_paths(roles_dir)}
+        for name, path in _iter_named_yaml_paths(legacy_dir):
+            if name in role_names:
+                continue
+            entries.append({
+                "name": name,
+                "path": str(path),
+                "roles_dir": str(roles_dir),
+            })
+    return entries
+
+
 def _collect_migration_section(conn: sqlite3.Connection, db_path: Path) -> dict:
     version = int(_fetch_meta(conn, _KINDS_MIGRATION_VERSION_KEY) or 0)
     migrated_at = _fetch_meta(conn, _KINDS_MIGRATION_MIGRATED_AT_KEY)
@@ -196,8 +250,6 @@ def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
     if not _column_exists(conn, "agents", "kind"):
         return {
             "total": 0,
-            "default_engineer_id": "",
-            "default_engineer_name": "",
             "engineers": [],
             "binding_env_mismatches": [],
         }
@@ -272,27 +324,6 @@ def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
             }
         )
 
-    def _sort_key(entry: dict):
-        created_at = entry.get("_created_at")
-        if isinstance(created_at, (int, float)) and created_at:
-            return (0, float(created_at), int(entry.get("_rowid", 0) or 0))
-        return (1, int(entry.get("_rowid", 0) or 0))
-
-    default_engineer_id = ""
-    default_engineer_name = ""
-    if len(engineers) == 1:
-        default_engineer_id = engineers[0]["id"]
-        default_engineer_name = engineers[0]["name"]
-    elif engineers:
-        weaver_named = [
-            engineer for engineer in engineers
-            if engineer.get("name", "") == "Weaver"
-        ]
-        candidates = weaver_named or engineers
-        candidates = sorted(candidates, key=_sort_key)
-        default_engineer_id = candidates[0]["id"]
-        default_engineer_name = candidates[0]["name"]
-
     binding_env_mismatches = []
     for engineer in engineers:
         actual = str(engineer.get("loom_engineer_id", engineer["id"]) or "")
@@ -312,8 +343,6 @@ def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
 
     return {
         "total": len(engineers),
-        "default_engineer_id": default_engineer_id,
-        "default_engineer_name": default_engineer_name,
         "engineers": engineers,
         "binding_env_mismatches": binding_env_mismatches,
     }
@@ -628,12 +657,7 @@ def _collect_drift_section(conn: sqlite3.Connection) -> dict:
 
 def _collect_roles_section() -> dict:
     roles_dir = Path.home() / ".loom" / "roles"
-    legacy_templates_dir = Path.home() / ".loom" / "agents"
     role_entries = _iter_named_yaml_paths(roles_dir)
-    legacy_entries = _iter_named_yaml_paths(legacy_templates_dir)
-    shadowed = sorted({name for name, _path in role_entries} & {
-        name for name, _path in legacy_entries
-    })
     roles_with_preamble = 0
     roles_with_priorities = 0
     for _name, path in role_entries:
@@ -648,12 +672,56 @@ def _collect_roles_section() -> dict:
     return {
         "roles_dir": str(roles_dir),
         "roles_file_count": len(role_entries),
-        "legacy_templates_dir": str(legacy_templates_dir),
-        "legacy_templates_file_count": len(legacy_entries),
-        "shadowed_legacy_templates": len(shadowed),
-        "shadowed_legacy_slugs": shadowed,
         "roles_with_preamble": roles_with_preamble,
         "roles_with_priorities": roles_with_priorities,
+    }
+
+
+def _collect_stage_6_cleanup_section(
+    conn: sqlite3.Connection,
+    *,
+    base_dir: str = "",
+) -> dict:
+    ignored_legacy_files = _collect_ignored_legacy_template_files(base_dir)
+    legacy_columns_present = any([
+        _column_exists(conn, "agents", "template"),
+        _column_exists(conn, "agents", "created_by_weaver_id"),
+        _column_exists(conn, "board_tasks", "weaver_owner_id"),
+    ])
+
+    weaver_tool_aliases_present = False
+    try:
+        from . import mcp as loom_mcp
+    except Exception:
+        loom_mcp = None
+    if loom_mcp is not None:
+        weaver_tool_aliases_present = any(
+            str(tool.get("name", "") or "").startswith("weaver_")
+            for tool in getattr(loom_mcp, "ALL_TOOLS", [])
+        )
+    try:
+        mcp_source = (Path(__file__).resolve().parent / "mcp.py").read_text(
+            encoding="utf-8"
+        )
+    except OSError:
+        mcp_source = ""
+    try:
+        shared_source = (
+            Path(__file__).resolve().parent / "mcp_tools_shared.py"
+        ).read_text(encoding="utf-8")
+    except OSError:
+        shared_source = ""
+    weaver_tool_aliases_present = weaver_tool_aliases_present or any([
+        "from .mcp_weaver import" in mcp_source,
+        "import loom.mcp_weaver" in mcp_source,
+        "_resolve_weaver_alias_caller" in shared_source,
+    ])
+
+    return {
+        "legacy_template_files_ignored": len(ignored_legacy_files),
+        "ignored_legacy_files": ignored_legacy_files,
+        "legacy_columns_present": legacy_columns_present,
+        "weaver_tool_aliases_present": weaver_tool_aliases_present,
     }
 
 
@@ -661,8 +729,8 @@ def _check_migration_version(report: dict) -> dict:
     actual = int(report["migration"]["schema_kinds_migration_version"] or 0)
     return {
         "name": "migration_version",
-        "status": "pass" if actual >= 2 else "fail",
-        "details": {"expected_min": 2, "actual": actual},
+        "status": "pass" if actual >= 3 else "fail",
+        "details": {"expected_min": 3, "actual": actual},
     }
 
 
@@ -722,25 +790,6 @@ def _warn_unassigned_tasks_when_engineer_present(report: dict) -> dict | None:
     }
 
 
-def _warn_shadowed_legacy_templates(report: dict) -> dict | None:
-    roles = report.get("roles", {}) or {}
-    count = int(roles.get("shadowed_legacy_templates", 0) or 0)
-    if count <= 0:
-        return None
-    return {
-        "name": "shadowed_legacy_templates",
-        "status": "warn",
-        "details": {
-            "count": count,
-            "slugs": list(roles.get("shadowed_legacy_slugs", []) or []),
-            "hint": (
-                "legacy template shadowed by new role; "
-                "consider migrating the legacy file"
-            ),
-        },
-    }
-
-
 def _warn_no_engineers(report: dict) -> dict | None:
     engineers = report.get("engineers", {}) or {}
     total = int(engineers.get("total", 0) or 0)
@@ -752,33 +801,8 @@ def _warn_no_engineers(report: dict) -> dict | None:
         "details": {
             "count": 0,
             "hint": (
-                "no engineer exists; weaver_* tool aliases will fail until one is created"
-            ),
-        },
-    }
-
-
-def _warn_ambiguous_default_engineer(report: dict) -> dict | None:
-    engineers = report.get("engineers", {}) or {}
-    entries = list(engineers.get("engineers", []) or [])
-    if len(entries) <= 1:
-        return None
-    if any(str(entry.get("name", "") or "") == "Weaver" for entry in entries):
-        return None
-    return {
-        "name": "ambiguous_default_engineer_routing",
-        "status": "warn",
-        "details": {
-            "count": len(entries),
-            "default_engineer_id": str(
-                engineers.get("default_engineer_id", "") or ""
-            ),
-            "default_engineer_name": str(
-                engineers.get("default_engineer_name", "") or ""
-            ),
-            "hint": (
-                "multiple engineers but no canonical 'Weaver' for default routing; "
-                "weaver_* aliases will pick the earliest by creation order"
+                "no engineer exists; create one from the Engineers panel "
+                "before using engineer MCP tools"
             ),
         },
     }
@@ -808,6 +832,45 @@ def _check_invalid_architect_hired_binding(report: dict) -> dict:
         "details": {
             "count": len(invalid),
             "invalid": invalid,
+        },
+    }
+
+
+def _check_stage_6_legacy_columns_removed(report: dict) -> dict:
+    cleanup = report.get("stage_6_cleanup", {}) or {}
+    present = bool(cleanup.get("legacy_columns_present"))
+    return {
+        "name": "stage_6_legacy_columns_removed",
+        "status": "pass" if not present else "fail",
+        "details": {"present": present},
+    }
+
+
+def _check_stage_6_weaver_tool_aliases_removed(report: dict) -> dict:
+    cleanup = report.get("stage_6_cleanup", {}) or {}
+    present = bool(cleanup.get("weaver_tool_aliases_present"))
+    return {
+        "name": "stage_6_weaver_tool_aliases_removed",
+        "status": "pass" if not present else "fail",
+        "details": {"present": present},
+    }
+
+
+def _warn_ignored_legacy_template_files(report: dict) -> dict | None:
+    cleanup = report.get("stage_6_cleanup", {}) or {}
+    ignored = list(cleanup.get("ignored_legacy_files", []) or [])
+    if not ignored:
+        return None
+    return {
+        "name": "legacy_template_files_ignored",
+        "status": "warn",
+        "details": {
+            "count": len(ignored),
+            "files": [_humanize_path(str(entry.get("path", "") or "")) for entry in ignored],
+            "hint": (
+                "legacy template files in agents/ are ignored; "
+                "move them into roles/"
+            ),
         },
     }
 
@@ -866,13 +929,14 @@ _DOCTOR_CHECKS = [
     _check_created_owner_drift,
     _check_task_owner_drift,
     _check_invalid_architect_hired_binding,
+    _check_stage_6_legacy_columns_removed,
+    _check_stage_6_weaver_tool_aliases_removed,
 ]
 
 _DOCTOR_WARNINGS = [
     _warn_unassigned_tasks_when_engineer_present,
-    _warn_shadowed_legacy_templates,
+    _warn_ignored_legacy_template_files,
     _warn_no_engineers,
-    _warn_ambiguous_default_engineer,
     _warn_engineer_binding_env_mismatch,
     _warn_stale_pending_hires,
     _warn_dangling_decision_architects,
@@ -897,6 +961,9 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
         "tasks": tasks,
         "drift": _collect_drift_section(conn),
         "roles": _collect_roles_section(),
+        "stage_6_cleanup": _collect_stage_6_cleanup_section(
+            conn, base_dir=str(db_path.parent)
+        ),
         "architects": architects,
         "pending_hires": _collect_pending_hires_section(
             conn,
@@ -907,8 +974,6 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
     report["roles_templates"] = {
         "roles_dir": report["roles"]["roles_dir"],
         "roles_file_count": report["roles"]["roles_file_count"],
-        "templates_dir": report["roles"]["legacy_templates_dir"],
-        "templates_file_count": report["roles"]["legacy_templates_file_count"],
     }
     report["engineers"] = _collect_engineers_section(conn)
     checks = [check(report) for check in _DOCTOR_CHECKS]
@@ -947,6 +1012,7 @@ def format_doctor_report(report: dict) -> str:
     tasks = report.get("tasks", {})
     drift = report.get("drift", {})
     roles = report.get("roles", {}) or {}
+    stage_6_cleanup = report.get("stage_6_cleanup", {}) or {}
     warnings = list(report.get("warnings", []) or [])
 
     engineer_line = f"  engineer:    {int(agents.get('engineer', 0) or 0)}"
@@ -955,22 +1021,6 @@ def format_doctor_report(report: dict) -> str:
         engineer_line += f"   ({engineer_name})"
 
     roles_count = int(roles.get("roles_file_count", 0) or 0)
-    legacy_templates_count = int(
-        roles.get("legacy_templates_file_count", 0) or 0
-    )
-    default_engineer_name = str(
-        engineers.get("default_engineer_name", "") or ""
-    ).strip()
-    default_engineer_id = str(
-        engineers.get("default_engineer_id", "") or ""
-    ).strip()
-    default_engineer_display = "<none>"
-    if default_engineer_id:
-        default_engineer_display = (
-            f"{default_engineer_name or default_engineer_id} "
-            f"(id={default_engineer_id})"
-        )
-
     lines = [
         "Loom doctor — kinds refactor",
         "",
@@ -991,7 +1041,6 @@ def format_doctor_report(report: dict) -> str:
         "",
         "[engineers]",
         f"  total:                        {int(engineers.get('total', 0) or 0)}",
-        f"  default (weaver_* routing):   {default_engineer_display}",
         "  engineers:",
     ]
     for engineer in list(engineers.get("engineers", []) or []):
@@ -1056,15 +1105,18 @@ def format_doctor_report(report: dict) -> str:
         "[roles]",
         "  roles_dir:                      "
         f"{_humanize_path(str(roles.get('roles_dir', '')))} ({roles_count} files)",
-        "  legacy_templates_dir:           "
-        f"{_humanize_path(str(roles.get('legacy_templates_dir', '')))} "
-        f"({legacy_templates_count} files)",
-        "  shadowed_legacy_templates:      "
-        f"{int(roles.get('shadowed_legacy_templates', 0) or 0)}",
         "  roles_with_preamble:            "
         f"{int(roles.get('roles_with_preamble', 0) or 0)}",
         "  roles_with_priorities:          "
         f"{int(roles.get('roles_with_priorities', 0) or 0)}",
+        "",
+        "[stage_6_cleanup]",
+        "  legacy_template_files_ignored:  "
+        f"{int(stage_6_cleanup.get('legacy_template_files_ignored', 0) or 0)}",
+        "  legacy_columns_present:         "
+        f"{str(bool(stage_6_cleanup.get('legacy_columns_present'))).lower()}",
+        "  weaver_tool_aliases_present:    "
+        f"{str(bool(stage_6_cleanup.get('weaver_tool_aliases_present'))).lower()}",
         "",
         (
             "Result: PASS (with warnings)"
@@ -1082,23 +1134,19 @@ def format_doctor_report(report: dict) -> str:
                     "  - engineer present but unassigned tasks remain: "
                     f"{details.get('count', 0)}"
                 )
-            elif name == "shadowed_legacy_templates":
-                slugs = ", ".join(details.get("slugs", []) or [])
+            elif name == "legacy_template_files_ignored":
+                files = ", ".join(details.get("files", []) or [])
                 line = (
-                    "  - legacy template shadowed by new role; "
-                    "consider migrating the legacy file"
+                    "  - legacy template files in agents/ are ignored; "
+                    "move them into roles/"
                 )
-                if slugs:
-                    line += f": {slugs}"
+                if files:
+                    line += f": {files}"
                 lines.append(line)
             elif name == "no_engineers":
                 lines.append(
-                    "  - no engineer exists; weaver_* tool aliases will fail until one is created"
-                )
-            elif name == "ambiguous_default_engineer_routing":
-                lines.append(
-                    "  - multiple engineers but no canonical 'Weaver' for default routing; "
-                    "weaver_* aliases will pick the earliest by creation order"
+                    "  - no engineer exists; create one from the Engineers panel "
+                    "before using engineer MCP tools"
                 )
             elif name == "engineer_binding_env_mismatch":
                 mismatches = details.get("mismatches", []) or []
@@ -1184,6 +1232,16 @@ def format_doctor_report(report: dict) -> str:
                         f"{entry.get('name') or entry.get('id')}"
                         " has hired_by_architect_id, invalid state"
                     )
+            elif name == "stage_6_legacy_columns_removed":
+                lines.append(
+                    "  - legacy kinds-refactor columns are still present; "
+                    "complete the stage-6 cleanup migration"
+                )
+            elif name == "stage_6_weaver_tool_aliases_removed":
+                lines.append(
+                    "  - weaver_* MCP aliases are still present; "
+                    "remove the legacy alias surface"
+                )
             else:
                 lines.append(f"  - {name}")
     return "\n".join(lines)
