@@ -44,36 +44,34 @@ function createSandbox() {
 }
 
 function loadWeaver(context) {
-  const filename = path.join(repoRoot, 'static/js/weaver.js');
+  const filename = path.join(repoRoot, 'static/js/agent_panel.js');
   const source = fs.readFileSync(filename, 'utf8');
   vm.runInContext(source, context, { filename });
 }
 
-test('renderWeaverPanel shows Journal and Events tabs without settings tabs when a Weaver is configured', () => {
+test('focused engineer panel shows Journal, Events, and Worklog tabs without settings tabs', () => {
   const sandbox = createSandbox();
-  sandbox.state.group_settings = {
-    alpha: { weaver_agent_id: 'weaver-alpha' },
-  };
+  sandbox.focusedItemId = 'eng-alpha';
   sandbox.state.agents = {
-    'weaver-alpha': { id: 'weaver-alpha', group: 'alpha', name: 'Weaver' },
+    'eng-alpha': { id: 'eng-alpha', group: 'alpha', name: 'Builder', kind: 'engineer', cell_type: 'agent' },
   };
   const panel = {
     innerHTML: '',
     querySelector() { return null; },
   };
   sandbox.document.getElementById = function(id) {
-    return id === 'panel-weaver' ? panel : null;
+    return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
 
-  vm.runInContext('renderWeaverPanel()', context);
+  vm.runInContext('renderAgentPanel()', context);
 
-  assert.match(panel.innerHTML, /Architects &amp; Engineers — alpha/);
+  assert.match(panel.innerHTML, /Engineer: Builder · Group: alpha/);
   assert.match(panel.innerHTML, />Journal</);
   assert.match(panel.innerHTML, />Events</);
   assert.match(panel.innerHTML, />Worklog</);
-  assert.match(panel.innerHTML, /weaver-tabs/);
+  assert.match(panel.innerHTML, /agent-panel-tabs/);
   assert.doesNotMatch(panel.innerHTML, />Settings</);
 });
 
@@ -94,29 +92,26 @@ test('weaver Events tab renders queued and sent digest sections', () => {
       { id: 5, kind: 'task_completed', agent_name: 'Worker', message: 'Merged cleanly', timestamp: 5, delivered_at: 12 },
     ],
   };
-  const panel = {
-    innerHTML: '',
-    querySelector() { return null; },
-  };
-  sandbox.document.getElementById = function(id) {
-    return id === 'panel-weaver' ? panel : null;
-  };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
 
-  vm.runInContext(`weaverSelectTab('events')`, context);
+  const html = vm.runInContext(`_agentPanelLegacyRenderEvents('alpha', state.weaver_settings.alpha || {}, null, state.weaver_buffer_stats.alpha)`, context);
 
-  assert.match(panel.innerHTML, /Queued for next digest/);
-  assert.match(panel.innerHTML, /Already sent to Weaver/);
-  assert.match(panel.innerHTML, /Waiting for review/);
-  assert.match(panel.innerHTML, /Merged cleanly/);
-  assert.match(panel.innerHTML, /Send queued now/);
+  assert.match(html, /Queued for next digest/);
+  assert.match(html, /Already sent to Weaver/);
+  assert.match(html, /Waiting for review/);
+  assert.match(html, /Merged cleanly/);
+  assert.match(html, /Send queued now/);
 });
 
-test('weaver Events countdown updates in place without rerendering the whole panel', () => {
+test('focused engineer Events countdown updates in place without rerendering the whole panel', () => {
   const sandbox = createSandbox();
   let nowMs = 1_000_000;
   sandbox.Date.now = () => nowMs;
+  sandbox.focusedItemId = 'eng-alpha';
+  sandbox.state.agents = {
+    'eng-alpha': { id: 'eng-alpha', group: 'alpha', name: 'Builder', kind: 'engineer', cell_type: 'agent' },
+  };
   sandbox.state.weaver_buffer_stats = {
     alpha: {
       buffered_events: 1,
@@ -132,7 +127,7 @@ test('weaver Events countdown updates in place without rerendering the whole pan
   let renderCount = 0;
   const panel = {
     querySelector(selector) {
-      if (selector === '.weaver-events-countdown') return countdown;
+      if (selector === '.agent-panel-events-countdown') return countdown;
       return null;
     },
   };
@@ -147,12 +142,12 @@ test('weaver Events countdown updates in place without rerendering the whole pan
     },
   });
   sandbox.document.getElementById = function(id) {
-    return id === 'panel-weaver' ? panel : null;
+    return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
 
-  vm.runInContext(`_weaverActiveTabByGroup.alpha = 'events'; renderWeaverPanel()`, context);
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'events'; renderAgentPanel()`, context);
 
   assert.equal(renderCount, 1);
   assert.equal(sandbox.intervalCalls.length, 1);
@@ -190,7 +185,7 @@ test('weaver Events tab disables send-now while paused', () => {
   loadWeaver(context);
 
   const html = vm.runInContext(
-    `_weaverRenderEvents("alpha", state.weaver_settings.alpha, null, state.weaver_buffer_stats.alpha)`,
+    `_agentPanelLegacyRenderEvents("alpha", state.weaver_settings.alpha, null, state.weaver_buffer_stats.alpha)`,
     context,
   );
 
@@ -231,7 +226,7 @@ test('weaver Worklog tab renders dispatched tasks with live lane and status', ()
   loadWeaver(context);
 
   const html = vm.runInContext(
-    `_weaverRenderWorklog("alpha", {})`,
+    `_agentPanelLegacyRenderWorklog("alpha", {})`,
     context,
   );
 
@@ -270,7 +265,7 @@ test('weaver Worklog tab hides non-owned rows when restrict_to_created_agents is
   loadWeaver(context);
 
   const html = vm.runInContext(
-    `_weaverRenderWorklog("alpha", { restrict_to_created_agents: true })`,
+    `_agentPanelLegacyRenderWorklog("alpha", { restrict_to_created_agents: true })`,
     context,
   );
 
@@ -289,11 +284,11 @@ test('weaver journal distinguishes blocking asks from non-blocking notes', () =>
   const context = vm.createContext(sandbox);
   loadWeaver(context);
 
-  const html = vm.runInContext(`_weaverRenderJournal("alpha")`, context);
+  const html = vm.runInContext(`_agentPanelLegacyRenderJournal("alpha")`, context);
 
-  assert.match(html, /class="weaver-ask-banner"/);
+  assert.match(html, /class="agent-panel-ask-banner"/);
   assert.match(html, /Weaver is asking:/);
-  assert.match(html, /class="weaver-note-banner"/);
+  assert.match(html, /class="agent-panel-note-banner"/);
   assert.match(html, /Weaver asks \(non-blocking\):/);
   assert.match(html, /weaverDismissNote/);
 });
@@ -347,13 +342,13 @@ test('weaver journal keeps chronology separate and shows a Session Map button', 
   const context = vm.createContext(sandbox);
   loadWeaver(context);
 
-  const html = vm.runInContext(`_weaverRenderJournal("alpha")`, context);
+  const html = vm.runInContext(`_agentPanelLegacyRenderJournal("alpha")`, context);
 
   assert.match(html, />Session Map</);
   assert.match(html, /No journal entries yet/);
   assert.doesNotMatch(html, /Open Streams/);
   assert.doesNotMatch(html, /Awaiting validation/);
-  assert.doesNotMatch(html, /weaver-stream-section-label-product/);
+  assert.doesNotMatch(html, /agent-panel-stream-section-label-product/);
 });
 
 test('weaver session map renders deterministic stream and recovery sections', () => {
@@ -435,7 +430,7 @@ test('weaver session map renders deterministic stream and recovery sections', ()
   loadWeaver(context);
   vm.runInContext(`_weaverJournalSubviewByGroup.alpha = 'session_map'`, context);
 
-  const html = vm.runInContext(`_weaverRenderJournal("alpha")`, context);
+  const html = vm.runInContext(`_agentPanelLegacyRenderJournal("alpha")`, context);
 
   assert.match(html, /Polish modal/);
   assert.match(html, /modal-polish/);
@@ -509,38 +504,30 @@ test('weaverSendNow uses the explicit flush command', () => {
   ]);
 });
 
-test('renderWeaverPanel uses the focused group in multi-project workspaces', () => {
+test('focused engineer utilities use the focused agent group in multi-project workspaces', () => {
   const sandbox = createSandbox();
-  sandbox.document.getElementById = function(id) {
-    if (id !== 'panel-weaver') return null;
-    return {
-      innerHTML: '',
-      querySelector() { return null; },
-    };
-  };
   sandbox.state.groups = { alpha: [], beta: [] };
-  sandbox.state.group_settings = {
-    alpha: { weaver_agent_id: 'weaver-alpha' },
-    beta: {},
-  };
   sandbox.state.agents = {
-    'stale-selected': { id: 'stale-selected', group: 'alpha' },
+    'eng-beta': { id: 'eng-beta', group: 'beta', name: 'Builder', kind: 'engineer', cell_type: 'agent' },
   };
-  sandbox.selectedAgentId = 'stale-selected';
-  sandbox._focusedGroup = function() { return 'beta'; };
+  sandbox.focusedItemId = 'eng-beta';
+  sandbox._focusedGroup = function() { return 'alpha'; };
   const panel = {
     innerHTML: '',
     querySelector() { return null; },
   };
   sandbox.document.getElementById = function(id) {
-    return id === 'panel-weaver' ? panel : null;
+    return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
   loadWeaver(context);
 
-  vm.runInContext('renderWeaverPanel()', context);
+  vm.runInContext('renderAgentPanel()', context);
+  vm.runInContext('weaverSendNow()', context);
 
-  assert.match(panel.innerHTML, /Architects &amp; Engineers — beta/);
-  assert.match(panel.innerHTML, /No Weaver configured for beta/);
-  assert.doesNotMatch(panel.innerHTML, /Architects &amp; Engineers — alpha/);
+  assert.match(panel.innerHTML, /Engineer: Builder · Group: beta/);
+  assert.equal(vm.runInContext(`_agentPanelCurrentGroup()`, context), 'beta');
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    { cmd: 'weaver_flush_now', group: 'beta' },
+  ]);
 });

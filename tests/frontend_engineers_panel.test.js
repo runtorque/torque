@@ -17,7 +17,12 @@ function createSandbox() {
       board_tasks: {},
       children: {},
       weaver_settings: {},
+      weaver_journal: {},
+      weaver_sent_events: {},
+      weaver_buffer_stats: {},
+      weaver_worklog: {},
     },
+    focusedItemId: '',
     document: {
       activeElement: null,
       getElementById() { return null; },
@@ -55,11 +60,11 @@ function createHarness() {
     querySelector() { return null; },
   };
   sandbox.document.getElementById = function(id) {
-    return id === 'panel-weaver' ? panel : null;
+    return id === 'panel-agent' ? panel : null;
   };
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/render.js');
-  loadScript(context, 'static/js/weaver.js');
+  loadScript(context, 'static/js/agent_panel.js');
   return { context, panel, sandbox };
 }
 
@@ -76,48 +81,52 @@ function engineer(id, name, createdAt) {
   };
 }
 
-test('renderWeaverPanel shows the Engineers header and empty roster when there are zero engineers', () => {
-  const { context, panel } = createHarness();
-
-  vm.runInContext('renderWeaverPanel()', context);
-
-  assert.match(panel.innerHTML, /Architects &amp; Engineers — loom/);
-  assert.match(panel.innerHTML, />\+ Add Architect</);
-  assert.match(panel.innerHTML, />\+ Add Engineer</);
-  assert.match(panel.innerHTML, /No user-owned engineers yet/);
-});
-
-test('renderWeaverPanel lists one engineer in the roster', () => {
+test('focused engineer panel shows journal/events/worklog tabs with the engineer header', () => {
   const { context, panel, sandbox } = createHarness();
   sandbox.state.agents['eng-alice'] = engineer('eng-alice', 'Alice', 10);
+  sandbox.focusedItemId = 'eng-alice';
 
-  vm.runInContext('renderWeaverPanel()', context);
+  vm.runInContext('renderAgentPanel()', context);
 
-  assert.equal((panel.innerHTML.match(/engineer-row-kind">engineer</g) || []).length, 1);
-  assert.match(panel.innerHTML, /User/);
-  assert.match(panel.innerHTML, /Alice/);
-  assert.match(panel.innerHTML, /eng-alice/);
+  assert.match(panel.innerHTML, /Engineer: Alice · Group: loom/);
+  assert.match(panel.innerHTML, />Journal</);
+  assert.match(panel.innerHTML, />Events</);
+  assert.match(panel.innerHTML, />Worklog</);
+  assert.match(panel.innerHTML, /Group: loom \(group-wide\)/);
 });
 
-test('renderWeaverPanel lists two engineers in created_at order', () => {
+test('focused engineer worklog tab renders the group worklog entries', () => {
   const { context, panel, sandbox } = createHarness();
-  sandbox.state.agents['eng-bob'] = engineer('eng-bob', 'Bob', 20);
   sandbox.state.agents['eng-alice'] = engineer('eng-alice', 'Alice', 10);
+  sandbox.state.agents['worker-1'] = { id: 'worker-1', name: 'Worker One' };
+  sandbox.state.weaver_worklog.loom = [
+    {
+      id: 4,
+      task_id: 'LOOM:9',
+      task_title: 'Add Worklog tab',
+      agent_id: 'worker-1',
+      agent_name: 'Worker One',
+      agent_slug: 'worker-one',
+      agent_owned: true,
+      started_at: 12,
+    },
+  ];
+  sandbox.state.board_tasks = {
+    'LOOM:9': {
+      id: 'LOOM:9',
+      task: 'Add Worklog tab',
+      lane: 'In Progress',
+      status: 'In review',
+      agent_id: 'worker-1',
+    },
+  };
+  sandbox.focusedItemId = 'eng-alice';
 
-  vm.runInContext('renderWeaverPanel()', context);
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'worklog'; renderAgentPanel()`, context);
 
-  assert.equal((panel.innerHTML.match(/engineer-row-kind">engineer</g) || []).length, 2);
-  assert.match(panel.innerHTML, /Alice[\s\S]*Bob/);
-});
-
-test('renderWeaverPanel lists three engineers in created_at order', () => {
-  const { context, panel, sandbox } = createHarness();
-  sandbox.state.agents['eng-cara'] = engineer('eng-cara', 'Cara', 30);
-  sandbox.state.agents['eng-bob'] = engineer('eng-bob', 'Bob', 20);
-  sandbox.state.agents['eng-alice'] = engineer('eng-alice', 'Alice', 10);
-
-  vm.runInContext('renderWeaverPanel()', context);
-
-  assert.equal((panel.innerHTML.match(/engineer-row-kind">engineer</g) || []).length, 3);
-  assert.match(panel.innerHTML, /Alice[\s\S]*Bob[\s\S]*Cara/);
+  assert.match(panel.innerHTML, /Engineer: Alice · Group: loom/);
+  assert.match(panel.innerHTML, /Dispatched tasks/);
+  assert.match(panel.innerHTML, /Add Worklog tab/);
+  assert.match(panel.innerHTML, /In Progress/);
+  assert.match(panel.innerHTML, /In review/);
 });

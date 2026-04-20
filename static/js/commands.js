@@ -268,6 +268,18 @@ let _dragType = null;
 function setupDrag() {
   const main = document.getElementById('main');
 
+  main.addEventListener('click', (e) => {
+    if (dragInProgress) return;
+    const target = e && e.target ? e.target : null;
+    if (target && typeof target.closest === 'function'
+        && target.closest('[data-drag-id]')) {
+      return;
+    }
+    if (!focusedItemId) return;
+    focusedItemId = null;
+    render();
+  });
+
   main.addEventListener('dragstart', (e) => {
     const el = e.target.closest('[data-drag-id]');
     if (!el) return;

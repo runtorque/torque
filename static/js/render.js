@@ -242,7 +242,7 @@ function _renderSurface(surface) {
   if (surface === 'actions' && typeof renderTemplatesPanel === 'function') renderTemplatesPanel();
   if (surface === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
   if (surface === 'events' && typeof renderEvents === 'function') renderEvents();
-  if (surface === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
+  if (surface === 'weaver' && typeof renderAgentPanel === 'function') renderAgentPanel();
   if (surface === 'templates' && typeof renderAgentTemplatesPanel === 'function') renderAgentTemplatesPanel();
 }
 
@@ -615,6 +615,10 @@ function render() {
   renderPendingHireBanner();
   _updateWeaverTaskbarBadge();
   if (typeof updateEventsAttentionBadge === 'function') updateEventsAttentionBadge();
+  if (typeof renderAgentPanel === 'function') {
+    const surfaces = _currentPanelSurfaces();
+    if (surfaces.includes('weaver')) renderAgentPanel();
+  }
   if (typeof renderTerminalWorkspace === 'function') renderTerminalWorkspace();
 }
 

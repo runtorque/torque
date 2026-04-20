@@ -6,11 +6,16 @@ var _activePanelApp = '';   // '' = collapsed, 'board' = board open
 var _panelHeight = 0;       // persisted height in px (0 = use CSS default)
 var _panelStateRestored = false;  // true after first state message restores panel
 
-var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-context', 'panel-events', 'panel-weaver'];
+var _panelIds = ['panel-board', 'panel-actions', 'panel-templates', 'panel-context', 'panel-events', 'panel-agent'];
 var _embeddedPanelMinHeight = 180;
 var _defaultPanelMinHeight = 80;
 var _workspaceSidebarDefaultWidth = 340;
 var _workspaceSidebarStorageKey = 'loom.ide.sidebar_width';
+
+function _panelRootId(appName) {
+  if (appName === 'weaver') return 'panel-agent';
+  return 'panel-' + appName;
+}
 
 function _panelAppVisible(appName) {
   if (!appName) return false;
@@ -134,14 +139,14 @@ function togglePanel(appName) {
     // Show/hide panel content
     _panelIds.forEach(function(id) {
       var el = document.getElementById(id);
-      if (el) el.classList.toggle('panel-hidden', id !== 'panel-' + appName);
+      if (el) el.classList.toggle('panel-hidden', id !== _panelRootId(appName));
     });
     // Render the active app
     if (appName === 'board') renderBoard();
     _loadPanelApp(appName);
     if (appName === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (appName === 'events' && typeof renderEvents === 'function') renderEvents();
-    if (appName === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
+    if (appName === 'weaver' && typeof renderAgentPanel === 'function') renderAgentPanel();
   }
   // Persist panel state to server
   send({ cmd: 'board_set_panel', active: _activePanelApp || '' });
@@ -180,7 +185,7 @@ function _restorePanelState() {
     }
     _panelIds.forEach(function(id) {
       var el = document.getElementById(id);
-      if (el) el.classList.toggle('panel-hidden', id !== 'panel-' + active);
+      if (el) el.classList.toggle('panel-hidden', id !== _panelRootId(active));
     });
     document.querySelectorAll('.taskbar-app').forEach(function(b) {
       b.classList.toggle('active', b.dataset.app === active);
@@ -189,7 +194,7 @@ function _restorePanelState() {
     _loadPanelApp(active);
     if (active === 'context' && typeof renderContextPanel === 'function') renderContextPanel();
     if (active === 'events' && typeof renderEvents === 'function') renderEvents();
-    if (active === 'weaver' && typeof renderWeaverPanel === 'function') renderWeaverPanel();
+    if (active === 'weaver' && typeof renderAgentPanel === 'function') renderAgentPanel();
   }
 }
 
@@ -685,7 +690,8 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     if (typeof openAddArchitectModal === 'function') {
       var architectGroup = '';
-      if (typeof _weaverCurrentGroup === 'function') architectGroup = _weaverCurrentGroup() || '';
+      if (typeof _agentPanelCurrentGroup === 'function') architectGroup = _agentPanelCurrentGroup() || '';
+      else if (typeof _currentGroup === 'function') architectGroup = _currentGroup() || '';
       openAddArchitectModal(architectGroup);
     }
     return;

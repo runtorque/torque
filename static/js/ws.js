@@ -190,9 +190,9 @@ function _handleWeaverSessionMapMessage(msg) {
   }
   if (((typeof _panelAppVisible === 'function' && _panelAppVisible('weaver'))
       || (typeof _activePanelApp !== 'undefined' && _activePanelApp === 'weaver'))
-      && typeof renderWeaverPanel === 'function') {
+      && typeof renderAgentPanel === 'function') {
     var currentGroup = (typeof _currentGroup === 'function') ? _currentGroup() : '';
-    if (!currentGroup || currentGroup === group) renderWeaverPanel();
+    if (!currentGroup || currentGroup === group) renderAgentPanel();
   }
 }
 

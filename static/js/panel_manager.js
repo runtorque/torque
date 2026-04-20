@@ -32,6 +32,7 @@ function _standalonePanelsEnabled() {
 }
 
 function _standalonePanelRootId(app) {
+  if (app === 'weaver') return 'panel-agent';
   return 'panel-' + app;
 }
 
