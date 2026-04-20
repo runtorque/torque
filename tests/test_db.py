@@ -2374,7 +2374,7 @@ class LoomDBTests(unittest.TestCase):
         migrated = LoomDB(path)
         self.addCleanup(migrated.close)
 
-        with self.assertLogs("loom", level="WARNING") as cm:
+        with self.assertLogs("loom", level="INFO") as cm:
             migrated.init()
 
         joined_logs = "\n".join(cm.output)
