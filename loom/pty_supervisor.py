@@ -100,7 +100,6 @@ class SupervisorSession:
     cols: int
     rows: int
     bootstrap_dir: str = ""
-    claude_config_dir: str = ""
     buffer: bytearray = field(default_factory=bytearray)
     total_bytes: int = 0
     subscribers: set = field(default_factory=set)
@@ -119,7 +118,6 @@ class SupervisorSession:
             "rows": self.rows,
             "total_bytes": self.total_bytes,
             "bootstrap_dir": self.bootstrap_dir,
-            "claude_config_dir": self.claude_config_dir,
             "shell_argv": list(self.shell_argv),
             "cwd": self.cwd,
         }
@@ -232,7 +230,6 @@ class PtySupervisor:
         cols = int(msg.get("cols") or 120)
         rows = int(msg.get("rows") or 32)
         bootstrap_dir = str(msg.get("bootstrap_dir") or "")
-        claude_config_dir = str(msg.get("claude_config_dir") or "")
         if not session_id or not shell_argv:
             await write_frame(writer, {
                 "type": "error",
@@ -257,7 +254,6 @@ class PtySupervisor:
                 cols=cols,
                 rows=rows,
                 bootstrap_dir=bootstrap_dir,
-                claude_config_dir=claude_config_dir,
             )
         except Exception as exc:
             log.exception("Failed to spawn session %s", session_id)
@@ -406,7 +402,6 @@ class PtySupervisor:
         cols: int,
         rows: int,
         bootstrap_dir: str,
-        claude_config_dir: str,
     ) -> SupervisorSession:
         master_fd, slave_fd = pty.openpty()
         set_winsize(master_fd, cols, rows)
@@ -434,7 +429,6 @@ class PtySupervisor:
             cols=cols,
             rows=rows,
             bootstrap_dir=bootstrap_dir,
-            claude_config_dir=claude_config_dir,
             process=process,
         )
 

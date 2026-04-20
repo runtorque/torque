@@ -140,7 +140,6 @@ class PtySupervisorClient:
         cols: int,
         rows: int,
         bootstrap_dir: str = "",
-        claude_config_dir: str = "",
     ) -> dict:
         return await self.call(
             "create",
@@ -152,7 +151,6 @@ class PtySupervisorClient:
             cols=cols,
             rows=rows,
             bootstrap_dir=bootstrap_dir,
-            claude_config_dir=claude_config_dir,
         )
 
     async def write_input(self, session_id: str, data: bytes) -> dict:
