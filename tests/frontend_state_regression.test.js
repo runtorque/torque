@@ -6274,8 +6274,13 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
     },
   };
   context.focusedItemId = 'eng-1';
-  context.state.weaver_buffer_stats = {
-    alpha: {
+  context.state.agent_digest_settings = {
+    'eng-1': { agent_id: 'eng-1', paused: false },
+  };
+  context.state.digest_buffer_stats = {
+    'eng-1': {
+      agent_id: 'eng-1',
+      group: 'alpha',
       buffered_events: 1,
       next_push_in: 30,
       queued_events: [
@@ -6284,8 +6289,8 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
       manual_flush_requested: false,
     },
   };
-  context.state.weaver_sent_events = {
-    alpha: [
+  context.state.digest_sent_events = {
+    'eng-1': [
       { id: 2, kind: 'task_completed', message: 'Sent event', timestamp: 5, delivered_at: 8 },
     ],
   };
@@ -6299,7 +6304,7 @@ test('renderAgentPanel preserves the selected Events tab across rerenders', () =
   context.renderAgentPanel();
 
   assert.match(panel.innerHTML, /id="agent-panel-tab-events" class="agent-panel-tab active"/);
-  assert.match(panel.innerHTML, /Already sent to Weaver/);
+  assert.match(panel.innerHTML, /Already sent to Engineer One/);
 });
 
 test('renderAgentPanel preserves the selected Worklog tab across rerenders', () => {
@@ -6406,16 +6411,21 @@ test('renderAgentPanel keeps the same Events anchor visible when new digest rows
     },
   });
 
-  context.state.weaver_buffer_stats = {
-    alpha: {
+  context.state.agent_digest_settings = {
+    'eng-1': { agent_id: 'eng-1', paused: false },
+  };
+  context.state.digest_buffer_stats = {
+    'eng-1': {
+      agent_id: 'eng-1',
+      group: 'alpha',
       buffered_events: 0,
       next_push_in: 0,
       queued_events: [],
       manual_flush_requested: false,
     },
   };
-  context.state.weaver_sent_events = {
-    alpha: [
+  context.state.digest_sent_events = {
+    'eng-1': [
       { id: 2, kind: 'task_completed', message: 'Older digest', timestamp: 5, delivered_at: 8 },
       { id: 1, kind: 'task_completed', message: 'Oldest digest', timestamp: 4, delivered_at: 6 },
     ],
@@ -8301,7 +8311,7 @@ test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   assert.match(main.innerHTML, /Shell Root/);
   assert.match(main.innerHTML, /class="cell[^"]*selected/);
   assert.match(main.innerHTML, /class="term-row/);
-  assert.match(main.innerHTML, /newWeaver\('alpha'\)/);
+  assert.match(main.innerHTML, /openAddEngineerModal\(\)/);
   assert.match(main.innerHTML, /quickAddAgent\('alpha'\)/);
   assert.match(main.innerHTML, /openAddAgentAdvanced\('alpha'\)/);
   assert.match(main.innerHTML, /quickAddTerminal\('alpha','agent-1'\)/);

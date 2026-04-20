@@ -403,6 +403,87 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
             ["event B"],
         )
 
+    async def test_pausing_one_recipient_does_not_block_another_buffer(self):
+        state, group = self._make_state()
+        engineer_a = self._add_agent(
+            state,
+            agent_id="eng-a",
+            name="Engineer A",
+            group=group,
+            kind="engineer",
+        )
+        engineer_b = self._add_agent(
+            state,
+            agent_id="eng-b",
+            name="Engineer B",
+            group=group,
+            kind="engineer",
+        )
+        worker_a = self._add_agent(
+            state,
+            agent_id="worker-a",
+            name="Worker A",
+            group=group,
+            kind="worker",
+            owner_engineer_id=engineer_a.id,
+        )
+        worker_b = self._add_agent(
+            state,
+            agent_id="worker-b",
+            name="Worker B",
+            group=group,
+            kind="worker",
+            owner_engineer_id=engineer_b.id,
+        )
+        state.update_agent_digest_settings(
+            engineer_a.id,
+            push_interval=0,
+            max_interval=0,
+        )
+        state.update_agent_digest_settings(
+            engineer_b.id,
+            push_interval=0,
+            max_interval=0,
+        )
+
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+
+        state.update_agent_digest_settings(engineer_a.id, paused=True)
+        buffer.on_delivery_paused(engineer_a.id)
+
+        buffer.on_panel_event(
+            {
+                "id": 1,
+                "cell_id": worker_a.id,
+                "group": group,
+                "kind": "task_completed",
+                "message": "event A",
+            }
+        )
+        buffer.on_panel_event(
+            {
+                "id": 2,
+                "cell_id": worker_b.id,
+                "group": group,
+                "kind": "task_completed",
+                "message": "event B",
+            }
+        )
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(
+            [event["message"] for event in buffer._buffers[engineer_a.id]],
+            ["event A"],
+        )
+        self.assertEqual(
+            [event["message"] for event in buffer.get_sent_events(engineer_b.id)],
+            ["event B"],
+        )
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("event B", bridge.sent[0][1])
+
     async def test_stopped_recipient_keeps_buffered_events_until_running(self):
         state, group = self._make_state()
         engineer = self._add_agent(
