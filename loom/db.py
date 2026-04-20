@@ -43,6 +43,7 @@ _KINDS_SCHEMA_MIGRATION_VERSION = 1
 _KINDS_BACKFILL_MIGRATION_VERSION = 2
 _KINDS_SCHEMA_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
 _KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
+_KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY = "schema_kinds_task_assignment_fixup_applied"
 _KINDS_SCHEMA_BACKUP_NAME = "loom.db.pre-kinds.bak"
 _KINDS_WEAVER_OVERRIDE_ENV = "LOOM_MIGRATE_WEAVER_ID"
 _KINDS_WEAVER_GROUP = "loom"
@@ -127,8 +128,20 @@ def _coalesce_agent_kinds_fields(row: dict) -> None:
         row["owner_engineer_id"] = created_by_weaver_id
 
 
-def _coalesce_task_kinds_fields(row: dict) -> None:
-    """Keep legacy task ownership columns authoritative until stage 6."""
+def _coalesce_task_kinds_fields(
+    row: dict,
+    *,
+    legacy_owner_supported: bool,
+) -> None:
+    """Keep legacy task ownership columns authoritative until stage 6.
+
+    Task ownership was historically group-level, not a persisted board_tasks
+    column. Only mirror the legacy task owner when a compatibility column
+    actually exists on disk.
+    """
+    if not legacy_owner_supported:
+        return
+
     weaver_owner_id = str(row.get("weaver_owner_id", "") or "")
     assigned_engineer_id = str(row.get("assigned_engineer_id", "") or "")
     if weaver_owner_id and not assigned_engineer_id:
@@ -235,20 +248,27 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
 
     def _prepare_board_task_row(self, task) -> dict:
         row = dict(task) if isinstance(task, dict) else asdict(task)
-        _coalesce_task_kinds_fields(row)
+        _coalesce_task_kinds_fields(
+            row,
+            legacy_owner_supported=self._legacy_board_task_owner_supported(),
+        )
         return row
 
+    def _legacy_board_task_owner_supported(self) -> bool:
+        return bool(self._conn) and self._column_exists(
+            "board_tasks", "weaver_owner_id"
+        )
+
     def _sync_legacy_board_task_owner(self, executor, task_row: dict) -> None:
+        if not self._legacy_board_task_owner_supported():
+            return
         task_id = str(task_row.get("id", "") or "")
         if not task_id:
             return
-        try:
-            executor.execute(
-                "UPDATE board_tasks SET weaver_owner_id=? WHERE id=?",
-                (str(task_row.get("weaver_owner_id", "") or ""), task_id),
-            )
-        except sqlite3.OperationalError:
-            return
+        executor.execute(
+            "UPDATE board_tasks SET weaver_owner_id=? WHERE id=?",
+            (str(task_row.get("weaver_owner_id", "") or ""), task_id),
+        )
 
     def _insert_board_task_row(self, executor, task) -> None:
         row = self._prepare_board_task_row(task)
@@ -262,6 +282,7 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         initialize_database(self._conn, self.backfill_agent_history)
         self._migrate_kinds_schema_if_needed()
         self._backfill_kinds_if_needed()
+        self._fixup_kinds_task_assignments_if_needed()
         self.migrate_task_ids_if_needed()
 
     def close(self):
@@ -2168,6 +2189,67 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         except sqlite3.OperationalError:
             return False
 
+    def _load_group_weaver_map(self) -> dict[str, str]:
+        rows = self._conn.execute(
+            "SELECT group_name, weaver_agent_id FROM group_settings"
+        ).fetchall()
+        return {
+            str(group_name or "").strip(): str(weaver_agent_id or "").strip()
+            for group_name, weaver_agent_id in rows
+            if str(group_name or "").strip()
+        }
+
+    def _backfill_task_assignments_from_group_settings(
+        self,
+        group_weaver_map: dict[str, str],
+        *,
+        only_unassigned: bool,
+        reset_stage1_fields: bool,
+    ) -> int:
+        updated = 0
+        if only_unassigned:
+            rows = self._conn.execute(
+                "SELECT id, group_name FROM board_tasks WHERE assigned_engineer_id=''"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, group_name FROM board_tasks"
+            ).fetchall()
+
+        for task_id, group_name in rows:
+            task_id = str(task_id or "").strip()
+            if not task_id:
+                continue
+            assigned_engineer_id = group_weaver_map.get(
+                str(group_name or "").strip(),
+                "",
+            )
+            if only_unassigned:
+                if not assigned_engineer_id:
+                    continue
+                self._conn.execute(
+                    "UPDATE board_tasks SET assigned_engineer_id=? WHERE id=?",
+                    (assigned_engineer_id, task_id),
+                )
+                updated += 1
+                continue
+
+            if reset_stage1_fields:
+                self._conn.execute(
+                    "UPDATE board_tasks "
+                    "SET assigned_engineer_id=?, "
+                    "created_by_architect_id='', "
+                    "suggested_action='' "
+                    "WHERE id=?",
+                    (assigned_engineer_id, task_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE board_tasks SET assigned_engineer_id=? WHERE id=?",
+                    (assigned_engineer_id, task_id),
+                )
+        return updated
+
     def _backfill_kinds_if_needed(self):
         version = self._current_kinds_migration_version()
         if version < _KINDS_SCHEMA_MIGRATION_VERSION:
@@ -2232,15 +2314,14 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             task_count = int(
                 self._conn.execute("SELECT COUNT(*) FROM board_tasks").fetchone()[0]
             )
-            task_owner_expr = (
-                "COALESCE(weaver_owner_id, '')"
-                if self._column_exists("board_tasks", "weaver_owner_id")
-                else "''"
-            )
-            self._conn.execute(
-                "UPDATE board_tasks "
-                f"SET assigned_engineer_id={task_owner_expr}, "
-                "created_by_architect_id='', suggested_action=''"
+            group_weaver_map = self._load_group_weaver_map()
+            configured_loom_weaver_id = group_weaver_map.get(_KINDS_WEAVER_GROUP, "")
+            if engineer_id and configured_loom_weaver_id:
+                assert configured_loom_weaver_id == engineer_id
+            self._backfill_task_assignments_from_group_settings(
+                group_weaver_map,
+                only_unassigned=False,
+                reset_stage1_fields=True,
             )
 
             migrated_at = datetime.now(timezone.utc).isoformat()
@@ -2255,6 +2336,10 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
                 (_KINDS_SCHEMA_MIGRATION_MIGRATED_AT_KEY, migrated_at),
             )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (_KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY, "1"),
+            )
             self._conn.commit()
         except Exception:
             self._conn.rollback()
@@ -2266,6 +2351,37 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             worker_count,
             task_count,
         )
+
+    def _fixup_kinds_task_assignments_if_needed(self):
+        version = self._current_kinds_migration_version()
+        if version != _KINDS_BACKFILL_MIGRATION_VERSION:
+            return
+
+        fixup_applied = str(
+            self._read_meta_value(_KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY) or ""
+        ).strip()
+        if fixup_applied == "1":
+            return
+
+        updated = 0
+        try:
+            self._conn.execute("BEGIN")
+            group_weaver_map = self._load_group_weaver_map()
+            updated = self._backfill_task_assignments_from_group_settings(
+                group_weaver_map,
+                only_unassigned=True,
+                reset_stage1_fields=False,
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (_KINDS_TASK_ASSIGNMENT_FIXUP_APPLIED_KEY, "1"),
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
+        log.info("migration: kinds task assignment fixup applied (updated=%d)", updated)
 
     # -- Migration ----------------------------------------------------------
 

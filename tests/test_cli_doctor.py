@@ -71,6 +71,25 @@ class CliDoctorTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, 1)
         self.assertIn("Result: FAIL", out.getvalue())
 
+    def test_cmd_doctor_keeps_zero_exit_for_pass_with_warnings(self):
+        report = {
+            "result": "pass",
+            "warnings": [
+                {
+                    "name": "unassigned_tasks_when_engineer_present",
+                    "status": "warn",
+                    "details": {"count": 2, "engineer_count": 1},
+                }
+            ],
+            "checks": [],
+        }
+        with mock.patch.object(self.cli, "get_doctor_local", return_value=report):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_doctor(SimpleNamespace(port=18932, json=False))
+
+        self.assertIn("Result: PASS (with warnings)", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

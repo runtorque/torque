@@ -13,7 +13,7 @@ from loom.db import LoomDB
 from loom.doctor import build_doctor_report_for_db, format_doctor_report
 
 install_aiohttp_stub()
-from loom.state import AgentCell, BoardTask
+from loom.state import AgentCell, BoardTask, GroupSettings
 
 
 class LoomDoctorTests(unittest.TestCase):
@@ -30,7 +30,29 @@ class LoomDoctorTests(unittest.TestCase):
         (home / ".loom" / "agents").mkdir(parents=True, exist_ok=True)
         return home
 
-    def test_build_doctor_report_passes_for_migrated_synced_db(self):
+    def test_build_doctor_report_passes_without_warnings_when_no_engineer_exists(self):
+        home = self._home_dir()
+        self.db.save_board_task(
+            BoardTask(
+                id="task-1",
+                task="Unassigned task",
+                slug="unassigned-task",
+                group="g",
+            )
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertEqual(report["warnings"], [])
+        self.assertEqual(report["tasks"]["unassigned"], 1)
+        self.assertEqual(report["tasks"]["unassigned_when_engineer_present"], 0)
+        self.assertIn("Result: PASS", rendered)
+        self.assertNotIn("with warnings", rendered)
+
+    def test_build_doctor_report_passes_for_fully_assigned_engineer_db(self):
         home = self._home_dir()
         (home / ".loom" / "agents" / "researcher.yaml").write_text(
             "name: researcher\n",
@@ -72,13 +94,9 @@ class LoomDoctorTests(unittest.TestCase):
                 assigned_engineer_id="weaver-1",
             )
         )
-        self.db.save_board_task(
-            BoardTask(
-                id="task-2",
-                task="Unassigned task",
-                slug="unassigned-task",
-                group="g",
-            )
+        self.db.save_group_settings(
+            "g",
+            GroupSettings(weaver_agent_id="weaver-1"),
         )
 
         with mock.patch.dict(os.environ, {"HOME": str(home)}):
@@ -98,17 +116,67 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["agents"]["engineer_name"], "Weaver")
         self.assertEqual(report["agents"]["worker"], 1)
         self.assertEqual(report["agents"]["unmigrated"], 0)
-        self.assertEqual(report["tasks"], {"total": 2, "assigned": 1, "unassigned": 1})
+        self.assertEqual(
+            report["tasks"],
+            {
+                "total": 1,
+                "assigned": 1,
+                "unassigned": 0,
+                "unassigned_when_engineer_present": 0,
+            },
+        )
         self.assertEqual(report["drift"]["agents_template_role"], 0)
         self.assertEqual(
             report["drift"]["agents_created_by_weaver_owner_engineer"],
             0,
         )
+        self.assertEqual(report["warnings"], [])
         self.assertEqual(report["roles_templates"]["roles_file_count"], 0)
         self.assertEqual(report["roles_templates"]["templates_file_count"], 1)
         self.assertIn("Loom doctor — stage 1 (kinds refactor)", rendered)
         self.assertIn("Result: PASS", rendered)
         self.assertIn("~/.loom/agents", rendered)
+
+    def test_build_doctor_report_warns_when_engineer_exists_with_unassigned_tasks(self):
+        home = self._home_dir()
+        self.db.save_agent(
+            AgentCell(
+                id="weaver-1",
+                name="Weaver",
+                group="loom",
+                slug="weaver",
+                cell_type="agent",
+                kind="engineer",
+                persistent=True,
+            )
+        )
+        self.db.save_board_task(
+            BoardTask(
+                id="task-1",
+                task="Unassigned task",
+                slug="unassigned-task",
+                group="g",
+            )
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertEqual(
+            report["warnings"],
+            [
+                {
+                    "name": "unassigned_tasks_when_engineer_present",
+                    "status": "warn",
+                    "details": {"count": 1, "engineer_count": 1},
+                }
+            ],
+        )
+        self.assertEqual(report["tasks"]["unassigned_when_engineer_present"], 1)
+        self.assertIn("Result: PASS (with warnings)", rendered)
+        self.assertIn("engineer present but unassigned tasks remain: 1", rendered)
 
     def test_build_doctor_report_flags_drift_and_unmigrated_rows(self):
         home = self._home_dir()

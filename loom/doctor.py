@@ -154,13 +154,14 @@ def _collect_agents_section(conn: sqlite3.Connection) -> dict:
     }
 
 
-def _collect_tasks_section(conn: sqlite3.Connection) -> dict:
+def _collect_tasks_section(conn: sqlite3.Connection, *, engineer_count: int) -> dict:
     total = int(_fetch_scalar(conn, "SELECT COUNT(*) FROM board_tasks", default=0) or 0)
     if not _column_exists(conn, "board_tasks", "assigned_engineer_id"):
         return {
             "total": total,
             "assigned": 0,
             "unassigned": total,
+            "unassigned_when_engineer_present": total if engineer_count >= 1 else 0,
         }
     assigned = int(
         _fetch_scalar(
@@ -174,6 +175,9 @@ def _collect_tasks_section(conn: sqlite3.Connection) -> dict:
         "total": total,
         "assigned": assigned,
         "unassigned": max(0, total - assigned),
+        "unassigned_when_engineer_present": (
+            max(0, total - assigned) if engineer_count >= 1 else 0
+        ),
     }
 
 
@@ -311,6 +315,21 @@ def _check_task_owner_drift(report: dict) -> dict:
     }
 
 
+def _warn_unassigned_tasks_when_engineer_present(report: dict) -> dict | None:
+    engineer_count = int(report["agents"]["engineer"] or 0)
+    count = int(report["tasks"]["unassigned_when_engineer_present"] or 0)
+    if engineer_count < 1 or count <= 0:
+        return None
+    return {
+        "name": "unassigned_tasks_when_engineer_present",
+        "status": "warn",
+        "details": {
+            "count": count,
+            "engineer_count": engineer_count,
+        },
+    }
+
+
 _DOCTOR_CHECKS = [
     _check_migration_version,
     _check_unmigrated_agents,
@@ -319,19 +338,27 @@ _DOCTOR_CHECKS = [
     _check_task_owner_drift,
 ]
 
+_DOCTOR_WARNINGS = [
+    _warn_unassigned_tasks_when_engineer_present,
+]
+
 
 def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
     db_path = Path(db_path)
+    agents = _collect_agents_section(conn)
+    tasks = _collect_tasks_section(conn, engineer_count=int(agents["engineer"] or 0))
     report = {
         "schema_version": DOCTOR_SCHEMA_VERSION,
         "migration": _collect_migration_section(conn, db_path),
-        "agents": _collect_agents_section(conn),
-        "tasks": _collect_tasks_section(conn),
+        "agents": agents,
+        "tasks": tasks,
         "drift": _collect_drift_section(conn),
         "roles_templates": _collect_roles_templates_section(),
     }
     checks = [check(report) for check in _DOCTOR_CHECKS]
+    warnings = [warning for fn in _DOCTOR_WARNINGS if (warning := fn(report))]
     report["checks"] = checks
+    report["warnings"] = warnings
     report["result"] = "pass" if all(c["status"] == "pass" for c in checks) else "fail"
     report["failed_checks"] = [c["name"] for c in checks if c["status"] != "pass"]
     return report
@@ -352,6 +379,7 @@ def format_doctor_report(report: dict) -> str:
     tasks = report.get("tasks", {})
     drift = report.get("drift", {})
     roles_templates = report.get("roles_templates", {})
+    warnings = list(report.get("warnings", []) or [])
 
     engineer_line = f"  engineer:    {int(agents.get('engineer', 0) or 0)}"
     engineer_name = str(agents.get("engineer_name", "") or "").strip()
@@ -383,6 +411,8 @@ def format_doctor_report(report: dict) -> str:
         f"  total:       {int(tasks.get('total', 0) or 0)}",
         f"  assigned:    {int(tasks.get('assigned', 0) or 0)}",
         f"  unassigned:  {int(tasks.get('unassigned', 0) or 0)}",
+        "  unassigned_when_engineer_present: "
+        f"{int(tasks.get('unassigned_when_engineer_present', 0) or 0)}",
         "",
         "[drift]",
         "  agents.template ↔ role:                 "
@@ -398,8 +428,24 @@ def format_doctor_report(report: dict) -> str:
         f"  {_humanize_path(str(roles_templates.get('templates_dir', '')))}: "
         f"{'(empty)' if templates_count == 0 else f'{templates_count} files'}",
         "",
-        f"Result: {str(report.get('result', 'fail')).upper()}",
+        (
+            "Result: PASS (with warnings)"
+            if str(report.get("result", "fail")) == "pass" and warnings
+            else f"Result: {str(report.get('result', 'fail')).upper()}"
+        ),
     ]
+    if warnings:
+        lines.append("Warnings:")
+        for warning in warnings:
+            name = str(warning.get("name", "") or "")
+            details = warning.get("details", {}) or {}
+            if name == "unassigned_tasks_when_engineer_present":
+                lines.append(
+                    "  - engineer present but unassigned tasks remain: "
+                    f"{details.get('count', 0)}"
+                )
+            else:
+                lines.append(f"  - {name}")
     failed_checks = list(report.get("failed_checks", []) or [])
     if failed_checks:
         lines.append("Failed checks:")

@@ -1690,15 +1690,6 @@ class LoomDBTests(unittest.TestCase):
                 BoardTask(id="ALPHA:1", task="Unowned task", group="alpha"),
             ],
         )
-        conn = sqlite3.connect(str(path))
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
-        )
-        conn.execute(
-            "UPDATE board_tasks SET weaver_owner_id='root-1' WHERE id='LOOM:1'"
-        )
-        conn.commit()
-        conn.close()
 
         migrated = LoomDB(path)
         self.addCleanup(migrated.close)
@@ -1738,7 +1729,7 @@ class LoomDBTests(unittest.TestCase):
             task_rows,
             [
                 ("ALPHA:1", "", "", ""),
-                ("LOOM:1", "root-1", "", ""),
+                ("LOOM:1", "", "", ""),
             ],
         )
         version = migrated._conn.execute(
@@ -1785,7 +1776,10 @@ class LoomDBTests(unittest.TestCase):
                     template="planner",
                 ),
             ],
-            tasks=[BoardTask(id="ALPHA:1", task="Task", group="alpha")],
+            tasks=[
+                BoardTask(id="LOOM:1", task="Loom task", group="loom"),
+                BoardTask(id="ALPHA:1", task="Alpha task", group="alpha"),
+            ],
             group_settings={
                 "loom": GroupSettings(weaver_agent_id="root-1"),
             },
@@ -1799,7 +1793,7 @@ class LoomDBTests(unittest.TestCase):
 
         joined_logs = "\n".join(cm.output)
         self.assertIn(
-            "migration: kinds backfill applied (engineer=root-1, workers=1, tasks=1)",
+            "migration: kinds backfill applied (engineer=root-1, workers=1, tasks=2)",
             joined_logs,
         )
         self.assertNotIn("no Weaver found", joined_logs)
@@ -1815,6 +1809,15 @@ class LoomDBTests(unittest.TestCase):
                 "FROM agents WHERE id='agent-1'"
             ).fetchone(),
             ("worker", "planner", "", 0),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT id, assigned_engineer_id FROM board_tasks ORDER BY id"
+            ).fetchall(),
+            [
+                ("ALPHA:1", ""),
+                ("LOOM:1", "root-1"),
+            ],
         )
         self.assertEqual(
             migrated._conn.execute(
@@ -1913,15 +1916,6 @@ class LoomDBTests(unittest.TestCase):
             ],
             tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
         )
-        conn = sqlite3.connect(str(path))
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
-        )
-        conn.execute(
-            "UPDATE board_tasks SET weaver_owner_id='weaver-a' WHERE id='LOOM:1'"
-        )
-        conn.commit()
-        conn.close()
 
         migrated = LoomDB(path)
         self.addCleanup(migrated.close)
@@ -1987,19 +1981,7 @@ class LoomDBTests(unittest.TestCase):
                 ),
             ],
             tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
-            group_settings={
-                "loom": GroupSettings(weaver_agent_id="weaver-b"),
-            },
         )
-        conn = sqlite3.connect(str(path))
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
-        )
-        conn.execute(
-            "UPDATE board_tasks SET weaver_owner_id='weaver-b' WHERE id='LOOM:1'"
-        )
-        conn.commit()
-        conn.close()
 
         migrated = LoomDB(path)
         self.addCleanup(migrated.close)
@@ -2066,16 +2048,10 @@ class LoomDBTests(unittest.TestCase):
                 ),
             ],
             tasks=[BoardTask(id="LOOM:1", task="Task", group="loom")],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="weaver-b"),
+            },
         )
-        conn = sqlite3.connect(str(path))
-        conn.execute(
-            "ALTER TABLE board_tasks ADD COLUMN weaver_owner_id TEXT NOT NULL DEFAULT ''"
-        )
-        conn.execute(
-            "UPDATE board_tasks SET weaver_owner_id='weaver-b' WHERE id='LOOM:1'"
-        )
-        conn.commit()
-        conn.close()
 
         migrated = LoomDB(path)
         self.addCleanup(migrated.close)
@@ -2106,11 +2082,142 @@ class LoomDBTests(unittest.TestCase):
                 "SELECT assigned_engineer_id FROM board_tasks WHERE id='task-1'"
                 .replace("task-1", "LOOM:1")
             ).fetchone()[0],
-            "weaver-b",
+            "",
         )
         self.assertEqual(
             migrated._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_kinds_migration_version'"
             ).fetchone()[0],
             "2",
+        )
+
+    def test_init_backfills_task_assignments_from_group_settings_weaver(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-task-assignment.db",
+            agents=[
+                AgentCell(
+                    id="root-1",
+                    name="Coordinator",
+                    group="loom",
+                    slug="coordinator",
+                ),
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="alpha",
+                    slug="worker",
+                    template="researcher",
+                ),
+            ],
+            tasks=[
+                BoardTask(id="LOOM:1", task="Loom task", group="loom"),
+                BoardTask(id="LOOM:2", task="Second loom task", group="loom"),
+                BoardTask(id="ALPHA:1", task="Alpha task", group="alpha"),
+            ],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="root-1"),
+            },
+        )
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+        migrated.init()
+
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT id, assigned_engineer_id FROM board_tasks ORDER BY id"
+            ).fetchall(),
+            [
+                ("ALPHA:1", ""),
+                ("LOOM:1", "root-1"),
+                ("LOOM:2", "root-1"),
+            ],
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key=?",
+                ("schema_kinds_task_assignment_fixup_applied",),
+            ).fetchone()[0],
+            "1",
+        )
+
+    def test_init_fixes_version2_unassigned_tasks_from_group_settings(self):
+        path = self._seed_stage1a_db(
+            "kinds-backfill-fixup.db",
+            agents=[
+                AgentCell(
+                    id="root-1",
+                    name="Weaver",
+                    group="loom",
+                    slug="weaver",
+                    kind="engineer",
+                    persistent=True,
+                ),
+                AgentCell(
+                    id="worker-1",
+                    name="Worker",
+                    group="alpha",
+                    slug="worker",
+                    template="researcher",
+                    kind="worker",
+                    role="researcher",
+                ),
+            ],
+            tasks=[
+                BoardTask(id="LOOM:1", task="Needs fixup", group="loom"),
+                BoardTask(
+                    id="ALPHA:1",
+                    task="Already assigned",
+                    group="alpha",
+                    assigned_engineer_id="explicit-owner",
+                ),
+            ],
+            group_settings={
+                "loom": GroupSettings(weaver_agent_id="root-1"),
+            },
+        )
+        conn = sqlite3.connect(str(path))
+        conn.execute(
+            "UPDATE meta SET value='2' WHERE key='schema_kinds_migration_version'"
+        )
+        conn.execute(
+            "DELETE FROM meta WHERE key='schema_kinds_task_assignment_fixup_applied'"
+        )
+        conn.execute(
+            "UPDATE agents SET kind='engineer', persistent=1 WHERE id='root-1'"
+        )
+        conn.execute(
+            "UPDATE agents SET kind='worker', role='researcher' WHERE id='worker-1'"
+        )
+        conn.execute(
+            "UPDATE board_tasks SET assigned_engineer_id='' WHERE id='LOOM:1'"
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = LoomDB(path)
+        self.addCleanup(migrated.close)
+
+        with self.assertLogs("loom", level="INFO") as cm:
+            migrated.init()
+
+        self.assertIn(
+            "migration: kinds task assignment fixup applied (updated=1)",
+            "\n".join(cm.output),
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT id, assigned_engineer_id FROM board_tasks ORDER BY id"
+            ).fetchall(),
+            [
+                ("ALPHA:1", "explicit-owner"),
+                ("LOOM:1", "root-1"),
+            ],
+        )
+        self.assertEqual(
+            migrated._conn.execute(
+                "SELECT value FROM meta WHERE key=?",
+                ("schema_kinds_task_assignment_fixup_applied",),
+            ).fetchone()[0],
+            "1",
         )
