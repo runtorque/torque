@@ -112,8 +112,13 @@ test('focused engineer Events countdown updates in place without rerendering the
   sandbox.state.agents = {
     'eng-alpha': { id: 'eng-alpha', group: 'alpha', name: 'Builder', kind: 'engineer', cell_type: 'agent' },
   };
-  sandbox.state.weaver_buffer_stats = {
-    alpha: {
+  sandbox.state.agent_digest_settings = {
+    'eng-alpha': { agent_id: 'eng-alpha', paused: false },
+  };
+  sandbox.state.digest_buffer_stats = {
+    'eng-alpha': {
+      agent_id: 'eng-alpha',
+      group: 'alpha',
       buffered_events: 1,
       next_push_in: 54,
       next_push_at: 1054,

@@ -681,7 +681,7 @@ async def inject_mcp_message(state: MatrixState, bridge, target, message: str, *
     state._emit_agent(target)
 
 
-def _format_mcp_message_prompt(
+def _format_injected_mcp_message_prompt(
     *,
     message: str,
     sender_name: str,
@@ -7694,7 +7694,7 @@ async def main(connection=None):
                     result = {"type": "ok", "delivered": False,
                               "reason": "no_session"}
                 else:
-                    formatted = _format_mcp_message_prompt(
+                    formatted = _format_injected_mcp_message_prompt(
                         message=str(data.get("message", "") or ""),
                         sender_name=str(data.get("sender_name", "") or ""),
                         sender_kind=str(data.get("sender_kind", "") or ""),

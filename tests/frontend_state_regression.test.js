@@ -8311,7 +8311,7 @@ test('embedded runtime reuses the shared group, cell, and terminal UI', () => {
   assert.match(main.innerHTML, /Shell Root/);
   assert.match(main.innerHTML, /class="cell[^"]*selected/);
   assert.match(main.innerHTML, /class="term-row/);
-  assert.match(main.innerHTML, /newWeaver\('alpha'\)/);
+  assert.match(main.innerHTML, /openAddEngineerModal\(\)/);
   assert.match(main.innerHTML, /quickAddAgent\('alpha'\)/);
   assert.match(main.innerHTML, /openAddAgentAdvanced\('alpha'\)/);
   assert.match(main.innerHTML, /quickAddTerminal\('alpha','agent-1'\)/);
