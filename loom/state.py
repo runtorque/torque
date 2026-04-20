@@ -2183,7 +2183,7 @@ class MatrixState:
         self._emit("weaver_worklog_append", group=group, entry=dict(item))
 
     def weaver_worklog_read(self, group: str, limit: int = 50) -> list[dict]:
-        """Return recent persisted/current Weaver worklog entries for a group."""
+        """Return recent persisted/current designated-engineer worklog entries for a group."""
         entries = self.weaver_worklog.get(group, [])
         if limit <= 0:
             return []

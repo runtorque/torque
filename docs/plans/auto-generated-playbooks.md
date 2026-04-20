@@ -87,7 +87,7 @@ That makes the consumer and the activation path concrete:
 - **draft candidates** are used only by the human reviewer
 - **published playbook recipes** are used by Loom operators in task creation/dispatch flows
 
-The Weaver is **not** a v1 consumer of raw generated candidates. A later phase may let Weaver recommend or execute **published** playbooks, but unpublished drafts must remain inert.
+The designated engineer is **not** a v1 consumer of raw generated candidates. A later phase may let Weaver recommend or execute **published** playbooks, but unpublished drafts must remain inert.
 
 ---
 

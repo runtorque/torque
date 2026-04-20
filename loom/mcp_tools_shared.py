@@ -5,7 +5,9 @@ This module contains the shared read/write tool logic used by the new
 aliases. Scoping is caller-driven via ``caller_kind`` + ``caller_id``.
 
 Security note: v1 keeps Loom's local-trust model. Environment/header
-spoofing protections are out of scope for this stage.
+spoofing protections are out of scope for this stage. The server HTTP
+command surface is user-operated and trusted; cross-kind communication
+graph enforcement lives in these MCP tool surfaces.
 """
 
 import copy
@@ -164,6 +166,16 @@ def _resolve_architect_engineer(state, caller_id: str,
         return None, f"Engineer not found: {engineer_ident}"
     visible = _architect_visible_engineers(state, caller_id)
     if engineer_id not in visible:
+        return None, "engineer not found in scope"
+    return engineer_id, ""
+
+
+def _resolve_architect_hired_engineer(state, caller_id: str,
+                                      engineer_ident: str) -> tuple[str | None, str]:
+    engineer_id = _resolve_agent(state, engineer_ident)
+    if not engineer_id:
+        return None, f"Engineer not found: {engineer_ident}"
+    if engineer_id not in _architect_hired_engineer_ids(state, caller_id):
         return None, "engineer not found in scope"
     return engineer_id, ""
 
@@ -2277,7 +2289,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         engineer_ident = str(args.get("engineer_id", "") or "").strip()
         if not engineer_ident:
             return "engineer_id is required", True
-        engineer_id, engineer_error = _resolve_architect_engineer(
+        engineer_id, engineer_error = _resolve_architect_hired_engineer(
             real_state, caller_id, engineer_ident
         )
         if not engineer_id:
@@ -2338,7 +2350,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         peer_id = str(entry.get("peer_id", "") or "").strip()
         peer = real_state.agents.get(peer_id)
         if caller_kind == "architect":
-            engineer_id, engineer_error = _resolve_architect_engineer(
+            engineer_id, engineer_error = _resolve_architect_hired_engineer(
                 real_state, caller_id, peer_id
             )
             if not engineer_id:
@@ -2401,7 +2413,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return (
-            "Question posted to the Weaver panel. Event pushes have "
+            "Question posted to the Engineers panel. Event pushes have "
             "been paused. The human will see your question and reply "
             "via the panel or directly in this terminal.\n\n"
             f"After the human responds, call "
@@ -2426,7 +2438,7 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return (
-            "Note posted to the Weaver panel without pausing event "
+            "Note posted to the Engineers panel without pausing event "
             "delivery. It will remain visible until dismissed."
         ), False
 

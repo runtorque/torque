@@ -214,16 +214,16 @@ This usually means the UI is connected to an old daemon instance or the daemon l
 ### Symptoms
 
 - The Weaver panel stops sending digests.
-- The Weaver is paused and never resumes.
+- The designated engineer is paused and never resumes.
 - The human replied, but the orchestration flow still looks stuck.
 
 ### Recovery
 
-1. Open the Weaver panel and check whether event delivery is paused.
-2. If the Weaver asked a human question, make sure the reply was actually sent back to the waiting task.
+1. Open the Engineers panel and check whether event delivery is paused.
+2. If the designated engineer asked a human question, make sure the reply was actually sent back to the waiting task.
 3. Resume orchestration after the reply if the flow expects that step.
-4. Relaunch the Weaver agent if the session itself stopped.
-5. Use the journal and recent event views in the Weaver workflow to recover context before dispatching more work.
+4. Relaunch the designated engineer if the session itself stopped.
+5. Use the journal and recent event views in the engineer workflow to recover context before dispatching more work.
 
 See [Weaver](weaver.md) for the full operating model and MCP tool surface.
 

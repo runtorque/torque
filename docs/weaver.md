@@ -1,16 +1,16 @@
 # Weaver
 
-The Weaver is Loom's per-group orchestrator agent. It watches the board, receives event digests, dispatches work to agents, keeps a persistent journal, and asks the human for guidance when needed.
+The legacy `weaver_*` compatibility surface routes to a designated per-group engineer. That engineer watches the board, receives event digests, dispatches work to agents, keeps a persistent journal, and asks the human for guidance when needed.
 
-The Weaver is deliberately semi-autonomous:
+That engineer is deliberately semi-autonomous:
 
 - it can plan, dispatch, review, merge, and clean up on its own
 - it should use `weaver_ask` only when priorities, approvals, or design choices need a blocking human decision
 - it should recover from `/clear` or restart by reading the journal and current board state instead of relying on chat history
 
-## What the Weaver does
+## What the designated engineer does
 
-Each group can have at most one Weaver. It acts as the control loop for that group's work:
+Each group can have multiple engineers. The legacy `weaver_*` compatibility layer binds to one designated engineer for that group's orchestration loop:
 
 1. Read the board and decide what should happen next.
 2. Dispatch tasks to agents in waves.
@@ -19,21 +19,21 @@ Each group can have at most one Weaver. It acts as the control loop for that gro
 5. Review diffs, merge worktrees, open PRs, and clean up sessions.
 6. Pause and ask the human when the next step should not be guessed.
 
-The journal belongs to the group, not the individual agent. If you recreate the Weaver later, it inherits the same journal history.
+The journal belongs to the group, not the individual agent. If you recreate that engineer later, it inherits the same journal history.
 
-## Creating and configuring the Weaver
+## Creating and configuring the designated engineer
 
-Use the target group's **+ New** dropdown and choose **Weaver**.
+Use the target group's **+ New** dropdown and choose **Engineer**.
 
-After the Weaver exists, open **Group Settings** for that group and switch to the **Weaver** tab to manage its operating-style presets, advanced digest settings, and expert overrides.
+After that engineer exists, open **Group Settings** for that group and switch to the **Weaver** compatibility tab to manage its operating-style presets, advanced digest settings, and expert overrides.
 
-The Weaver must be created through Loom's dedicated Weaver flow because Loom needs to boot it with a persistent system prompt. You cannot turn an existing agent into a Weaver after the fact.
+The designated engineer still uses Loom's legacy Weaver launch/settings flow because Loom needs to boot it with a persistent system prompt. You cannot retroactively convert an arbitrary existing agent into that compatibility endpoint.
 
-### Weaver panel
+### Engineers panel
 
 The panel's **Journal** tab keeps chronology separate from synthesis:
 
-- **Journal** keeps the persistent journal plus blocking asks and non-blocking notes/questions from the Weaver
+- **Journal** keeps the persistent journal plus blocking asks and non-blocking notes/questions from the designated engineer
 - **Session Map** is opened from a button at the top of Journal and shows the current deterministic orchestration snapshot on demand
 
 The panel header also shows:
@@ -42,37 +42,37 @@ The panel header also shows:
 - time until the next digest push
 - a pause/resume toggle for event delivery
 
-In standalone mode, the **Board** remains the default lower workspace. Open **Weaver** when you need orchestration detail, journal context, or the deterministic session map.
+In standalone mode, the **Board** remains the default lower workspace. Open **Engineers** when you need orchestration detail, journal context, or the deterministic session map.
 
-When event delivery is paused, Loom keeps buffering matching events for that Weaver instead of dropping them. Resuming delivery flushes the buffered events in order, so pausing is safe even during busy boards.
+When event delivery is paused, Loom keeps buffering matching events for that engineer instead of dropping them. Resuming delivery flushes the buffered events in order, so pausing is safe even during busy boards.
 
-### Group Settings → Weaver
+### Group Settings → Weaver compatibility
 
-The Weaver tab in group settings contains the editable Weaver configuration:
+The designated engineer compatibility tab in group settings contains the editable designated-engineer configuration:
 
-- **Agent** section shows the current Weaver agent or the create button.
-- **Launch controls** let you set or relaunch the Weaver's provider, boot command, model, reasoning effort, and custom instructions from the same modal flow.
-- **Operating style** sets the Weaver's autonomy mode and default worker concurrency.
+- **Agent** section shows the current designated engineer for the compatibility surface or the create button.
+- **Launch controls** let you set or relaunch the designated engineer's provider, boot command, model, reasoning effort, and custom instructions from the same modal flow.
+- **Operating style** sets the designated engineer's autonomy mode and default worker concurrency.
 - **Digest details** configures push interval, max interval, heartbeat interval, and which optional event types appear in digests.
-- **Expert overrides** let you override the provider, boot command, model, and reasoning effort just for the Weaver and append custom instructions. If left empty, the Weaver uses the group's defaults and built-in policy.
+- **Expert overrides** let you override the provider, boot command, model, and reasoning effort just for the designated engineer and append custom instructions. If left empty, the designated engineer uses the group's defaults and built-in policy.
 
 ### Agent cell behavior
 
-The Weaver agent is visually distinct:
+The designated engineer agent is visually distinct:
 
 - pinned first in the group's agent grid and tab order
 - amber left border
 - `? awaiting input` state when a human reply is pending
-- taskbar attention state when the Weaver has asked a question
-- a dedicated **Restart Weaver…** context-menu action that reopens the Weaver launch dialog instead of the generic relaunch flow
+- taskbar attention state when the designated engineer has asked a question
+- a dedicated restart action that reopens the same launch dialog instead of the generic relaunch flow
 
 ## Operating model
 
-The Weaver is most effective when it works in short control loops instead of trying to solve everything in one huge plan.
+The designated engineer is most effective when it works in short control loops instead of trying to solve everything in one huge plan.
 
 Loom's newer orchestration model is **stream-centered**:
 
-- the Weaver schedules **waves**
+- the designated engineer schedules **waves**
 - each branch/worktree execution lane is represented as a **stream**
 - stream state now explains queue pauses, blocker loops, validation gates, and merge readiness more directly
 
@@ -90,7 +90,7 @@ See [Streams & Waves](streams-and-waves.md) for the detailed model and UI interp
 
 ### Dispatch philosophy
 
-The Weaver system prompt steers it toward a few practical habits:
+The designated engineer system prompt steers it toward a few practical habits:
 
 - dispatch in waves, not all at once
 - reuse the same agent when context matters
@@ -102,21 +102,21 @@ The Weaver system prompt steers it toward a few practical habits:
 Group settings now expose two safe first-class policy controls:
 
 - **Autonomy mode** — `Suggest only`, `Dispatch when clear`, or `Aggressive auto-continue`
-- **Default worker concurrency** — the fallback worker cap Loom uses when the Weaver dispatches a batch without explicitly passing `max_concurrent`
+- **Default worker concurrency** — the fallback worker cap Loom uses when the designated engineer dispatches a batch without explicitly passing `max_concurrent`
 
 ## Event digests and delivery
 
-The Weaver does not need to poll constantly. Loom pushes event digests into the Weaver's terminal when appropriate.
+The designated engineer does not need to poll constantly. Loom pushes event digests into the designated engineer's terminal when appropriate.
 
 ### How digests work
 
 Digests are:
 
-- **idle-gated**: Loom only pushes them when the Weaver is idle or waiting
+- **idle-gated**: Loom only pushes them when the designated engineer is idle or waiting
 - **buffered**: events accumulate between pushes
 - **heartbeat-aware**: an idle heartbeat can arrive if no digest was sent
   for `heartbeat_interval`
-- **scoped**: each Weaver only sees events for its own group
+- **scoped**: each designated engineer only sees events for its own group
 
 The notification controls expose three separate intervals:
 
@@ -144,7 +144,7 @@ These always appear regardless of notification settings:
 
 ### Optional events
 
-These can be enabled or disabled in the Weaver settings:
+These can be enabled or disabled in the designated engineer settings:
 
 - `agent_started`
 - `task_dispatched`
@@ -158,17 +158,17 @@ A digest includes:
 - the buffered events
 - a compact board summary
 - active-agent summary when there are no new events
-- a context-usage warning if the Weaver's token usage is getting large
+- a context-usage warning if the designated engineer's token usage is getting large
 
 ## Journal and recovery
 
-The journal is the Weaver's persistent memory. It is what lets the Weaver recover after `/clear`, a restart, or a long pause without needing the old conversation history.
+The journal is the designated engineer's persistent memory. It is what lets the designated engineer recover after `/clear`, a restart, or a long pause without needing the old conversation history.
 
 ### Journal entry types
 
 | Type | Use it for |
 |------|------------|
-| **`decision`** | A choice the Weaver made and why |
+| **`decision`** | A choice the designated engineer made and why |
 | **`observation`** | Something learned from events, agents, or the human |
 | **`checkpoint`** | A compact snapshot of board state and next steps |
 | **`plan`** | Intended next actions |
@@ -185,7 +185,7 @@ Use `weaver_board_summary` when the compact summary is enough, and `weaver_board
 
 ### Journal discipline
 
-The Weaver should write journal entries for:
+The designated engineer should write journal entries for:
 
 - dispatch decisions
 - priority changes
@@ -203,25 +203,25 @@ The Journal tab in the UI shows entries newest-first, and entries can be deleted
 updates, or proposed next waves that should stay visible without pausing
 orchestration.
 
-`weaver_ask` is the Weaver's blocking human-in-the-loop mechanism. Use
+`weaver_ask` is the designated engineer's blocking human-in-the-loop mechanism. Use
 it only when the next orchestration step should stop until the human
 answers.
 
-When the Weaver posts a non-blocking note:
+When the designated engineer posts a non-blocking note:
 
 1. the note appears in the Journal tab as an informational banner
 2. event pushes continue normally
 3. Loom does not enter awaiting-input state
 4. the note is recorded in the journal and survives restart until dismissed
 
-When the Weaver asks a question:
+When the designated engineer asks a question:
 
 1. the question appears in the Journal tab as an amber banner
 2. event pushes are automatically paused
-3. the Weaver agent shows an awaiting-input state
+3. the designated engineer agent shows an awaiting-input state
 4. the question is recorded in the journal as an observation
 
-If the board is idle with backlog remaining and the Weaver only needs to
+If the board is idle with backlog remaining and the designated engineer only needs to
 surface its recommended next wave or a soft preference question, it
 should use `weaver_note`, not `weaver_ask`.
 
@@ -229,10 +229,10 @@ should use `weaver_note`, not `weaver_ask`.
 
 The human can answer in two ways:
 
-- **Via the panel**: Loom sends the reply to the Weaver terminal and automatically unpauses events.
-- **Directly in the terminal**: the Weaver receives the reply in its own session and should call `weaver_resume` after handling it.
+- **Via the panel**: Loom sends the reply to the designated engineer terminal and automatically unpauses events.
+- **Directly in the terminal**: the designated engineer receives the reply in its own session and should call `weaver_resume` after handling it.
 
-If the Weaver becomes active again after being idle with a pending question, Loom clears the pending-question state and unpauses delivery. The safest explicit pattern is still:
+If the designated engineer becomes active again after being idle with a pending question, Loom clears the pending-question state and unpauses delivery. The safest explicit pattern is still:
 
 1. receive the answer
 2. incorporate it into the plan
@@ -240,15 +240,15 @@ If the Weaver becomes active again after being idle with a pending question, Loo
 
 ## MCP tool surface
 
-All Weaver tools are available through the same `/mcp` endpoint as agent tools, using the `weaver_` prefix.
+All `weaver_*` compatibility tools are available through the same `/mcp` endpoint as agent tools.
 
-However, they are **only** visible and callable from the designated Weaver agent session for that group. Loom authorizes them using the caller's `X-Loom-Cell-Id` header:
+However, they are **only** visible and callable from the designated engineer session for that group. Loom authorizes them using the caller's `X-Loom-Cell-Id` header:
 
-- the designated Weaver sees both `loom_*` and `weaver_*` tools
+- the designated engineer sees both `loom_*` and `weaver_*` tools
 - regular agents only see `loom_*` tools
-- direct calls to `weaver_*` from non-Weaver agents are rejected
+- direct calls to `weaver_*` from other agents are rejected
 
-In other words, Weaver tools are group-scoped **and** Weaver-only.
+In other words, `weaver_*` tools are group-scoped **and** designated-engineer-only.
 
 ### Board and planning
 
@@ -324,14 +324,14 @@ When the worker replies, Loom appends the reply to the follow-up task's history 
 
 ## Batch dispatch and orchestration patterns
 
-`weaver_batch_dispatch` is the Weaver's main tool for deliberate orchestration instead of ad-hoc dispatching.
+`weaver_batch_dispatch` is the designated engineer's main tool for deliberate orchestration instead of ad-hoc dispatching.
 
 ### How batch dispatch works
 
 Batch dispatch:
 
 - processes tasks in the order you pass them
-- enforces `max_concurrent` against active non-Weaver agents in the group
+- enforces `max_concurrent` against active non-designated-engineer agents in the group
 - can keep related tasks on the same agent with `agent_group`
 - refuses tasks that are already assigned, already done, already in progress, or blocked by dependencies
 
@@ -356,7 +356,7 @@ Use `agent_group` when several ordered tasks should stay on the same worker agen
 
 ## Review, merge, and cleanup flows
 
-The Weaver is expected to handle the operational end of agent work, not just the initial dispatch.
+The designated engineer is expected to handle the operational end of agent work, not just the initial dispatch.
 
 ### Review flow
 
@@ -368,15 +368,15 @@ A practical review sequence is:
 4. inspect specific risky paths with `weaver_diff(..., paths=[...])` if needed
 5. ask the agent for clarification with `weaver_agent_message` if the diff is unclear
 
-For shared same-agent branches, `weaver_agent_show` also exposes task-boundary metadata so the Weaver can tell which completed task is the latest clean mergeable boundary and which queued tasks resume after it.
+For shared same-agent branches, `weaver_agent_show` also exposes task-boundary metadata so the designated engineer can tell which completed task is the latest clean mergeable boundary and which queued tasks resume after it.
 
 ### Merge flow
 
-`weaver_merge` is a server-side merge operation. If Loom detects conflicts, it returns an error with conflict context and the Weaver can run `weaver_rebase` before retrying the merge.
+`weaver_merge` is a server-side merge operation. If Loom detects conflicts, it returns an error with conflict context and the designated engineer can run `weaver_rebase` before retrying the merge.
 
 On shared sequential branches, `weaver_merge` also refuses to merge when the latest task boundary is no longer cleanly mergeable, for example because a queued follow-up already started or the branch tip moved after the boundary was recorded.
 
-`weaver_rebase` uses the same merge-readiness checks before it runs, aborts automatically if the rebase hits conflicts, and returns enough conflict detail for the Weaver to decide whether to retry or escalate to the human for a manual plan.
+`weaver_rebase` uses the same merge-readiness checks before it runs, aborts automatically if the rebase hits conflicts, and returns enough conflict detail for the designated engineer to decide whether to retry or escalate to the human for a manual plan.
 
 Typical flow:
 
@@ -393,7 +393,7 @@ Typical flow:
 
 ### Cleanup flow
 
-After merge, the Weaver can use:
+After merge, the designated engineer can use:
 
 - `weaver_agent_close` to remove the live session
 - `weaver_worktree_remove` to clean the branch checkout from disk
@@ -403,7 +403,7 @@ After merge, the Weaver can use:
 
 ### Starting a new orchestration session
 
-When there is no useful journal history yet, the Weaver should introduce itself and ask the human what to focus on before dispatching anything substantial.
+When there is no useful journal history yet, the designated engineer should introduce itself and ask the human what to focus on before dispatching anything substantial.
 
 ### Running a wave
 
@@ -416,12 +416,12 @@ Use a compact pattern:
 
 ### Idle board with backlog remaining
 
-When a wave finishes, the Weaver should distinguish between two states:
+When a wave finishes, the designated engineer should distinguish between two states:
 
 - **Waiting on active work**: agents are still running or tasks are still in `In Progress`. In that case, wait for Loom digests.
 - **Idle with backlog remaining**: there are 0 active agents, 0 `In Progress` tasks, and work still sits in `Backlog` or `To Do`. That is not a terminal steady state.
 
-In the second case, the Weaver should read `weaver_board_summary` and then either:
+In the second case, the designated engineer should read `weaver_board_summary` and then either:
 
 - dispatch the next best wave if the user's standing priorities already make the next step clear
 - post a `weaver_note` that proposes the next wave and explains what ambiguity or constraint is preventing automatic dispatch
@@ -464,18 +464,18 @@ loom weaver journal --json
 loom ai reply "your response"
 ```
 
-Most orchestration control happens through the Weaver's MCP tools rather than separate CLI commands.
+Most orchestration control happens through the designated engineer's MCP tools rather than separate CLI commands.
 
 ## Practical summary
 
-The best way to think about the Weaver is:
+The best way to think about the designated engineer is:
 
 - a board-scoped orchestrator, not a generic autonomous agent
 - driven by digests and recovery, not by constant polling
 - stateful because of the journal, not because chat history is permanent
 - safest when dispatching in waves and escalating ambiguous decisions to the human
 
-If you want the Weaver to work well, give it:
+If you want the designated engineer to work well, give it:
 
 - clear actions and transitions
 - bounded concurrency

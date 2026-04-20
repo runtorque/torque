@@ -75,6 +75,10 @@ ENGINEER_TOOLS.extend([
         },
     },
 ])
+_ENGINEER_TOOL_NAMES = {
+    str(tool.get("name", "") or "").strip()
+    for tool in ENGINEER_TOOLS
+}
 
 
 def _stringify_startup_error(error_text: str) -> str:
@@ -123,6 +127,8 @@ def exit_if_invalid_engineer_binding(state=None) -> str:
 async def _dispatch_engineer_tool(name, args, handle_command, state,
                                   caller_id: str = ""):
     caller_id = str(caller_id or "").strip() or bound_engineer_id_from_env()
+    if str(name or "").strip() not in _ENGINEER_TOOL_NAMES:
+        return f"Unknown engineer tool: {name}", True
     return await dispatch_scoped_tool(
         name,
         args,

@@ -30,8 +30,8 @@ The weaver is NOT fully autonomous — it's a semi-independent orchestrator that
 4. **Mandatory + optional events** — Some events always appear in digests (task completed, agent error, agent reply). Others are configurable (agent started, progress updates). A max interval (default 5 minutes) ensures the weaver gets periodic heartbeats even when nothing critical happened.
 5. **Journal as persistent brain** — The weaver writes structured journal entries (decisions, observations, checkpoints, plans). On context cleanup, the journal + current board state is enough to resume orchestration. The journal is per-group and stored in SQLite.
 6. **Pausable by the user** — A pause/resume button in the UI suspends event pushes so the human can interact with the weaver directly without competing with automated digests.
-7. **Human-in-the-loop** — The weaver is semi-autonomous: it uses `weaver_ask` to post questions to the human, which auto-pauses event delivery and shows the question in the Weaver panel. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the weaver's Claude Code terminal. When the weaver becomes active again, the pending question auto-clears.
-8. **Weaver creation via UI** — The weaver is created through the Weaver panel's Settings tab ("+ Create Weaver" button), not by designating an existing agent. This ensures the `--append-system-prompt-file` flag is set on boot.
+7. **Human-in-the-loop** — The weaver is semi-autonomous: it uses `weaver_ask` to post questions to the human, which auto-pauses event delivery and shows the question in the Engineers panel. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the designated engineer's Claude Code terminal. When the weaver becomes active again, the pending question auto-clears.
+8. **Weaver creation via UI** — The legacy `weaver_*` entrypoint is created through the Engineers panel settings flow rather than by designating an arbitrary existing agent. This ensures the `--append-system-prompt-file` flag is set on boot.
 
 ---
 
@@ -216,12 +216,12 @@ class WeaverSettings:
     )
 ```
 
-**`custom_instructions`**: Free-text instructions injected into the weaver's system prompt via `--append-system-prompt`. The user writes these in the Weaver panel's Settings tab. They are concatenated with the weaver's base system prompt (from the action's `system_prompt` field or a built-in default) and passed as a single `--append-system-prompt` flag on boot.
+**`custom_instructions`**: Free-text instructions injected into the weaver's system prompt via `--append-system-prompt`. The user writes these in the Engineers panel settings tab. They are concatenated with the weaver's base system prompt (from the action's `system_prompt` field or a built-in default) and passed as a single `--append-system-prompt` flag on boot.
 
 **System prompt structure** (assembled by Loom, passed via `--append-system-prompt`):
 
 ```
-You are the Weaver — the orchestrator agent for the "{group}" group in Loom.
+You are the designated engineer — the orchestrator agent for the "{group}" group in Loom.
 Your role is to manage the task board, dispatch work to agents, react to events,
 and maintain a decision journal for context continuity.
 
@@ -394,7 +394,7 @@ Reply to a message from the weaver. Only works when the agent has a pending weav
 
 ### Weaver-side: final tool list
 
-Tools are served from the same `/mcp` endpoint. The `weaver_` prefix provides namespace separation. Access is authorized by `X-Loom-Cell-Id`: only the designated Weaver agent for a group can list or call `weaver_*` tools. Regular agents only see the `loom_*` surface.
+Tools are served from the same `/mcp` endpoint. The `weaver_` prefix provides namespace separation. Access is authorized by `X-Loom-Cell-Id`: only the designated engineer session for a group can list or call `weaver_*` tools. Regular agents only see the `loom_*` surface.
 
 #### Read tools
 
@@ -714,7 +714,7 @@ Reply with: loom_reply("your response")
 
 ##### `weaver_ask` (new)
 
-Ask the human a question. Posts the question to the Weaver panel and auto-pauses event delivery. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the weaver's Claude Code terminal.
+Ask the human a question. Posts the question to the Engineers panel and auto-pauses event delivery. The human can reply via the panel (Loom sends the answer to the terminal) or type directly into the designated engineer's Claude Code terminal.
 
 ```json
 {
@@ -730,7 +730,7 @@ Ask the human a question. Posts the question to the Weaver panel and auto-pauses
 
 **Tool response:**
 ```
-Question posted to the Weaver panel. Event pushes have been paused.
+Question posted to the Engineers panel. Event pushes have been paused.
 The human will see your question and reply via the panel or directly
 in this terminal.
 
@@ -972,7 +972,7 @@ All weaver configuration in one place. Sections separated by subtle dividers.
 
 #### Pause/Resume button
 
-- Shown in the Weaver panel settings section
+- Shown in the Engineers panel settings section
 - Also shown as a small toggle icon on the weaver's agent cell in the Agents panel
 - When paused: event buffer still accumulates, but no digests are sent
 - When resumed: if events are buffered, they flush on next idle check
@@ -1046,7 +1046,7 @@ Append an entry to the weaver's journal.
 **Behavior:**
 1. Validate entry_type is one of: decision, observation, checkpoint, plan
 2. Insert into `weaver_journal` table
-3. Emit delta: `journal_append` (new delta op type for the Weaver panel)
+3. Emit delta: `journal_append` (new delta op type for the Engineers panel)
 4. Return `{"type": "ok", "id": entry_id}`
 
 #### `weaver_journal_read`

@@ -519,7 +519,7 @@ def _agent_has_targeted_auto_dispatch_work(state: MatrixState,
 
 def _agent_has_pending_weaver_followups(state: MatrixState,
                                         agent_id: str) -> bool:
-    """Return whether the agent still owes the Weaver a visible reply."""
+    """Return whether the agent still owes the designated engineer a visible reply."""
     if not agent_id:
         return False
     if state.agent_pending_weaver_reply_tasks(agent_id):
@@ -639,6 +639,17 @@ def _format_weaver_message_prompt(message: str, task_id: str) -> str:
         f'Reply with: loom_reply(task="{task_id}", message="your response")\n'
         "---\n"
     )
+
+
+def _inherit_assigned_engineer_for_derived_task(parent_task,
+                                                derived_task=None) -> str:
+    """Keep derived-task ownership bound to the parent's assigned engineer."""
+    assigned_engineer_id = str(
+        getattr(parent_task, "assigned_engineer_id", "") or ""
+    ).strip()
+    if derived_task is not None:
+        derived_task.assigned_engineer_id = assigned_engineer_id
+    return assigned_engineer_id
 
 
 def _emit_task_artifact_uploaded_event(panel_event, task, actor, artifact) -> None:
@@ -1548,7 +1559,7 @@ async def _relaunch_agent_after_worktree_removal(
 
 
 def _resolve_engineer_group(state: MatrixState) -> str:
-    """Return the reserved engineer group, preferring the current Weaver."""
+    """Return the reserved engineer group, preferring the designated engineer."""
     for group_name, group_settings in state.group_settings.items():
         engineer_id = str(getattr(group_settings, "weaver_agent_id", "") or "")
         cell = state.agents.get(engineer_id)
@@ -3190,7 +3201,9 @@ async def main(connection=None):
         Direct-response commands (get_config, get_group_settings,
         worktree_history) return immediately without broadcasting.
         Mutation commands broadcast state to all WS clients and
-        optionally return a result dict.
+        optionally return a result dict. This HTTP command surface is
+        operated by the user and intentionally trusted; MCP tool
+        surfaces enforce architect/engineer/worker communication scope.
         """
         cmd = data.get("cmd")
         log.info("CMD %s %s", cmd,
@@ -6875,6 +6888,9 @@ async def main(connection=None):
                                         or task.id
                                     derive_desc = data.get(
                                         "description", "")
+                                    assigned_engineer_id = (
+                                        _inherit_assigned_engineer_for_derived_task(task)
+                                    )
                                     reusable_task = _find_reusable_review_fix_task(
                                         state,
                                         task,
@@ -6894,6 +6910,7 @@ async def main(connection=None):
                                             pipeline_depth=new_depth,
                                             pipeline_root_id=root_id,
                                             description=derive_desc,
+                                            assigned_engineer_id=assigned_engineer_id,
                                         )
                                     elif reused_existing_task:
                                         _refresh_reused_derived_task(
@@ -6902,7 +6919,16 @@ async def main(connection=None):
                                             description=derive_desc,
                                             action_vars=act_vars,
                                         )
+                                        _inherit_assigned_engineer_for_derived_task(
+                                            task,
+                                            new_task,
+                                        )
                                         _save_task(new_task)
+                                    if new_task:
+                                        _inherit_assigned_engineer_for_derived_task(
+                                            task,
+                                            new_task,
+                                        )
                                     if new_task:
                                         _append_mcp(
                                             cell, "derive",

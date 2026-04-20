@@ -491,7 +491,7 @@ class WeaverEventBufferTests(unittest.IsolatedAsyncioTestCase):
     def test_build_weaver_system_prompt_contains_first_session_guidance(self):
         text = self.weaver_mod.build_weaver_system_prompt("g")
 
-        self.assertIn("You are the Weaver", text)
+        self.assertIn("You are the designated engineer", text)
         self.assertIn("First session", text)
         self.assertIn("do a short reconnaissance pass before dispatching", text)
         self.assertIn("inspect the action catalog", text)

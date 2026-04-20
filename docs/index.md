@@ -24,7 +24,7 @@ Loom is an iTerm2 Toolbelt plugin for organizing AI agents and terminal sessions
 - [Workflow Guide](workflow-guide.md) — follow the normal path from task creation to dispatch, handoffs, schedules, and completion
 - [Task Board](board.md) — create tasks, organize lanes, and dispatch work
 - [Task Lifecycle](task-lifecycle.md) — see how tasks move through Loom
-- [Streams & Waves](streams-and-waves.md) — understand Loom's branch-level execution model, stream states, queue gates, and how the Weaver schedules work in waves
+- [Streams & Waves](streams-and-waves.md) — understand Loom's branch-level execution model, stream states, queue gates, and how the designated engineer schedules work in waves
 - [Schedules](schedules.md) — understand recurring and one-shot dispatch entry points
 - [Worktrees](worktrees.md) — isolate changes per agent in separate git worktrees
 

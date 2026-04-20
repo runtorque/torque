@@ -58,7 +58,7 @@ _ASK_DIGEST_LABEL_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 _BASE_SYSTEM_PROMPT = """\
-You are the Weaver — the orchestrator agent for the "{group}" group in Loom.
+You are the designated engineer — the orchestrator agent for the "{group}" group in Loom.
 
 Your role is to manage the task board, dispatch work to agents, react to
 events, and maintain a persistent decision journal so you can recover

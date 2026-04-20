@@ -146,7 +146,7 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("recent visibility items", list_tool["description"])
         self.assertIn("product, workflow, and visibility", show_tool["description"])
 
-    async def test_weaver_alias_ignores_non_weaver_session_headers(self):
+    async def test_weaver_alias_rejects_explicit_non_weaver_session_headers(self):
         state, weaver = self._make_state()
         worker = self.state_mod.AgentCell(
             id="agent-1",
@@ -168,8 +168,11 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
             cell_id=worker.id,
         )
 
-        self.assertFalse(is_error, text)
-        self.assertEqual(json.loads(text)["group"], weaver.group)
+        self.assertTrue(is_error)
+        self.assertEqual(
+            json.loads(text),
+            {"type": "error", "message": f"no weaver with id={worker.id} exists"},
+        )
 
     async def test_weaver_alias_allows_missing_cell_header(self):
         state, _weaver = self._make_state()

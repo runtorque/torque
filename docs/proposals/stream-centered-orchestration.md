@@ -8,7 +8,7 @@
 
 ## Executive summary
 
-Loom today is already good at tracking **tasks**, **agents**, and **branch boundaries**. The next step is to make the system equally good at tracking the thing the Weaver actually reasons about most of the time:
+Loom today is already good at tracking **tasks**, **agents**, and **branch boundaries**. The next step is to make the system equally good at tracking the thing the designated engineer actually reasons about most of the time:
 
 > a shared branch/worktree slice of work that evolves through implementation, review, blocker-fix loops, validation, and merge.
 
@@ -21,7 +21,7 @@ In the proposed model:
 - a **visibility item** is communication or status context that should be visible without pretending to be product work
 - a **derived task** is an explicit workflow handoff or follow-up inside that work
 - a **stream** is the branch/worktree-level execution and review state machine that contains those tasks
-- a **wave** is the set of streams/tasks the Weaver intentionally activates in parallel
+- a **wave** is the set of streams/tasks the designated engineer intentionally activates in parallel
 
 The central simplification is:
 
@@ -29,7 +29,7 @@ The central simplification is:
 - **streams manage continuity inside a branch/worktree**
 - **queue priority, queue state, review blockers, and merge gates all become stream behavior**
 
-That replaces the current situation where the Weaver often has to reconstruct a branch's real state from a mix of tasks, reviews, verification notes, agent state, and branch-boundary summaries.
+That replaces the current situation where the designated engineer often has to reconstruct a branch's real state from a mix of tasks, reviews, verification notes, agent state, and branch-boundary summaries.
 
 ---
 
@@ -70,7 +70,7 @@ That distinction matters because it lets Loom keep the branch conflict-free **wi
 
 ## Problem statement
 
-During complex orchestration, the Weaver is rarely thinking in terms of isolated tasks. It is usually thinking in terms of questions like:
+During complex orchestration, the designated engineer is rarely thinking in terms of isolated tasks. It is usually thinking in terms of questions like:
 
 - What is the current state of this branch?
 - Is this branch implementing, reviewing, fixing blockers, waiting on manual smoke, or ready to merge?
@@ -134,8 +134,8 @@ A **task** is a unit of work tracked on the board.
 
 Examples:
 
-- Add Events tab to the Weaver panel
-- Add Worklog tab to the Weaver panel
+- Add Events tab to the Engineers panel
+- Add Worklog tab to the Engineers panel
 - Keep Weaver Events next-dispatch timing accurate without full-panel rerender
 - Review self-dispatch prompt submission fix
 - Resolve merge conflicts for Weaver ownership branch
@@ -178,7 +178,7 @@ A **visibility item** is not product scope and usually should not be treated as 
 Examples:
 
 - a Weaver note to a worker
-- a worker reply to the Weaver
+- a worker reply to the designated engineer
 - a prompt such as "Proceed with the derived task you just created"
 - a short queue-control or reprioritization message
 
@@ -246,7 +246,7 @@ The stream is the place where Loom should answer:
 
 ### Wave
 
-A **wave** is the set of streams and/or standalone tasks the Weaver intentionally activates together.
+A **wave** is the set of streams and/or standalone tasks the designated engineer intentionally activates together.
 
 A wave answers:
 
@@ -506,7 +506,7 @@ If merge or rebase fails and conflict resolution is required, Loom should:
 
 A wave should remain intentionally simple.
 
-A wave is the Weaver's answer to:
+A wave is the designated engineer's answer to:
 
 > Which streams or standalone tasks should be active in parallel right now?
 
@@ -526,7 +526,7 @@ Wave 12
 └── Stream C: Self-dispatch prompt bug
 ```
 
-After dispatching the wave, the Weaver should not need to micromanage branch-internal priority. Each stream should handle:
+After dispatching the wave, the designated engineer should not need to micromanage branch-internal priority. Each stream should handle:
 
 - review loops
 - blocker preemption
@@ -536,8 +536,8 @@ After dispatching the wave, the Weaver should not need to micromanage branch-int
 
 ### Why this matters
 
-Without streams, the Weaver ends up doing branch traffic control manually.
-With streams, the Weaver can think at the right level:
+Without streams, the designated engineer ends up doing branch traffic control manually.
+With streams, the designated engineer can think at the right level:
 
 - Which streams should be active now?
 - Which streams are blocked?
@@ -944,9 +944,9 @@ This proposal does **not** require:
 ## Why this model is simpler, not more complex
 
 At first glance, adding “streams” sounds like another abstraction.
-In practice, it reduces complexity because it matches how the Weaver already thinks.
+In practice, it reduces complexity because it matches how the designated engineer already thinks.
 
-Today the Weaver mentally groups:
+Today the designated engineer mentally groups:
 
 - several product tasks
 - several workflow tasks

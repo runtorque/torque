@@ -238,3 +238,36 @@ class MCPWeaverCompatTests(unittest.IsolatedAsyncioTestCase):
             await self._call(self.mcp_engineer_mod, "engineer_board_summary", state, weaver.id),
             expected["weaver_board_summary"],
         )
+
+    async def test_weaver_alias_does_not_fallback_when_explicit_session_is_invalid(self):
+        state, weaver = self._make_state()
+        worker = state.agents["worker-1"]
+
+        async def fake_handle_command(_payload):
+            self.fail("invalid bound session should fail before dispatch")
+
+        text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
+            "weaver_agents_list",
+            {},
+            fake_handle_command,
+            state,
+            cell_id=worker.id,
+        )
+
+        self.assertTrue(is_error)
+        self.assertEqual(
+            json.loads(text),
+            {"type": "error", "message": f"no weaver with id={worker.id} exists"},
+        )
+
+    def test_weaver_alias_surface_has_no_bonus_tools_beyond_engineer_aliases(self):
+        weaver_names = {
+            tool["name"] for tool in self.mcp_weaver_mod.WEAVER_TOOLS
+        }
+        engineer_alias_names = {
+            tool["name"].replace("engineer_", "weaver_", 1)
+            for tool in self.mcp_engineer_mod.ENGINEER_TOOLS
+            if str(tool.get("name", "")).startswith("engineer_")
+        }
+
+        self.assertEqual(weaver_names - engineer_alias_names, set())

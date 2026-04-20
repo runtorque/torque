@@ -193,6 +193,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
                 user_engineer.id: "visible",
             },
         )
+        self.assertNotIn("worker-a", engineers)
         self.assertEqual(engineers[alice.id]["current_task_id"], visible_task.id)
         self.assertEqual(engineers[alice.id]["current_task"], visible_task.task)
         self.assertEqual(engineers[user_engineer.id]["current_task_id"], "")
@@ -284,6 +285,64 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             user_engineer.id,
         )
 
+    async def test_architect_task_create_and_reassign_reject_non_engineer_targets(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        engineer = self._add_engineer(
+            "eng-hired", "Hired", hired_by_architect_id=architect.id
+        )
+        worker = self._add_worker("worker-1", "Worker", engineer.id)
+        task = self._add_task(
+            "task-own",
+            "Architect-owned task",
+            assigned_engineer_id=engineer.id,
+            created_by_architect_id=architect.id,
+        )
+
+        worker_create_text, worker_create_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Wrong target",
+                "group": "loom",
+                "assigned_engineer_id": worker.id,
+            },
+            architect.id,
+        )
+        self.assertTrue(worker_create_error)
+        self.assertEqual(worker_create_text, "engineer not found in scope")
+        self.assertEqual(len(self.state.board_tasks), 1)
+
+        architect_create_text, architect_create_error = await self._call(
+            "architect_task_create",
+            {
+                "title": "Wrong target",
+                "group": "loom",
+                "assigned_engineer_id": other_architect.id,
+            },
+            architect.id,
+        )
+        self.assertTrue(architect_create_error)
+        self.assertEqual(architect_create_text, "engineer not found in scope")
+        self.assertEqual(len(self.state.board_tasks), 1)
+
+        worker_reassign_text, worker_reassign_error = await self._call(
+            "architect_task_reassign",
+            {"task": task.id, "new_engineer_id": worker.id},
+            architect.id,
+        )
+        self.assertTrue(worker_reassign_error)
+        self.assertEqual(worker_reassign_text, "engineer not found in scope")
+        self.assertEqual(self.state.board_tasks[task.id].assigned_engineer_id, engineer.id)
+
+        architect_reassign_text, architect_reassign_error = await self._call(
+            "architect_task_reassign",
+            {"task": task.id, "new_engineer_id": other_architect.id},
+            architect.id,
+        )
+        self.assertTrue(architect_reassign_error)
+        self.assertEqual(architect_reassign_text, "engineer not found in scope")
+        self.assertEqual(self.state.board_tasks[task.id].assigned_engineer_id, engineer.id)
+
     async def test_architect_and_engineer_messaging_respects_hiring_scope(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")
@@ -293,6 +352,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         other_hired = self._add_engineer(
             "eng-other", "Other Hired", hired_by_architect_id=other_architect.id
         )
+        user_visible = self._add_engineer("eng-user", "User Visible")
 
         ok_text, ok_error = await self._call(
             "architect_engineer_message",
@@ -317,6 +377,14 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(denied_error)
         self.assertEqual(denied_text, "engineer not found in scope")
+
+        visible_text, visible_error = await self._call(
+            "architect_engineer_message",
+            {"engineer_id": user_visible.id, "message": "Also hidden"},
+            architect.id,
+        )
+        self.assertTrue(visible_error)
+        self.assertEqual(visible_text, "engineer not found in scope")
 
         engineer_ok_text, engineer_ok_error = await self._call_engineer(
             "engineer_message_architect",

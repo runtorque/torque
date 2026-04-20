@@ -1,6 +1,6 @@
 # Streams & Waves
 
-Loom now uses a **stream-centered orchestration model** for the Weaver.
+Loom now uses a **stream-centered orchestration model** for the designated engineer.
 
 This page explains:
 
@@ -19,7 +19,7 @@ If you want the design rationale rather than the operator-facing explanation, se
 
 Loom now distinguishes between two levels of orchestration:
 
-- a **wave** is the set of work the Weaver chooses to run in parallel
+- a **wave** is the set of work the designated engineer chooses to run in parallel
 - a **stream** is one branch/worktree execution lane that moves through implementation, review, blocker fixes, validation, and merge
 
 Put simply:
@@ -27,7 +27,7 @@ Put simply:
 > Waves schedule work across streams.  
 > Streams manage continuity inside a branch.
 
-That means the Weaver no longer has to infer a branch's real status from a messy pile of loosely-related tasks, review notes, and agent state.
+That means the designated engineer no longer has to infer a branch's real status from a messy pile of loosely-related tasks, review notes, and agent state.
 
 ---
 
@@ -42,11 +42,11 @@ Before streams, Loom already tracked:
 - branch boundaries
 - verification notes
 
-That was enough to get work done, but not enough to explain the thing the Weaver actually reasons about most of the time:
+That was enough to get work done, but not enough to explain the thing the designated engineer actually reasons about most of the time:
 
 > “What is the current state of this branch-sized slice of work?”
 
-Examples of the questions the Weaver needs answered quickly:
+Examples of the questions the designated engineer needs answered quickly:
 
 - Is this branch still implementing?
 - Is it on review?
@@ -67,8 +67,8 @@ A **product task** is a user-visible or operator-visible deliverable.
 
 Examples:
 
-- Add Events tab to the Weaver panel
-- Add Worklog tab to the Weaver panel
+- Add Events tab to the Engineers panel
+- Add Worklog tab to the Engineers panel
 - Keep Weaver Events countdown accurate
 - Add inline task description editing
 
@@ -106,7 +106,7 @@ A **visibility item** is communication or orchestration context that the user sh
 Examples:
 
 - a Weaver note to a worker
-- a worker reply to the Weaver
+- a worker reply to the designated engineer
 - a queue-control message such as “pause the queued task and fix the blocker first”
 
 Visibility items answer:
@@ -194,9 +194,9 @@ That is still **one stream** if all of it lives on the same branch/worktree lane
 
 ## Wave
 
-A **wave** is the Weaver’s scheduling decision.
+A **wave** is the designated engineer’s scheduling decision.
 
-It is the set of streams and/or standalone tasks that the Weaver intentionally activates in parallel.
+It is the set of streams and/or standalone tasks that the designated engineer intentionally activates in parallel.
 
 Waves answer:
 
@@ -540,7 +540,7 @@ So validation is now **visible and structurally real**, but not yet fully operat
 
 ---
 
-## Open Streams in the Weaver UI
+## Open Streams in the Engineers UI
 
 The Weaver panel now includes an **Open Streams** summary.
 
@@ -646,7 +646,7 @@ Action: Loom auto-dispatches LOOM:334 if policy allows
 - computed stream synthesis
 - product/workflow/visibility classification
 - stream exposure through Weaver MCP and board summary surfaces
-- Open Streams UI in the Weaver panel
+- Open Streams UI in the Engineers panel
 - validation represented as a stream gate
 
 ### Phase 2
@@ -694,7 +694,7 @@ Validation is now first-class as a **state/gate**, but not yet as a fully operat
 
 ## Practical guidance for operators
 
-When reading the Weaver panel:
+When reading the Engineers panel:
 
 ### Think in this order
 

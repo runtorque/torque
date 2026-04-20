@@ -75,8 +75,8 @@ See [Actions & Templates](actions.md) for the full guide.
 When Loom's Weaver is coordinating larger pieces of work, it reasons at two levels:
 
 - a **stream** is one branch/worktree execution lane that moves through implementation, review, blocker fixes, validation, and merge
-- a **wave** is the set of streams and/or standalone tasks the Weaver intentionally activates in parallel
+- a **wave** is the set of streams and/or standalone tasks the designated engineer intentionally activates in parallel
 
-That means the Weaver can plan work across streams while each stream manages its own queue, review blockers, and validation gates.
+That means the designated engineer can plan work across streams while each stream manages its own queue, review blockers, and validation gates.
 
 See [Streams & Waves](streams-and-waves.md) for the detailed model.

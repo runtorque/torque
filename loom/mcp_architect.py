@@ -173,7 +173,7 @@ _ARCHITECT_TOOL_SPECS = [
     },
     {
         "name": "architect_engineer_message",
-        "description": "Send a direct message from this architect to a visible engineer.",
+        "description": "Send a direct message from this architect to a hired engineer.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -366,6 +366,10 @@ def _copy_tool_spec(tool: dict) -> dict:
 
 
 ARCHITECT_TOOLS = [_copy_tool_spec(tool) for tool in _ARCHITECT_TOOL_SPECS]
+_ARCHITECT_TOOL_NAMES = {
+    str(tool.get("name", "") or "").strip()
+    for tool in ARCHITECT_TOOLS
+}
 
 
 def _stringify_startup_error(error_text: str) -> str:
@@ -450,6 +454,8 @@ def exit_if_invalid_architect_binding(state=None) -> str:
 async def _dispatch_architect_tool(name, args, handle_command, state,
                                    caller_id: str = ""):
     caller_id = str(caller_id or "").strip() or bound_architect_id_from_env()
+    if str(name or "").strip() not in _ARCHITECT_TOOL_NAMES:
+        return f"Unknown architect tool: {name}", True
     return await dispatch_scoped_tool(
         name,
         args,

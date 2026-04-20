@@ -269,7 +269,7 @@ class AgentLaunchService:
                                      base_dir: str = "",
                                      explicit_template: str = "",
                                      overrides: dict[str, Any] | None = None) -> dict:
-        """Resolve launch config for the designated Weaver in a group."""
+        """Resolve launch config for the designated engineer in a group."""
         merged = dict(overrides or {})
         ws = self.state.get_weaver_settings(group)
         if getattr(ws, "weaver_provider", ""):

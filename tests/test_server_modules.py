@@ -108,6 +108,31 @@ class ServerModuleExtractionTests(unittest.TestCase):
         finally:
             self.server_mod.STANDALONE = old
 
+    def test_derive_helper_preserves_parent_assigned_engineer(self):
+        parent = self.state_mod.BoardTask(
+            id='task-parent',
+            task='Parent task',
+            group='g',
+            lane='In Progress',
+            assigned_engineer_id='eng-123',
+        )
+        child = self.state_mod.BoardTask(
+            id='task-child',
+            task='Child task',
+            group='g',
+            lane='Backlog',
+        )
+
+        assigned_engineer_id = (
+            self.server_mod._inherit_assigned_engineer_for_derived_task(
+                parent,
+                child,
+            )
+        )
+
+        self.assertEqual(assigned_engineer_id, 'eng-123')
+        self.assertEqual(child.assigned_engineer_id, 'eng-123')
+
     def test_board_archive_command_ignores_include_descendants_and_archives_one_task(self):
         state = self.state_mod.MatrixState()
         state.add_group('g')

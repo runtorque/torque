@@ -2,7 +2,7 @@
 
 ## 0. Goals
 
-1. Replace the single Weaver with multiple named persistent **Engineers**, scoped to only see their own agents/tasks and derived descendants.
+1. Replace the legacy single-engineer Weaver model with multiple named persistent **Engineers**, scoped to only see their own agents/tasks and derived descendants.
 2. Add a new **Architect** kind: product-level, creates and assigns tasks, maintains a typed decision log and journal, can hire engineers, talks only to engineers and the user.
 3. Rename regular agents to **Workers**; rename **Templates → Roles** and attach them to workers as persistent personas (provider, env, and a behavior preamble injected at dispatch).
 4. User sees everything in the UI, ordered hierarchically: Architect → its Engineers → each Engineer's Workers.
@@ -62,7 +62,7 @@ Rendered in the UI as a list grouped by status, with click-through to linked tas
 
 ### 1.5 Architect journal
 
-Reuse the existing journal storage pattern (JSONL per agent). One file per architect, keyed by architect id. Same entry shape as the Weaver journal today. Separate from decisions — the journal is the audit trail, decisions are the curated product map.
+Reuse the existing journal storage pattern (JSONL per agent). One file per architect, keyed by architect id. Same entry shape as the legacy engineer journal today. Separate from decisions — the journal is the audit trail, decisions are the curated product map.
 
 ### 1.6 Schema migrations
 
@@ -181,7 +181,7 @@ The `loom` context namespace gets additions:
 - `loom.agent.role` — role name (workers only)
 - `loom.agent.owner_engineer` — engineer name (workers only)
 
-Architects and engineers get their own boot prompts when launched (like the current Weaver boot prompt), stored as special system roles (not user-editable in the first pass).
+Architects and engineers get their own boot prompts when launched (like the legacy `weaver_*` boot prompt), stored as special system roles (not user-editable in the first pass).
 
 ## 8. Communication graph enforcement
 
@@ -204,7 +204,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 - Back up `loom.db` to `loom.db.pre-kinds.bak` before migration runs (once, idempotent — skip if backup already exists).
 - Add all new columns (`kind`, `role`, `owner_engineer_id`, `hired_by_architect_id`, `persistent`, `assigned_engineer_id`, `created_by_architect_id`, `suggested_action`) and create `decisions` table.
-- Define an explicit **Weaver identification rule** for backfill: an agent is a Weaver if (a) it's in the "loom" reserved group and (b) its `template` matches the Weaver template slug, else fall back to the agent whose MCP session registers the `weaver_*` tool surface on startup. Document this rule in the migration module.
+- Define an explicit **legacy-engineer identification rule** for backfill: an agent is treated as the stage-1 migrated engineer if (a) it's in the "loom" reserved group and (b) its `template` matches the legacy Weaver template slug, else fall back to the agent whose MCP session registers the `weaver_*` tool surface on startup. Document this rule in the migration module.
 - Backfill:
   - Each identified Weaver → `kind='engineer'`, `persistent=1`, name coerced to `"Weaver"` (with uniqueness suffix if needed).
   - Other agents → `kind='worker'`, `role=template`, `owner_engineer_id=created_by_weaver_id`.
@@ -231,7 +231,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Deliverable**: the user can create multiple named engineers; each sees only its own agents and tasks; existing `weaver_*` clients still work via an alias.
 
-- **Engineer launch infra**: new "Add Engineer" action in the Engineers panel. Prompts for name + provider/command (default: the same Claude Code command the Weaver uses today). Spawns a persistent agent with `kind='engineer'`, unique `LOOM_ENGINEER_ID` env var, and the engineer MCP config pointing at `mcp_engineer.py`.
+- **Engineer launch infra**: new "Add Engineer" action in the Engineers panel. Prompts for name + provider/command (default: the same Claude Code command the default engineer uses today). Spawns a persistent agent with `kind='engineer'`, unique `LOOM_ENGINEER_ID` env var, and the engineer MCP config pointing at `mcp_engineer.py`.
 - **MCP session binding**: engineer MCP server runs through a local stdio entrypoint (`mcp_engineer.py`), reads `LOOM_ENGINEER_ID` on startup, rejects tool calls if the env var is missing or the referenced engineer has been deleted, and scopes every read/write by that id.
 - Split the tool implementation: the existing single-surface module splits into a shared core (ownership-filtered CRUD) and per-kind entrypoints. `weaver_*` names stay as aliases routed to a deterministic "default engineer" — the one named `"Weaver"` if present, else the first engineer by creation order. When the alias is called from a bound legacy Weaver or engineer session, it stays bound to that session instead of jumping to the global default. If zero engineers exist, the alias returns a clear error telling the user to create one.
 - Enforce ownership scoping on all `engineer_*` reads and writes. Writes that create agents or tasks auto-stamp `owner_engineer_id` / `assigned_engineer_id` to the caller, and engineer task access is group-scoped.
@@ -271,7 +271,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 - Change new worktree branch scheme to `loom/<engineer-slug>/<worker-slug>-<shortid>` (or `loom/user/...` for user-owned workers). Existing branches are grandfathered.
 - Audit every MCP tool registration to confirm: architects cannot message workers, engineers cannot message workers owned by other engineers, workers have no cross-agent messaging tools. Remove or gate anything that violates this.
-- Remove the "hints" in code comments / docs that still reference the Weaver as a singleton.
+- Remove the "hints" in code comments / docs that still reference the legacy single-engineer model.
 - **Full acceptance test**: architect → hires engineer (with approval) → creates task → engineer dispatches worker → worker runs, reports progress, derives a sub-task (inherits `assigned_engineer_id`) → worker asks a clarifying question → engineer escalates to architect → architect writes a decision and updates the task → engineer re-dispatches → worker completes → merge back. All communication flows through the permitted paths; no scope leakage.
 
 **Acceptance criterion**: the end-to-end scenario above runs green. `loom doctor` still reports zero drift. No `weaver_*` alias call makes it to an unintended surface.
@@ -297,7 +297,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 - **Engineer visibility edge cases** (user-created workers, manual cell creation): → explicit rule — anything not owned by an engineer is owned by the user; user sees all, engineers don't see user-owned workers by default. Architect can reassign.
 - **Migration of in-flight work**: users upgrading mid-session need existing tasks/agents to keep working. → Stage 1 is pure additive + backfill + dual-write; zero behavior change, so upgrades are safe even with live sessions.
 - **Dual-write drift between old and new columns** (stages 1–5): a future code path might update only one side. → All writes go through a thin wrapper layer in `db.py` that writes both columns. `loom doctor` is run in CI and reports any drift, catching regressions.
-- **Weaver identification ambiguity**: if migration can't uniquely identify the existing Weaver (e.g. no group match, no tool-surface registration history), backfill would silently misclassify. → Migration refuses to proceed and prints a diagnostic asking the user to confirm which agent was the Weaver, falling back to an interactive prompt or a CLI flag (`loom migrate --weaver-id <id>`).
+- **Weaver identification ambiguity**: if migration can't uniquely identify the existing Weaver (e.g. no group match, no tool-surface registration history), backfill would silently misclassify. → Migration refuses to proceed and prints a diagnostic asking the user to confirm which agent was the stage-1 migrated engineer, falling back to an interactive prompt or a CLI flag (`loom migrate --weaver-id <id>`).
 - **MCP session binding spoofing**: a compromised env var could let an engineer session claim another engineer's id. → Not a hardening goal for v1 (local trust model), but documented; future could sign session tokens.
 - **Architect task-reassign authority**: allowing any architect to reassign any task creates unclear ownership. → V1: architect can only reassign tasks it created. Revisit if workflow demands broader reassignment.
 - **Version skip during cleanup** (stage 6): users upgrading directly from pre-stage-1 to post-stage-6 would lose data. → Upgrade guard refuses to boot with a clear "install intermediate version first" error.

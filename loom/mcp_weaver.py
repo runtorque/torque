@@ -3,11 +3,13 @@
 The legacy weaver namespace remains available for a one-release
 compatibility window. Headerless external calls still resolve the
 default engineer at call time. Calls bound to an existing legacy
-Weaver session stay pinned to that specific Weaver/group instead of
+weaver session stay pinned to that specific group/designated engineer instead of
 silently hopping to the global default engineer.
 """
 
 from __future__ import annotations
+
+import json
 
 from .mcp_tools_shared import (
     NO_ENGINEER_ALIAS_ERROR,
@@ -15,6 +17,18 @@ from .mcp_tools_shared import (
     resolve_default_engineer,
 )
 from .mcp_weaver_tools.tool_specs import WEAVER_TOOLS
+
+_WEAVER_TOOL_NAMES = {
+    str(tool.get("name", "") or "").strip()
+    for tool in WEAVER_TOOLS
+}
+
+
+def _invalid_weaver_alias_error(cell_id: str) -> str:
+    return json.dumps({
+        "type": "error",
+        "message": f"no weaver with id={cell_id} exists",
+    })
 
 
 def _resolve_weaver_alias_caller(state, cell_id: str = "") -> tuple[str, str]:
@@ -35,6 +49,7 @@ def _resolve_weaver_alias_caller(state, cell_id: str = "") -> tuple[str, str]:
             == cell.id
         ):
             return "legacy_weaver", cell.id
+        return "", cell_id
 
     engineer_id = resolve_default_engineer(state) or ""
     if engineer_id:
@@ -47,6 +62,8 @@ def _authorize_weaver_cell(state, cell_id: str = ""):
     caller_kind, caller_id = _resolve_weaver_alias_caller(state, cell_id)
     if not caller_id:
         return None, "", NO_ENGINEER_ALIAS_ERROR
+    if not caller_kind:
+        return None, "", _invalid_weaver_alias_error(caller_id)
     cell = state.agents.get(caller_id)
     if not cell:
         return None, "", NO_ENGINEER_ALIAS_ERROR
@@ -55,9 +72,13 @@ def _authorize_weaver_cell(state, cell_id: str = ""):
 
 async def _dispatch_weaver_tool(name, args, handle_command, state,
                                 cell_id: str = ""):
+    if str(name or "").strip() not in _WEAVER_TOOL_NAMES:
+        return f"Unknown weaver tool: {name}", True
     caller_kind, caller_id = _resolve_weaver_alias_caller(state, cell_id)
     if not caller_id:
         return NO_ENGINEER_ALIAS_ERROR, True
+    if not caller_kind:
+        return _invalid_weaver_alias_error(caller_id), True
     return await dispatch_scoped_tool(
         name,
         args,

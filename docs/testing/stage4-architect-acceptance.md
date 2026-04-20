@@ -174,7 +174,7 @@ Expected:
 - `created_by_architect_id='$PRODUCTMIND_ID'`
 - `suggested_action='feature/implement'`
 
-Also verify in the UI that the task appears in the Weaver backlog / inbox with
+Also verify in the UI that the task appears in the engineer backlog / inbox with
 the suggested action visible.
 
 ## Request and approve an engineer hire

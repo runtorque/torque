@@ -689,8 +689,8 @@ WEAVER_TOOLS = [
     {
         "name": "weaver_launch_settings",
         "description": (
-            "Update the designated Weaver's persisted launch settings. "
-            "These settings are used the next time the Weaver is created "
+            "Update the designated engineer's persisted launch settings. "
+            "These settings are used the next time the designated engineer is created "
             "or relaunched."
         ),
         "inputSchema": {
@@ -700,23 +700,23 @@ WEAVER_TOOLS = [
                     "type": "string",
                     "description": (
                         "Provider/backend override for the designated "
-                        "Weaver (for example 'codex' or 'claude-code')."
+                        "designated engineer (for example 'codex' or 'claude-code')."
                     ),
                 },
                 "command": {
                     "type": "string",
                     "description": (
-                        "Boot command override for the designated Weaver."
+                        "Boot command override for the designated engineer."
                     ),
                 },
                 "model": {
                     "type": "string",
-                    "description": "Model override for the designated Weaver.",
+                    "description": "Model override for the designated engineer.",
                 },
                 "reasoning_effort": {
                     "type": "string",
                     "description": (
-                        "Reasoning-effort override for the designated Weaver."
+                        "Reasoning-effort override for the designated engineer."
                     ),
                 },
             },
@@ -895,7 +895,7 @@ WEAVER_TOOLS = [
         "name": "weaver_ask",
         "description": (
             "Ask the human a question. The question is displayed in "
-            "the Weaver panel and event pushes are automatically "
+            "the Engineers panel and event pushes are automatically "
             "paused until the human replies. Use this only when the "
             "next orchestration step depends on a blocking human "
             "decision — prioritization, design decisions, approval, "

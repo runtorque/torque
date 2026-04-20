@@ -110,17 +110,17 @@ The **Weaver** tab owns per-group Weaver configuration.
 
 | Setting | Description |
 |---------|-------------|
-| **Agent** | Shows the current Weaver agent for the group. Create a Weaver from the group’s **+ New** dropdown, then manage it here. |
-| **Only show/manage agents launched by this Weaver** | Restricts Weaver-only tools and views to worker agents originally created by this Weaver. Human operators still see the full board. |
-| **Provider** | Optional backend override just for the Weaver. Leave empty to inherit the group default. |
-| **Command override** | Optional boot command override for the Weaver. |
-| **Model** | Optional provider-specific model override for the designated Weaver. |
-| **Reasoning effort** | Optional provider-specific reasoning-effort override for the designated Weaver. Unsupported providers ignore it. |
-| **Custom Instructions** | Extra instructions appended to the Weaver system prompt. |
+| **Agent** | Shows the designated engineer for the group’s legacy `weaver_*` surface. Create an engineer from the group’s **+ New** dropdown, then manage it here. |
+| **Only show/manage agents launched by this engineer** | Restricts designated-engineer-only tools and views to worker agents originally created by that engineer. Human operators still see the full board. |
+| **Provider** | Optional backend override just for the designated engineer. Leave empty to inherit the group default. |
+| **Command override** | Optional boot command override for the designated engineer. |
+| **Model** | Optional provider-specific model override for the designated engineer. |
+| **Reasoning effort** | Optional provider-specific reasoning-effort override for the designated engineer. Unsupported providers ignore it. |
+| **Custom Instructions** | Extra instructions appended to the designated-engineer system prompt. |
 | **Push / Max / Heartbeat intervals** | Controls digest cadence and idle heartbeat behavior. |
 | **Events** | Choose which optional event types appear in Weaver digests. Mandatory event types are always enabled. |
 
-The designated Weaver can be restarted from its context menu. The restart flow reuses the same Weaver launch dialog, so provider, command, model, reasoning effort, and policy settings stay editable even after the Weaver already exists.
+The designated engineer can be restarted from its context menu. The restart flow reuses the same launch dialog, so provider, command, model, reasoning effort, and policy settings stay editable even after that engineer already exists.
 
 ## How defaults are resolved
 
