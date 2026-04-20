@@ -169,7 +169,7 @@ function _boardCacheDispatchActionList(msg) {
 
 function _boardCacheDispatchTemplateList(msg) {
   if (!msg || !msg.group) return;
-  _boardEligibilityTemplatesByGroup[msg.group] = msg.templates || [];
+  _boardEligibilityTemplatesByGroup[msg.group] = msg.roles || msg.templates || [];
   if (_boardEligibilityTemplateWaiting
       && msg.group === (_currentGroup() || '')) {
     _boardEligibilityTemplateWaiting = false;
@@ -207,7 +207,7 @@ function _boardEnsureDispatchEligibilityRefs(group) {
   if (needsTemplates && !_boardEligibilityTemplatesByGroup[group]
       && !_boardEligibilityTemplateWaiting) {
     _boardEligibilityTemplateWaiting = true;
-    send({ cmd: 'list_templates', group: group });
+    send({ cmd: 'list_roles', group: group });
   }
 }
 
@@ -272,7 +272,7 @@ function _boardTaskDispatchEligibility(task) {
     return {
       className: 'board-card-dispatch board-card-dispatch-checking',
       label: 'Checking refs',
-      title: 'Loading action/template availability',
+      title: 'Loading action/role availability',
     };
   }
   var unmetDeps = _boardUnmetDependencyNames(task);
@@ -304,15 +304,15 @@ function _boardTaskDispatchEligibility(task) {
   if (missingAction || missingTemplate) {
     var missing = [];
     if (missingAction) missing.push('action');
-    if (missingTemplate) missing.push('template');
+    if (missingTemplate) missing.push('role');
     return {
       className: 'board-card-dispatch board-card-dispatch-warning',
       label: missing.length === 2 ? 'Missing refs' : 'Missing ' + missing[0],
       title: missingAction && missingTemplate
-        ? 'Missing action "' + task.action_name + '" and template "' + task.agent_template + '"'
+        ? 'Missing action "' + task.action_name + '" and role "' + task.agent_template + '"'
         : missingAction
           ? 'Missing action "' + task.action_name + '"'
-          : 'Missing template "' + task.agent_template + '"',
+          : 'Missing role "' + task.agent_template + '"',
     };
   }
   return null;
@@ -691,7 +691,7 @@ function _renderBoardCard(t, childrenOf, depth) {
   }
   if (_boardHasActiveFilters() && t.lane) meta += '<span class="board-card-lane-badge">' + esc(t.lane) + '</span>';
   if (t.action_name) meta += '<span class="board-card-label board-card-template">' + esc(t.action_name) + '</span>';
-  if (t.agent_template) meta += '<span class="board-card-label board-card-template">agent: ' + esc(t.agent_template) + '</span>';
+  if (t.agent_template) meta += '<span class="board-card-label board-card-template">role: ' + esc(t.agent_template) + '</span>';
   if (t.labels && t.labels.length) {
     var userLbls = [], sysLbls = [];
     var priority = _boardTaskPriority(t);

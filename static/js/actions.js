@@ -197,7 +197,7 @@ function renderTemplatesEditor() {
   // Agent block (collapsible)
   html += '<details class="tpled-section"' + (agentUsesTemplate || agent.name_prefix || agent.tab_color || agent.command ? ' open' : '') + '>';
   html += '<summary>Agent</summary>';
-  html += '<label>Agent template</label>';
+  html += '<label>Role</label>';
   html += '<select id="tpled-agent-template" onchange="tplEditorToggleAgentMode();tplEditorMarkDirty()">';
   html += '<option value="">Legacy inline config</option>';
   var projectAgentTpls = (_cachedAgentTemplates || []).filter(function(t) { return !t.global && !t.shadowed; });
@@ -252,6 +252,7 @@ function renderTemplatesEditor() {
   }
   html += '<label>Prompt <span class="label-req">*</span> <span class="label-hint">must contain {{ TASK }}</span></label>';
   html += _tplHighlightWrap('tpled-prompt', prompt);
+  html += '<label class="gs-checkbox"><input id="tpled-disable-role-preamble" type="checkbox"' + (d.disable_role_preamble ? ' checked' : '') + ' onchange="tplEditorMarkDirty()"> Disable role preamble (don\'t inject the worker\'s role preamble for this action)</label>';
   html += '<label>Labels</label>';
   html += '<input id="tpled-labels" value="' + esc((d.labels || []).join(', ')) + '" placeholder="comma-separated" autocomplete="off" onchange="tplEditorMarkDirty()">';
 
@@ -604,6 +605,7 @@ function _tplEditorSaveInner() {
     group: (document.getElementById('tpled-group').value || '').trim(),
     worktree: document.getElementById('tpled-worktree').checked,
     auto_close_on_done: document.getElementById('tpled-auto-close-on-done').checked,
+    disable_role_preamble: document.getElementById('tpled-disable-role-preamble').checked,
     prompt: prompt,
     labels: labels,
     transitions: transitions,
@@ -674,6 +676,7 @@ function _tplEditorReadForm() {
     group: (document.getElementById('tpled-group').value || '').trim(),
     worktree: document.getElementById('tpled-worktree').checked,
     auto_close_on_done: document.getElementById('tpled-auto-close-on-done').checked,
+    disable_role_preamble: document.getElementById('tpled-disable-role-preamble').checked,
     prompt: document.getElementById('tpled-prompt').value || '',
     labels: labelsRaw ? labelsRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [],
     transitions: _tplReadTransitions(),

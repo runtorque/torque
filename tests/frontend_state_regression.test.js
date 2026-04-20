@@ -661,6 +661,13 @@ function createWsRenderHarness() {
 function createTemplatesHarness() {
   const { sandbox, document } = createSandbox({
     _cachedProviders: [],
+    _populateProviderSelect() {},
+    _getProviderValue() { return ''; },
+    _getProviderCommand() { return ''; },
+    _envToText(value) { return value ? JSON.stringify(value) : ''; },
+    _textToEnv() { return {}; },
+    _tplAutoResize() {},
+    toggleHint() {},
   });
   document.register('panel-templates');
   const context = vm.createContext(sandbox);
@@ -1270,6 +1277,7 @@ test('actions editor save payload preserves auto_close_on_done', () => {
   document.register('tpled-group').value = '';
   document.register('tpled-worktree').checked = false;
   document.register('tpled-auto-close-on-done').checked = true;
+  document.register('tpled-disable-role-preamble').checked = true;
   document.register('tpled-prompt').value = '{{ TASK }}';
   document.register('tpled-labels').value = 'review';
   document.register('tpled-scope').value = 'project';
@@ -1283,6 +1291,10 @@ test('actions editor save payload preserves auto_close_on_done', () => {
   assert.equal(jsonValue(context, 'sendCalls.length'), 1);
   assert.equal(
     jsonValue(context, 'sendCalls[0].action.auto_close_on_done'),
+    true,
+  );
+  assert.equal(
+    jsonValue(context, 'sendCalls[0].action.disable_role_preamble'),
     true,
   );
   assert.deepEqual(jsonValue(context, 'sendCalls[0].action.transitions'), []);
@@ -2693,7 +2705,7 @@ test('_boardTaskDispatchEligibility only surfaces non-default dispatch states on
     JSON.stringify({
       className: 'board-card-dispatch board-card-dispatch-warning',
       label: 'Missing refs',
-      title: 'Missing action "missing/action" and template "missing-template"',
+      title: 'Missing action "missing/action" and role "missing-template"',
     }),
   );
   assert.equal(
@@ -2739,7 +2751,7 @@ test('renderBoard requests action and template refs for dispatch eligibility bad
 
   assert.deepEqual(jsonValue(context, 'sendCalls'), [
     { cmd: 'list_actions', group: 'alpha' },
-    { cmd: 'list_templates', group: 'alpha' },
+    { cmd: 'list_roles', group: 'alpha' },
   ]);
 });
 
@@ -6626,11 +6638,118 @@ test('agents panel defaults to history view', () => {
 
   context.renderAgentTemplatesPanel();
 
-  assert.match(panel.innerHTML, /Agent Library/);
+  assert.match(panel.innerHTML, /Role Library/);
   assert.match(panel.innerHTML, /Live agents stay in the left column/);
   assert.match(panel.innerHTML, /History<\/button>/);
   assert.match(panel.innerHTML, /tpled-view-btn active[^"]*" onclick="agentsPanelSwitchView\('history'\)"/);
   assert.match(panel.innerHTML, /agent-history-container/);
+});
+
+test('roles panel renders role fields and saves via save_role with blank priorities discarded', () => {
+  const { context, document, sandbox } = createTemplatesHarness();
+  const panel = document.getElementById('panel-templates');
+  const editor = document.register('agent-tpl-editor');
+
+  runInContext(context, `
+    _agentsPanelView = 'templates';
+    _agentTplData = {
+      name: 'reviewer',
+      display_name: 'Reviewer',
+      preamble: 'Be careful.',
+      priorities: ['ship small', 'test first'],
+      env_vars: {},
+      terminals: [],
+    };
+    _agentTplNew = true;
+    _agentTplScope = 'project';
+    renderAgentTemplatesPanel();
+  `);
+
+  assert.match(panel.innerHTML, /Roles<\/button>/);
+  assert.match(editor.innerHTML, /Preamble \(behavior\)/);
+  assert.match(editor.innerHTML, /Behavior guidance for workers with this role/);
+  assert.match(editor.innerHTML, /Priorities/);
+  assert.match(editor.innerHTML, /Project \(\.loom\/roles\/\)/);
+  assert.match(editor.innerHTML, /User \(~\/\.loom\/roles\/\)/);
+
+  document.register('agent-template-name').value = 'reviewer';
+  document.register('agent-template-display').value = 'Reviewer';
+  document.register('agent-template-desc').value = 'Reviews carefully';
+  document.register('agent-template-provider').value = '';
+  document.register('agent-template-command').value = '';
+  document.register('agent-template-model').value = '';
+  document.register('agent-template-permissions').value = '';
+  document.register('agent-template-max-turns').value = '0';
+  document.register('agent-template-preamble').value = 'Be careful.';
+  document.register('agent-template-system-prompt').value = '';
+  document.register('agent-template-initial-prompt').value = '';
+  document.register('agent-template-session-resume').checked = true;
+  document.register('agent-template-idle-timeout').value = '0';
+  document.register('agent-template-color').value = '';
+  document.register('agent-template-icon').value = '';
+  document.register('agent-template-worktree').checked = false;
+  document.register('agent-template-worktree-base').value = '';
+  document.register('agent-template-auto-checkpoint').checked = false;
+  document.register('agent-template-merge-squash').checked = true;
+  document.register('agent-template-scope').value = 'project';
+  document.register('agent-template-env').value = '';
+
+  const priorityOne = new FakeElement();
+  priorityOne.setQuerySelector('.agent-template-priority-input', { value: 'ship small' });
+  const priorityBlank = new FakeElement();
+  priorityBlank.setQuerySelector('.agent-template-priority-input', { value: '   ' });
+  const priorityTwo = new FakeElement();
+  priorityTwo.setQuerySelector('.agent-template-priority-input', { value: 'test first' });
+  document.setSelectorAll('#agent-template-priorities .tpled-priority-row', [
+    priorityOne, priorityBlank, priorityTwo,
+  ]);
+  document.setSelectorAll('#agent-template-terminals .tpled-transition-entry', []);
+
+  runInContext(context, `
+    _agentTplSelected = 'project:reviewer';
+    _agentTplScope = 'project';
+    agentTemplateSave();
+  `);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.sendCalls)), [
+    {
+      cmd: 'save_role',
+      name: 'reviewer',
+      role: {
+        name: 'reviewer',
+        display_name: 'Reviewer',
+        description: 'Reviews carefully',
+        provider: '',
+        command: '',
+        model: '',
+        permissions: '',
+        max_turns: 0,
+        preamble: 'Be careful.',
+        priorities: ['ship small', 'test first'],
+        system_prompt: '',
+        initial_prompt: '',
+        session_resume: true,
+        idle_timeout: 0,
+        tab_color: '',
+        icon: '',
+        worktree: false,
+        worktree_base_branch: '',
+        worktree_auto_checkpoint: false,
+        worktree_merge_squash: true,
+        env_vars: {},
+        terminals: [],
+      },
+      scope: 'project',
+      group: 'alpha',
+    },
+  ]);
+});
+
+test('task modal and add-agent labels rename template UI to role UI', () => {
+  const html = fs.readFileSync(path.join(repoRoot, 'webview.html'), 'utf8');
+  assert.match(html, /<label>Role<\/label>\s*<select id="add-template-select"/);
+  assert.match(html, /<label>Default role<\/label>\s*<select id="gs-default-agent-template"/);
+  assert.match(html, /<label>Role[\s\S]*Optional role used when this task creates a new agent during dispatch\./);
 });
 
 test('standalone panel title renames templates surface to library', () => {
@@ -6883,7 +7002,7 @@ test('openEditTask populates modal state from the task and preserves editable ve
   assert.equal(document.getElementById('task-task-input').selected, true);
   assert.deepEqual(jsonValue(context, 'sendCalls'), [
     { cmd: 'list_actions', group: 'beta' },
-    { cmd: 'list_templates', group: 'beta' },
+    { cmd: 'list_roles', group: 'beta' },
   ]);
 });
 

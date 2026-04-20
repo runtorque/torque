@@ -9,6 +9,10 @@ let selectedTerminalId = null;
 let focusedItemId = null;
 let _cachedAgentTemplates = [];
 
+function _wsRoleList(msg) {
+  return (msg && (msg.roles || msg.templates)) || [];
+}
+
 var _firstStateReceived = false;
 var _expectedSeq = 0;
 var _resyncPending = false;
@@ -42,7 +46,7 @@ function connect() {
       _handleDelta(msg);
     } else if (msg.type === 'config') {
       if (msg.providers) _cachedProviders = msg.providers;
-      if (msg.templates) _cachedAgentTemplates = msg.templates;
+      if (msg.roles || msg.templates) _cachedAgentTemplates = _wsRoleList(msg);
       if (msg.runtime) state.runtime = msg.runtime;
       if (_pendingModal) {
         _showAddModal(_pendingModal.mode, _pendingModal.group, msg);
@@ -50,7 +54,7 @@ function connect() {
       }
     } else if (msg.type === 'group_settings') {
       if (msg.providers) _cachedProviders = msg.providers;
-      if (msg.templates) _cachedAgentTemplates = msg.templates;
+      if (msg.roles || msg.templates) _cachedAgentTemplates = _wsRoleList(msg);
       if (msg.runtime) state.runtime = msg.runtime;
       _showGroupSettings(msg.group, msg);
     } else if (msg.type === 'toast') {
@@ -94,8 +98,8 @@ function connect() {
         // Ignore unsolicited action lists instead of reopening the
         // "Task from Action" modal after reconnect/startup.
       }
-    } else if (msg.type === 'templates') {
-      _cachedAgentTemplates = msg.templates || [];
+    } else if (msg.type === 'roles' || msg.type === 'templates') {
+      _cachedAgentTemplates = _wsRoleList(msg);
       if (typeof _boardCacheDispatchTemplateList === 'function') {
         _boardCacheDispatchTemplateList(msg);
       }
