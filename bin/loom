@@ -451,15 +451,38 @@ def _engineers_with_counts(state_data):
     return engineers
 
 
-def _resolve_engineer_id_by_slug(state_data, engineer_slug: str) -> str:
-    """Resolve an engineer slug to its agent id, or return an empty string."""
+def _resolve_engineer_by_slug(state_data, engineer_slug: str):
+    """Resolve an engineer slug to its cell dict, or return None."""
     wanted = str(engineer_slug or "").strip().lower()
     if not wanted:
-        return ""
+        return None
     for engineer in _iter_engineers_from_state(state_data):
         if str(engineer.get("slug", "") or "").strip().lower() == wanted:
-            return engineer["id"]
-    return ""
+            return engineer
+    return None
+
+
+def _resolve_engineer_id_by_slug(state_data, engineer_slug: str) -> str:
+    """Resolve an engineer slug to its agent id, or return an empty string."""
+    engineer = _resolve_engineer_by_slug(state_data, engineer_slug)
+    return str(engineer.get("id", "") or "") if engineer else ""
+
+
+def _validate_engineer_assignment(state_data, engineer_slug: str, group: str) -> str:
+    """Resolve an engineer slug for a specific group or exit with a clear error."""
+    wanted = str(engineer_slug or "").strip()
+    if not wanted:
+        return ""
+    engineer = _resolve_engineer_by_slug(state_data, wanted)
+    if not engineer:
+        die(f"no engineer with slug '{wanted}'")
+    engineer_group = str(engineer.get("group", "") or "").strip()
+    if engineer_group != str(group or "").strip():
+        die(
+            f"engineer '{wanted}' belongs to group '{engineer_group}', "
+            f"not '{group}'"
+        )
+    return str(engineer.get("id", "") or "")
 
 
 def get_state_local(port):
@@ -1926,11 +1949,9 @@ def cmd_task_create(args):
         "lane": "Backlog",
     }
     if getattr(args, "engineer", None) is not None:
-        engineer_slug = str(args.engineer or "").strip()
-        engineer_id = _resolve_engineer_id_by_slug(state_data, engineer_slug)
-        if engineer_slug and not engineer_id:
-            die(f"no engineer with slug '{engineer_slug}'")
-        kwargs["assigned_engineer_id"] = engineer_id
+        kwargs["assigned_engineer_id"] = _validate_engineer_assignment(
+            state_data, args.engineer, group
+        )
     if getattr(args, "context", None):
         kwargs["description"] = args.context
     if args.labels:
@@ -2466,11 +2487,10 @@ def cmd_task_edit(args):
         if args.group is not None:
             fields["group"] = args.group
         if args.engineer is not None:
-            engineer_slug = str(args.engineer or "").strip()
-            engineer_id = _resolve_engineer_id_by_slug(st, engineer_slug)
-            if engineer_slug and not engineer_id:
-                die(f"no engineer with slug '{engineer_slug}'")
-            fields["assigned_engineer_id"] = engineer_id
+            target_group = str(args.group or t.get("group", "") or "").strip()
+            fields["assigned_engineer_id"] = _validate_engineer_assignment(
+                st, args.engineer, target_group
+            )
         if getattr(args, "at", None) is not None:
             fields["scheduled_at"] = _parse_relative_time(args.at)
         if getattr(args, "depends_on", None) is not None:

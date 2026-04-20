@@ -50,6 +50,7 @@ class CliEngineerTests(unittest.TestCase):
                     "id": "eng-alice",
                     "name": "Alice",
                     "slug": "alice",
+                    "group": "loom",
                     "kind": "engineer",
                     "cell_type": "agent",
                 }
@@ -106,6 +107,42 @@ class CliEngineerTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, 1)
         self.assertIn("no engineer with slug 'alice'", err.getvalue())
 
+    def test_cmd_task_create_rejects_cross_group_engineer_slug(self):
+        state = {
+            "agents": {
+                "eng-bob": {
+                    "id": "eng-bob",
+                    "name": "Bob",
+                    "slug": "bob",
+                    "group": "group-b",
+                    "kind": "engineer",
+                    "cell_type": "agent",
+                }
+            }
+        }
+        args = SimpleNamespace(
+            port=18932,
+            description="Ship it",
+            group="group-a",
+            engineer="bob",
+            context=None,
+            labels=None,
+            action=None,
+            var=None,
+            at=None,
+            depends_on=None,
+        )
+        err = io.StringIO()
+        with mock.patch.object(self.cli, "get_state", return_value=state), \
+             mock.patch.object(self.cli, "api_call") as api_call, \
+             contextlib.redirect_stderr(err), \
+             self.assertRaises(SystemExit) as cm:
+            self.cli.cmd_task_create(args)
+
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("engineer 'bob' belongs to group 'group-b', not 'group-a'", err.getvalue())
+        api_call.assert_not_called()
+
     def test_cmd_task_edit_sets_assigned_engineer_id_from_slug(self):
         state = {
             "agents": {
@@ -113,6 +150,7 @@ class CliEngineerTests(unittest.TestCase):
                     "id": "eng-alice",
                     "name": "Alice",
                     "slug": "alice",
+                    "group": "loom",
                     "kind": "engineer",
                     "cell_type": "agent",
                 }
@@ -160,6 +198,62 @@ class CliEngineerTests(unittest.TestCase):
             assigned_engineer_id="eng-alice",
         )
         self.assertIn("Updated task ship-it", out.getvalue())
+
+    def test_cmd_task_edit_rejects_cross_group_engineer_slug_using_updated_group(self):
+        state = {
+            "agents": {
+                "eng-alice": {
+                    "id": "eng-alice",
+                    "name": "Alice",
+                    "slug": "alice",
+                    "group": "group-a",
+                    "kind": "engineer",
+                    "cell_type": "agent",
+                }
+            },
+            "board_tasks": {
+                "task-1": {
+                    "id": "task-1",
+                    "task": "Ship it",
+                    "slug": "ship-it",
+                    "group": "group-a",
+                    "verification_summary": {},
+                }
+            },
+        }
+        args = SimpleNamespace(
+            port=18932,
+            identifier="task-1",
+            task=None,
+            action=None,
+            var=None,
+            labels=None,
+            group="group-b",
+            engineer="alice",
+            at=None,
+            depends_on=None,
+            verify_mode=None,
+            verify_state=None,
+            verify_note=None,
+            verify_tests=None,
+            verify_smoke_done=False,
+            verify_deploy_needed=False,
+            verify_deploy_attempted=False,
+            verify_human=None,
+        )
+        err = io.StringIO()
+        with mock.patch.object(self.cli, "get_state_local", return_value=state), \
+             mock.patch.object(self.cli, "api_call") as api_call, \
+             contextlib.redirect_stderr(err), \
+             self.assertRaises(SystemExit) as cm:
+            self.cli.cmd_task_edit(args)
+
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn(
+            "engineer 'alice' belongs to group 'group-a', not 'group-b'",
+            err.getvalue(),
+        )
+        api_call.assert_not_called()
 
     def test_cmd_engineer_list_outputs_json_with_worker_and_task_counts(self):
         state = {

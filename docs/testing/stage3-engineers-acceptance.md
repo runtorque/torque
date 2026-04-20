@@ -86,7 +86,7 @@ loom task create "Stage 3 smoke task" --group loom --engineer alice
 Expected:
 
 - the task is created successfully
-- `loom task show <task-slug-or-id>` shows Alice's engineer assignment
+- `loom --json task show <task-slug-or-id>` includes Alice's `assigned_engineer_id`
 
 If you prefer a UI-only smoke, assign the task to Alice through the task modal
 instead, but keep the equivalent expectation: the task must end up with
