@@ -150,10 +150,11 @@ The UI stays "see everything" but the order changes:
 - Visual treatment: indentation + a faint connector line. Each kind gets a distinct icon/badge.
 - Group header becomes optional — hierarchy replaces it as the primary organizing principle. (Groups still exist for color/settings, but they're no longer the top-level axis.)
 - Panel rename: "Weaver" panel → "Engineers" panel. New "Architects" panel parallel to it. Roles editor replaces Templates editor.
+- Architect detail UI also carries the live decision log and pending-hire review surfaces. Those views update from `decision_*` and `pending_hire_*` WebSocket deltas instead of a separate polling loop.
 
 ## 5. Hire / fire / relaunch semantics
 
-- **Hire (architect → engineer)**: architect calls `architect_engineer_hire`. This queues a pending hire visible to the user with approve/reject. On approve, a new engineer row is created (`persistent=1`) with `hired_by_architect_id=architect.id`. On reject, the architect gets a tool error and logs the rejection in its journal. Every hire requires user approval in v1 — no pre-approved/trusted-architect mode. We'll revisit after observing usage.
+- **Hire (architect → engineer)**: architect calls `architect_engineer_hire`. This queues a pending hire visible to the user with approve/reject. The tool returns immediately with `status='pending'`; the architect must poll for resolution. On approve, a new engineer row is created (`persistent=1`) with `hired_by_architect_id=architect.id`. On reject, the architect gets a tool error and logs the rejection in its journal. Every hire requires explicit user approval in v1 — no pre-approved/trusted-architect mode. We'll revisit after observing usage.
 - **Relaunch engineer**: existing agent relaunch flow; works because `persistent=1` keeps the row alive after session end.
 - **Delete engineer**: hard delete only via the Engineers panel with user confirmation. On delete: all agents with `owner_engineer_id == deleted.id` get `owner_engineer_id=''` (transfer to user); all tasks with `assigned_engineer_id == deleted.id` get `assigned_engineer_id=''`. Worktrees stay (cleanup is separate). Deleting the last engineer is still allowed; `weaver_*` aliases then fail with a clear "create an engineer" error until one exists again.
 - **Delete architect**: same pattern — its engineers transfer to user (they keep running). Its decision log is archived (kept readable but marked `archived=1`), not deleted, so the audit trail survives.
@@ -187,6 +188,7 @@ Architects and engineers get their own boot prompts when launched (like the curr
 Enforce in the MCP layer, not via runtime checks:
 
 - `architect_engineer_message` is the only cross-kind messaging tool architects have. No `worker_message` on the architect surface.
+- Architect messaging to engineers is limited to engineers the architect hired plus same-group engineers intentionally surfaced as visible collaborators; workers are never direct architect message targets.
 - `engineer_*` tools that target agents filter to `owner_engineer_id == self.id`, so an engineer can't message another engineer's worker.
 - Engineers can talk to their parent architect via `engineer_message_architect` (outbound clarifying questions, decision escalations) and reply to architect messages via `engineer_reply`. No user approval — routine coordination.
 - The engineer boot prompt explicitly instructs: *when a non-trivial product or scope decision arises, call the architect via `engineer_message_architect` before committing to a direction.* This keeps decision ownership with the architect.

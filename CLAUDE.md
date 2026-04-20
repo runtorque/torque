@@ -101,6 +101,16 @@ For dual mode, also run `make open` to get a browser window alongside the toolbe
 - The CLI supports offline-capable `loom engineer list` plus `--engineer <slug>` on `loom task create` and `loom task edit` for explicit assignment and reassignment.
 - `loom doctor` includes an `[engineers]` section and warns when default `weaver_*` routing is missing or ambiguous.
 
+### Kinds refactor (stage 4 invariants)
+- Architects are a first-class persistent kind alongside engineers, workers, and terminals. Architects are user-created only — they are never hired, and `hired_by_architect_id` must stay empty on architect rows.
+- `LOOM_ARCHITECT_ID` binds an architect's MCP session to its own agent id.
+- `architect_*` MCP tools cover decision CRUD, task creation with required `assigned_engineer_id` plus optional `suggested_action`, engineer list/message/hire, and task reassignment only for tasks the architect created.
+- The decision log is per-architect, persisted in the `decisions` table, and uses an archived-not-deleted policy when an architect is deleted.
+- The pending-hire queue is user-approved: the architect requests the hire, the user approves or rejects it, and approval creates an engineer with `hired_by_architect_id=<architect.id>`.
+- Architect ↔ engineer messaging is the only cross-kind channel for architects; architects cannot message workers directly.
+- The engineer boot prompt explicitly tells architect-hired engineers to escalate non-trivial product or scope decisions to their hiring architect before choosing a direction.
+- `loom doctor` adds `[architects]` and `[pending_hires]` sections.
+
 - **Loom context namespace**: Action templates can reference a `loom` dict injected at render time containing agent identity (`loom.agent.*`), dispatch context (`loom.context.is_clean`, `loom.context.tasks_dispatched`, `loom.context.previous_tasks`), worktree state (`loom.worktree.*`), task metadata (`loom.task.*`), and child terminals (`loom.terminals`). `loom` is a reserved variable name — rejected on action save. Preview renders use `LOOM_CONTEXT_STUB` (safe defaults with `is_clean=True`).
 
 ## Code conventions

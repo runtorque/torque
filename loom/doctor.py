@@ -13,6 +13,8 @@ DOCTOR_SCHEMA_VERSION = 1
 _KINDS_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
 _KINDS_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
 _KINDS_BACKUP_NAME = "loom.db.pre-kinds.bak"
+_SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60
+_ONE_DAY_SECONDS = 24 * 60 * 60
 
 
 def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
@@ -303,6 +305,161 @@ def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
     }
 
 
+def _collect_architects_section(conn: sqlite3.Connection) -> dict:
+    if not _column_exists(conn, "agents", "kind"):
+        return {
+            "total": 0,
+            "architects": [],
+            "invalid_hired_by_architect": [],
+            "dangling_decisions": [],
+        }
+
+    hired_counts = {}
+    if _column_exists(conn, "agents", "hired_by_architect_id"):
+        try:
+            rows = conn.execute(
+                "SELECT hired_by_architect_id, COUNT(*) FROM agents "
+                "WHERE cell_type='agent' AND kind='engineer' "
+                "AND hired_by_architect_id != '' "
+                "GROUP BY hired_by_architect_id"
+            ).fetchall()
+            hired_counts = {
+                str(architect_id or ""): int(count or 0)
+                for architect_id, count in rows
+                if str(architect_id or "").strip()
+            }
+        except sqlite3.OperationalError:
+            hired_counts = {}
+
+    architects = []
+    invalid_hired_by_architect = []
+    architect_binding_exists = _column_exists(conn, "agents", "hired_by_architect_id")
+    try:
+        if architect_binding_exists:
+            rows = conn.execute(
+                "SELECT rowid, id, name, slug, hired_by_architect_id "
+                "FROM agents WHERE cell_type='agent' AND kind='architect' "
+                "ORDER BY rowid"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT rowid, id, name, slug, '' AS hired_by_architect_id "
+                "FROM agents WHERE cell_type='agent' AND kind='architect' "
+                "ORDER BY rowid"
+            ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    for _rowid, architect_id, name, slug, hired_by_architect_id in rows:
+        architect_id = str(architect_id or "")
+        invalid_binding = str(hired_by_architect_id or "").strip()
+        entry = {
+            "id": architect_id,
+            "name": str(name or ""),
+            "slug": str(slug or ""),
+            "decision_count": 0,
+            "hired_engineer_count": int(hired_counts.get(architect_id, 0) or 0),
+        }
+        architects.append(entry)
+        if invalid_binding:
+            invalid_hired_by_architect.append({
+                "id": architect_id,
+                "name": entry["name"],
+                "slug": entry["slug"],
+                "hired_by_architect_id": invalid_binding,
+            })
+
+    architect_ids = {entry["id"] for entry in architects if entry.get("id")}
+    dangling_decisions = []
+    if _table_exists(conn, "decisions"):
+        try:
+            rows = conn.execute(
+                "SELECT id, architect_id, archived FROM decisions"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+        for decision_id, architect_id, archived in rows:
+            architect_id = str(architect_id or "").strip()
+            if not architect_id:
+                continue
+            if not int(archived or 0):
+                for architect in architects:
+                    if architect["id"] == architect_id:
+                        architect["decision_count"] += 1
+                        break
+            # Archived decisions are intentionally retained after architect
+            # deletion; only warn on active rows that still point at a missing
+            # architect.
+            if int(archived or 0):
+                continue
+            if architect_id not in architect_ids:
+                dangling_decisions.append({
+                    "id": str(decision_id or ""),
+                    "architect_id": architect_id,
+                })
+
+    return {
+        "total": len(architects),
+        "architects": architects,
+        "invalid_hired_by_architect": invalid_hired_by_architect,
+        "dangling_decisions": dangling_decisions,
+    }
+
+
+def _collect_pending_hires_section(
+    conn: sqlite3.Connection,
+    *,
+    architect_names: dict[str, str] | None = None,
+) -> dict:
+    section = {
+        "pending": 0,
+        "approved_recent": 0,
+        "rejected_recent": 0,
+        "stale_pending": 0,
+        "stale_pending_hires": [],
+    }
+    if not _table_exists(conn, "pending_hires"):
+        return section
+
+    architect_names = architect_names or {}
+    now_ts = int(datetime.now().timestamp())
+    recent_cutoff = now_ts - _SEVEN_DAYS_SECONDS
+    stale_cutoff = now_ts - _ONE_DAY_SECONDS
+    try:
+        rows = conn.execute(
+            "SELECT id, architect_id, status, created_at, resolved_at "
+            "FROM pending_hires"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+
+    stale_entries = []
+    for hire_id, architect_id, status, created_at, resolved_at in rows:
+        hire_id = str(hire_id or "")
+        architect_id = str(architect_id or "").strip()
+        status = str(status or "").strip()
+        created_at = int(created_at or 0)
+        resolved_at = int(resolved_at or 0)
+        if status == "pending":
+            section["pending"] += 1
+            if created_at and created_at < stale_cutoff:
+                age_hours = max(1, int((now_ts - created_at) // 3600))
+                architect_name = str(architect_names.get(architect_id, "") or "")
+                stale_entries.append({
+                    "id": hire_id,
+                    "architect_id": architect_id,
+                    "architect_name": architect_name,
+                    "age_hours": age_hours,
+                })
+        elif status == "approved" and resolved_at >= recent_cutoff:
+            section["approved_recent"] += 1
+        elif status == "rejected" and resolved_at >= recent_cutoff:
+            section["rejected_recent"] += 1
+
+    section["stale_pending_hires"] = stale_entries
+    section["stale_pending"] = len(stale_entries)
+    return section
+
+
 def _collect_tasks_section(conn: sqlite3.Connection, *, engineer_count: int) -> dict:
     total = int(_fetch_scalar(conn, "SELECT COUNT(*) FROM board_tasks", default=0) or 0)
     if not _column_exists(conn, "board_tasks", "assigned_engineer_id"):
@@ -576,12 +733,58 @@ def _warn_engineer_binding_env_mismatch(report: dict) -> dict | None:
     }
 
 
+def _check_invalid_architect_hired_binding(report: dict) -> dict:
+    architects = report.get("architects", {}) or {}
+    invalid = list(architects.get("invalid_hired_by_architect", []) or [])
+    return {
+        "name": "invalid_architect_hired_by_architect",
+        "status": "pass" if not invalid else "fail",
+        "details": {
+            "count": len(invalid),
+            "invalid": invalid,
+        },
+    }
+
+
+def _warn_stale_pending_hires(report: dict) -> list[dict]:
+    pending_hires = report.get("pending_hires", {}) or {}
+    warnings = []
+    for entry in list(pending_hires.get("stale_pending_hires", []) or []):
+        warnings.append({
+            "name": "stale_pending_hire",
+            "status": "warn",
+            "details": {
+                "id": str(entry.get("id", "") or ""),
+                "architect_id": str(entry.get("architect_id", "") or ""),
+                "architect_name": str(entry.get("architect_name", "") or ""),
+                "age_hours": int(entry.get("age_hours", 0) or 0),
+            },
+        })
+    return warnings
+
+
+def _warn_dangling_decision_architects(report: dict) -> list[dict]:
+    architects = report.get("architects", {}) or {}
+    warnings = []
+    for entry in list(architects.get("dangling_decisions", []) or []):
+        warnings.append({
+            "name": "dangling_decision_architect",
+            "status": "warn",
+            "details": {
+                "id": str(entry.get("id", "") or ""),
+                "architect_id": str(entry.get("architect_id", "") or ""),
+            },
+        })
+    return warnings
+
+
 _DOCTOR_CHECKS = [
     _check_migration_version,
     _check_unmigrated_agents,
     _check_template_role_drift,
     _check_created_owner_drift,
     _check_task_owner_drift,
+    _check_invalid_architect_hired_binding,
 ]
 
 _DOCTOR_WARNINGS = [
@@ -590,6 +793,8 @@ _DOCTOR_WARNINGS = [
     _warn_no_engineers,
     _warn_ambiguous_default_engineer,
     _warn_engineer_binding_env_mismatch,
+    _warn_stale_pending_hires,
+    _warn_dangling_decision_architects,
 ]
 
 
@@ -597,6 +802,12 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
     db_path = Path(db_path)
     agents = _collect_agents_section(conn)
     tasks = _collect_tasks_section(conn, engineer_count=int(agents["engineer"] or 0))
+    architects = _collect_architects_section(conn)
+    architect_names = {
+        str(entry.get("id", "") or ""): str(entry.get("name", "") or "")
+        for entry in list(architects.get("architects", []) or [])
+        if str(entry.get("id", "") or "").strip()
+    }
     report = {
         "schema_version": DOCTOR_SCHEMA_VERSION,
         "migration": _collect_migration_section(conn, db_path),
@@ -604,6 +815,11 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
         "tasks": tasks,
         "drift": _collect_drift_section(conn),
         "roles": _collect_roles_section(),
+        "architects": architects,
+        "pending_hires": _collect_pending_hires_section(
+            conn,
+            architect_names=architect_names,
+        ),
     }
     report["roles_templates"] = {
         "roles_dir": report["roles"]["roles_dir"],
@@ -613,7 +829,15 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
     }
     report["engineers"] = _collect_engineers_section(conn)
     checks = [check(report) for check in _DOCTOR_CHECKS]
-    warnings = [warning for fn in _DOCTOR_WARNINGS if (warning := fn(report))]
+    warnings = []
+    for fn in _DOCTOR_WARNINGS:
+        warning = fn(report)
+        if not warning:
+            continue
+        if isinstance(warning, list):
+            warnings.extend(warning)
+        else:
+            warnings.append(warning)
     report["checks"] = checks
     report["warnings"] = warnings
     report["result"] = "pass" if all(c["status"] == "pass" for c in checks) else "fail"
@@ -634,6 +858,8 @@ def format_doctor_report(report: dict) -> str:
     migration = report.get("migration", {})
     agents = report.get("agents", {})
     engineers = report.get("engineers", {}) or {}
+    architects = report.get("architects", {}) or {}
+    pending_hires = report.get("pending_hires", {}) or {}
     tasks = report.get("tasks", {})
     drift = report.get("drift", {})
     roles = report.get("roles", {}) or {}
@@ -694,6 +920,29 @@ def format_doctor_report(report: dict) -> str:
             f"tasks={int(engineer.get('task_count', 0) or 0)}"
         )
     lines.extend([
+        "",
+        "[architects]",
+        f"  total:             {int(architects.get('total', 0) or 0)}",
+        "  architects:",
+    ])
+    for architect in list(architects.get("architects", []) or []):
+        lines.append(
+            "    - "
+            f"{architect.get('name', '')} "
+            f"id={architect.get('id', '')} "
+            f"decisions={int(architect.get('decision_count', 0) or 0)} "
+            f"hired_engineers={int(architect.get('hired_engineer_count', 0) or 0)}"
+        )
+    lines.extend([
+        "",
+        "[pending_hires]",
+        f"  pending:                  {int(pending_hires.get('pending', 0) or 0)}",
+        "  approved:                 "
+        f"{int(pending_hires.get('approved_recent', 0) or 0)} (in the last 7 days)",
+        "  rejected:                 "
+        f"{int(pending_hires.get('rejected_recent', 0) or 0)} (in the last 7 days)",
+        "  stale_pending (>24h):     "
+        f"{int(pending_hires.get('stale_pending', 0) or 0)}",
         "",
         "[tasks]",
         f"  total:       {int(tasks.get('total', 0) or 0)}",
@@ -768,6 +1017,23 @@ def format_doctor_report(report: dict) -> str:
                 if summary:
                     base += f": {summary}"
                 lines.append(base)
+            elif name == "stale_pending_hire":
+                architect_name = str(details.get("architect_name", "") or "").strip()
+                architect_display = architect_name or str(
+                    details.get("architect_id", "") or "<unknown architect>"
+                )
+                lines.append(
+                    "  - pending hire "
+                    f"{details.get('id', '')} from {architect_display} "
+                    f"has been waiting {int(details.get('age_hours', 0) or 0)} hours; "
+                    "approve or reject"
+                )
+            elif name == "dangling_decision_architect":
+                lines.append(
+                    "  - decision "
+                    f"{details.get('id', '')} points at missing architect "
+                    f"{details.get('architect_id', '')}"
+                )
             else:
                 lines.append(f"  - {name}")
     failed_checks = list(report.get("failed_checks", []) or [])
@@ -804,6 +1070,13 @@ def format_doctor_report(report: dict) -> str:
                     "  - board_tasks.weaver_owner_id ↔ assigned_engineer_id drift: "
                     f"{details.get('count', 0)}"
                 )
+            elif name == "invalid_architect_hired_by_architect":
+                for entry in list(details.get("invalid", []) or []):
+                    lines.append(
+                        "  - architect "
+                        f"{entry.get('name') or entry.get('id')}"
+                        " has hired_by_architect_id, invalid state"
+                    )
             else:
                 lines.append(f"  - {name}")
     return "\n".join(lines)

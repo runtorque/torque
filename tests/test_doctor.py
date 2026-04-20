@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -29,6 +30,33 @@ class LoomDoctorTests(unittest.TestCase):
         home = Path(self.tmp.name) / "home"
         (home / ".loom" / "agents").mkdir(parents=True, exist_ok=True)
         return home
+
+    def _save_engineer(self, engineer_id="weaver-1", name="Weaver"):
+        self.db.save_agent(
+            AgentCell(
+                id=engineer_id,
+                name=name,
+                group="loom",
+                slug=name.lower(),
+                cell_type="agent",
+                kind="engineer",
+                persistent=True,
+            )
+        )
+
+    def _save_architect(self, architect_id="arch-1", name="productmind", **overrides):
+        self.db.save_agent(
+            AgentCell(
+                id=architect_id,
+                name=name,
+                group="loom",
+                slug=name.lower(),
+                cell_type="agent",
+                kind="architect",
+                persistent=True,
+                **overrides,
+            )
+        )
 
     def test_build_doctor_report_warns_when_no_engineer_exists(self):
         home = self._home_dir()
@@ -73,6 +101,8 @@ class LoomDoctorTests(unittest.TestCase):
             rendered,
         )
         self.assertIn("roles_dir:                      ~/.loom/roles (0 files)", rendered)
+        self.assertIn("[architects]", rendered)
+        self.assertIn("[pending_hires]", rendered)
 
     def test_build_doctor_report_passes_for_fully_assigned_engineer_db(self):
         home = self._home_dir()
@@ -174,9 +204,176 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertIn("Loom doctor — kinds refactor", rendered)
         self.assertIn("Result: PASS", rendered)
         self.assertIn("[engineers]", rendered)
+        self.assertIn("[architects]", rendered)
+        self.assertIn("[pending_hires]", rendered)
         self.assertIn("default (weaver_* routing):   Weaver (id=weaver-1)", rendered)
         self.assertIn(
             "legacy_templates_dir:           ~/.loom/agents (1 files)",
+            rendered,
+        )
+
+    def test_build_doctor_report_includes_zero_architect_and_pending_hire_sections(self):
+        home = self._home_dir()
+        self._save_engineer()
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertEqual(report["architects"]["total"], 0)
+        self.assertEqual(report["architects"]["architects"], [])
+        self.assertEqual(
+            report["pending_hires"],
+            {
+                "pending": 0,
+                "approved_recent": 0,
+                "rejected_recent": 0,
+                "stale_pending": 0,
+                "stale_pending_hires": [],
+            },
+        )
+        self.assertIn("[architects]", rendered)
+        self.assertIn("total:             0", rendered)
+        self.assertIn("[pending_hires]", rendered)
+        self.assertIn("pending:                  0", rendered)
+        self.assertIn("approved:                 0 (in the last 7 days)", rendered)
+        self.assertIn("rejected:                 0 (in the last 7 days)", rendered)
+        self.assertIn("stale_pending (>24h):     0", rendered)
+
+    def test_build_doctor_report_counts_architect_decisions_and_hired_engineers(self):
+        home = self._home_dir()
+        self._save_engineer()
+        self._save_architect()
+        self.db.save_agent(
+            AgentCell(
+                id="eng-bob",
+                name="bob",
+                group="loom",
+                slug="bob",
+                cell_type="agent",
+                kind="engineer",
+                persistent=True,
+                hired_by_architect_id="arch-1",
+            )
+        )
+        self.db.save_decision(
+            {"id": "decision-1", "architect_id": "arch-1", "title": "One", "rationale": "A"}
+        )
+        self.db.save_decision(
+            {"id": "decision-2", "architect_id": "arch-1", "title": "Two", "rationale": "B"}
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertEqual(report["architects"]["total"], 1)
+        self.assertEqual(
+            report["architects"]["architects"],
+            [
+                {
+                    "id": "arch-1",
+                    "name": "productmind",
+                    "slug": "productmind",
+                    "decision_count": 2,
+                    "hired_engineer_count": 1,
+                }
+            ],
+        )
+        self.assertIn(
+            "- productmind id=arch-1 decisions=2 hired_engineers=1",
+            rendered,
+        )
+
+    def test_build_doctor_report_warns_for_stale_pending_hires(self):
+        home = self._home_dir()
+        self._save_engineer()
+        self._save_architect()
+        now_ts = int(time.time())
+        self.db.save_pending_hire(
+            {
+                "id": "hire-1",
+                "architect_id": "arch-1",
+                "requested_name": "bob",
+                "status": "pending",
+                "created_at": now_ts - (26 * 3600),
+            }
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertIn(
+            {
+                "name": "stale_pending_hire",
+                "status": "warn",
+                "details": {
+                    "id": "hire-1",
+                    "architect_id": "arch-1",
+                    "architect_name": "productmind",
+                    "age_hours": 26,
+                },
+            },
+            report["warnings"],
+        )
+        self.assertEqual(report["pending_hires"]["pending"], 1)
+        self.assertEqual(report["pending_hires"]["stale_pending"], 1)
+        self.assertIn("Result: PASS (with warnings)", rendered)
+        self.assertIn(
+            "pending hire hire-1 from productmind has been waiting 26 hours; approve or reject",
+            rendered,
+        )
+
+    def test_build_doctor_report_warns_for_dangling_decision_architect(self):
+        home = self._home_dir()
+        self._save_engineer()
+        self.db.save_decision(
+            {
+                "id": "decision-dangling",
+                "architect_id": "arch-missing",
+                "title": "Dangling",
+                "rationale": "Missing architect",
+            }
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertIn(
+            {
+                "name": "dangling_decision_architect",
+                "status": "warn",
+                "details": {
+                    "id": "decision-dangling",
+                    "architect_id": "arch-missing",
+                },
+            },
+            report["warnings"],
+        )
+        self.assertIn(
+            "decision decision-dangling points at missing architect arch-missing",
+            rendered,
+        )
+
+    def test_build_doctor_report_fails_for_architect_hired_by_architect_corruption(self):
+        home = self._home_dir()
+        self._save_engineer()
+        self._save_architect(hired_by_architect_id="arch-parent")
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "fail")
+        self.assertIn("invalid_architect_hired_by_architect", report["failed_checks"])
+        self.assertIn(
+            "architect productmind has hired_by_architect_id, invalid state",
             rendered,
         )
 
