@@ -24,7 +24,6 @@ CREATE TABLE IF NOT EXISTS agents (
     directory             TEXT NOT NULL DEFAULT '',
     tab_color             TEXT NOT NULL DEFAULT '',
     icon                  TEXT NOT NULL DEFAULT '',
-    template              TEXT NOT NULL DEFAULT '',
     window_id             TEXT NOT NULL DEFAULT '',
     parent_id             TEXT NOT NULL DEFAULT '',
     status                TEXT NOT NULL DEFAULT 'stopped',
@@ -40,8 +39,7 @@ CREATE TABLE IF NOT EXISTS agents (
     agent_session_id      TEXT NOT NULL DEFAULT '',
     session_resume        INTEGER NOT NULL DEFAULT 1,
     idle_timeout          INTEGER NOT NULL DEFAULT 0,
-    tasks_dispatched      INTEGER NOT NULL DEFAULT 0,
-    created_by_weaver_id  TEXT NOT NULL DEFAULT ''
+    tasks_dispatched      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS groups (
@@ -653,8 +651,6 @@ def initialize_database(conn: sqlite3.Connection, backfill_agent_history):
     # Migrate: add tasks_dispatched column to agents
     for col, col_type, default in [
         ("tasks_dispatched", "INTEGER", "0"),
-        ("created_by_weaver_id", "TEXT", "''"),
-        ("template", "TEXT", "''"),
         ("worktree_base_dir", "TEXT", "'.loom/worktrees'"),
         ("worktree_auto_checkpoint", "INTEGER", "0"),
         ("checkpoint_on_progress", "INTEGER", "0"),

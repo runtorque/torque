@@ -415,7 +415,7 @@ class MatrixStateCleanupTests(unittest.TestCase):
         self.assertEqual(task.suggested_action, "feature/review")
         self.assertEqual(
             state.agents["agent-1"].created_by_weaver_id,
-            "weaver-1",
+            "engineer-1",
         )
 
     def test_agent_visibility_to_weaver_respects_owned_agent_setting(self):
