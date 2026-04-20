@@ -41,6 +41,10 @@ var _weaverArchitectExpanded = {};
 var _weaverArchitectDecisionUi = {};
 var _WEAVER_DECISION_STATUSES = ['proposed', 'accepted', 'revised', 'rejected'];
 
+function _weaverDecisionFocusKey(decisionId, field) {
+  return 'weaver-decision-' + String(field || '') + ':' + String(decisionId || '');
+}
+
 function _weaverGroupAgents(group) {
   var agents = [];
   if (!state || !state.agents) return agents;
@@ -242,6 +246,9 @@ function _weaverRenderDecisionRow(architectId, decision) {
   var ui = _weaverDecisionUiState(decision.id, decision);
   var decisionIdJs = JSON.stringify(String(decision.id || ''));
   var architectIdJs = JSON.stringify(String(architectId || ''));
+  var titleFocusKey = _weaverDecisionFocusKey(decision.id, 'title');
+  var rationaleFocusKey = _weaverDecisionFocusKey(decision.id, 'rationale');
+  var statusFocusKey = _weaverDecisionFocusKey(decision.id, 'status');
   var linkedTaskIds = Array.isArray(decision.linked_task_ids) ? decision.linked_task_ids : [];
   var linkedEngineerIds = Array.isArray(decision.linked_engineer_ids) ? decision.linked_engineer_ids : [];
   var taskOptions = getArchitectDecisionTaskOptions(architectId);
@@ -263,13 +270,17 @@ function _weaverRenderDecisionRow(architectId, decision) {
     html += '<div class="architect-decision-body">';
     if (ui.editing) {
       html += '<input class="detail-inline-description-input architect-decision-input"'
+        + ' data-focus-key="' + _esc(titleFocusKey) + '"'
         + ' value="' + _esc(ui.draft.title || '') + '"'
         + ' oninput="weaverDecisionDraftInput(' + decisionIdJs + ',\'title\',this.value)"'
         + ' placeholder="Decision title">';
       html += '<textarea class="detail-inline-description-input architect-decision-textarea" rows="4"'
+        + ' data-focus-key="' + _esc(rationaleFocusKey) + '"'
         + ' oninput="weaverDecisionDraftInput(' + decisionIdJs + ',\'rationale\',this.value)"'
         + ' placeholder="Decision rationale...">' + _esc(ui.draft.rationale || '') + '</textarea>';
-      html += '<select class="architect-decision-status-select" onchange="weaverDecisionDraftInput(' + decisionIdJs + ',\'status\',this.value)">';
+      html += '<select class="architect-decision-status-select"'
+        + ' data-focus-key="' + _esc(statusFocusKey) + '"'
+        + ' onchange="weaverDecisionDraftInput(' + decisionIdJs + ',\'status\',this.value)">';
       for (var statusIndex = 0; statusIndex < _WEAVER_DECISION_STATUSES.length; statusIndex++) {
         var statusOption = _WEAVER_DECISION_STATUSES[statusIndex];
         var selected = ui.draft.status === statusOption ? ' selected' : '';
@@ -570,6 +581,10 @@ function renderWeaverPanel() {
   var panelStateOptions = {
     scrollSelectors: ['.weaver-content'],
     captureFocusKey(active) {
+      if (typeof _captureMainFocusKey === 'function') {
+        var key = _captureMainFocusKey(active);
+        if (key) return key;
+      }
       if (active && active.classList
           && active.classList.contains('weaver-instructions')) {
         return '.weaver-instructions';

@@ -6109,6 +6109,126 @@ test('renderWeaverPanel preserves focused reply draft across rerenders', () => {
   assert.equal(input.selectionEnd, 13);
 });
 
+test('renderWeaverPanel preserves focused architect decision title editor across rerenders', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-weaver');
+  const content = document.createElement('div');
+  content.classList.add('weaver-content');
+  panel.setQuerySelector('.weaver-content', content);
+
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Productmind',
+      slug: 'productmind',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      created_at: 10,
+    },
+  };
+  context.state.decisions = {
+    'decision-1': {
+      id: 'decision-1',
+      architect_id: 'arch-1',
+      title: 'Initial title',
+      rationale: 'Initial rationale',
+      status: 'proposed',
+      updated_at: 20,
+    },
+  };
+
+  runInContext(context, `
+    _weaverArchitectExpanded['arch-1'] = true;
+    weaverStartDecisionEdit('decision-1');
+    weaverDecisionDraftInput('decision-1', 'title', 'Updated direction');
+  `);
+
+  const oldInput = document.createElement('input');
+  oldInput.dataset.focusKey = 'weaver-decision-title:decision-1';
+  oldInput.value = 'Updated direction';
+  oldInput.selectionStart = 7;
+  oldInput.selectionEnd = 16;
+  panel.appendChild(oldInput);
+  document.activeElement = oldInput;
+
+  const restoredInput = document.createElement('input');
+  restoredInput.dataset.focusKey = 'weaver-decision-title:decision-1';
+  panel.setQuerySelector('[data-focus-key="weaver-decision-title:decision-1"]', restoredInput);
+
+  context.renderWeaverPanel();
+
+  assert.equal(restoredInput.focused, true);
+  assert.equal(restoredInput.value, 'Updated direction');
+  assert.equal(restoredInput.selectionStart, 7);
+  assert.equal(restoredInput.selectionEnd, 16);
+  assert.equal(
+    jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.title`),
+    'Updated direction',
+  );
+});
+
+test('renderWeaverPanel preserves focused architect decision rationale editor across rerenders', () => {
+  const { context, document } = createWeaverHarness();
+  const panel = document.register('panel-weaver');
+  const content = document.createElement('div');
+  content.classList.add('weaver-content');
+  panel.setQuerySelector('.weaver-content', content);
+
+  context.state.agents = {
+    'arch-1': {
+      id: 'arch-1',
+      name: 'Productmind',
+      slug: 'productmind',
+      kind: 'architect',
+      group: 'alpha',
+      cell_type: 'agent',
+      status: 'running',
+      created_at: 10,
+    },
+  };
+  context.state.decisions = {
+    'decision-1': {
+      id: 'decision-1',
+      architect_id: 'arch-1',
+      title: 'Initial title',
+      rationale: 'Initial rationale',
+      status: 'proposed',
+      updated_at: 20,
+    },
+  };
+
+  runInContext(context, `
+    _weaverArchitectExpanded['arch-1'] = true;
+    weaverStartDecisionEdit('decision-1');
+    weaverDecisionDraftInput('decision-1', 'rationale', 'Keep the UI stable across refreshes');
+  `);
+
+  const oldTextarea = document.createElement('textarea');
+  oldTextarea.dataset.focusKey = 'weaver-decision-rationale:decision-1';
+  oldTextarea.value = 'Keep the UI stable across refreshes';
+  oldTextarea.selectionStart = 9;
+  oldTextarea.selectionEnd = 18;
+  panel.appendChild(oldTextarea);
+  document.activeElement = oldTextarea;
+
+  const restoredTextarea = document.createElement('textarea');
+  restoredTextarea.dataset.focusKey = 'weaver-decision-rationale:decision-1';
+  panel.setQuerySelector('[data-focus-key="weaver-decision-rationale:decision-1"]', restoredTextarea);
+
+  context.renderWeaverPanel();
+
+  assert.equal(restoredTextarea.focused, true);
+  assert.equal(restoredTextarea.value, 'Keep the UI stable across refreshes');
+  assert.equal(restoredTextarea.selectionStart, 9);
+  assert.equal(restoredTextarea.selectionEnd, 18);
+  assert.equal(
+    jsonValue(context, `_weaverArchitectDecisionUi['decision-1'].draft.rationale`),
+    'Keep the UI stable across refreshes',
+  );
+});
+
 test('renderWeaverPanel preserves the selected Events tab across rerenders', () => {
   const { context, document } = createWeaverHarness();
   const panel = document.register('panel-weaver');
