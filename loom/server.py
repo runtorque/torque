@@ -1602,20 +1602,59 @@ def _resolve_architect_cell(state: MatrixState, *, architect_id: str = "",
 def _engineer_name_exists(state: MatrixState, name: str, *,
                           exclude_id: str = "") -> bool:
     """Return True when another engineer already has ``name``."""
+    return _agent_name_exists_for_kind(
+        state,
+        name,
+        kind="engineer",
+        exclude_id=exclude_id,
+    )
+
+
+def _architect_name_exists(state: MatrixState, name: str, *,
+                           exclude_id: str = "") -> bool:
+    """Return True when another architect already has ``name``."""
+    return _agent_name_exists_for_kind(
+        state,
+        name,
+        kind="architect",
+        exclude_id=exclude_id,
+    )
+
+
+def _agent_name_exists_for_kind(state: MatrixState, name: str, *,
+                                kind: str, exclude_id: str = "") -> bool:
+    """Return True when another agent of ``kind`` already has ``name``."""
     normalized = str(name or "").strip().lower()
     if not normalized:
         return False
     excluded = str(exclude_id or "").strip()
+    expected_kind = str(kind or "").strip()
     for cell in state.agents.values():
         if cell.cell_type != "agent":
             continue
-        if str(getattr(cell, "kind", "") or "").strip() != "engineer":
+        if str(getattr(cell, "kind", "") or "").strip() != expected_kind:
             continue
         if excluded and cell.id == excluded:
             continue
         if str(cell.name or "").strip().lower() == normalized:
             return True
     return False
+
+
+def _architect_persistent_prompt_text(action_system_prompt: str = "") -> str:
+    """Build a minimal persistent prompt for user-created architect agents."""
+    parts = []
+    if action_system_prompt:
+        parts.append(str(action_system_prompt).rstrip())
+    parts.append(build_loom_system_prompt().rstrip())
+    parts.append(
+        "You are an architect agent. Use the architect_* tool surface to keep "
+        "a decision log, route work to specific engineers, request hires for "
+        "user approval, and message the engineers you hire. Product-level "
+        "scope lives with the architect; do not silently delegate or reshape "
+        "scope without recording the decision."
+    )
+    return "\n\n".join(parts) + "\n"
 
 
 async def _handle_add_engineer_command(
@@ -1692,6 +1731,76 @@ async def _handle_add_engineer_command(
         "slug": cell.slug,
         "name": cell.name,
         "kind": "engineer",
+    }
+
+
+async def _handle_add_architect_command(
+        data: dict,
+        state: MatrixState, *,
+        resolve_base_dir,
+        resolve_weaver_launch_config,
+        create_agent_with_config,
+        send_agent_prompt) -> dict:
+    """Create and launch a persistent architect agent."""
+    name = str(data.get("name", "") or "").strip()
+    if not name:
+        return {"type": "error", "message": "Architect name is required"}
+    if _architect_name_exists(state, name):
+        return {
+            "type": "error",
+            "message": f"Architect '{name}' already exists",
+        }
+
+    group = str(data.get("group", "") or "").strip() or _resolve_engineer_group(state)
+    if group not in state.groups:
+        state.add_group(group)
+    base_dir = await resolve_base_dir(group)
+    overrides = {
+        key: str(data.get(key, "") or "").strip()
+        for key in ("command", "provider", "directory")
+        if str(data.get(key, "") or "").strip()
+    }
+    launch_cfg = resolve_weaver_launch_config(
+        group,
+        base_dir=base_dir,
+        explicit_template="",
+        overrides=overrides,
+    )
+
+    persistent_prompt_text = _architect_persistent_prompt_text(
+        launch_cfg.get("system_prompt", ""),
+    )
+    startup_prompt = _startup_prompt_for_new_agent(
+        agent_type=launch_cfg.get("agent_type", ""),
+        persistent_prompt_text=persistent_prompt_text,
+        is_weaver=True,
+    )
+
+    cell = await create_agent_with_config(
+        group,
+        name,
+        launch_cfg,
+        explicit_template="",
+        persistent_prompt_text=persistent_prompt_text,
+        created_by_weaver_id="",
+        owner_engineer_id="",
+        kind="architect",
+        persistent=True,
+        hired_by_architect_id="",
+    )
+    if not cell:
+        return {"type": "error", "message": "Failed to create architect"}
+
+    if cell.session_id:
+        for prompt_text, send_kwargs in _new_agent_prompt_sequence(
+                launch_cfg,
+                startup_prompt=startup_prompt):
+            await send_agent_prompt(cell, prompt_text, **send_kwargs)
+    return {
+        "id": cell.id,
+        "slug": cell.slug,
+        "name": cell.name,
+        "kind": "architect",
     }
 
 
@@ -1919,6 +2028,85 @@ async def _handle_rename_engineer_command(
         "name": engineer.name,
         "kind": "engineer",
     }
+
+
+async def _handle_delete_architect_command(
+        data: dict,
+        state: MatrixState, *,
+        close_agent_session_only) -> dict:
+    """Delete an architect after transferring hired engineers to the user."""
+    architect = _resolve_architect_cell(
+        state,
+        architect_id=data.get("id", ""),
+        architect_slug=data.get("slug", ""),
+    )
+    if not architect:
+        return {"type": "error", "message": "Architect not found"}
+
+    transferred_engineers = 0
+    for cell in list(state.agents.values()):
+        if cell.cell_type != "agent":
+            continue
+        if str(getattr(cell, "kind", "") or "").strip() != "engineer":
+            continue
+        if str(getattr(cell, "hired_by_architect_id", "") or "").strip() != architect.id:
+            continue
+        cell.hired_by_architect_id = ""
+        transferred_engineers += 1
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+
+    archived_decisions = 0
+    for decision in state.load_decisions_for_architect(
+            architect.id, include_archived=False):
+        saved = state.save_decision({
+            "id": decision["id"],
+            "archived": True,
+        })
+        if saved:
+            archived_decisions += 1
+
+    await close_agent_session_only(architect)
+    return {
+        "transferred_engineers": transferred_engineers,
+        "archived_decisions": archived_decisions,
+    }
+
+
+async def _dispatch_architect_ui_tool(name: str, args: dict,
+                                      state: MatrixState) -> dict:
+    """Run an architect-scoped shared-core tool for the user-facing UI."""
+    from .mcp_tools_shared import dispatch_scoped_tool
+
+    caller_id = str(args.get("architect_id", "") or "").strip()
+    if not caller_id:
+        return {"type": "error", "message": "architect_id is required"}
+
+    async def _unexpected_handle_command(_data: dict) -> dict:
+        return {
+            "type": "error",
+            "message": "Architect UI command cannot route nested commands",
+        }
+
+    payload_text, is_error = await dispatch_scoped_tool(
+        name,
+        args,
+        _unexpected_handle_command,
+        state,
+        tool_prefix="architect_",
+        caller_kind="architect",
+        caller_id=caller_id,
+    )
+    if is_error:
+        return {"type": "error", "message": payload_text}
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError:
+        return {"type": "ok", "message": payload_text}
+    if isinstance(payload, dict):
+        payload.setdefault("type", "ok")
+        return payload
+    return {"type": "ok", "data": payload}
 
 
 async def _handle_relaunch_agent_command(
@@ -3457,6 +3645,16 @@ async def main(connection=None):
                     send_agent_prompt=_send_agent_prompt,
                 )
 
+            elif cmd == "add_architect":
+                result = await _handle_add_architect_command(
+                    data,
+                    state,
+                    resolve_base_dir=_resolve_base_dir,
+                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    create_agent_with_config=_create_agent_with_config,
+                    send_agent_prompt=_send_agent_prompt,
+                )
+
             elif cmd == "architect_engineer_hire":
                 result = await _handle_architect_engineer_hire_command(
                     data,
@@ -3489,11 +3687,30 @@ async def main(connection=None):
                     close_agent_session_only=_close_agent_session_only,
                 )
 
+            elif cmd == "delete_architect":
+                result = await _handle_delete_architect_command(
+                    data,
+                    state,
+                    close_agent_session_only=_close_agent_session_only,
+                )
+
             elif cmd == "rename_engineer":
                 result = await _handle_rename_engineer_command(
                     data,
                     state,
                     update_session=bridge.update_session,
+                )
+
+            elif cmd in {
+                    "architect_decision_create",
+                    "architect_decision_update",
+                    "architect_decision_link",
+                    "architect_decision_list",
+            }:
+                result = await _dispatch_architect_ui_tool(
+                    cmd,
+                    data,
+                    state,
                 )
 
             elif cmd == "add_agent":
@@ -3633,7 +3850,14 @@ async def main(connection=None):
                 cell = state.agents.get(data["id"])
                 removed = []
                 if cell:
-                    removed = await _close_agent_session_only(cell)
+                    if str(getattr(cell, "kind", "") or "").strip() == "architect":
+                        result = await _handle_delete_architect_command(
+                            {"id": cell.id},
+                            state,
+                            close_agent_session_only=_close_agent_session_only,
+                        )
+                    else:
+                        removed = await _close_agent_session_only(cell)
                 for c in removed:
                     await _safe_remove_worktree(c)
 

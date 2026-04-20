@@ -3631,7 +3631,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     board: false,
     context: false,
     events: false,
-    weaver: false,
+    weaver: true,
     templates: false,
   });
   assert.deepEqual(jsonValue(context, `state.pending_hires["hire-1"]`), {
@@ -3659,7 +3659,7 @@ test('decision and pending-hire deltas invalidate the main surface', () => {
     board: false,
     context: false,
     events: false,
-    weaver: false,
+    weaver: true,
     templates: false,
   });
   assert.equal(
@@ -8002,6 +8002,31 @@ test('Cmd+Option+E opens the add engineer modal through the shared key handler',
   assert.equal(sandbox.addEngineerModalCalls, 1);
 });
 
+test('Cmd+Option+P opens the add architect modal through the shared key handler', () => {
+  const { document, sandbox } = createMainHarness({
+    openAddArchitectModal(group) {
+      sandbox.addArchitectModalCalls = (sandbox.addArchitectModalCalls || []);
+      sandbox.addArchitectModalCalls.push(group);
+    },
+    _weaverCurrentGroup() {
+      return 'loom';
+    },
+  });
+  let prevented = false;
+
+  document.listeners.keydown({
+    key: 'P',
+    metaKey: true,
+    altKey: true,
+    ctrlKey: false,
+    shiftKey: false,
+    preventDefault() { prevented = true; },
+  });
+
+  assert.equal(prevented, true);
+  assert.deepEqual(sandbox.addArchitectModalCalls, ['loom']);
+});
+
 test('full state toggles embedded runtime body class', () => {
   const { context, document } = createWsRenderHarness();
 
@@ -8448,6 +8473,107 @@ test('main render preserves manual state.groups ordering within engineer hierarc
     'agent-user',
   ]);
   assert.match(main.innerHTML, /Bob[\s\S]*Worker B2[\s\S]*Worker B1[\s\S]*Alice[\s\S]*Worker A2[\s\S]*Worker A1[\s\S]*User Worker/);
+});
+
+test('main render orders architects above hired engineers, then user-owned engineers and orphan workers', () => {
+  const { context, document, sandbox } = createMainRenderHarness();
+  const main = document.getElementById('main');
+
+  sandbox.state.groups = {
+    loom: ['worker-user', 'eng-user', 'worker-hired', 'arch-a', 'eng-hired', 'orphan', 'arch-b'],
+  };
+  sandbox.state.group_settings = {
+    loom: { collapsed_default: false, weaver_agent_id: '' },
+  };
+  sandbox.state.children = {};
+  sandbox.state.agents = {
+    'arch-a': {
+      id: 'arch-a',
+      name: 'Architect A',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'A',
+      status: 'running',
+      session_id: 'sess-arch-a',
+    },
+    'arch-b': {
+      id: 'arch-b',
+      name: 'Architect B',
+      kind: 'architect',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'B',
+      status: 'running',
+      session_id: 'sess-arch-b',
+    },
+    'eng-hired': {
+      id: 'eng-hired',
+      name: 'Alice',
+      kind: 'engineer',
+      hired_by_architect_id: 'arch-a',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'E',
+      status: 'running',
+      session_id: 'sess-eng-hired',
+    },
+    'worker-hired': {
+      id: 'worker-hired',
+      name: 'Worker A',
+      owner_engineer_id: 'eng-hired',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'W',
+      status: 'running',
+      session_id: 'sess-worker-hired',
+    },
+    'eng-user': {
+      id: 'eng-user',
+      name: 'Bob',
+      kind: 'engineer',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'U',
+      status: 'running',
+      session_id: 'sess-eng-user',
+    },
+    'worker-user': {
+      id: 'worker-user',
+      name: 'Worker B',
+      owner_engineer_id: 'eng-user',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'V',
+      status: 'running',
+      session_id: 'sess-worker-user',
+    },
+    'orphan': {
+      id: 'orphan',
+      name: 'Orphan Worker',
+      group: 'loom',
+      cell_type: 'agent',
+      icon: 'O',
+      status: 'running',
+      session_id: 'sess-orphan',
+    },
+  };
+
+  runInContext(context, `render();`);
+
+  assert.deepEqual(jsonValue(context, `window._navAgents`), [
+    'arch-a',
+    'eng-hired',
+    'worker-hired',
+    'arch-b',
+    'eng-user',
+    'worker-user',
+    'orphan',
+  ]);
+  assert.match(main.innerHTML, /Architect A[\s\S]*Alice[\s\S]*Worker A[\s\S]*Architect B[\s\S]*Bob[\s\S]*Worker B[\s\S]*Orphan Worker/);
+  assert.match(main.innerHTML, /cell-architect-badge/);
+  assert.match(main.innerHTML, /architect-owned-engineer/);
+  assert.match(main.innerHTML, /architect-owned-worker/);
 });
 
 test('main render restores the main scroll position across rerenders', () => {

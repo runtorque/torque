@@ -406,7 +406,7 @@ function _deltaSurfaceInvalidations(ops) {
       case 'decision_remove':
       case 'pending_hire_upsert':
       case 'pending_hire_resolve':
-        _markSurface(flags, 'main');
+        _markSurface(flags, 'main', 'weaver');
         break;
       case 'ui_update':
         _applyUiSurfaceInvalidation(flags, op.key);
@@ -913,6 +913,8 @@ function handleAction(msg) {
     if (msg.group) quickAddAgent(msg.group);
   } else if (msg.action === 'add_engineer') {
     if (typeof openAddEngineerModal === 'function') openAddEngineerModal();
+  } else if (msg.action === 'add_architect') {
+    if (typeof openAddArchitectModal === 'function') openAddArchitectModal(msg.group || '');
   } else if (msg.action === 'add_terminal') {
     if (msg.group && msg.parent_id) quickAddTerminal(msg.group, msg.parent_id);
   }

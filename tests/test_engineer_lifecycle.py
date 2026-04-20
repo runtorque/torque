@@ -89,6 +89,22 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         state._emit_agent(engineer)
         return engineer
 
+    def _add_architect_cell(self, state, architect_id: str, name: str):
+        del architect_id
+        architect = state.add_agent(
+            name=name,
+            group="loom",
+            terminal_backend="iterm2",
+            profile="Default",
+            command="codex",
+            directory="/tmp/project",
+            tab_color="",
+        )
+        architect.kind = "architect"
+        architect.persistent = True
+        state._emit_agent(architect)
+        return architect
+
     async def test_add_engineer_creates_persistent_engineer_with_binding_and_engineer_mcp_entrypoint(self):
         state = self._make_state()
         bridge = _CapturingBridge()
@@ -190,6 +206,110 @@ class EngineerLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["type"], "error")
         self.assertEqual(len(state.agents), 1)
+
+    async def test_add_architect_creates_persistent_architect_with_binding_and_architect_mcp_entrypoint(self):
+        state = self._make_state()
+        bridge = _CapturingBridge()
+        service = self.server_agent_mod.AgentLaunchService(
+            state=state,
+            connection=None,
+            bridge=bridge,
+            worktree_mgr=None,
+            template_mgr=None,
+        )
+        sent_prompts = []
+
+        async def fake_resolve_base_dir(group):
+            self.assertEqual(group, "loom")
+            return temp_dir
+
+        def fake_resolve_weaver_launch_config(group, *, base_dir="",
+                                              explicit_template="",
+                                              overrides=None):
+            self.assertEqual(group, "loom")
+            self.assertEqual(base_dir, temp_dir)
+            self.assertEqual(explicit_template, "")
+            self.assertEqual(overrides, {"command": "codex --architect"})
+            return self._launch_config(temp_dir)
+
+        async def fake_send_agent_prompt(cell, prompt, **kwargs):
+            sent_prompts.append({
+                "cell_id": cell.id,
+                "prompt": prompt,
+                "kwargs": kwargs,
+            })
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = await self.server_mod._handle_add_architect_command(
+                {
+                    "name": "Productmind",
+                    "command": "codex --architect",
+                    "group": "loom",
+                },
+                state,
+                resolve_base_dir=fake_resolve_base_dir,
+                resolve_weaver_launch_config=fake_resolve_weaver_launch_config,
+                create_agent_with_config=service.create_agent_with_config,
+                send_agent_prompt=fake_send_agent_prompt,
+            )
+
+        self.assertEqual(result["name"], "Productmind")
+        self.assertEqual(result["kind"], "architect")
+        architect = state.agents[result["id"]]
+        self.assertEqual(architect.slug, result["slug"])
+        self.assertEqual(architect.kind, "architect")
+        self.assertTrue(architect.persistent)
+        self.assertEqual(len(bridge.create_session_calls), 1)
+        call = bridge.create_session_calls[0]["kwargs"]
+        self.assertEqual(call["env_vars"]["BASE"], "1")
+        self.assertEqual(call["env_vars"]["LOOM_ARCHITECT_ID"], architect.id)
+        self.assertEqual(
+            call["mcp_entrypoint"],
+            self.server_agent_mod.ARCHITECT_MCP_ENTRYPOINT,
+        )
+        self.assertEqual(len(sent_prompts), 1)
+
+    async def test_delete_architect_transfers_hired_engineers_and_archives_decisions(self):
+        state = self._make_state()
+        state.db = self.server_mod.LoomDB(Path(":memory:"))
+        state.db.init()
+        try:
+            architect = self._add_architect_cell(state, "arch-1", "Productmind")
+            hired = self._add_engineer_cell(state, "eng-a", "Alice")
+            hired.hired_by_architect_id = architect.id
+            other = self._add_engineer_cell(state, "eng-b", "Bob")
+            saved_decision = state.save_decision({
+                "id": "decision-1",
+                "architect_id": architect.id,
+                "title": "Scope",
+                "rationale": "Keep it small",
+                "status": "proposed",
+            })
+            self.assertIsNotNone(saved_decision)
+            removed = []
+
+            async def fake_close_agent_session_only(cell):
+                removed.append(cell.id)
+                return state.remove_agent(cell.id)
+
+            result = await self.server_mod._handle_delete_architect_command(
+                {"id": architect.id},
+                state,
+                close_agent_session_only=fake_close_agent_session_only,
+            )
+
+            self.assertEqual(
+                result,
+                {"transferred_engineers": 1, "archived_decisions": 1},
+            )
+            self.assertEqual(hired.hired_by_architect_id, "")
+            self.assertEqual(other.hired_by_architect_id, "")
+            self.assertNotIn(architect.id, state.agents)
+            self.assertEqual(removed, [architect.id])
+            archived = state.load_decision("decision-1")
+            self.assertTrue(archived["archived"])
+        finally:
+            state.db.close()
 
     async def test_delete_engineer_transfers_workers_and_tasks(self):
         state = self._make_state()

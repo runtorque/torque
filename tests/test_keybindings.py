@@ -39,6 +39,7 @@ def _install_iterm2_stub():
         ANSI_B = auto()
         ANSI_C = auto()
         ANSI_E = auto()
+        ANSI_P = auto()
         ANSI_T = auto()
 
     class BindingAction(Enum):
@@ -622,6 +623,48 @@ class KeybindingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             sent,
             [{"type": "action", "action": "add_engineer"}],
+        )
+
+    async def test_add_architect_shortcut_dispatches_frontend_action(self):
+        state = self.state_mod.MatrixState()
+        state.groups = {"loom": ["agent-1"]}
+        agent = self.state_mod.AgentCell(
+            id="agent-1",
+            name="Agent 1",
+            group="loom",
+            slug="agent-1",
+            cell_type="agent",
+            session_id="session-1",
+            window_id="window-a",
+        )
+        state.agents = {agent.id: agent}
+        state.active_session_id = agent.session_id
+
+        class Bridge:
+            async def focus_session(self, _session_id):
+                return None
+
+        sent = []
+
+        class FakeWs:
+            async def send_str(self, payload):
+                sent.append(json.loads(payload))
+
+        state._ws_clients = {FakeWs()}
+
+        await self.keybindings_mod.setup(object(), state, Bridge())
+
+        await self.stored["rpcs"]["loom_add_architect"](
+            session_id=agent.session_id,
+        )
+
+        defaults = self.keybindings_mod.get_default_bindings()
+        self.assertIn("add_architect", defaults)
+        self.assertEqual(defaults["add_architect"]["keycode"], "ANSI_P")
+        self.assertEqual(defaults["add_architect"]["label"], "Add architect")
+        self.assertEqual(
+            sent,
+            [{"type": "action", "action": "add_architect", "group": "loom"}],
         )
 
     async def test_navigation_rpcs_follow_engineer_hierarchy_order(self):

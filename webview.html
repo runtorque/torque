@@ -12,6 +12,7 @@
 <!-- Persistent infrastructure-health banner. Hidden by default;
      populated when the supervisor is unavailable or restarted. -->
 <div id="system-banner" hidden></div>
+<div id="pending-hire-banner" hidden></div>
 
 <!-- Header -->
 <header>
@@ -179,6 +180,61 @@
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModals()">Cancel</button>
       <button class="btn-primary" id="engineer-submit-btn" onclick="submitAddEngineer()">Create Engineer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Architect modal -->
+<div class="overlay" id="modal-architect">
+  <div class="modal">
+    <h2 id="modal-architect-title">Add Architect</h2>
+    <div id="modal-architect-summary" class="modal-summary hidden"></div>
+    <label>Name</label>
+    <input id="architect-name-input" placeholder="e.g. Productmind" autocomplete="off"
+           onkeydown="if(event.key==='Enter')submitAddArchitect();if(event.key==='Escape')closeModals();">
+    <label>Boot command <span class="label-hint">(optional)</span></label>
+    <input id="architect-command-input" placeholder="Use default architect command" autocomplete="off"
+           onkeydown="if(event.key==='Enter')submitAddArchitect();if(event.key==='Escape')closeModals();">
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" id="architect-submit-btn" onclick="submitAddArchitect()">Create Architect</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reject pending hire modal -->
+<div class="overlay" id="modal-pending-hire-reject">
+  <div class="modal">
+    <h2>Reject Hire Request</h2>
+    <div id="pending-hire-reject-summary" class="modal-summary hidden"></div>
+    <label>Optional note</label>
+    <textarea id="pending-hire-reject-note" rows="4" placeholder="Add context for the architect (optional)"
+              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary btn-danger" id="pending-hire-reject-submit-btn" onclick="submitPendingHireReject()">Reject</button>
+    </div>
+  </div>
+</div>
+
+<!-- Architect decision modal -->
+<div class="overlay" id="modal-architect-decision">
+  <div class="modal modal-tall">
+    <h2 id="architect-decision-modal-title">New Decision</h2>
+    <div id="architect-decision-modal-summary" class="modal-summary hidden"></div>
+    <label>Title</label>
+    <input id="architect-decision-title-input" placeholder="e.g. Define API cut line" autocomplete="off"
+           onkeydown="if(event.key==='Enter')submitArchitectDecision();if(event.key==='Escape')closeModals();">
+    <label>Rationale</label>
+    <textarea id="architect-decision-rationale-input" rows="6" placeholder="Capture the why behind this decision..."
+              onkeydown="if(event.key==='Escape')closeModals();"></textarea>
+    <label>Linked tasks <span class="label-hint">(optional)</span></label>
+    <select id="architect-decision-task-select" multiple size="6"></select>
+    <label>Linked engineers <span class="label-hint">(optional)</span></label>
+    <select id="architect-decision-engineer-select" multiple size="6"></select>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" id="architect-decision-submit-btn" onclick="submitArchitectDecision()">Create Decision</button>
     </div>
   </div>
 </div>
@@ -1002,7 +1058,7 @@
     </span>
     <span>Context</span>
   </button>
-  <button class="taskbar-app" data-app="weaver" onclick="togglePanel('weaver')">&#x2696; Engineers</button>
+  <button class="taskbar-app" data-app="weaver" onclick="togglePanel('weaver')">&#x2696; Architects</button>
   <button class="taskbar-app" data-app="events" onclick="togglePanel('events')">&#x26A0; Events</button>
   <div class="taskbar-spacer"></div>
   <button id="taskbar-restore-layout" class="taskbar-aux-btn"

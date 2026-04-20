@@ -131,6 +131,33 @@ function onAgentDblClick(id) {
 async function removeAgent(id) {
   const a = state.agents[id];
   if (!a) return;
+  if ((a.kind || '') === 'architect') {
+    var hiredEngineers = 0;
+    if (state && state.agents) {
+      for (var architectAgentId in state.agents) {
+        var candidate = state.agents[architectAgentId];
+        if (!candidate || candidate.cell_type !== 'agent') continue;
+        if ((candidate.kind || '') !== 'engineer') continue;
+        if (String(candidate.hired_by_architect_id || '') === String(a.id || '')) {
+          hiredEngineers += 1;
+        }
+      }
+    }
+    var decisionCount = 0;
+    if (typeof _architectDecisionsForAgent === 'function') {
+      decisionCount = _architectDecisionsForAgent(a.id).length;
+    }
+    var architectMsg = 'Remove "' + a.name + '"? Deleting an architect transfers '
+      + hiredEngineers + ' hired engineer' + (hiredEngineers === 1 ? '' : 's')
+      + ' to the user and archives ' + decisionCount + ' decision'
+      + (decisionCount === 1 ? '' : 's') + '.';
+    if (await showConfirm(architectMsg)) {
+      if (selectedAgentId === id) selectedAgentId = null;
+      if (selectedTerminalId === id) selectedTerminalId = null;
+      send({ cmd: 'delete_architect', id });
+    }
+    return;
+  }
   const childCount = (state.children[id] || []).length;
   let msg = `Remove "${a.name}"?`;
   if (childCount > 0) {

@@ -680,6 +680,17 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  if (e.metaKey && e.altKey && !e.shiftKey && !e.ctrlKey
+      && (e.key === 'p' || e.key === 'P')) {
+    e.preventDefault();
+    if (typeof openAddArchitectModal === 'function') {
+      var architectGroup = '';
+      if (typeof _weaverCurrentGroup === 'function') architectGroup = _weaverCurrentGroup() || '';
+      openAddArchitectModal(architectGroup);
+    }
+    return;
+  }
+
   // Skip shortcuts when any input/select/textarea is focused
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;

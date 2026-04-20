@@ -675,6 +675,32 @@ body.runtime-embedded .terminal-empty {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 999px;
 }
+.cell.architect-owned-engineer {
+  padding-left: 16px;
+}
+.cell.architect-owned-engineer::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 10px;
+  bottom: 8px;
+  width: 1px;
+  background: color-mix(in srgb, var(--amber) 28%, transparent);
+  border-radius: 999px;
+}
+.cell.architect-owned-worker {
+  padding-left: 24px;
+}
+.cell.architect-owned-worker::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: color-mix(in srgb, var(--amber) 28%, transparent);
+  border-radius: 999px;
+}
 .cell-name {
   font-size: 9px; text-align: center;
   max-width: 100%; overflow: hidden;
@@ -885,6 +911,21 @@ body.runtime-embedded .terminal-empty {
   color: var(--accent);
   background: rgba(88, 166, 255, 0.12);
   border: 1px solid rgba(88, 166, 255, 0.24);
+  border-radius: 999px;
+  padding: 0 4px;
+  line-height: 1.4;
+}
+.cell-architect-badge {
+  position: absolute;
+  bottom: 2px;
+  left: 3px;
+  font-size: 7px;
+  letter-spacing: .03em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #1f1300;
+  background: color-mix(in srgb, var(--amber) 82%, white);
+  border: 1px solid color-mix(in srgb, var(--amber) 58%, transparent);
   border-radius: 999px;
   padding: 0 4px;
   line-height: 1.4;
@@ -5584,6 +5625,128 @@ body.diff-view-open #ctx-menu {
   flex-direction: column;
   gap: 6px;
 }
+.architects-roster {
+  margin-bottom: 12px;
+}
+.architect-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.architect-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 4px 0;
+}
+.architect-parent-row {
+  border-color: color-mix(in srgb, var(--amber) 30%, var(--border));
+}
+.engineer-row-virtual-parent {
+  background: color-mix(in srgb, var(--bg-hover) 60%, transparent);
+}
+.architect-roster-level-1 {
+  margin-left: 12px;
+}
+.architect-roster-level-2 {
+  margin-left: 24px;
+}
+.architect-roster-level-1,
+.architect-roster-level-2 {
+  position: relative;
+}
+.architect-roster-level-1::before,
+.architect-roster-level-2::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+}
+.architect-roster-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+}
+.architect-roster-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.architect-roster-section-count,
+.architect-decision-group-count {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.architect-roster-section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.architect-roster-empty {
+  margin-left: 12px;
+}
+.architect-decision-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.architect-decision-group-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: capitalize;
+}
+.architect-decision-card {
+  margin-left: 12px;
+}
+.architect-decision-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  min-width: 0;
+  text-align: left;
+}
+.architect-decision-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.architect-decision-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.architect-decision-link-select,
+.architect-decision-status-select,
+.architect-decision-input,
+.architect-decision-textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-cell);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.architect-decision-link-select,
+.architect-decision-status-select {
+  min-width: 160px;
+}
+.architect-decision-input,
+.architect-decision-textarea {
+  width: 100%;
+}
 .engineer-row {
   display: flex;
   align-items: center;
@@ -6671,4 +6834,52 @@ body.diff-view-open #ctx-menu {
   background: #5a3a1a;
   color: #ffe5c0;
   border-bottom-color: #7a5020;
+}
+#pending-hire-banner {
+  position: sticky;
+  top: 0;
+  z-index: 39;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--amber) 22%, var(--bg-surface));
+  color: var(--text);
+  border-bottom: 1px solid color-mix(in srgb, var(--amber) 45%, var(--border));
+}
+.pending-hire-banner-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pending-hire-banner-copy {
+  font-size: 12px;
+  line-height: 1.4;
+}
+.pending-hire-banner-more {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.pending-hire-banner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pending-hire-banner-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font: 10px var(--font);
+  font-weight: 700;
+  cursor: pointer;
+}
+.pending-hire-banner-btn:hover {
+  border-color: var(--text-dim);
+}
+.pending-hire-banner-btn-primary {
+  background: color-mix(in srgb, var(--green) 78%, white);
+  color: #041b07;
+  border-color: color-mix(in srgb, var(--green) 36%, transparent);
 }
