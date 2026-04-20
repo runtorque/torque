@@ -170,11 +170,22 @@ Expected after restart:
 
 ## Recovery / rollback
 
-To revert only the stage-2 role files created by this smoke:
+To revert only the smoke-created role from this guide, remove that specific
+file:
 
 ```bash
-rm -rf "$HOME/.loom/roles"
+rm -f "$HOME/.loom/roles/careful-reviewer.yaml"
 ```
+
+If you saved the smoke role in project scope instead of user scope, remove the
+matching project-local file instead:
+
+```bash
+rm -f "<project>/.loom/roles/careful-reviewer.yaml"
+```
+
+Only remove the entire `~/.loom/roles/` directory if you independently
+confirmed it contains no other roles you want to keep.
 
 Then restart Loom. Legacy templates under `~/.loom/agents/` remain available
 through compatibility reads.
