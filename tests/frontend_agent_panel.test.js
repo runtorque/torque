@@ -19,6 +19,8 @@ function createHarness() {
   };
   const captureCalls = [];
   const restoreCalls = [];
+  const intervalCalls = [];
+  const clearIntervalCalls = [];
   const sandbox = {
     console,
     Date,
@@ -55,8 +57,8 @@ function createHarness() {
     },
     _weaverStopEventsCountdownTimer() {},
     _currentGroup() { return 'alpha'; },
-    setInterval() { return 1; },
-    clearInterval() {},
+    setInterval(fn, ms) { intervalCalls.push({ fn, ms }); return intervalCalls.length; },
+    clearInterval(id) { clearIntervalCalls.push(id); },
     send() {},
     window: { prompt() { return null; } },
   };
@@ -65,7 +67,7 @@ function createHarness() {
   const context = vm.createContext(sandbox);
   loadScript(context, 'static/js/weaver.js');
   loadScript(context, 'static/js/agent_panel.js');
-  return { context, panel, captureCalls, restoreCalls };
+  return { context, panel, captureCalls, restoreCalls, intervalCalls, clearIntervalCalls };
 }
 
 function setFocusedAgent(context, agent) {
@@ -310,6 +312,73 @@ test('architect panel filters decisions, hired engineers, and messages to the fo
   context.agentPanelSelectTab('messages');
   assert.match(panel.innerHTML, /Need a follow-up worker/);
   assert.match(panel.innerHTML, /Reply composer lands in a later task\./);
+});
+
+test('focused architect decision interactions rerender the agent panel instead of the legacy weaver surface', () => {
+  const { context, panel } = createHarness();
+  setFocusedAgent(context, {
+    id: 'arch-1',
+    name: 'Planner',
+    kind: 'architect',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.decisions = {
+    d1: {
+      id: 'd1',
+      architect_id: 'arch-1',
+      title: 'Keep the focused agent surface stable',
+      status: 'proposed',
+      updated_at: 40,
+    },
+  };
+
+  context.renderAgentPanel();
+  assert.match(panel.innerHTML, /Architect: Planner · Group: alpha/);
+  assert.doesNotMatch(panel.innerHTML, /Architects &amp; Engineers/);
+
+  context.weaverToggleDecision('d1');
+
+  assert.match(panel.innerHTML, /Architect: Planner · Group: alpha/);
+  assert.doesNotMatch(panel.innerHTML, /Architects &amp; Engineers/);
+  assert.match(panel.innerHTML, /architect-decision-body/);
+  assert.equal(vm.runInContext(`_weaverDecisionUiState('d1').expanded`, context), true);
+});
+
+test('focused engineer events tab starts the live countdown timer', () => {
+  const { context, panel, intervalCalls } = createHarness();
+  const countdownEl = { textContent: '' };
+  panel.querySelector = function(selector) {
+    if (selector === '.agent-panel-events-countdown'
+        && /agent-panel-events-countdown/.test(this.innerHTML || '')) {
+      return countdownEl;
+    }
+    return null;
+  };
+
+  setFocusedAgent(context, {
+    id: 'eng-1',
+    name: 'Builder',
+    kind: 'engineer',
+    group: 'alpha',
+    cell_type: 'agent',
+  });
+  context.state.weaver_buffer_stats.alpha = {
+    buffered_events: 1,
+    next_push_at: Math.floor(Date.now() / 1000) + 45,
+    queued_events: [
+      { id: 7, kind: 'task_completed', message: 'Queued for digest', timestamp: 30 },
+    ],
+    manual_flush_requested: false,
+  };
+  vm.runInContext(`_agentPanelLastSelectedTabByKind.engineer = 'events';`, context);
+
+  context.renderAgentPanel();
+
+  assert.match(panel.innerHTML, /Send queued now/);
+  assert.match(countdownEl.textContent, /Next eligible send in/);
+  assert.equal(intervalCalls.length, 1);
+  assert.equal(intervalCalls[0].ms, 1000);
 });
 
 test('worker worklog updates after task changes and preserves the current anchor across rerenders', () => {

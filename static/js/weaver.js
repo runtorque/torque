@@ -494,14 +494,14 @@ function weaverToggleArchitect(architectId) {
 function weaverToggleDecision(decisionId) {
   var ui = _weaverDecisionUiState(decisionId);
   ui.expanded = !ui.expanded;
-  renderWeaverPanel();
+  _weaverRenderCurrentSurface();
 }
 
 function weaverStartDecisionEdit(decisionId) {
   var ui = _weaverDecisionUiState(decisionId);
   ui.expanded = true;
   ui.editing = true;
-  renderWeaverPanel();
+  _weaverRenderCurrentSurface();
 }
 
 function weaverDecisionDraftInput(decisionId, field, value) {
@@ -512,7 +512,7 @@ function weaverDecisionDraftInput(decisionId, field, value) {
 function weaverCancelDecisionEdit(decisionId) {
   var ui = _weaverDecisionUiState(decisionId);
   ui.editing = false;
-  renderWeaverPanel();
+  _weaverRenderCurrentSurface();
 }
 
 function weaverSaveDecisionEdit(architectId, decisionId) {
@@ -527,7 +527,7 @@ function weaverSaveDecisionEdit(architectId, decisionId) {
   });
   ui.editing = false;
   if (typeof _showToast === 'function') _showToast('Decision updated', 'success');
-  renderWeaverPanel();
+  _weaverRenderCurrentSurface();
 }
 
 function weaverArchiveDecision(architectId, decisionId) {
@@ -557,7 +557,7 @@ function weaverLinkDecisionTask(architectId, decisionId) {
   });
   ui.link_task_id = '';
   if (typeof _showToast === 'function') _showToast('Decision linked to task', 'success');
-  renderWeaverPanel();
+  _weaverRenderCurrentSurface();
 }
 
 function weaverLinkDecisionEngineer(architectId, decisionId) {
@@ -571,7 +571,7 @@ function weaverLinkDecisionEngineer(architectId, decisionId) {
   });
   ui.link_engineer_id = '';
   if (typeof _showToast === 'function') _showToast('Decision linked to engineer', 'success');
-  renderWeaverPanel();
+  _weaverRenderCurrentSurface();
 }
 
 function renderWeaverPanel() {
@@ -1001,19 +1001,43 @@ function _weaverStopEventsCountdownTimer() {
   _weaverEventsCountdownTimer = 0;
 }
 
+function _weaverVisibleEventsSurfaceState(group, activeTab) {
+  var fallbackGroup = String(group || '');
+  var fallbackTab = String(activeTab || '');
+  if (typeof _resolveFocusedAgent === 'function'
+      && typeof _agentPanelKind === 'function'
+      && typeof _agentPanelActiveTab === 'function') {
+    var focused = _resolveFocusedAgent();
+    if (focused && _agentPanelKind(focused) === 'engineer') {
+      return {
+        group: String(focused.group || fallbackGroup || ''),
+        tab: String(_agentPanelActiveTab('engineer') || fallbackTab || 'journal'),
+      };
+    }
+  }
+  var currentGroup = String(_weaverCurrentGroup() || fallbackGroup || '');
+  return {
+    group: currentGroup,
+    tab: String(_weaverActiveTab(currentGroup) || fallbackTab || 'journal'),
+  };
+}
+
 function _weaverSyncEventsCountdown(panel, group, activeTab) {
   if (!panel || typeof panel.querySelector !== 'function') return;
   var countdownEl = panel.querySelector('.agent-panel-events-countdown');
   if (!countdownEl) return;
-  var ws = _weaverGetSettings(group);
-  var weaver = group ? _weaverGetAgent(group) : null;
-  var bstats = (state.weaver_buffer_stats && state.weaver_buffer_stats[group]) || null;
+  var surfaceState = _weaverVisibleEventsSurfaceState(group, activeTab);
+  var surfaceGroup = surfaceState.group;
+  var surfaceTab = surfaceState.tab;
+  var ws = _weaverGetSettings(surfaceGroup);
+  var weaver = surfaceGroup ? _weaverGetAgent(surfaceGroup) : null;
+  var bstats = (state.weaver_buffer_stats && state.weaver_buffer_stats[surfaceGroup]) || null;
   countdownEl.textContent = _weaverEventsStatusText(
     bstats,
     !!(ws && ws.paused),
     weaver
   );
-  if (!_weaverShouldLiveUpdateCountdown(group, activeTab)
+  if (!_weaverShouldLiveUpdateCountdown(surfaceGroup, surfaceTab)
       || typeof setInterval !== 'function') {
     return;
   }
@@ -1023,8 +1047,9 @@ function _weaverSyncEventsCountdown(panel, group, activeTab) {
       _weaverStopEventsCountdownTimer();
       return;
     }
-    var currentGroup = _weaverCurrentGroup();
-    var currentTab = _weaverActiveTab(currentGroup);
+    var currentState = _weaverVisibleEventsSurfaceState(group, activeTab);
+    var currentGroup = currentState.group;
+    var currentTab = currentState.tab;
     var currentCountdown = currentPanel.querySelector('.agent-panel-events-countdown');
     if (!currentCountdown || currentTab !== 'events') {
       _weaverStopEventsCountdownTimer();
@@ -2301,7 +2326,7 @@ function weaverDeleteEntry(entryId) {
     state.weaver_journal[group] = state.weaver_journal[group].filter(
       function(e) { return e.id !== entryId; });
   }
-  renderWeaverPanel();
+  _weaverRenderCurrentSurface();
 }
 
 // -- Human reply -----------------------------------------------------------

@@ -681,4 +681,9 @@ function renderAgentPanel() {
   if (typeof _restoreSurfaceState === 'function') {
     _restoreSurfaceState(el, panelState, panelStateOptions);
   }
+  if (agent
+      && _agentPanelKind(agent) === 'engineer'
+      && typeof _weaverSyncEventsCountdown === 'function') {
+    _weaverSyncEventsCountdown(el, agent.group || '', _agentPanelActiveTab('engineer'));
+  }
 }
