@@ -161,7 +161,7 @@ The UI stays "see everything" but the order changes:
 
 ## 6. Branch namespacing
 
-Worktree branches go from `loom/<agent-slug>-<shortid>` to `loom/<engineer-slug>/<worker-slug>-<shortid>`. Workers owned by the user (no engineer) use `loom/user/<worker-slug>-<shortid>`. This lives in `worktree.py`. Migration: existing branches are grandfathered (no rename), new ones use the new scheme.
+Worker worktree branches go from `loom/<agent-slug>-<shortid>` to `loom/<engineer-slug>/<worker-slug>-<shortid>`. Workers owned by the user (no engineer) use `loom/user/<worker-slug>-<shortid>`. Engineer and architect worktrees stay flat (`loom/<engineer-slug>-<shortid>` / `loom/<architect-slug>-<shortid>`) because they are already the ownership root. This lives in `worktree.py`. Migration: existing branches are grandfathered (no rename), new ones use the new scheme.
 
 ## 7. Dispatch prompt changes
 
@@ -187,10 +187,11 @@ Architects and engineers get their own boot prompts when launched (like the lega
 
 Enforce in the MCP layer, not via runtime checks:
 
-- `architect_engineer_message` is the only cross-kind messaging tool architects have. No `worker_message` on the architect surface.
-- Architect messaging to engineers is limited to engineers the architect hired plus same-group engineers intentionally surfaced as visible collaborators; workers are never direct architect message targets.
+- `architect_engineer_message` is the only cross-kind messaging tool architects have. No worker-targeting tool exists on the architect surface.
+- Architect task assignment / reassignment and architect messaging are limited to engineers the architect hired; workers are never direct architect targets.
 - `engineer_*` tools that target agents filter to `owner_engineer_id == self.id`, so an engineer can't message another engineer's worker.
-- Engineers can talk to their parent architect via `engineer_message_architect` (outbound clarifying questions, decision escalations) and reply to architect messages via `engineer_reply`. No user approval — routine coordination.
+- Engineers can talk only to their hiring architect via `engineer_message_architect` and reply to architect messages via `engineer_reply`. No user approval — routine coordination.
+- `weaver_*` compatibility aliases stay bound to the explicit engineer session when one is present; fallback to the default engineer only when no engineer session id is available.
 - The engineer boot prompt explicitly instructs: *when a non-trivial product or scope decision arises, call the architect via `engineer_message_architect` before committing to a direction.* This keeps decision ownership with the architect.
 - Workers never initiate messages to engineers or architects — they use `loom ai` to report, which surfaces in the dashboards.
 
@@ -198,7 +199,7 @@ Enforce in the MCP layer, not via runtime checks:
 
 Six stages, each independently shippable with a concrete acceptance criterion.
 
-### Stage 1 — Schema & migration groundwork
+### Stage 1 — Schema & migration groundwork ✓ shipped
 
 **Deliverable**: a safely-migrated database with new columns populated, zero behavior change, and a verification tool.
 
@@ -214,7 +215,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Acceptance criterion**: on an existing database, `loom doctor` reports zero drift, exactly one engineer (named `"Weaver"`), every worker has `owner_engineer_id` set or empty-for-orphans, every task has `assigned_engineer_id` matching legacy `weaver_owner_id`. No UI or dispatch behavior change observed by the user.
 
-### Stage 2 — Roles + preamble (worker persona layer)
+### Stage 2 — Roles + preamble (worker persona layer) ✓ shipped
 
 **Deliverable**: a working Role concept with a preamble field that takes effect on dispatch.
 
@@ -227,7 +228,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Acceptance criterion**: create a role with a preamble + two priorities, assign it to a worker, dispatch a task → preview prompt shows the preamble at the top followed by the action prompt. Create an action with `disable_role_preamble: true` → preview omits the preamble. Existing templates load and dispatch unchanged (compat read works).
 
-### Stage 3 — Engineer kind + scoped MCP surface + multiple engineers
+### Stage 3 — Engineer kind + scoped MCP surface + multiple engineers ✓ shipped
 
 **Deliverable**: the user can create multiple named engineers; each sees only its own agents and tasks; existing `weaver_*` clients still work via an alias.
 
@@ -246,7 +247,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Acceptance criterion**: create two engineers (Alice, Bob). Dispatch a worker from each. Run an `engineer_agents_list` call as Alice → sees only Alice's worker, not Bob's. Delete Alice → her worker transfers to the user (visible in UI with no engineer parent). Existing `weaver_*` external clients continue to work against the default engineer.
 
-### Stage 4 — Architect kind + decision log + hire flow + journal
+### Stage 4 — Architect kind + decision log + hire flow + journal ✓ shipped
 
 **Deliverable**: the user can spawn an Architect that creates tasks, assigns them to engineers, writes typed decisions, and can request hiring new engineers via a user-approved flow.
 
@@ -265,7 +266,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Acceptance criterion**: launch an architect → it writes a decision (`status=proposed`) → creates a task with `suggested_action='feature/foo'` and `assigned_engineer_id=Alice.id` → Alice sees the task and the suggested action; architect requests hire → user approves → new engineer appears and is tagged as hired by this architect; architect updates the decision to `accepted` → change appears live in the UI via delta. Restart daemon → decision log + journal + pending-hire history persist.
 
-### Stage 5 — Branch namespacing + communication graph enforcement + end-to-end acceptance
+### Stage 5 — Branch namespacing + communication graph enforcement + end-to-end acceptance ✓ shipped
 
 **Deliverable**: worktree branches are engineer-namespaced, the communication graph is fully enforced (no stray tools on the wrong surfaces), and we run a full acceptance pass.
 

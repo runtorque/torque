@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,19 @@ _KINDS_MIGRATION_MIGRATED_AT_KEY = "schema_kinds_migration_migrated_at"
 _KINDS_BACKUP_NAME = "loom.db.pre-kinds.bak"
 _SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60
 _ONE_DAY_SECONDS = 24 * 60 * 60
+# WorktreeManager currently derives the default branch suffix from ``cell.id[:7]``.
+# Accept 6+ hex tails so the doctor stays tolerant of older/manual fixtures while
+# still rejecting very short manual tails like ``-bad``.
+_WORKTREE_SHORT_ID_RE = r"[a-f0-9]{6,}"
+_NAMESPACED_WORKTREE_RE = re.compile(
+    rf"^loom/[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*-{_WORKTREE_SHORT_ID_RE}$"
+)
+_USER_WORKTREE_RE = re.compile(
+    rf"^loom/user/[a-z0-9][a-z0-9-]*-{_WORKTREE_SHORT_ID_RE}$"
+)
+_LEGACY_WORKTREE_RE = re.compile(
+    rf"^loom/[a-z0-9][a-z0-9-]*-{_WORKTREE_SHORT_ID_RE}$"
+)
 
 
 def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
@@ -487,6 +501,58 @@ def _collect_tasks_section(conn: sqlite3.Connection, *, engineer_count: int) -> 
     }
 
 
+def _classify_worker_worktree_branch(branch: str) -> str:
+    branch = str(branch or "").strip()
+    if not branch:
+        return ""
+    if _USER_WORKTREE_RE.match(branch) or _NAMESPACED_WORKTREE_RE.match(branch):
+        return "namespaced"
+    if _LEGACY_WORKTREE_RE.match(branch):
+        return "legacy"
+    return "nonconforming"
+
+
+def _collect_worktrees_section(conn: sqlite3.Connection) -> dict:
+    section = {
+        "total_worker_branches": 0,
+        "namespaced": 0,
+        "legacy": 0,
+        "nonconforming": 0,
+        "nonconforming_branches": [],
+    }
+    if not _column_exists(conn, "agents", "kind"):
+        return section
+
+    try:
+        rows = conn.execute(
+            "SELECT id, name, slug, worktree_branch FROM agents "
+            "WHERE cell_type='agent' AND kind='worker' AND worktree_branch != '' "
+            "ORDER BY rowid"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return section
+
+    for agent_id, name, slug, worktree_branch in rows:
+        category = _classify_worker_worktree_branch(str(worktree_branch or ""))
+        if not category:
+            continue
+        section["total_worker_branches"] += 1
+        if category == "namespaced":
+            section["namespaced"] += 1
+        elif category == "legacy":
+            section["legacy"] += 1
+        else:
+            section["nonconforming"] += 1
+            section["nonconforming_branches"].append({
+                "id": str(agent_id or ""),
+                "name": str(name or ""),
+                "slug": str(slug or ""),
+                "branch": str(worktree_branch or ""),
+            })
+
+    return section
+
+
 def _collect_drift_section(conn: sqlite3.Connection) -> dict:
     role_exists = _column_exists(conn, "agents", "role")
     owner_exists = _column_exists(conn, "agents", "owner_engineer_id")
@@ -778,6 +844,21 @@ def _warn_dangling_decision_architects(report: dict) -> list[dict]:
     return warnings
 
 
+def _warn_nonconforming_worker_worktree_branches(report: dict) -> dict | None:
+    worktrees = report.get("worktrees", {}) or {}
+    branches = list(worktrees.get("nonconforming_branches", []) or [])
+    if not branches:
+        return None
+    return {
+        "name": "nonconforming_worker_worktree_branches",
+        "status": "warn",
+        "details": {
+            "count": len(branches),
+            "branches": branches,
+        },
+    }
+
+
 _DOCTOR_CHECKS = [
     _check_migration_version,
     _check_unmigrated_agents,
@@ -795,6 +876,7 @@ _DOCTOR_WARNINGS = [
     _warn_engineer_binding_env_mismatch,
     _warn_stale_pending_hires,
     _warn_dangling_decision_architects,
+    _warn_nonconforming_worker_worktree_branches,
 ]
 
 
@@ -820,6 +902,7 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
             conn,
             architect_names=architect_names,
         ),
+        "worktrees": _collect_worktrees_section(conn),
     }
     report["roles_templates"] = {
         "roles_dir": report["roles"]["roles_dir"],
@@ -860,6 +943,7 @@ def format_doctor_report(report: dict) -> str:
     engineers = report.get("engineers", {}) or {}
     architects = report.get("architects", {}) or {}
     pending_hires = report.get("pending_hires", {}) or {}
+    worktrees = report.get("worktrees", {}) or {}
     tasks = report.get("tasks", {})
     drift = report.get("drift", {})
     roles = report.get("roles", {}) or {}
@@ -943,6 +1027,16 @@ def format_doctor_report(report: dict) -> str:
         f"{int(pending_hires.get('rejected_recent', 0) or 0)} (in the last 7 days)",
         "  stale_pending (>24h):     "
         f"{int(pending_hires.get('stale_pending', 0) or 0)}",
+        "",
+        "[worktrees]",
+        "  total_worker_branches: "
+        f"{int(worktrees.get('total_worker_branches', 0) or 0)}",
+        "  namespaced (stage 5):  "
+        f"{int(worktrees.get('namespaced', 0) or 0)}",
+        "  legacy (pre-stage-5):  "
+        f"{int(worktrees.get('legacy', 0) or 0)}",
+        "  nonconforming:         "
+        f"{int(worktrees.get('nonconforming', 0) or 0)}",
         "",
         "[tasks]",
         f"  total:       {int(tasks.get('total', 0) or 0)}",
@@ -1034,6 +1128,19 @@ def format_doctor_report(report: dict) -> str:
                     f"{details.get('id', '')} points at missing architect "
                     f"{details.get('architect_id', '')}"
                 )
+            elif name == "nonconforming_worker_worktree_branches":
+                branches = details.get("branches", []) or []
+                summary = ", ".join(
+                    str(entry.get("branch", "") or "")
+                    for entry in branches
+                    if str(entry.get("branch", "") or "").strip()
+                )
+                base = (
+                    "  - worker worktree branches do not match stage-5 or legacy naming"
+                )
+                if summary:
+                    base += f": {summary}"
+                lines.append(base)
             else:
                 lines.append(f"  - {name}")
     failed_checks = list(report.get("failed_checks", []) or [])

@@ -58,6 +58,19 @@ class LoomDoctorTests(unittest.TestCase):
             )
         )
 
+    def _save_worker(self, worker_id: str, name: str, **overrides):
+        self.db.save_agent(
+            AgentCell(
+                id=worker_id,
+                name=name,
+                group="loom",
+                slug=name.lower().replace(" ", "-"),
+                cell_type="agent",
+                kind="worker",
+                **overrides,
+            )
+        )
+
     def test_build_doctor_report_warns_when_no_engineer_exists(self):
         home = self._home_dir()
         self.db.save_board_task(
@@ -240,6 +253,94 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertIn("approved:                 0 (in the last 7 days)", rendered)
         self.assertIn("rejected:                 0 (in the last 7 days)", rendered)
         self.assertIn("stale_pending (>24h):     0", rendered)
+        self.assertEqual(
+            report["worktrees"],
+            {
+                "total_worker_branches": 0,
+                "namespaced": 0,
+                "legacy": 0,
+                "nonconforming": 0,
+                "nonconforming_branches": [],
+            },
+        )
+        self.assertIn("[worktrees]", rendered)
+        self.assertIn("total_worker_branches: 0", rendered)
+        self.assertIn("namespaced (stage 5):  0", rendered)
+        self.assertIn("legacy (pre-stage-5):  0", rendered)
+        self.assertIn("nonconforming:         0", rendered)
+
+    def test_build_doctor_report_warns_for_nonconforming_worker_branch_names(self):
+        home = self._home_dir()
+        self._save_engineer("eng-alice", "Alice")
+        self._save_worker(
+            "worker-namespaced",
+            "Worker Namespaced",
+            owner_engineer_id="eng-alice",
+            worktree_branch="loom/alice/worker-namespaced-a1b2c3",
+        )
+        self._save_worker(
+            "worker-legacy",
+            "Worker Legacy",
+            owner_engineer_id="eng-alice",
+            worktree_branch="loom/worker-legacy-deadbee",
+        )
+        self._save_worker(
+            "worker-bad",
+            "Worker Bad",
+            owner_engineer_id="eng-alice",
+            worktree_branch="loom/alice/worker-bad",
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertEqual(
+            report["worktrees"],
+            {
+                "total_worker_branches": 3,
+                "namespaced": 1,
+                "legacy": 1,
+                "nonconforming": 1,
+                "nonconforming_branches": [
+                    {
+                        "id": "worker-bad",
+                        "name": "Worker Bad",
+                        "slug": "worker-bad",
+                        "branch": "loom/alice/worker-bad",
+                    }
+                ],
+            },
+        )
+        self.assertIn(
+            {
+                "name": "nonconforming_worker_worktree_branches",
+                "status": "warn",
+                "details": {
+                    "count": 1,
+                    "branches": [
+                        {
+                            "id": "worker-bad",
+                            "name": "Worker Bad",
+                            "slug": "worker-bad",
+                            "branch": "loom/alice/worker-bad",
+                        }
+                    ],
+                },
+            },
+            report["warnings"],
+        )
+        self.assertIn("Result: PASS (with warnings)", rendered)
+        self.assertIn("[worktrees]", rendered)
+        self.assertIn("total_worker_branches: 3", rendered)
+        self.assertIn("namespaced (stage 5):  1", rendered)
+        self.assertIn("legacy (pre-stage-5):  1", rendered)
+        self.assertIn("nonconforming:         1", rendered)
+        self.assertIn(
+            "worker worktree branches do not match stage-5 or legacy naming: loom/alice/worker-bad",
+            rendered,
+        )
 
     def test_build_doctor_report_counts_architect_decisions_and_hired_engineers(self):
         home = self._home_dir()

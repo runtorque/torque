@@ -73,43 +73,19 @@ For dual mode, also run `make open` to get a browser window alongside the toolbe
 - **Delta broadcasts**: Every mutation calls `_emit()` to queue a delta op. `broadcast()` sends `{"type": "delta", "seq": N, "ops": [...]}` to WS clients. Full state (`snapshot_msg()`) is sent only on initial WS connect or `resync` command. 12 delta op types: `agent_upsert`, `agent_remove`, `group_update`, `group_remove`, `group_rename`, `groups_reorder`, `group_settings_update`, `global_settings_update`, `task_upsert`, `task_remove`, `lanes_update`, `ui_update`, `focus_update`.
 - **Slugs**: Every agent, terminal, group, and board task has a `slug` column persisted in SQLite. Slugs are auto-generated from the resource name via `_slugify()` and are unique per resource type. On startup, any resource missing a slug (or a terminal with an old-format slug lacking `:`) gets one generated automatically. The CLI accepts slugs as identifiers everywhere IDs or names are accepted.
 - **Migration**: On first startup, if `loom.db` is empty but `state.json` exists, data is imported automatically and `state.json` is renamed to `state.json.bak`. Schema migrations (e.g. adding `slug`, `action_name`, `action_vars`, `tasks_dispatched` columns) use `ALTER TABLE ... ADD COLUMN` in `LoomDB.init()`, guarded by try/except. `action_vars` is stored as JSON text in SQLite, decoded on load.
-### Kinds refactor (stage 1 invariants)
-- `agents` now includes `kind`, `role`, `owner_engineer_id`, `hired_by_architect_id`, and `persistent`.
-- `board_tasks` now includes `assigned_engineer_id`, `created_by_architect_id`, and `suggested_action`.
-- A `decisions` table now exists for architect-level decision records; keep schema details in the plan doc, not here.
-- Through stage 5, legacy columns stay authoritative: `template`, `created_by_weaver_id`, and `weaver_owner_id` (when present).
-- `loom/db.py` dual-write coalescing keeps the new columns populated from those legacy values and warns on drift.
-- Treat `loom doctor` as the migration verification surface after any schema/backfill/dual-write change.
+### Kinds refactor invariants
+- `AgentCell.kind` is now explicit (`architect`, `engineer`, `worker`, `terminal`); workers carry `role` plus `owner_engineer_id`, engineers may carry `hired_by_architect_id`, and engineers / architects are persistent rows.
+- `BoardTask` carries `assigned_engineer_id`, `created_by_architect_id`, and `suggested_action`; derived tasks inherit `assigned_engineer_id` from their parent until an architect explicitly reassigns them.
+- Through stage 5, legacy fields (`template`, `created_by_weaver_id`, `weaver_owner_id` when present) are still dual-written and coalesced in `loom/db.py`; use `loom doctor` as the migration / drift verification surface after any schema or ownership change.
+- Roles supersede templates semantically. `~/.loom/roles/` and project `.loom/roles/` override legacy `.loom/agents/` files with shadow warnings, and worker dispatch prepends role `preamble` / `priorities` unless the action sets `disable_role_preamble: true`.
+- The Jinja `loom` namespace includes `loom.agent.kind`, `loom.agent.role`, `loom.agent.owner_engineer`, and for architect-hired workers `loom.agent.hired_by_architect`.
+- Multiple engineers can coexist. `LOOM_ENGINEER_ID` binds engineer MCP sessions; `weaver_*` remains a compatibility alias to the default engineer (`Weaver` when present, otherwise the earliest engineer) when no bound engineer session is available.
+- Engineer scoping is strict: an engineer sees only itself, its owned workers / terminals, and tasks assigned to it in-group. Engineer-created workers and tasks are auto-stamped with that engineer's ownership ids. Deleting an engineer transfers owned workers and assigned tasks back to the user by clearing those ids.
+- Architects are user-created only and are never hired. `LOOM_ARCHITECT_ID` binds architect MCP sessions. Architects can create / reassign only their own architect-created tasks, and only to engineers they hired.
+- The decision log is per-architect and persisted in `decisions`; pending hires are user-approved and approval creates engineers with `hired_by_architect_id=<architect.id>`.
+- Architect ↔ engineer messaging is the only architect cross-kind channel. Engineers may message only their hiring architect. Workers report only through `loom ai` status / derive / ask flows, not direct messaging tools.
+- Stage 5 worker worktrees use `loom/<engineer-slug>/<worker-slug>-<shortid>` or `loom/user/<worker-slug>-<shortid>`; engineer / architect worktrees stay flat under `loom/<slug>-<shortid>`, and grandfathered flat worker branches remain valid.
 - The staged source of truth is [Agent Kinds Refactor](docs/plans/agent-kinds-refactor.md).
-
-### Kinds refactor (stage 2 invariants)
-- Roles supersede Templates semantically. `~/.loom/roles/` and project `.loom/roles/` win over legacy `~/.loom/agents/` files with a logged shadow warning.
-- Worker dispatch can prepend role guidance from `preamble` plus rendered `priorities`.
-- Actions may opt out of that injection with `disable_role_preamble: true`.
-- The Jinja `loom` namespace now includes `loom.agent.kind`, `loom.agent.role`, and `loom.agent.owner_engineer`.
-- The DB / wire field name `agent_template` still carries the role slug until the later stage-6 rename.
-- `loom doctor` reports role counts plus shadow warnings for legacy templates masked by new roles.
-
-### Kinds refactor (stage 3 invariants)
-- Multiple engineers can coexist; `kind='engineer'` rows are persistent and relaunchable.
-- `LOOM_ENGINEER_ID` binds an engineer's MCP session to its own agent id.
-- `engineer_*` MCP tools enforce ownership scoping: an engineer sees only itself, its owned workers/terminals, and tasks assigned to it inside its group.
-- Unassigned tasks remain visible to all engineers as the shared inbox, but they stay out of `engineer_board_summary` until assigned.
-- `weaver_*` tools remain as compatibility aliases routed to the default engineer (`"Weaver"` when present, otherwise the earliest engineer by creation order).
-- Worker auto-stamping is mandatory: engineer-created agents get `owner_engineer_id=<engineer.id>` and engineer-created tasks get `assigned_engineer_id=<engineer.id>`.
-- Engineer deletion transfers owned workers and assigned tasks back to the user by clearing the ownership ids.
-- The CLI supports offline-capable `loom engineer list` plus `--engineer <slug>` on `loom task create` and `loom task edit` for explicit assignment and reassignment.
-- `loom doctor` includes an `[engineers]` section and warns when default `weaver_*` routing is missing or ambiguous.
-
-### Kinds refactor (stage 4 invariants)
-- Architects are a first-class persistent kind alongside engineers, workers, and terminals. Architects are user-created only — they are never hired, and `hired_by_architect_id` must stay empty on architect rows.
-- `LOOM_ARCHITECT_ID` binds an architect's MCP session to its own agent id.
-- `architect_*` MCP tools cover decision CRUD, task creation with required `assigned_engineer_id` plus optional `suggested_action`, engineer list/message/hire, and task reassignment only for tasks the architect created.
-- The decision log is per-architect, persisted in the `decisions` table, and uses an archived-not-deleted policy when an architect is deleted.
-- The pending-hire queue is user-approved: the architect requests the hire, the user approves or rejects it, and approval creates an engineer with `hired_by_architect_id=<architect.id>`.
-- Architect ↔ engineer messaging is the only cross-kind channel for architects; architects cannot message workers directly.
-- The engineer boot prompt explicitly tells architect-hired engineers to escalate non-trivial product or scope decisions to their hiring architect before choosing a direction.
-- `loom doctor` adds `[architects]` and `[pending_hires]` sections.
 
 - **Loom context namespace**: Action templates can reference a `loom` dict injected at render time containing agent identity (`loom.agent.*`), dispatch context (`loom.context.is_clean`, `loom.context.tasks_dispatched`, `loom.context.previous_tasks`), worktree state (`loom.worktree.*`), task metadata (`loom.task.*`), and child terminals (`loom.terminals`). `loom` is a reserved variable name — rejected on action save. Preview renders use `LOOM_CONTEXT_STUB` (safe defaults with `is_clean=True`).
 
