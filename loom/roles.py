@@ -113,6 +113,10 @@ class RoleManager(TemplateManager):
         dirs = cls.find_roles_dirs(base_dir)
         return dirs[0] if dirs else None
 
+    @classmethod
+    def find_project_role_dir(cls, base_dir: str = "") -> str | None:
+        return cls._find_project_dir(base_dir, "roles")
+
     @staticmethod
     def find_legacy_template_dirs(base_dir: str = "") -> list[str]:
         return TemplateManager.find_templates_dirs(base_dir)
@@ -278,7 +282,7 @@ class RoleManager(TemplateManager):
             role_dir = self._global_dir("roles")
             os.makedirs(role_dir, exist_ok=True)
         else:
-            role_dir = self.find_role_dir(base_dir)
+            role_dir = self.find_project_role_dir(base_dir)
             if not role_dir:
                 role_dir = self._default_project_role_dir(base_dir)
                 os.makedirs(role_dir, exist_ok=True)
@@ -314,7 +318,7 @@ class RoleManager(TemplateManager):
         if scope == "user":
             dirs = [self._global_dir("roles")]
         elif scope == "project":
-            role_dir = self.find_role_dir(base_dir)
+            role_dir = self.find_project_role_dir(base_dir)
             dirs = [role_dir] if role_dir else []
         for role_dir in dirs:
             if not role_dir:

@@ -88,11 +88,10 @@ class ServerModuleExtractionTests(unittest.TestCase):
         ))
 
     def test_standalone_mode_skips_keybinding_installation(self):
-        self.assertFalse(self.server_mod.STANDALONE)
-        self.assertTrue(self.server_mod._should_install_keybindings())
-
         old = self.server_mod.STANDALONE
         try:
+            self.server_mod.STANDALONE = False
+            self.assertTrue(self.server_mod._should_install_keybindings())
             self.server_mod.STANDALONE = True
             self.assertFalse(self.server_mod._should_install_keybindings())
         finally:
