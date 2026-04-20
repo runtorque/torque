@@ -309,6 +309,27 @@ def _deliver_architect_engineer_message(state, sender, recipient, *,
     return shared
 
 
+async def _inject_mcp_message(handle_command, sender, recipient,
+                              delivered: dict, message: str) -> None:
+    """Ask the server to type the message into the recipient's terminal."""
+    if not recipient or not handle_command:
+        return
+    try:
+        await handle_command({
+            "cmd": "inject_mcp_message",
+            "agent_id": getattr(recipient, "id", ""),
+            "message": message,
+            "sender_name": str(getattr(sender, "name", "") or "").strip(),
+            "sender_kind": str(getattr(sender, "kind", "") or "").strip(),
+            "message_id": str(delivered.get("id", "") or ""),
+        })
+    except Exception:
+        log.exception(
+            "Failed to inject MCP message into agent %s",
+            getattr(recipient, "id", ""),
+        )
+
+
 def _visible_agent_ids_for_caller(state, caller_kind: str,
                                   caller_id: str) -> set[str]:
     if caller_kind == "architect":
@@ -2169,6 +2190,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             action="architect_message",
             message=message,
         )
+        await _inject_mcp_message(
+            handle_command, architect, engineer, delivered, message
+        )
         return json.dumps({
             "type": "ok",
             "message_id": delivered["id"],
@@ -2195,6 +2219,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             architect,
             action="engineer_message_architect",
             message=message,
+        )
+        await _inject_mcp_message(
+            handle_command, engineer, architect, delivered, message
         )
         return json.dumps({
             "type": "ok",
@@ -2239,6 +2266,9 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
             message=message,
             reply_to_id=str(entry.get("id", "") or "").strip(),
             thread_id=str(entry.get("thread_id", "") or "").strip(),
+        )
+        await _inject_mcp_message(
+            handle_command, caller, peer, delivered, message
         )
         return json.dumps({
             "type": "ok",

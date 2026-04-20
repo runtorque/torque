@@ -15,33 +15,21 @@ def _loom_mcp_url() -> str:
 
 
 def _read_framed_message(reader) -> bytes | None:
-    headers: dict[str, str] = {}
+    # MCP stdio transport is newline-delimited JSON-RPC: one message per line.
     while True:
         line = reader.readline()
         if not line:
             return None
-        if line in (b"\r\n", b"\n"):
-            break
-        decoded = line.decode("utf-8", errors="replace").strip()
-        if not decoded or ":" not in decoded:
+        stripped = line.strip()
+        if not stripped:
             continue
-        key, value = decoded.split(":", 1)
-        headers[key.strip().lower()] = value.strip()
-    try:
-        length = int(headers.get("content-length", "0") or "0")
-    except ValueError:
-        return None
-    if length <= 0:
-        return None
-    body = reader.read(length)
-    if not body:
-        return None
-    return body
+        return stripped
 
 
 def _write_framed_message(writer, body: bytes) -> None:
-    writer.write(f"Content-Length: {len(body)}\r\n\r\n".encode("utf-8"))
     writer.write(body)
+    if not body.endswith(b"\n"):
+        writer.write(b"\n")
     writer.flush()
 
 

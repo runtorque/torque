@@ -7,7 +7,8 @@ from unittest import mock
 
 
 def _frame(payload: bytes) -> bytes:
-    return f"Content-Length: {len(payload)}\r\n\r\n".encode("utf-8") + payload
+    # MCP stdio transport: newline-delimited JSON-RPC.
+    return payload + b"\n"
 
 
 class MCPStdioProxyTests(unittest.TestCase):

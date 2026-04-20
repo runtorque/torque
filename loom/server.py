@@ -641,6 +641,34 @@ def _format_weaver_message_prompt(message: str, task_id: str) -> str:
     )
 
 
+def _format_mcp_message_prompt(
+    *,
+    message: str,
+    sender_name: str,
+    sender_kind: str,
+    recipient_kind: str,
+    message_id: str,
+) -> str:
+    sender_label = sender_name or sender_kind or "peer"
+    if sender_kind and sender_name:
+        header = f"Message from {sender_name} ({sender_kind})"
+    else:
+        header = f"Message from {sender_label}"
+    reply_tool = (
+        f"mcp__loom__{recipient_kind}_reply"
+        if recipient_kind in {"architect", "engineer"}
+        else "mcp__loom__loom_reply"
+    )
+    return (
+        "\n"
+        f"## {header}\n"
+        f"{message}\n\n"
+        f'Reply with: {reply_tool}(message_id="{message_id}", '
+        'message="your response")\n'
+        "---\n"
+    )
+
+
 def _inherit_assigned_engineer_for_derived_task(parent_task,
                                                 derived_task=None) -> str:
     """Keep derived-task ownership bound to the parent's assigned engineer."""
@@ -7581,6 +7609,37 @@ async def main(connection=None):
                         msg_text,
                         _panel_event,
                     )
+
+            elif cmd == "inject_mcp_message":
+                target_ident = data.get("agent_id", "")
+                target_id = _resolve_agent_id(state, target_ident)
+                target = state.agents.get(target_id) if target_id else None
+                if not target:
+                    result = {"type": "error",
+                              "message": f"Agent not found: {target_ident}"}
+                elif not getattr(target, "session_id", ""):
+                    result = {"type": "ok", "delivered": False,
+                              "reason": "no_session"}
+                else:
+                    formatted = _format_mcp_message_prompt(
+                        message=str(data.get("message", "") or ""),
+                        sender_name=str(data.get("sender_name", "") or ""),
+                        sender_kind=str(data.get("sender_kind", "") or ""),
+                        recipient_kind=str(
+                            getattr(target, "kind", "") or ""
+                        ),
+                        message_id=str(data.get("message_id", "") or ""),
+                    )
+                    try:
+                        if hasattr(bridge, "prime_input_ready"):
+                            bridge.prime_input_ready(target.session_id)
+                        await bridge.send_text(target.session_id, formatted)
+                        result = {"type": "ok", "delivered": True}
+                    except Exception as exc:
+                        log.exception(
+                            "Failed to inject MCP message to %s", target.id)
+                        result = {"type": "error",
+                                  "message": f"Failed to inject: {exc}"}
 
             elif cmd == "weaver_journal_append":
                 group = data.get("group", "")
