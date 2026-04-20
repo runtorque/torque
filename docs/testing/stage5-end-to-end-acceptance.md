@@ -254,30 +254,7 @@ loom ai progress "working on it"
 
 Expected: alice sees the worker progress update in the board / agent history.
 
-### 3.4 Worker derives a follow-up task
-
-In the worker terminal, run:
-
-```bash
-loom ai derive "add a regression test" -a feature/implement
-```
-
-Capture the derived task id and verify ownership inheritance:
-
-```bash
-DERIVED_TASK_ID="$(sqlite3 "$DB" "SELECT id FROM board_tasks WHERE parent_task_id='$TASK_ID' ORDER BY rowid DESC LIMIT 1;")"
-echo "$DERIVED_TASK_ID"
-test -n "$DERIVED_TASK_ID"
-sqlite3 "$DB" "SELECT id, parent_task_id, assigned_engineer_id, action_name FROM board_tasks WHERE id='$DERIVED_TASK_ID';"
-```
-
-Expected:
-
-- `parent_task_id='$TASK_ID'`
-- `assigned_engineer_id='$ALICE_ID'`
-- `action_name='feature/implement'`
-
-### 3.5 Worker asks a blocking question
+### 3.4 Worker asks a blocking question
 
 In the worker terminal, run:
 
@@ -285,10 +262,10 @@ In the worker terminal, run:
 loom ai ask "should X be configurable or hardcoded?"
 ```
 
-Capture the newest child task (the human-ask task):
+Capture the ask task id:
 
 ```bash
-ASK_TASK_ID="$(sqlite3 "$DB" "SELECT id FROM board_tasks WHERE parent_task_id='$TASK_ID' ORDER BY rowid DESC LIMIT 1;")"
+ASK_TASK_ID="$(sqlite3 "$DB" "SELECT id FROM board_tasks WHERE parent_task_id='$TASK_ID' AND task='should X be configurable or hardcoded?' ORDER BY rowid DESC LIMIT 1;")"
 echo "$ASK_TASK_ID"
 test -n "$ASK_TASK_ID"
 sqlite3 "$DB" "SELECT id, lane, labels FROM board_tasks WHERE id='$ASK_TASK_ID';"
@@ -343,21 +320,75 @@ Expected:
 - the decision is now `accepted`
 - alice receives the architect reply in her engineer session
 
-### 4.3 Alice relays the answer to the worker
+### 4.3 Alice resolves the ask task for the worker
 
-In alice's engineer session, paste this prompt after replacing `WORKER_ID_VALUE`:
+In alice's engineer session, paste this prompt after replacing `ASK_TASK_ID_VALUE`:
 
 ```text
-Call engineer_agent_message with:
-{"agent":"WORKER_ID_VALUE","message":"make it configurable"}
+Call engineer_task_resolve with:
+{"task":"ASK_TASK_ID_VALUE","answer":"configurable, please"}
 Return only the JSON result.
 ```
 
-Expected: the message appears in the worker session / history.
+Verify that the ask task is now closed:
 
-## Phase 5 — Worker completion, engineer review, and merge
+```bash
+sqlite3 "$DB" "SELECT id, lane, status FROM board_tasks WHERE id='$ASK_TASK_ID';"
+```
 
-### 5.1 Worker completes the task
+Expected:
+
+- the ask task is now in `Done`
+- the worker receives the answer in its terminal / history
+- the worker's parent task no longer shows `Awaiting Input`
+
+### 4.4 Worker resumes and hands off to review
+
+In the worker terminal, run:
+
+```bash
+loom ai progress "implemented configurable option; handing off to review"
+loom ai derive "Review feature X implementation" -t feature/review
+```
+
+Capture the review task id and verify ownership inheritance:
+
+```bash
+REVIEW_TASK_ID="$(sqlite3 "$DB" "SELECT id FROM board_tasks WHERE parent_task_id='$TASK_ID' AND action_name='feature/review' ORDER BY rowid DESC LIMIT 1;")"
+REVIEW_AGENT_ID="$(sqlite3 "$DB" "SELECT agent_id FROM board_tasks WHERE id='$REVIEW_TASK_ID';")"
+echo "REVIEW_TASK_ID=$REVIEW_TASK_ID"
+echo "REVIEW_AGENT_ID=$REVIEW_AGENT_ID"
+test -n "$REVIEW_TASK_ID"
+test -n "$REVIEW_AGENT_ID"
+sqlite3 "$DB" "SELECT id, parent_task_id, assigned_engineer_id, action_name, agent_id FROM board_tasks WHERE id='$REVIEW_TASK_ID';"
+```
+
+Expected:
+
+- `parent_task_id='$TASK_ID'`
+- `assigned_engineer_id='$ALICE_ID'`
+- `action_name='feature/review'`
+- the derived review task is dispatched to a review agent
+
+## Phase 5 — Review, worker completion, and merge
+
+### 5.1 Review agent completes the review task
+
+Open the review agent terminal and run:
+
+```bash
+loom ai done "review complete — ready to merge"
+```
+
+Verify the review task is closed:
+
+```bash
+sqlite3 "$DB" "SELECT id, lane, action_name FROM board_tasks WHERE id='$REVIEW_TASK_ID';"
+```
+
+Expected: the review task is now in `Done`.
+
+### 5.2 Worker completes the parent task after follow-up tasks are resolved
 
 In the worker terminal, run:
 
@@ -365,9 +396,19 @@ In the worker terminal, run:
 loom ai done "feature X with configurable option"
 ```
 
-Expected: the worker task moves to `Done` and alice sees the completion update.
+Verify that all child tasks are closed before the parent is completed:
 
-### 5.2 Alice reviews the diff and merges the worker branch
+```bash
+sqlite3 "$DB" "SELECT id, lane, status FROM board_tasks WHERE id IN ('$ASK_TASK_ID', '$REVIEW_TASK_ID') ORDER BY rowid;"
+```
+
+Expected:
+
+- both child tasks are already in `Done`
+- the worker task now moves to `Done`
+- alice sees the completion update
+
+### 5.3 Alice reviews the diff and merges the worker branch
 
 In alice's engineer session, paste these prompts after replacing `WORKER_ID_VALUE`:
 
@@ -445,7 +486,7 @@ Then re-run these checks:
 loom doctor
 sqlite3 "$DB" "SELECT id, name, kind, hired_by_architect_id FROM agents WHERE id IN ('$PRODUCTMIND_ID', '$ALICE_ID', '$WORKER_ID') ORDER BY rowid;"
 sqlite3 "$DB" "SELECT id, status, rationale FROM decisions WHERE id='$DECISION_ID';"
-sqlite3 "$DB" "SELECT id, task, assigned_engineer_id, parent_task_id, pipeline_root_id FROM board_tasks WHERE id IN ('$TASK_ID', '$DERIVED_TASK_ID', '$ASK_TASK_ID') ORDER BY rowid;"
+sqlite3 "$DB" "SELECT id, task, assigned_engineer_id, parent_task_id, pipeline_root_id, action_name, lane FROM board_tasks WHERE id IN ('$TASK_ID', '$REVIEW_TASK_ID', '$ASK_TASK_ID') ORDER BY rowid;"
 ```
 
 Expected: the architect, engineer, decision, and task rows all persist across restart.

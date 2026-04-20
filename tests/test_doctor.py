@@ -269,6 +269,41 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertIn("legacy (pre-stage-5):  0", rendered)
         self.assertIn("nonconforming:         0", rendered)
 
+    def test_build_doctor_report_accepts_custom_worker_branch_names(self):
+        home = self._home_dir()
+        self._save_engineer("eng-alice", "Alice")
+        self._save_worker(
+            "worker-custom",
+            "Worker Custom",
+            owner_engineer_id="eng-alice",
+            worktree_branch="loom/alice/feature-api-v2-face123",
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertEqual(
+            report["worktrees"],
+            {
+                "total_worker_branches": 1,
+                "namespaced": 1,
+                "legacy": 0,
+                "nonconforming": 0,
+                "nonconforming_branches": [],
+            },
+        )
+        self.assertNotIn(
+            "nonconforming_worker_worktree_branches",
+            {warning.get("name", "") for warning in report["warnings"]},
+        )
+        self.assertIn("[worktrees]", rendered)
+        self.assertIn("total_worker_branches: 1", rendered)
+        self.assertIn("namespaced (stage 5):  1", rendered)
+        self.assertIn("legacy (pre-stage-5):  0", rendered)
+        self.assertIn("nonconforming:         0", rendered)
+
     def test_build_doctor_report_warns_for_nonconforming_worker_branch_names(self):
         home = self._home_dir()
         self._save_engineer("eng-alice", "Alice")

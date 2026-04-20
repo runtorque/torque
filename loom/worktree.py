@@ -368,6 +368,26 @@ def _branch_prefix_for_agent(agent, state) -> str:
     return "loom/user/"
 
 
+def _custom_branch_leaf_for_agent(agent, candidate: str) -> str:
+    """Return the custom branch leaf for a worktree target.
+
+    Worker custom worktree names still need to follow the Stage 5 branch
+    contract (`<slug>-<shortid>` under the engineer/user namespace), so append
+    the agent short id to the sanitized custom name. Engineer/architect custom
+    branches keep the existing flat custom leaf because they are already the
+    ownership root.
+    """
+    candidate = str(candidate or "").strip()
+    if not candidate:
+        return candidate
+    if str(getattr(agent, "kind", "") or "").strip() != "worker":
+        return candidate
+    short_id = str(getattr(agent, "id", "") or "").strip()[:7]
+    if not short_id:
+        return candidate
+    return f"{candidate}-{short_id}"
+
+
 def _resolve_worktree_base_path(repo_root: str, base_dir: str) -> str:
     """Return the absolute base directory under which worktrees are created."""
     repo_root = os.path.realpath(os.path.expanduser(repo_root))
@@ -819,7 +839,8 @@ class WorktreeManager:
         candidate = requested
         suffix_index = 2
         while True:
-            branch = f"{branch_prefix}{candidate}"
+            branch_leaf = _custom_branch_leaf_for_agent(cell, candidate)
+            branch = f"{branch_prefix}{branch_leaf}"
             wt_path = os.path.realpath(os.path.join(base_path, candidate))
             if os.path.commonpath([base_path, wt_path]) != base_path:
                 candidate = _dedupe_worktree_name(requested, suffix_index)

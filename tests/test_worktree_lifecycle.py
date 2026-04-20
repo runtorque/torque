@@ -309,6 +309,34 @@ class WorktreeLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(cell.worktree_branch, "loom/feature-api-v2")
 
+    async def test_worker_custom_worktree_name_keeps_namespaced_shortid_branch(self):
+        engineer = self._make_cell(agent_id="eng12345", name="Alice")
+        engineer.kind = "engineer"
+        engineer.slug = "alice"
+        worker = self._make_cell(agent_id="face1234", name="Feature Worker")
+        worker.kind = "worker"
+        worker.slug = "feature-worker"
+        worker.owner_engineer_id = engineer.id
+
+        wt_path = await self.mgr.create(
+            worker,
+            str(self.repo_root),
+            base_dir=".loom/custom-worktrees",
+            base_branch="main",
+            worktree_name="Feature API / v2!!!",
+            state=self._make_state(engineer, worker),
+        )
+
+        self.assertIsNotNone(wt_path)
+        self.assertEqual(
+            Path(wt_path).resolve(),
+            (self.repo_root / ".loom" / "custom-worktrees" / "feature-api-v2").resolve(),
+        )
+        self.assertEqual(
+            worker.worktree_branch,
+            "loom/alice/feature-api-v2-face123",
+        )
+
     async def test_custom_worktree_name_collision_adds_numeric_suffix(self):
         first = self._make_cell(agent_id="agent-1", name="Worker One")
         second = self._make_cell(agent_id="agent-2", name="Worker Two")
