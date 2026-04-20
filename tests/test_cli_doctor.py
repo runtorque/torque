@@ -90,6 +90,46 @@ class CliDoctorTests(unittest.TestCase):
 
         self.assertIn("Result: PASS (with warnings)", out.getvalue())
 
+    def test_cmd_doctor_keeps_zero_exit_for_shadowed_legacy_role_warning(self):
+        report = {
+            "result": "pass",
+            "warnings": [
+                {
+                    "name": "shadowed_legacy_templates",
+                    "status": "warn",
+                    "details": {
+                        "count": 1,
+                        "slugs": ["shared"],
+                        "hint": (
+                            "legacy template shadowed by new role; "
+                            "consider migrating the legacy file"
+                        ),
+                    },
+                }
+            ],
+            "checks": [],
+            "roles": {
+                "roles_dir": "/tmp/.loom/roles",
+                "roles_file_count": 1,
+                "legacy_templates_dir": "/tmp/.loom/agents",
+                "legacy_templates_file_count": 1,
+                "shadowed_legacy_templates": 1,
+                "roles_with_preamble": 1,
+                "roles_with_priorities": 0,
+            },
+        }
+        with mock.patch.object(self.cli, "get_doctor_local", return_value=report):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_doctor(SimpleNamespace(port=18932, json=False))
+
+        text = out.getvalue()
+        self.assertIn("Result: PASS (with warnings)", text)
+        self.assertIn(
+            "legacy template shadowed by new role; consider migrating the legacy file: shared",
+            text,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

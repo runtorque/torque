@@ -49,8 +49,11 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["warnings"], [])
         self.assertEqual(report["tasks"]["unassigned"], 1)
         self.assertEqual(report["tasks"]["unassigned_when_engineer_present"], 0)
+        self.assertEqual(report["roles"]["roles_file_count"], 0)
+        self.assertEqual(report["roles"]["legacy_templates_file_count"], 0)
         self.assertIn("Result: PASS", rendered)
         self.assertNotIn("with warnings", rendered)
+        self.assertIn("roles_dir:                      ~/.loom/roles (0 files)", rendered)
 
     def test_build_doctor_report_passes_for_fully_assigned_engineer_db(self):
         home = self._home_dir()
@@ -131,11 +134,39 @@ class LoomDoctorTests(unittest.TestCase):
             0,
         )
         self.assertEqual(report["warnings"], [])
-        self.assertEqual(report["roles_templates"]["roles_file_count"], 0)
-        self.assertEqual(report["roles_templates"]["templates_file_count"], 1)
-        self.assertIn("Loom doctor — stage 1 (kinds refactor)", rendered)
+        self.assertEqual(report["roles"]["roles_file_count"], 0)
+        self.assertEqual(report["roles"]["legacy_templates_file_count"], 1)
+        self.assertIn("Loom doctor — kinds refactor", rendered)
         self.assertIn("Result: PASS", rendered)
-        self.assertIn("~/.loom/agents", rendered)
+        self.assertIn(
+            "legacy_templates_dir:           ~/.loom/agents (1 files)",
+            rendered,
+        )
+
+    def test_build_doctor_report_counts_roles_preamble_and_priorities(self):
+        home = self._home_dir()
+        (home / ".loom" / "roles").mkdir(parents=True, exist_ok=True)
+        (home / ".loom" / "roles" / "careful.yaml").write_text(
+            "name: careful\npreamble: |\n  Be careful.\n",
+            encoding="utf-8",
+        )
+        (home / ".loom" / "roles" / "reviewer.yaml").write_text(
+            "name: reviewer\npriorities:\n  - ship small\n",
+            encoding="utf-8",
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertEqual(report["warnings"], [])
+        self.assertEqual(report["roles"]["roles_file_count"], 2)
+        self.assertEqual(report["roles"]["roles_with_preamble"], 1)
+        self.assertEqual(report["roles"]["roles_with_priorities"], 1)
+        self.assertIn("roles_dir:                      ~/.loom/roles (2 files)", rendered)
+        self.assertIn("roles_with_preamble:            1", rendered)
+        self.assertIn("roles_with_priorities:          1", rendered)
 
     def test_build_doctor_report_warns_when_engineer_exists_with_unassigned_tasks(self):
         home = self._home_dir()
@@ -246,6 +277,48 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertIn("agents.template ↔ role drift: 1", rendered)
         self.assertIn(
             "board_tasks.weaver_owner_id ↔ assigned_engineer_id drift: 1",
+            rendered,
+        )
+
+    def test_build_doctor_report_warns_for_shadowed_legacy_templates(self):
+        home = self._home_dir()
+        (home / ".loom" / "agents" / "shared.yaml").write_text(
+            "name: shared\ndescription: legacy\n",
+            encoding="utf-8",
+        )
+        (home / ".loom" / "roles").mkdir(parents=True, exist_ok=True)
+        (home / ".loom" / "roles" / "shared.yaml").write_text(
+            "name: shared\npreamble: |\n  New role.\n",
+            encoding="utf-8",
+        )
+
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            report = build_doctor_report_for_db(self.db_path)
+            rendered = format_doctor_report(report)
+
+        self.assertEqual(report["result"], "pass")
+        self.assertEqual(report["failed_checks"], [])
+        self.assertEqual(report["roles"]["shadowed_legacy_templates"], 1)
+        self.assertEqual(
+            report["warnings"],
+            [
+                {
+                    "name": "shadowed_legacy_templates",
+                    "status": "warn",
+                    "details": {
+                        "count": 1,
+                        "slugs": ["shared"],
+                        "hint": (
+                            "legacy template shadowed by new role; "
+                            "consider migrating the legacy file"
+                        ),
+                    },
+                }
+            ],
+        )
+        self.assertIn("Result: PASS (with warnings)", rendered)
+        self.assertIn(
+            "legacy template shadowed by new role; consider migrating the legacy file: shared",
             rendered,
         )
 

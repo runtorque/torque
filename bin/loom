@@ -3873,7 +3873,7 @@ def build_parser():
     p.set_defaults(func=cmd_status)
 
     # -- doctor -------------------------------------------------------------
-    p = sub.add_parser("doctor", help="Run Stage 1 kinds migration checks")
+    p = sub.add_parser("doctor", help="Run Loom doctor checks")
     p.add_argument("--json", action="store_true",
                    help="Output raw JSON")
     p.set_defaults(func=cmd_doctor)

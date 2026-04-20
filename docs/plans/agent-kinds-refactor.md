@@ -35,7 +35,9 @@ Ownership rule on derive: if a worker or engineer derives a task, the new task i
 
 ### 1.3 Role (replacing Template)
 
-Files move from `~/.loom/templates/` → `~/.loom/roles/` with compat read-through so existing templates still load as roles during the transition.
+Primary role files live in `~/.loom/roles/` (and project `.loom/roles/`) with
+compat read-through from the legacy template locations `~/.loom/agents/` and
+project `.loom/agents/` during the transition.
 
 Schema adds:
 
@@ -208,7 +210,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Deliverable**: a working Role concept with a preamble field that takes effect on dispatch.
 
-- Rename `templates/` dir to `roles/` with compat read-through: if a name exists in both paths, `roles/` wins and a warning is logged. Writes always go to `roles/`.
+- Rename the effective template storage to `roles/` with compat read-through from legacy `agents/`: if a name exists in both paths, `roles/` wins and a warning is logged. Writes always go to `roles/`.
 - Add `preamble: str` (block scalar) and `priorities: list[str]` to the role schema. `priorities` renders into the preamble as a bullet list at render time (not stored twice).
 - Add `disable_role_preamble: bool` to the action schema and honor it in the dispatch prompt assembler: when true, skip the preamble block entirely.
 - Dispatch prompt assembly (workers only): `role.preamble → action.prompt(vars) → loom_postscript`. Engineers and architects bypass role preamble — they have their own boot prompts (stage 3/4).
@@ -273,7 +275,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 - **Upgrade guard**: on boot, if the database has legacy columns populated but `kind` is empty on any row, refuse to start and print an actionable error: "this version requires a prior upgrade; install version X first, run once, then upgrade". Prevents skipping stage 1.
 - Drop columns: `template`, `weaver_owner_id`, `created_by_weaver_id`. Use the SQLite 14-step table-rebuild pattern so WAL doesn't get confused.
 - Remove `weaver_*` MCP tool aliases and the default-engineer routing layer.
-- Remove `~/.loom/templates/` compat read; roles live in `~/.loom/roles/` only.
+- Remove legacy `~/.loom/agents/` compat read; roles live in `~/.loom/roles/` only.
 - Bump major version.
 
 **Acceptance criterion**: fresh install + upgrade from stage-5 db succeed; attempt to upgrade from pre-stage-1 db is refused with a clear message. `loom doctor` reports clean state with no legacy-column references.

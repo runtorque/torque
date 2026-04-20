@@ -1,4 +1,4 @@
-"""Stage 1 kinds-migration diagnostics shared by CLI and server."""
+"""Kinds-refactor diagnostics shared by CLI and server."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+
+import yaml
 
 DOCTOR_SCHEMA_VERSION = 1
 _KINDS_MIGRATION_VERSION_KEY = "schema_kinds_migration_version"
@@ -19,16 +21,6 @@ def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
         return True
     except sqlite3.OperationalError:
         return False
-
-
-def _count_yaml_files(path: Path) -> int:
-    if not path.is_dir():
-        return 0
-    return sum(
-        1
-        for file_path in path.rglob("*")
-        if file_path.is_file() and file_path.suffix.lower() in {".yaml", ".yml"}
-    )
 
 
 def _fetch_scalar(conn: sqlite3.Connection, sql: str, params=(), default=0):
@@ -80,6 +72,28 @@ def _humanize_path(path: str) -> str:
     if expanded.startswith(home + os.sep):
         return "~/" + expanded[len(home) + 1:]
     return expanded
+
+
+def _iter_named_yaml_paths(root_dir: Path) -> list[tuple[str, Path]]:
+    if not root_dir.is_dir():
+        return []
+    entries = []
+    for file_path in sorted(root_dir.rglob("*")):
+        if not file_path.is_file():
+            continue
+        if file_path.suffix.lower() not in {".yaml", ".yml"}:
+            continue
+        rel = file_path.relative_to(root_dir)
+        entries.append((str(rel.with_suffix("")), file_path))
+    return entries
+
+
+def _load_yaml_dict(path: Path) -> dict:
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _collect_migration_section(conn: sqlite3.Connection, db_path: Path) -> dict:
@@ -254,14 +268,34 @@ def _collect_drift_section(conn: sqlite3.Connection) -> dict:
     }
 
 
-def _collect_roles_templates_section() -> dict:
+def _collect_roles_section() -> dict:
     roles_dir = Path.home() / ".loom" / "roles"
-    templates_dir = Path.home() / ".loom" / "agents"
+    legacy_templates_dir = Path.home() / ".loom" / "agents"
+    role_entries = _iter_named_yaml_paths(roles_dir)
+    legacy_entries = _iter_named_yaml_paths(legacy_templates_dir)
+    shadowed = sorted({name for name, _path in role_entries} & {
+        name for name, _path in legacy_entries
+    })
+    roles_with_preamble = 0
+    roles_with_priorities = 0
+    for _name, path in role_entries:
+        data = _load_yaml_dict(path)
+        if str(data.get("preamble", "") or "").strip():
+            roles_with_preamble += 1
+        priorities = data.get("priorities")
+        if isinstance(priorities, list) and any(
+            str(item or "").strip() for item in priorities
+        ):
+            roles_with_priorities += 1
     return {
         "roles_dir": str(roles_dir),
-        "roles_file_count": _count_yaml_files(roles_dir),
-        "templates_dir": str(templates_dir),
-        "templates_file_count": _count_yaml_files(templates_dir),
+        "roles_file_count": len(role_entries),
+        "legacy_templates_dir": str(legacy_templates_dir),
+        "legacy_templates_file_count": len(legacy_entries),
+        "shadowed_legacy_templates": len(shadowed),
+        "shadowed_legacy_slugs": shadowed,
+        "roles_with_preamble": roles_with_preamble,
+        "roles_with_priorities": roles_with_priorities,
     }
 
 
@@ -330,6 +364,25 @@ def _warn_unassigned_tasks_when_engineer_present(report: dict) -> dict | None:
     }
 
 
+def _warn_shadowed_legacy_templates(report: dict) -> dict | None:
+    roles = report.get("roles", {}) or {}
+    count = int(roles.get("shadowed_legacy_templates", 0) or 0)
+    if count <= 0:
+        return None
+    return {
+        "name": "shadowed_legacy_templates",
+        "status": "warn",
+        "details": {
+            "count": count,
+            "slugs": list(roles.get("shadowed_legacy_slugs", []) or []),
+            "hint": (
+                "legacy template shadowed by new role; "
+                "consider migrating the legacy file"
+            ),
+        },
+    }
+
+
 _DOCTOR_CHECKS = [
     _check_migration_version,
     _check_unmigrated_agents,
@@ -340,6 +393,7 @@ _DOCTOR_CHECKS = [
 
 _DOCTOR_WARNINGS = [
     _warn_unassigned_tasks_when_engineer_present,
+    _warn_shadowed_legacy_templates,
 ]
 
 
@@ -353,7 +407,13 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
         "agents": agents,
         "tasks": tasks,
         "drift": _collect_drift_section(conn),
-        "roles_templates": _collect_roles_templates_section(),
+        "roles": _collect_roles_section(),
+    }
+    report["roles_templates"] = {
+        "roles_dir": report["roles"]["roles_dir"],
+        "roles_file_count": report["roles"]["roles_file_count"],
+        "templates_dir": report["roles"]["legacy_templates_dir"],
+        "templates_file_count": report["roles"]["legacy_templates_file_count"],
     }
     checks = [check(report) for check in _DOCTOR_CHECKS]
     warnings = [warning for fn in _DOCTOR_WARNINGS if (warning := fn(report))]
@@ -378,7 +438,7 @@ def format_doctor_report(report: dict) -> str:
     agents = report.get("agents", {})
     tasks = report.get("tasks", {})
     drift = report.get("drift", {})
-    roles_templates = report.get("roles_templates", {})
+    roles = report.get("roles", {}) or {}
     warnings = list(report.get("warnings", []) or [])
 
     engineer_line = f"  engineer:    {int(agents.get('engineer', 0) or 0)}"
@@ -386,11 +446,13 @@ def format_doctor_report(report: dict) -> str:
     if engineer_name:
         engineer_line += f"   ({engineer_name})"
 
-    roles_count = int(roles_templates.get("roles_file_count", 0) or 0)
-    templates_count = int(roles_templates.get("templates_file_count", 0) or 0)
+    roles_count = int(roles.get("roles_file_count", 0) or 0)
+    legacy_templates_count = int(
+        roles.get("legacy_templates_file_count", 0) or 0
+    )
 
     lines = [
-        "Loom doctor — stage 1 (kinds refactor)",
+        "Loom doctor — kinds refactor",
         "",
         "[migration]",
         "  schema_kinds_migration_version: "
@@ -422,11 +484,18 @@ def format_doctor_report(report: dict) -> str:
         "  board_tasks.weaver_owner_id ↔ assigned_engineer_id: "
         f"{int(drift.get('board_tasks_weaver_owner_assigned_engineer', 0) or 0)}",
         "",
-        "[roles/templates]",
-        f"  {_humanize_path(str(roles_templates.get('roles_dir', '')))}: "
-        f"{'(empty)' if roles_count == 0 else f'{roles_count} files'}",
-        f"  {_humanize_path(str(roles_templates.get('templates_dir', '')))}: "
-        f"{'(empty)' if templates_count == 0 else f'{templates_count} files'}",
+        "[roles]",
+        "  roles_dir:                      "
+        f"{_humanize_path(str(roles.get('roles_dir', '')))} ({roles_count} files)",
+        "  legacy_templates_dir:           "
+        f"{_humanize_path(str(roles.get('legacy_templates_dir', '')))} "
+        f"({legacy_templates_count} files)",
+        "  shadowed_legacy_templates:      "
+        f"{int(roles.get('shadowed_legacy_templates', 0) or 0)}",
+        "  roles_with_preamble:            "
+        f"{int(roles.get('roles_with_preamble', 0) or 0)}",
+        "  roles_with_priorities:          "
+        f"{int(roles.get('roles_with_priorities', 0) or 0)}",
         "",
         (
             "Result: PASS (with warnings)"
@@ -444,6 +513,15 @@ def format_doctor_report(report: dict) -> str:
                     "  - engineer present but unassigned tasks remain: "
                     f"{details.get('count', 0)}"
                 )
+            elif name == "shadowed_legacy_templates":
+                slugs = ", ".join(details.get("slugs", []) or [])
+                line = (
+                    "  - legacy template shadowed by new role; "
+                    "consider migrating the legacy file"
+                )
+                if slugs:
+                    line += f": {slugs}"
+                lines.append(line)
             else:
                 lines.append(f"  - {name}")
     failed_checks = list(report.get("failed_checks", []) or [])
