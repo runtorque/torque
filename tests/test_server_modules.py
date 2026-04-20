@@ -256,6 +256,7 @@ class ServerModuleExtractionTests(unittest.TestCase):
             (root / 'repo' / '.loom' / 'agents').mkdir(parents=True)
             home = root / 'home'
             (home / '.loom').mkdir(parents=True)
+            (home / '.loom' / 'agents').mkdir(parents=True)
             prev_home = os.environ.get('HOME')
             os.environ['HOME'] = str(home)
             self.addCleanup(
