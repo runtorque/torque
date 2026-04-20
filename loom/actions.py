@@ -694,8 +694,24 @@ class ActionManager:
         return self._fallback_render(text, variables)
 
     @staticmethod
+    def _flatten_render_vars(variables: dict, prefix: str = "") -> dict[str, str]:
+        flat = {}
+        for key, value in (variables or {}).items():
+            key_text = str(key)
+            path = f"{prefix}.{key_text}" if prefix else key_text
+            if isinstance(value, dict):
+                flat.update(ActionManager._flatten_render_vars(value, path))
+            else:
+                flat[path] = str(value)
+        return flat
+
+    @staticmethod
     def _fallback_render(text: str, variables: dict) -> str:
-        for key, value in variables.items():
-            text = text.replace('{{ ' + key + ' }}', str(value))
-            text = text.replace('{{' + key + '}}', str(value))
+        flat = dict(ActionManager._flatten_render_vars(variables))
+        for key, value in (variables or {}).items():
+            if not isinstance(value, dict):
+                flat[str(key)] = str(value)
+        for key, value in flat.items():
+            text = text.replace('{{ ' + key + ' }}', value)
+            text = text.replace('{{' + key + '}}', value)
         return text

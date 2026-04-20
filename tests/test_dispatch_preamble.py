@@ -227,7 +227,7 @@ class DispatchPreambleTests(unittest.TestCase):
         stub_rendered = self._render_action(raw)
         self.assertEqual(
             stub_rendered["prompt"],
-            "kind=\nrole=\nowner=\nImplement feature\n",
+            "kind=\nrole=\nowner=\nImplement feature",
         )
 
         loom_ctx = self.server_mod._build_loom_context(
@@ -240,7 +240,7 @@ class DispatchPreambleTests(unittest.TestCase):
         rendered = self._render_action(raw, loom_context=loom_ctx)
         self.assertEqual(
             rendered["prompt"],
-            "kind=worker\nrole=reviewer\nowner=Engineer\nImplement feature\n",
+            "kind=worker\nrole=reviewer\nowner=Engineer\nImplement feature",
         )
 
     def test_preview_and_dispatch_use_same_prompt_structure_helper(self):
