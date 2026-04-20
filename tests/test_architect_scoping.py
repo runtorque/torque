@@ -139,6 +139,23 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self._add_engineer("eng-bob", "Bob", hired_by_architect_id=other_architect.id)
         user_engineer = self._add_engineer("eng-user", "User Owned")
         self._add_worker("worker-a", "Alice Worker", alice.id)
+        visible_task = self._add_task(
+            "task-visible",
+            "Architect-visible work",
+            lane="In Progress",
+            assigned_engineer_id=alice.id,
+            created_by_architect_id=architect.id,
+        )
+        hidden_task = self._add_task(
+            "task-hidden",
+            "Other work",
+            lane="In Progress",
+            assigned_engineer_id=user_engineer.id,
+        )
+        visible_task.agent_id = alice.id
+        hidden_task.agent_id = user_engineer.id
+        self.state.agents[alice.id].current_task_id = visible_task.id
+        self.state.agents[user_engineer.id].current_task_id = hidden_task.id
 
         visible_agents = self.shared_mod._filter_agents_for_caller(
             self.state,
@@ -155,16 +172,20 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(is_error, text)
         engineers = {
-            item["id"]: item["relation"]
+            item["id"]: item
             for item in json.loads(text)["engineers"]
         }
         self.assertEqual(
-            engineers,
+            {engineer_id: item["relation"] for engineer_id, item in engineers.items()},
             {
                 alice.id: "hired",
                 user_engineer.id: "visible",
             },
         )
+        self.assertEqual(engineers[alice.id]["current_task_id"], visible_task.id)
+        self.assertEqual(engineers[alice.id]["current_task"], visible_task.task)
+        self.assertEqual(engineers[user_engineer.id]["current_task_id"], "")
+        self.assertEqual(engineers[user_engineer.id]["current_task"], "")
 
     async def test_architect_task_create_stamps_architect_fields_and_rejects_out_of_scope_engineer(self):
         architect = self._add_architect("arch-1", "Architect")

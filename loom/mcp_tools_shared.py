@@ -1117,11 +1117,16 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return json.dumps(d), False
 
     if tool_name == "engineer_list" and caller_kind == "architect":
+        visible_task_ids = set(
+            _filter_tasks_for_caller(real_state, caller_kind, caller_id)
+        )
         engineers = []
         for cell, relation in _architect_visible_engineers(
             real_state, caller_id
         ).values():
             current_task = real_state.agent_current_task(cell.id)
+            if current_task and current_task.id not in visible_task_ids:
+                current_task = None
             engineers.append({
                 "id": cell.id,
                 "name": cell.name,
