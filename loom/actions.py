@@ -190,7 +190,9 @@ def _migrate_syntax(text):
 # Stub loom context for preview renders (no real agent/task).
 # Templates referencing loom.* get safe defaults instead of StrictUndefined errors.
 LOOM_CONTEXT_STUB = {
-    "agent":     {"name": "", "slug": "", "type": "", "group": "", "directory": ""},
+    "agent":     {"name": "", "slug": "", "type": "", "group": "",
+                  "directory": "", "kind": "", "role": "",
+                  "owner_engineer": ""},
     "context":   {"is_clean": True, "tasks_dispatched": 0, "previous_tasks": []},
     "worktree":  {"active": False, "path": "", "branch": "", "base_branch": "",
                   "dirty": False, "diff": {}, "checkpoints": 0},
@@ -515,6 +517,9 @@ class ActionManager:
             "labels": act.get("labels", []),
             "worktree": act.get("worktree", None),
             "auto_close_on_done": bool(act.get("auto_close_on_done", False)),
+            "disable_role_preamble": bool(
+                act.get("disable_role_preamble", False)
+            ),
             "terminals": act.get("terminals", []),
             "transitions": act.get("transitions", []),
             "max_depth": act.get("max_depth", None),

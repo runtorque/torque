@@ -11,7 +11,8 @@ class _BlockStr(str):
 
 _ACTION_KEY_ORDER = [
     "name", "description", "agent", "group", "worktree",
-    "auto_close_on_done", "prompt", "labels", "transitions", "terminals",
+    "auto_close_on_done", "disable_role_preamble", "prompt", "labels",
+    "transitions", "terminals",
 ]
 
 
@@ -52,6 +53,8 @@ def _action_to_yaml(name: str, data: dict) -> str:
         doc["worktree"] = True
     if data.get("auto_close_on_done"):
         doc["auto_close_on_done"] = True
+    if data.get("disable_role_preamble"):
+        doc["disable_role_preamble"] = True
 
     prompt = data.get("prompt", "")
     if prompt:

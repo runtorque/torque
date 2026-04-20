@@ -68,6 +68,15 @@ class ServerModuleExtractionTests(unittest.TestCase):
 
         self.assertIn('auto_close_on_done: true', yaml_text)
 
+    def test_action_to_yaml_round_trips_disable_role_preamble(self):
+        yaml_text = self.server_actions._action_to_yaml('diagnostic/run', {
+            'description': 'Diagnostic action',
+            'disable_role_preamble': True,
+            'prompt': '{{ TASK }}\n',
+        })
+
+        self.assertIn('disable_role_preamble: true', yaml_text)
+
     def test_dispatch_queue_helper_respects_self_dispatch(self):
         active = self.state_mod.BoardTask(
             id='task-1',
