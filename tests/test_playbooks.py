@@ -17,7 +17,7 @@ from loom.playbooks import (
     publish_playbook_record,
 )
 from loom.state import BoardTask, MatrixState
-from loom.templates import TemplateManager
+from loom.roles import RoleManager
 
 
 class PlaybookCandidateExtractionTests(unittest.TestCase):
@@ -196,7 +196,7 @@ class PlaybookDraftPublicationTests(unittest.TestCase):
         (self.repo / ".loom" / "actions" / "feature" / "review.yaml").write_text(
             "name: feature/review\nprompt: |\n  {{ TASK }}\n"
         )
-        TemplateManager().save_template(
+        RoleManager().save_template(
             "default",
             {
                 "display_name": "Default",
@@ -211,7 +211,7 @@ class PlaybookDraftPublicationTests(unittest.TestCase):
         self.state = MatrixState(db=self.db)
         self.state.groups["g"] = []
         self.action_mgr = ActionManager()
-        self.template_mgr = TemplateManager()
+        self.template_mgr = RoleManager()
 
     def _candidate(self):
         return {

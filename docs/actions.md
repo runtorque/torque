@@ -1,13 +1,13 @@
-# Actions & Templates
+# Actions & Roles
 
 Loom now separates reusable agent configuration from reusable task prompts:
 
 For the day-to-day "how do I use these together?" view, see the [Workflow Guide](workflow-guide.md).
 
-- **Agent templates** define who does the work: provider, model, permissions, system prompt, worktree behavior, environment, and child terminals.
+- **Agent roles** define who does the work: provider, model, permissions, system prompt, worktree behavior, environment, and child terminals.
 - **Actions** define what work to do: the rendered prompt, labels, and pipeline transitions.
 
-When you dispatch a task, Loom resolves both pieces. The agent template creates the session, then the action prompt is rendered and sent to it.
+When you dispatch a task, Loom resolves both pieces. The agent role creates the session, then the action prompt is rendered and sent to it.
 
 ## Why actions?
 
@@ -24,7 +24,7 @@ In normal use, a task becomes dispatchable when you combine:
 
 - a **task** on the board
 - an **action** for the prompt
-- optionally an **agent template** for launch settings
+- optionally an **agent role** for launch settings
 
 Example:
 
@@ -99,7 +99,7 @@ prompt: |
 | **name** | string | yes | Unique identifier. Supports namespaces: `feature/review` maps to `feature/review.yaml`. |
 | **description** | string | no | One-line description shown in the UI action picker. |
 | **prompt** | string | yes | The Jinja2 template rendered and sent to the agent. Must contain `{{ TASK }}`. |
-| **agent** | string or object | no | Preferred: agent template name to use when the action spawns a new agent. Legacy inline agent mapping is still supported but deprecated. |
+| **agent** | string or object | no | Preferred: agent role name to use when the action spawns a new agent. Legacy inline agent mapping is still supported but deprecated. |
 | **agent.name_prefix** | string | no | Legacy inline field. Prefix for the agent name (deprecated). |
 | **agent.command** | string | no | Legacy inline field. Boot command override (deprecated). |
 | **agent.directory** | string | no | Legacy inline field. Working directory override (deprecated). |
@@ -226,20 +226,20 @@ prompt: |
 ```
 
 !!! note
-    Only the `prompt` field is rendered through Jinja2. Agent templates are static YAML in v1; they do not render Jinja2 expressions.
+    Only the `prompt` field is rendered through Jinja2. Agent roles are static YAML; they do not render Jinja2 expressions.
 
-## Agent templates
+## Agent roles
 
-Agent templates live alongside actions but in a separate directory:
+Agent roles live alongside actions but in a separate directory:
 
 | Scope | Path |
 |-------|------|
-| **Project** | `.loom/agents/` |
-| **User** | `~/.loom/agents/` |
+| **Project** | `.loom/roles/` |
+| **User** | `~/.loom/roles/` |
 
-They support the fields documented in the UI editor: provider, command override, model, permissions, system prompt, initial prompt, session resume, idle timeout, tab color, icon, worktree settings, environment variables, and child terminals.
+These role files carry the same launch/runtime fields documented in the UI editor: provider, command override, model, permissions, system prompt, initial prompt, session resume, idle timeout, tab color, icon, worktree settings, environment variables, child terminals, plus optional worker `preamble` and `priorities`.
 
-Actions can reference templates directly:
+Actions can reference roles directly:
 
 ```yaml
 name: feature/research

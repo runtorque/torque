@@ -118,22 +118,22 @@ class LoomDoctorTests(unittest.TestCase):
         self.assertEqual(report["tasks"]["unassigned_when_engineer_present"], 0)
         self.assertEqual(report["engineers"]["total"], 0)
         self.assertEqual(report["roles"]["roles_file_count"], 0)
-        self.assertEqual(report["roles"]["legacy_templates_file_count"], 0)
+        self.assertEqual(report["stage_6_cleanup"]["legacy_template_files_ignored"], 0)
+        self.assertFalse(report["stage_6_cleanup"]["legacy_columns_present"])
+        self.assertFalse(report["stage_6_cleanup"]["weaver_tool_aliases_present"])
         self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertIn(
             "no engineer exists; create one from the Engineers panel before using engineer MCP tools",
             rendered,
         )
         self.assertIn("roles_dir:                      ~/.loom/roles (0 files)", rendered)
+        self.assertIn("[stage_6_cleanup]", rendered)
+        self.assertIn("legacy_template_files_ignored:  0", rendered)
         self.assertIn("[architects]", rendered)
         self.assertIn("[pending_hires]", rendered)
 
     def test_build_doctor_report_passes_for_fully_assigned_engineer_db(self):
         home = self._home_dir()
-        (home / ".loom" / "agents" / "researcher.yaml").write_text(
-            "name: researcher\n",
-            encoding="utf-8",
-        )
         self.db_path.with_name("loom.db.pre-kinds.bak").write_bytes(b"backup")
 
         self.db.save_agent(
@@ -179,12 +179,12 @@ class LoomDoctorTests(unittest.TestCase):
             report = build_doctor_report_for_db(self.db_path)
             rendered = format_doctor_report(report)
 
-        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["schema_version"], 2)
         self.assertEqual(report["result"], "pass")
         self.assertEqual(report["failed_checks"], [])
         self.assertGreaterEqual(
             report["migration"]["schema_kinds_migration_version"],
-            2,
+            3,
         )
         self.assertTrue(report["migration"]["backup_exists"])
         self.assertEqual(report["agents"]["total"], 2)
@@ -222,17 +222,16 @@ class LoomDoctorTests(unittest.TestCase):
         )
         self.assertEqual(report["warnings"], [])
         self.assertEqual(report["roles"]["roles_file_count"], 0)
-        self.assertEqual(report["roles"]["legacy_templates_file_count"], 1)
+        self.assertEqual(report["stage_6_cleanup"]["legacy_template_files_ignored"], 0)
+        self.assertFalse(report["stage_6_cleanup"]["legacy_columns_present"])
+        self.assertFalse(report["stage_6_cleanup"]["weaver_tool_aliases_present"])
         self.assertIn("Loom doctor — kinds refactor", rendered)
         self.assertIn("Result: PASS", rendered)
         self.assertIn("[engineers]", rendered)
         self.assertIn("[architects]", rendered)
         self.assertIn("[pending_hires]", rendered)
+        self.assertIn("[stage_6_cleanup]", rendered)
         self.assertNotIn("default (weaver_* routing)", rendered)
-        self.assertIn(
-            "legacy_templates_dir:           ~/.loom/agents (1 files)",
-            rendered,
-        )
 
     def test_build_doctor_report_includes_zero_architect_and_pending_hire_sections(self):
         home = self._home_dir()
@@ -721,6 +720,7 @@ class LoomDoctorTests(unittest.TestCase):
                 "agents_template_role_drift",
                 "agents_created_by_owner_drift",
                 "board_tasks_owner_drift",
+                "stage_6_legacy_columns_removed",
             ],
         )
         self.assertEqual(report["agents"]["unmigrated"], 1)
@@ -741,16 +741,15 @@ class LoomDoctorTests(unittest.TestCase):
             "board_tasks.weaver_owner_id ↔ assigned_engineer_id drift: 1",
             rendered,
         )
+        self.assertIn(
+            "legacy kinds-refactor columns are still present; complete the stage-6 cleanup migration",
+            rendered,
+        )
 
-    def test_build_doctor_report_warns_for_shadowed_legacy_templates(self):
+    def test_build_doctor_report_warns_for_ignored_legacy_templates(self):
         home = self._home_dir()
         (home / ".loom" / "agents" / "shared.yaml").write_text(
             "name: shared\ndescription: legacy\n",
-            encoding="utf-8",
-        )
-        (home / ".loom" / "roles").mkdir(parents=True, exist_ok=True)
-        (home / ".loom" / "roles" / "shared.yaml").write_text(
-            "name: shared\npreamble: |\n  New role.\n",
             encoding="utf-8",
         )
 
@@ -760,19 +759,19 @@ class LoomDoctorTests(unittest.TestCase):
 
         self.assertEqual(report["result"], "pass")
         self.assertEqual(report["failed_checks"], [])
-        self.assertEqual(report["roles"]["shadowed_legacy_templates"], 1)
+        self.assertEqual(report["stage_6_cleanup"]["legacy_template_files_ignored"], 1)
         self.assertEqual(
             report["warnings"],
             [
                 {
-                    "name": "shadowed_legacy_templates",
+                    "name": "legacy_template_files_ignored",
                     "status": "warn",
                     "details": {
                         "count": 1,
-                        "slugs": ["shared"],
+                        "files": ["~/.loom/agents/shared.yaml"],
                         "hint": (
-                            "legacy template shadowed by new role; "
-                            "consider migrating the legacy file"
+                            "legacy template files in agents/ are ignored; "
+                            "move them into roles/"
                         ),
                     },
                 },
@@ -791,7 +790,7 @@ class LoomDoctorTests(unittest.TestCase):
         )
         self.assertIn("Result: PASS (with warnings)", rendered)
         self.assertIn(
-            "legacy template shadowed by new role; consider migrating the legacy file: shared",
+            "legacy template files in agents/ are ignored; move them into roles/: ~/.loom/agents/shared.yaml",
             rendered,
         )
         self.assertIn(

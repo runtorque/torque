@@ -17,7 +17,7 @@ Before expanding coverage, the suite needed one explicit cleanup:
 
 | Surface | Baseline Coverage | This Wave | Recommended Layer | Remaining Gap |
 |---|---|---|---|---|
-| Agent templates and adapter flags | `tests/test_agent_template_adapters.py`, `tests/test_action_agent_templates.py`, plus broader adapter coverage already landing in `tests-implementation-wave` | No duplicate additions here | Unit | Full provider hook/MCP lifecycle should continue to live in adapter-focused unit tests |
+| Agent roles and adapter flags | `tests/test_agent_template_adapters.py`, `tests/test_action_agent_templates.py`, plus broader adapter coverage already landing in `tests-implementation-wave` | No duplicate additions here | Unit | Full provider hook/MCP lifecycle should continue to live in adapter-focused unit tests |
 | Board, task lifecycle, dependencies, smoke task flow | Existing `tests/test_state.py`; larger workflow coverage already landing in `tests-implementation-wave` via `tests/test_state.py` and `tests/test_smoke_flows.py` | No duplicate additions here | Unit + integration smoke | Full `server.py` command-path coverage is still thinner than the underlying workflow model coverage |
 | Worktree lifecycle | `tests/test_worktree_gitignore.py`; deeper lifecycle coverage already landing in `tests-implementation-wave` via `tests/test_worktree_lifecycle.py` | Fixed the stale gitignore baseline expectation | Unit + git-backed integration | PR creation and more server-driven merge flows remain lightly covered |
 | MCP agent tool dispatch | None before this wave | `tests/test_mcp.py` covers tool-to-`ai_report` mapping and JSON-RPC handler behavior | Integration | `server.py` command execution through `/api/cmd` still needs broader end-to-end coverage |

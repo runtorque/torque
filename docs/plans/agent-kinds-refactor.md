@@ -199,7 +199,7 @@ Enforce in the MCP layer, not via runtime checks:
 
 Six stages, each independently shippable with a concrete acceptance criterion.
 
-### Stage 1 — Schema & migration groundwork ✓ shipped
+### Stage 1 — Schema & migration groundwork ✓ shipped (`c0bd587`)
 
 **Deliverable**: a safely-migrated database with new columns populated, zero behavior change, and a verification tool.
 
@@ -215,7 +215,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Acceptance criterion**: on an existing database, `loom doctor` reports zero drift, exactly one engineer (named `"Weaver"`), every worker has `owner_engineer_id` set or empty-for-orphans, every task has `assigned_engineer_id` matching legacy `weaver_owner_id`. No UI or dispatch behavior change observed by the user.
 
-### Stage 2 — Roles + preamble (worker persona layer) ✓ shipped
+### Stage 2 — Roles + preamble (worker persona layer) ✓ shipped (`6c10bab`)
 
 **Deliverable**: a working Role concept with a preamble field that takes effect on dispatch.
 
@@ -228,7 +228,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Acceptance criterion**: create a role with a preamble + two priorities, assign it to a worker, dispatch a task → preview prompt shows the preamble at the top followed by the action prompt. Create an action with `disable_role_preamble: true` → preview omits the preamble. Existing templates load and dispatch unchanged (compat read works).
 
-### Stage 3 — Engineer kind + scoped MCP surface + multiple engineers ✓ shipped
+### Stage 3 — Engineer kind + scoped MCP surface + multiple engineers ✓ shipped (`de48a19`)
 
 **Deliverable**: the user can create multiple named engineers; each sees only its own agents and tasks; existing `weaver_*` clients still work via an alias.
 
@@ -247,7 +247,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Acceptance criterion**: create two engineers (Alice, Bob). Dispatch a worker from each. Run an `engineer_agents_list` call as Alice → sees only Alice's worker, not Bob's. Delete Alice → her worker transfers to the user (visible in UI with no engineer parent). Existing `weaver_*` external clients continue to work against the default engineer.
 
-### Stage 4 — Architect kind + decision log + hire flow + journal ✓ shipped
+### Stage 4 — Architect kind + decision log + hire flow + journal ✓ shipped (`1297c14`)
 
 **Deliverable**: the user can spawn an Architect that creates tasks, assigns them to engineers, writes typed decisions, and can request hiring new engineers via a user-approved flow.
 
@@ -266,7 +266,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Acceptance criterion**: launch an architect → it writes a decision (`status=proposed`) → creates a task with `suggested_action='feature/foo'` and `assigned_engineer_id=Alice.id` → Alice sees the task and the suggested action; architect requests hire → user approves → new engineer appears and is tagged as hired by this architect; architect updates the decision to `accepted` → change appears live in the UI via delta. Restart daemon → decision log + journal + pending-hire history persist.
 
-### Stage 5 — Branch namespacing + communication graph enforcement + end-to-end acceptance ✓ shipped
+### Stage 5 — Branch namespacing + communication graph enforcement + end-to-end acceptance ✓ shipped (`238ba4d`)
 
 **Deliverable**: worktree branches are engineer-namespaced, the communication graph is fully enforced (no stray tools on the wrong surfaces), and we run a full acceptance pass.
 
@@ -277,7 +277,7 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 
 **Acceptance criterion**: the end-to-end scenario above runs green. `loom doctor` still reports zero drift. No `weaver_*` alias call makes it to an unintended surface.
 
-### Stage 6 — Cleanup & compatibility sunset ✓ shipped
+### Stage 6 — Cleanup & compatibility sunset ✓ shipped (`2300d5f`)
 
 **Deliverable**: legacy names and columns are removed; upgrade path is explicit.
 
@@ -296,12 +296,12 @@ Six stages, each independently shippable with a concrete acceptance criterion.
 - **Hire approval loop UX**: every hire requires user approval in v1. → Accepted friction for now; revisit if it proves disruptive. Deferred: "pre-approved" mode (user checkbox to trust an architect to hire without confirmation).
 - **Ordering under groups**: we're effectively subordinating groups to hierarchy. Users who relied on groups for organization may dislike. → Keep groups visible as a secondary filter; allow switching between hierarchy view and group view.
 - **Engineer visibility edge cases** (user-created workers, manual cell creation): → explicit rule — anything not owned by an engineer is owned by the user; user sees all, engineers don't see user-owned workers by default. Architect can reassign.
-- **Migration of in-flight work**: users upgrading mid-session need existing tasks/agents to keep working. → Stage 1 is pure additive + backfill + dual-write; zero behavior change, so upgrades are safe even with live sessions.
-- **Dual-write drift between old and new columns** (stages 1–5): a future code path might update only one side. → All writes go through a thin wrapper layer in `db.py` that writes both columns. `loom doctor` is run in CI and reports any drift, catching regressions.
-- **Weaver identification ambiguity**: if migration can't uniquely identify the existing Weaver (e.g. no group match, no tool-surface registration history), backfill would silently misclassify. → Migration refuses to proceed and prints a diagnostic asking the user to confirm which agent was the stage-1 migrated engineer, falling back to an interactive prompt or a CLI flag (`loom migrate --weaver-id <id>`).
+~~**Migration of in-flight work**: users upgrading mid-session need existing tasks/agents to keep working. → Stage 1 is pure additive + backfill + dual-write; zero behavior change, so upgrades are safe even with live sessions.~~
+~~**Dual-write drift between old and new columns** (stages 1–5): a future code path might update only one side. → All writes go through a thin wrapper layer in `db.py` that writes both columns. `loom doctor` is run in CI and reports any drift, catching regressions.~~
+~~**Weaver identification ambiguity**: if migration can't uniquely identify the existing Weaver (e.g. no group match, no tool-surface registration history), backfill would silently misclassify. → Migration refuses to proceed and prints a diagnostic asking the user to confirm which agent was the stage-1 migrated engineer, falling back to an interactive prompt or a CLI flag (`loom migrate --weaver-id <id>`).~~
 - **MCP session binding spoofing**: a compromised env var could let an engineer session claim another engineer's id. → Not a hardening goal for v1 (local trust model), but documented; future could sign session tokens.
 - **Architect task-reassign authority**: allowing any architect to reassign any task creates unclear ownership. → V1: architect can only reassign tasks it created. Revisit if workflow demands broader reassignment.
-- **Version skip during cleanup** (stage 6): users upgrading directly from pre-stage-1 to post-stage-6 would lose data. → Upgrade guard refuses to boot with a clear "install intermediate version first" error.
+~~**Version skip during cleanup** (stage 6): users upgrading directly from pre-stage-1 to post-stage-6 would lose data. → Upgrade guard refuses to boot with a clear "install intermediate version first" error.~~
 - **Worktree orphans on engineer delete**: when an engineer is deleted and its workers transfer to the user, worktree branches still exist under the old `loom/<engineer-slug>/...` prefix. → Keep the branches as-is (don't rename — breaks git refs); document that branch names reflect creation-time ownership, not current.
 - **Pending-hire table growth**: approved/rejected hires pile up. → Auto-archive entries older than 30 days; expose a "clear history" action in the Architects panel.
 

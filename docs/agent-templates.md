@@ -1,8 +1,10 @@
-# Agent Templates
+# Agent Roles
 
-Agent templates are reusable YAML-defined presets for creating agents and dispatching tasks. They answer the question:
+Agent roles are reusable YAML-defined presets for creating agents and dispatching tasks. They answer the question:
 
 For the runtime model behind these fields, see [Agents & Sessions](agents-and-sessions.md).
+
+This page keeps its historical filename (`agent-templates.md`) for backward-compatible links. Loom now stores these launch presets under `roles/`.
 
 > **Who should do this work?**
 
@@ -10,11 +12,11 @@ Actions still answer:
 
 > **What work should be done?**
 
-Together, an agent template plus an action fully describe a dispatch.
+Together, an agent role plus an action fully describe a dispatch.
 
-## What templates configure
+## What roles configure
 
-Agent templates can define:
+Agent roles can define:
 
 - Provider and command override
 - Model
@@ -27,7 +29,7 @@ Agent templates can define:
 - Environment variables
 - Child terminals
 
-Templates are static config in v1. Unlike action prompts, template fields are not rendered with Jinja2.
+Role files are static config. Unlike action prompts, role fields are not rendered with Jinja2.
 
 ## Field guide
 
@@ -50,7 +52,7 @@ These fields map directly onto Loom's launch pipeline:
 
 ## Provider and boot-command behavior
 
-The most important template fields are `provider` and `command`.
+The most important role fields are `provider` and `command`.
 
 - If you set only `provider`, Loom uses that adapter's default command.
 - If you set both `provider` and `command`, Loom uses your command but still treats the session as that provider.
@@ -83,24 +85,24 @@ Lets Loom infer the Claude Code adapter from the command itself.
 - `permissions` currently maps to Claude Code flags.
 - If you fully own the boot command, include any provider-specific flags directly in that command.
 
-## Where templates live
+## Where roles live
 
-Loom discovers templates from two locations:
+Loom discovers roles from two locations:
 
 | Scope | Path |
 |-------|------|
-| Project | `.loom/agents/` |
-| User | `~/.loom/agents/` |
+| Project | `.loom/roles/` |
+| User | `~/.loom/roles/` |
 
-Project templates take precedence when a project and user template share the same name. User templates are still shown in the editor as overridden.
+Project roles take precedence when a project and user role share the same name. User roles are still shown in the editor as overridden. Legacy `.loom/agents/*.yaml` files are ignored and surfaced as warnings in `loom doctor` and startup logs.
 
 Subdirectories create namespaces. For example:
 
 ```text
-.loom/agents/ops/researcher.yaml
+.loom/roles/ops/researcher.yaml
 ```
 
-becomes the template:
+becomes the role:
 
 ```text
 ops/researcher
@@ -137,7 +139,7 @@ terminals:
     command: tail -f loom.log
 ```
 
-This template says:
+This role says:
 
 - use the **Claude Code** adapter
 - launch it with the **`opus`** model
@@ -149,25 +151,25 @@ This template says:
 
 ## Agent Library panel
 
-In the UI, templates and agent history live together in the **Agent Library** panel.
+In the UI, roles and agent history live together in the **Agent Library** panel.
 
-- **Templates** are reusable launch presets.
+- **Roles** are reusable launch presets.
 - **History** is for past agent runs and audit trails.
 - **Live agents stay in the main left column** — the library is for presets and history, not the current runtime roster.
 
-## How templates are used
+## How roles are used
 
-Templates integrate in four places:
+Roles integrate in four places:
 
 ### 1. New agent creation
 
-The `+ New` dropdown shows saved templates and, when the group does not already have one, a **Weaver** entry. Choosing a template creates a new agent with that template applied. Choosing **Weaver** creates the group's orchestrator agent. If the group has `agent_always_custom_dialog` enabled, the custom dialog opens with the template pre-filled instead.
+The `+ New` dropdown shows saved roles. Choosing a role creates a new agent with that role applied. If the group has `agent_always_custom_dialog` enabled, the custom dialog opens with the role pre-filled instead.
 
 ### 2. Task dispatch
 
-Tasks can store an `agent_template`. When dispatch creates a new agent, Loom applies that template before sending the action prompt or raw task text.
+Tasks can store an `agent_template` field for compatibility, but Loom resolves it by loading the matching role from `roles/`. When dispatch creates a new agent, Loom applies that role before sending the action prompt or raw task text.
 
-### 3. Actions can reference templates
+### 3. Actions can reference roles
 
 An action can set:
 
@@ -175,7 +177,7 @@ An action can set:
 agent: researcher
 ```
 
-This tells Loom to use the `researcher` template whenever that action creates an agent.
+This tells Loom to use the `researcher` role whenever that action creates an agent.
 
 Legacy inline action agent mappings still work:
 
@@ -185,26 +187,26 @@ agent:
   directory: /repo
 ```
 
-but template references are the preferred form.
+but role references are the preferred form.
 
 ### 4. Group defaults
 
-Each group can set a `default_agent_template`. This acts as the base configuration for new agents in that group.
+Each group can set a `default_agent_template` (historical field name). This acts as the base role configuration for new agents in that group.
 
 ## Merge order
 
 When Loom resolves agent settings, it applies them in this order:
 
-1. Group default template
+1. Group default role
 2. Group `agent_*` overrides
-3. Explicit template selected on the agent, task, or action
+3. Explicit role selected on the agent, task, or action
 4. Per-agent overrides from the custom dialog or dispatch payload
 
 Environment variables are merged across levels. Scalar fields overwrite less specific values.
 
 ## Runtime notes
 
-Templates influence more than the boot command:
+Roles influence more than the boot command:
 
 - `system_prompt` is folded into Loom's persistent agent prompt for supported adapters
 - `initial_prompt` is sent only after the provider is ready for input
@@ -216,6 +218,6 @@ See [Agents & Sessions](agents-and-sessions.md) for how Loom turns these fields 
 ## Related docs
 
 - [Agents & Sessions](agents-and-sessions.md)
-- [Actions & Templates](actions.md)
+- [Actions & Roles](actions.md)
 - [Task Board](board.md)
 - [Group Settings](group-settings.md)

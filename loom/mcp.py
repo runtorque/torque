@@ -14,6 +14,7 @@ import logging
 
 from aiohttp import web
 
+from . import __version__
 from .mcp_architect import ARCHITECT_TOOLS, _dispatch_architect_tool
 from .mcp_engineer import ENGINEER_TOOLS, _dispatch_engineer_tool
 from .server_artifacts import serialize_task_for_mcp
@@ -21,7 +22,7 @@ from .server_artifacts import serialize_task_for_mcp
 log = logging.getLogger("loom")
 
 PROTOCOL_VERSION = "2025-03-26"
-SERVER_INFO = {"name": "loom", "version": "1.0.0"}
+SERVER_INFO = {"name": "loom", "version": __version__}
 INSTRUCTIONS = (
     "Loom manages AI agent sessions and tasks in iTerm2. "
     "Use these tools to report progress, complete tasks, derive "
