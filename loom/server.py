@@ -8,6 +8,7 @@ import os
 import shutil
 import sys
 import time
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1580,6 +1581,24 @@ def _resolve_engineer_cell(state: MatrixState, *, engineer_id: str = "",
     return None
 
 
+def _resolve_architect_cell(state: MatrixState, *, architect_id: str = "",
+                            architect_slug: str = ""):
+    """Resolve an architect agent by exact id or slug."""
+    architect_id = str(architect_id or "").strip()
+    architect_slug = str(architect_slug or "").strip().lower()
+    for cell in state.agents.values():
+        if cell.cell_type != "agent":
+            continue
+        if str(getattr(cell, "kind", "") or "").strip() != "architect":
+            continue
+        if architect_id and cell.id == architect_id:
+            return cell
+        if architect_slug and str(getattr(cell, "slug", "") or "").strip().lower() \
+                == architect_slug:
+            return cell
+    return None
+
+
 def _engineer_name_exists(state: MatrixState, name: str, *,
                           exclude_id: str = "") -> bool:
     """Return True when another engineer already has ``name``."""
@@ -1616,7 +1635,7 @@ async def _handle_add_engineer_command(
             "message": f"Engineer '{name}' already exists",
         }
 
-    group = _resolve_engineer_group(state)
+    group = str(data.get("group", "") or "").strip() or _resolve_engineer_group(state)
     if group not in state.groups:
         state.add_group(group)
     base_dir = await resolve_base_dir(group)
@@ -1632,9 +1651,9 @@ async def _handle_add_engineer_command(
         overrides=overrides,
     )
 
-    from .weaver import build_weaver_system_prompt
+    from .weaver import build_engineer_system_prompt
 
-    persistent_prompt_text = build_weaver_system_prompt(
+    persistent_prompt_text = build_engineer_system_prompt(
         group,
         state.get_weaver_settings(group),
         launch_cfg.get("system_prompt", ""),
@@ -1656,7 +1675,9 @@ async def _handle_add_engineer_command(
         owner_engineer_id="",
         kind="engineer",
         persistent=True,
-        hired_by_architect_id="",
+        hired_by_architect_id=str(
+            data.get("hired_by_architect_id", "") or ""
+        ).strip(),
     )
     if not cell:
         return {"type": "error", "message": "Failed to create engineer"}
@@ -1671,6 +1692,139 @@ async def _handle_add_engineer_command(
         "slug": cell.slug,
         "name": cell.name,
         "kind": "engineer",
+    }
+
+
+async def _handle_architect_engineer_hire_command(
+        data: dict,
+        state: MatrixState) -> dict:
+    """Queue a user-approved pending hire for an architect."""
+    architect = _resolve_architect_cell(
+        state,
+        architect_id=data.get("architect_id", ""),
+    )
+    if not architect:
+        return {"type": "error", "message": "Architect not found"}
+    if not architect.group:
+        return {"type": "error", "message": "Architect is not assigned to a group"}
+
+    name = str(data.get("name", "") or "").strip()
+    if not name:
+        return {"type": "error", "message": "Engineer name is required"}
+
+    pending_hire = state.save_pending_hire({
+        "id": "hire-" + uuid.uuid4().hex[:12],
+        "architect_id": architect.id,
+        "requested_name": name,
+        "requested_command": str(data.get("command", "") or "").strip(),
+        "requested_provider": str(data.get("provider", "") or "").strip(),
+        "requested_directory": str(data.get("directory", "") or "").strip(),
+        "status": "pending",
+        "resolution_note": "",
+        "created_engineer_id": "",
+    })
+    if not pending_hire:
+        return {"type": "error", "message": "Failed to create pending hire"}
+    return {
+        "hire_id": pending_hire["id"],
+        "status": pending_hire["status"],
+    }
+
+
+async def _handle_pending_hire_approve_command(
+        data: dict,
+        state: MatrixState, *,
+        resolve_base_dir,
+        resolve_weaver_launch_config,
+        create_agent_with_config,
+        send_agent_prompt) -> dict:
+    """Approve a pending architect hire and create the engineer."""
+    pending_hire = state.load_pending_hire(data.get("id", ""))
+    if not pending_hire:
+        return {"type": "error", "message": "Pending hire not found"}
+
+    if pending_hire["status"] == "approved":
+        engineer = state.agents.get(pending_hire.get("created_engineer_id", ""))
+        return {
+            "engineer_id": str(pending_hire.get("created_engineer_id", "") or ""),
+            "slug": str(getattr(engineer, "slug", "") or ""),
+        }
+    if pending_hire["status"] == "rejected":
+        return {"type": "error", "message": "Pending hire has already been rejected"}
+
+    architect = _resolve_architect_cell(
+        state,
+        architect_id=pending_hire.get("architect_id", ""),
+    )
+    if not architect:
+        return {"type": "error", "message": "Architect not found for pending hire"}
+    if not architect.group:
+        return {"type": "error", "message": "Architect is not assigned to a group"}
+
+    created = await _handle_add_engineer_command(
+        {
+            "name": pending_hire.get("requested_name", ""),
+            "command": pending_hire.get("requested_command", ""),
+            "provider": pending_hire.get("requested_provider", ""),
+            "directory": pending_hire.get("requested_directory", ""),
+            "group": architect.group,
+            "hired_by_architect_id": architect.id,
+        },
+        state,
+        resolve_base_dir=resolve_base_dir,
+        resolve_weaver_launch_config=resolve_weaver_launch_config,
+        create_agent_with_config=create_agent_with_config,
+        send_agent_prompt=send_agent_prompt,
+    )
+    if created.get("type") == "error":
+        return created
+
+    saved = state.save_pending_hire({
+        "id": pending_hire["id"],
+        "status": "approved",
+        "resolution_note": str(data.get("note", "") or "").strip(),
+        "created_engineer_id": created["id"],
+    })
+    if not saved:
+        return {"type": "error", "message": "Failed to resolve pending hire"}
+    return {
+        "engineer_id": created["id"],
+        "slug": created["slug"],
+    }
+
+
+async def _handle_pending_hire_reject_command(
+        data: dict,
+        state: MatrixState) -> dict:
+    """Reject a pending architect hire request."""
+    pending_hire = state.load_pending_hire(data.get("id", ""))
+    if not pending_hire:
+        return {"type": "error", "message": "Pending hire not found"}
+    if pending_hire["status"] == "approved":
+        return {"type": "error", "message": "Pending hire has already been approved"}
+    if pending_hire["status"] == "rejected":
+        return {"ok": True}
+
+    saved = state.save_pending_hire({
+        "id": pending_hire["id"],
+        "status": "rejected",
+        "resolution_note": str(data.get("note", "") or "").strip(),
+        "created_engineer_id": "",
+    })
+    if not saved:
+        return {"type": "error", "message": "Failed to resolve pending hire"}
+    return {"ok": True}
+
+
+def _handle_pending_hire_list_command(data: dict, state: MatrixState) -> dict:
+    """Return pending-hire rows for the UI or architect-scoped polling."""
+    status_filter = str(data.get("status_filter", "") or "").strip()
+    architect_id = str(data.get("architect_id", "") or "").strip()
+    return {
+        "pending_hires": state.load_pending_hires(
+            status_filter=status_filter,
+            architect_id=architect_id,
+        )
     }
 
 
@@ -2386,10 +2540,16 @@ async def main(connection=None):
         if cell.cell_type != "agent" or not launch_cfg.get("agent_type"):
             return ""
         gs = state.get_group_settings(cell.group)
-        if gs.weaver_agent_id == cell.id or cell.kind == "engineer":
+        if gs.weaver_agent_id == cell.id:
             from .weaver import build_weaver_system_prompt
             ws = state.get_weaver_settings(cell.group)
             return build_weaver_system_prompt(
+                cell.group, ws, launch_cfg.get("system_prompt", ""),
+                group_settings=gs)
+        if cell.kind == "engineer":
+            from .weaver import build_engineer_system_prompt
+            ws = state.get_weaver_settings(cell.group)
+            return build_engineer_system_prompt(
                 cell.group, ws, launch_cfg.get("system_prompt", ""),
                 group_settings=gs)
         return _build_dispatch_persistent_prompt(
@@ -3296,6 +3456,31 @@ async def main(connection=None):
                     create_agent_with_config=_create_agent_with_config,
                     send_agent_prompt=_send_agent_prompt,
                 )
+
+            elif cmd == "architect_engineer_hire":
+                result = await _handle_architect_engineer_hire_command(
+                    data,
+                    state,
+                )
+
+            elif cmd == "pending_hire_approve":
+                result = await _handle_pending_hire_approve_command(
+                    data,
+                    state,
+                    resolve_base_dir=_resolve_base_dir,
+                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    create_agent_with_config=_create_agent_with_config,
+                    send_agent_prompt=_send_agent_prompt,
+                )
+
+            elif cmd == "pending_hire_reject":
+                result = await _handle_pending_hire_reject_command(
+                    data,
+                    state,
+                )
+
+            elif cmd == "pending_hire_list":
+                result = _handle_pending_hire_list_command(data, state)
 
             elif cmd == "delete_engineer":
                 result = await _handle_delete_engineer_command(

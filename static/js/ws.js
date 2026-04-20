@@ -402,6 +402,11 @@ function _deltaSurfaceInvalidations(ops) {
       case 'weaver_settings_update':
         _markSurface(flags, 'main', 'weaver');
         break;
+      case 'decision_upsert':
+      case 'decision_remove':
+      case 'pending_hire_upsert':
+      case 'pending_hire_resolve':
+        break;
       case 'ui_update':
         _applyUiSurfaceInvalidation(flags, op.key);
         break;
@@ -806,6 +811,36 @@ function _applyDelta(ops) {
         }
         break;
       }
+
+      case 'decision_upsert': {
+        if (!state.decisions) state.decisions = {};
+        var decisionId = op.id;
+        if (decisionId) {
+          var decision = Object.assign({}, op);
+          delete decision.op;
+          state.decisions[decisionId] = decision;
+        }
+        break;
+      }
+
+      case 'decision_remove':
+        if (state.decisions) delete state.decisions[op.id];
+        break;
+
+      case 'pending_hire_upsert': {
+        if (!state.pending_hires) state.pending_hires = {};
+        var pendingHireId = op.id;
+        if (pendingHireId) {
+          var pendingHire = Object.assign({}, op);
+          delete pendingHire.op;
+          state.pending_hires[pendingHireId] = pendingHire;
+        }
+        break;
+      }
+
+      case 'pending_hire_resolve':
+        if (state.pending_hires) delete state.pending_hires[op.id];
+        break;
 
       case 'focus_update':
         if ('active_session_id' in op) {

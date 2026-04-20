@@ -23,6 +23,8 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.shared_mod = importlib.reload(self.shared_mod)
         self.mcp_architect_mod = importlib.import_module("loom.mcp_architect")
         self.mcp_architect_mod = importlib.reload(self.mcp_architect_mod)
+        self.mcp_engineer_mod = importlib.import_module("loom.mcp_engineer")
+        self.mcp_engineer_mod = importlib.reload(self.mcp_engineer_mod)
 
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -123,6 +125,15 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
 
     async def _call(self, tool_name: str, args: dict, caller_id: str):
         return await self.mcp_architect_mod._dispatch_architect_tool(
+            tool_name,
+            args,
+            self._handle_command,
+            self.state,
+            caller_id=caller_id,
+        )
+
+    async def _call_engineer(self, tool_name: str, args: dict, caller_id: str):
+        return await self.mcp_engineer_mod._dispatch_engineer_tool(
             tool_name,
             args,
             self._handle_command,
@@ -273,6 +284,106 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             user_engineer.id,
         )
 
+    async def test_architect_and_engineer_messaging_respects_hiring_scope(self):
+        architect = self._add_architect("arch-1", "Architect")
+        other_architect = self._add_architect("arch-2", "Other Architect")
+        hired = self._add_engineer(
+            "eng-hired", "Hired", hired_by_architect_id=architect.id
+        )
+        other_hired = self._add_engineer(
+            "eng-other", "Other Hired", hired_by_architect_id=other_architect.id
+        )
+
+        ok_text, ok_error = await self._call(
+            "architect_engineer_message",
+            {"engineer_id": hired.id, "message": "Need a scope decision."},
+            architect.id,
+        )
+        self.assertFalse(ok_error, ok_text)
+        delivered = json.loads(ok_text)
+        self.assertTrue(delivered["message_id"])
+        self.assertEqual(hired.mcp_messages[0]["action"], "architect_message")
+        self.assertEqual(architect.mcp_messages[0]["action"], "architect_message")
+        self.assertTrue(hired.pending_weaver_message)
+        self.assertEqual(
+            [op["op"] for op in self.state._delta_ops[-2:]],
+            ["agent_upsert", "agent_upsert"],
+        )
+
+        denied_text, denied_error = await self._call(
+            "architect_engineer_message",
+            {"engineer_id": other_hired.id, "message": "Hidden"},
+            architect.id,
+        )
+        self.assertTrue(denied_error)
+        self.assertEqual(denied_text, "engineer not found in scope")
+
+        engineer_ok_text, engineer_ok_error = await self._call_engineer(
+            "engineer_message_architect",
+            {"architect_id": architect.id, "message": "Need product guidance."},
+            hired.id,
+        )
+        self.assertFalse(engineer_ok_error, engineer_ok_text)
+        self.assertEqual(
+            architect.mcp_messages[0]["action"],
+            "engineer_message_architect",
+        )
+        self.assertFalse(hired.pending_weaver_message)
+
+        engineer_denied_text, engineer_denied_error = await self._call_engineer(
+            "engineer_message_architect",
+            {"architect_id": other_architect.id, "message": "Wrong architect"},
+            hired.id,
+        )
+        self.assertTrue(engineer_denied_error)
+        self.assertEqual(engineer_denied_text, "architect not found in scope")
+
+    async def test_architect_and_engineer_replies_follow_existing_threads(self):
+        architect = self._add_architect("arch-1", "Architect")
+        hired = self._add_engineer(
+            "eng-hired", "Hired", hired_by_architect_id=architect.id
+        )
+
+        first_text, first_error = await self._call(
+            "architect_engineer_message",
+            {"engineer_id": hired.id, "message": "Please confirm the plan."},
+            architect.id,
+        )
+        self.assertFalse(first_error, first_text)
+        thread = json.loads(first_text)
+
+        reply_text, reply_error = await self._call_engineer(
+            "engineer_reply",
+            {
+                "message_id": thread["message_id"],
+                "message": "Confirmed; I need one more decision.",
+            },
+            hired.id,
+        )
+        self.assertFalse(reply_error, reply_text)
+        reply = json.loads(reply_text)
+        self.assertEqual(architect.mcp_messages[0]["action"], "engineer_reply")
+        self.assertEqual(architect.mcp_messages[0]["thread_id"], thread["thread_id"])
+
+        architect_reply_text, architect_reply_error = await self._call(
+            "architect_reply",
+            {
+                "message_id": reply["message_id"],
+                "message": "Approved. Continue on the safer path.",
+            },
+            architect.id,
+        )
+        self.assertFalse(architect_reply_error, architect_reply_text)
+        architect_reply = json.loads(architect_reply_text)
+        self.assertEqual(
+            hired.mcp_messages[0]["action"],
+            "architect_reply",
+        )
+        self.assertEqual(
+            hired.mcp_messages[0]["thread_id"],
+            architect_reply["thread_id"],
+        )
+
     async def test_architect_decisions_are_scoped_to_owner(self):
         architect = self._add_architect("arch-1", "Architect")
         other_architect = self._add_architect("arch-2", "Other Architect")
@@ -306,6 +417,7 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision["linked_task_ids"], [task.id])
         self.assertEqual(decision["linked_engineer_ids"], [alice.id])
         self.assertGreater(decision["created_at"], 0)
+        self.assertEqual(self.state._delta_ops[-1]["op"], "decision_upsert")
 
         update_text, update_error = await self._call(
             "architect_decision_update",
@@ -351,6 +463,14 @@ class ArchitectScopingTests(unittest.IsolatedAsyncioTestCase):
             relinked["linked_engineer_ids"],
             [alice.id, user_engineer.id],
         )
+
+        archive_text, archive_error = await self._call(
+            "architect_decision_update",
+            {"id": decision["id"], "archived": True},
+            architect.id,
+        )
+        self.assertFalse(archive_error, archive_text)
+        self.assertEqual(self.state._delta_ops[-1]["op"], "decision_remove")
 
     async def test_architect_journal_round_trips_and_uses_private_file_permissions(self):
         architect = self._add_architect("arch-1", "Architect")

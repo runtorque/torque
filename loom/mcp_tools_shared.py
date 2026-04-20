@@ -10,9 +10,11 @@ spoofing protections are out of scope for this stage.
 
 import copy
 import json
+import time
 import uuid
 from dataclasses import asdict, replace
 
+from .config import log
 from .mcp_weaver_tools.shared import (
     active_worker_ids as _active_worker_ids,
     blocked_dependency_titles as _blocked_dependency_titles,
@@ -200,6 +202,109 @@ def _load_architect_decision(state, caller_id: str,
     ).strip():
         return None, "Decision not found"
     return decision, ""
+
+
+def _load_architect_pending_hire(state, caller_id: str,
+                                 hire_id: str) -> tuple[dict | None, str]:
+    hire_id = str(hire_id or "").strip()
+    if not hire_id:
+        return None, "hire_id is required"
+    pending_hire = state.load_pending_hire(hire_id)
+    if not pending_hire or str(
+            pending_hire.get("architect_id", "") or "").strip() != str(
+                caller_id or "").strip():
+        return None, "Pending hire not found"
+    return pending_hire, ""
+
+
+def _resolve_architect_for_engineer(state, caller_id: str,
+                                    architect_ident: str) -> tuple[object | None, str]:
+    architect_id = _resolve_agent(state, architect_ident)
+    if not architect_id:
+        return None, f"Architect not found: {architect_ident}"
+    architect = state.agents.get(architect_id)
+    if not _is_architect_cell(architect):
+        return None, f"Architect not found: {architect_ident}"
+    caller = state.agents.get(str(caller_id or "").strip())
+    if not caller:
+        return None, f"Engineer not found: {caller_id}"
+    hired_by = str(getattr(caller, "hired_by_architect_id", "") or "").strip()
+    if not hired_by:
+        return None, "engineer is not hired by an architect"
+    if architect.id != hired_by:
+        return None, "architect not found in scope"
+    return architect, ""
+
+
+def _append_cross_kind_message(cell, entry: dict) -> None:
+    if not cell:
+        return
+    cell.mcp_messages.insert(0, dict(entry))
+    if len(cell.mcp_messages) > 20:
+        cell.mcp_messages[:] = cell.mcp_messages[:20]
+
+
+def _load_message_entry(cell, message_id: str) -> tuple[dict | None, str]:
+    message_id = str(message_id or "").strip()
+    if not message_id:
+        return None, "message_id is required"
+    for entry in list(getattr(cell, "mcp_messages", []) or []):
+        if str((entry or {}).get("id", "") or "").strip() == message_id:
+            return dict(entry), ""
+    return None, "Message not found"
+
+
+def _deliver_architect_engineer_message(state, sender, recipient, *,
+                                        action: str, message: str,
+                                        reply_to_id: str = "",
+                                        thread_id: str = "") -> dict:
+    message_text = str(message or "").strip()
+    if not message_text:
+        raise ValueError("message is required")
+    timestamp = time.time()
+    message_id = "msg-" + uuid.uuid4().hex[:12]
+    conversation_id = str(thread_id or "").strip() or message_id
+    reply_to = str(reply_to_id or "").strip()
+    shared = {
+        "id": message_id,
+        "thread_id": conversation_id,
+        "reply_to_id": reply_to,
+        "action": action,
+        "message": message_text,
+        "timestamp": timestamp,
+        "sender_id": sender.id,
+        "sender_kind": str(getattr(sender, "kind", "") or "").strip(),
+    }
+    sender_entry = dict(shared)
+    sender_entry.update({
+        "peer_id": recipient.id,
+        "peer_kind": str(getattr(recipient, "kind", "") or "").strip(),
+        "direction": "sent",
+    })
+    recipient_entry = dict(shared)
+    recipient_entry.update({
+        "peer_id": sender.id,
+        "peer_kind": str(getattr(sender, "kind", "") or "").strip(),
+        "direction": "received",
+    })
+    log.debug(
+        "architect-engineer message action=%s sender=%s recipient=%s thread=%s",
+        action,
+        sender.id,
+        recipient.id,
+        conversation_id,
+    )
+    _append_cross_kind_message(sender, sender_entry)
+    _append_cross_kind_message(recipient, recipient_entry)
+    state.history_record_message(sender.id, action, message_text)
+    state.history_record_message(recipient.id, action, message_text)
+    if str(getattr(recipient, "kind", "") or "").strip() == "engineer":
+        recipient.pending_weaver_message = True
+    if str(getattr(sender, "kind", "") or "").strip() == "engineer":
+        sender.pending_weaver_message = False
+    state._emit_agent(sender)
+    state._emit_agent(recipient)
+    return shared
 
 
 def _visible_agent_ids_for_caller(state, caller_kind: str,
@@ -1148,6 +1253,29 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         )
         return json.dumps({"engineers": engineers}), False
 
+    if tool_name == "pending_hire_status" and caller_kind == "architect":
+        pending_hire, hire_error = _load_architect_pending_hire(
+            real_state, caller_id, args.get("hire_id", "")
+        )
+        if not pending_hire:
+            return hire_error, True
+        return json.dumps(pending_hire), False
+
+    if tool_name == "pending_hire_list" and caller_kind == "architect":
+        status_filter = str(args.get("status_filter", "") or "").strip()
+        if status_filter and status_filter not in {
+                "pending", "approved", "rejected"}:
+            return (
+                "status_filter must be one of: pending, approved, rejected",
+                True,
+            )
+        return json.dumps({
+            "pending_hires": real_state.load_pending_hires(
+                status_filter=status_filter,
+                architect_id=str(caller_id or "").strip(),
+            )
+        }), False
+
     if tool_name == "agents_list":
         agents = []
         for c in state.agents.values():
@@ -1330,6 +1458,22 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return json.dumps(result), False
 
     # -- Write tools --------------------------------------------------------
+
+    if tool_name == "engineer_hire" and caller_kind == "architect":
+        name = str(args.get("name", "") or "").strip()
+        if not name:
+            return "name is required", True
+        result = await handle_command({
+            "cmd": "architect_engineer_hire",
+            "architect_id": str(caller_id or "").strip(),
+            "name": name,
+            "command": str(args.get("command", "") or "").strip(),
+            "provider": str(args.get("provider", "") or "").strip(),
+            "directory": str(args.get("directory", "") or "").strip(),
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps(result) if result else '{"type":"ok"}', False
 
     if tool_name == "task_create":
         if caller_kind == "architect":
@@ -2128,6 +2272,104 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return json.dumps(result), False
 
     # -- Interaction tools --------------------------------------------------
+
+    if tool_name == "engineer_message" and caller_kind == "architect":
+        engineer_ident = str(args.get("engineer_id", "") or "").strip()
+        if not engineer_ident:
+            return "engineer_id is required", True
+        engineer_id, engineer_error = _resolve_architect_engineer(
+            real_state, caller_id, engineer_ident
+        )
+        if not engineer_id:
+            return engineer_error, True
+        engineer = real_state.agents.get(engineer_id)
+        architect = real_state.agents.get(str(caller_id or "").strip())
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        delivered = _deliver_architect_engineer_message(
+            real_state,
+            architect,
+            engineer,
+            action="architect_message",
+            message=message,
+        )
+        return json.dumps({
+            "type": "ok",
+            "message_id": delivered["id"],
+            "thread_id": delivered["thread_id"],
+            "engineer_id": engineer.id,
+        }), False
+
+    if tool_name == "message_architect" and caller_kind == "engineer":
+        architect_ident = str(args.get("architect_id", "") or "").strip()
+        if not architect_ident:
+            return "architect_id is required", True
+        architect, architect_error = _resolve_architect_for_engineer(
+            real_state, caller_id, architect_ident
+        )
+        if not architect:
+            return architect_error, True
+        engineer = real_state.agents.get(str(caller_id or "").strip())
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        delivered = _deliver_architect_engineer_message(
+            real_state,
+            engineer,
+            architect,
+            action="engineer_message_architect",
+            message=message,
+        )
+        return json.dumps({
+            "type": "ok",
+            "message_id": delivered["id"],
+            "thread_id": delivered["thread_id"],
+            "architect_id": architect.id,
+        }), False
+
+    if tool_name == "reply" and caller_kind in {"architect", "engineer"}:
+        caller = real_state.agents.get(str(caller_id or "").strip())
+        entry, message_error = _load_message_entry(
+            caller, args.get("message_id", "")
+        )
+        if not entry:
+            return message_error, True
+        peer_id = str(entry.get("peer_id", "") or "").strip()
+        peer = real_state.agents.get(peer_id)
+        if caller_kind == "architect":
+            engineer_id, engineer_error = _resolve_architect_engineer(
+                real_state, caller_id, peer_id
+            )
+            if not engineer_id:
+                return engineer_error, True
+            peer = real_state.agents.get(engineer_id)
+            action = "architect_reply"
+        else:
+            architect, architect_error = _resolve_architect_for_engineer(
+                real_state, caller_id, peer_id
+            )
+            if not architect:
+                return architect_error, True
+            peer = architect
+            action = "engineer_reply"
+        message = str(args.get("message", "") or "").strip()
+        if not message:
+            return "message is required", True
+        delivered = _deliver_architect_engineer_message(
+            real_state,
+            caller,
+            peer,
+            action=action,
+            message=message,
+            reply_to_id=str(entry.get("id", "") or "").strip(),
+            thread_id=str(entry.get("thread_id", "") or "").strip(),
+        )
+        return json.dumps({
+            "type": "ok",
+            "message_id": delivered["id"],
+            "thread_id": delivered["thread_id"],
+        }), False
 
     if tool_name == "agent_message":
         agent_ident = args.get("agent", "")

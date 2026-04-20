@@ -356,6 +356,13 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
             kind="architect",
         )
+        engineer = self.state_mod.AgentCell(
+            id="engineer-1",
+            name="Engineer",
+            group="g",
+            cell_type="agent",
+            kind="engineer",
+        )
         worker = self.state_mod.AgentCell(
             id="agent-1",
             name="Worker",
@@ -364,8 +371,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         state.agents[weaver.id] = weaver
         state.agents[architect.id] = architect
+        state.agents[engineer.id] = engineer
         state.agents[worker.id] = worker
-        state.groups["g"] = [weaver.id, architect.id, worker.id]
+        state.groups["g"] = [weaver.id, architect.id, engineer.id, worker.id]
         state.group_settings["g"] = self.state_mod.GroupSettings(
             weaver_agent_id=weaver.id
         )
@@ -419,7 +427,22 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertIn("architect_board_summary", architect_tool_names)
         self.assertIn("architect_decision_create", architect_tool_names)
+        self.assertIn("architect_engineer_hire", architect_tool_names)
+        self.assertIn("architect_engineer_message", architect_tool_names)
         self.assertNotIn("weaver_board_summary", architect_tool_names)
+
+        listed_engineer = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 121, "method": "tools/list"},
+                headers={"X-Loom-Cell-Id": engineer.id},
+            )
+        )
+        engineer_tool_names = [
+            tool["name"] for tool in listed_engineer.payload["result"]["tools"]
+        ]
+        self.assertIn("weaver_board_summary", engineer_tool_names)
+        self.assertIn("engineer_message_architect", engineer_tool_names)
+        self.assertIn("engineer_reply", engineer_tool_names)
 
         listed_weaver = await handler(
             FakeRequest(

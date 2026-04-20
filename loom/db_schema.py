@@ -422,6 +422,24 @@ CREATE INDEX IF NOT EXISTS idx_memory_links_entry
     ON memory_links(entry_id, target_kind, target_ref);
 CREATE INDEX IF NOT EXISTS idx_memory_links_target
     ON memory_links(target_kind, target_ref, created_at DESC, entry_id);
+
+CREATE TABLE IF NOT EXISTS pending_hires (
+    id TEXT PRIMARY KEY,
+    architect_id TEXT NOT NULL,
+    requested_name TEXT NOT NULL,
+    requested_command TEXT NOT NULL DEFAULT '',
+    requested_provider TEXT NOT NULL DEFAULT '',
+    requested_directory TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    resolution_note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL DEFAULT 0,
+    resolved_at INTEGER NOT NULL DEFAULT 0,
+    created_engineer_id TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_pending_hires_status
+    ON pending_hires(status);
+CREATE INDEX IF NOT EXISTS idx_pending_hires_architect
+    ON pending_hires(architect_id);
 """
 
 def initialize_database(conn: sqlite3.Connection, backfill_agent_history):

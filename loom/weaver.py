@@ -258,6 +258,18 @@ Operational rules:
    agent when you want a clean review/merge boundary.
 """
 
+_ENGINEER_ARCHITECT_ESCALATION_SECTION = """\
+## Architect escalation
+
+When a non-trivial product or scope decision arises, call
+`engineer_message_architect(architect_id=<hiring-architect-id>, message=...)`
+BEFORE committing to a direction. The hiring architect owns product-level
+scope. Do not silently reinterpret the task.
+
+This only applies when an architect is in your chain. If you are user-owned
+and no architect is attached, proceed as normal.
+"""
+
 
 def _autonomy_mode_label(mode: str) -> str:
     labels = {
@@ -468,6 +480,19 @@ def build_weaver_system_prompt(group: str, weaver_settings=None,
         )
 
     return "\n\n".join(parts) + "\n"
+
+
+def build_engineer_system_prompt(group: str, weaver_settings=None,
+                                 action_system_prompt: str = "",
+                                 group_settings=None) -> str:
+    """Assemble the engineer boot prompt with architect escalation guidance."""
+    prompt = build_weaver_system_prompt(
+        group,
+        weaver_settings,
+        action_system_prompt,
+        group_settings=group_settings,
+    ).rstrip()
+    return prompt + "\n\n" + _ENGINEER_ARCHITECT_ESCALATION_SECTION + "\n"
 
 
 

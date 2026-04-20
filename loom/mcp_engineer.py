@@ -34,6 +34,47 @@ def _rename_tool_spec(tool: dict) -> dict:
 
 
 ENGINEER_TOOLS = [_rename_tool_spec(tool) for tool in WEAVER_TOOLS]
+ENGINEER_TOOLS.extend([
+    {
+        "name": "engineer_message_architect",
+        "description": (
+            "Send a direct message to the architect that hired this engineer. "
+            "Use this for non-trivial product or scope decisions."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "architect_id": {
+                    "type": "string",
+                    "description": "Architect id/slug/name.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Message content.",
+                },
+            },
+            "required": ["architect_id", "message"],
+        },
+    },
+    {
+        "name": "engineer_reply",
+        "description": "Reply to an existing architect↔engineer message thread.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string",
+                    "description": "Existing message id from the conversation log.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Reply content.",
+                },
+            },
+            "required": ["message_id", "message"],
+        },
+    },
+])
 
 
 def _stringify_startup_error(error_text: str) -> str:

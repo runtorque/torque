@@ -116,6 +116,98 @@ _ARCHITECT_TOOL_SPECS = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "architect_engineer_hire",
+        "description": (
+            "Queue a new engineer hire request for user approval. This returns "
+            "immediately with status='pending'; poll with "
+            "architect_pending_hire_status or architect_pending_hire_list for "
+            "resolution."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Requested engineer name."},
+                "command": {
+                    "type": "string",
+                    "description": "Optional boot command override.",
+                },
+                "provider": {
+                    "type": "string",
+                    "description": "Optional provider override.",
+                },
+                "directory": {
+                    "type": "string",
+                    "description": "Optional working directory override.",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "architect_pending_hire_status",
+        "description": "Read one pending-hire request created by this architect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "hire_id": {
+                    "type": "string",
+                    "description": "Pending-hire id.",
+                }
+            },
+            "required": ["hire_id"],
+        },
+    },
+    {
+        "name": "architect_pending_hire_list",
+        "description": "List pending-hire requests created by this architect.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status_filter": {
+                    "type": "string",
+                    "enum": ["pending", "approved", "rejected"],
+                    "description": "Optional status filter.",
+                }
+            },
+        },
+    },
+    {
+        "name": "architect_engineer_message",
+        "description": "Send a direct message from this architect to a visible engineer.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "engineer_id": {
+                    "type": "string",
+                    "description": "Engineer id/slug/name.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Message content.",
+                },
+            },
+            "required": ["engineer_id", "message"],
+        },
+    },
+    {
+        "name": "architect_reply",
+        "description": "Reply to an existing architect↔engineer message thread.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string",
+                    "description": "Existing message id from the conversation log.",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Reply content.",
+                },
+            },
+            "required": ["message_id", "message"],
+        },
+    },
+    {
         "name": "architect_decision_create",
         "description": "Create a new architect decision log entry.",
         "inputSchema": {

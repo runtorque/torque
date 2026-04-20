@@ -264,6 +264,17 @@ def _decode_decision_row(row, cols) -> dict:
     return decision
 
 
+def _decode_pending_hire_row(row, cols) -> dict:
+    pending_hire = dict(zip(cols, row))
+    pending_hire["created_at"] = _decision_int(
+        pending_hire.get("created_at", 0)
+    )
+    pending_hire["resolved_at"] = _decision_int(
+        pending_hire.get("resolved_at", 0)
+    )
+    return pending_hire
+
+
 
 
 class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
@@ -1304,6 +1315,21 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         cols = [d[0] for d in cursor.description]
         return [_decode_decision_row(row, cols) for row in rows]
 
+    def load_all_decisions(self, *, include_archived: bool = False) -> list[dict]:
+        """Load all persisted architect decisions, newest first."""
+        query = (
+            "SELECT id, architect_id, title, rationale, status, supersedes, "
+            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at "
+            "FROM decisions"
+        )
+        if not include_archived:
+            query += " WHERE archived=0"
+        query += " ORDER BY updated_at DESC, created_at DESC, id DESC"
+        cursor = self._conn.execute(query)
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        return [_decode_decision_row(row, cols) for row in rows]
+
     def delete_decision(self, decision_id: str) -> dict | None:
         """Soft-delete one decision by marking it archived."""
         decision_id = str(decision_id or "").strip()
@@ -1325,6 +1351,148 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         if not decision_id:
             return
         self._conn.execute("DELETE FROM decisions WHERE id=?", (decision_id,))
+        self._conn.commit()
+
+    def load_pending_hire(self, hire_id: str) -> dict | None:
+        """Load one persisted pending hire by id."""
+        hire_id = str(hire_id or "").strip()
+        if not hire_id:
+            return None
+        cursor = self._conn.execute(
+            "SELECT id, architect_id, requested_name, requested_command, "
+            "requested_provider, requested_directory, status, resolution_note, "
+            "created_at, resolved_at, created_engineer_id "
+            "FROM pending_hires WHERE id=?",
+            (hire_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cursor.description]
+        return _decode_pending_hire_row(row, cols)
+
+    def save_pending_hire(self, row_dict: dict) -> dict:
+        """Upsert one pending-hire row and return the normalized row."""
+        row = dict(row_dict or {})
+        hire_id = str(row.get("id", "") or "").strip()
+        if not hire_id:
+            raise ValueError("pending hire id is required")
+
+        existing = self.load_pending_hire(hire_id) or {}
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        architect_id = str(
+            row.get("architect_id", existing.get("architect_id", "")) or ""
+        ).strip()
+        if not architect_id:
+            raise ValueError("architect_id is required")
+        requested_name = str(
+            row.get("requested_name", existing.get("requested_name", "")) or ""
+        ).strip()
+        if not requested_name:
+            raise ValueError("requested_name is required")
+
+        status = str(
+            row.get("status", existing.get("status", "pending")) or "pending"
+        ).strip() or "pending"
+        if status not in {"pending", "approved", "rejected"}:
+            raise ValueError(
+                "status must be one of: pending, approved, rejected"
+            )
+        created_at = _decision_int(
+            row.get("created_at", existing.get("created_at", now_ts)),
+            now_ts,
+        )
+        prior_status = str(existing.get("status", "") or "").strip()
+        if status == "pending":
+            resolved_at = 0
+        elif "resolved_at" in row:
+            resolved_at = _decision_int(row.get("resolved_at", now_ts), now_ts)
+        elif prior_status == status and existing.get("resolved_at", 0):
+            resolved_at = _decision_int(existing.get("resolved_at", 0), now_ts)
+        else:
+            resolved_at = now_ts
+
+        self._conn.execute(
+            "INSERT OR REPLACE INTO pending_hires "
+            "(id, architect_id, requested_name, requested_command, "
+            "requested_provider, requested_directory, status, resolution_note, "
+            "created_at, resolved_at, created_engineer_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                hire_id,
+                architect_id,
+                requested_name,
+                str(
+                    row.get(
+                        "requested_command",
+                        existing.get("requested_command", ""),
+                    ) or ""
+                ),
+                str(
+                    row.get(
+                        "requested_provider",
+                        existing.get("requested_provider", ""),
+                    ) or ""
+                ),
+                str(
+                    row.get(
+                        "requested_directory",
+                        existing.get("requested_directory", ""),
+                    ) or ""
+                ),
+                status,
+                str(
+                    row.get(
+                        "resolution_note",
+                        existing.get("resolution_note", ""),
+                    ) or ""
+                ),
+                created_at,
+                resolved_at,
+                str(
+                    row.get(
+                        "created_engineer_id",
+                        existing.get("created_engineer_id", ""),
+                    ) or ""
+                ),
+            ),
+        )
+        self._conn.commit()
+        saved = self.load_pending_hire(hire_id)
+        if not saved:
+            raise RuntimeError(f"failed to load saved pending hire {hire_id}")
+        return saved
+
+    def load_pending_hires(self, *, status_filter: str = "",
+                           architect_id: str = "") -> list[dict]:
+        """Load persisted pending-hire rows, newest first."""
+        query = (
+            "SELECT id, architect_id, requested_name, requested_command, "
+            "requested_provider, requested_directory, status, resolution_note, "
+            "created_at, resolved_at, created_engineer_id "
+            "FROM pending_hires WHERE 1=1"
+        )
+        params: list = []
+        architect_id = str(architect_id or "").strip()
+        if architect_id:
+            query += " AND architect_id=?"
+            params.append(architect_id)
+        status_filter = str(status_filter or "").strip()
+        if status_filter:
+            query += " AND status=?"
+            params.append(status_filter)
+        query += " ORDER BY created_at DESC, id DESC"
+        cursor = self._conn.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        return [_decode_pending_hire_row(row, cols) for row in rows]
+
+    def delete_pending_hire(self, hire_id: str) -> None:
+        """Permanently delete one pending-hire row."""
+        hire_id = str(hire_id or "").strip()
+        if not hire_id:
+            return
+        self._conn.execute("DELETE FROM pending_hires WHERE id=?", (hire_id,))
         self._conn.commit()
 
     def save_weaver_task_log_entry(self, record: dict) -> int:
