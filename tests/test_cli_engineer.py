@@ -255,6 +255,63 @@ class CliEngineerTests(unittest.TestCase):
         )
         api_call.assert_not_called()
 
+    def test_cmd_task_edit_rejects_cross_group_move_for_existing_assignment(self):
+        state = {
+            "agents": {
+                "eng-alice": {
+                    "id": "eng-alice",
+                    "name": "Alice",
+                    "slug": "alice",
+                    "group": "group-a",
+                    "kind": "engineer",
+                    "cell_type": "agent",
+                }
+            },
+            "board_tasks": {
+                "task-1": {
+                    "id": "task-1",
+                    "task": "Ship it",
+                    "slug": "ship-it",
+                    "group": "group-a",
+                    "assigned_engineer_id": "eng-alice",
+                    "verification_summary": {},
+                }
+            },
+        }
+        args = SimpleNamespace(
+            port=18932,
+            identifier="task-1",
+            task=None,
+            action=None,
+            var=None,
+            labels=None,
+            group="group-b",
+            engineer=None,
+            at=None,
+            depends_on=None,
+            verify_mode=None,
+            verify_state=None,
+            verify_note=None,
+            verify_tests=None,
+            verify_smoke_done=False,
+            verify_deploy_needed=False,
+            verify_deploy_attempted=False,
+            verify_human=None,
+        )
+        err = io.StringIO()
+        with mock.patch.object(self.cli, "get_state_local", return_value=state), \
+             mock.patch.object(self.cli, "api_call") as api_call, \
+             contextlib.redirect_stderr(err), \
+             self.assertRaises(SystemExit) as cm:
+            self.cli.cmd_task_edit(args)
+
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn(
+            "cannot move assigned task to group 'group-b' while engineer 'alice' belongs to group 'group-a'; clear or reassign --engineer",
+            err.getvalue(),
+        )
+        api_call.assert_not_called()
+
     def test_cmd_engineer_list_outputs_json_with_worker_and_task_counts(self):
         state = {
             "agents": {

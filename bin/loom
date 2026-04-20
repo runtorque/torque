@@ -485,6 +485,37 @@ def _validate_engineer_assignment(state_data, engineer_slug: str, group: str) ->
     return str(engineer.get("id", "") or "")
 
 
+def _validate_task_group_assignment_change(state_data, task, fields):
+    """Reject group moves that would leave an assigned engineer out of scope."""
+    if "group" not in fields:
+        return
+    target_group = str(fields.get("group", "") or task.get("group", "") or "").strip()
+    assigned_engineer_id = str(
+        fields.get(
+            "assigned_engineer_id",
+            task.get("assigned_engineer_id", ""),
+        ) or ""
+    ).strip()
+    if not assigned_engineer_id:
+        return
+    engineer = (state_data.get("agents", {}) or {}).get(assigned_engineer_id)
+    if not engineer:
+        return
+    engineer_group = str(engineer.get("group", "") or "").strip()
+    if engineer_group == target_group:
+        return
+    engineer_label = (
+        str(engineer.get("slug", "") or "").strip()
+        or str(engineer.get("name", "") or "").strip()
+        or assigned_engineer_id
+    )
+    die(
+        f"cannot move assigned task to group '{target_group}' while "
+        f"engineer '{engineer_label}' belongs to group '{engineer_group}'; "
+        "clear or reassign --engineer"
+    )
+
+
 def get_state_local(port):
     """Try SQLite first, fall back to HTTP daemon.
     Use for read-only commands that don't need ephemeral fields."""
@@ -2542,6 +2573,8 @@ def cmd_task_edit(args):
     if not fields:
         print("No changes.")
         return
+
+    _validate_task_group_assignment_change(st, t, fields)
 
     resp = api_call("board_update_task", port=args.port, id=t["id"], **fields)
     check_ok(resp)
