@@ -402,6 +402,120 @@ def db_read_doctor_report():
     return build_doctor_report_for_db(LOOM_DB)
 
 
+def _iter_engineers_from_state(state_data):
+    """Yield engineer agent dicts in the state's natural order."""
+    for cell in (state_data.get("agents", {}) or {}).values():
+        if cell.get("cell_type", "") != "agent":
+            continue
+        if str(cell.get("kind", "") or "").strip() != "engineer":
+            continue
+        yield cell
+
+
+def _engineer_counts_from_state(state_data):
+    """Return worker/task counts keyed by engineer id."""
+    worker_counts = {}
+    task_counts = {}
+    for cell in (state_data.get("agents", {}) or {}).values():
+        if cell.get("cell_type", "") != "agent":
+            continue
+        if str(cell.get("kind", "") or "").strip() != "worker":
+            continue
+        owner_id = str(cell.get("owner_engineer_id", "") or "").strip()
+        if not owner_id:
+            continue
+        worker_counts[owner_id] = worker_counts.get(owner_id, 0) + 1
+    for task in (state_data.get("board_tasks", {}) or {}).values():
+        engineer_id = str(task.get("assigned_engineer_id", "") or "").strip()
+        if not engineer_id:
+            continue
+        task_counts[engineer_id] = task_counts.get(engineer_id, 0) + 1
+    return worker_counts, task_counts
+
+
+def _engineers_with_counts(state_data):
+    """Return engineers annotated with worker/task counts."""
+    worker_counts, task_counts = _engineer_counts_from_state(state_data)
+    engineers = []
+    for engineer in _iter_engineers_from_state(state_data):
+        engineers.append(
+            {
+                "id": engineer["id"],
+                "name": engineer.get("name", ""),
+                "slug": engineer.get("slug", ""),
+                "status": engineer.get("status", "") or "stopped",
+                "worker_count": int(worker_counts.get(engineer["id"], 0) or 0),
+                "task_count": int(task_counts.get(engineer["id"], 0) or 0),
+            }
+        )
+    return engineers
+
+
+def _resolve_engineer_by_slug(state_data, engineer_slug: str):
+    """Resolve an engineer slug to its cell dict, or return None."""
+    wanted = str(engineer_slug or "").strip().lower()
+    if not wanted:
+        return None
+    for engineer in _iter_engineers_from_state(state_data):
+        if str(engineer.get("slug", "") or "").strip().lower() == wanted:
+            return engineer
+    return None
+
+
+def _resolve_engineer_id_by_slug(state_data, engineer_slug: str) -> str:
+    """Resolve an engineer slug to its agent id, or return an empty string."""
+    engineer = _resolve_engineer_by_slug(state_data, engineer_slug)
+    return str(engineer.get("id", "") or "") if engineer else ""
+
+
+def _validate_engineer_assignment(state_data, engineer_slug: str, group: str) -> str:
+    """Resolve an engineer slug for a specific group or exit with a clear error."""
+    wanted = str(engineer_slug or "").strip()
+    if not wanted:
+        return ""
+    engineer = _resolve_engineer_by_slug(state_data, wanted)
+    if not engineer:
+        die(f"no engineer with slug '{wanted}'")
+    engineer_group = str(engineer.get("group", "") or "").strip()
+    if engineer_group != str(group or "").strip():
+        die(
+            f"engineer '{wanted}' belongs to group '{engineer_group}', "
+            f"not '{group}'"
+        )
+    return str(engineer.get("id", "") or "")
+
+
+def _validate_task_group_assignment_change(state_data, task, fields):
+    """Reject group moves that would leave an assigned engineer out of scope."""
+    if "group" not in fields:
+        return
+    target_group = str(fields.get("group", "") or task.get("group", "") or "").strip()
+    assigned_engineer_id = str(
+        fields.get(
+            "assigned_engineer_id",
+            task.get("assigned_engineer_id", ""),
+        ) or ""
+    ).strip()
+    if not assigned_engineer_id:
+        return
+    engineer = (state_data.get("agents", {}) or {}).get(assigned_engineer_id)
+    if not engineer:
+        return
+    engineer_group = str(engineer.get("group", "") or "").strip()
+    if engineer_group == target_group:
+        return
+    engineer_label = (
+        str(engineer.get("slug", "") or "").strip()
+        or str(engineer.get("name", "") or "").strip()
+        or assigned_engineer_id
+    )
+    die(
+        f"cannot move assigned task to group '{target_group}' while "
+        f"engineer '{engineer_label}' belongs to group '{engineer_group}'; "
+        "clear or reassign --engineer"
+    )
+
+
 def get_state_local(port):
     """Try SQLite first, fall back to HTTP daemon.
     Use for read-only commands that don't need ephemeral fields."""
@@ -1865,6 +1979,10 @@ def cmd_task_create(args):
         "group": group,
         "lane": "Backlog",
     }
+    if getattr(args, "engineer", None) is not None:
+        kwargs["assigned_engineer_id"] = _validate_engineer_assignment(
+            state_data, args.engineer, group
+        )
     if getattr(args, "context", None):
         kwargs["description"] = args.context
     if args.labels:
@@ -2372,7 +2490,7 @@ def cmd_task_edit(args):
     has_flags = any(
         getattr(args, attr, None) is not None
         for attr in (
-            "task", "action", "labels", "group", "at", "depends_on",
+            "task", "action", "labels", "group", "engineer", "at", "depends_on",
             "verify_mode", "verify_state", "verify_note", "verify_tests",
             "verify_human",
         )
@@ -2399,6 +2517,11 @@ def cmd_task_edit(args):
                                 if l.strip()]
         if args.group is not None:
             fields["group"] = args.group
+        if args.engineer is not None:
+            target_group = str(args.group or t.get("group", "") or "").strip()
+            fields["assigned_engineer_id"] = _validate_engineer_assignment(
+                st, args.engineer, target_group
+            )
         if getattr(args, "at", None) is not None:
             fields["scheduled_at"] = _parse_relative_time(args.at)
         if getattr(args, "depends_on", None) is not None:
@@ -2451,9 +2574,38 @@ def cmd_task_edit(args):
         print("No changes.")
         return
 
+    _validate_task_group_assignment_change(st, t, fields)
+
     resp = api_call("board_update_task", port=args.port, id=t["id"], **fields)
     check_ok(resp)
     print(f"Updated task {t.get('slug', '') or t['id'][:6]}")
+
+
+def cmd_engineer_list(args):
+    """List engineers with ownership counts."""
+    st = get_state_local(args.port)
+    engineers = _engineers_with_counts(st)
+
+    if args.json:
+        print(json.dumps({"engineers": engineers}, indent=2))
+        return
+
+    if not engineers:
+        print("\n  No engineers.\n")
+        return
+
+    print(f"\n  {_bold('Engineers')} ({len(engineers)})")
+    for engineer in engineers:
+        eslug = _dim(engineer.get("slug", "") or engineer["id"][:6])
+        status = engineer.get("status", "") or "stopped"
+        print(
+            "    "
+            f"{eslug}  {engineer.get('name', '')}  "
+            f"{_dim(status)}  "
+            f"workers={engineer.get('worker_count', 0)}  "
+            f"tasks={engineer.get('task_count', 0)}"
+        )
+    print()
 
 
 def cmd_task_verify(args):
@@ -3962,6 +4114,17 @@ def build_parser():
     p.add_argument("--color", help="New tab color (hex)")
     p.set_defaults(func=cmd_agent_edit)
 
+    # -- engineer -----------------------------------------------------------
+    eng = sub.add_parser("engineer", help="Engineer management")
+    eng.set_defaults(func=None, _sub_parser=eng)
+    eng_sub = eng.add_subparsers(dest="engineer_cmd")
+
+    p = eng_sub.add_parser("list", aliases=["ls"],
+                           help="List engineers")
+    p.add_argument("--json", action="store_true",
+                   help="Output raw JSON")
+    p.set_defaults(func=cmd_engineer_list)
+
     hist = agt_sub.add_parser("history", aliases=["hist"],
                               help="Agent history (persistent)")
     hist.set_defaults(func=None, _sub_parser=hist)
@@ -4093,6 +4256,8 @@ def build_parser():
     p.add_argument("-d", "--context", help="Longer description / context")
     p.add_argument("-g", "--group",
                    help="Target group (auto-detected if in a Loom session)")
+    p.add_argument("--engineer",
+                   help="Assign to an engineer slug (default: unassigned)")
     p.add_argument("-t", "--action", help="Action name to attach")
     p.add_argument("-v", "--var", nargs="+", metavar="KEY=VALUE",
                    help="Action variables (e.g., -v CONTEXT='some info')")
@@ -4142,6 +4307,8 @@ def build_parser():
                    help="Set action variables")
     p.add_argument("-l", "--labels", help="Comma-separated labels")
     p.add_argument("-g", "--group", help="Move to different group")
+    p.add_argument("--engineer",
+                   help="Reassign to an engineer slug (empty string clears)")
     p.add_argument("--at", help="Schedule dispatch (ISO 8601, +2h, tomorrow 09:00)")
     p.add_argument("--depends-on",
                    help="Comma-separated task slugs/IDs this depends on")

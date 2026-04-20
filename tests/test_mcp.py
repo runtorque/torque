@@ -384,8 +384,8 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("loom_memory_publish", tool_names)
         self.assertIn("loom_memory_read", tool_names)
         self.assertIn("loom_memory_link", tool_names)
-        self.assertNotIn("weaver_board_summary", tool_names)
-        self.assertNotIn("weaver_task_verify", tool_names)
+        self.assertIn("weaver_board_summary", tool_names)
+        self.assertIn("weaver_task_verify", tool_names)
 
         listed_worker = await handler(
             FakeRequest(
@@ -428,7 +428,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             missing_header.payload["result"]["content"][0]["text"],
         )
 
-        denied_summary = await handler(
+        alias_summary = await handler(
             FakeRequest(
                 {
                     "jsonrpc": "2.0",
@@ -438,10 +438,10 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
         )
-        self.assertTrue(denied_summary.payload["result"]["isError"])
-        self.assertIn(
-            "X-Loom-Cell-Id header is required",
-            denied_summary.payload["result"]["content"][0]["text"],
+        self.assertFalse(alias_summary.payload["result"]["isError"])
+        self.assertEqual(
+            json.loads(alias_summary.payload["result"]["content"][0]["text"])["group"],
+            "g",
         )
 
         denied_worker_summary = await handler(
@@ -457,7 +457,7 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(denied_worker_summary.payload["result"]["isError"])
         self.assertIn(
-            "only available to the designated Weaver agent",
+            "only available to engineer sessions or external MCP clients",
             denied_worker_summary.payload["result"]["content"][0]["text"],
         )
 

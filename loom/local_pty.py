@@ -31,6 +31,7 @@ from .pty_core import (
     preexec_acquire_ctty as _preexec_acquire_ctty,
     set_winsize as _pty_set_winsize,
 )
+from .server_agent import mcp_entrypoint_for_cell
 from .state import AgentCell, MatrixState
 from .terminal_adapter import TerminalCapabilities, TerminalLaunchContext
 from .worktree import ensure_git_exclude
@@ -121,6 +122,7 @@ class LocalPtyAdapter:
         init_script: str = "",
         shell: str = "",
         system_prompt: str = "",
+        mcp_entrypoint: str = "",
         target_session_id: str = "",
         target_window_id: str = "",
         restore_focus_to_prev_tab: bool = False,
@@ -171,6 +173,7 @@ class LocalPtyAdapter:
             env_file=env_file,
             init_script=init_script,
             system_prompt=system_prompt,
+            mcp_entrypoint=mcp_entrypoint,
         )
 
     def _prepare_create(
@@ -247,6 +250,7 @@ class LocalPtyAdapter:
         env_file: str,
         init_script: str,
         system_prompt: str,
+        mcp_entrypoint: str = "",
     ) -> None:
         """Post-spawn cell state updates and startup commands.
 
@@ -273,6 +277,7 @@ class LocalPtyAdapter:
             env_file=env_file,
             init_script=init_script,
             system_prompt=system_prompt,
+            mcp_entrypoint=mcp_entrypoint,
         )
         if setup_commands:
             await asyncio.sleep(0.12)
@@ -569,6 +574,7 @@ class LocalPtyAdapter:
         env_file: str = "",
         init_script: str = "",
         system_prompt: str = "",
+        mcp_entrypoint: str = "",
     ) -> list[str]:
         commands: list[str] = []
         shell_name = shell_name or os.path.basename(self._resolve_shell(""))
@@ -594,7 +600,11 @@ class LocalPtyAdapter:
                     log.info("Installed hooks for '%s' (type=%s) in %s",
                              cell.name, cell.agent_type, hook_dir)
             if hook_dir and hasattr(adapter, "install_mcp_config"):
-                if adapter.install_mcp_config(hook_dir):
+                if adapter.install_mcp_config(
+                        hook_dir,
+                        mcp_entrypoint=(
+                            mcp_entrypoint or mcp_entrypoint_for_cell(cell)
+                        )):
                     log.info("Installed MCP config for '%s' in %s", cell.name, hook_dir)
             if hook_dir and hasattr(adapter, "install_skills"):
                 if adapter.install_skills(hook_dir):
@@ -1042,6 +1052,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
         init_script: str = "",
         shell: str = "",
         system_prompt: str = "",
+        mcp_entrypoint: str = "",
         target_session_id: str = "",
         target_window_id: str = "",
         restore_focus_to_prev_tab: bool = False,
@@ -1103,6 +1114,7 @@ class SupervisedPtyAdapter(LocalPtyAdapter):
             env_file=env_file,
             init_script=init_script,
             system_prompt=system_prompt,
+            mcp_entrypoint=mcp_entrypoint,
         )
 
     async def close_session(self, session_id: str) -> None:

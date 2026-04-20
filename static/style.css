@@ -610,6 +610,14 @@ body.runtime-embedded .terminal-empty {
   outline-offset: -1px;
 }
 .cell.stopped { opacity: .55; }
+.cell.engineer {
+  border-left: 3px solid rgba(88, 166, 255, 0.72);
+  box-shadow: inset 3px 0 0 rgba(88, 166, 255, 0.14);
+}
+.cell.engineer .cell-name {
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+  font-weight: 600;
+}
 .cell.weaver {
   --weaver-chrome: transparent;
   --weaver-edge-shadow: none;
@@ -653,6 +661,19 @@ body.runtime-embedded .terminal-empty {
   font-weight: 600;
   text-align: center;
   margin-top: 2px;
+}
+.cell.engineer-owned-worker {
+  padding-left: 16px;
+}
+.cell.engineer-owned-worker::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 12px;
+  bottom: 10px;
+  width: 1px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 999px;
 }
 .cell-name {
   font-size: 9px; text-align: center;
@@ -852,6 +873,21 @@ body.runtime-embedded .terminal-empty {
   font-size: 7px; color: var(--text-dim);
   letter-spacing: .03em; font-weight: 600;
   opacity: .7;
+}
+.cell-engineer-badge {
+  position: absolute;
+  bottom: 2px;
+  left: 3px;
+  font-size: 7px;
+  letter-spacing: .03em;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.12);
+  border: 1px solid rgba(88, 166, 255, 0.24);
+  border-radius: 999px;
+  padding: 0 4px;
+  line-height: 1.4;
 }
 .cell-term-count {
   position: absolute; bottom: 2px; right: 3px;
@@ -5386,7 +5422,20 @@ body.diff-view-open #ctx-menu {
   align-items: center;
   gap: 6px;
   margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
+.weaver-add-engineer-btn {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  font: 10px var(--font);
+  font-weight: 700;
+  cursor: pointer;
+}
+.weaver-add-engineer-btn:hover { opacity: 0.92; }
 .weaver-buffer-stats {
   font-size: 9px;
   color: var(--text-dim);
@@ -5434,6 +5483,106 @@ body.diff-view-open #ctx-menu {
   min-height: 0;
   overflow-y: auto;
   padding: 8px;
+}
+.engineers-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-cell);
+}
+.engineers-roster-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.engineers-roster-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.engineers-roster-count,
+.engineers-roster-empty {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.engineers-roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.engineer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.01);
+}
+.engineer-row-main,
+.engineer-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.engineer-row-main {
+  flex: 1 1 auto;
+}
+.engineer-row-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.engineer-row-kind {
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: rgba(88, 166, 255, 0.12);
+  border: 1px solid rgba(88, 166, 255, 0.24);
+  border-radius: 999px;
+  padding: 1px 5px;
+}
+.engineer-row-slug {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.engineer-row-status {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.engineer-row-status-running { color: var(--green); }
+.engineer-row-status-idle { color: var(--text-dim); }
+.engineer-row-status-stopped { color: var(--red); }
+.engineer-row-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: 9px var(--font);
+  color: var(--text-dim);
+  background: transparent;
+  cursor: pointer;
+}
+.engineer-row-btn:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.engineer-row-btn-danger:hover {
+  color: #fff;
+  border-color: var(--red);
+  background: var(--red);
 }
 
 .weaver-events-tab {

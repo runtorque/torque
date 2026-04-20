@@ -23,6 +23,14 @@ def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
         return False
 
 
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        (table,),
+    ).fetchone()
+    return bool(row)
+
+
 def _fetch_scalar(conn: sqlite3.Connection, sql: str, params=(), default=0):
     try:
         row = conn.execute(sql, params).fetchone()
@@ -165,6 +173,133 @@ def _collect_agents_section(conn: sqlite3.Connection) -> dict:
         "terminal": counts["terminal"],
         "architect": counts["architect"],
         "unmigrated": unmigrated,
+    }
+
+
+def _collect_engineers_section(conn: sqlite3.Connection) -> dict:
+    if not _column_exists(conn, "agents", "kind"):
+        return {
+            "total": 0,
+            "default_engineer_id": "",
+            "default_engineer_name": "",
+            "engineers": [],
+            "binding_env_mismatches": [],
+        }
+
+    history_created_at = {}
+    if _table_exists(conn, "agent_history"):
+        try:
+            rows = conn.execute(
+                "SELECT id, MIN(created_at) FROM agent_history GROUP BY id"
+            ).fetchall()
+            history_created_at = {
+                str(agent_id or ""): created_at
+                for agent_id, created_at in rows
+                if str(agent_id or "").strip()
+            }
+        except sqlite3.OperationalError:
+            history_created_at = {}
+
+    worker_counts = {}
+    if _column_exists(conn, "agents", "owner_engineer_id"):
+        try:
+            worker_rows = conn.execute(
+                "SELECT owner_engineer_id, COUNT(*) FROM agents "
+                "WHERE cell_type='agent' AND kind='worker' AND owner_engineer_id != '' "
+                "GROUP BY owner_engineer_id"
+            ).fetchall()
+            worker_counts = {
+                str(engineer_id or ""): int(count or 0)
+                for engineer_id, count in worker_rows
+                if str(engineer_id or "").strip()
+            }
+        except sqlite3.OperationalError:
+            worker_counts = {}
+
+    task_counts = {}
+    if _column_exists(conn, "board_tasks", "assigned_engineer_id"):
+        try:
+            task_rows = conn.execute(
+                "SELECT assigned_engineer_id, COUNT(*) FROM board_tasks "
+                "WHERE assigned_engineer_id != '' "
+                "GROUP BY assigned_engineer_id"
+            ).fetchall()
+            task_counts = {
+                str(engineer_id or ""): int(count or 0)
+                for engineer_id, count in task_rows
+                if str(engineer_id or "").strip()
+            }
+        except sqlite3.OperationalError:
+            task_counts = {}
+
+    engineers = []
+    try:
+        rows = conn.execute(
+            "SELECT rowid, id, name, slug, persistent FROM agents "
+            "WHERE cell_type='agent' AND kind='engineer' "
+            "ORDER BY rowid"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    for rowid, agent_id, name, slug, persistent in rows:
+        agent_id = str(agent_id or "")
+        engineers.append(
+            {
+                "id": agent_id,
+                "name": str(name or ""),
+                "slug": str(slug or ""),
+                "persistent": int(persistent or 0),
+                "worker_count": int(worker_counts.get(agent_id, 0) or 0),
+                "task_count": int(task_counts.get(agent_id, 0) or 0),
+                "_rowid": int(rowid or 0),
+                "_created_at": history_created_at.get(agent_id),
+            }
+        )
+
+    def _sort_key(entry: dict):
+        created_at = entry.get("_created_at")
+        if isinstance(created_at, (int, float)) and created_at:
+            return (0, float(created_at), int(entry.get("_rowid", 0) or 0))
+        return (1, int(entry.get("_rowid", 0) or 0))
+
+    default_engineer_id = ""
+    default_engineer_name = ""
+    if len(engineers) == 1:
+        default_engineer_id = engineers[0]["id"]
+        default_engineer_name = engineers[0]["name"]
+    elif engineers:
+        weaver_named = [
+            engineer for engineer in engineers
+            if engineer.get("name", "") == "Weaver"
+        ]
+        candidates = weaver_named or engineers
+        candidates = sorted(candidates, key=_sort_key)
+        default_engineer_id = candidates[0]["id"]
+        default_engineer_name = candidates[0]["name"]
+
+    binding_env_mismatches = []
+    for engineer in engineers:
+        actual = str(engineer.get("loom_engineer_id", engineer["id"]) or "")
+        if actual != engineer["id"]:
+            binding_env_mismatches.append(
+                {
+                    "id": engineer["id"],
+                    "name": engineer["name"],
+                    "expected": engineer["id"],
+                    "actual": actual,
+                }
+            )
+
+    for engineer in engineers:
+        engineer.pop("_rowid", None)
+        engineer.pop("_created_at", None)
+
+    return {
+        "total": len(engineers),
+        "default_engineer_id": default_engineer_id,
+        "default_engineer_name": default_engineer_name,
+        "engineers": engineers,
+        "binding_env_mismatches": binding_env_mismatches,
     }
 
 
@@ -383,6 +518,64 @@ def _warn_shadowed_legacy_templates(report: dict) -> dict | None:
     }
 
 
+def _warn_no_engineers(report: dict) -> dict | None:
+    engineers = report.get("engineers", {}) or {}
+    total = int(engineers.get("total", 0) or 0)
+    if total != 0:
+        return None
+    return {
+        "name": "no_engineers",
+        "status": "warn",
+        "details": {
+            "count": 0,
+            "hint": (
+                "no engineer exists; weaver_* tool aliases will fail until one is created"
+            ),
+        },
+    }
+
+
+def _warn_ambiguous_default_engineer(report: dict) -> dict | None:
+    engineers = report.get("engineers", {}) or {}
+    entries = list(engineers.get("engineers", []) or [])
+    if len(entries) <= 1:
+        return None
+    if any(str(entry.get("name", "") or "") == "Weaver" for entry in entries):
+        return None
+    return {
+        "name": "ambiguous_default_engineer_routing",
+        "status": "warn",
+        "details": {
+            "count": len(entries),
+            "default_engineer_id": str(
+                engineers.get("default_engineer_id", "") or ""
+            ),
+            "default_engineer_name": str(
+                engineers.get("default_engineer_name", "") or ""
+            ),
+            "hint": (
+                "multiple engineers but no canonical 'Weaver' for default routing; "
+                "weaver_* aliases will pick the earliest by creation order"
+            ),
+        },
+    }
+
+
+def _warn_engineer_binding_env_mismatch(report: dict) -> dict | None:
+    engineers = report.get("engineers", {}) or {}
+    mismatches = list(engineers.get("binding_env_mismatches", []) or [])
+    if not mismatches:
+        return None
+    return {
+        "name": "engineer_binding_env_mismatch",
+        "status": "warn",
+        "details": {
+            "count": len(mismatches),
+            "mismatches": mismatches,
+        },
+    }
+
+
 _DOCTOR_CHECKS = [
     _check_migration_version,
     _check_unmigrated_agents,
@@ -394,6 +587,9 @@ _DOCTOR_CHECKS = [
 _DOCTOR_WARNINGS = [
     _warn_unassigned_tasks_when_engineer_present,
     _warn_shadowed_legacy_templates,
+    _warn_no_engineers,
+    _warn_ambiguous_default_engineer,
+    _warn_engineer_binding_env_mismatch,
 ]
 
 
@@ -415,6 +611,7 @@ def build_doctor_report(conn: sqlite3.Connection, db_path: Path | str) -> dict:
         "templates_dir": report["roles"]["legacy_templates_dir"],
         "templates_file_count": report["roles"]["legacy_templates_file_count"],
     }
+    report["engineers"] = _collect_engineers_section(conn)
     checks = [check(report) for check in _DOCTOR_CHECKS]
     warnings = [warning for fn in _DOCTOR_WARNINGS if (warning := fn(report))]
     report["checks"] = checks
@@ -436,6 +633,7 @@ def build_doctor_report_for_db(db_path: Path | str) -> dict:
 def format_doctor_report(report: dict) -> str:
     migration = report.get("migration", {})
     agents = report.get("agents", {})
+    engineers = report.get("engineers", {}) or {}
     tasks = report.get("tasks", {})
     drift = report.get("drift", {})
     roles = report.get("roles", {}) or {}
@@ -450,6 +648,18 @@ def format_doctor_report(report: dict) -> str:
     legacy_templates_count = int(
         roles.get("legacy_templates_file_count", 0) or 0
     )
+    default_engineer_name = str(
+        engineers.get("default_engineer_name", "") or ""
+    ).strip()
+    default_engineer_id = str(
+        engineers.get("default_engineer_id", "") or ""
+    ).strip()
+    default_engineer_display = "<none>"
+    if default_engineer_id:
+        default_engineer_display = (
+            f"{default_engineer_name or default_engineer_id} "
+            f"(id={default_engineer_id})"
+        )
 
     lines = [
         "Loom doctor — kinds refactor",
@@ -468,6 +678,22 @@ def format_doctor_report(report: dict) -> str:
         f"  terminal:    {int(agents.get('terminal', 0) or 0)}",
         f"  architect:   {int(agents.get('architect', 0) or 0)}",
         f"  unmigrated:  {int(agents.get('unmigrated', 0) or 0)}   (rows with kind='')",
+        "",
+        "[engineers]",
+        f"  total:                        {int(engineers.get('total', 0) or 0)}",
+        f"  default (weaver_* routing):   {default_engineer_display}",
+        "  engineers:",
+    ]
+    for engineer in list(engineers.get("engineers", []) or []):
+        lines.append(
+            "    - "
+            f"{engineer.get('name', '')}  "
+            f"kind=engineer  "
+            f"persistent={int(engineer.get('persistent', 0) or 0)}  "
+            f"workers={int(engineer.get('worker_count', 0) or 0)}  "
+            f"tasks={int(engineer.get('task_count', 0) or 0)}"
+        )
+    lines.extend([
         "",
         "[tasks]",
         f"  total:       {int(tasks.get('total', 0) or 0)}",
@@ -502,7 +728,7 @@ def format_doctor_report(report: dict) -> str:
             if str(report.get("result", "fail")) == "pass" and warnings
             else f"Result: {str(report.get('result', 'fail')).upper()}"
         ),
-    ]
+    ])
     if warnings:
         lines.append("Warnings:")
         for warning in warnings:
@@ -522,6 +748,26 @@ def format_doctor_report(report: dict) -> str:
                 if slugs:
                     line += f": {slugs}"
                 lines.append(line)
+            elif name == "no_engineers":
+                lines.append(
+                    "  - no engineer exists; weaver_* tool aliases will fail until one is created"
+                )
+            elif name == "ambiguous_default_engineer_routing":
+                lines.append(
+                    "  - multiple engineers but no canonical 'Weaver' for default routing; "
+                    "weaver_* aliases will pick the earliest by creation order"
+                )
+            elif name == "engineer_binding_env_mismatch":
+                mismatches = details.get("mismatches", []) or []
+                summary = ", ".join(
+                    f"{m.get('name') or m.get('id')} "
+                    f"(expected={m.get('expected')}, actual={m.get('actual')})"
+                    for m in mismatches
+                )
+                base = "  - engineer LOOM_ENGINEER_ID mismatch detected"
+                if summary:
+                    base += f": {summary}"
+                lines.append(base)
             else:
                 lines.append(f"  - {name}")
     failed_checks = list(report.get("failed_checks", []) or [])

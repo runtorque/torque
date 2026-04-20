@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
+from .mcp_launch import build_stdio_launch_spec
 
 _LOOM_EVENT_URL_RE = re.compile(r"http://(?:localhost|127\.0\.0\.1):\d+/events")
 
@@ -442,7 +443,8 @@ class CodexAdapter(AgentAdapter):
         except Exception:
             pass  # Best-effort cleanup
 
-    def install_mcp_config(self, working_dir: str) -> bool:
+    def install_mcp_config(self, working_dir: str, *,
+                           mcp_entrypoint: str = "") -> bool:
         """Write Loom MCP server entry into .codex/config.toml.
 
         Uses regex text manipulation for both reading and writing to
@@ -452,12 +454,21 @@ class CodexAdapter(AgentAdapter):
         config_dir = Path(working_dir) / ".codex"
         config_file = config_dir / "config.toml"
 
-        loom_section = (
-            f"\n{_MCP_MARKER}\n"
-            "[mcp_servers.loom]\n"
-            f'url = "{_loom_mcp_url()}"\n'
-            'env_http_headers = { "X-Loom-Cell-Id" = "LOOM_CELL_ID" }\n'
-        )
+        stdio_spec = build_stdio_launch_spec(mcp_entrypoint)
+        if stdio_spec:
+            loom_section = (
+                f"\n{_MCP_MARKER}\n"
+                "[mcp_servers.loom]\n"
+                f"command = {json.dumps(stdio_spec['command'])}\n"
+                f"args = {json.dumps(stdio_spec['args'])}\n"
+            )
+        else:
+            loom_section = (
+                f"\n{_MCP_MARKER}\n"
+                "[mcp_servers.loom]\n"
+                f'url = "{_loom_mcp_url()}"\n'
+                'env_http_headers = { "X-Loom-Cell-Id" = "LOOM_CELL_ID" }\n'
+            )
 
         try:
             config_dir.mkdir(parents=True, exist_ok=True)

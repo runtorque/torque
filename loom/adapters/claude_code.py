@@ -9,6 +9,7 @@ import shlex
 from textwrap import dedent
 
 from .base import AgentAdapter, AgentEvent, InputReadyPolicy
+from .mcp_launch import build_stdio_launch_spec
 
 _LOOM_EVENT_URL_RE = re.compile(r"http://(?:localhost|127\.0\.0\.1):\d+/events")
 
@@ -395,7 +396,8 @@ class ClaudeCodeAdapter(AgentAdapter):
         except Exception:
             pass  # Best-effort cleanup
 
-    def install_mcp_config(self, working_dir: str) -> bool:
+    def install_mcp_config(self, working_dir: str, *,
+                           mcp_entrypoint: str = "") -> bool:
         """Write Loom MCP server entry into .mcp.json.
 
         Merges with any existing .mcp.json so user's other MCP servers
@@ -405,11 +407,15 @@ class ClaudeCodeAdapter(AgentAdapter):
         """
         mcp_file = Path(working_dir) / ".mcp.json"
 
-        loom_entry = {
-            "type": "http",
-            "url": "http://127.0.0.1:${LOOM_PORT:-18932}/mcp",
-            "headers": {"X-Loom-Cell-Id": "${LOOM_CELL_ID}"},
-        }
+        loom_entry = build_stdio_launch_spec(mcp_entrypoint)
+        if loom_entry:
+            loom_entry["type"] = "stdio"
+        else:
+            loom_entry = {
+                "type": "http",
+                "url": "http://127.0.0.1:${LOOM_PORT:-18932}/mcp",
+                "headers": {"X-Loom-Cell-Id": "${LOOM_CELL_ID}"},
+            }
 
         try:
             existing = {}

@@ -28,6 +28,123 @@ var _weaverHealthSeverity = {
   'blocked': 5,
 };
 
+function _weaverCreatedSortValue(cell) {
+  if (!cell) return '';
+  return String(cell.created_at || cell.updated_at || cell.id || '');
+}
+
+function _weaverSortByCreatedAt(a, b) {
+  return _weaverCreatedSortValue(a).localeCompare(_weaverCreatedSortValue(b));
+}
+
+function _weaverEngineerAgents() {
+  var agents = [];
+  if (!state || !state.agents) return agents;
+  for (var agentId in state.agents) {
+    var agent = state.agents[agentId];
+    if (!agent || agent.cell_type !== 'agent') continue;
+    if ((agent.kind || '') !== 'engineer') continue;
+    agents.push(agent);
+  }
+  agents.sort(_weaverSortByCreatedAt);
+  return agents;
+}
+
+function _weaverEngineerStatusLabel(agent) {
+  if (!agent || agent.status === 'stopped') return 'stopped';
+  if (agent.activity || agent.activity_detail) return 'running';
+  return 'idle';
+}
+
+function _weaverEngineerTransferCounts(engineerId) {
+  var counts = { workers: 0, tasks: 0 };
+  if (!engineerId) return counts;
+  if (state && state.agents) {
+    for (var agentId in state.agents) {
+      var agent = state.agents[agentId];
+      if (!agent || agent.id === engineerId || agent.cell_type !== 'agent') continue;
+      if ((agent.owner_engineer_id || '') === engineerId
+          || (agent.created_by_weaver_id || '') === engineerId) {
+        counts.workers += 1;
+      }
+    }
+  }
+  if (state && state.board_tasks) {
+    for (var taskId in state.board_tasks) {
+      var task = state.board_tasks[taskId];
+      if (task && (task.assigned_engineer_id || '') === engineerId) counts.tasks += 1;
+    }
+  }
+  return counts;
+}
+
+function _weaverRenderEngineerRoster() {
+  var engineers = _weaverEngineerAgents();
+  var html = '<section class="engineers-roster">';
+  html += '<div class="engineers-roster-header">';
+  html += '<span class="engineers-roster-title">Engineers</span>';
+  html += '<span class="engineers-roster-count">' + engineers.length + ' total</span>';
+  html += '</div>';
+  if (!engineers.length) {
+    html += '<div class="engineers-roster-empty">No engineers yet. Add one to launch a dedicated engineer session.</div>';
+    html += '</section>';
+    return html;
+  }
+  html += '<div class="engineers-roster-list">';
+  for (var i = 0; i < engineers.length; i++) {
+    var engineer = engineers[i];
+    var status = _weaverEngineerStatusLabel(engineer);
+    html += '<div class="engineer-row">';
+    html += '<div class="engineer-row-main">';
+    html += '<span class="engineer-row-name">' + _esc(engineer.name || engineer.id || '') + '</span>';
+    html += '<span class="engineer-row-kind">engineer</span>';
+    if (engineer.slug) {
+      html += '<span class="engineer-row-slug">' + _esc(engineer.slug) + '</span>';
+    }
+    html += '</div>';
+    html += '<div class="engineer-row-meta">';
+    html += '<span class="engineer-row-status engineer-row-status-' + _esc(status) + '">' + _esc(status) + '</span>';
+    html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();relaunchAgent(\'' + _esc(engineer.id) + '\')">Relaunch</button>';
+    html += '<button type="button" class="engineer-row-btn" onclick="event.stopPropagation();weaverRenameEngineer(\'' + _esc(engineer.id) + '\')">Rename</button>';
+    html += '<button type="button" class="engineer-row-btn engineer-row-btn-danger" onclick="event.stopPropagation();weaverDeleteEngineer(\'' + _esc(engineer.id) + '\')">Delete</button>';
+    html += '</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+  html += '</section>';
+  return html;
+}
+
+function weaverOpenAddEngineer() {
+  if (typeof openAddEngineerModal === 'function') openAddEngineerModal();
+}
+
+function weaverRenameEngineer(engineerId) {
+  var engineer = state && state.agents ? state.agents[engineerId] : null;
+  if (!engineer) return;
+  var currentName = String(engineer.name || '').trim();
+  var nextName = window.prompt('Rename engineer', currentName);
+  if (typeof nextName !== 'string') return;
+  nextName = nextName.trim();
+  if (!nextName || nextName === currentName) return;
+  send({ cmd: 'rename_engineer', id: engineerId, new_name: nextName });
+}
+
+async function weaverDeleteEngineer(engineerId) {
+  var engineer = state && state.agents ? state.agents[engineerId] : null;
+  if (!engineer) return;
+  var counts = _weaverEngineerTransferCounts(engineerId);
+  var message = 'Deleting ' + (engineer.name || engineerId)
+    + ' will transfer its ' + counts.workers + ' workers and ' + counts.tasks
+    + ' tasks to the user. Continue?';
+  if (await showConfirm(message, {
+    label: 'Delete engineer',
+    variant: 'btn-danger',
+  })) {
+    send({ cmd: 'delete_engineer', id: engineerId });
+  }
+}
+
 function renderWeaverPanel() {
   var el = document.getElementById('panel-weaver');
   _weaverStopEventsCountdownTimer();
@@ -70,14 +187,15 @@ function renderWeaverPanel() {
   // Header
   html += '<div class="weaver-header">';
   html += '<div class="weaver-header-copy">';
-  html += '<span class="weaver-title">Weaver';
+  html += '<span class="weaver-title">Engineers';
   if (group) html += ' — ' + _esc(group);
   html += '</span>';
-  html += '<div class="weaver-subtitle">Orchestration journal, digest queue, worklog, and session map.</div>';
+  html += '<div class="weaver-subtitle">Engineer roster, orchestration journal, digest queue, worklog, and session map.</div>';
   html += '</div>';
+  html += '<div class="weaver-header-right">';
+  html += '<button type="button" class="weaver-add-engineer-btn" onclick="weaverOpenAddEngineer()">+ Add Engineer</button>';
   // Buffer stats + Pause/Resume toggle
   if (!emptyMessage && group) {
-    html += '<div class="weaver-header-right">';
     if (bstats && bstats.buffered_events > 0) {
       html += '<span class="weaver-buffer-stats">'
            + _esc(_weaverHeaderBufferStats(bstats, paused, weaver))
@@ -87,12 +205,13 @@ function renderWeaverPanel() {
          + 'onclick="weaverTogglePause()">'
          + (paused ? '&#x25B6;' : '&#x23F8;')
          + '</button>';
-    html += '</div>';
   }
+  html += '</div>';
   html += '</div>';
 
   if (!emptyMessage) html += _weaverRenderTabs(group, activeTab);
   html += '<div class="weaver-content">';
+  html += _weaverRenderEngineerRoster();
   if (emptyMessage) {
     html += '<div class="weaver-empty">' + _esc(emptyMessage) + '</div>';
   } else if (activeTab === 'events') {

@@ -875,6 +875,8 @@ function handleAction(msg) {
     if (msg.cell_id) removeAgent(msg.cell_id);
   } else if (msg.action === 'add_agent') {
     if (msg.group) quickAddAgent(msg.group);
+  } else if (msg.action === 'add_engineer') {
+    if (typeof openAddEngineerModal === 'function') openAddEngineerModal();
   } else if (msg.action === 'add_terminal') {
     if (msg.group && msg.parent_id) quickAddTerminal(msg.group, msg.parent_id);
   }

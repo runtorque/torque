@@ -19,6 +19,9 @@ from .artifacts import (
 )
 from .config import log
 
+DEFAULT_MCP_ENTRYPOINT = "loom/mcp.py"
+ENGINEER_MCP_ENTRYPOINT = "loom/mcp_engineer.py"
+
 
 def _append_task_artifacts(prompt: str, attachments, artifacts,
                            upstream_artifacts=None) -> str:
@@ -67,6 +70,24 @@ def _new_agent_prompt_sequence(launch_cfg: dict, *,
     if final_prompt:
         prompts.append((final_prompt, {"background": True}))
     return prompts
+
+
+def runtime_env_vars_for_cell(cell, env_vars: dict[str, str] | None = None):
+    """Return launch env vars with per-cell identity bindings applied."""
+    merged = dict(env_vars or {})
+    if getattr(cell, "cell_type", "") == "agent" \
+            and str(getattr(cell, "kind", "") or "").strip() == "engineer":
+        merged["LOOM_ENGINEER_ID"] = str(getattr(cell, "id", "") or "")
+    return merged or None
+
+
+def mcp_entrypoint_for_cell(cell) -> str:
+    """Return the MCP entrypoint path to associate with a cell launch."""
+    if getattr(cell, "cell_type", "") != "agent":
+        return ""
+    if str(getattr(cell, "kind", "") or "").strip() == "engineer":
+        return ENGINEER_MCP_ENTRYPOINT
+    return DEFAULT_MCP_ENTRYPOINT
 
 
 class AgentLaunchService:
@@ -373,6 +394,10 @@ class AgentLaunchService:
                                        target_window_id: str = "",
                                        persistent_prompt_text: str = "",
                                        created_by_weaver_id: str = "",
+                                       owner_engineer_id: str = "",
+                                       kind: str = "",
+                                       persistent: bool = False,
+                                       hired_by_architect_id: str = "",
                                        restore_focus_to_prev_tab: bool = False):
         """Create an agent cell, prepare its worktree, and open the session."""
         cell = self.state.add_agent(
@@ -389,6 +414,9 @@ class AgentLaunchService:
             return None
         cell.session_resume = bool(launch_cfg.get("session_resume", True))
         cell.idle_timeout = int(launch_cfg.get("idle_timeout", 0) or 0)
+        cell.kind = str(kind or "").strip()
+        cell.persistent = bool(persistent)
+        cell.hired_by_architect_id = str(hired_by_architect_id or "").strip()
         cell.worktree_base_dir = (
             launch_cfg.get("worktree_base_dir") or ".loom/worktrees"
         )
@@ -403,6 +431,9 @@ class AgentLaunchService:
         )
         cell.template = explicit_template or launch_cfg.get("template", "")
         cell.created_by_weaver_id = str(created_by_weaver_id or "").strip()
+        cell.owner_engineer_id = str(owner_engineer_id or "").strip() or str(
+            created_by_weaver_id or ""
+        ).strip()
         if launch_cfg.get("agent_type"):
             cell.agent_type = launch_cfg["agent_type"]
         self.state._emit_agent(cell)
@@ -434,10 +465,13 @@ class AgentLaunchService:
 
         await self.bridge.create_session(
             cell,
-            env_vars=launch_cfg.get("env_vars"),
+            env_vars=runtime_env_vars_for_cell(
+                cell, launch_cfg.get("env_vars")
+            ),
             env_file=launch_cfg.get("env_file", ""),
             shell=launch_cfg.get("shell", ""),
             system_prompt=launch_cfg.get("system_prompt", ""),
+            mcp_entrypoint=mcp_entrypoint_for_cell(cell),
             target_session_id=target_session_id,
             target_window_id=target_window_id,
             restore_focus_to_prev_tab=restore_focus_to_prev_tab,

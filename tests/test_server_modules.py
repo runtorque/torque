@@ -828,6 +828,7 @@ class ServerMergeCleanupTests(unittest.IsolatedAsyncioTestCase):
                     'env_file': '/tmp/loom.env',
                     'shell': 'zsh',
                     'system_prompt': 'system prompt',
+                    'mcp_entrypoint': 'loom/mcp.py',
                 },
             }],
         )

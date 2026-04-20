@@ -99,6 +99,8 @@ from .server_agent import (
     _build_self_dispatch_prompt,
     _new_agent_prompt_sequence,
     _startup_prompt_for_new_agent,
+    mcp_entrypoint_for_cell,
+    runtime_env_vars_for_cell,
 )
 from .server_dispatch import (
     _capture_auto_resume_targets,
@@ -1500,6 +1502,8 @@ async def _relaunch_agent_after_worktree_removal(
         state,
         resolve_base_dir,
         resolve_agent_launch_config,
+        resolve_weaver_launch_config=None,
+        is_designated_weaver=None,
         apply_persistent_prompt,
         build_cell_persistent_prompt):
     """Reset an agent session after its worktree is removed."""
@@ -1512,7 +1516,16 @@ async def _relaunch_agent_after_worktree_removal(
     cell.agent_session_id = ""
     base_dir = cell.worktree_repo_root or cell.directory \
         or await resolve_base_dir(cell.group)
-    launch_cfg = resolve_agent_launch_config(
+    use_weaver_launch = (
+        str(getattr(cell, "kind", "") or "").strip() == "engineer"
+        or bool(is_designated_weaver and is_designated_weaver(cell))
+    )
+    resolver = (
+        resolve_weaver_launch_config
+        if use_weaver_launch and resolve_weaver_launch_config
+        else resolve_agent_launch_config
+    )
+    launch_cfg = resolver(
         cell.group,
         base_dir=base_dir,
         explicit_template=cell.template,
@@ -1525,10 +1538,370 @@ async def _relaunch_agent_after_worktree_removal(
     state._db_save_agent(cell)
     await bridge.create_session(
         cell,
-        env_vars=launch_cfg.get("env_vars"),
+        env_vars=runtime_env_vars_for_cell(cell, launch_cfg.get("env_vars")),
         env_file=launch_cfg.get("env_file", ""),
         shell=launch_cfg.get("shell", ""),
-        system_prompt=launch_cfg.get("system_prompt", ""))
+        system_prompt=launch_cfg.get("system_prompt", ""),
+        mcp_entrypoint=mcp_entrypoint_for_cell(cell),
+    )
+
+
+def _resolve_engineer_group(state: MatrixState) -> str:
+    """Return the reserved engineer group, preferring the current Weaver."""
+    for group_name, group_settings in state.group_settings.items():
+        engineer_id = str(getattr(group_settings, "weaver_agent_id", "") or "")
+        cell = state.agents.get(engineer_id)
+        if cell and cell.cell_type == "agent" \
+                and str(getattr(cell, "kind", "") or "").strip() == "engineer":
+            return str(cell.group or group_name or "loom")
+    for cell in state.agents.values():
+        if cell.cell_type != "agent":
+            continue
+        if str(getattr(cell, "kind", "") or "").strip() == "engineer":
+            return str(cell.group or "loom")
+    return "loom"
+
+
+def _resolve_engineer_cell(state: MatrixState, *, engineer_id: str = "",
+                           engineer_slug: str = ""):
+    """Resolve an engineer agent by exact id or slug."""
+    engineer_id = str(engineer_id or "").strip()
+    engineer_slug = str(engineer_slug or "").strip().lower()
+    for cell in state.agents.values():
+        if cell.cell_type != "agent":
+            continue
+        if str(getattr(cell, "kind", "") or "").strip() != "engineer":
+            continue
+        if engineer_id and cell.id == engineer_id:
+            return cell
+        if engineer_slug and str(getattr(cell, "slug", "") or "").strip().lower() \
+                == engineer_slug:
+            return cell
+    return None
+
+
+def _engineer_name_exists(state: MatrixState, name: str, *,
+                          exclude_id: str = "") -> bool:
+    """Return True when another engineer already has ``name``."""
+    normalized = str(name or "").strip().lower()
+    if not normalized:
+        return False
+    excluded = str(exclude_id or "").strip()
+    for cell in state.agents.values():
+        if cell.cell_type != "agent":
+            continue
+        if str(getattr(cell, "kind", "") or "").strip() != "engineer":
+            continue
+        if excluded and cell.id == excluded:
+            continue
+        if str(cell.name or "").strip().lower() == normalized:
+            return True
+    return False
+
+
+async def _handle_add_engineer_command(
+        data: dict,
+        state: MatrixState, *,
+        resolve_base_dir,
+        resolve_weaver_launch_config,
+        create_agent_with_config,
+        send_agent_prompt) -> dict:
+    """Create and launch a persistent engineer agent."""
+    name = str(data.get("name", "") or "").strip()
+    if not name:
+        return {"type": "error", "message": "Engineer name is required"}
+    if _engineer_name_exists(state, name):
+        return {
+            "type": "error",
+            "message": f"Engineer '{name}' already exists",
+        }
+
+    group = _resolve_engineer_group(state)
+    if group not in state.groups:
+        state.add_group(group)
+    base_dir = await resolve_base_dir(group)
+    overrides = {
+        key: str(data.get(key, "") or "").strip()
+        for key in ("command", "provider", "directory")
+        if str(data.get(key, "") or "").strip()
+    }
+    launch_cfg = resolve_weaver_launch_config(
+        group,
+        base_dir=base_dir,
+        explicit_template="",
+        overrides=overrides,
+    )
+
+    from .weaver import build_weaver_system_prompt
+
+    persistent_prompt_text = build_weaver_system_prompt(
+        group,
+        state.get_weaver_settings(group),
+        launch_cfg.get("system_prompt", ""),
+        group_settings=state.get_group_settings(group),
+    )
+    startup_prompt = _startup_prompt_for_new_agent(
+        agent_type=launch_cfg.get("agent_type", ""),
+        persistent_prompt_text=persistent_prompt_text,
+        is_weaver=True,
+    )
+
+    cell = await create_agent_with_config(
+        group,
+        name,
+        launch_cfg,
+        explicit_template="",
+        persistent_prompt_text=persistent_prompt_text,
+        created_by_weaver_id="",
+        owner_engineer_id="",
+        kind="engineer",
+        persistent=True,
+        hired_by_architect_id="",
+    )
+    if not cell:
+        return {"type": "error", "message": "Failed to create engineer"}
+
+    if cell.session_id:
+        for prompt_text, send_kwargs in _new_agent_prompt_sequence(
+                launch_cfg,
+                startup_prompt=startup_prompt):
+            await send_agent_prompt(cell, prompt_text, **send_kwargs)
+    return {
+        "id": cell.id,
+        "slug": cell.slug,
+        "name": cell.name,
+        "kind": "engineer",
+    }
+
+
+async def _handle_delete_engineer_command(
+        data: dict,
+        state: MatrixState, *,
+        close_agent_session_only) -> dict:
+    """Delete an engineer after transferring owned workers/tasks to user."""
+    policy = str(data.get("transfer_policy", "user") or "user").strip()
+    if policy not in {"user", "orphan"}:
+        return {
+            "type": "error",
+            "message": "transfer_policy must be 'user' or 'orphan'",
+        }
+    del policy
+
+    engineer = _resolve_engineer_cell(
+        state,
+        engineer_id=data.get("id", ""),
+        engineer_slug=data.get("slug", ""),
+    )
+    if not engineer:
+        return {"type": "error", "message": "Engineer not found"}
+
+    transferred_agents = 0
+    for cell in list(state.agents.values()):
+        if cell.cell_type != "agent":
+            continue
+        owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
+        creator_id = str(getattr(cell, "created_by_weaver_id", "") or "").strip()
+        if owner_id != engineer.id and creator_id != engineer.id:
+            continue
+        if owner_id == engineer.id:
+            cell.owner_engineer_id = ""
+        if creator_id == engineer.id:
+            cell.created_by_weaver_id = ""
+        transferred_agents += 1
+        state._emit_agent(cell)
+        state._db_save_agent(cell)
+
+    transferred_tasks = 0
+    for task in list(state.board_tasks.values()):
+        if str(getattr(task, "assigned_engineer_id", "") or "").strip() != engineer.id:
+            continue
+        if task.assigned_engineer_id != "":
+            transferred_tasks += 1
+        state.board_update_task(task.id, assigned_engineer_id="")
+
+    await close_agent_session_only(engineer)
+    return {
+        "transferred_agents": transferred_agents,
+        "transferred_tasks": transferred_tasks,
+    }
+
+
+async def _handle_rename_engineer_command(
+        data: dict,
+        state: MatrixState, *,
+        update_session) -> dict:
+    """Rename an engineer while preserving engineer-specific fields."""
+    engineer = _resolve_engineer_cell(
+        state,
+        engineer_id=data.get("id", ""),
+        engineer_slug=data.get("slug", ""),
+    )
+    if not engineer:
+        return {"type": "error", "message": "Engineer not found"}
+
+    new_name = str(data.get("new_name", "") or "").strip()
+    if not new_name:
+        return {"type": "error", "message": "new_name is required"}
+    if _engineer_name_exists(state, new_name, exclude_id=engineer.id):
+        return {
+            "type": "error",
+            "message": f"Engineer '{new_name}' already exists",
+        }
+
+    old_name = engineer.name
+    state.update_agent(
+        engineer.id,
+        name=new_name,
+        tab_color=engineer.tab_color,
+        icon=engineer.icon,
+    )
+    if new_name != old_name:
+        state.history_update_agent(engineer, name=engineer.name, slug=engineer.slug)
+        if engineer.session_id:
+            await update_session(engineer, old_name)
+    return {
+        "id": engineer.id,
+        "slug": engineer.slug,
+        "name": engineer.name,
+        "kind": "engineer",
+    }
+
+
+async def _handle_relaunch_agent_command(
+        data: dict,
+        state: MatrixState, *,
+        bridge,
+        worktree_mgr,
+        resolve_base_dir,
+        resolve_agent_launch_config,
+        resolve_weaver_launch_config,
+        apply_persistent_prompt,
+        build_cell_persistent_prompt,
+        persistent_prompt_filename,
+        is_designated_weaver) -> dict | None:
+    """Relaunch a stopped agent or terminal using current launch settings."""
+    cell = state.agents.get(data.get("id", ""))
+    if not cell:
+        return {"type": "error", "message": "Agent not found"}
+    if cell.status != "stopped":
+        return None
+
+    owner = _find_active_worktree_owner(state, cell)
+    if owner:
+        return {
+            "type": "error",
+            "message":
+                f"Cannot relaunch '{cell.name}' while "
+                f"'{owner.name}' is active on "
+                f"{owner.worktree_branch or owner.worktree_path}",
+        }
+
+    gs = state.get_group_settings(cell.group)
+    base_dir = cell.worktree_repo_root or cell.directory \
+        or await resolve_base_dir(cell.group)
+    use_weaver_launch = (
+        str(getattr(cell, "kind", "") or "").strip() == "engineer"
+        or is_designated_weaver(cell)
+    )
+    resolver = (
+        resolve_weaver_launch_config if use_weaver_launch
+        else resolve_agent_launch_config
+    )
+    launch_cfg = resolver(
+        cell.group,
+        base_dir=base_dir,
+        explicit_template=cell.template,
+        overrides={},
+    )
+    cell.session_resume = bool(
+        launch_cfg.get("session_resume", cell.session_resume))
+    cell.idle_timeout = int(
+        launch_cfg.get("idle_timeout", cell.idle_timeout) or 0)
+    if cell.cell_type == "agent":
+        cell.command = launch_cfg.get("command", cell.command)
+        cell.profile = launch_cfg.get("profile", cell.profile)
+        cell.tab_color = launch_cfg.get("tab_color", cell.tab_color)
+        cell.icon = launch_cfg.get("icon", cell.icon)
+        cell.agent_type = launch_cfg.get("agent_type", cell.agent_type)
+        if not cell.worktree_path:
+            cell.directory = launch_cfg.get("directory", cell.directory)
+    cell.worktree_base_dir = (
+        launch_cfg.get("worktree_base_dir")
+        or cell.worktree_base_dir
+        or ".loom/worktrees")
+    cell.worktree_auto_checkpoint = bool(
+        launch_cfg.get(
+            "worktree_auto_checkpoint",
+            cell.worktree_auto_checkpoint))
+    cell.checkpoint_on_progress = bool(
+        launch_cfg.get(
+            "checkpoint_on_progress",
+            cell.checkpoint_on_progress))
+    cell.worktree_merge_squash = bool(
+        launch_cfg.get(
+            "worktree_merge_squash",
+            cell.worktree_merge_squash))
+    state._emit_agent(cell)
+    state._db_save_agent(cell)
+
+    if cell.cell_type == "terminal":
+        env = {**gs.env_vars, **gs.terminal_env_vars} or None
+        env_file = gs.terminal_env_file or gs.env_file
+        shell = gs.terminal_shell or gs.shell or ""
+        init_script = gs.terminal_init_script
+    else:
+        env = runtime_env_vars_for_cell(cell, launch_cfg.get("env_vars"))
+        env_file = launch_cfg.get("env_file", "")
+        shell = launch_cfg.get("shell", "")
+        init_script = ""
+        prev_directory = cell.directory
+        if cell.worktree_path:
+            if await worktree_mgr.validate(cell):
+                cell.directory = cell.worktree_path
+                log.info("Reusing worktree for '%s': %s",
+                         cell.name, cell.worktree_path)
+            else:
+                log.warning("Worktree invalid for '%s', clearing", cell.name)
+                cell.worktree_path = ""
+                cell.worktree_branch = ""
+                cell.worktree_repo_root = ""
+                cell.worktree_base_branch = ""
+                state._emit_agent(cell)
+                state._db_save_agent(cell)
+        if not cell.worktree_path and launch_cfg.get("worktree") and cell.directory:
+            repo_root = await worktree_mgr.get_repo_root(cell.directory)
+            if repo_root:
+                wt_path = await worktree_mgr.create(
+                    cell,
+                    repo_root,
+                    base_dir=cell.worktree_base_dir or ".loom/worktrees",
+                    base_branch=launch_cfg.get("worktree_base_branch", "") or "",
+                    symlinks=launch_cfg.get("worktree_symlinks", []),
+                )
+                if wt_path:
+                    cell.directory = wt_path
+                    state._emit_agent(cell)
+                    state._db_save_agent(cell)
+        if (cell.agent_type and prev_directory and prev_directory != cell.directory):
+            get_adapter(cell.agent_type).uninstall_persistent_prompt(
+                os.path.expanduser(prev_directory),
+                persistent_prompt_filename(cell),
+            )
+    apply_persistent_prompt(
+        cell, launch_cfg,
+        build_cell_persistent_prompt(cell, launch_cfg))
+    state._emit_agent(cell)
+    state._db_save_agent(cell)
+    await bridge.create_session(
+        cell,
+        env_vars=env,
+        env_file=env_file,
+        init_script=init_script,
+        shell=shell,
+        system_prompt=launch_cfg.get("system_prompt", ""),
+        mcp_entrypoint=mcp_entrypoint_for_cell(cell),
+    )
+    return None
 
 
 async def main(connection=None):
@@ -1671,6 +2044,8 @@ async def main(connection=None):
                 state=state,
                 resolve_base_dir=_resolve_base_dir,
                 resolve_agent_launch_config=_resolve_agent_launch_config,
+                resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                is_designated_weaver=_is_designated_weaver,
                 apply_persistent_prompt=_apply_persistent_prompt,
                 build_cell_persistent_prompt=_build_cell_persistent_prompt,
             )
@@ -1961,6 +2336,10 @@ async def main(connection=None):
                                         target_window_id: str = "",
                                         persistent_prompt_text: str = "",
                                         created_by_weaver_id: str = "",
+                                        owner_engineer_id: str = "",
+                                        kind: str = "",
+                                        persistent: bool = False,
+                                        hired_by_architect_id: str = "",
                                         restore_focus_to_prev_tab: bool = False):
         return await agent_launch.create_agent_with_config(
             group,
@@ -1971,6 +2350,10 @@ async def main(connection=None):
             target_window_id=target_window_id,
             persistent_prompt_text=persistent_prompt_text,
             created_by_weaver_id=created_by_weaver_id,
+            owner_engineer_id=owner_engineer_id,
+            kind=kind,
+            persistent=persistent,
+            hired_by_architect_id=hired_by_architect_id,
             restore_focus_to_prev_tab=restore_focus_to_prev_tab,
         )
 
@@ -2003,7 +2386,7 @@ async def main(connection=None):
         if cell.cell_type != "agent" or not launch_cfg.get("agent_type"):
             return ""
         gs = state.get_group_settings(cell.group)
-        if gs.weaver_agent_id == cell.id:
+        if gs.weaver_agent_id == cell.id or cell.kind == "engineer":
             from .weaver import build_weaver_system_prompt
             ws = state.get_weaver_settings(cell.group)
             return build_weaver_system_prompt(
@@ -2904,6 +3287,30 @@ async def main(connection=None):
             elif cmd == "rename_group":
                 state.rename_group(data["group"], data["new_name"])
 
+            elif cmd == "add_engineer":
+                result = await _handle_add_engineer_command(
+                    data,
+                    state,
+                    resolve_base_dir=_resolve_base_dir,
+                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    create_agent_with_config=_create_agent_with_config,
+                    send_agent_prompt=_send_agent_prompt,
+                )
+
+            elif cmd == "delete_engineer":
+                result = await _handle_delete_engineer_command(
+                    data,
+                    state,
+                    close_agent_session_only=_close_agent_session_only,
+                )
+
+            elif cmd == "rename_engineer":
+                result = await _handle_rename_engineer_command(
+                    data,
+                    state,
+                    update_session=bridge.update_session,
+                )
+
             elif cmd == "add_agent":
                 group = data["group"]
                 is_weaver = data.get("is_weaver", False)
@@ -3101,134 +3508,19 @@ async def main(connection=None):
                         )
 
             elif cmd == "relaunch_agent":
-                cell = state.agents.get(data["id"])
-                if cell and cell.status == "stopped":
-                    owner = _find_active_worktree_owner(state, cell)
-                    if owner:
-                        result = {
-                            "type": "error",
-                            "message":
-                                f"Cannot relaunch '{cell.name}' while "
-                                f"'{owner.name}' is active on "
-                                f"{owner.worktree_branch or owner.worktree_path}",
-                        }
-                    else:
-                        gs = state.get_group_settings(cell.group)
-                        base_dir = cell.worktree_repo_root or cell.directory \
-                            or await _resolve_base_dir(cell.group)
-                        resolver = (
-                            _resolve_weaver_launch_config
-                            if _is_designated_weaver(cell)
-                            else _resolve_agent_launch_config
-                        )
-                        launch_cfg = resolver(
-                            cell.group,
-                            base_dir=base_dir,
-                            explicit_template=cell.template,
-                            overrides={},
-                        )
-                        cell.session_resume = bool(
-                            launch_cfg.get(
-                                "session_resume", cell.session_resume))
-                        cell.idle_timeout = int(
-                            launch_cfg.get(
-                                "idle_timeout", cell.idle_timeout) or 0)
-                        if cell.cell_type == "agent":
-                            cell.command = launch_cfg.get(
-                                "command", cell.command)
-                            cell.profile = launch_cfg.get(
-                                "profile", cell.profile)
-                            cell.tab_color = launch_cfg.get(
-                                "tab_color", cell.tab_color)
-                            cell.icon = launch_cfg.get("icon", cell.icon)
-                            cell.agent_type = launch_cfg.get(
-                                "agent_type", cell.agent_type)
-                            if not cell.worktree_path:
-                                cell.directory = launch_cfg.get(
-                                    "directory", cell.directory)
-                        cell.worktree_base_dir = (
-                            launch_cfg.get("worktree_base_dir")
-                            or cell.worktree_base_dir
-                            or ".loom/worktrees")
-                        cell.worktree_auto_checkpoint = bool(
-                            launch_cfg.get(
-                                "worktree_auto_checkpoint",
-                                cell.worktree_auto_checkpoint))
-                        cell.checkpoint_on_progress = bool(
-                            launch_cfg.get(
-                                "checkpoint_on_progress",
-                                cell.checkpoint_on_progress))
-                        cell.worktree_merge_squash = bool(
-                            launch_cfg.get(
-                                "worktree_merge_squash",
-                                cell.worktree_merge_squash))
-                        state._emit_agent(cell)
-                        state._db_save_agent(cell)
-                        if cell.cell_type == "terminal":
-                            env = {**gs.env_vars, **gs.terminal_env_vars} \
-                                or None
-                            ef = gs.terminal_env_file or gs.env_file
-                            shell = gs.terminal_shell or gs.shell or ""
-                            init = gs.terminal_init_script
-                        else:
-                            env = launch_cfg.get("env_vars")
-                            ef = launch_cfg.get("env_file", "")
-                            shell = launch_cfg.get("shell", "")
-                            init = ""
-                            prev_directory = cell.directory
-                            # Worktree handling on relaunch
-                            if cell.worktree_path:
-                                if await worktree_mgr.validate(cell):
-                                    # Reuse existing worktree
-                                    cell.directory = cell.worktree_path
-                                    log.info("Reusing worktree for '%s': %s",
-                                             cell.name, cell.worktree_path)
-                                else:
-                                    # Worktree gone — clear and recreate if enabled
-                                    log.warning("Worktree invalid for '%s', "
-                                                "clearing", cell.name)
-                                    cell.worktree_path = ""
-                                    cell.worktree_branch = ""
-                                    cell.worktree_repo_root = ""
-                                    cell.worktree_base_branch = ""
-                                    state._emit_agent(cell)
-                                    state._db_save_agent(cell)
-                            # Create new worktree if enabled and none exists
-                            if not cell.worktree_path \
-                                    and launch_cfg.get("worktree") \
-                                    and cell.directory:
-                                repo_root = await worktree_mgr.get_repo_root(
-                                    cell.directory)
-                                if repo_root:
-                                    wt_path = await worktree_mgr.create(
-                                        cell, repo_root,
-                                        base_dir=cell.worktree_base_dir
-                                        or ".loom/worktrees",
-                                        base_branch=launch_cfg.get(
-                                            "worktree_base_branch", "")
-                                        or "",
-                                        symlinks=launch_cfg.get(
-                                            "worktree_symlinks", []))
-                                    if wt_path:
-                                        cell.directory = wt_path
-                                        state._emit_agent(cell)
-                                        state._db_save_agent(cell)
-                            if (cell.agent_type and prev_directory
-                                    and prev_directory != cell.directory):
-                                get_adapter(cell.agent_type) \
-                                    .uninstall_persistent_prompt(
-                                        os.path.expanduser(prev_directory),
-                                        _persistent_prompt_filename(cell))
-                        _apply_persistent_prompt(
-                            cell, launch_cfg,
-                            _build_cell_persistent_prompt(cell, launch_cfg))
-                        state._emit_agent(cell)
-                        state._db_save_agent(cell)
-                        await bridge.create_session(
-                            cell, env_vars=env, env_file=ef,
-                            init_script=init, shell=shell,
-                            system_prompt=launch_cfg.get(
-                                "system_prompt", ""))
+                result = await _handle_relaunch_agent_command(
+                    data,
+                    state,
+                    bridge=bridge,
+                    worktree_mgr=worktree_mgr,
+                    resolve_base_dir=_resolve_base_dir,
+                    resolve_agent_launch_config=_resolve_agent_launch_config,
+                    resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                    apply_persistent_prompt=_apply_persistent_prompt,
+                    build_cell_persistent_prompt=_build_cell_persistent_prompt,
+                    persistent_prompt_filename=_persistent_prompt_filename,
+                    is_designated_weaver=_is_designated_weaver,
+                )
 
             elif cmd == "move_group":
                 state.move_group(data["group"], data.get("before", ""))
@@ -3312,11 +3604,14 @@ async def main(connection=None):
                                 state._db_save_agent(cell)
                                 await bridge.create_session(
                                     cell,
-                                    env_vars=launch_cfg.get("env_vars"),
+                                    env_vars=runtime_env_vars_for_cell(
+                                        cell, launch_cfg.get("env_vars")),
                                     env_file=launch_cfg.get("env_file", ""),
                                     shell=launch_cfg.get("shell", ""),
                                     system_prompt=launch_cfg.get(
                                         "system_prompt", ""),
+                                    mcp_entrypoint=mcp_entrypoint_for_cell(
+                                        cell),
                                     target_session_id=data.get(
                                         "target_session_id", ""),
                                     target_window_id=data.get(
@@ -3338,6 +3633,8 @@ async def main(connection=None):
                             state=state,
                             resolve_base_dir=_resolve_base_dir,
                             resolve_agent_launch_config=_resolve_agent_launch_config,
+                            resolve_weaver_launch_config=_resolve_weaver_launch_config,
+                            is_designated_weaver=_is_designated_weaver,
                             apply_persistent_prompt=_apply_persistent_prompt,
                             build_cell_persistent_prompt=_build_cell_persistent_prompt,
                         )
@@ -4040,6 +4337,7 @@ async def main(connection=None):
                     external_url=ext_link["external_url"],
                     depends_on=data.get("depends_on", []),
                     scheduled_at=data.get("scheduled_at", ""),
+                    assigned_engineer_id=data.get("assigned_engineer_id", ""),
                     verification_mode=data.get("verification_mode", ""),
                     verification_state=data.get("verification_state", ""),
                     verification_notes=data.get("verification_notes", ""),
@@ -4657,6 +4955,8 @@ async def main(connection=None):
                                 persistent_prompt_text=persistent_prompt_text,
                                 created_by_weaver_id=data.get(
                                     "_created_by_weaver_id", ""),
+                                owner_engineer_id=data.get(
+                                    "owner_engineer_id", ""),
                                 restore_focus_to_prev_tab=True,
                             )
                             if cell:

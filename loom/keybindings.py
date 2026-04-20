@@ -60,6 +60,11 @@ _ACTION_DEFAULTS = {
                    iterm2.keyboard.Modifier.OPTION],
                   iterm2.keyboard.Keycode.ANSI_A,
                   "loom_add_agent()"),
+    "add_engineer": (ord('E'),
+                     [iterm2.keyboard.Modifier.COMMAND,
+                      iterm2.keyboard.Modifier.OPTION],
+                     iterm2.keyboard.Keycode.ANSI_E,
+                     "loom_add_engineer()"),
     "add_terminal": (ord('T'),
                      [iterm2.keyboard.Modifier.COMMAND,
                       iterm2.keyboard.Modifier.OPTION],
@@ -75,6 +80,7 @@ _ACTION_LABELS = {
     "toggle_broadcast": "Toggle broadcast",
     "close_cell": "Close cell",
     "add_agent": "Add agent",
+    "add_engineer": "Add engineer",
     "add_terminal": "Add terminal",
 }
 
@@ -218,7 +224,9 @@ def build_close_cell_confirmation_message(state, cell):
 def _get_group_display_ids(state, group_name):
     """Return top-level cell ids in the same effective order as the UI.
 
-    The rendered grid pins the configured weaver agent first within its group.
+    The rendered grid uses a stable hierarchy:
+    architects → engineers → each engineer's owned workers → user-owned
+    workers, with standalone terminals left in their existing order.
     Keyboard navigation should follow that same top-level order while still
     letting child terminals stay adjacent to their parent agent during
     traversal.
@@ -226,10 +234,46 @@ def _get_group_display_ids(state, group_name):
     ordered_ids = list(state.groups.get(group_name, []))
     if not ordered_ids:
         return ordered_ids
-    weaver_id = state.get_group_settings(group_name).weaver_agent_id or ""
-    if not weaver_id or weaver_id not in ordered_ids:
-        return ordered_ids
-    return [weaver_id] + [aid for aid in ordered_ids if aid != weaver_id]
+    visible_agents = {}
+    standalone = []
+    for cell_id in ordered_ids:
+        cell = state.agents.get(cell_id)
+        if cell and cell.cell_type == "agent":
+            visible_agents[cell_id] = cell
+        else:
+            standalone.append(cell_id)
+
+    architects = []
+    engineers = []
+    user_owned = []
+    workers_by_engineer = {}
+    for cell_id in ordered_ids:
+        cell = visible_agents.get(cell_id)
+        if not cell:
+            continue
+        kind = str(getattr(cell, "kind", "") or "").strip()
+        if kind == "architect":
+            architects.append(cell)
+            continue
+        if kind == "engineer":
+            engineers.append(cell)
+            continue
+        owner_id = str(getattr(cell, "owner_engineer_id", "") or "").strip()
+        owner = visible_agents.get(owner_id) if owner_id else None
+        if owner and str(getattr(owner, "kind", "") or "").strip() == "engineer":
+            workers_by_engineer.setdefault(owner_id, []).append(cell)
+            continue
+        user_owned.append(cell)
+
+    ordered = []
+    for cell in architects:
+        ordered.append(cell.id)
+    for cell in engineers:
+        ordered.append(cell.id)
+        ordered.extend(worker.id for worker in workers_by_engineer.get(cell.id, []))
+    ordered.extend(cell.id for cell in user_owned)
+    ordered.extend(standalone)
+    return ordered
 
 
 def get_ordered_cells(state, window_id=None):
@@ -469,6 +513,10 @@ async def setup(connection, state, bridge, overrides=None, *,
             log.info("Add-agent shortcut ignored — no Loom group available")
 
     @iterm2.RPC
+    async def loom_add_engineer():
+        await _send_action("add_engineer")
+
+    @iterm2.RPC
     async def loom_add_terminal(session_id=iterm2.Reference("id")):
         # Find the agent associated with the active session
         current_agent, _ = _find_current_agent(state, session_id)
@@ -496,6 +544,7 @@ async def setup(connection, state, bridge, overrides=None, *,
     await loom_toggle_broadcast.async_register(connection, timeout=10)
     await loom_close_cell.async_register(connection, timeout=10)
     await loom_add_agent.async_register(connection, timeout=10)
+    await loom_add_engineer.async_register(connection, timeout=10)
     await loom_add_terminal.async_register(connection, timeout=10)
     log.info("Loom RPCs registered")
 

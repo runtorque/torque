@@ -673,6 +673,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  if (e.metaKey && e.altKey && !e.shiftKey && !e.ctrlKey
+      && (e.key === 'e' || e.key === 'E')) {
+    e.preventDefault();
+    if (typeof openAddEngineerModal === 'function') openAddEngineerModal();
+    return;
+  }
+
   // Skip shortcuts when any input/select/textarea is focused
   const tag = document.activeElement && document.activeElement.tagName;
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
@@ -765,6 +772,13 @@ document.querySelectorAll('.overlay').forEach(o => {
  'add-args-input', 'add-init-input'].forEach(id => {
   document.getElementById(id).addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitAdd();
+    if (e.key === 'Escape') closeModals();
+  });
+});
+
+['engineer-name-input', 'engineer-command-input'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitAddEngineer();
     if (e.key === 'Escape') closeModals();
   });
 });

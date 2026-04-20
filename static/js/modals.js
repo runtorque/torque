@@ -319,6 +319,36 @@ function submitGroup() {
   if (standalone && typeof openAddAgent === 'function') openAddAgent(name);
 }
 
+/* -- Add Engineer ----------------------------------------------------- */
+function openAddEngineerModal() {
+  const modal = document.getElementById('modal-engineer');
+  if (!modal) return;
+  const nameInput = document.getElementById('engineer-name-input');
+  const commandInput = document.getElementById('engineer-command-input');
+  const summary = document.getElementById('modal-engineer-summary');
+  if (summary) {
+    summary.textContent = 'Create a persistent engineer session with its own MCP scope and launch command.';
+    summary.classList.remove('hidden');
+  }
+  if (nameInput) nameInput.value = '';
+  if (commandInput) commandInput.value = '';
+  modal.classList.add('visible');
+  if (nameInput && typeof nameInput.focus === 'function') nameInput.focus();
+  if (nameInput && typeof nameInput.select === 'function') nameInput.select();
+}
+
+function submitAddEngineer() {
+  const nameInput = document.getElementById('engineer-name-input');
+  const commandInput = document.getElementById('engineer-command-input');
+  const name = nameInput ? nameInput.value.trim() : '';
+  const command = commandInput ? commandInput.value.trim() : '';
+  if (!name) return;
+  const payload = { cmd: 'add_engineer', name };
+  if (command) payload.command = command;
+  send(payload);
+  closeModals();
+}
+
 /* -- Add agent / terminal modal extracted to static/js/modals/add-cell.js -- */
 /* -- Edit Agent / Terminal --------------------------------------------- */
 let _editCellId = null;

@@ -146,7 +146,7 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("recent visibility items", list_tool["description"])
         self.assertIn("product, workflow, and visibility", show_tool["description"])
 
-    async def test_non_weaver_agent_cannot_call_weaver_tools(self):
+    async def test_weaver_alias_ignores_non_weaver_session_headers(self):
         state, weaver = self._make_state()
         worker = self.state_mod.AgentCell(
             id="agent-1",
@@ -158,7 +158,7 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         state.groups["g"].append(worker.id)
 
         async def fake_handle_command(_payload):
-            self.fail("non-weaver agent should be denied before dispatch")
+            self.fail("board summary should not call handle_command")
 
         text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
             "weaver_board_summary",
@@ -168,14 +168,14 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
             cell_id=worker.id,
         )
 
-        self.assertTrue(is_error)
-        self.assertIn("designated Weaver agent", text)
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["group"], weaver.group)
 
-    async def test_missing_cell_header_cannot_call_weaver_tools(self):
+    async def test_weaver_alias_allows_missing_cell_header(self):
         state, _weaver = self._make_state()
 
         async def fake_handle_command(_payload):
-            self.fail("missing header should be denied before dispatch")
+            self.fail("board summary should not call handle_command")
 
         text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(
             "weaver_board_summary",
@@ -185,8 +185,8 @@ class WeaverBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
             cell_id="",
         )
 
-        self.assertTrue(is_error)
-        self.assertIn("X-Loom-Cell-Id header is required", text)
+        self.assertFalse(is_error, text)
+        self.assertEqual(json.loads(text)["group"], "g")
 
     async def _dispatch(self, state, weaver, args, handle_command):
         text, is_error = await self.mcp_weaver_mod._dispatch_weaver_tool(

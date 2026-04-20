@@ -66,6 +66,7 @@ class TerminalAdapter(Protocol):
         init_script: str = "",
         shell: str = "",
         system_prompt: str = "",
+        mcp_entrypoint: str = "",
         target_session_id: str = "",
         target_window_id: str = "",
         restore_focus_to_prev_tab: bool = False,

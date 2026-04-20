@@ -106,6 +106,50 @@ function _renderWeaverMenuItem(group, groupSettings) {
   return `<button onclick="event.stopPropagation();closeMenus();newWeaver('${esc(group)}')">Weaver</button>`;
 }
 
+function _sortAgentsHierarchically(agents) {
+  const visibleById = {};
+  const architects = [];
+  const engineers = [];
+  const userOwned = [];
+  const workersByEngineer = {};
+  const list = Array.isArray(agents) ? agents.slice() : [];
+
+  for (const agent of list) {
+    if (!agent) continue;
+    visibleById[agent.id] = agent;
+  }
+
+  for (const agent of list) {
+    if (!agent) continue;
+    if ((agent.kind || '') === 'architect') {
+      architects.push(agent);
+      continue;
+    }
+    if ((agent.kind || '') === 'engineer') {
+      engineers.push(agent);
+      continue;
+    }
+    const ownerId = String(agent.owner_engineer_id || '');
+    const owner = ownerId ? visibleById[ownerId] : null;
+    if (owner && (owner.kind || '') === 'engineer') {
+      if (!workersByEngineer[ownerId]) workersByEngineer[ownerId] = [];
+      workersByEngineer[ownerId].push(agent);
+      continue;
+    }
+    userOwned.push(agent);
+  }
+
+  const ordered = [];
+  for (const architect of architects) ordered.push(architect);
+  for (const engineer of engineers) {
+    ordered.push(engineer);
+    const workers = workersByEngineer[engineer.id] || [];
+    for (const worker of workers) ordered.push(worker);
+  }
+  for (const worker of userOwned) ordered.push(worker);
+  return ordered;
+}
+
 function toggleMenu(chevron) {
   const menu = chevron.nextElementSibling;
   const wasOpen = menu.classList.contains('open');
@@ -338,7 +382,7 @@ function render() {
   const oldRects = doFlip ? _captureRects(main) : null;
   _captureAgentDetailDrafts();
   const mainState = _captureSurfaceState(main, {
-    scrollSelectors: ['.mcp-log'],
+    scrollSelectors: [':root', '.mcp-log'],
     captureFocusKey: _captureMainFocusKey,
   });
 
@@ -423,13 +467,14 @@ function render() {
 
     html += `<div class="group-body"><div class="group-body-inner">`;
 
-    /* Agent grid (+ New cell is part of the grid) — weaver pinned first */
-    const weaverId = gsLocal.weaver_agent_id || '';
-    if (weaverId) {
-      agents.sort((a, b) => (a.id === weaverId ? -1 : b.id === weaverId ? 1 : 0));
+    /* Agent grid (+ New cell is part of the grid) — hierarchical by kind/owner */
+    const sortedAgents = _sortAgentsHierarchically(agents);
+    const visibleEngineerIds = {};
+    for (const agent of sortedAgents) {
+      if ((agent.kind || '') === 'engineer') visibleEngineerIds[agent.id] = true;
     }
     html += `<div class="agent-grid" data-drop-group="${esc(gname)}" data-drop-type="agent">`;
-    for (const a of agents) {
+    for (const a of sortedAgents) {
       if (!collapsed) {
         navItems.push(a.id);
         navAgents.push(a.id);
@@ -446,7 +491,7 @@ function render() {
           }
         }
       }
-      html += renderAgentCell(a);
+      html += renderAgentCell(a, { visibleEngineerIds });
     }
     if (!collapsed) {
       for (const t of standaloneTerms) {
@@ -943,7 +988,8 @@ function _agentCellSubtitle(a) {
     || '';
 }
 
-function renderAgentCell(a) {
+function renderAgentCell(a, options) {
+  options = options || {};
   const active = a.session_id && a.session_id === state.active_session_id;
   const selected = a.id === selectedAgentId;
   const childCount = (state.children[a.id] || []).length;
@@ -964,6 +1010,15 @@ function renderAgentCell(a) {
   const _weaverAsking = _weaverWs && _weaverWs.pending_question;
   if (_weaverAsking) cls.push('weaver-asking');
   if (_isWeaver) cls.push(_weaverPaused ? 'weaver-paused' : 'weaver-running');
+  const _isEngineer = (a.kind || '') === 'engineer';
+  const visibleEngineerIds = options.visibleEngineerIds || null;
+  const _isOwnedWorker = !!(
+    !_isEngineer
+    && a.owner_engineer_id
+    && (!visibleEngineerIds || visibleEngineerIds[a.owner_engineer_id])
+  );
+  if (_isEngineer) cls.push('engineer');
+  if (_isOwnedWorker) cls.push('engineer-owned-worker');
 
   const statusCls = agentStatusClass(a);
   const titleParts = [a.name, `(${a.status})`];
@@ -996,6 +1051,9 @@ function renderAgentCell(a) {
   h += `</div>`;
   h += `<div class="cell-icon">${a.icon || agentIcon(a.name)}</div>`;
   h += `<div class="cell-name">${esc(a.name)}</div>`;
+  if (_isEngineer) {
+    h += `<div class="cell-engineer-badge">engineer</div>`;
+  }
   if (_weaverAsking) {
     h += `<div class="cell-weaver-ask" title="${esc(_weaverWs.pending_question)}">? awaiting input</div>`;
   }

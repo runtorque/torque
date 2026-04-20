@@ -130,6 +130,97 @@ class CliDoctorTests(unittest.TestCase):
             text,
         )
 
+    def test_cmd_doctor_prints_no_engineers_warning(self):
+        report = {
+            "result": "pass",
+            "warnings": [
+                {
+                    "name": "no_engineers",
+                    "status": "warn",
+                    "details": {
+                        "count": 0,
+                        "hint": (
+                            "no engineer exists; weaver_* tool aliases will fail until one is created"
+                        ),
+                    },
+                }
+            ],
+            "checks": [],
+            "engineers": {
+                "total": 0,
+                "default_engineer_id": "",
+                "default_engineer_name": "",
+                "engineers": [],
+            },
+        }
+        with mock.patch.object(self.cli, "get_doctor_local", return_value=report):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_doctor(SimpleNamespace(port=18932, json=False))
+
+        text = out.getvalue()
+        self.assertIn("Result: PASS (with warnings)", text)
+        self.assertIn(
+            "no engineer exists; weaver_* tool aliases will fail until one is created",
+            text,
+        )
+
+    def test_cmd_doctor_prints_ambiguous_default_engineer_warning(self):
+        report = {
+            "result": "pass",
+            "warnings": [
+                {
+                    "name": "ambiguous_default_engineer_routing",
+                    "status": "warn",
+                    "details": {
+                        "count": 2,
+                        "default_engineer_id": "eng-alice",
+                        "default_engineer_name": "Alice",
+                        "hint": (
+                            "multiple engineers but no canonical 'Weaver' for default routing; "
+                            "weaver_* aliases will pick the earliest by creation order"
+                        ),
+                    },
+                }
+            ],
+            "checks": [],
+            "engineers": {
+                "total": 2,
+                "default_engineer_id": "eng-alice",
+                "default_engineer_name": "Alice",
+                "engineers": [
+                    {
+                        "id": "eng-alice",
+                        "name": "Alice",
+                        "slug": "alice",
+                        "persistent": 1,
+                        "worker_count": 0,
+                        "task_count": 0,
+                    },
+                    {
+                        "id": "eng-bob",
+                        "name": "Bob",
+                        "slug": "bob",
+                        "persistent": 1,
+                        "worker_count": 0,
+                        "task_count": 0,
+                    },
+                ],
+            },
+        }
+        with mock.patch.object(self.cli, "get_doctor_local", return_value=report):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.cli.cmd_doctor(SimpleNamespace(port=18932, json=False))
+
+        text = out.getvalue()
+        self.assertIn("default (weaver_* routing):   Alice (id=eng-alice)", text)
+        self.assertIn(
+            "multiple engineers but no canonical 'Weaver' for default routing; "
+            "weaver_* aliases will pick the earliest by creation order",
+            text,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

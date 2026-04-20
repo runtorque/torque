@@ -167,6 +167,22 @@
   </div>
 </div>
 
+<!-- Add Engineer modal -->
+<div class="overlay" id="modal-engineer">
+  <div class="modal">
+    <h2 id="modal-engineer-title">Add Engineer</h2>
+    <div id="modal-engineer-summary" class="modal-summary hidden"></div>
+    <label>Name</label>
+    <input id="engineer-name-input" placeholder="e.g. Alice" autocomplete="off">
+    <label>Boot command <span class="label-hint">(optional)</span></label>
+    <input id="engineer-command-input" placeholder="Use default engineer command" autocomplete="off">
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModals()">Cancel</button>
+      <button class="btn-primary" id="engineer-submit-btn" onclick="submitAddEngineer()">Create Engineer</button>
+    </div>
+  </div>
+</div>
+
 <!-- Weaver launch / relaunch modal -->
 <div class="overlay" id="modal-weaver-launch">
   <div class="modal modal-tall">
@@ -986,7 +1002,7 @@
     </span>
     <span>Context</span>
   </button>
-  <button class="taskbar-app" data-app="weaver" onclick="togglePanel('weaver')">&#x2696; Weaver</button>
+  <button class="taskbar-app" data-app="weaver" onclick="togglePanel('weaver')">&#x2696; Engineers</button>
   <button class="taskbar-app" data-app="events" onclick="togglePanel('events')">&#x26A0; Events</button>
   <div class="taskbar-spacer"></div>
   <button id="taskbar-restore-layout" class="taskbar-aux-btn"

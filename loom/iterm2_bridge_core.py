@@ -10,6 +10,7 @@ from typing import Optional
 import iterm2
 
 from .config import log
+from .server_agent import mcp_entrypoint_for_cell
 from .state import AgentCell, MatrixState
 from .adapters import detect_agent_type, detect_by_command, get_adapter
 from .terminal_adapter import (
@@ -177,7 +178,9 @@ class ITerm2BridgeCore:
                             log.info("Re-installed hooks for '%s' in %s",
                                      cell.name, hook_dir)
                     if hasattr(adapter, "install_mcp_config"):
-                        if adapter.install_mcp_config(hook_dir):
+                        if adapter.install_mcp_config(
+                                hook_dir,
+                                mcp_entrypoint=mcp_entrypoint_for_cell(cell)):
                             log.info("Re-installed MCP config for '%s' in %s",
                                      cell.name, hook_dir)
                     if hasattr(adapter, "install_skills"):
@@ -312,6 +315,7 @@ class ITerm2BridgeCore:
                              init_script: str = "",
                              shell: str = "",
                              system_prompt: str = "",
+                             mcp_entrypoint: str = "",
                              target_session_id: str = "",
                              target_window_id: str = "",
                              restore_focus_to_prev_tab: bool = False):
@@ -445,7 +449,11 @@ class ITerm2BridgeCore:
                     log.warning("Failed to install hooks for '%s' in %s",
                                 cell.name, hook_dir)
             if hook_dir and hasattr(adapter, "install_mcp_config"):
-                if adapter.install_mcp_config(hook_dir):
+                if adapter.install_mcp_config(
+                        hook_dir,
+                        mcp_entrypoint=(
+                            mcp_entrypoint or mcp_entrypoint_for_cell(cell)
+                        )):
                     log.info("Installed MCP config for '%s' in %s",
                              cell.name, hook_dir)
             if hook_dir and hasattr(adapter, "install_skills"):
