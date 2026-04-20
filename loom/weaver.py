@@ -581,6 +581,14 @@ class WeaverEventBuffer:
             return None
         return target
 
+    @staticmethod
+    def _recipient_is_running(target) -> bool:
+        return bool(
+            target
+            and getattr(target, "session_id", "")
+            and getattr(target, "status", "") == "running"
+        )
+
     def get_sent_events(self, recipient_or_group: str) -> list[dict]:
         agent_id = self._resolve_recipient_id(recipient_or_group)
         return [dict(evt) for evt in self._sent_events.get(agent_id, [])]
@@ -758,7 +766,7 @@ class WeaverEventBuffer:
             ):
                 continue
             target = self._digest_recipient(recipient_id)
-            if not target or not target.session_id or target.status != "running":
+            if not target:
                 continue
             buf = self._buffers.setdefault(recipient_id, [])
             if not buf:
@@ -769,7 +777,10 @@ class WeaverEventBuffer:
             settings = self._state.get_agent_digest_settings(recipient_id)
             if settings.paused:
                 continue
-            if not target.activity or target.activity == "waiting":
+            if (
+                    self._recipient_is_running(target)
+                    and (not target.activity or target.activity == "waiting")
+            ):
                 self._check_weaver_flush(target)
 
     def on_delivery_resumed(self, recipient_or_group: str):
@@ -779,7 +790,10 @@ class WeaverEventBuffer:
         if not target:
             return
         self._emit_buffer_stats(agent_id)
-        if not target.activity or target.activity == "waiting":
+        if (
+                self._recipient_is_running(target)
+                and (not target.activity or target.activity == "waiting")
+        ):
             if self._buffers.get(agent_id):
                 self._cancel_due_check(agent_id)
                 self._schedule_flush(agent_id)
@@ -828,7 +842,7 @@ class WeaverEventBuffer:
             return False, "Recipient is required"
 
         target = self._digest_recipient(agent_id)
-        if not target or not target.session_id:
+        if not self._recipient_is_running(target):
             return False, "Digest recipient is not running"
 
         if not self._loop or self._loop.is_closed():
@@ -855,7 +869,8 @@ class WeaverEventBuffer:
 
     def _check_weaver_flush(self, cell):
         """If *cell* is an eligible digest recipient with buffered events, flush."""
-        if not self._digest_recipient(getattr(cell, "id", "")):
+        cell = self._digest_recipient(getattr(cell, "id", ""))
+        if not cell or not self._recipient_is_running(cell):
             return
 
         agent_id = cell.id
@@ -906,7 +921,7 @@ class WeaverEventBuffer:
         buffer_started_at = None
         try:
             target = self._digest_recipient(agent_id)
-            if not target or not target.session_id:
+            if not self._recipient_is_running(target):
                 return
 
             settings = self._state.get_agent_digest_settings(agent_id)

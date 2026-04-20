@@ -257,6 +257,85 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(recipients, [engineer.id])
 
+    def test_blank_cell_task_event_routes_to_assigned_engineer(self):
+        state, group = self._make_state()
+        legacy = self._add_agent(
+            state,
+            agent_id="eng-a",
+            name="Legacy Engineer",
+            group=group,
+            kind="engineer",
+        )
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-b",
+            name="Owner Engineer",
+            group=group,
+            kind="engineer",
+        )
+        state.group_settings[group] = self.state_mod.GroupSettings(
+            weaver_agent_id=legacy.id
+        )
+        task = state.board_add_task(
+            "Verify release",
+            group,
+            id="task-1",
+            assigned_engineer_id=engineer.id,
+        )
+        self.assertIsNotNone(task)
+        state.update_agent_digest_settings(legacy.id)
+        state.update_agent_digest_settings(engineer.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {
+                "cell_id": "",
+                "group": group,
+                "kind": "task_verification_updated",
+                "task_id": task.id,
+            },
+        )
+
+        self.assertEqual(recipients, [engineer.id])
+
+    def test_blank_cell_task_event_routes_via_task_agent_chain(self):
+        state, group = self._make_state()
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Owner Engineer",
+            group=group,
+            kind="engineer",
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+            owner_engineer_id=engineer.id,
+        )
+        task = state.board_add_task(
+            "Review implementation",
+            group,
+            id="task-1",
+            agent_id=worker.id,
+        )
+        self.assertIsNotNone(task)
+        state.update_agent_digest_settings(engineer.id)
+
+        recipients = self.routing_mod.resolve_digest_recipients(
+            state,
+            {
+                "cell_id": "",
+                "group": group,
+                "kind": "task_verification_updated",
+                "task_id": task.id,
+            },
+        )
+
+        self.assertEqual(recipients, [engineer.id])
+
     async def test_per_recipient_buffer_isolation(self):
         state, group = self._make_state()
         engineer_a = self._add_agent(
@@ -323,6 +402,58 @@ class DigestRoutingTests(unittest.IsolatedAsyncioTestCase):
             [event["message"] for event in buffer._buffers[engineer_b.id]],
             ["event B"],
         )
+
+    async def test_stopped_recipient_keeps_buffered_events_until_running(self):
+        state, group = self._make_state()
+        engineer = self._add_agent(
+            state,
+            agent_id="eng-1",
+            name="Engineer",
+            group=group,
+            kind="engineer",
+            running=False,
+        )
+        worker = self._add_agent(
+            state,
+            agent_id="worker-1",
+            name="Worker",
+            group=group,
+            kind="worker",
+            owner_engineer_id=engineer.id,
+        )
+        state.update_agent_digest_settings(
+            engineer.id,
+            push_interval=0,
+            max_interval=0,
+        )
+
+        bridge = FakeBridge()
+        buffer = self.weaver_mod.WeaverEventBuffer(state, bridge)
+        buffer._loop = asyncio.get_running_loop()
+        buffer.on_panel_event(
+            {
+                "id": 1,
+                "cell_id": worker.id,
+                "group": group,
+                "kind": "task_completed",
+                "message": "event A",
+            }
+        )
+        await asyncio.sleep(0)
+
+        self.assertEqual(
+            [event["message"] for event in buffer._buffers[engineer.id]],
+            ["event A"],
+        )
+        self.assertEqual(bridge.sent, [])
+
+        engineer.session_id = "session-eng-1"
+        engineer.status = "running"
+        buffer._timer_tick()
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(len(bridge.sent), 1)
+        self.assertIn("event A", bridge.sent[0][1])
 
     async def test_worker_event_creates_default_owner_digest_settings(self):
         state, group = self._make_state()

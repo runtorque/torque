@@ -30,17 +30,54 @@ def _effective_owner_engineer_id(cell) -> str:
     return str(getattr(cell, "created_by_weaver_id", "") or "").strip()
 
 
+def _task_routing_source(state, event: dict):
+    task_id = str(event.get("task_id", "") or "").strip()
+    if not task_id:
+        return None
+    task = getattr(state, "board_tasks", {}).get(task_id)
+    if not task:
+        return None
+
+    assigned_engineer_id = str(
+        getattr(task, "assigned_engineer_id", "") or ""
+    ).strip()
+    if assigned_engineer_id:
+        engineer = state.agents.get(assigned_engineer_id)
+        if engineer:
+            return engineer
+
+    for field_name in ("agent_id", "reply_agent_id"):
+        cell_id = str(getattr(task, field_name, "") or "").strip()
+        if not cell_id:
+            continue
+        source = state.agents.get(cell_id)
+        if source:
+            return source
+    return None
+
+
+def _event_routing_source(state, event: dict):
+    cell_id = str(event.get("cell_id", "") or "").strip()
+    if cell_id:
+        source = state.agents.get(cell_id)
+        if source:
+            return source
+
+    source = _task_routing_source(state, event)
+    if source:
+        return source
+
+    group = str(event.get("group", "") or "").strip()
+    if not group:
+        return None
+    return getattr(state, "get_weaver_for_group", lambda _group: None)(group)
+
+
 def candidate_digest_recipients(state, event: dict) -> list[str]:
     """Return the unfiltered recipient chain for a panel event."""
-    source = state.agents.get(str(event.get("cell_id", "") or "").strip())
+    source = _event_routing_source(state, event)
     if not source:
-        group = str(event.get("group", "") or "").strip()
-        if not group:
-            return []
-        legacy_weaver = getattr(state, "get_weaver_for_group", lambda _group: None)(group)
-        if not legacy_weaver:
-            return []
-        source = legacy_weaver
+        return []
 
     kind = _cell_kind(source)
     recipients: list[str] = []
