@@ -349,6 +349,13 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             group="g",
             cell_type="agent",
         )
+        architect = self.state_mod.AgentCell(
+            id="architect-1",
+            name="Architect",
+            group="g",
+            cell_type="agent",
+            kind="architect",
+        )
         worker = self.state_mod.AgentCell(
             id="agent-1",
             name="Worker",
@@ -356,8 +363,9 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
             cell_type="agent",
         )
         state.agents[weaver.id] = weaver
+        state.agents[architect.id] = architect
         state.agents[worker.id] = worker
-        state.groups["g"] = [weaver.id, worker.id]
+        state.groups["g"] = [weaver.id, architect.id, worker.id]
         state.group_settings["g"] = self.state_mod.GroupSettings(
             weaver_agent_id=weaver.id
         )
@@ -398,10 +406,24 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertIn("loom_progress", worker_tool_names)
         self.assertNotIn("weaver_board_summary", worker_tool_names)
+        self.assertNotIn("architect_board_summary", worker_tool_names)
+
+        listed_architect = await handler(
+            FakeRequest(
+                {"jsonrpc": "2.0", "id": 12, "method": "tools/list"},
+                headers={"X-Loom-Cell-Id": architect.id},
+            )
+        )
+        architect_tool_names = [
+            tool["name"] for tool in listed_architect.payload["result"]["tools"]
+        ]
+        self.assertIn("architect_board_summary", architect_tool_names)
+        self.assertIn("architect_decision_create", architect_tool_names)
+        self.assertNotIn("weaver_board_summary", architect_tool_names)
 
         listed_weaver = await handler(
             FakeRequest(
-                {"jsonrpc": "2.0", "id": 12, "method": "tools/list"},
+                {"jsonrpc": "2.0", "id": 13, "method": "tools/list"},
                 headers={"X-Loom-Cell-Id": weaver.id},
             )
         )
@@ -459,6 +481,23 @@ class MCPToolDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(
             "only available to engineer sessions or external MCP clients",
             denied_worker_summary.payload["result"]["content"][0]["text"],
+        )
+
+        denied_architect_summary = await handler(
+            FakeRequest(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 41,
+                    "method": "tools/call",
+                    "params": {"name": "architect_board_summary", "arguments": {}},
+                },
+                headers={"X-Loom-Cell-Id": worker.id},
+            )
+        )
+        self.assertTrue(denied_architect_summary.payload["result"]["isError"])
+        self.assertIn(
+            "architect tools are only available inside a Loom-managed architect session",
+            denied_architect_summary.payload["result"]["content"][0]["text"],
         )
 
         summary = await handler(

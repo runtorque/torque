@@ -366,10 +366,31 @@ class AgentLaunchServiceTests(unittest.IsolatedAsyncioTestCase):
             {"BASE": "1", "LOOM_ENGINEER_ID": "eng-1"},
         )
 
-    def test_mcp_entrypoint_for_cell_uses_engineer_entrypoint(self):
+    def test_runtime_env_vars_for_architect_adds_binding(self):
+        cell = types.SimpleNamespace(
+            id="arch-1",
+            cell_type="agent",
+            kind="architect",
+        )
+
+        env = self.server_agent_mod.runtime_env_vars_for_cell(
+            cell, {"BASE": "1"}
+        )
+
+        self.assertEqual(
+            env,
+            {"BASE": "1", "LOOM_ARCHITECT_ID": "arch-1"},
+        )
+
+    def test_mcp_entrypoint_for_cell_uses_kind_specific_entrypoint(self):
+        architect = types.SimpleNamespace(cell_type="agent", kind="architect")
         engineer = types.SimpleNamespace(cell_type="agent", kind="engineer")
         worker = types.SimpleNamespace(cell_type="agent", kind="worker")
 
+        self.assertEqual(
+            self.server_agent_mod.mcp_entrypoint_for_cell(architect),
+            self.server_agent_mod.ARCHITECT_MCP_ENTRYPOINT,
+        )
         self.assertEqual(
             self.server_agent_mod.mcp_entrypoint_for_cell(engineer),
             self.server_agent_mod.ENGINEER_MCP_ENTRYPOINT,

@@ -14,6 +14,7 @@ import logging
 
 from aiohttp import web
 
+from .mcp_architect import ARCHITECT_TOOLS, _dispatch_architect_tool
 from .mcp_engineer import ENGINEER_TOOLS, _dispatch_engineer_tool
 from .mcp_weaver import WEAVER_TOOLS, _dispatch_weaver_tool
 from .server_artifacts import serialize_task_for_mcp
@@ -517,7 +518,7 @@ TOOLS = [
 _TOOL_MAP = {t["name"]: t for t in TOOLS}
 
 # Combined tool list (agent + weaver tools)
-ALL_TOOLS = TOOLS + ENGINEER_TOOLS + WEAVER_TOOLS
+ALL_TOOLS = TOOLS + ARCHITECT_TOOLS + ENGINEER_TOOLS + WEAVER_TOOLS
 _ALL_TOOL_MAP = {t["name"]: t for t in ALL_TOOLS}
 
 
@@ -535,6 +536,8 @@ def _visible_tools(state, cell_id: str):
     if caller_kind == "engineer":
         tools.extend(ENGINEER_TOOLS)
         tools.extend(WEAVER_TOOLS)
+    elif caller_kind == "architect":
+        tools.extend(ARCHITECT_TOOLS)
     elif is_legacy_weaver:
         tools.extend(WEAVER_TOOLS)
     elif not cell_id:
@@ -830,6 +833,35 @@ def create_mcp_handler(handle_command, state):
                             "isError": True,
                         }))
                 text, is_error = await _dispatch_engineer_tool(
+                    tool_name, arguments, handle_command, state,
+                    caller_id=cell_id)
+            elif tool_name.startswith("architect_"):
+                if not cell_id:
+                    return web.json_response(
+                        _jsonrpc_ok(req_id, {
+                            "content": [{
+                                "type": "text",
+                                "text": (
+                                    "X-Loom-Cell-Id header is required"
+                                    " — architect tools only work inside a"
+                                    " Loom-managed architect session"
+                                ),
+                            }],
+                            "isError": True,
+                        }))
+                if caller_kind != "architect":
+                    return web.json_response(
+                        _jsonrpc_ok(req_id, {
+                            "content": [{
+                                "type": "text",
+                                "text": (
+                                    "architect tools are only available inside a "
+                                    "Loom-managed architect session"
+                                ),
+                            }],
+                            "isError": True,
+                        }))
+                text, is_error = await _dispatch_architect_tool(
                     tool_name, arguments, handle_command, state,
                     caller_id=cell_id)
             else:

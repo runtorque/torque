@@ -221,6 +221,49 @@ def _unique_value(base: str, existing: set[str]) -> str:
     return f"{base}-{i}"
 
 
+def _decision_json_list(value) -> list[str]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            value = []
+    if not isinstance(value, list):
+        return []
+    out = []
+    seen = set()
+    for item in value:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        out.append(text)
+        seen.add(text)
+    return out
+
+
+def _decision_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default or 0)
+
+
+def _decode_decision_row(row, cols) -> dict:
+    decision = dict(zip(cols, row))
+    decision["supersedes"] = (
+        str(decision.get("supersedes", "") or "").strip() or None
+    )
+    decision["linked_task_ids"] = _decision_json_list(
+        decision.get("linked_task_ids", "[]")
+    )
+    decision["linked_engineer_ids"] = _decision_json_list(
+        decision.get("linked_engineer_ids", "[]")
+    )
+    decision["archived"] = bool(decision.get("archived", 0))
+    decision["created_at"] = _decision_int(decision.get("created_at", 0))
+    decision["updated_at"] = _decision_int(decision.get("updated_at", 0))
+    return decision
+
+
 
 
 class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
@@ -1159,6 +1202,130 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 (group_name, limit)).fetchall()
         return [{"id": r[0], "group": r[1], "timestamp": r[2],
                  "type": r[3], "entry": r[4]} for r in rows]
+
+    def load_decision(self, decision_id: str) -> dict | None:
+        """Load one persisted architect decision by id."""
+        decision_id = str(decision_id or "").strip()
+        if not decision_id:
+            return None
+        cursor = self._conn.execute(
+            "SELECT id, architect_id, title, rationale, status, supersedes, "
+            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at "
+            "FROM decisions WHERE id=?",
+            (decision_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cursor.description]
+        return _decode_decision_row(row, cols)
+
+    def save_decision(self, row_dict: dict) -> dict:
+        """Upsert one architect decision and return the normalized row."""
+        row = dict(row_dict or {})
+        decision_id = str(row.get("id", "") or "").strip()
+        if not decision_id:
+            raise ValueError("decision id is required")
+
+        existing = self.load_decision(decision_id) or {}
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        architect_id = str(
+            row.get("architect_id", existing.get("architect_id", "")) or ""
+        ).strip()
+        if not architect_id:
+            raise ValueError("architect_id is required")
+
+        created_at = _decision_int(
+            row.get("created_at", existing.get("created_at", now_ts)),
+            now_ts,
+        )
+        updated_at = _decision_int(
+            row.get("updated_at", now_ts),
+            now_ts,
+        )
+        supersedes = row.get("supersedes", existing.get("supersedes", None))
+        supersedes = str(supersedes or "").strip() or None
+        linked_task_ids = _decision_json_list(
+            row.get(
+                "linked_task_ids",
+                existing.get("linked_task_ids", []),
+            )
+        )
+        linked_engineer_ids = _decision_json_list(
+            row.get(
+                "linked_engineer_ids",
+                existing.get("linked_engineer_ids", []),
+            )
+        )
+        archived = bool(row.get("archived", existing.get("archived", False)))
+
+        self._conn.execute(
+            "INSERT OR REPLACE INTO decisions "
+            "(id, architect_id, title, rationale, status, supersedes, "
+            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                decision_id,
+                architect_id,
+                str(row.get("title", existing.get("title", "")) or ""),
+                str(row.get("rationale", existing.get("rationale", "")) or ""),
+                str(row.get("status", existing.get("status", "proposed")) or "proposed"),
+                supersedes,
+                json.dumps(linked_task_ids),
+                json.dumps(linked_engineer_ids),
+                1 if archived else 0,
+                created_at,
+                updated_at,
+            ),
+        )
+        self._conn.commit()
+        saved = self.load_decision(decision_id)
+        if not saved:
+            raise RuntimeError(f"failed to load saved decision {decision_id}")
+        return saved
+
+    def load_decisions_for_architect(self, architect_id: str, *,
+                                     include_archived: bool = False) -> list[dict]:
+        """Load persisted decisions for one architect, newest first."""
+        architect_id = str(architect_id or "").strip()
+        if not architect_id:
+            return []
+        query = (
+            "SELECT id, architect_id, title, rationale, status, supersedes, "
+            "linked_task_ids, linked_engineer_ids, archived, created_at, updated_at "
+            "FROM decisions WHERE architect_id=?"
+        )
+        params = [architect_id]
+        if not include_archived:
+            query += " AND archived=0"
+        query += " ORDER BY updated_at DESC, created_at DESC, id DESC"
+        cursor = self._conn.execute(query, tuple(params))
+        rows = cursor.fetchall()
+        cols = [d[0] for d in cursor.description]
+        return [_decode_decision_row(row, cols) for row in rows]
+
+    def delete_decision(self, decision_id: str) -> dict | None:
+        """Soft-delete one decision by marking it archived."""
+        decision_id = str(decision_id or "").strip()
+        if not decision_id:
+            return None
+        existing = self.load_decision(decision_id)
+        if not existing:
+            return None
+        self._conn.execute(
+            "UPDATE decisions SET archived=1, updated_at=? WHERE id=?",
+            (int(datetime.now(timezone.utc).timestamp()), decision_id),
+        )
+        self._conn.commit()
+        return self.load_decision(decision_id)
+
+    def hard_delete_decision(self, decision_id: str) -> None:
+        """Permanently delete one decision row."""
+        decision_id = str(decision_id or "").strip()
+        if not decision_id:
+            return
+        self._conn.execute("DELETE FROM decisions WHERE id=?", (decision_id,))
+        self._conn.commit()
 
     def save_weaver_task_log_entry(self, record: dict) -> int:
         """Insert a persisted Weaver dispatch/worklog row."""

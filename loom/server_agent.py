@@ -20,6 +20,7 @@ from .artifacts import (
 from .config import log
 
 DEFAULT_MCP_ENTRYPOINT = "loom/mcp.py"
+ARCHITECT_MCP_ENTRYPOINT = "loom/mcp_architect.py"
 ENGINEER_MCP_ENTRYPOINT = "loom/mcp_engineer.py"
 
 
@@ -75,9 +76,12 @@ def _new_agent_prompt_sequence(launch_cfg: dict, *,
 def runtime_env_vars_for_cell(cell, env_vars: dict[str, str] | None = None):
     """Return launch env vars with per-cell identity bindings applied."""
     merged = dict(env_vars or {})
-    if getattr(cell, "cell_type", "") == "agent" \
-            and str(getattr(cell, "kind", "") or "").strip() == "engineer":
-        merged["LOOM_ENGINEER_ID"] = str(getattr(cell, "id", "") or "")
+    if getattr(cell, "cell_type", "") == "agent":
+        kind = str(getattr(cell, "kind", "") or "").strip()
+        if kind == "engineer":
+            merged["LOOM_ENGINEER_ID"] = str(getattr(cell, "id", "") or "")
+        elif kind == "architect":
+            merged["LOOM_ARCHITECT_ID"] = str(getattr(cell, "id", "") or "")
     return merged or None
 
 
@@ -85,8 +89,11 @@ def mcp_entrypoint_for_cell(cell) -> str:
     """Return the MCP entrypoint path to associate with a cell launch."""
     if getattr(cell, "cell_type", "") != "agent":
         return ""
-    if str(getattr(cell, "kind", "") or "").strip() == "engineer":
+    kind = str(getattr(cell, "kind", "") or "").strip()
+    if kind == "engineer":
         return ENGINEER_MCP_ENTRYPOINT
+    if kind == "architect":
+        return ARCHITECT_MCP_ENTRYPOINT
     return DEFAULT_MCP_ENTRYPOINT
 
 

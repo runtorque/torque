@@ -10,6 +10,7 @@ spoofing protections are out of scope for this stage.
 
 import copy
 import json
+import uuid
 from dataclasses import asdict, replace
 
 from .mcp_weaver_tools.shared import (
@@ -44,6 +45,8 @@ _STREAM_STATES = (
     "ready_to_merge",
     "merged",
 )
+_DECISION_STATUSES = {"proposed", "accepted", "revised", "rejected"}
+_JOURNAL_ENTRY_TYPES = {"decision", "observation", "checkpoint", "plan"}
 
 # ---------------------------------------------------------------------------
 # Shared scoping helpers
@@ -95,6 +98,110 @@ def _is_engineer_like_cell(state, cell) -> bool:
     return bool(state.get_group_settings(group).weaver_agent_id == cell.id)
 
 
+def _is_architect_cell(cell) -> bool:
+    return bool(
+        cell
+        and getattr(cell, "cell_type", "") == "agent"
+        and str(getattr(cell, "kind", "") or "").strip() == "architect"
+    )
+
+
+def _caller_group(state, caller_id: str) -> str:
+    caller = state.agents.get(str(caller_id or "").strip())
+    return str(getattr(caller, "group", "") or "").strip() if caller else ""
+
+
+def _dedupe_strings(values) -> list[str]:
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, list):
+        return []
+    out = []
+    seen = set()
+    for item in values:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        out.append(text)
+        seen.add(text)
+    return out
+
+
+def _architect_visible_engineers(state, caller_id: str) -> dict[str, tuple[object, str]]:
+    caller_group = _caller_group(state, caller_id)
+    if not caller_group:
+        return {}
+    visible = {}
+    for cell in state.agents.values():
+        if not _is_engineer_like_cell(state, cell):
+            continue
+        if str(getattr(cell, "group", "") or "").strip() != caller_group:
+            continue
+        hired_by = str(getattr(cell, "hired_by_architect_id", "") or "").strip()
+        if hired_by == str(caller_id or "").strip():
+            visible[cell.id] = (cell, "hired")
+        elif not hired_by:
+            visible[cell.id] = (cell, "visible")
+    return visible
+
+
+def _architect_hired_engineer_ids(state, caller_id: str) -> set[str]:
+    return {
+        engineer_id
+        for engineer_id, (_cell, relation) in _architect_visible_engineers(
+            state, caller_id
+        ).items()
+        if relation == "hired"
+    }
+
+
+def _resolve_architect_engineer(state, caller_id: str,
+                                engineer_ident: str) -> tuple[str | None, str]:
+    engineer_id = _resolve_agent(state, engineer_ident)
+    if not engineer_id:
+        return None, f"Engineer not found: {engineer_ident}"
+    visible = _architect_visible_engineers(state, caller_id)
+    if engineer_id not in visible:
+        return None, "engineer not found in scope"
+    return engineer_id, ""
+
+
+def _normalize_decision_links(state, caller_id: str, *,
+                              task_ids=None,
+                              engineer_ids=None) -> tuple[list[str], list[str], str]:
+    visible_tasks = _filter_tasks_for_caller(state, "architect", caller_id)
+    normalized_task_ids = []
+    for task_ident in _dedupe_strings(task_ids):
+        task_id = _resolve_task(state, task_ident)
+        if not task_id or task_id not in visible_tasks:
+            return [], [], f"Task not found: {task_ident}"
+        normalized_task_ids.append(task_id)
+
+    normalized_engineer_ids = []
+    for engineer_ident in _dedupe_strings(engineer_ids):
+        engineer_id, error_text = _resolve_architect_engineer(
+            state, caller_id, engineer_ident
+        )
+        if not engineer_id:
+            return [], [], error_text
+        normalized_engineer_ids.append(engineer_id)
+
+    return normalized_task_ids, normalized_engineer_ids, ""
+
+
+def _load_architect_decision(state, caller_id: str,
+                             decision_id: str) -> tuple[dict | None, str]:
+    decision_id = str(decision_id or "").strip()
+    if not decision_id:
+        return None, "decision id is required"
+    decision = state.load_decision(decision_id)
+    if not decision or str(decision.get("architect_id", "") or "").strip() != str(
+        caller_id or ""
+    ).strip():
+        return None, "Decision not found"
+    return decision, ""
+
+
 def _visible_agent_ids_for_caller(state, caller_kind: str,
                                   caller_id: str) -> set[str]:
     if caller_kind == "legacy_weaver":
@@ -115,6 +222,11 @@ def _visible_agent_ids_for_caller(state, caller_kind: str,
                 getattr(cell, "created_by_weaver_id", "") or ""
             ).strip() == str(caller_id or "").strip():
                 visible.add(cell.id)
+        return visible
+    if caller_kind == "architect":
+        caller_id = str(caller_id or "").strip()
+        visible = {caller_id} if caller_id in state.agents else set()
+        visible.update(_architect_hired_engineer_ids(state, caller_id))
         return visible
     if caller_kind != "engineer":
         return set()
@@ -163,6 +275,26 @@ def _filter_tasks_for_caller(state, caller_kind: str,
             for task in state.board_tasks.values()
             if str(getattr(task, "group", "") or "").strip() == caller_group
         }
+    if caller_kind == "architect":
+        caller_id = str(caller_id or "").strip()
+        caller_group = _caller_group(state, caller_id)
+        if not caller_group:
+            return {}
+        hired_engineer_ids = _architect_hired_engineer_ids(state, caller_id)
+        filtered = {}
+        for task in state.board_tasks.values():
+            if str(getattr(task, "group", "") or "").strip() != caller_group:
+                continue
+            created_by_architect_id = str(
+                getattr(task, "created_by_architect_id", "") or ""
+            ).strip()
+            assigned_engineer_id = _effective_assigned_engineer_id(task)
+            if (
+                created_by_architect_id == caller_id
+                or assigned_engineer_id in hired_engineer_ids
+            ):
+                filtered[task.id] = task
+        return filtered
     if caller_kind != "engineer":
         return {}
     caller_id = str(caller_id or "").strip()
@@ -261,8 +393,12 @@ def resolve_default_engineer(state) -> str | None:
 
 def authorize_caller(state, *, caller_kind: str, caller_id: str):
     caller_id = str(caller_id or "").strip()
-    label = "engineer" if caller_kind == "engineer" else "weaver"
-    if caller_kind not in {"engineer", "legacy_weaver"}:
+    label = {
+        "engineer": "engineer",
+        "legacy_weaver": "weaver",
+        "architect": "architect",
+    }.get(caller_kind, caller_kind)
+    if caller_kind not in {"engineer", "legacy_weaver", "architect"}:
         return None, "", caller_kind, json.dumps({
             "type": "error",
             "message": f"unsupported caller kind: {caller_kind}",
@@ -271,6 +407,8 @@ def authorize_caller(state, *, caller_kind: str, caller_id: str):
         missing_message = (
             "LOOM_ENGINEER_ID is required"
             if caller_kind == "engineer"
+            else "LOOM_ARCHITECT_ID is required"
+            if caller_kind == "architect"
             else "legacy weaver session id is required"
         )
         return None, "", caller_kind, json.dumps({
@@ -278,8 +416,18 @@ def authorize_caller(state, *, caller_kind: str, caller_id: str):
             "message": missing_message,
         }), True
     cell = state.agents.get(caller_id)
-    if not _is_engineer_like_cell(state, cell):
+    if caller_kind == "architect":
+        valid = _is_architect_cell(cell)
+    else:
+        valid = _is_engineer_like_cell(state, cell)
+    if not valid:
         error_text = (
+            json.dumps({
+                "type": "error",
+                "message": f"no architect with id={caller_id} exists",
+            })
+            if caller_kind == "architect"
+            else
             engineer_not_found_error(caller_id)
             if caller_kind == "engineer"
             else json.dumps({
@@ -295,6 +443,9 @@ def authorize_caller(state, *, caller_kind: str, caller_id: str):
             "message": f"{label} {caller_id} is not assigned to a group",
         }), True
     effective_kind = (
+        "architect"
+        if caller_kind == "architect"
+        else
         "engineer"
         if str(getattr(cell, "kind", "") or "").strip() == "engineer"
         else "legacy_weaver"
@@ -965,6 +1116,33 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
                 d["pipeline_chain"].append(item)
         return json.dumps(d), False
 
+    if tool_name == "engineer_list" and caller_kind == "architect":
+        engineers = []
+        for cell, relation in _architect_visible_engineers(
+            real_state, caller_id
+        ).values():
+            current_task = real_state.agent_current_task(cell.id)
+            engineers.append({
+                "id": cell.id,
+                "name": cell.name,
+                "slug": cell.slug,
+                "status": cell.status,
+                "group": cell.group,
+                "relation": relation,
+                "current_task_id": current_task.id if current_task else "",
+                "current_task": current_task.task if current_task else "",
+                "activity": cell.activity,
+                "activity_detail": cell.activity_detail,
+            })
+        engineers.sort(
+            key=lambda item: (
+                0 if item["relation"] == "hired" else 1,
+                item["slug"] or item["name"] or item["id"],
+                item["id"],
+            )
+        )
+        return json.dumps({"engineers": engineers}), False
+
     if tool_name == "agents_list":
         agents = []
         for c in state.agents.values():
@@ -1149,6 +1327,63 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
     # -- Write tools --------------------------------------------------------
 
     if tool_name == "task_create":
+        if caller_kind == "architect":
+            title = str(args.get("title", "") or "").strip()
+            if not title:
+                return "title is required", True
+            requested_group = str(args.get("group", "") or "").strip()
+            if not requested_group:
+                return "group is required", True
+            if requested_group != _weaver_group:
+                return "group must match the architect's group", True
+            assigned_engineer_ident = str(
+                args.get("assigned_engineer_id", "") or ""
+            ).strip()
+            if not assigned_engineer_ident:
+                return "assigned_engineer_id is required", True
+            assigned_engineer_id, engineer_error = _resolve_architect_engineer(
+                real_state, caller_id, assigned_engineer_ident
+            )
+            if not assigned_engineer_id:
+                return engineer_error, True
+            action_vars = args.get("action_vars", {})
+            if action_vars is None:
+                action_vars = {}
+            if not isinstance(action_vars, dict):
+                return "action_vars must be an object", True
+
+            create_result = await handle_command({
+                "cmd": "board_add_task",
+                "task": title,
+                "description": args.get("description", ""),
+                "group": _weaver_group,
+                "lane": args.get("lane", ""),
+                "labels": args.get("labels", []),
+                "assigned_engineer_id": assigned_engineer_id,
+            })
+            if create_result and create_result.get("type") == "error":
+                return create_result.get("message", "Unknown error"), True
+
+            task_id = str((create_result or {}).get("task_id", "") or "").strip()
+            if task_id:
+                update_result = await handle_command({
+                    "cmd": "board_update_task",
+                    "id": task_id,
+                    "assigned_engineer_id": assigned_engineer_id,
+                    "created_by_architect_id": str(caller_id or "").strip(),
+                    "suggested_action": str(
+                        args.get("suggested_action", "") or ""
+                    ).strip(),
+                    "action_name": "",
+                    "action_vars": action_vars,
+                })
+                if update_result and update_result.get("type") == "error":
+                    return update_result.get("message", "Unknown error"), True
+            return (
+                json.dumps(create_result)
+                if create_result else '{"type":"ok"}'
+            ), False
+
         payload = {
             "cmd": "board_add_task",
             "task": args.get("title", ""),
@@ -1168,6 +1403,38 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         if result and result.get("type") == "error":
             return result.get("message", "Unknown error"), True
         return json.dumps(result) if result else '{"type":"ok"}', False
+
+    if tool_name == "task_reassign" and caller_kind == "architect":
+        tid = _resolve_task(state, args.get("task", ""))
+        if not tid:
+            return "Task not found", True
+        task = state.board_tasks.get(tid)
+        if not task:
+            return "Task not found", True
+        if str(getattr(task, "created_by_architect_id", "") or "").strip() != str(
+            caller_id or ""
+        ).strip():
+            return "Task was not created by this architect", True
+        engineer_ident = str(args.get("new_engineer_id", "") or "").strip()
+        if not engineer_ident:
+            return "new_engineer_id is required", True
+        engineer_id, engineer_error = _resolve_architect_engineer(
+            real_state, caller_id, engineer_ident
+        )
+        if not engineer_id:
+            return engineer_error, True
+        result = await handle_command({
+            "cmd": "board_update_task",
+            "id": tid,
+            "assigned_engineer_id": engineer_id,
+        })
+        if result and result.get("type") == "error":
+            return result.get("message", "Unknown error"), True
+        return json.dumps({
+            "type": "ok",
+            "task_id": tid,
+            "assigned_engineer_id": engineer_id,
+        }), False
 
     if tool_name == "task_edit":
         tid = _resolve_task(state, args.get("task", ""))
@@ -1646,7 +1913,185 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
 
     # -- Context tools ------------------------------------------------------
 
+    if tool_name == "decision_create" and caller_kind == "architect":
+        title = str(args.get("title", "") or "").strip()
+        rationale = str(args.get("rationale", "") or "").strip()
+        if not title:
+            return "title is required", True
+        if not rationale:
+            return "rationale is required", True
+        status = str(args.get("status", "") or "proposed").strip() or "proposed"
+        if status not in _DECISION_STATUSES:
+            return (
+                "status must be one of: proposed, accepted, revised, rejected",
+                True,
+            )
+        supersedes = str(args.get("supersedes", "") or "").strip() or None
+        if supersedes:
+            prior_decision, decision_error = _load_architect_decision(
+                real_state, caller_id, supersedes
+            )
+            if not prior_decision:
+                return decision_error, True
+        linked_task_ids, linked_engineer_ids, link_error = _normalize_decision_links(
+            real_state,
+            caller_id,
+            task_ids=args.get("linked_task_ids", []),
+            engineer_ids=args.get("linked_engineer_ids", []),
+        )
+        if link_error:
+            return link_error, True
+        decision = real_state.save_decision({
+            "id": "decision-" + uuid.uuid4().hex[:12],
+            "architect_id": str(caller_id or "").strip(),
+            "title": title,
+            "rationale": rationale,
+            "status": status,
+            "supersedes": supersedes,
+            "linked_task_ids": linked_task_ids,
+            "linked_engineer_ids": linked_engineer_ids,
+            "archived": False,
+        })
+        if not decision:
+            return "Failed to save decision", True
+        return json.dumps({
+            "id": decision["id"],
+            "created_at": decision["created_at"],
+        }), False
+
+    if tool_name == "decision_update" and caller_kind == "architect":
+        decision, decision_error = _load_architect_decision(
+            real_state, caller_id, args.get("id", "")
+        )
+        if not decision:
+            return decision_error, True
+        patch = {"id": decision["id"]}
+        if "title" in args:
+            title = str(args.get("title", "") or "").strip()
+            if not title:
+                return "title is required", True
+            patch["title"] = title
+        if "rationale" in args:
+            rationale = str(args.get("rationale", "") or "").strip()
+            if not rationale:
+                return "rationale is required", True
+            patch["rationale"] = rationale
+        if "status" in args:
+            status = str(args.get("status", "") or "").strip()
+            if status not in _DECISION_STATUSES:
+                return (
+                    "status must be one of: proposed, accepted, revised, rejected",
+                    True,
+                )
+            patch["status"] = status
+        if "supersedes" in args:
+            supersedes = str(args.get("supersedes", "") or "").strip() or None
+            if supersedes:
+                prior_decision, supersedes_error = _load_architect_decision(
+                    real_state, caller_id, supersedes
+                )
+                if not prior_decision:
+                    return supersedes_error, True
+            patch["supersedes"] = supersedes
+        if "linked_task_ids" in args or "linked_engineer_ids" in args:
+            linked_task_ids, linked_engineer_ids, link_error = _normalize_decision_links(
+                real_state,
+                caller_id,
+                task_ids=args.get(
+                    "linked_task_ids",
+                    decision.get("linked_task_ids", []),
+                ),
+                engineer_ids=args.get(
+                    "linked_engineer_ids",
+                    decision.get("linked_engineer_ids", []),
+                ),
+            )
+            if link_error:
+                return link_error, True
+            if "linked_task_ids" in args:
+                patch["linked_task_ids"] = linked_task_ids
+            if "linked_engineer_ids" in args:
+                patch["linked_engineer_ids"] = linked_engineer_ids
+        if "archived" in args:
+            patch["archived"] = bool(args.get("archived"))
+
+        updated = real_state.save_decision(patch)
+        if not updated:
+            return "Failed to save decision", True
+        return json.dumps(updated), False
+
+    if tool_name == "decision_link" and caller_kind == "architect":
+        decision, decision_error = _load_architect_decision(
+            real_state, caller_id, args.get("id", "")
+        )
+        if not decision:
+            return decision_error, True
+        task_id = str(args.get("task_id", "") or "").strip()
+        engineer_id = str(args.get("engineer_id", "") or "").strip()
+        if bool(task_id) == bool(engineer_id):
+            return "Provide exactly one of task_id or engineer_id", True
+
+        patch = {"id": decision["id"]}
+        if task_id:
+            linked_task_ids, _linked_engineer_ids, link_error = _normalize_decision_links(
+                real_state,
+                caller_id,
+                task_ids=list(decision.get("linked_task_ids", [])) + [task_id],
+                engineer_ids=[],
+            )
+            if link_error:
+                return link_error, True
+            patch["linked_task_ids"] = linked_task_ids
+        else:
+            _linked_task_ids, linked_engineer_ids, link_error = _normalize_decision_links(
+                real_state,
+                caller_id,
+                task_ids=[],
+                engineer_ids=list(decision.get("linked_engineer_ids", [])) + [engineer_id],
+            )
+            if link_error:
+                return link_error, True
+            patch["linked_engineer_ids"] = linked_engineer_ids
+
+        updated = real_state.save_decision(patch)
+        if not updated:
+            return "Failed to save decision", True
+        return json.dumps(updated), False
+
+    if tool_name == "decision_list" and caller_kind == "architect":
+        status_filter = str(args.get("status_filter", "") or "").strip()
+        if status_filter and status_filter not in _DECISION_STATUSES:
+            return (
+                "status_filter must be one of: proposed, accepted, revised, rejected",
+                True,
+            )
+        decisions = real_state.load_decisions_for_architect(
+            caller_id,
+            include_archived=bool(args.get("include_archived", False)),
+        )
+        if status_filter:
+            decisions = [
+                decision for decision in decisions
+                if str(decision.get("status", "") or "").strip() == status_filter
+            ]
+        return json.dumps({"decisions": decisions}), False
+
     if tool_name == "journal":
+        if caller_kind == "architect":
+            entry_type = str(args.get("type", "") or "").strip()
+            if entry_type not in _JOURNAL_ENTRY_TYPES:
+                return (
+                    "type must be one of: decision, observation, checkpoint, plan",
+                    True,
+                )
+            entry = str(args.get("entry", "") or "")
+            if not entry:
+                return "entry is required", True
+            return json.dumps(real_state.architect_journal_append(
+                caller_id,
+                entry_type,
+                entry,
+            )), False
         result = await handle_command({
             "cmd": "weaver_journal_append",
             "group": _weaver_group,
@@ -1658,6 +2103,15 @@ async def dispatch_scoped_tool(name, args, handle_command, state, *,
         return json.dumps(result), False
 
     if tool_name == "journal_read":
+        if caller_kind == "architect":
+            return json.dumps({
+                "type": "journal",
+                "entries": real_state.architect_journal_read(
+                    caller_id,
+                    since=args.get("since", 0),
+                    limit=args.get("limit", 20),
+                ),
+            }), False
         result = await handle_command({
             "cmd": "weaver_journal_read",
             "group": _weaver_group,
