@@ -240,12 +240,85 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         self._backfill_kinds_if_needed()
         self._fixup_kinds_task_assignments_if_needed()
         self._cleanup_kinds_legacy_columns_if_needed()
+        self._migrate_agent_digest_settings_from_legacy_weaver_settings()
         self.migrate_task_ids_if_needed()
 
     def close(self):
         if self._conn:
             self._conn.close()
             self._conn = None
+
+    def _legacy_weaver_rows_exist(self) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM weaver_settings LIMIT 1"
+        ).fetchone()
+        return bool(row)
+
+    def _migrate_agent_digest_settings_from_legacy_weaver_settings(self):
+        """Backfill per-agent digest settings from legacy per-group rows."""
+        if not self._legacy_weaver_rows_exist():
+            return
+        try:
+            legacy_rows = self.load_all_weaver_settings()
+        except sqlite3.OperationalError:
+            return
+        if not legacy_rows:
+            return
+        for group_name, settings in legacy_rows.items():
+            row = self._conn.execute(
+                "SELECT weaver_agent_id FROM group_settings "
+                "WHERE group_name=?",
+                (group_name,),
+            ).fetchone()
+            engineer_id = str((row[0] if row else "") or "").strip()
+            if not engineer_id:
+                log.warning(
+                    "Skipping legacy weaver_settings migration for '%s': no designated engineer",
+                    group_name,
+                )
+                continue
+            agent_row = self._conn.execute(
+                "SELECT kind FROM agents WHERE id=?",
+                (engineer_id,),
+            ).fetchone()
+            if not agent_row:
+                log.warning(
+                    "Skipping legacy weaver_settings migration for '%s': agent '%s' missing",
+                    group_name,
+                    engineer_id,
+                )
+                continue
+            if str(agent_row[0] or "").strip() != "engineer":
+                log.warning(
+                    "Skipping legacy weaver_settings migration for '%s': agent '%s' is not an engineer",
+                    group_name,
+                    engineer_id,
+                )
+                continue
+            if self.load_agent_digest_settings(engineer_id):
+                continue
+            self.save_agent_digest_settings(
+                engineer_id,
+                {
+                    "agent_id": engineer_id,
+                    "paused": bool(settings.get("paused", False)),
+                    "push_interval": settings.get("push_interval", 60),
+                    "max_interval": settings.get("max_interval", 300),
+                    "heartbeat_interval": settings.get(
+                        "heartbeat_interval",
+                        settings.get("max_interval", 300),
+                    ),
+                    "digest_verbosity": settings.get(
+                        "digest_verbosity",
+                        "balanced",
+                    ),
+                    "enabled_events": list(
+                        settings.get("enabled_events", []) or []
+                    ),
+                    "architect_digest": False,
+                    "wake_on_digest": False,
+                },
+            )
 
     def load_task_id_aliases(self) -> dict[str, str]:
         rows = self._conn.execute(
@@ -962,6 +1035,44 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
         ))
         self._conn.commit()
 
+    def save_agent_digest_settings(self, agent_id: str, settings: dict):
+        """Upsert per-agent digest settings."""
+        enabled_events = json.dumps(
+            settings.get(
+                "enabled_events",
+                [
+                    "agent_started",
+                    "task_dispatched",
+                    "task_derived",
+                    "task_health_alert",
+                ],
+            )
+        )
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO agent_digest_settings
+                (agent_id, paused, push_interval, max_interval,
+                 heartbeat_interval, digest_verbosity, enabled_events,
+                 architect_digest, wake_on_digest)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                agent_id,
+                1 if settings.get("paused", False) else 0,
+                settings.get("push_interval", 60),
+                settings.get("max_interval", 300),
+                settings.get(
+                    "heartbeat_interval",
+                    settings.get("max_interval", 300),
+                ),
+                settings.get("digest_verbosity", "balanced"),
+                enabled_events,
+                1 if settings.get("architect_digest", False) else 0,
+                1 if settings.get("wake_on_digest", False) else 0,
+            ),
+        )
+        self._conn.commit()
+
     def load_weaver_settings(self, group_name: str) -> dict | None:
         """Load weaver settings for a group. Returns None if not set."""
         row = self._conn.execute(
@@ -1022,9 +1133,51 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
             "weaver_tab_color": row[24] if len(row) > 24 else "",
         }
 
+    def load_agent_digest_settings(self, agent_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT agent_id, paused, push_interval, max_interval, "
+            "heartbeat_interval, digest_verbosity, enabled_events, "
+            "architect_digest, wake_on_digest "
+            "FROM agent_digest_settings WHERE agent_id=?",
+            (agent_id,),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            enabled = json.loads(row[6])
+        except (json.JSONDecodeError, TypeError):
+            enabled = [
+                "agent_started",
+                "task_dispatched",
+                "task_derived",
+                "task_health_alert",
+            ]
+        heartbeat_interval = row[4]
+        if heartbeat_interval is None or (
+                heartbeat_interval == 300 and row[3] != 300):
+            heartbeat_interval = row[3]
+        return {
+            "agent_id": row[0],
+            "paused": bool(row[1]),
+            "push_interval": row[2],
+            "max_interval": row[3],
+            "heartbeat_interval": heartbeat_interval,
+            "digest_verbosity": row[5] if len(row) > 5 else "balanced",
+            "enabled_events": enabled,
+            "architect_digest": bool(row[7]) if len(row) > 7 else False,
+            "wake_on_digest": bool(row[8]) if len(row) > 8 else False,
+        }
+
     def delete_weaver_settings(self, group_name: str):
         self._conn.execute(
             "DELETE FROM weaver_settings WHERE group_name=?", (group_name,))
+        self._conn.commit()
+
+    def delete_agent_digest_settings(self, agent_id: str):
+        self._conn.execute(
+            "DELETE FROM agent_digest_settings WHERE agent_id=?",
+            (agent_id,),
+        )
         self._conn.commit()
 
     def load_all_weaver_settings(self) -> dict[str, dict]:
@@ -1085,6 +1238,41 @@ class LoomDB(BoardPersistenceMixin, MemoryPersistenceMixin):
                 "weaver_profile": row[22] if len(row) > 22 else "",
                 "weaver_shell": row[23] if len(row) > 23 else "",
                 "weaver_tab_color": row[24] if len(row) > 24 else "",
+            }
+        return result
+
+    def load_all_agent_digest_settings(self) -> dict[str, dict]:
+        rows = self._conn.execute(
+            "SELECT agent_id, paused, push_interval, max_interval, "
+            "heartbeat_interval, digest_verbosity, enabled_events, "
+            "architect_digest, wake_on_digest "
+            "FROM agent_digest_settings"
+        ).fetchall()
+        result = {}
+        for row in rows:
+            try:
+                enabled = json.loads(row[6])
+            except (json.JSONDecodeError, TypeError):
+                enabled = [
+                    "agent_started",
+                    "task_dispatched",
+                    "task_derived",
+                    "task_health_alert",
+                ]
+            heartbeat_interval = row[4]
+            if heartbeat_interval is None or (
+                    heartbeat_interval == 300 and row[3] != 300):
+                heartbeat_interval = row[3]
+            result[row[0]] = {
+                "agent_id": row[0],
+                "paused": bool(row[1]),
+                "push_interval": row[2],
+                "max_interval": row[3],
+                "heartbeat_interval": heartbeat_interval,
+                "digest_verbosity": row[5] if len(row) > 5 else "balanced",
+                "enabled_events": enabled,
+                "architect_digest": bool(row[7]) if len(row) > 7 else False,
+                "wake_on_digest": bool(row[8]) if len(row) > 8 else False,
             }
         return result
 

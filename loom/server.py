@@ -630,15 +630,55 @@ def _weaver_followup_task_title(message: str) -> str:
     return f"Weaver: {_summarize_weaver_message(message)}"
 
 
-def _format_weaver_message_prompt(message: str, task_id: str) -> str:
-    return (
+def _format_mcp_message_prompt(message: str, *,
+                               sender_name: str = "Weaver",
+                               sender_kind: str = "weaver",
+                               task_id: str = "") -> str:
+    prompt = (
         "\n"
-        "## Message from Weaver\n"
+        f"## Message from {sender_name}\n"
         f"{message}\n\n"
-        f"Task: {task_id}\n"
-        f'Reply with: loom_reply(task="{task_id}", message="your response")\n'
-        "---\n"
     )
+    if task_id:
+        prompt += f"Task: {task_id}\n"
+    if sender_kind != "system" and task_id:
+        prompt += (
+            f'Reply with: loom_reply(task="{task_id}", '
+            'message="your response")\n'
+        )
+    prompt += "---\n"
+    return prompt
+
+
+def _format_weaver_message_prompt(message: str, task_id: str) -> str:
+    return _format_mcp_message_prompt(
+        message,
+        sender_name="Weaver",
+        sender_kind="weaver",
+        task_id=task_id,
+    )
+
+
+async def inject_mcp_message(state: MatrixState, bridge, target, message: str, *,
+                             sender_name: str = "Loom",
+                             sender_kind: str = "system",
+                             action: str = "system",
+                             task_id: str = "") -> None:
+    if not target or not target.session_id:
+        raise ValueError("Target agent is not running")
+    if hasattr(bridge, "prime_input_ready"):
+        bridge.prime_input_ready(target.session_id)
+    await bridge.send_text(
+        target.session_id,
+        _format_mcp_message_prompt(
+            message,
+            sender_name=sender_name,
+            sender_kind=sender_kind,
+            task_id=task_id,
+        ),
+    )
+    _append_mcp_message(target, action, message)
+    state._emit_agent(target)
 
 
 def _format_mcp_message_prompt(
@@ -2347,7 +2387,14 @@ async def main(connection=None):
     )
 
     from .weaver import WeaverEventBuffer
-    weaver_buffer = WeaverEventBuffer(state, bridge)
+    async def _inject_digest_message(target, message: str, **kwargs):
+        await inject_mcp_message(state, bridge, target, message, **kwargs)
+
+    weaver_buffer = WeaverEventBuffer(
+        state,
+        bridge,
+        inject_message=_inject_digest_message,
+    )
     weaver_buffer.start()
     event_bus._weaver_buffer = weaver_buffer
     panel_log.on_event = weaver_buffer.on_panel_event

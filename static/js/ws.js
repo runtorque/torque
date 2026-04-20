@@ -259,6 +259,9 @@ function _handleFullState(msg) {
   if (typeof _boardFilterStateGroup !== 'undefined') _boardFilterStateGroup = '';
   if (msg.providers) _cachedProviders = msg.providers;
   if (!state.panel_events) state.panel_events = [];
+  if (!state.agent_digest_settings) state.agent_digest_settings = {};
+  if (!state.digest_buffer_stats) state.digest_buffer_stats = {};
+  if (!state.digest_sent_events) state.digest_sent_events = {};
   if (!state.weaver_buffer_stats) state.weaver_buffer_stats = {};
   if (!state.weaver_sent_events) state.weaver_sent_events = {};
   if (!state.weaver_worklog) state.weaver_worklog = {};
@@ -392,6 +395,9 @@ function _deltaSurfaceInvalidations(ops) {
         break;
       case 'journal_append':
       case 'journal_delete':
+      case 'agent_digest_update':
+      case 'digest_buffer_stats':
+      case 'digest_sent_push':
       case 'weaver_buffer_stats':
       case 'weaver_sent_events':
       case 'weaver_worklog_append':
@@ -443,6 +449,7 @@ function _collectSessionMapInvalidationGroups(ops, hints) {
       case 'task_upsert':
       case 'journal_append':
       case 'journal_delete':
+      case 'agent_digest_update':
       case 'weaver_settings_update':
         group = op.group || '';
         break;
@@ -505,6 +512,9 @@ function _opTouchesGroup(op, group, hint) {
       return op.old_name === group || op.new_name === group;
     case 'journal_append':
     case 'journal_delete':
+    case 'agent_digest_update':
+    case 'digest_buffer_stats':
+    case 'digest_sent_push':
     case 'weaver_buffer_stats':
     case 'weaver_sent_events':
     case 'weaver_worklog_append':
@@ -541,6 +551,9 @@ function _applyDelta(ops) {
       }
       case 'agent_remove':
         delete state.agents[op.id];
+        if (state.agent_digest_settings) delete state.agent_digest_settings[op.id];
+        if (state.digest_buffer_stats) delete state.digest_buffer_stats[op.id];
+        if (state.digest_sent_events) delete state.digest_sent_events[op.id];
         // Selection globals (`selectedAgentId` / `selectedTerminalId` /
         // `focusedItemId`) are browser-local — the server doesn't know
         // about them. When the agent they reference gets removed
@@ -772,6 +785,32 @@ function _applyDelta(ops) {
         break;
       }
 
+      case 'digest_buffer_stats': {
+        if (!state.digest_buffer_stats) state.digest_buffer_stats = {};
+        var dbg = op.agent_id || '';
+        if (dbg) {
+          state.digest_buffer_stats[dbg] = {
+            agent_id: dbg,
+            group: op.group || '',
+            buffered_events: op.buffered_events || 0,
+            next_push_in: op.next_push_in || 0,
+            next_push_at: op.next_push_at || 0,
+            queued_events: op.queued_events || [],
+            manual_flush_requested: !!op.manual_flush_requested,
+          };
+        }
+        break;
+      }
+
+      case 'digest_sent_push': {
+        if (!state.digest_sent_events) state.digest_sent_events = {};
+        var dsg = op.agent_id || '';
+        if (dsg) {
+          state.digest_sent_events[dsg] = op.events || [];
+        }
+        break;
+      }
+
       case 'weaver_worklog_append': {
         if (!state.weaver_worklog) state.weaver_worklog = {};
         var wlg = op.group || '';
@@ -809,6 +848,17 @@ function _applyDelta(ops) {
           var ws = Object.assign({}, op);
           delete ws.op;
           state.weaver_settings[wg] = ws;
+        }
+        break;
+      }
+
+      case 'agent_digest_update': {
+        if (!state.agent_digest_settings) state.agent_digest_settings = {};
+        var digestAgentId = op.agent_id || '';
+        if (digestAgentId) {
+          var digestSettings = Object.assign({}, op);
+          delete digestSettings.op;
+          state.agent_digest_settings[digestAgentId] = digestSettings;
         }
         break;
       }

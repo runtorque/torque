@@ -10,8 +10,12 @@ import logging
 import re
 import time
 
+from .digest_routing import (
+    candidate_digest_recipients,
+    recipient_wants_digest_event,
+    resolve_digest_recipients,
+)
 from .state import (
-    WEAVER_MANDATORY_EVENTS,
     normalize_default_worker_concurrency,
     normalize_weaver_autonomy_mode,
     normalize_weaver_digest_verbosity,
@@ -502,25 +506,26 @@ def build_engineer_system_prompt(group: str, weaver_settings=None,
 # ---------------------------------------------------------------------------
 
 class WeaverEventBuffer:
-    """Per-group event buffering with idle-gated digest delivery.
+    """Per-recipient event buffering with idle-gated digest delivery.
 
-    Events are buffered per group.  When the weaver goes idle (activity
-    becomes empty) and events are pending, the buffer flushes a formatted
-    digest to the weaver's terminal.  A periodic timer ensures an idle
-    digest still arrives even when nothing critical happens.
+    Events are buffered per engineer/architect recipient. When the target
+    goes idle and events are pending, the buffer flushes a formatted digest
+    to that recipient's terminal. A periodic timer ensures an idle digest
+    still arrives even when nothing critical happens.
     """
 
-    def __init__(self, state, bridge):
+    def __init__(self, state, bridge, *, inject_message=None):
         self._state = state
-        self._bridge = bridge          # ITerm2Adapter — for send_text()
-        self._buffers: dict[str, list[dict]] = {}   # group → buffered events
-        self._buffer_started: dict[str, float] = {}  # group → oldest buffered event timestamp
-        self._sent_events: dict[str, list[dict]] = {}  # group → recently delivered events
-        self._last_push: dict[str, float] = {}       # group → timestamp
-        self._due_checks: dict[str, asyncio.TimerHandle] = {}  # group → next regular-digest deadline callback
-        self._due_check_deadlines: dict[str, float] = {}  # group → wall-clock deadline for due check
-        self._pending_flush: dict[str, bool] = {}    # group → flush task scheduled/running
-        self._manual_flush_requested: dict[str, bool] = {}  # group → operator requested immediate flush
+        self._bridge = bridge          # adapter fallback for send_text()
+        self._inject_message = inject_message
+        self._buffers: dict[str, list[dict]] = {}   # agent_id → buffered events
+        self._buffer_started: dict[str, float] = {}  # agent_id → oldest buffered event timestamp
+        self._sent_events: dict[str, list[dict]] = {}  # agent_id → recently delivered events
+        self._last_push: dict[str, float] = {}       # agent_id → timestamp
+        self._due_checks: dict[str, asyncio.TimerHandle] = {}  # agent_id → next regular-digest deadline callback
+        self._due_check_deadlines: dict[str, float] = {}  # agent_id → wall-clock deadline for due check
+        self._pending_flush: dict[str, bool] = {}    # agent_id → flush task scheduled/running
+        self._manual_flush_requested: dict[str, bool] = {}  # agent_id → operator requested immediate flush
         self._was_idle_with_question: set[str] = set()  # groups where weaver went idle with pending_question
         self._hint_delivery: dict[str, dict[str, float]] = {}  # group → fingerprint → last sent at
         self._timer_handle: asyncio.TimerHandle | None = None
@@ -558,38 +563,68 @@ class WeaverEventBuffer:
             snapshot["delivered_at"] = event.get("delivered_at", 0)
         return snapshot
 
-    def get_sent_events(self, group: str) -> list[dict]:
-        return [dict(evt) for evt in self._sent_events.get(group, [])]
+    def _resolve_recipient_id(self, recipient_or_group: str) -> str:
+        recipient_or_group = str(recipient_or_group or "").strip()
+        if recipient_or_group in self._state.agents:
+            return recipient_or_group
+        legacy_weaver = self._state.get_weaver_for_group(recipient_or_group)
+        if legacy_weaver:
+            return legacy_weaver.id
+        return recipient_or_group
+
+    def _digest_recipient(self, agent_id: str):
+        target = self._state.agents.get(str(agent_id or "").strip())
+        if not target or target.cell_type != "agent":
+            return None
+        if str(getattr(target, "kind", "") or "").strip() not in {
+                "engineer", "architect"}:
+            return None
+        return target
+
+    @staticmethod
+    def _recipient_is_running(target) -> bool:
+        return bool(
+            target
+            and getattr(target, "session_id", "")
+            and getattr(target, "status", "") == "running"
+        )
+
+    def get_sent_events(self, recipient_or_group: str) -> list[dict]:
+        agent_id = self._resolve_recipient_id(recipient_or_group)
+        return [dict(evt) for evt in self._sent_events.get(agent_id, [])]
 
     def export_state(self) -> dict:
-        groups = {
-            group for group, settings in self._state.group_settings.items()
-            if settings.weaver_agent_id
+        agent_ids = {
+            cell.id
+            for cell in self._state.agents.values()
+            if self._digest_recipient(cell.id)
         }
-        groups.update(self._buffers.keys())
-        groups.update(self._sent_events.keys())
+        agent_ids.update(self._buffers.keys())
+        agent_ids.update(self._sent_events.keys())
 
         return {
-            "weaver_buffer_stats": {
-                group: self.get_buffer_stats(group)
-                for group in sorted(groups)
+            "digest_buffer_stats": {
+                agent_id: self.get_buffer_stats(agent_id)
+                for agent_id in sorted(agent_ids)
             },
-            "weaver_sent_events": {
-                group: self.get_sent_events(group)
-                for group in sorted(groups)
-                if self._sent_events.get(group)
+            "digest_sent_events": {
+                agent_id: self.get_sent_events(agent_id)
+                for agent_id in sorted(agent_ids)
+                if self._sent_events.get(agent_id)
             },
         }
 
-    def get_buffer_stats(self, group: str) -> dict:
+    def get_buffer_stats(self, recipient_or_group: str) -> dict:
         """Return buffer stats for the UI: event count + seconds until next push."""
-        buf = self._buffers.get(group, [])
-        ws = self._state.get_weaver_settings(group)
-        last = self._last_push.get(group, 0)
+        agent_id = self._resolve_recipient_id(recipient_or_group)
+        target = self._state.agents.get(agent_id)
+        buf = self._buffers.get(agent_id, [])
+        settings = self._state.get_agent_digest_settings(agent_id)
+        last = self._last_push.get(agent_id, 0)
         now = time.time()
         deadline = None
         manual_flush_requested = bool(
-            self._manual_flush_requested.get(group)
+            self._manual_flush_requested.get(agent_id)
         )
 
         if buf:
@@ -597,18 +632,20 @@ class WeaverEventBuffer:
                 next_in = 0
                 deadline = now
             else:
-                deadline = self._buffered_digest_deadline(group, ws)
+                deadline = self._buffered_digest_deadline(agent_id, settings)
                 next_in = self._seconds_until_buffered_digest(
-                    group, ws, now=now)
+                    agent_id, settings, now=now)
         elif not last:
-            next_in = ws.push_interval
-            deadline = now + ws.push_interval
+            next_in = settings.push_interval
+            deadline = now + settings.push_interval
         else:
             elapsed = now - last
-            next_in = max(0, ws.push_interval - elapsed)
-            deadline = last + ws.push_interval
+            next_in = max(0, settings.push_interval - elapsed)
+            deadline = last + settings.push_interval
 
         return {
+            "agent_id": agent_id,
+            "group": getattr(target, "group", "") or "",
             "buffered_events": len(buf),
             "next_push_in": int(next_in),
             "next_push_at": int(deadline or 0),
@@ -618,151 +655,163 @@ class WeaverEventBuffer:
             "manual_flush_requested": manual_flush_requested,
         }
 
-    def _buffered_digest_deadline(self, group: str, ws) -> float | None:
+    def _buffered_digest_deadline(self, agent_id: str, settings) -> float | None:
         """Return the next eligible wall-clock time for a buffered digest."""
-        if not self._buffers.get(group):
+        if not self._buffers.get(agent_id):
             return None
-        first = self._buffer_started.get(group)
+        first = self._buffer_started.get(agent_id)
         if first is None:
             return None
 
-        last = self._last_push.get(group, 0)
-        push_deadline = (last + ws.push_interval) if last else (
-            first + ws.push_interval
+        last = self._last_push.get(agent_id, 0)
+        push_deadline = (last + settings.push_interval) if last else (
+            first + settings.push_interval
         )
-        max_deadline = first + ws.max_interval
+        max_deadline = first + settings.max_interval
         return min(push_deadline, max_deadline)
 
-    def _seconds_until_buffered_digest(self, group: str, ws, *,
+    def _seconds_until_buffered_digest(self, agent_id: str, settings, *,
                                        now: float | None = None) -> float:
         """Return seconds until buffered events become eligible to flush."""
-        deadline = self._buffered_digest_deadline(group, ws)
+        deadline = self._buffered_digest_deadline(agent_id, settings)
         if deadline is None:
             return 0
         current = time.time() if now is None else now
         return max(0, deadline - current)
 
-    def _is_buffered_digest_due(self, group: str, ws, *,
+    def _is_buffered_digest_due(self, agent_id: str, settings, *,
                                 now: float | None = None) -> bool:
         """Check whether buffered events are eligible for a regular digest."""
-        deadline = self._buffered_digest_deadline(group, ws)
+        deadline = self._buffered_digest_deadline(agent_id, settings)
         if deadline is None:
             return False
         current = time.time() if now is None else now
         return current >= deadline
 
-    def _cancel_due_check(self, group: str):
-        handle = self._due_checks.pop(group, None)
+    def _cancel_due_check(self, agent_id: str):
+        handle = self._due_checks.pop(agent_id, None)
         if handle:
             handle.cancel()
-        self._due_check_deadlines.pop(group, None)
+        self._due_check_deadlines.pop(agent_id, None)
 
-    def _ensure_due_check(self, group: str, ws):
+    def _ensure_due_check(self, agent_id: str, settings):
         """Schedule a precise wake-up for the next buffered-digest deadline."""
         if not self._loop or self._loop.is_closed():
             return
 
-        deadline = self._buffered_digest_deadline(group, ws)
+        deadline = self._buffered_digest_deadline(agent_id, settings)
         if deadline is None:
-            self._cancel_due_check(group)
+            self._cancel_due_check(agent_id)
             return
 
-        existing = self._due_checks.get(group)
-        existing_deadline = self._due_check_deadlines.get(group)
+        existing = self._due_checks.get(agent_id)
+        existing_deadline = self._due_check_deadlines.get(agent_id)
         if existing and not existing.cancelled() and existing_deadline is not None:
             if abs(existing_deadline - deadline) < 0.5:
                 return
             existing.cancel()
 
         delay = max(0, deadline - time.time())
-        self._due_checks[group] = self._loop.call_later(
-            delay, self._on_due_check, group)
-        self._due_check_deadlines[group] = deadline
+        self._due_checks[agent_id] = self._loop.call_later(
+            delay, self._on_due_check, agent_id)
+        self._due_check_deadlines[agent_id] = deadline
 
-    def _on_due_check(self, group: str):
-        self._due_checks.pop(group, None)
-        self._due_check_deadlines.pop(group, None)
-        weaver = self._state.get_weaver_for_group(group)
-        if not weaver:
+    def _on_due_check(self, agent_id: str):
+        self._due_checks.pop(agent_id, None)
+        self._due_check_deadlines.pop(agent_id, None)
+        target = self._digest_recipient(agent_id)
+        if not target:
             return
-        if not weaver.activity or weaver.activity == "waiting":
-            self._check_weaver_flush(weaver)
+        if not target.activity or target.activity == "waiting":
+            self._check_weaver_flush(target)
 
-    def _emit_buffer_stats(self, group: str):
+    def _emit_buffer_stats(self, agent_id: str):
         """Queue a buffer-stats delta for the UI."""
+        payload = self.get_buffer_stats(agent_id)
         self._state._emit(
-            "weaver_buffer_stats",
-            group=group,
-            **self.get_buffer_stats(group),
+            "digest_buffer_stats",
+            **payload,
         )
 
-    def _emit_sent_events(self, group: str):
+    def _emit_sent_events(self, agent_id: str):
+        target = self._state.agents.get(agent_id)
         self._state._emit(
-            "weaver_sent_events",
-            group=group,
-            events=self.get_sent_events(group),
+            "digest_sent_push",
+            agent_id=agent_id,
+            group=getattr(target, "group", "") or "",
+            events=self.get_sent_events(agent_id),
         )
 
     # -- Public hooks ---------------------------------------------------------
 
     def on_panel_event(self, event: dict):
-        """Called when a panel event is emitted.  Buffer for matching weavers."""
-        group = event.get("group", "")
-        if not group:
+        """Called when a panel event is emitted. Buffer for matching recipients."""
+        if not event.get("group", ""):
             return
+        candidate_ids = candidate_digest_recipients(self._state, event)
+        active_recipient_ids = set(resolve_digest_recipients(self._state, event))
+        for recipient_id in candidate_ids:
+            if recipient_id not in self._state.agent_digest_settings:
+                self._state.ensure_agent_digest_settings(recipient_id)
+        for recipient_id in candidate_ids:
+            if recipient_id not in active_recipient_ids and not (
+                    recipient_id in self._state.agent_digest_settings
+                    and self._state.get_agent_digest_settings(recipient_id).paused
+                    and recipient_wants_digest_event(
+                        self._state,
+                        recipient_id,
+                        event,
+                        ignore_pause=True,
+                    )
+            ):
+                continue
+            target = self._digest_recipient(recipient_id)
+            if not target:
+                continue
+            buf = self._buffers.setdefault(recipient_id, [])
+            if not buf:
+                self._buffer_started[recipient_id] = time.time()
+            buf.append(dict(event))
+            self._emit_buffer_stats(recipient_id)
 
-        # Is there a weaver for this group?
-        weaver = self._state.get_weaver_for_group(group)
-        if not weaver:
+            settings = self._state.get_agent_digest_settings(recipient_id)
+            if settings.paused:
+                continue
+            if (
+                    self._recipient_is_running(target)
+                    and (not target.activity or target.activity == "waiting")
+            ):
+                self._check_weaver_flush(target)
+
+    def on_delivery_resumed(self, recipient_or_group: str):
+        """Re-check buffered events after pause/resume changes."""
+        agent_id = self._resolve_recipient_id(recipient_or_group)
+        target = self._digest_recipient(agent_id)
+        if not target:
             return
-
-        ws = self._state.get_weaver_settings(group)
-
-        kind = event.get("kind", "")
-        # Check if this event type should be buffered
-        if kind not in WEAVER_MANDATORY_EVENTS:
-            if kind not in ws.enabled_events:
-                return
-
-        buf = self._buffers.setdefault(group, [])
-        if not buf:
-            self._buffer_started[group] = time.time()
-        buf.append(event)
-        self._emit_buffer_stats(group)
-
-        if ws.paused:
-            return
-
-        # If the weaver is already idle, schedule a flush now.
-        # `_check_weaver_flush()` decides whether the digest is due yet or
-        # needs a precise wake-up later.
-        if not weaver.activity or weaver.activity == "waiting":
-            self._check_weaver_flush(weaver)
-
-    def on_delivery_resumed(self, group: str):
-        """Re-check a group's buffered events after pause/resume changes."""
-        weaver = self._state.get_weaver_for_group(group)
-        if not weaver:
-            return
-        self._emit_buffer_stats(group)
-        if not weaver.activity or weaver.activity == "waiting":
-            if self._buffers.get(group):
-                self._cancel_due_check(group)
-                self._schedule_flush(group)
+        self._emit_buffer_stats(agent_id)
+        if (
+                self._recipient_is_running(target)
+                and (not target.activity or target.activity == "waiting")
+        ):
+            if self._buffers.get(agent_id):
+                self._cancel_due_check(agent_id)
+                self._schedule_flush(agent_id)
             else:
-                self._check_weaver_flush(weaver)
+                self._check_weaver_flush(target)
 
-    def on_delivery_paused(self, group: str):
-        self._manual_flush_requested.pop(group, None)
-        self._cancel_due_check(group)
-        self._emit_buffer_stats(group)
+    def on_delivery_paused(self, recipient_or_group: str):
+        agent_id = self._resolve_recipient_id(recipient_or_group)
+        self._manual_flush_requested.pop(agent_id, None)
+        self._cancel_due_check(agent_id)
+        self._emit_buffer_stats(agent_id)
 
     def on_agent_activity_change(self, cell):
-        """Called when an agent's activity changes.  Flush if weaver goes idle."""
-        gs = self._state.group_settings.get(cell.group)
-        is_weaver = gs and gs.weaver_agent_id == cell.id
+        """Called when an agent's activity changes. Flush if a recipient goes idle."""
+        legacy_weaver = self._state.get_weaver_for_group(cell.group)
+        is_legacy_weaver = bool(legacy_weaver and legacy_weaver.id == cell.id)
 
-        if is_weaver:
+        if is_legacy_weaver:
             group = cell.group
             # Track when the weaver goes idle while a question is pending.
             # Only auto-clear pending_question when the weaver becomes
@@ -781,173 +830,190 @@ class WeaverEventBuffer:
                             group, pending_question="",
                             paused=False)
 
-        if not cell.activity or cell.activity == "waiting":
-            # Agent went idle — check if it's a weaver with pending events
+        if (
+                self._digest_recipient(cell.id)
+                and (not cell.activity or cell.activity == "waiting")
+        ):
             self._check_weaver_flush(cell)
 
-    def request_manual_flush(self, group: str) -> tuple[bool, str]:
-        if not group:
-            return False, "Group is required"
+    def request_manual_flush(self, recipient_or_group: str) -> tuple[bool, str]:
+        agent_id = self._resolve_recipient_id(recipient_or_group)
+        if not agent_id:
+            return False, "Recipient is required"
 
-        weaver = self._state.get_weaver_for_group(group)
-        if not weaver or not weaver.session_id:
-            return False, "Weaver is not running"
+        target = self._digest_recipient(agent_id)
+        if not self._recipient_is_running(target):
+            return False, "Digest recipient is not running"
 
         if not self._loop or self._loop.is_closed():
-            return False, "Weaver event delivery is unavailable right now"
+            return False, "Digest delivery is unavailable right now"
 
-        ws = self._state.get_weaver_settings(group)
-        if ws.paused:
+        settings = self._state.get_agent_digest_settings(agent_id)
+        if settings.paused:
             return (
                 False,
-                "Weaver delivery is paused. Resume it before sending queued events.",
+                "Digest delivery is paused. Resume it before sending queued events.",
             )
 
-        if not self._buffers.get(group):
+        if not self._buffers.get(agent_id):
             return False, "No queued events to send"
 
-        self._manual_flush_requested[group] = True
-        self._emit_buffer_stats(group)
+        self._manual_flush_requested[agent_id] = True
+        self._emit_buffer_stats(agent_id)
 
-        if not weaver.activity or weaver.activity == "waiting":
-            self._check_weaver_flush(weaver)
+        if not target.activity or target.activity == "waiting":
+            self._check_weaver_flush(target)
         return True, ""
 
     # -- Internal -------------------------------------------------------------
 
     def _check_weaver_flush(self, cell):
-        """If *cell* is a weaver with buffered events (or overdue), flush."""
-        gs = self._state.group_settings.get(cell.group)
-        if not gs or gs.weaver_agent_id != cell.id:
-            return  # not a weaver
+        """If *cell* is an eligible digest recipient with buffered events, flush."""
+        cell = self._digest_recipient(getattr(cell, "id", ""))
+        if not cell or not self._recipient_is_running(cell):
+            return
 
+        agent_id = cell.id
         group = cell.group
-        ws = self._state.get_weaver_settings(group)
-        if ws.paused:
+        settings = self._state.get_agent_digest_settings(agent_id)
+        if settings.paused:
             return
 
-        has_events = bool(self._buffers.get(group))
+        has_events = bool(self._buffers.get(agent_id))
         if has_events:
-            if (self._manual_flush_requested.get(group)
-                    or self._is_buffered_digest_due(group, ws)):
-                self._cancel_due_check(group)
-                self._schedule_flush(group)
+            if (self._manual_flush_requested.get(agent_id)
+                    or self._is_buffered_digest_due(agent_id, settings)):
+                self._cancel_due_check(agent_id)
+                self._schedule_flush(agent_id)
             else:
-                self._ensure_due_check(group, ws)
+                self._ensure_due_check(agent_id, settings)
             return
 
-        self._cancel_due_check(group)
+        self._cancel_due_check(agent_id)
         if self._due_hints(group, weaver=cell):
-            self._schedule_flush(group)
+            self._schedule_flush(agent_id)
             return
-        is_overdue = self._is_heartbeat_due(group, ws)
+        is_overdue = self._is_heartbeat_due(agent_id, settings)
         if is_overdue:
-            self._schedule_flush(group)
+            self._schedule_flush(agent_id)
 
-    def _schedule_flush(self, group: str):
-        """Schedule one flush task per group at a time."""
-        if not self._loop or self._pending_flush.get(group):
+    def _schedule_flush(self, agent_id: str):
+        """Schedule one flush task per recipient at a time."""
+        if not self._loop or self._pending_flush.get(agent_id):
             return
-        self._cancel_due_check(group)
-        self._pending_flush[group] = True
-        self._loop.create_task(self._flush(group))
+        self._cancel_due_check(agent_id)
+        self._pending_flush[agent_id] = True
+        self._loop.create_task(self._flush(agent_id))
 
-    def _is_heartbeat_due(self, group: str, ws) -> bool:
+    def _is_heartbeat_due(self, agent_id: str, settings) -> bool:
         """Check if the idle heartbeat interval has elapsed since last push."""
-        interval = getattr(ws, "heartbeat_interval", 0)
+        interval = getattr(settings, "heartbeat_interval", 0)
         if not interval:
             return False
-        last = self._last_push.get(group, 0)
+        last = self._last_push.get(agent_id, 0)
         if last == 0:
             return False  # never pushed — wait for first event
         return (time.time() - last) >= interval
 
-    async def _flush(self, group: str):
-        """Format and send buffered events as a digest to the weaver."""
+    async def _flush(self, agent_id: str):
+        """Format and send buffered events as a digest to one recipient."""
         events = None
         buffer_started_at = None
         try:
-            weaver = self._state.get_weaver_for_group(group)
-            if not weaver or not weaver.session_id:
+            target = self._digest_recipient(agent_id)
+            if not self._recipient_is_running(target):
                 return
 
-            ws = self._state.get_weaver_settings(group)
-            if ws.paused:
+            settings = self._state.get_agent_digest_settings(agent_id)
+            if settings.paused:
                 return
 
-            # Check weaver is actually idle
-            if weaver.activity and weaver.activity != "waiting":
+            # Check recipient is actually idle
+            if target.activity and target.activity != "waiting":
                 return
 
-            self._manual_flush_requested.pop(group, None)
-            events = self._buffers.pop(group, [])
-            buffer_started_at = self._buffer_started.pop(group, None)
-            due_hints = self._due_hints(group, weaver=weaver)
-            board_summary = self._board_summary(group)
+            self._manual_flush_requested.pop(agent_id, None)
+            events = self._buffers.pop(agent_id, [])
+            buffer_started_at = self._buffer_started.pop(agent_id, None)
+            due_hints = self._due_hints(target.group, weaver=target)
+            board_summary = self._board_summary(target.group, recipient_id=agent_id)
             text = self._format_digest(
-                group,
+                target.group,
                 events,
                 board_summary,
-                weaver,
+                target,
                 hints=due_hints,
             )
 
             try:
-                await self._bridge.send_text(weaver.session_id, text + "\n")
+                if self._inject_message:
+                    await self._inject_message(
+                        target,
+                        text,
+                        sender_name="Loom",
+                        sender_kind="system",
+                        action="digest",
+                    )
+                else:
+                    if hasattr(self._bridge, "prime_input_ready"):
+                        self._bridge.prime_input_ready(target.session_id)
+                    await self._bridge.send_text(target.session_id, text + "\n")
                 delivered_at = time.time()
-                self._last_push[group] = delivered_at
-                log.info("Weaver digest sent to '%s' (%d events)",
-                         weaver.name, len(events))
+                self._last_push[agent_id] = delivered_at
+                log.info("Digest sent to '%s' (%d events)",
+                         target.name, len(events))
                 if events:
-                    sent = self._sent_events.setdefault(group, [])
+                    sent = self._sent_events.setdefault(agent_id, [])
                     sent.extend(
                         self._event_snapshot(evt, delivered_at=delivered_at)
                         for evt in events
                     )
                     if len(sent) > 200:
-                        self._sent_events[group] = sent[-200:]
-                    self._emit_sent_events(group)
+                        self._sent_events[agent_id] = sent[-200:]
+                    self._emit_sent_events(agent_id)
                 if due_hints:
                     self._record_sent_hints(
-                        group,
+                        target.group,
                         due_hints,
                         sent_at=delivered_at,
                     )
             except Exception:
-                log.exception("Failed to send weaver digest to '%s'",
-                              weaver.name)
+                log.exception("Failed to send digest to '%s'",
+                              target.name)
                 if events:
-                    current = self._buffers.get(group, [])
-                    self._buffers[group] = events + current
+                    current = self._buffers.get(agent_id, [])
+                    self._buffers[agent_id] = events + current
                     if buffer_started_at is not None:
-                        restored = self._buffer_started.get(group)
-                        self._buffer_started[group] = (
+                        restored = self._buffer_started.get(agent_id)
+                        self._buffer_started[agent_id] = (
                             buffer_started_at
                             if restored is None
                             else min(restored, buffer_started_at)
                         )
         finally:
-            self._pending_flush.pop(group, None)
+            self._pending_flush.pop(agent_id, None)
 
             # If new events arrived during the send, or the idle digest is
             # already overdue again, queue the next flush.
-            weaver = self._state.get_weaver_for_group(group)
-            if weaver:
-                is_idle = not weaver.activity or weaver.activity == "waiting"
-                ws = self._state.get_weaver_settings(group)
-                if is_idle and not ws.paused:
-                    self._check_weaver_flush(weaver)
+            target = self._digest_recipient(agent_id)
+            if target:
+                is_idle = not target.activity or target.activity == "waiting"
+                settings = self._state.get_agent_digest_settings(agent_id)
+                if is_idle and not settings.paused:
+                    self._check_weaver_flush(target)
 
             if events:
-                self._emit_buffer_stats(group)
+                self._emit_buffer_stats(agent_id)
                 if self._loop:
                     self._loop.create_task(self._state.broadcast())
 
     def _format_digest(self, group: str, events: list[dict], board_summary: str,
                        weaver=None, hints: list[dict] | None = None) -> str:
+        recipient_id = str(getattr(weaver, "id", "") or "").strip()
         verbosity = normalize_weaver_digest_verbosity(
             getattr(
-                self._state.get_weaver_settings(group),
+                self._state.get_agent_digest_settings(recipient_id)
+                if recipient_id else self._state.get_weaver_settings(group),
                 "digest_verbosity",
                 "balanced",
             )
@@ -1169,11 +1235,12 @@ class WeaverEventBuffer:
         ]
         return "Attention: " + " · ".join(preview)
 
-    def _board_summary(self, group: str) -> str:
+    def _board_summary(self, group: str, *, recipient_id: str = "") -> str:
         """Count tasks per lane for a group, including unhealthy rollups."""
         verbosity = normalize_weaver_digest_verbosity(
             getattr(
-                self._state.get_weaver_settings(group),
+                self._state.get_agent_digest_settings(recipient_id)
+                if recipient_id else self._state.get_weaver_settings(group),
                 "digest_verbosity",
                 "balanced",
             )
@@ -1293,31 +1360,31 @@ class WeaverEventBuffer:
                 10.0, self._timer_tick)
 
     def _timer_tick(self):
-        """Check if any weaver needs a digest and emit buffer stats."""
+        """Check if any engineer/architect recipient needs a digest."""
         self._timer_handle = None
         stats_changed = False
 
-        for group, gs_obj in self._state.group_settings.items():
-            if not gs_obj.weaver_agent_id:
+        for recipient in self._state.agents.values():
+            if recipient.cell_type != "agent":
                 continue
-            weaver = self._state.agents.get(gs_obj.weaver_agent_id)
-            if not weaver or weaver.status != "running":
+            if str(getattr(recipient, "kind", "") or "").strip() not in {
+                    "engineer", "architect"}:
+                continue
+            if recipient.status != "running" or not recipient.session_id:
                 continue
 
             # Emit buffer stats for the UI
-            stats = self.get_buffer_stats(group)
-            self._state._emit("weaver_buffer_stats",
-                              group=group, **stats)
+            stats = self.get_buffer_stats(recipient.id)
+            self._state._emit("digest_buffer_stats", **stats)
             stats_changed = True
 
-            ws = self._state.get_weaver_settings(group)
-            if ws.paused:
+            settings = self._state.get_agent_digest_settings(recipient.id)
+            if settings.paused:
                 continue
 
-            # Re-check due regular digests / heartbeats for idle weavers.
-            is_idle = not weaver.activity or weaver.activity == "waiting"
+            is_idle = not recipient.activity or recipient.activity == "waiting"
             if is_idle:
-                self._check_weaver_flush(weaver)
+                self._check_weaver_flush(recipient)
 
         if stats_changed and self._loop:
             self._loop.create_task(self._state.broadcast())
